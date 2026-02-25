@@ -11,6 +11,7 @@ from string import ascii_letters
 
 import pytest
 import pytest_asyncio
+from redis import DataError, RedisClusterException, ResponseError
 import redis
 from redis import exceptions
 from redis._parsers.helpers import (
@@ -20,6 +21,7 @@ from redis._parsers.helpers import (
     parse_info,
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
+from redis.commands.core import DataPersistOptions, HotkeysMetricsTypes
 from redis.commands.json.path import Path
 from redis.commands.search.field import TextField
 from redis.commands.search.query import Query
@@ -526,25 +528,38 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("7.2.0")
     async def test_client_setinfo(self, r: redis.Redis):
+        from redis.utils import get_lib_version
+
         await r.ping()
         info = await r.client_info()
         assert info["lib-name"] == "redis-py"
-        assert info["lib-ver"] == redis.__version__
+        assert info["lib-ver"] == get_lib_version()
         assert await r.client_setinfo("lib-name", "test")
         assert await r.client_setinfo("lib-ver", "123")
         info = await r.client_info()
         assert info["lib-name"] == "test"
         assert info["lib-ver"] == "123"
-        r2 = redis.asyncio.Redis(lib_name="test2", lib_version="1234")
+
+        # Test deprecated lib_name/lib_version parameters
+        with pytest.warns(DeprecationWarning):
+            r2 = redis.asyncio.Redis(lib_name="test2", lib_version="1234")
         info = await r2.client_info()
         assert info["lib-name"] == "test2"
         assert info["lib-ver"] == "1234"
         await r2.aclose()
-        r3 = redis.asyncio.Redis(lib_name=None, lib_version=None)
-        info = await r3.client_info()
-        assert info["lib-name"] == ""
-        assert info["lib-ver"] == ""
-        await r3.aclose()
+
+    @skip_if_server_version_lt("7.2.0")
+    async def test_client_setinfo_with_driver_info(self, r: redis.Redis):
+        from redis import DriverInfo
+        from redis.utils import get_lib_version
+
+        info = DriverInfo().add_upstream_driver("celery", "5.4.1")
+        r2 = redis.asyncio.Redis(driver_info=info)
+        await r2.ping()
+        client_info = await r2.client_info()
+        assert client_info["lib-name"] == "redis-py(celery_v5.4.1)"
+        assert client_info["lib-ver"] == get_lib_version()
+        await r2.aclose()
 
     @skip_if_server_version_lt("2.6.9")
     @pytest.mark.onlynoncluster
@@ -795,6 +810,312 @@ class TestRedisCommands:
         assert isinstance(t[0], int)
         assert isinstance(t[1], int)
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_start_basic(self, r: redis.Redis):
+        """Test basic HOTKEYS START command with CPU metric"""
+        # Reset any previous session
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start collection with CPU metric
+        result = await r.hotkeys_start(count=10, metrics=[HotkeysMetricsTypes.CPU])
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_start_with_all_metrics(self, r: redis.Redis):
+        """Test HOTKEYS START with both CPU and NET metrics"""
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        result = await r.hotkeys_start(
+            count=5, metrics=[HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET]
+        )
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_start_with_duration(self, r: redis.Redis):
+        """Test HOTKEYS START with duration parameter"""
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        result = await r.hotkeys_start(
+            count=10, metrics=[HotkeysMetricsTypes.CPU], duration=60
+        )
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_start_with_sample_ratio(self, r: redis.Redis):
+        """Test HOTKEYS START with sample ratio"""
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        result = await r.hotkeys_start(
+            count=10, metrics=[HotkeysMetricsTypes.CPU], sample_ratio=10
+        )
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_start_with_slots_fail_on_non_cluster_setup(
+        self, r: redis.Redis
+    ):
+        """Test HOTKEYS START with specific hash slots"""
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+        with pytest.raises(Exception):
+            await r.hotkeys_start(
+                count=10, metrics=[HotkeysMetricsTypes.CPU], slots=[0, 100, 200]
+            )
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_start_with_all_parameters(self, r: redis.Redis):
+        """Test HOTKEYS START with all optional parameters"""
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        result = await r.hotkeys_start(
+            count=5,
+            metrics=[HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET],
+            duration=30,
+            sample_ratio=5,
+        )
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_stop(self, r: redis.Redis):
+        """Test HOTKEYS STOP command"""
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a collection session
+        await r.hotkeys_start(count=10, metrics=[HotkeysMetricsTypes.CPU])
+
+        # Stop the session
+        result = await r.hotkeys_stop()
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_reset(self, r: redis.Redis):
+        """Test HOTKEYS RESET command"""
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a session and generate some data
+        await r.hotkeys_start(count=10, metrics=[HotkeysMetricsTypes.CPU])
+
+        # Perform some operations to generate hotkeys data
+        for i in range(5):
+            await r.set(f"resetkey{i}", f"value{i}")
+            await r.get(f"resetkey{i}")
+
+        # Stop the session
+        await r.hotkeys_stop()
+
+        # Get results before reset - should have data
+        result_before = await r.hotkeys_get()
+        assert isinstance(result_before, list)
+        for res_elem in result_before:
+            assert isinstance(res_elem, dict)
+            assert b"tracking-active" in res_elem
+
+        # Reset the results
+        result = await r.hotkeys_reset()
+        assert result == b"OK"
+
+        # Try to get results after reset - should fail or return empty
+        try:
+            result_after = await r.hotkeys_get()
+            # If it doesn't fail, verify the data is cleared
+            # The response might indicate no session exists
+            assert result_after != result_before
+        except Exception:
+            # Expected - no session exists after reset
+            pass
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_get_ongoing_session(self, r: redis.Redis):
+        """Test HOTKEYS GET during an ongoing collection session"""
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a collection session
+        await r.hotkeys_start(
+            count=10, metrics=[HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET]
+        )
+
+        # Perform some operations to generate hotkeys data
+        for i in range(10):
+            await r.set(f"key{i}", f"value{i}")
+            await r.get(f"key{i}")
+
+        # Get the results
+        result = await r.hotkeys_get()
+
+        # Verify the response structure
+        assert isinstance(result, list)
+        for res_elem in result:
+            assert isinstance(res_elem, dict)
+            # Check tracking-active is 1 (ongoing session)
+            assert res_elem[b"tracking-active"] == 1
+
+        # Stop the session
+        await r.hotkeys_stop()
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_get_terminated_session(self, r: redis.Redis):
+        """Test HOTKEYS GET after stopping a collection session"""
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a collection session
+        await r.hotkeys_start(count=10, metrics=[HotkeysMetricsTypes.CPU])
+
+        # Perform some operations
+        for i in range(5):
+            await r.set(f"testkey{i}", f"testvalue{i}")
+
+        # Stop the session
+        await r.hotkeys_stop()
+
+        # Get the results
+        result = await r.hotkeys_get()
+
+        # Verify the response structure
+        assert isinstance(result, list)
+        for res_elem in result:
+            assert isinstance(res_elem, dict)
+            # Check tracking-active is 0 (terminated session)
+            assert res_elem[b"tracking-active"] == 0
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_get_all_fields(self, r: redis.Redis):
+        """Test HOTKEYS GET returns all documented fields"""
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a collection session with all parameters
+        await r.hotkeys_start(
+            count=5,
+            metrics=[HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET],
+            sample_ratio=1,
+        )
+
+        # Perform operations to generate data
+        for i in range(20):
+            await r.set("anyprefix:{3}:key", f"value{i}")
+            await r.get("anyprefix:{3}:key")
+            await r.set("anyprefix:{1}:key", f"value{i}")
+            await r.get("anyprefix:{1}:key")
+
+        # Stop the session
+        await r.hotkeys_stop()
+
+        # Get the results
+        result = await r.hotkeys_get()
+
+        # Verify all documented fields are present
+        expected_fields = [
+            b"tracking-active",
+            b"sample-ratio",
+            b"selected-slots",
+            b"net-bytes-all-commands-all-slots",
+            b"collection-start-time-unix-ms",
+            b"collection-duration-ms",
+            b"total-cpu-time-user-ms",
+            b"total-cpu-time-sys-ms",
+            b"total-net-bytes",
+            b"by-cpu-time-us",
+            b"by-net-bytes",
+        ]
+
+        for elem in result:
+            for field in expected_fields:
+                assert field in elem, (
+                    f"Field '{field}' is missing from HOTKEYS GET response"
+                )
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_get_all_fields_decoded(self, decoded_r: redis.Redis):
+        """Test HOTKEYS GET returns all documented fields"""
+        try:
+            await decoded_r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a collection session with all parameters
+        await decoded_r.hotkeys_start(
+            count=5,
+            metrics=[HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET],
+            sample_ratio=1,
+        )
+
+        # Perform operations to generate data
+        for i in range(20):
+            await decoded_r.set("anyprefix:{3}:key", f"value{i}")
+            await decoded_r.get(f"anyprefix:{3}:key")
+            await decoded_r.set("anyprefix:{1}:key", f"value{i}")
+            await decoded_r.get(f"anyprefix:{1}:key")
+
+        # Stop the session
+        await decoded_r.hotkeys_stop()
+
+        # Get the results
+        result = await decoded_r.hotkeys_get()
+
+        # Verify all documented fields are present
+        expected_fields = [
+            "tracking-active",
+            "sample-ratio",
+            "selected-slots",
+            "net-bytes-all-commands-all-slots",
+            "collection-start-time-unix-ms",
+            "collection-duration-ms",
+            "total-cpu-time-user-ms",
+            "total-cpu-time-sys-ms",
+            "total-net-bytes",
+            "by-cpu-time-us",
+            "by-net-bytes",
+        ]
+
+        for elem in result:
+            for field in expected_fields:
+                assert field in elem, (
+                    f"Field '{field}' is missing from HOTKEYS GET response"
+                )
+
     async def test_never_decode_option(self, r: redis.Redis):
         opts = {NEVER_DECODE: []}
         await r.delete("a")
@@ -1030,6 +1351,114 @@ class TestRedisCommands:
         await r.delete("a")
         assert await r.get("a") is None
 
+    def _ensure_str(self, x):
+        return x.decode("ascii") if isinstance(x, (bytes, bytearray)) else x
+
+    async def _server_xxh3_digest(self, r, key):
+        """
+        Get the server-computed XXH3 hex digest for the key's value.
+        Requires the DIGEST command implemented on the server.
+        """
+        d = await r.execute_command("DIGEST", key)
+        return None if d is None else self._ensure_str(d).lower()
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_delex_nonexistent(self, r):
+        await r.delete("nope")
+        assert await r.delex("nope") == 0
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_delex_unconditional_delete_string(self, r):
+        await r.set("k", b"v")
+        assert await r.exists("k") == 1
+        assert await r.delex("k") == 1
+        assert await r.exists("k") == 0
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_delex_unconditional_delete_nonstring_allowed(self, r):
+        # Spec: error happens only when a condition is specified on a non-string key.
+        await r.lpush("lst", "a")
+        assert await r.delex("lst") == 1
+        assert await r.exists("lst") == 0
+
+        await r.lpush("lst", "a")
+
+        with pytest.raises(redis.ResponseError):
+            await r.delex("lst", ifeq=b"a")
+        assert await r.exists("lst") == 1
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_delex_ifeq(self, r):
+        await r.set("k", b"abc")
+        assert await r.delex("k", ifeq=b"abc") == 1  # matches → deleted
+        assert await r.exists("k") == 0
+
+        await r.set("k", b"abc")
+        assert await r.delex("k", ifeq=b"zzz") == 0  # not match → not deleted
+        assert await r.get("k") == b"abc"  # still there
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_delex_ifne(self, r):
+        await r.set("k2", b"abc")
+        assert await r.delex("k2", ifne=b"zzz") == 1  # different → deleted
+        assert await r.exists("k2") == 0
+
+        await r.set("k2", b"abc")
+        assert await r.delex("k2", ifne=b"abc") == 0  # equal → not deleted
+        assert await r.get("k2") == b"abc"
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_delex_with_conditionon_nonstring_values(self, r):
+        await r.lpush("nk", "x")
+        with pytest.raises(redis.ResponseError):
+            await r.delex("nk", ifeq=b"x")
+        with pytest.raises(redis.ResponseError):
+            await r.delex("nk", ifne=b"x")
+        with pytest.raises(redis.ResponseError):
+            await r.delex("nk", ifdeq="deadbeef")
+
+    @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.parametrize("val", [b"", b"abc", b"The quick brown fox"])
+    async def test_delex_ifdeq_and_ifdne(self, r, val):
+        await r.set("h", val)
+        d = await self._server_xxh3_digest(r, "h")
+        assert d is not None
+
+        # IFDEQ should delete with exact digest
+        await r.set("h", val)
+        assert await r.delex("h", ifdeq=d) == 1
+        assert await r.exists("h") == 0
+
+        # IFDNE should NOT delete when digest matches
+        await r.set("h", val)
+        assert await r.delex("h", ifdne=d) == 0
+        assert await r.get("h") == val
+
+        # IFDNE should delete when digest doesn't match
+        await r.set("h", val)
+        wrong = "0" * len(d)
+        if wrong == d:
+            wrong = "f" * len(d)
+        assert await r.delex("h", ifdne=wrong) == 1
+        assert await r.exists("h") == 0
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_delex_pipeline(self, r):
+        await r.mset({"p1{45}": b"A", "p2{45}": b"B"})
+        p = r.pipeline()
+        p.delex("p1{45}", ifeq=b"A")
+        p.delex("p2{45}", ifne=b"B")  # false → 0
+        p.delex("nope")  # nonexistent → 0
+        out = await p.execute()
+        assert out == [1, 0, 0]
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_delex_mutual_exclusion_client_side(self, r):
+        with pytest.raises(ValueError):
+            await r.delex("k", ifeq=b"A", ifne=b"B")
+        with pytest.raises(ValueError):
+            await r.delex("k", ifdeq="aa", ifdne="bb")
+
     @skip_if_server_version_lt("4.0.0")
     async def test_unlink(self, r: redis.Redis):
         assert await r.unlink("a") == 0
@@ -1112,6 +1541,82 @@ class TestRedisCommands:
         expire_at_seconds = int(expire_at.timestamp())
         assert await r.expireat("a", expire_at_seconds)
         assert 0 < await r.ttl("a") <= 61
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_digest_nonexistent_returns_none(self, r):
+        assert await r.digest("no:such:key") is None
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_digest_wrong_type_raises(self, r):
+        await r.lpush("alist", "x")
+        with pytest.raises(Exception):  # or redis.exceptions.ResponseError
+            await r.digest("alist")
+
+    @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.parametrize(
+        "value", [b"", b"abc", b"The quick brown fox jumps over the lazy dog"]
+    )
+    async def test_digest_response_when_available(self, r, value):
+        key = "k:digest"
+        await r.delete(key)
+        await r.set(key, value)
+
+        res = await r.digest(key)
+        # got is str if decode_responses=True; ensure bytes->str for comparison
+        if isinstance(res, bytes):
+            res = res.decode()
+        assert res is not None
+        assert all(c in "0123456789abcdefABCDEF" for c in res)
+
+        assert len(res) == 16
+
+    @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.parametrize(
+        "value",
+        [
+            b"",
+            b"abc",
+            b"The quick brown fox jumps over the lazy dog",
+            "",
+            "abc",
+            "The quick brown fox jumps over the lazy dog",
+        ],
+    )
+    async def test_local_digest_matches_server(self, r, value):
+        key = "k:digest"
+        await r.delete(key)
+        await r.set(key, value)
+
+        res_server = await r.digest(key)
+
+        # Caution! This one is not executing execute_command and it is not async
+        res_local = r.digest_local(value)
+
+        # Verify type consistency between server and local digest
+        if isinstance(res_server, bytes):
+            assert isinstance(res_local, bytes)
+        else:
+            assert isinstance(res_local, str)
+
+        assert res_server is not None
+        assert len(res_server) == 16
+        assert res_local is not None
+        assert len(res_local) == 16
+        assert res_server == res_local
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_pipeline_digest(self, r):
+        k1, k2 = "k:d1{42}", "k:d2{42}"
+        await r.mset({k1: b"A", k2: b"B"})
+        p = r.pipeline()
+        p.digest(k1)
+        p.digest(k2)
+        out = await p.execute()
+        assert len(out) == 2
+        for d in out:
+            if isinstance(d, bytes):
+                d = d.decode()
+            assert d is None or len(d) == 16
 
     async def test_get_and_set(self, r: redis.Redis):
         # get and set can't be tested independently of each other
@@ -1198,6 +1703,349 @@ class TestRedisCommands:
         assert await r.mset(d)
         for k, v in d.items():
             assert await r.get(k) == v
+
+    @pytest.mark.onlycluster
+    async def test_mset_on_cluster(self, r):
+        # validate that mset command works in cluster client
+        # when the keys are in the same slot
+        d = {"a:{test:1}": b"1", "b:{test:1}": b"2", "c:{test:1}": b"3"}
+        assert await r.mset(d)
+        for k, v in d.items():
+            assert await r.get(k) == v
+
+    @pytest.mark.onlycluster
+    async def test_mset_on_cluster_multiple_slots(self, r):
+        d = {"a": b"1", "b": b"2", "c": b"3"}
+        with pytest.raises(RedisClusterException):
+            assert await r.mset(d)
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_no_expiration_with_cluster_client(self, r):
+        all_test_keys = ["1:{test:1}", "2:{test:1}"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        # set items from mapping without expiration
+        assert await r.msetex(mapping={"1:{test:1}": 1, "2:{test:1}": b"four"}) == 1
+        assert await r.mget("1:{test:1}", "2:{test:1}") == [b"1", b"four"]
+        assert await r.ttl("1:{test:1}") == -1
+        assert await r.ttl("2:{test:1}") == -1
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_ex_and_keepttl_with_cluster_client(self, r):
+        all_test_keys = ["1:{test:1}", "2:{test:1}"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        # set items from mapping with expiration - testing ex field
+        assert (
+            await r.msetex(
+                mapping={"1:{test:1}": 1, "2:{test:1}": "2"},
+                ex=10,
+            )
+            == 1
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in all_test_keys])
+        for ttl in ttls:
+            assert pytest.approx(ttl) == 10
+
+        assert await r.mget(*all_test_keys) == [b"1", b"2"]
+        await asyncio.sleep(1.1)
+        # validate keepttl
+        assert await r.msetex(mapping={"1:{test:1}": 11}, keepttl=True) == 1
+        assert await r.ttl("1:{test:1}") < 10
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_px_with_cluster_client(self, r):
+        all_test_keys = ["1:{test:1}", "2:{test:1}"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        mapping = {"1:{test:1}": 1, "2:{test:1}": "2"}
+        # set key/value pairs provided in mapping
+        # with expiration - testing px field
+        assert await r.msetex(mapping=mapping, px=60000) == 1
+
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        for ttl in ttls:
+            assert pytest.approx(ttl) == 60
+        assert await r.mget(*mapping.keys()) == [b"1", b"2"]
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_pxat_and_nx_with_cluster_client(self, r):
+        all_test_keys = [
+            "1:{test:1}",
+            "2:{test:1}",
+            "3:{test:1}",
+            "new:{test:1}",
+            "new_2:{test:1}",
+        ]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        mapping = {"1:{test:1}": 1, "2:{test:1}": "2", "3:{test:1}": "three"}
+        assert await r.msetex(mapping=mapping, ex=30) == 1
+
+        # NX is set with existing keys - nothing should be saved or updated
+        expire_at = await redis_server_time(r) + datetime.timedelta(seconds=10)
+        assert (
+            await r.msetex(
+                mapping={"1:{test:1}": "new_value", "new:{test:1}": "ok"},
+                pxat=expire_at,
+                data_persist_option=DataPersistOptions.NX,
+            )
+            == 0
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        for ttl in ttls:
+            assert 10 < ttl <= 30
+        assert await r.mget(*mapping.keys(), "new:{test:1}") == [
+            b"1",
+            b"2",
+            b"three",
+            None,
+        ]
+
+        # NX is set with non existing keys - values should be set
+        assert (
+            await r.msetex(
+                mapping={"new:{test:1}": "ok", "new_2:{test:1}": "ok_2"},
+                pxat=expire_at,
+                data_persist_option=DataPersistOptions.NX,
+            )
+            == 1
+        )
+        old_ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        new_ttls = await asyncio.gather(*(r.ttl(key) for key in ["new", "new_2"]))
+        for ttl in old_ttls:
+            assert 10 < ttl <= 30
+        for ttl in new_ttls:
+            assert ttl <= 11
+        assert await r.mget(*mapping.keys(), "new:{test:1}", "new_2:{test:1}") == [
+            b"1",
+            b"2",
+            b"three",
+            b"ok",
+            b"ok_2",
+        ]
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_exat_and_xx_with_cluster_client(self, r):
+        all_test_keys = ["1:{test:1}", "2:{test:1}", "3:{test:1}", "new:{test:1}"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        mapping = {"1:{test:1}": 1, "2:{test:1}": "2", "3:{test:1}": "three"}
+        assert await r.msetex(mapping, ex=30) == 1
+
+        expire_at = await redis_server_time(r) + datetime.timedelta(seconds=10)
+        ## XX is set with unexisting key - nothing should be saved or updated
+        assert (
+            await r.msetex(
+                mapping={"1:{test:1}": "new_value", "new:{test:1}": "ok"},
+                exat=expire_at,
+                data_persist_option=DataPersistOptions.XX,
+            )
+            == 0
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        for ttl in ttls:
+            assert 10 < ttl <= 30
+        assert await r.mget(*mapping.keys(), "new:{test:1}") == [
+            b"1",
+            b"2",
+            b"three",
+            None,
+        ]
+
+        # XX is set with existing keys - values should be updated
+        assert (
+            await r.msetex(
+                mapping={"1:{test:1}": "new_value", "2:{test:1}": "new_value_2"},
+                exat=expire_at,
+                data_persist_option=DataPersistOptions.XX,
+            )
+            == 1
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        assert ttls[0] <= 11
+        assert ttls[1] <= 11
+        assert 10 < ttls[2] <= 30
+        assert await r.mget(
+            "1:{test:1}", "2:{test:1}", "3:{test:1}", "new:{test:1}"
+        ) == [
+            b"new_value",
+            b"new_value_2",
+            b"three",
+            None,
+        ]
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_invalid_inputs_with_cluster_client(self, r):
+        mapping = {"1": 1, "2": "2", "3": "three"}
+        with pytest.raises(exceptions.RedisClusterException):
+            await r.msetex(mapping)
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_no_expiration(self, r):
+        all_test_keys = ["1", "2"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        # # set items from mapping without expiration
+        assert await r.msetex(mapping={"1": 1, "2": b"four"}) == 1
+        assert await r.mget("1", "2") == [b"1", b"four"]
+        assert await r.ttl("1") == -1
+        assert await r.ttl("2") == -1
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_ex_and_keepttl(self, r):
+        all_test_keys = ["1", "2"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        # set items from mapping with expiration - testing ex field
+        assert (
+            await r.msetex(
+                mapping={"1": 1, "2": "2"},
+                ex=10,
+            )
+            == 1
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in all_test_keys])
+        for ttl in ttls:
+            assert pytest.approx(ttl) == 10
+
+        assert await r.mget(*all_test_keys) == [b"1", b"2"]
+        await asyncio.sleep(1.1)
+        # validate keepttl
+        assert await r.msetex(mapping={"1": 11}, keepttl=True) == 1
+        assert await r.ttl("1") < 10
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_px(self, r):
+        all_test_keys = ["1", "2"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        mapping = {"1": 1, "2": "2"}
+        # set key/value pairs provided in mapping
+        # with expiration - testing px field
+        assert await r.msetex(mapping=mapping, px=60000) == 1
+
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        for ttl in ttls:
+            assert pytest.approx(ttl) == 60
+        assert await r.mget(*mapping.keys()) == [b"1", b"2"]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_pxat_and_nx(self, r):
+        all_test_keys = ["1", "2", "3", "new", "new_2"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        mapping = {"1": 1, "2": "2", "3": "three"}
+        assert await r.msetex(mapping=mapping, ex=30) == 1
+
+        # NX is set with existing keys - nothing should be saved or updated
+        expire_at = await redis_server_time(r) + datetime.timedelta(seconds=10)
+        assert (
+            await r.msetex(
+                mapping={"1": "new_value", "new": "ok"},
+                pxat=expire_at,
+                data_persist_option=DataPersistOptions.NX,
+            )
+            == 0
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        for ttl in ttls:
+            assert 10 < ttl <= 30
+        assert await r.mget(*mapping.keys(), "new") == [b"1", b"2", b"three", None]
+
+        # NX is set with non existing keys - values should be set
+        assert (
+            await r.msetex(
+                mapping={"new": "ok", "new_2": "ok_2"},
+                pxat=expire_at,
+                data_persist_option=DataPersistOptions.NX,
+            )
+            == 1
+        )
+        old_ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        new_ttls = await asyncio.gather(*(r.ttl(key) for key in ["new", "new_2"]))
+        for ttl in old_ttls:
+            assert 10 < ttl <= 30
+        for ttl in new_ttls:
+            assert ttl <= 11
+        assert await r.mget(*mapping.keys(), "new", "new_2") == [
+            b"1",
+            b"2",
+            b"three",
+            b"ok",
+            b"ok_2",
+        ]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_exat_and_xx(self, r):
+        all_test_keys = ["1", "2", "3", "new"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        mapping = {"1": 1, "2": "2", "3": "three"}
+        assert await r.msetex(mapping, ex=30) == 1
+
+        expire_at = await redis_server_time(r) + datetime.timedelta(seconds=10)
+        ## XX is set with unexisting key - nothing should be saved or updated
+        assert (
+            await r.msetex(
+                mapping={"1": "new_value", "new": "ok"},
+                exat=expire_at,
+                data_persist_option=DataPersistOptions.XX,
+            )
+            == 0
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        for ttl in ttls:
+            assert 10 < ttl <= 30
+        assert await r.mget(*mapping.keys(), "new") == [b"1", b"2", b"three", None]
+
+        # XX is set with existing keys - values should be updated
+        assert (
+            await r.msetex(
+                mapping={"1": "new_value", "2": "new_value_2"},
+                exat=expire_at,
+                data_persist_option=DataPersistOptions.XX,
+            )
+            == 1
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        assert ttls[0] <= 11
+        assert ttls[1] <= 11
+        assert 10 < ttls[2] <= 30
+        assert await r.mget("1", "2", "3", "new") == [
+            b"new_value",
+            b"new_value_2",
+            b"three",
+            None,
+        ]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_invalid_inputs(self, r):
+        mapping = {"1": 1, "2": "2"}
+        with pytest.raises(exceptions.DataError):
+            await r.msetex(mapping, ex=10, keepttl=True)
 
     @pytest.mark.onlynoncluster
     async def test_msetnx(self, r: redis.Redis):
@@ -1353,6 +2201,102 @@ class TestRedisCommands:
         await r.set("a", "2", keepttl=True)
         assert await r.get("a") == b"2"
         assert 0 < await r.ttl("a") <= 10
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_ifeq_true_sets_and_returns_true(self, r):
+        await r.delete("k")
+        await r.set("k", b"foo")
+        assert await r.set("k", b"bar", ifeq=b"foo") is True
+        assert await r.get("k") == b"bar"
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_ifeq_false_does_not_set_returns_none(self, r):
+        await r.delete("k")
+        await r.set("k", b"foo")
+        assert await r.set("k", b"bar", ifeq=b"nope") is None
+        assert await r.get("k") == b"foo"
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_ifne_true_sets(self, r):
+        await r.delete("k")
+        await r.set("k", b"foo")
+        assert await r.set("k", b"bar", ifne=b"zzz") is True
+        assert await r.get("k") == b"bar"
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_ifne_false_does_not_set(self, r):
+        await r.delete("k")
+        await r.set("k", b"foo")
+        assert await r.set("k", b"bar", ifne=b"foo") is None
+        assert await r.get("k") == b"foo"
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_ifeq_when_key_missing_does_not_create(self, r):
+        await r.delete("k")
+        assert await r.set("k", b"bar", ifeq=b"foo") is None
+        assert await r.exists("k") == 0
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_ifne_when_key_missing_creates(self, r):
+        await r.delete("k")
+        assert await r.set("k", b"bar", ifne=b"foo") is True
+        assert await r.get("k") == b"bar"
+
+    @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.parametrize("val", [b"", b"abc", b"The quick brown fox"])
+    async def test_set_ifdeq_and_ifdne(self, r, val):
+        await r.delete("k")
+        await r.set("k", val)
+        d = await self._server_xxh3_digest(r, "k")
+        assert d is not None
+
+        # IFDEQ must match to set; if key missing => won't create
+        assert await r.set("k", b"X", ifdeq=d) is True
+        assert await r.get("k") == b"X"
+
+        await r.delete("k")
+        # key missing + IFDEQ => not created
+        assert await r.set("k", b"Y", ifdeq=d) is None
+        assert await r.exists("k") == 0
+
+        # IFDNE: create when missing, and set when digest differs
+        assert await r.set("k", b"bar", ifdne=d) is True
+        prev_d = await self._server_xxh3_digest(r, "k")
+        assert prev_d is not None
+        # If digest equal → do not set
+        assert await r.set("k", b"zzz", ifdne=prev_d) is None
+        assert await r.get("k") == b"bar"
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_with_get_returns_previous_value(self, r):
+        await r.delete("k")
+        # when key didn’t exist → returns None, and key is created if condition allows it
+        prev = await r.set("k", b"v1", get=True, ifne=b"any")  # IFNE on missing creates
+        assert prev is None
+        # subsequent GET returns previous value, regardless of whether set occurs
+        prev2 = await r.set(
+            "k", b"v2", get=True, ifeq=b"v1"
+        )  # matches → set; returns "v1"
+        assert prev2 == b"v1"
+        prev3 = await r.set(
+            "k", b"v3", get=True, ifeq=b"no"
+        )  # no set; returns previous "v2"
+        assert prev3 == b"v2"
+        assert await r.get("k") == b"v2"
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_mutual_exclusion_client_side(self, r):
+        await r.delete("k")
+        with pytest.raises(DataError):
+            await r.set("k", b"v", nx=True, ifeq=b"x")
+        with pytest.raises(DataError):
+            await r.set("k", b"v", ifdeq="aa", ifdne="bb")
+        with pytest.raises(DataError):
+            await r.set("k", b"v", ex=1, px=1)
+        with pytest.raises(DataError):
+            await r.set("k", b"v", exat=1, pxat=1)
+        with pytest.raises(DataError):
+            await r.set("k", b"v", ex=1, exat=1)
 
     async def test_setex(self, r: redis.Redis):
         assert await r.setex("a", 60, "1")
@@ -3294,6 +4238,58 @@ class TestRedisCommands:
         consumer = info["groups"][0]["consumers"][0]
         assert isinstance(consumer, dict)
 
+    @skip_if_server_version_lt("8.5.0")
+    async def test_xinfo_stream_idempotent_fields(self, r: redis.Redis):
+        stream = "stream"
+
+        # Create stream with regular entry
+        await r.xadd(stream, {"foo": "bar"})
+        info = await r.xinfo_stream(stream)
+
+        # Verify new idempotent producer fields are present with default values
+        assert "idmp-duration" in info
+        assert "idmp-maxsize" in info
+        assert "pids-tracked" in info
+        assert "iids-tracked" in info
+        assert "iids-added" in info
+        assert "iids-duplicates" in info
+
+        # Default values (before any idempotent entries)
+        assert info["pids-tracked"] == 0
+        assert info["iids-tracked"] == 0
+        assert info["iids-added"] == 0
+        assert info["iids-duplicates"] == 0
+
+        # Add idempotent entry
+        await r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
+        info = await r.xinfo_stream(stream)
+
+        # After adding idempotent entry
+        assert info["pids-tracked"] == 1  # One producer tracked
+        assert info["iids-tracked"] == 1  # One iid tracked
+        assert info["iids-added"] == 1  # One idempotent entry added
+        assert info["iids-duplicates"] == 0  # No duplicates yet
+
+        # Add duplicate entry
+        await r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
+        info = await r.xinfo_stream(stream)
+
+        # After duplicate
+        assert info["pids-tracked"] == 1  # Still one producer
+        assert info["iids-tracked"] == 1  # Still one iid (duplicate doesn't add new)
+        assert info["iids-added"] == 1  # Still one unique entry
+        assert info["iids-duplicates"] == 1  # One duplicate detected
+
+        # Add entry from different producer
+        await r.xadd(stream, {"field2": "value2"}, idmpauto="producer2")
+        info = await r.xinfo_stream(stream)
+
+        # After second producer
+        assert info["pids-tracked"] == 2  # Two producers tracked
+        assert info["iids-tracked"] == 2  # Two iids tracked
+        assert info["iids-added"] == 2  # Two unique entries
+        assert info["iids-duplicates"] == 1  # Still one duplicate
+
     @skip_if_server_version_lt("5.0.0")
     async def test_xlen(self, r: redis.Redis):
         stream = "stream"
@@ -3474,6 +4470,360 @@ class TestRedisCommands:
         res = await r.xreadgroup(group, consumer, streams={stream: "0"})
         assert_resp_response(
             r, res, [[strem_name, expected_entries]], {strem_name: [expected_entries]}
+        )
+
+    def _validate_xreadgroup_with_claim_min_idle_time_response(
+        self, r, response, expected_entries
+    ):
+        # validate the number of streams
+        assert len(response) == len(expected_entries)
+
+        expected_streams = expected_entries.keys()
+        for str_index, expected_stream in enumerate(expected_streams):
+            expected_entries_per_stream = expected_entries[expected_stream]
+
+            if is_resp2_connection(r):
+                actual_entries_per_stream = response[str_index][1]
+                actual_stream = response[str_index][0]
+                assert actual_stream == expected_stream
+            else:
+                actual_entries_per_stream = response[expected_stream][0]
+
+            # validate the number of entries
+            assert len(actual_entries_per_stream) == len(expected_entries_per_stream)
+
+            for i, entry in enumerate(actual_entries_per_stream):
+                message = (entry[0], entry[1])
+                message_idle = int(entry[2])
+                message_delivered_count = int(entry[3])
+
+                expected_idle = expected_entries_per_stream[i]["min_idle_time"]
+
+                assert message == expected_entries_per_stream[i]["msg"]
+                if expected_idle == 0:
+                    assert message_idle == 0
+                    assert message_delivered_count == 0
+                else:
+                    assert message_idle >= expected_idle
+                    assert message_delivered_count > 0
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_xreadgroup_with_claim_min_idle_time(self, r):
+        stream = "stream"
+        group = "group"
+        consumer_1 = "c1"
+        stream_name = stream.encode()
+
+        try:
+            # before test cleanup
+            await r.xgroup_destroy(stream, group)
+        except ResponseError:
+            pass
+
+        m1 = await r.xadd(stream, {"key_m1": "val_m1"})
+        m2 = await r.xadd(stream, {"key_m2": "val_m2"})
+
+        await r.xgroup_create(stream, group, 0)
+
+        # read all the messages - this will save the msgs in PEL
+        await r.xreadgroup(group, consumer_1, streams={stream: ">"})
+
+        # wait for 100ms - so that the messages would have been in the PEL for long enough
+        await asyncio.sleep(0.1)
+
+        m3 = await r.xadd(stream, {"key_m3": "val_m3"})
+        m4 = await r.xadd(stream, {"key_m4": "val_m4"})
+
+        expected_entries = {
+            stream_name: [
+                {"msg": await get_stream_message(r, stream, m1), "min_idle_time": 100},
+                {"msg": await get_stream_message(r, stream, m2), "min_idle_time": 100},
+                {"msg": await get_stream_message(r, stream, m3), "min_idle_time": 0},
+                {"msg": await get_stream_message(r, stream, m4), "min_idle_time": 0},
+            ]
+        }
+
+        res = await r.xreadgroup(
+            group, consumer_1, streams={stream: ">"}, claim_min_idle_time=100
+        )
+
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
+        # validate PEL still holds the messages until they are acknowledged
+        response = await r.xpending_range(stream, group, min="-", max="+", count=5)
+        assert len(response) == 4
+
+        # add 2 more messages
+        m5 = await r.xadd(stream, {"key_m5": "val_m5"})
+        m6 = await r.xadd(stream, {"key_m6": "val_m6"})
+
+        expected_entries = [
+            await get_stream_message(r, stream, m5),
+            await get_stream_message(r, stream, m6),
+        ]
+        # read all the messages - this will save the msgs in PEL
+        res = await r.xreadgroup(group, consumer_1, streams={stream: ">"})
+        assert_resp_response(
+            r,
+            res,
+            [[stream_name, expected_entries]],
+            {stream_name: [expected_entries]},
+        )
+
+        # add 2 more messages
+        m7 = await r.xadd(stream, {"key_m7": "val_m7"})
+        m8 = await r.xadd(stream, {"key_m8": "val_m8"})
+        # read the messages with claim_min_idle_time=1000
+        # only m7 and m8 should be returned
+        # because the other messages have not been in the PEL for long enough
+        expected_entries = {
+            stream_name: [
+                {"msg": await get_stream_message(r, stream, m7), "min_idle_time": 0},
+                {"msg": await get_stream_message(r, stream, m8), "min_idle_time": 0},
+            ]
+        }
+        res = await r.xreadgroup(
+            group, consumer_1, streams={stream: ">"}, claim_min_idle_time=100
+        )
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_xreadgroup_with_claim_min_idle_time_multiple_streams_same_slots(
+        self, r
+    ):
+        stream_1 = "stream1:{same_slot:42}"
+        stream_2 = "stream2:{same_slot:42}"
+        group = "group"
+        consumer_1 = "c1"
+
+        stream_1_name = stream_1.encode()
+        stream_2_name = stream_2.encode()
+
+        # before test cleanup
+        try:
+            await r.xgroup_destroy(stream_1, group)
+        except ResponseError:
+            pass
+        try:
+            await r.xgroup_destroy(stream_2, group)
+        except ResponseError:
+            pass
+
+        m1_s1 = await r.xadd(stream_1, {"key_m1_s1": "val_m1"})
+        m2_s1 = await r.xadd(stream_1, {"key_m2_s1": "val_m2"})
+        await r.xgroup_create(stream_1, group, 0)
+
+        m1_s2 = await r.xadd(stream_2, {"key_m1_s2": "val_m1"})
+        m2_s2 = await r.xadd(stream_2, {"key_m2_s2": "val_m2"})
+        await r.xgroup_create(stream_2, group, 0)
+
+        # read all the messages - this will save the msgs in PEL
+        await r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
+
+        # wait for 100ms - so that the messages would have been in the PEL for long enough
+        await asyncio.sleep(0.1)
+
+        m3_s1 = await r.xadd(stream_1, {"key_m3_s1": "val_m3"})
+        m4_s2 = await r.xadd(stream_2, {"key_m4_s2": "val_m4"})
+
+        expected_entries = {
+            stream_1_name: [
+                {
+                    "msg": await get_stream_message(r, stream_1, m1_s1),
+                    "min_idle_time": 100,
+                },
+                {
+                    "msg": await get_stream_message(r, stream_1, m2_s1),
+                    "min_idle_time": 100,
+                },
+                {
+                    "msg": await get_stream_message(r, stream_1, m3_s1),
+                    "min_idle_time": 0,
+                },
+            ],
+            stream_2_name: [
+                {
+                    "msg": await get_stream_message(r, stream_2, m1_s2),
+                    "min_idle_time": 100,
+                },
+                {
+                    "msg": await get_stream_message(r, stream_2, m2_s2),
+                    "min_idle_time": 100,
+                },
+                {
+                    "msg": await get_stream_message(r, stream_2, m4_s2),
+                    "min_idle_time": 0,
+                },
+            ],
+        }
+
+        res = await r.xreadgroup(
+            group,
+            consumer_1,
+            streams={stream_1: ">", stream_2: ">"},
+            claim_min_idle_time=100,
+        )
+
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
+        # validate PEL still holds the messages until they are acknowledged
+        response = await r.xpending_range(stream_1, group, min="-", max="+", count=5)
+        assert len(response) == 3
+        response = await r.xpending_range(stream_2, group, min="-", max="+", count=5)
+        assert len(response) == 3
+
+        # add 2 more messages
+        await r.xadd(stream_1, {"key_m5": "val_m5"})
+        await r.xadd(stream_2, {"key_m6": "val_m6"})
+
+        # read all the messages - this will save the msgs in PEL
+        await r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
+
+        # add 2 more messages
+        m7 = await r.xadd(stream_1, {"key_m7": "val_m7"})
+        m8 = await r.xadd(stream_2, {"key_m8": "val_m8"})
+        # read the messages with claim_min_idle_time=1000
+        # only m7 and m8 should be returned
+        # because the other messages have not been in the PEL for long enough
+        expected_entries = {
+            stream_1_name: [
+                {"msg": await get_stream_message(r, stream_1, m7), "min_idle_time": 0}
+            ],
+            stream_2_name: [
+                {"msg": await get_stream_message(r, stream_2, m8), "min_idle_time": 0}
+            ],
+        }
+        res = await r.xreadgroup(
+            group,
+            consumer_1,
+            streams={stream_1: ">", stream_2: ">"},
+            claim_min_idle_time=100,
+        )
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_xreadgroup_with_claim_min_idle_time_multiple_streams(self, r):
+        stream_1 = "stream1"
+        stream_2 = "stream2"
+        group = "group"
+        consumer_1 = "c1"
+
+        stream_1_name = stream_1.encode()
+        stream_2_name = stream_2.encode()
+
+        # before test cleanup
+        try:
+            await r.xgroup_destroy(stream_1, group)
+        except ResponseError:
+            pass
+        try:
+            await r.xgroup_destroy(stream_2, group)
+        except ResponseError:
+            pass
+
+        m1_s1 = await r.xadd(stream_1, {"key_m1_s1": "val_m1"})
+        m2_s1 = await r.xadd(stream_1, {"key_m2_s1": "val_m2"})
+        await r.xgroup_create(stream_1, group, 0)
+
+        m1_s2 = await r.xadd(stream_2, {"key_m1_s2": "val_m1"})
+        m2_s2 = await r.xadd(stream_2, {"key_m2_s2": "val_m2"})
+        await r.xgroup_create(stream_2, group, 0)
+
+        # read all the messages - this will save the msgs in PEL
+        await r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
+
+        # wait for 100ms - so that the messages would have been in the PEL for long enough
+        await asyncio.sleep(0.1)
+
+        m3_s1 = await r.xadd(stream_1, {"key_m3_s1": "val_m3"})
+        m4_s2 = await r.xadd(stream_2, {"key_m4_s2": "val_m4"})
+
+        expected_entries = {
+            stream_1_name: [
+                {
+                    "msg": await get_stream_message(r, stream_1, m1_s1),
+                    "min_idle_time": 100,
+                },
+                {
+                    "msg": await get_stream_message(r, stream_1, m2_s1),
+                    "min_idle_time": 100,
+                },
+                {
+                    "msg": await get_stream_message(r, stream_1, m3_s1),
+                    "min_idle_time": 0,
+                },
+            ],
+            stream_2_name: [
+                {
+                    "msg": await get_stream_message(r, stream_2, m1_s2),
+                    "min_idle_time": 100,
+                },
+                {
+                    "msg": await get_stream_message(r, stream_2, m2_s2),
+                    "min_idle_time": 100,
+                },
+                {
+                    "msg": await get_stream_message(r, stream_2, m4_s2),
+                    "min_idle_time": 0,
+                },
+            ],
+        }
+
+        res = await r.xreadgroup(
+            group,
+            consumer_1,
+            streams={stream_1: ">", stream_2: ">"},
+            claim_min_idle_time=100,
+        )
+
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
+        # validate PEL still holds the messages until they are acknowledged
+        response = await r.xpending_range(stream_1, group, min="-", max="+", count=5)
+        assert len(response) == 3
+        response = await r.xpending_range(stream_2, group, min="-", max="+", count=5)
+        assert len(response) == 3
+
+        # add 2 more messages
+        await r.xadd(stream_1, {"key_m5": "val_m5"})
+        await r.xadd(stream_2, {"key_m6": "val_m6"})
+
+        # read all the messages - this will save the msgs in PEL
+        await r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
+
+        # add 2 more messages
+        m7 = await r.xadd(stream_1, {"key_m7": "val_m7"})
+        m8 = await r.xadd(stream_2, {"key_m8": "val_m8"})
+        # read the messages with claim_min_idle_time=1000
+        # only m7 and m8 should be returned
+        # because the other messages have not been in the PEL for long enough
+        expected_entries = {
+            stream_1_name: [
+                {"msg": await get_stream_message(r, stream_1, m7), "min_idle_time": 0}
+            ],
+            stream_2_name: [
+                {"msg": await get_stream_message(r, stream_2, m8), "min_idle_time": 0}
+            ],
+        }
+        res = await r.xreadgroup(
+            group,
+            consumer_1,
+            streams={stream_1: ">", stream_2: ">"},
+            claim_min_idle_time=100,
+        )
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
         )
 
     @skip_if_server_version_lt("5.0.0")
@@ -3667,6 +5017,175 @@ class TestRedisCommands:
         # Test error case
         with pytest.raises(redis.DataError):
             await r.xadd(stream, {"foo": "bar"}, ref_policy="INVALID")
+
+    @skip_if_server_version_lt("8.5.0")
+    async def test_xadd_idmpauto(self, r: redis.Redis):
+        stream = "stream"
+
+        # XADD with IDMPAUTO - first write
+        message_id1 = await r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
+
+        # Test XADD with IDMPAUTO - duplicate write returns same ID
+        message_id2 = await r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
+        assert message_id1 == message_id2
+
+        # Test XADD with IDMPAUTO - different content creates new entry
+        message_id3 = await r.xadd(stream, {"field1": "value2"}, idmpauto="producer1")
+        assert message_id3 != message_id1
+
+        # Test XADD with IDMPAUTO - different producer creates new entry
+        message_id4 = await r.xadd(stream, {"field1": "value1"}, idmpauto="producer2")
+        assert message_id4 != message_id1
+
+        # Verify stream has 3 entries (2 unique from producer1, 1 from producer2)
+        assert await r.xlen(stream) == 3
+
+    @skip_if_server_version_lt("8.5.0")
+    async def test_xadd_idmp(self, r: redis.Redis):
+        stream = "stream"
+
+        # Test XADD with IDMP - first write
+        message_id1 = await r.xadd(
+            stream, {"field1": "value1"}, idmp=("producer1", b"msg1")
+        )
+
+        # Test XADD with IDMP - duplicate write returns same ID
+        message_id2 = await r.xadd(
+            stream, {"field1": "value1"}, idmp=("producer1", b"msg1")
+        )
+        assert message_id1 == message_id2
+
+        # Test XADD with IDMP - different iid creates new entry
+        message_id3 = await r.xadd(
+            stream, {"field1": "value1"}, idmp=("producer1", b"msg2")
+        )
+        assert message_id3 != message_id1
+
+        # Test XADD with IDMP - different producer creates new entry
+        message_id4 = await r.xadd(
+            stream, {"field1": "value1"}, idmp=("producer2", b"msg1")
+        )
+        assert message_id4 != message_id1
+
+        # Test XADD with IDMP - shorter binary iid
+        await r.xadd(stream, {"field1": "value1"}, idmp=("producer1", b"\x01"))
+
+        # Verify stream has 4 entries
+        assert await r.xlen(stream) == 4
+
+    @skip_if_server_version_lt("8.5.0")
+    async def test_xadd_idmp_validation(self, r: redis.Redis):
+        stream = "stream"
+
+        # Test error: both idmpauto and idmp specified
+        with pytest.raises(redis.DataError):
+            await r.xadd(
+                stream,
+                {"foo": "bar"},
+                idmpauto="producer1",
+                idmp=("producer1", b"msg1"),
+            )
+
+        # Test error: idmpauto with explicit id
+        with pytest.raises(redis.DataError):
+            await r.xadd(
+                stream, {"foo": "bar"}, id="1234567890-0", idmpauto="producer1"
+            )
+
+        # Test error: idmp with explicit id
+        with pytest.raises(redis.DataError):
+            await r.xadd(
+                stream, {"foo": "bar"}, id="1234567890-0", idmp=("producer1", b"msg1")
+            )
+
+        # Test error: idmp not a tuple
+        with pytest.raises(redis.DataError):
+            await r.xadd(stream, {"foo": "bar"}, idmp="invalid")
+
+        # Test error: idmp tuple with wrong number of elements
+        with pytest.raises(redis.DataError):
+            await r.xadd(stream, {"foo": "bar"}, idmp=("producer1",))
+
+        # Test error: idmp tuple with wrong number of elements
+        with pytest.raises(redis.DataError):
+            await r.xadd(stream, {"foo": "bar"}, idmp=("producer1", b"msg1", "extra"))
+
+    @skip_if_server_version_lt("8.5.0")
+    async def test_xcfgset_idmp_duration(self, r: redis.Redis):
+        stream = "stream"
+
+        # Create stream first
+        await r.xadd(stream, {"foo": "bar"})
+
+        # Test XCFGSET with IDMP-DURATION only
+        assert await r.xcfgset(stream, idmp_duration=120) == b"OK"
+
+        # Test with minimum value
+        assert await r.xcfgset(stream, idmp_duration=1) == b"OK"
+
+        # Test with maximum value
+        assert await r.xcfgset(stream, idmp_duration=300) == b"OK"
+
+    @skip_if_server_version_lt("8.5.0")
+    async def test_xcfgset_idmp_maxsize(self, r: redis.Redis):
+        stream = "stream"
+
+        # Create stream first
+        await r.xadd(stream, {"foo": "bar"})
+
+        # Test XCFGSET with IDMP-MAXSIZE only
+        assert await r.xcfgset(stream, idmp_maxsize=5000) == b"OK"
+
+        # Test with minimum value
+        assert await r.xcfgset(stream, idmp_maxsize=1) == b"OK"
+
+        # Test with maximum value
+        assert await r.xcfgset(stream, idmp_maxsize=10000) == b"OK"
+
+    @skip_if_server_version_lt("8.5.0")
+    async def test_xcfgset_both_parameters(self, r: redis.Redis):
+        stream = "stream"
+
+        # Create stream first
+        await r.xadd(stream, {"foo": "bar"})
+
+        # Test XCFGSET with both IDMP-DURATION and IDMP-MAXSIZE
+        assert await r.xcfgset(stream, idmp_duration=120, idmp_maxsize=5000) == b"OK"
+
+        # Test with different values
+        assert await r.xcfgset(stream, idmp_duration=60, idmp_maxsize=10000) == b"OK"
+
+    @skip_if_server_version_lt("8.5.0")
+    async def test_xcfgset_validation(self, r: redis.Redis):
+        stream = "stream"
+
+        # Test error: no parameters provided
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream)
+
+        # Test error: idmp_duration too small
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream, idmp_duration=0)
+
+        # Test error: idmp_duration too large
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream, idmp_duration=301)
+
+        # Test error: idmp_duration not an integer
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream, idmp_duration="invalid")
+
+        # Test error: idmp_maxsize too small
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream, idmp_maxsize=0)
+
+        # Test error: idmp_maxsize too large
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream, idmp_maxsize=1000001)
+
+        # Test error: idmp_maxsize not an integer
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream, idmp_maxsize="invalid")
 
     @pytest.mark.onlynoncluster
     async def test_bitfield_operations(self, r: redis.Redis):

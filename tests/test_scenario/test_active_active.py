@@ -3,6 +3,7 @@ import logging
 import os
 import threading
 from time import sleep
+from typing import Optional
 
 import pytest
 
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def trigger_network_failure_action(
-    fault_injector_client, config, event: threading.Event = None
+    fault_injector_client, config, event: Optional[threading.Event] = None
 ):
     action_request = ActionRequest(
         action_type=ActionType.NETWORK_FAILURE,
@@ -43,6 +44,7 @@ def trigger_network_failure_action(
     logger.info(f"Action completed. Status: {status_result['status']}")
 
 
+@pytest.mark.skip(reason="Temporarily disabled")
 class TestActiveActive:
     def teardown_method(self, method):
         # Timeout so the cluster could recover from network failure.

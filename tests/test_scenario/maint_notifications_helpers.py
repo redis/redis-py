@@ -1,30 +1,65 @@
+import binascii
 import logging
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Union
 import pytest
+from redis import RedisCluster
 
 from redis.client import Redis
 from redis.connection import Connection
 from tests.test_scenario.fault_injector_client import (
-    ActionRequest,
-    ActionType,
     FaultInjectorClient,
+    NodeInfo,
+    SlotMigrateEffects,
 )
 
 
 class ClientValidations:
     @staticmethod
+    def get_default_connection(redis_client: Union[Redis, RedisCluster]) -> Connection:
+        """Get a random connection from the pool."""
+        if isinstance(redis_client, RedisCluster):
+            return redis_client.get_default_node().redis_connection.connection_pool.get_connection()
+        if isinstance(redis_client, Redis):
+            return redis_client.connection_pool.get_connection()
+        raise ValueError(f"Unsupported redis client type: {type(redis_client)}")
+
+    @staticmethod
+    def release_connection(
+        redis_client: Union[Redis, RedisCluster], connection: Connection
+    ):
+        """Release a connection back to the pool."""
+        if isinstance(redis_client, RedisCluster):
+            node_address = connection.host + ":" + str(connection.port)
+            node = redis_client.get_node(node_address)
+            if node is None:
+                raise ValueError(
+                    f"Node not found in cluster for address: {node_address}"
+                )
+            node.redis_connection.connection_pool.release(connection)
+        elif isinstance(redis_client, Redis):
+            redis_client.connection_pool.release(connection)
+        else:
+            raise ValueError(f"Unsupported redis client type: {type(redis_client)}")
+
+    @staticmethod
     def wait_push_notification(
-        redis_client: Redis,
-        timeout: int = 120,
+        redis_client: Union[Redis, RedisCluster],
+        timeout: float = 120,
         fail_on_timeout: bool = True,
         connection: Optional[Connection] = None,
     ):
         """Wait for a push notification to be received."""
-        start_time = time.time()
+        start_time = time.time()  # returns the time in seconds
         check_interval = 0.2  # Check more frequently during operations
         test_conn = (
-            connection if connection else redis_client.connection_pool.get_connection()
+            connection
+            if connection
+            else ClientValidations.get_default_connection(redis_client)
+        )
+        logging.info(
+            f"Waiting for push notification on connection: {test_conn}, "
+            f"local socket port: {test_conn._sock.getsockname()[1] if test_conn._sock else None}"
         )
 
         try:
@@ -44,196 +79,60 @@ class ClientValidations:
                     break
                 time.sleep(check_interval)
             if fail_on_timeout:
-                pytest.fail("Timeout waiting for push notification")
+                pytest.fail(
+                    f"Timeout waiting for push notification: waiting > {time.time() - start_time} seconds."
+                )
         finally:
             # Release the connection back to the pool
             try:
                 if not connection:
-                    redis_client.connection_pool.release(test_conn)
+                    ClientValidations.release_connection(redis_client, test_conn)
             except Exception as e:
                 logging.error(f"Error releasing connection: {e}")
 
 
 class ClusterOperations:
     @staticmethod
-    def get_cluster_nodes_info(
+    def find_database_id_by_name(
         fault_injector: FaultInjectorClient,
-        endpoint_config: Dict[str, Any],
-        timeout: int = 60,
-    ) -> Dict[str, Any]:
-        """Get cluster nodes information from Redis Enterprise."""
-        try:
-            # Use rladmin status to get node information
-            bdb_id = endpoint_config.get("bdb_id")
-            get_status_action = ActionRequest(
-                action_type=ActionType.EXECUTE_RLADMIN_COMMAND,
-                parameters={
-                    "rladmin_command": "status",
-                    "bdb_id": bdb_id,
-                },
-            )
-            trigger_action_result = fault_injector.trigger_action(get_status_action)
-            action_id = trigger_action_result.get("action_id")
-            if not action_id:
-                raise ValueError(
-                    f"Failed to trigger get cluster status action for bdb_id {bdb_id}: {trigger_action_result}"
-                )
-
-            action_status_check_response = fault_injector.get_operation_result(
-                action_id, timeout=timeout
-            )
-            logging.info(
-                f"Completed cluster nodes info reading: {action_status_check_response}"
-            )
-            return action_status_check_response
-
-        except Exception as e:
-            pytest.fail(f"Failed to get cluster nodes info: {e}")
+        database_name: str,
+        force_cluster_info_refresh: bool = True,
+    ) -> Optional[int]:
+        """Find the database ID by name."""
+        return fault_injector.find_database_id_by_name(
+            database_name, force_cluster_info_refresh
+        )
 
     @staticmethod
     def find_target_node_and_empty_node(
         fault_injector: FaultInjectorClient,
         endpoint_config: Dict[str, Any],
-    ) -> Tuple[str, str]:
+        force_cluster_info_refresh: bool = True,
+    ) -> Tuple[NodeInfo, NodeInfo]:
         """Find the node with master shards and the node with no shards.
 
         Returns:
             tuple: (target_node, empty_node) where target_node has master shards
                    and empty_node has no shards
         """
-        cluster_info = ClusterOperations.get_cluster_nodes_info(
-            fault_injector, endpoint_config
+        return fault_injector.find_target_node_and_empty_node(
+            endpoint_config, force_cluster_info_refresh
         )
-        output = cluster_info.get("output", {}).get("output", "")
-
-        if not output:
-            raise ValueError("No cluster status output found")
-
-        # Parse the sections to find nodes with master shards and nodes with no shards
-        lines = output.split("\n")
-        shards_section_started = False
-        nodes_section_started = False
-
-        # Get all node IDs from CLUSTER NODES section
-        all_nodes = set()
-        nodes_with_any_shards = set()  # Nodes with shards from ANY database
-        nodes_with_target_db_shards = set()  # Nodes with shards from target database
-        master_nodes = set()  # Master nodes for target database only
-
-        for line in lines:
-            line = line.strip()
-
-            # Start of CLUSTER NODES section
-            if line.startswith("CLUSTER NODES:"):
-                nodes_section_started = True
-                continue
-            elif line.startswith("DATABASES:"):
-                nodes_section_started = False
-                continue
-            elif nodes_section_started and line and not line.startswith("NODE:ID"):
-                # Parse node line: node:1  master 10.0.101.206 ... (ignore the role)
-                parts = line.split()
-                if len(parts) >= 1:
-                    node_id = parts[0].replace("*", "")  # Remove * prefix if present
-                    all_nodes.add(node_id)
-
-            # Start of SHARDS section - only care about shard roles here
-            if line.startswith("SHARDS:"):
-                shards_section_started = True
-                continue
-            elif shards_section_started and line.startswith("DB:ID"):
-                continue
-            elif shards_section_started and line and not line.startswith("ENDPOINTS:"):
-                # Parse shard line: db:1  m-standard  redis:1  node:2  master  0-8191  1.4MB  OK
-                parts = line.split()
-                if len(parts) >= 5:
-                    db_id = parts[0]  # db:1, db:2, etc.
-                    node_id = parts[3]  # node:2
-                    shard_role = parts[4]  # master/slave - this is what matters
-
-                    # Track ALL nodes with shards (for finding truly empty nodes)
-                    nodes_with_any_shards.add(node_id)
-
-                    # Only track master nodes for the specific database we're testing
-                    bdb_id = endpoint_config.get("bdb_id")
-                    if db_id == f"db:{bdb_id}":
-                        nodes_with_target_db_shards.add(node_id)
-                        if shard_role == "master":
-                            master_nodes.add(node_id)
-            elif line.startswith("ENDPOINTS:") or not line:
-                shards_section_started = False
-
-        # Find empty node (node with no shards from ANY database)
-        nodes_with_no_shards_target_bdb = all_nodes - nodes_with_target_db_shards
-
-        logging.debug(f"All nodes: {all_nodes}")
-        logging.debug(f"Nodes with shards from any database: {nodes_with_any_shards}")
-        logging.debug(
-            f"Nodes with target database shards: {nodes_with_target_db_shards}"
-        )
-        logging.debug(f"Master nodes (target database only): {master_nodes}")
-        logging.debug(
-            f"Nodes with no shards from target database: {nodes_with_no_shards_target_bdb}"
-        )
-
-        if not nodes_with_no_shards_target_bdb:
-            raise ValueError("All nodes have shards from target database")
-
-        if not master_nodes:
-            raise ValueError("No nodes with master shards from target database found")
-
-        # Return the first available empty node and master node (numeric part only)
-        empty_node = next(iter(nodes_with_no_shards_target_bdb)).split(":")[
-            1
-        ]  # node:1 -> 1
-        target_node = next(iter(master_nodes)).split(":")[1]  # node:2 -> 2
-
-        return target_node, empty_node
 
     @staticmethod
     def find_endpoint_for_bind(
         fault_injector: FaultInjectorClient,
-        endpoint_config: Dict[str, Any],
         endpoint_name: str,
-        timeout: int = 60,
+        force_cluster_info_refresh: bool = True,
     ) -> str:
         """Find the endpoint ID from cluster status.
 
         Returns:
             str: The endpoint ID (e.g., "1:1")
         """
-        cluster_info = ClusterOperations.get_cluster_nodes_info(
-            fault_injector, endpoint_config, timeout
+        return fault_injector.find_endpoint_for_bind(
+            endpoint_name, force_cluster_info_refresh
         )
-        output = cluster_info.get("output", {}).get("output", "")
-
-        if not output:
-            raise ValueError("No cluster status output found")
-
-        # Parse the ENDPOINTS section to find endpoint ID
-        lines = output.split("\n")
-        endpoints_section_started = False
-
-        for line in lines:
-            line = line.strip()
-
-            # Start of ENDPOINTS section
-            if line.startswith("ENDPOINTS:"):
-                endpoints_section_started = True
-                continue
-            elif line.startswith("SHARDS:"):
-                endpoints_section_started = False
-                break
-            elif endpoints_section_started and line and not line.startswith("DB:ID"):
-                # Parse endpoint line: db:1  m-standard  endpoint:1:1  node:2  single  No
-                parts = line.split()
-                if len(parts) >= 3 and parts[1] == endpoint_name:
-                    endpoint_full = parts[2]  # endpoint:1:1
-                    if endpoint_full.startswith("endpoint:"):
-                        endpoint_id = endpoint_full.replace("endpoint:", "")  # 1:1
-                        return endpoint_id
-
-        raise ValueError(f"No endpoint ID for {endpoint_name} found in cluster status")
 
     @staticmethod
     def execute_failover(
@@ -242,100 +141,149 @@ class ClusterOperations:
         timeout: int = 60,
     ) -> Dict[str, Any]:
         """Execute failover command and wait for completion."""
-
-        try:
-            bdb_id = endpoint_config.get("bdb_id")
-            failover_action = ActionRequest(
-                action_type=ActionType.FAILOVER,
-                parameters={
-                    "bdb_id": bdb_id,
-                },
-            )
-            trigger_action_result = fault_injector.trigger_action(failover_action)
-            action_id = trigger_action_result.get("action_id")
-            if not action_id:
-                raise ValueError(
-                    f"Failed to trigger fail over action for bdb_id {bdb_id}: {trigger_action_result}"
-                )
-
-            action_status_check_response = fault_injector.get_operation_result(
-                action_id, timeout=timeout
-            )
-            logging.info(
-                f"Completed cluster nodes info reading: {action_status_check_response}"
-            )
-            return action_status_check_response
-
-        except Exception as e:
-            pytest.fail(f"Failed to get cluster nodes info: {e}")
+        return fault_injector.execute_failover(endpoint_config, timeout)
 
     @staticmethod
-    def execute_rladmin_migrate(
+    def execute_migrate(
         fault_injector: FaultInjectorClient,
         endpoint_config: Dict[str, Any],
         target_node: str,
         empty_node: str,
+        skip_end_notification: bool = False,
     ) -> str:
         """Execute rladmin migrate command and wait for completion."""
-        command = f"migrate node {target_node} all_shards target_node {empty_node}"
-
-        # Get bdb_id from endpoint configuration
-        bdb_id = endpoint_config.get("bdb_id")
-
-        try:
-            # Correct parameter format for fault injector
-            parameters = {
-                "bdb_id": bdb_id,
-                "rladmin_command": command,  # Just the command without "rladmin" prefix
-            }
-
-            logging.debug(f"Executing rladmin_command with parameter: {parameters}")
-
-            action = ActionRequest(
-                action_type=ActionType.EXECUTE_RLADMIN_COMMAND, parameters=parameters
-            )
-            result = fault_injector.trigger_action(action)
-
-            logging.debug(f"Migrate command action result: {result}")
-
-            action_id = result.get("action_id")
-
-            if not action_id:
-                raise Exception(f"Failed to trigger migrate action: {result}")
-            return action_id
-        except Exception as e:
-            raise Exception(f"Failed to execute rladmin migrate: {e}")
+        return fault_injector.execute_migrate(
+            endpoint_config, target_node, empty_node, skip_end_notification
+        )
 
     @staticmethod
-    def execute_rladmin_bind_endpoint(
+    def execute_rebind(
         fault_injector: FaultInjectorClient,
         endpoint_config: Dict[str, Any],
         endpoint_id: str,
     ) -> str:
         """Execute rladmin bind endpoint command and wait for completion."""
-        command = f"bind endpoint {endpoint_id} policy single"
+        return fault_injector.execute_rebind(endpoint_config, endpoint_id)
 
-        bdb_id = endpoint_config.get("bdb_id")
+    @staticmethod
+    def get_slot_migrate_triggers(
+        fault_injector: FaultInjectorClient,
+        effect_name: SlotMigrateEffects,
+    ) -> Dict[str, Any]:
+        """Get available triggers(trigger name + db example config) for a slot migration effect."""
+        return fault_injector.get_slot_migrate_triggers(effect_name)
 
-        try:
-            parameters = {
-                "rladmin_command": command,  # Just the command without "rladmin" prefix
-                "bdb_id": bdb_id,
-            }
+    @staticmethod
+    def trigger_effect(
+        fault_injector: FaultInjectorClient,
+        endpoint_config: Dict[str, Any],
+        effect_name: SlotMigrateEffects,
+        trigger_name: Optional[str] = None,
+        source_node: Optional[str] = None,
+        target_node: Optional[str] = None,
+        skip_end_notification: bool = False,
+    ) -> str:
+        """Execute fault injector action that will trigger the desired effect.
 
-            logging.info(f"Executing rladmin_command with parameter: {parameters}")
-            action = ActionRequest(
-                action_type=ActionType.EXECUTE_RLADMIN_COMMAND, parameters=parameters
-            )
-            result = fault_injector.trigger_action(action)
-            logging.info(
-                f"Migrate command {command} with parameters {parameters} trigger result: {result}"
-            )
+        Args:
+            fault_injector: The fault injector client to use
+            endpoint_config: Endpoint configuration dictionary
+            effect_name: The effect to trigger (e.g., SlotMigrateEffects enum value)
+            trigger_name: Optional trigger/variant name
+            source_node: Optional source node ID
+            target_node: Optional target node ID
+            skip_end_notification: Whether to skip end notification
 
-            action_id = result.get("action_id")
+        Returns:
+            str: Action ID for tracking the operation
+        """
+        return fault_injector.trigger_effect(
+            endpoint_config=endpoint_config,
+            effect_name=effect_name,
+            trigger_name=trigger_name,
+            source_node=source_node,
+            target_node=target_node,
+            skip_end_notification=skip_end_notification,
+        )
 
-            if not action_id:
-                raise Exception(f"Failed to trigger bind endpoint action: {result}")
-            return action_id
-        except Exception as e:
-            raise Exception(f"Failed to execute rladmin bind endpoint: {e}")
+
+class KeyGenerationHelpers:
+    TOTAL_SLOTS = 16384
+
+    @staticmethod
+    def redis_crc16(data: bytes) -> int:
+        """
+        Redis-compatible CRC16 (CRC-CCITT)
+        """
+        return binascii.crc_hqx(data, 0)
+
+    @staticmethod
+    def redis_slot(key: str) -> int:
+        """
+        Compute Redis Cluster hash slot for a key
+        """
+        start = key.find("{")
+        if start != -1:
+            end = key.find("}", start + 1)
+            if end != -1 and end > start + 1:
+                key = key[start + 1 : end]
+
+        return (
+            KeyGenerationHelpers.redis_crc16(key.encode("utf-8"))
+            % KeyGenerationHelpers.TOTAL_SLOTS
+        )
+
+    @staticmethod
+    def generate_key(slot_number: int, prefix: str = "key") -> str:
+        """
+        Generate a Redis key that hashes to the given slot
+        """
+        if not (0 <= slot_number < KeyGenerationHelpers.TOTAL_SLOTS):
+            raise ValueError("slot_number must be between 0 and 16383")
+
+        i = 0
+        while True:
+            hashtag = f"{slot_number}-{i}"
+            candidate = f"{prefix}:{{{hashtag}}}"
+            if KeyGenerationHelpers.redis_slot(candidate) == slot_number:
+                return candidate
+            i += 1
+
+    @staticmethod
+    def generate_keys_for_all_shards(
+        shards_count: int, prefix: str = "key", keys_per_shard: int = 1
+    ) -> list:
+        """
+        Generate keys for all shards based on slot ranges.
+
+        Divides the total slots (16384) evenly across shards and generates
+        keys for each shard range.
+
+        Args:
+            shards_count: Number of shards in the cluster
+            prefix: Prefix for generated keys
+            keys_per_shard: Number of keys to generate per shard
+
+        Returns:
+            List of generated keys distributed across all shards
+        """
+        keys = []
+        slots_per_shard = KeyGenerationHelpers.TOTAL_SLOTS // shards_count
+
+        for shard_index in range(shards_count):
+            # Calculate slot range for this shard
+            start_slot = shard_index * slots_per_shard
+
+            # Last shard gets any remaining slots
+            if shard_index == shards_count - 1:
+                end_slot = KeyGenerationHelpers.TOTAL_SLOTS - 1
+            else:
+                end_slot = start_slot + slots_per_shard - 1
+
+            # Generate keys for this shard's slot range
+            for i in range(keys_per_shard):
+                # Pick a slot within this shard's range
+                slot_number = start_slot + (i % (end_slot - start_slot + 1))
+                keys.append(KeyGenerationHelpers.generate_key(slot_number, prefix))
+
+        return keys

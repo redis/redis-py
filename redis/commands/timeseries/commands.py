@@ -170,7 +170,7 @@ class TimeSeriesCommands:
         self,
         key: KeyT,
         timestamp: Union[int, str],
-        value: Number,
+        value: Union[Number, str],
         retention_msecs: Optional[int] = None,
         uncompressed: Optional[bool] = False,
         labels: Optional[Dict[str, str]] = None,
@@ -251,7 +251,7 @@ class TimeSeriesCommands:
 
         return self.execute_command(ADD_CMD, *params)
 
-    def madd(self, ktv_tuples: List[Tuple[KeyT, Union[int, str], Number]]):
+    def madd(self, ktv_tuples: List[Tuple[KeyT, Union[int, str], Union[Number, str]]]):
         """
         Append new samples to one or more time series.
 
@@ -507,7 +507,7 @@ class TimeSeriesCommands:
             aggregation_type:
                 Aggregation type: One of the following:
                 [`avg`, `sum`, `min`, `max`, `range`, `count`, `first`, `last`, `std.p`,
-                `std.s`, `var.p`, `var.s`, `twa`]
+                `std.s`, `var.p`, `var.s`, `twa`, 'countNaN', 'countAll']
             bucket_size_msec:
                 Duration of each bucket, in milliseconds.
             align_timestamp:
@@ -593,7 +593,7 @@ class TimeSeriesCommands:
             aggregation_type:
                 Optional aggregation type. Can be one of [`avg`, `sum`, `min`, `max`,
                 `range`, `count`, `first`, `last`, `std.p`, `std.s`, `var.p`, `var.s`,
-                `twa`]
+                `twa`, 'countNaN', 'countAll']
             bucket_size_msec:
                 Time bucket for aggregation in milliseconds.
             filter_by_ts:
@@ -669,7 +669,7 @@ class TimeSeriesCommands:
             aggregation_type:
                 Optional aggregation type. Can be one of [`avg`, `sum`, `min`, `max`,
                 `range`, `count`, `first`, `last`, `std.p`, `std.s`, `var.p`, `var.s`,
-                `twa`]
+                `twa`, 'countNaN', 'countAll']
             bucket_size_msec:
                 Time bucket for aggregation in milliseconds.
             filter_by_ts:
@@ -783,7 +783,7 @@ class TimeSeriesCommands:
             aggregation_type:
                 Optional aggregation type. Can be one of [`avg`, `sum`, `min`, `max`,
                 `range`, `count`, `first`, `last`, `std.p`, `std.s`, `var.p`, `var.s`,
-                `twa`]
+                `twa`, 'countNaN', 'countAll']
             bucket_size_msec:
                 Time bucket for aggregation in milliseconds.
             with_labels:
@@ -877,7 +877,7 @@ class TimeSeriesCommands:
             aggregation_type:
                 Optional aggregation type. Can be one of [`avg`, `sum`, `min`, `max`,
                 `range`, `count`, `first`, `last`, `std.p`, `std.s`, `var.p`, `var.s`,
-                `twa`].
+                `twa`, 'countNaN', 'countAll'].
             bucket_size_msec:
                 Time bucket for aggregation in milliseconds.
             with_labels:

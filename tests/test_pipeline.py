@@ -2,7 +2,12 @@ from contextlib import closing
 from unittest import mock
 
 import pytest
+from redis import RedisClusterException
 import redis
+from redis.client import Pipeline
+from redis.observability import recorder
+from redis.observability.config import OTelConfig, MetricGroup
+from redis.observability.metrics import RedisMetricsCollector
 
 from .conftest import skip_if_server_version_lt, wait_for_command
 
@@ -438,3 +443,513 @@ class TestPipeline:
         pipe.hgetall("hash:1")
         resp = pipe.execute()
         assert resp == [1, 1, 1, {b"bar": b"foo", b"baz": b"bar", b"foo": b"bar"}]
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_pipeline_with_msetex(self, r):
+        r.delete("key1", "key2", "key1_transaction", "key2_transaction")
+
+        p = r.pipeline()
+        with pytest.raises(RedisClusterException):
+            p.msetex({"key1": "value1", "key2": "value2"}, ex=1000)
+
+        p_transaction = r.pipeline(transaction=True)
+        with pytest.raises(RedisClusterException):
+            p_transaction.msetex(
+                {"key1_transaction": "value1", "key2_transaction": "value2"}, ex=10
+            )
+
+
+class TestPipelineMetricsRecording:
+    """
+    Unit tests that verify metrics are properly recorded from Pipeline
+    and delivered to the Meter through the observability recorder.
+
+    These tests use fully mocked connection and connection pool - no real Redis
+    or OTel integration is used.
+    """
+
+    @pytest.fixture
+    def mock_connection(self):
+        """Create a mock connection with required attributes."""
+        conn = mock.MagicMock()
+        conn.host = "localhost"
+        conn.port = 6379
+        conn.db = 0
+
+        # Mock retry to just execute the function directly
+        def mock_call_with_retry(do, fail, is_retryable=None, with_failure_count=False):
+            return do()
+
+        conn.retry.call_with_retry = mock_call_with_retry
+
+        return conn
+
+    @pytest.fixture
+    def mock_connection_pool(self, mock_connection):
+        """Create a mock connection pool."""
+        pool = mock.MagicMock()
+        pool.get_connection.return_value = mock_connection
+        pool.get_encoder.return_value = mock.MagicMock()
+        return pool
+
+    @pytest.fixture
+    def mock_meter(self):
+        """Create a mock Meter that tracks all instrument calls."""
+        meter = mock.MagicMock()
+
+        # Create mock histogram for operation duration
+        self.operation_duration = mock.MagicMock()
+        # Create mock counter for client errors
+        self.client_errors = mock.MagicMock()
+
+        def create_histogram_side_effect(name, **kwargs):
+            if name == "db.client.operation.duration":
+                return self.operation_duration
+            return mock.MagicMock()
+
+        def create_counter_side_effect(name, **kwargs):
+            if name == "redis.client.errors":
+                return self.client_errors
+            return mock.MagicMock()
+
+        meter.create_counter.side_effect = create_counter_side_effect
+        meter.create_up_down_counter.return_value = mock.MagicMock()
+        meter.create_histogram.side_effect = create_histogram_side_effect
+
+        return meter
+
+    @pytest.fixture
+    def setup_pipeline_with_otel(
+        self, mock_connection_pool, mock_connection, mock_meter
+    ):
+        """
+        Setup a Pipeline with mocked connection and OTel collector.
+        Returns tuple of (pipeline, operation_duration_mock).
+        """
+
+        # Reset any existing collector state
+        recorder.reset_collector()
+
+        # Create config with COMMAND group enabled
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        # Create collector with mocked meter
+        with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        # Patch the recorder to use our collector
+        with mock.patch.object(
+            recorder, "_get_or_create_collector", return_value=collector
+        ):
+            # Create pipeline with mocked connection pool
+            pipeline = Pipeline(
+                connection_pool=mock_connection_pool,
+                response_callbacks={},
+                transaction=True,
+                shard_hint=None,
+            )
+
+            yield pipeline, self.operation_duration
+
+        # Cleanup
+        recorder.reset_collector()
+
+    def test_pipeline_execute_records_metric(self, setup_pipeline_with_otel):
+        """
+        Test that executing a pipeline records operation duration metric
+        which is delivered to the Meter's histogram.record() method.
+        """
+        pipeline, operation_duration_mock = setup_pipeline_with_otel
+
+        # Mock _execute_transaction to return successful responses
+        pipeline._execute_transaction = mock.MagicMock(
+            return_value=[True, True, b"value1"]
+        )
+
+        # Queue commands in the pipeline
+        pipeline.command_stack = [
+            (("SET", "key1", "value1"), {}),
+            (("SET", "key2", "value2"), {}),
+            (("GET", "key1"), {}),
+        ]
+
+        # Execute the pipeline
+        pipeline.execute()
+
+        # Verify the Meter's histogram.record() was called
+        operation_duration_mock.record.assert_called_once()
+
+        # Get the call arguments
+        call_args = operation_duration_mock.record.call_args
+
+        # Verify duration was recorded (first positional arg)
+        duration = call_args[0][0]
+        assert isinstance(duration, float)
+        assert duration >= 0
+
+        # Verify attributes
+        attrs = call_args[1]["attributes"]
+        assert attrs["db.operation.name"] == "MULTI"
+        # Note: db.operation.batch.size is no longer included in OTel attributes
+        assert "db.operation.batch.size" not in attrs
+        assert attrs["server.address"] == "localhost"
+        assert attrs["server.port"] == 6379
+        assert attrs["db.namespace"] == "0"
+
+    def test_pipeline_no_transaction_records_pipeline_command_name(
+        self, mock_connection_pool, mock_connection, mock_meter
+    ):
+        """
+        Test that executing a pipeline without transaction
+        records metric with command_name='PIPELINE'.
+        """
+        recorder.reset_collector()
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with mock.patch.object(
+            recorder, "_get_or_create_collector", return_value=collector
+        ):
+            # Create pipeline with transaction=False
+            pipeline = Pipeline(
+                connection_pool=mock_connection_pool,
+                response_callbacks={},
+                transaction=False,  # Non-transaction mode
+                shard_hint=None,
+            )
+
+            pipeline._execute_pipeline = mock.MagicMock(return_value=[True, True])
+            pipeline.command_stack = [
+                (("SET", "key1", "value1"), {}),
+                (("SET", "key2", "value2"), {}),
+            ]
+
+            pipeline.execute()
+
+            # Verify command name is PIPELINE
+            call_args = self.operation_duration.record.call_args
+            attrs = call_args[1]["attributes"]
+            assert attrs["db.operation.name"] == "PIPELINE"
+
+        recorder.reset_collector()
+
+    def test_pipeline_error_records_error_count(
+        self, mock_connection_pool, mock_connection, mock_meter
+    ):
+        """
+        Test that when a pipeline execution raises an exception,
+        record_error_count is called (not record_operation_duration).
+        Direct failures call record_error_count, not record_operation_duration.
+        """
+        recorder.reset_collector()
+        # Enable RESILIENCY metric group for error counting
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND, MetricGroup.RESILIENCY])
+
+        with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with mock.patch.object(
+            recorder, "_get_or_create_collector", return_value=collector
+        ):
+            pipeline = Pipeline(
+                connection_pool=mock_connection_pool,
+                response_callbacks={},
+                transaction=False,
+                shard_hint=None,
+            )
+
+            # Make execute raise an exception
+            test_error = redis.ResponseError("WRONGTYPE Operation error")
+            pipeline._execute_pipeline = mock.MagicMock(side_effect=test_error)
+            pipeline.command_stack = [(("LPUSH", "string_key", "value"), {})]
+
+            # Execute should raise the error
+            with pytest.raises(redis.ResponseError):
+                pipeline.execute()
+
+            # For direct failures (no retries), record_error_count is called
+            # record_operation_duration is NOT called for direct failures
+            self.operation_duration.record.assert_not_called()
+
+            # Verify record_error_count was called
+            self.client_errors.add.assert_called_once()
+            error_call_args = self.client_errors.add.call_args
+            error_attrs = error_call_args[1]["attributes"]
+            assert "error.type" in error_attrs
+
+        recorder.reset_collector()
+
+    def test_pipeline_server_attributes_recorded(self, setup_pipeline_with_otel):
+        """
+        Test that server address, port, and db namespace are correctly recorded.
+        """
+        pipeline, operation_duration_mock = setup_pipeline_with_otel
+
+        pipeline._execute_transaction = mock.MagicMock(return_value=[True])
+        pipeline.command_stack = [(("PING",), {})]
+
+        pipeline.execute()
+
+        call_args = operation_duration_mock.record.call_args
+        attrs = call_args[1]["attributes"]
+
+        # Verify server attributes match mock connection
+        assert attrs["server.address"] == "localhost"
+        assert attrs["server.port"] == 6379
+        assert attrs["db.namespace"] == "0"
+
+    def test_multiple_pipeline_executions_record_multiple_metrics(
+        self, mock_connection_pool, mock_connection, mock_meter
+    ):
+        """
+        Test that each pipeline execution records a separate metric to the Meter.
+        """
+        recorder.reset_collector()
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with mock.patch.object(
+            recorder, "_get_or_create_collector", return_value=collector
+        ):
+            # First pipeline execution
+            pipeline1 = Pipeline(
+                connection_pool=mock_connection_pool,
+                response_callbacks={},
+                transaction=True,
+                shard_hint=None,
+            )
+            pipeline1._execute_transaction = mock.MagicMock(return_value=[True])
+            pipeline1.command_stack = [(("SET", "key1", "value1"), {})]
+            pipeline1.execute()
+
+            # Second pipeline execution
+            pipeline2 = Pipeline(
+                connection_pool=mock_connection_pool,
+                response_callbacks={},
+                transaction=True,
+                shard_hint=None,
+            )
+            pipeline2._execute_transaction = mock.MagicMock(return_value=[True, True])
+            pipeline2.command_stack = [
+                (("SET", "key2", "value2"), {}),
+                (("SET", "key3", "value3"), {}),
+            ]
+            pipeline2.execute()
+
+            # Verify histogram.record() was called twice
+            assert self.operation_duration.record.call_count == 2
+
+        recorder.reset_collector()
+
+    def test_empty_pipeline_does_not_record_metric(
+        self, mock_connection_pool, mock_connection, mock_meter
+    ):
+        """
+        Test that an empty pipeline (no commands) does not record a metric.
+        """
+        recorder.reset_collector()
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with mock.patch.object(
+            recorder, "_get_or_create_collector", return_value=collector
+        ):
+            pipeline = Pipeline(
+                connection_pool=mock_connection_pool,
+                response_callbacks={},
+                transaction=True,
+                shard_hint=None,
+            )
+
+            # Empty command stack
+            pipeline.command_stack = []
+
+            # Execute empty pipeline
+            result = pipeline.execute()
+
+            # Should return empty list
+            assert result == []
+
+            # No metric should be recorded for empty pipeline
+            self.operation_duration.record.assert_not_called()
+
+        recorder.reset_collector()
+
+    def test_pipeline_retry_records_metric_on_each_attempt(
+        self, mock_connection_pool, mock_meter
+    ):
+        """
+        Test that when a pipeline is retried, operation duration metric
+        is recorded for each retry attempt with retry_attempts attribute.
+        """
+        # Create connection with retry behavior
+        mock_connection = mock.MagicMock()
+        mock_connection.host = "localhost"
+        mock_connection.port = 6379
+        mock_connection.db = 0
+
+        # Track retry attempts
+        max_retries = 2
+
+        def call_with_retry_impl(do, fail, is_retryable=None, with_failure_count=False):
+            """Simulate retry behavior - fail twice, then succeed."""
+            for attempt in range(max_retries + 1):
+                try:
+                    return do()
+                except redis.ConnectionError as e:
+                    if attempt < max_retries:
+                        if with_failure_count:
+                            fail(e, attempt + 1)
+                        else:
+                            fail(e)
+                    else:
+                        raise
+
+        mock_connection.retry.call_with_retry = call_with_retry_impl
+        mock_connection.retry.get_retries.return_value = max_retries
+
+        mock_connection_pool.get_connection.return_value = mock_connection
+
+        recorder.reset_collector()
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with mock.patch.object(
+            recorder, "_get_or_create_collector", return_value=collector
+        ):
+            pipeline = Pipeline(
+                connection_pool=mock_connection_pool,
+                response_callbacks={},
+                transaction=False,
+                shard_hint=None,
+            )
+
+            # Make pipeline fail twice then succeed
+            call_count = [0]
+
+            def execute_pipeline_impl(*args, **kwargs):
+                call_count[0] += 1
+                if call_count[0] <= 2:
+                    raise redis.ConnectionError("Connection failed")
+                return [True, True]
+
+            pipeline._execute_pipeline = mock.MagicMock(
+                side_effect=execute_pipeline_impl
+            )
+            pipeline.command_stack = [
+                (("SET", "key1", "value1"), {}),
+                (("SET", "key2", "value2"), {}),
+            ]
+
+            # Execute pipeline - should retry twice then succeed
+            pipeline.execute()
+
+            # Verify histogram.record() was called 3 times:
+            # 2 retry attempts + 1 final success
+            assert self.operation_duration.record.call_count == 3
+
+            calls = self.operation_duration.record.call_args_list
+
+            # First two calls should have error.type (retry attempts)
+            assert "error.type" in calls[0][1]["attributes"]
+            assert "error.type" in calls[1][1]["attributes"]
+
+            # Last call should be success (no error.type)
+            assert "error.type" not in calls[2][1]["attributes"]
+
+            # Note: db.operation.batch.size is no longer included in OTel attributes
+            for call in calls:
+                assert "db.operation.batch.size" not in call[1]["attributes"]
+
+        recorder.reset_collector()
+
+    def test_pipeline_retry_exhausted_records_final_error_metrics(
+        self, mock_connection_pool, mock_meter
+    ):
+        """
+        Test that when all retries are exhausted, metrics are recorded correctly:
+        - record_operation_duration is called for each retry attempt (with error info)
+        - record_error_count is called for the final error (after all retries exhausted)
+        """
+        mock_connection = mock.MagicMock()
+        mock_connection.host = "localhost"
+        mock_connection.port = 6379
+        mock_connection.db = 0
+
+        max_retries = 2
+
+        def call_with_retry_impl(do, fail, is_retryable=None, with_failure_count=False):
+            """Simulate retry behavior - always fail."""
+            for attempt in range(max_retries + 1):
+                try:
+                    return do()
+                except redis.ConnectionError as e:
+                    if attempt < max_retries:
+                        if with_failure_count:
+                            fail(e, attempt + 1)
+                        else:
+                            fail(e)
+                    else:
+                        raise
+
+        mock_connection.retry.call_with_retry = call_with_retry_impl
+        mock_connection.retry.get_retries.return_value = max_retries
+
+        mock_connection_pool.get_connection.return_value = mock_connection
+
+        recorder.reset_collector()
+        # Enable both COMMAND and RESILIENCY metric groups
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND, MetricGroup.RESILIENCY])
+
+        with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with mock.patch.object(
+            recorder, "_get_or_create_collector", return_value=collector
+        ):
+            pipeline = Pipeline(
+                connection_pool=mock_connection_pool,
+                response_callbacks={},
+                transaction=False,
+                shard_hint=None,
+            )
+
+            # Make pipeline always fail
+            pipeline._execute_pipeline = mock.MagicMock(
+                side_effect=redis.ConnectionError("Connection failed")
+            )
+            pipeline.command_stack = [
+                (("SET", "key1", "value1"), {}),
+            ]
+
+            # Execute pipeline - should fail after all retries
+            with pytest.raises(redis.ConnectionError):
+                pipeline.execute()
+
+            # Verify histogram.record() was called 2 times (for retry attempts only)
+            # Final error does NOT call record_operation_duration
+            assert self.operation_duration.record.call_count == 2
+
+            calls = self.operation_duration.record.call_args_list
+
+            # Both retry calls should have error.type
+            for call in calls:
+                assert "error.type" in call[1]["attributes"]
+                assert call[1]["attributes"]["db.operation.name"] == "PIPELINE"
+
+            # Verify record_error_count was called once for the final error
+            self.client_errors.add.assert_called_once()
+            error_call_args = self.client_errors.add.call_args
+            error_attrs = error_call_args[1]["attributes"]
+            assert "error.type" in error_attrs
+
+        recorder.reset_collector()

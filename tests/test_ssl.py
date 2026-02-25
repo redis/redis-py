@@ -6,8 +6,12 @@ import pytest
 import redis
 from redis.exceptions import ConnectionError, RedisError
 
-from .conftest import skip_if_cryptography, skip_if_nocryptography
-from .ssl_utils import CertificateType, get_tls_certificates
+from .conftest import (
+    skip_if_cryptography,
+    skip_if_nocryptography,
+    skip_if_server_version_lt,
+)
+from .ssl_utils import CertificateType, get_tls_certificates, CN_USERNAME
 
 
 @pytest.mark.ssl
@@ -20,10 +24,10 @@ class TestSSL:
 
     @pytest.fixture(autouse=True)
     def _set_ssl_certs(self, request):
-        tls_cert_subdir = request.session.config.REDIS_INFO["tls_cert_subdir"]
-        self.client_certs = get_tls_certificates(tls_cert_subdir)
+        self.tls_cert_subdir = request.session.config.REDIS_INFO["tls_cert_subdir"]
+        self.client_certs = get_tls_certificates(self.tls_cert_subdir)
         self.server_certs = get_tls_certificates(
-            tls_cert_subdir, cert_type=CertificateType.server
+            self.tls_cert_subdir, cert_type=CertificateType.server
         )
 
     def test_ssl_with_invalid_cert(self, request):
@@ -31,7 +35,7 @@ class TestSSL:
         sslclient = redis.from_url(ssl_url)
         with pytest.raises(ConnectionError) as e:
             sslclient.ping()
-        assert "SSL: CERTIFICATE_VERIFY_FAILED" in str(e)
+        assert "SSL: CERTIFICATE_VERIFY_FAILED" in str(e.value)
         sslclient.close()
 
     def test_ssl_connection(self, request):
@@ -54,7 +58,7 @@ class TestSSL:
 
         with pytest.raises(ConnectionError) as e:
             r.ping()
-        assert "Connection closed by server" in str(e)
+        assert "Connection closed by server" in str(e.value)
         r.close()
 
     def test_validating_self_signed_certificate(self, request):
@@ -124,7 +128,7 @@ class TestSSL:
         )
         with pytest.raises(RedisError) as e:
             r.ping()
-        assert "No cipher can be selected" in str(e)
+        assert "No cipher can be selected" in str(e.value)
         r.close()
 
     @pytest.mark.parametrize(
@@ -148,7 +152,7 @@ class TestSSL:
         )
         with pytest.raises(RedisError) as e:
             r.ping()
-        assert "No cipher can be selected" in str(e)
+        assert "No cipher can be selected" in str(e.value)
         r.close()
 
     def _create_oscp_conn(self, request):
@@ -171,7 +175,7 @@ class TestSSL:
         r = self._create_oscp_conn(request)
         with pytest.raises(RedisError) as e:
             r.ping()
-        assert "cryptography is not installed" in str(e)
+        assert "cryptography is not installed" in str(e.value)
         r.close()
 
     @skip_if_nocryptography()
@@ -179,7 +183,7 @@ class TestSSL:
         r = self._create_oscp_conn(request)
         with pytest.raises(ConnectionError) as e:
             assert r.ping()
-        assert "No AIA information present in ssl certificate" in str(e)
+        assert "No AIA information present in ssl certificate" in str(e.value)
         r.close()
 
     @skip_if_nocryptography()
@@ -205,7 +209,7 @@ class TestSSL:
                 ocsp = OCSPVerifier(wrapped, hostname, 443)
                 with pytest.raises(ConnectionError) as e:
                     assert ocsp.is_valid()
-                assert "REVOKED" in str(e)
+                assert "REVOKED" in str(e.value)
 
     @skip_if_nocryptography()
     def test_unauthorized_ocsp(self):
@@ -230,7 +234,7 @@ class TestSSL:
                 ocsp = OCSPVerifier(wrapped, hostname, 443)
                 with pytest.raises(ConnectionError) as e:
                     assert ocsp.is_valid()
-                assert "from the" in str(e)
+                assert "from the" in str(e.value)
 
     @skip_if_nocryptography()
     def test_unauthorized_then_direct(self):
@@ -287,7 +291,7 @@ class TestSSL:
 
         with pytest.raises(ConnectionError) as e:
             r.ping()
-        assert "no ocsp response present" in str(e)
+        assert "no ocsp response present" in str(e.value)
         r.close()
 
         r = redis.Redis(
@@ -303,7 +307,7 @@ class TestSSL:
 
         with pytest.raises(ConnectionError) as e:
             r.ping()
-        assert "no ocsp response present" in str(e)
+        assert "no ocsp response present" in str(e.value)
         r.close()
 
     def test_cert_reqs_none_with_check_hostname(self, request):
@@ -423,5 +427,42 @@ class TestSSL:
             finally:
                 mock_sock.close()
 
+        finally:
+            r.close()
+
+    @skip_if_server_version_lt("8.5.0")
+    def test_ssl_authenticate_with_client_cert(self, request, r):
+        """Test that when client certificate is used for authentication,
+        the connection is created successfully"""
+
+        try:
+            # Non SSL client, to setup ACL
+            assert r.acl_setuser(
+                CN_USERNAME,
+                enabled=True,
+                reset=True,
+                passwords=["+clientpass"],
+                keys=["*"],
+                commands=["+acl"],
+            )
+        finally:
+            r.close()
+
+        ssl_url = request.config.option.redis_ssl_url
+        p = urlparse(ssl_url)[1].split(":")
+        client_cn_cert, client_cn_key, ca_cert = get_tls_certificates(
+            self.tls_cert_subdir, CertificateType.client_cn
+        )
+        r = redis.Redis(
+            host=p[0],
+            port=p[1],
+            ssl=True,
+            ssl_certfile=client_cn_cert,
+            ssl_keyfile=client_cn_key,
+            ssl_cert_reqs="required",
+            ssl_ca_certs=ca_cert,
+        )
+        try:
+            assert r.acl_whoami() == CN_USERNAME
         finally:
             r.close()

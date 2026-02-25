@@ -441,7 +441,7 @@ class TestMaintenanceNotificationsBase:
             setup_pool_handler: Whether to set up pool handler for moving notifications (default: False)
 
         Returns:
-            tuple: (test_pool, test_redis_client)
+            test_redis_client
         """
         config = (
             maint_notifications_config
@@ -759,7 +759,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
                 patch.object(
                     pool_handler, "handle_node_moving_notification"
                 ) as mock_handle_moving,
-                patch("redis.maint_notifications.logging.error") as mock_logging_error,
+                patch("redis.maint_notifications.logger.error") as mock_logging_error,
             ):
                 # Pool handler should return None for migrating notifications (not its responsibility)
                 pool_handler.handle_notification(migrating_notification)
@@ -2076,10 +2076,8 @@ class TestMaintenanceNotificationsHandlingMultipleProxies(
         )
         # validate free connections for ip1
         changed_free_connections = 0
-        if isinstance(pool, BlockingConnectionPool):
-            free_connections = [conn for conn in pool.pool.queue if conn is not None]
-        elif isinstance(pool, ConnectionPool):
-            free_connections = pool._available_connections
+        free_connections = pool._get_free_connections()
+
         for conn in free_connections:
             if conn.host == new_ip:
                 changed_free_connections += 1
@@ -2126,10 +2124,8 @@ class TestMaintenanceNotificationsHandlingMultipleProxies(
         )
         # validate free connections for ip2
         changed_free_connections = 0
-        if isinstance(pool, BlockingConnectionPool):
-            free_connections = [conn for conn in pool.pool.queue if conn is not None]
-        elif isinstance(pool, ConnectionPool):
-            free_connections = pool._available_connections
+        free_connections = pool._get_free_connections()
+
         for conn in free_connections:
             if conn.host == new_ip_2:
                 changed_free_connections += 1

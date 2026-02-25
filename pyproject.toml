@@ -28,12 +28,19 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = ['async-timeout>=4.0.3; python_full_version<"3.11.3"']
+dependencies = [
+    'async-timeout>=4.0.3; python_full_version<"3.11.3"',
+]
 
 [project.optional-dependencies]
 hiredis = [
     "hiredis>=3.2.0",
 ]
+
+xxhash = [
+    'xxhash~=3.6.0',
+]
+
 ocsp = [
     "cryptography>=36.0.1",
     "pyopenssl>=20.0.1",
@@ -44,6 +51,11 @@ jwt = [
 ]
 circuit_breaker = [
     "pybreaker>=1.4.0"
+]
+otel = [
+    "opentelemetry-api>=1.39.1",
+    "opentelemetry-sdk>=1.39.1",
+    "opentelemetry-exporter-otlp-proto-http>=1.39.1",
 ]
 
 [project.urls]

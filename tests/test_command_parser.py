@@ -1,9 +1,12 @@
 import pytest
 from redis._parsers import CommandsParser
+from redis._parsers.commands import RequestPolicy, ResponsePolicy
+from tests.helpers import get_expected_command_policies
 
 from .conftest import (
     assert_resp_response,
     skip_if_redis_enterprise,
+    skip_if_server_version_gte,
     skip_if_server_version_lt,
 )
 
@@ -106,3 +109,52 @@ class TestCommandsParser:
         assert commands_parser.get_keys(r, *args2) == ["foo1", "foo2", "foo3"]
         assert commands_parser.get_keys(r, *args3) == ["*"]
         assert commands_parser.get_keys(r, *args4) == ["foo1", "foo2", "foo3"]
+
+    @skip_if_server_version_lt("8.0.0")
+    @skip_if_server_version_gte("8.5.240")
+    @pytest.mark.onlycluster
+    def test_get_command_policies(self, r):
+        commands_parser = CommandsParser(r)
+
+        expected_command_policies = get_expected_command_policies()
+
+        actual_policies = commands_parser.get_command_policies()
+        assert len(actual_policies) > 0
+
+        for module_name, commands in expected_command_policies.items():
+            for command, command_policies in commands.items():
+                assert command in actual_policies[module_name]
+                assert command_policies == [
+                    command,
+                    actual_policies[module_name][command].request_policy,
+                    actual_policies[module_name][command].response_policy,
+                ]
+
+    @skip_if_server_version_lt("8.5.240")
+    @pytest.mark.onlycluster
+    def test_get_command_policies_json_debug_updated(self, r):
+        commands_parser = CommandsParser(r)
+
+        changes_in_defaults = {
+            "json": {
+                "debug": [
+                    "debug",
+                    RequestPolicy.DEFAULT_KEYLESS,
+                    ResponsePolicy.DEFAULT_KEYLESS,
+                ],
+            },
+        }
+
+        expected_command_policies = get_expected_command_policies(changes_in_defaults)
+
+        actual_policies = commands_parser.get_command_policies()
+        assert len(actual_policies) > 0
+
+        for module_name, commands in expected_command_policies.items():
+            for command, command_policies in commands.items():
+                assert command in actual_policies[module_name]
+                assert command_policies == [
+                    command,
+                    actual_policies[module_name][command].request_policy,
+                    actual_policies[module_name][command].response_policy,
+                ]

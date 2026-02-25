@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, List, Optional, Union
 
+from redis.observability.attributes import CSCReason
+
 
 class CacheEntryStatus(Enum):
     VALID = "VALID"
@@ -17,8 +19,21 @@ class EvictionPolicyType(Enum):
 
 @dataclass(frozen=True)
 class CacheKey:
+    """
+    Represents a unique key for a cache entry.
+
+    Attributes:
+        command (str): The Redis command being cached.
+        redis_keys (tuple): The Redis keys involved in the command.
+        redis_args (tuple): Additional arguments for the Redis command.
+            This field is included in the cache key to ensure uniqueness
+            when commands have the same keys but different arguments.
+            Changing this field will affect cache key uniqueness.
+    """
+
     command: str
     redis_keys: tuple
+    redis_args: tuple = ()  # Additional arguments for the Redis command; affects cache key uniqueness.
 
 
 class CacheEntry:
@@ -173,9 +188,6 @@ class DefaultCache(CacheInterface):
         self._cache[entry.cache_key] = entry
         self._eviction_policy.touch(entry.cache_key)
 
-        if self._cache_config.is_exceeds_max_size(len(self._cache)):
-            self._eviction_policy.evict_next()
-
         return True
 
     def get(self, key: CacheKey) -> Union[CacheEntry, None]:
@@ -199,15 +211,25 @@ class DefaultCache(CacheInterface):
 
         return response
 
-    def delete_by_redis_keys(self, redis_keys: List[bytes]) -> List[bool]:
+    def delete_by_redis_keys(
+        self, redis_keys: Union[List[bytes], List[str]]
+    ) -> List[bool]:
         response = []
         keys_to_delete = []
 
         for redis_key in redis_keys:
-            if isinstance(redis_key, bytes):
-                redis_key = redis_key.decode()
+            # Prepare both versions for lookup
+            candidates = [redis_key]
+            if isinstance(redis_key, str):
+                candidates.append(redis_key.encode("utf-8"))
+            elif isinstance(redis_key, bytes):
+                try:
+                    candidates.append(redis_key.decode("utf-8"))
+                except UnicodeDecodeError:
+                    pass  # Non-UTF-8 bytes, skip str version
+
             for cache_key in self._cache:
-                if redis_key in cache_key.redis_keys:
+                if any(candidate in cache_key.redis_keys for candidate in candidates):
                     keys_to_delete.append(cache_key)
                     response.append(True)
 
@@ -223,6 +245,61 @@ class DefaultCache(CacheInterface):
 
     def is_cachable(self, key: CacheKey) -> bool:
         return self._cache_config.is_allowed_to_cache(key.command)
+
+
+class CacheProxy(CacheInterface):
+    """
+    Proxy object that wraps cache implementations to enable additional logic on top
+    """
+
+    def __init__(self, cache: CacheInterface):
+        self._cache = cache
+
+    @property
+    def collection(self) -> OrderedDict:
+        return self._cache.collection
+
+    @property
+    def config(self) -> CacheConfigurationInterface:
+        return self._cache.config
+
+    @property
+    def eviction_policy(self) -> EvictionPolicyInterface:
+        return self._cache.eviction_policy
+
+    @property
+    def size(self) -> int:
+        return self._cache.size
+
+    def get(self, key: CacheKey) -> Union[CacheEntry, None]:
+        return self._cache.get(key)
+
+    def set(self, entry: CacheEntry) -> bool:
+        is_set = self._cache.set(entry)
+
+        if self.config.is_exceeds_max_size(self.size):
+            # Lazy import to avoid circular dependency
+            from redis.observability.recorder import record_csc_eviction
+
+            record_csc_eviction(
+                count=1,
+                reason=CSCReason.FULL,
+            )
+            self.eviction_policy.evict_next()
+
+        return is_set
+
+    def delete_by_cache_keys(self, cache_keys: List[CacheKey]) -> List[bool]:
+        return self._cache.delete_by_cache_keys(cache_keys)
+
+    def delete_by_redis_keys(self, redis_keys: List[bytes]) -> List[bool]:
+        return self._cache.delete_by_redis_keys(redis_keys)
+
+    def flush(self) -> int:
+        return self._cache.flush()
+
+    def is_cachable(self, key: CacheKey) -> bool:
+        return self._cache.is_cachable(key)
 
 
 class LRUPolicy(EvictionPolicyInterface):
@@ -399,4 +476,4 @@ class CacheFactory(CacheFactoryInterface):
 
     def get_cache(self) -> CacheInterface:
         cache_class = self._config.get_cache_class()
-        return cache_class(cache_config=self._config)
+        return CacheProxy(cache_class(cache_config=self._config))

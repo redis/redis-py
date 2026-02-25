@@ -127,9 +127,7 @@ class TestClusterTransaction:
 
         with (
             patch.object(ClusterNode, "parse_response") as parse_response,
-            patch.object(
-                NodesManager, "_update_moved_slots"
-            ) as manager_update_moved_slots,
+            patch.object(NodesManager, "move_slot") as manager_move_slot,
         ):
 
             def ask_redirect_effect(connection, *args, **options):
@@ -152,7 +150,7 @@ class TestClusterTransaction:
                     f" {slot} {node_importing.name}"
                 )
 
-            manager_update_moved_slots.assert_called()
+            manager_move_slot.assert_called()
 
     @pytest.mark.onlycluster
     async def test_retry_transaction_during_slot_migration_successful(
@@ -170,9 +168,6 @@ class TestClusterTransaction:
 
         with (
             patch.object(ClusterNode, "parse_response") as parse_response,
-            patch.object(
-                NodesManager, "_update_moved_slots"
-            ) as manager_update_moved_slots,
         ):
 
             def ask_redirect_effect(conn, *args, **options):
@@ -192,15 +187,7 @@ class TestClusterTransaction:
                 else:
                     assert False, f"unexpected node {conn.host}:{conn.port} was called"
 
-            def update_moved_slot():  # simulate slot table update
-                ask_error = r.nodes_manager._moved_exception
-                assert ask_error is not None, "No AskError was previously triggered"
-                assert f"{ask_error.host}:{ask_error.port}" == node_importing.name
-                r.nodes_manager._moved_exception = None
-                r.nodes_manager.slots_cache[slot] = [node_importing]
-
             parse_response.side_effect = ask_redirect_effect
-            manager_update_moved_slots.side_effect = update_moved_slot
 
             result = None
             async with r.pipeline(transaction=True) as pipe:
@@ -281,47 +268,63 @@ class TestClusterTransaction:
         key = "book"
         slot = r.keyslot(key)
 
+        _node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
+        original_slots_cache = r.nodes_manager.slots_cache[slot]
+
         mock_connection = Mock(spec=Connection)
         mock_connection.read_response.side_effect = redis.exceptions.ConnectionError(
             "Conn error"
         )
         mock_connection.retry = Retry(NoBackoff(), 0)
 
-        _node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
         node_importing._free.append(mock_connection)
         r.nodes_manager.slots_cache[slot] = [node_importing]
         r.reinitialize_steps = 1
 
-        async with r.pipeline(transaction=True) as pipe:
-            pipe.set(key, "val")
-            assert await pipe.execute() == [True]
+        try:
+            async with r.pipeline(transaction=True) as pipe:
+                pipe.set(key, "val")
+                assert await pipe.execute() == [True]
 
-        assert mock_connection.read_response.call_count == 1
+            assert mock_connection.read_response.call_count == 1
+        finally:
+            # Clean up mock connection from node so teardown can work
+            if mock_connection in node_importing._free:
+                node_importing._free.remove(mock_connection)
+            r.nodes_manager.slots_cache[slot] = original_slots_cache
 
     @pytest.mark.onlycluster
     async def test_retry_transaction_on_connection_error_with_watched_keys(self, r):
         key = "book"
         slot = r.keyslot(key)
 
+        _node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
+        original_slots_cache = r.nodes_manager.slots_cache[slot]
+
         mock_connection = Mock(spec=Connection)
         mock_connection.read_response.side_effect = redis.exceptions.ConnectionError(
             "Conn error"
         )
         mock_connection.retry = Retry(NoBackoff(), 0)
 
-        _node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
         node_importing._free.append(mock_connection)
         r.nodes_manager.slots_cache[slot] = [node_importing]
         r.reinitialize_steps = 1
 
-        async with r.pipeline(transaction=True) as pipe:
-            await pipe.watch(key)
+        try:
+            async with r.pipeline(transaction=True) as pipe:
+                await pipe.watch(key)
 
-            pipe.multi()
-            pipe.set(key, "val")
-            assert await pipe.execute() == [True]
+                pipe.multi()
+                pipe.set(key, "val")
+                assert await pipe.execute() == [True]
 
-        assert mock_connection.read_response.call_count == 1
+            assert mock_connection.read_response.call_count == 1
+        finally:
+            # Clean up mock connection from node so teardown can work
+            if mock_connection in node_importing._free:
+                node_importing._free.remove(mock_connection)
+            r.nodes_manager.slots_cache[slot] = original_slots_cache
 
     @pytest.mark.onlycluster
     async def test_exec_error_raised(self, r):

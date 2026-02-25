@@ -53,6 +53,7 @@ from redis.commands import (
     list_or_args,
 )
 from redis.credentials import CredentialProvider
+from redis.driver_info import DriverInfo, resolve_driver_info
 from redis.event import (
     AfterPooledConnectionsInstantiationEvent,
     AfterPubSubConnectionInstantiationEvent,
@@ -74,7 +75,6 @@ from redis.utils import (
     _set_info_logger,
     deprecated_args,
     deprecated_function,
-    get_lib_version,
     safe_str,
     str_if_bytes,
     truncate_text,
@@ -126,12 +126,12 @@ class Redis(
 
     @classmethod
     def from_url(
-        cls,
+        cls: Type["Redis"],
         url: str,
         single_connection_client: bool = False,
         auto_close_connection_pool: Optional[bool] = None,
         **kwargs,
-    ):
+    ) -> "Redis":
         """
         Return a Redis client object configured from the given URL
 
@@ -214,6 +214,11 @@ class Redis(
         reason="TimeoutError is included by default.",
         version="6.0.0",
     )
+    @deprecated_args(
+        args_to_warn=["lib_name", "lib_version"],
+        reason="Use 'driver_info' parameter instead. "
+        "lib_name and lib_version will be removed in a future version.",
+    )
     def __init__(
         self,
         *,
@@ -243,15 +248,18 @@ class Redis(
         ssl_exclude_verify_flags: Optional[List[VerifyFlags]] = None,
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
+        ssl_ca_path: Optional[str] = None,
         ssl_check_hostname: bool = True,
         ssl_min_version: Optional[TLSVersion] = None,
         ssl_ciphers: Optional[str] = None,
+        ssl_password: Optional[str] = None,
         max_connections: Optional[int] = None,
         single_connection_client: bool = False,
         health_check_interval: int = 0,
         client_name: Optional[str] = None,
-        lib_name: Optional[str] = "redis-py",
-        lib_version: Optional[str] = get_lib_version(),
+        lib_name: Optional[str] = None,
+        lib_version: Optional[str] = None,
+        driver_info: Optional["DriverInfo"] = None,
         username: Optional[str] = None,
         auto_close_connection_pool: Optional[bool] = None,
         redis_connect_func=None,
@@ -304,6 +312,12 @@ class Redis(
             # Create internal connection pool, expected to be closed by Redis instance
             if not retry_on_error:
                 retry_on_error = []
+
+            # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version
+            computed_driver_info = resolve_driver_info(
+                driver_info, lib_name, lib_version
+            )
+
             kwargs = {
                 "db": db,
                 "username": username,
@@ -318,8 +332,7 @@ class Redis(
                 "max_connections": max_connections,
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
-                "lib_name": lib_name,
-                "lib_version": lib_version,
+                "driver_info": computed_driver_info,
                 "redis_connect_func": redis_connect_func,
                 "protocol": protocol,
             }
@@ -354,9 +367,11 @@ class Redis(
                             "ssl_exclude_verify_flags": ssl_exclude_verify_flags,
                             "ssl_ca_certs": ssl_ca_certs,
                             "ssl_ca_data": ssl_ca_data,
+                            "ssl_ca_path": ssl_ca_path,
                             "ssl_check_hostname": ssl_check_hostname,
                             "ssl_min_version": ssl_min_version,
                             "ssl_ciphers": ssl_ciphers,
+                            "ssl_password": ssl_password,
                         }
                     )
             # This arg only used if no pool is passed in
@@ -857,8 +872,8 @@ class PubSub:
     will be returned and it's safe to start listening again.
     """
 
-    PUBLISH_MESSAGE_TYPES = ("message", "pmessage")
-    UNSUBSCRIBE_MESSAGE_TYPES = ("unsubscribe", "punsubscribe")
+    PUBLISH_MESSAGE_TYPES = ("message", "pmessage", "smessage")
+    UNSUBSCRIBE_MESSAGE_TYPES = ("unsubscribe", "punsubscribe", "sunsubscribe")
     HEALTH_CHECK_MESSAGE = "redis-py-health-check"
 
     def __init__(
@@ -944,18 +959,38 @@ class PubSub:
         # NOTE: for python3, we can't pass bytestrings as keyword arguments
         # so we need to decode channel/pattern names back to unicode strings
         # before passing them to [p]subscribe.
+        #
+        # However, channels subscribed without a callback (positional args) may
+        # have binary names that are not valid in the current encoding (e.g.
+        # arbitrary bytes that are not valid UTF-8).  These channels are stored
+        # with a ``None`` handler.  We re-subscribe them as positional args so
+        # that no decoding is required.
         self.pending_unsubscribe_channels.clear()
         self.pending_unsubscribe_patterns.clear()
         if self.channels:
-            channels = {}
+            channels_with_handlers = {}
+            channels_without_handlers = []
             for k, v in self.channels.items():
-                channels[self.encoder.decode(k, force=True)] = v
-            await self.subscribe(**channels)
+                if v is not None:
+                    channels_with_handlers[self.encoder.decode(k, force=True)] = v
+                else:
+                    channels_without_handlers.append(k)
+            if channels_with_handlers or channels_without_handlers:
+                await self.subscribe(
+                    *channels_without_handlers, **channels_with_handlers
+                )
         if self.patterns:
-            patterns = {}
+            patterns_with_handlers = {}
+            patterns_without_handlers = []
             for k, v in self.patterns.items():
-                patterns[self.encoder.decode(k, force=True)] = v
-            await self.psubscribe(**patterns)
+                if v is not None:
+                    patterns_with_handlers[self.encoder.decode(k, force=True)] = v
+                else:
+                    patterns_without_handlers.append(k)
+            if patterns_with_handlers or patterns_without_handlers:
+                await self.psubscribe(
+                    *patterns_without_handlers, **patterns_with_handlers
+                )
 
     @property
     def subscribed(self):
@@ -1584,7 +1619,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         cmd = " ".join(map(safe_str, command))
         msg = (
             f"Command # {number} ({truncate_text(cmd)}) "
-            "of pipeline caused error: {exception.args}"
+            f"of pipeline caused error: {exception.args}"
         )
         exception.args = (msg,) + exception.args[1:]
 

@@ -4,6 +4,7 @@ from ...asyncio.client import Pipeline as AsyncioPipeline
 from .commands import (
     AGGREGATE_CMD,
     CONFIG_CMD,
+    HYBRID_CMD,
     INFO_CMD,
     PROFILE_CMD,
     SEARCH_CMD,
@@ -102,6 +103,7 @@ class Search(SearchCommands):
         self._RESP2_MODULE_CALLBACKS = {
             INFO_CMD: self._parse_info,
             SEARCH_CMD: self._parse_search,
+            HYBRID_CMD: self._parse_hybrid_search,
             AGGREGATE_CMD: self._parse_aggregate,
             PROFILE_CMD: self._parse_profile,
             SPELLCHECK_CMD: self._parse_spellcheck,

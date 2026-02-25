@@ -26,6 +26,7 @@ from typing import (
 )
 
 from redis._parsers import AsyncCommandsParser, Encoder
+from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
 from redis._parsers.helpers import (
     _RedisCallbacks,
     _RedisCallbacksRESP2,
@@ -51,6 +52,7 @@ from redis.cluster import (
     parse_cluster_slots,
 )
 from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
+from redis.commands.policies import AsyncPolicyResolver, AsyncStaticPolicyResolver
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.credentials import CredentialProvider
 from redis.event import AfterAsyncClusterInstantiationEvent, EventDispatcher
@@ -310,6 +312,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         protocol: Optional[int] = 2,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
+        policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver(),
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -423,7 +426,36 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self.load_balancing_strategy = load_balancing_strategy
         self.reinitialize_steps = reinitialize_steps
         self.reinitialize_counter = 0
+
+        # For backward compatibility, mapping from existing policies to new one
+        self._command_flags_mapping: dict[str, Union[RequestPolicy, ResponsePolicy]] = {
+            self.__class__.RANDOM: RequestPolicy.DEFAULT_KEYLESS,
+            self.__class__.PRIMARIES: RequestPolicy.ALL_SHARDS,
+            self.__class__.ALL_NODES: RequestPolicy.ALL_NODES,
+            self.__class__.REPLICAS: RequestPolicy.ALL_REPLICAS,
+            self.__class__.DEFAULT_NODE: RequestPolicy.DEFAULT_NODE,
+            SLOT_ID: RequestPolicy.DEFAULT_KEYED,
+        }
+
+        self._policies_callback_mapping: dict[
+            Union[RequestPolicy, ResponsePolicy], Callable
+        ] = {
+            RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [
+                self.get_random_primary_or_all_nodes(command_name)
+            ],
+            RequestPolicy.DEFAULT_KEYED: self.get_nodes_from_slot,
+            RequestPolicy.DEFAULT_NODE: lambda: [self.get_default_node()],
+            RequestPolicy.ALL_SHARDS: self.get_primaries,
+            RequestPolicy.ALL_NODES: self.get_nodes,
+            RequestPolicy.ALL_REPLICAS: self.get_replicas,
+            RequestPolicy.SPECIAL: self.get_special_nodes,
+            ResponsePolicy.DEFAULT_KEYLESS: lambda res: res,
+            ResponsePolicy.DEFAULT_KEYED: lambda res: res,
+        }
+
+        self._policy_resolver = policy_resolver
         self.commands_parser = AsyncCommandsParser()
+        self._aggregate_nodes = None
         self.node_flags = self.__class__.NODE_FLAGS.copy()
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.response_callbacks = kwargs["response_callbacks"]
@@ -619,6 +651,45 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
         return slot_cache[node_idx]
 
+    def get_random_primary_or_all_nodes(self, command_name):
+        """
+        Returns random primary or all nodes depends on READONLY mode.
+        """
+        if self.read_from_replicas and command_name in READ_COMMANDS:
+            return self.get_random_node()
+
+        return self.get_random_primary_node()
+
+    def get_random_primary_node(self) -> "ClusterNode":
+        """
+        Returns a random primary node
+        """
+        return random.choice(self.get_primaries())
+
+    async def get_nodes_from_slot(self, command: str, *args):
+        """
+        Returns a list of nodes that hold the specified keys' slots.
+        """
+        # get the node that holds the key's slot
+        return [
+            self.nodes_manager.get_node_from_slot(
+                await self._determine_slot(command, *args),
+                self.read_from_replicas and command in READ_COMMANDS,
+                self.load_balancing_strategy if command in READ_COMMANDS else None,
+            )
+        ]
+
+    def get_special_nodes(self) -> Optional[list["ClusterNode"]]:
+        """
+        Returns a list of nodes for commands with a special policy.
+        """
+        if not self._aggregate_nodes:
+            raise RedisClusterException(
+                "Cannot execute FT.CURSOR commands without FT.AGGREGATE"
+            )
+
+        return self._aggregate_nodes
+
     def keyslot(self, key: EncodableT) -> int:
         """
         Find the keyslot for a given key.
@@ -643,7 +714,11 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self.response_callbacks[command] = callback
 
     async def _determine_nodes(
-        self, command: str, *args: Any, node_flag: Optional[str] = None
+        self,
+        command: str,
+        *args: Any,
+        request_policy: RequestPolicy,
+        node_flag: Optional[str] = None,
     ) -> List["ClusterNode"]:
         # Determine which nodes should be executed the command on.
         # Returns a list of target nodes.
@@ -651,31 +726,22 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             # get the nodes group for this command if it was predefined
             node_flag = self.command_flags.get(command)
 
-        if node_flag in self.node_flags:
-            if node_flag == self.__class__.DEFAULT_NODE:
-                # return the cluster's default node
-                return [self.nodes_manager.default_node]
-            if node_flag == self.__class__.PRIMARIES:
-                # return all primaries
-                return self.nodes_manager.get_nodes_by_server_type(PRIMARY)
-            if node_flag == self.__class__.REPLICAS:
-                # return all replicas
-                return self.nodes_manager.get_nodes_by_server_type(REPLICA)
-            if node_flag == self.__class__.ALL_NODES:
-                # return all nodes
-                return list(self.nodes_manager.nodes_cache.values())
-            if node_flag == self.__class__.RANDOM:
-                # return a random node
-                return [random.choice(list(self.nodes_manager.nodes_cache.values()))]
+        if node_flag in self._command_flags_mapping:
+            request_policy = self._command_flags_mapping[node_flag]
 
-        # get the node that holds the key's slot
-        return [
-            self.nodes_manager.get_node_from_slot(
-                await self._determine_slot(command, *args),
-                self.read_from_replicas and command in READ_COMMANDS,
-                self.load_balancing_strategy if command in READ_COMMANDS else None,
-            )
-        ]
+        policy_callback = self._policies_callback_mapping[request_policy]
+
+        if request_policy == RequestPolicy.DEFAULT_KEYED:
+            nodes = await policy_callback(command, *args)
+        elif request_policy == RequestPolicy.DEFAULT_KEYLESS:
+            nodes = policy_callback(command)
+        else:
+            nodes = policy_callback()
+
+        if command.lower() == "ft.aggregate":
+            self._aggregate_nodes = nodes
+
+        return nodes
 
     async def _determine_slot(self, command: str, *args: Any) -> int:
         if self.command_flags.get(command) == SLOT_ID:
@@ -780,6 +846,33 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             target_nodes_specified = True
             retry_attempts = 0
 
+        command_policies = await self._policy_resolver.resolve(args[0].lower())
+
+        if not command_policies and not target_nodes_specified:
+            command_flag = self.command_flags.get(command)
+            if not command_flag:
+                # Fallback to default policy
+                if not self.get_default_node():
+                    slot = None
+                else:
+                    slot = await self._determine_slot(*args)
+                if slot is None:
+                    command_policies = CommandPolicies()
+                else:
+                    command_policies = CommandPolicies(
+                        request_policy=RequestPolicy.DEFAULT_KEYED,
+                        response_policy=ResponsePolicy.DEFAULT_KEYED,
+                    )
+            else:
+                if command_flag in self._command_flags_mapping:
+                    command_policies = CommandPolicies(
+                        request_policy=self._command_flags_mapping[command_flag]
+                    )
+                else:
+                    command_policies = CommandPolicies()
+        elif not command_policies and target_nodes_specified:
+            command_policies = CommandPolicies()
+
         # Add one for the first execution
         execute_attempts = 1 + retry_attempts
         for _ in range(execute_attempts):
@@ -795,7 +888,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 if not target_nodes_specified:
                     # Determine the nodes to execute the command on
                     target_nodes = await self._determine_nodes(
-                        *args, node_flag=passed_targets
+                        *args,
+                        request_policy=command_policies.request_policy,
+                        node_flag=passed_targets,
                     )
                     if not target_nodes:
                         raise RedisClusterException(
@@ -806,10 +901,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     # Return the processed result
                     ret = await self._execute_command(target_nodes[0], *args, **kwargs)
                     if command in self.result_callbacks:
-                        return self.result_callbacks[command](
+                        ret = self.result_callbacks[command](
                             command, {target_nodes[0].name: ret}, **kwargs
                         )
-                    return ret
+                    return self._policies_callback_mapping[
+                        command_policies.response_policy
+                    ](ret)
                 else:
                     keys = [node.name for node in target_nodes]
                     values = await asyncio.gather(
@@ -824,7 +921,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                         return self.result_callbacks[command](
                             command, dict(zip(keys, values)), **kwargs
                         )
-                    return dict(zip(keys, values))
+                    return self._policies_callback_mapping[
+                        command_policies.response_policy
+                    ](dict(zip(keys, values)))
             except Exception as e:
                 if retry_attempts > 0 and type(e) in self.__class__.ERRORS_ALLOW_RETRY:
                     # The nodes and slots cache were should be reinitialized.
@@ -874,12 +973,18 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             except (ConnectionError, TimeoutError):
                 # Connection retries are being handled in the node's
                 # Retry object.
-                # Remove the failed node from the startup nodes before we try
-                # to reinitialize the cluster
-                self.nodes_manager.startup_nodes.pop(target_node.name, None)
-                # Hard force of reinitialize of the node/slots setup
-                # and try again with the new setup
-                await self.aclose()
+                # Mark active connections for reconnect and disconnect free ones
+                # This handles connection state (like READONLY) that may be stale
+                target_node.update_active_connections_for_reconnect()
+                await target_node.disconnect_free_connections()
+
+                # Move the failed node to the end of the cached nodes list
+                # so it's tried last during reinitialization
+                self.nodes_manager.move_node_to_end_of_cached_nodes(target_node.name)
+
+                # Signal that reinitialization is needed
+                # The retry loop will handle initialize() AND replace_default_node()
+                self._initialize = True
                 raise
             except (ClusterDownError, SlotNotCoveredError):
                 # ClusterDownError can occur during a failover and to get
@@ -912,7 +1017,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     # Reset the counter
                     self.reinitialize_counter = 0
                 else:
-                    self.nodes_manager._moved_exception = e
+                    self.nodes_manager.move_slot(e)
                 moved = True
             except AskError as e:
                 redirect_addr = get_node_name(host=e.host, port=e.port)
@@ -1107,6 +1212,9 @@ class ClusterNode:
     def __eq__(self, obj: Any) -> bool:
         return isinstance(obj, ClusterNode) and obj.name == self.name
 
+    def __hash__(self) -> int:
+        return hash(self.name)
+
     _DEL_MESSAGE = "Unclosed ClusterNode object"
 
     def __del__(
@@ -1164,11 +1272,47 @@ class ClusterNode:
 
             raise MaxConnectionsError()
 
+    async def disconnect_if_needed(self, connection: Connection) -> None:
+        """
+        Disconnect a connection if it's marked for reconnect.
+        This implements lazy disconnection to avoid race conditions.
+        The connection will auto-reconnect on next use.
+        """
+        if connection.should_reconnect():
+            await connection.disconnect()
+
     def release(self, connection: Connection) -> None:
         """
         Release connection back to free queue.
+        If the connection is marked for reconnect, it will be disconnected
+        lazily when next acquired via disconnect_if_needed().
         """
         self._free.append(connection)
+
+    def update_active_connections_for_reconnect(self) -> None:
+        """
+        Mark all in-use (active) connections for reconnect.
+        In-use connections are those in _connections but not currently in _free.
+        They will be disconnected when released back to the pool.
+        """
+        free_set = set(self._free)
+        for connection in self._connections:
+            if connection not in free_set:
+                connection.mark_for_reconnect()
+
+    async def disconnect_free_connections(self) -> None:
+        """
+        Disconnect all free/idle connections in the pool.
+        This is useful after topology changes (e.g., failover) to clear
+        stale connection state like READONLY mode.
+        The connections remain in the pool and will reconnect on next use.
+        """
+        if self._free:
+            # Take a snapshot to avoid issues if _free changes during await
+            await asyncio.gather(
+                *(connection.disconnect() for connection in tuple(self._free)),
+                return_exceptions=True,
+            )
 
     async def parse_response(
         self, connection: Connection, command: str, **kwargs: Any
@@ -1199,6 +1343,8 @@ class ClusterNode:
     async def execute_command(self, *args: Any, **kwargs: Any) -> Any:
         # Acquire connection
         connection = self.acquire_connection()
+        # Handle lazy disconnect for connections marked for reconnect
+        await self.disconnect_if_needed(connection)
 
         # Execute command
         await connection.send_packed_command(connection.pack_command(*args), False)
@@ -1207,12 +1353,15 @@ class ClusterNode:
         try:
             return await self.parse_response(connection, args[0], **kwargs)
         finally:
+            await self.disconnect_if_needed(connection)
             # Release connection
             self._free.append(connection)
 
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:
         # Acquire connection
         connection = self.acquire_connection()
+        # Handle lazy disconnect for connections marked for reconnect
+        await self.disconnect_if_needed(connection)
 
         # Execute command
         await connection.send_packed_command(
@@ -1231,6 +1380,7 @@ class ClusterNode:
                 ret = True
 
         # Release connection
+        await self.disconnect_if_needed(connection)
         self._free.append(connection)
 
         return ret
@@ -1266,13 +1416,14 @@ class ClusterNode:
 class NodesManager:
     __slots__ = (
         "_dynamic_startup_nodes",
-        "_moved_exception",
         "_event_dispatcher",
         "_background_tasks",
         "connection_kwargs",
         "default_node",
         "nodes_cache",
+        "_epoch",
         "read_load_balancer",
+        "_initialize_lock",
         "require_full_coverage",
         "slots_cache",
         "startup_nodes",
@@ -1296,11 +1447,12 @@ class NodesManager:
         self.default_node: "ClusterNode" = None
         self.nodes_cache: Dict[str, "ClusterNode"] = {}
         self.slots_cache: Dict[int, List["ClusterNode"]] = {}
+        self._epoch: int = 0
         self.read_load_balancer = LoadBalancer()
+        self._initialize_lock: asyncio.Lock = asyncio.Lock()
 
         self._background_tasks: Set[asyncio.Task] = set()
         self._dynamic_startup_nodes: bool = dynamic_startup_nodes
-        self._moved_exception: MovedError = None
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
         else:
@@ -1333,24 +1485,53 @@ class NodesManager:
         if remove_old:
             for name in list(old.keys()):
                 if name not in new:
-                    task = asyncio.create_task(old.pop(name).disconnect())
+                    # Node is removed from cache before disconnect starts,
+                    # so it won't be found in lookups during disconnect
+                    # Mark active connections for reconnect so they get disconnected after current command completes
+                    # and disconnect free connections immediately
+                    # the node is removed from the cache before the connections changes so it won't be used and should be safe
+                    # not to wait for the disconnects
+                    removed_node = old.pop(name)
+                    removed_node.update_active_connections_for_reconnect()
+                    task = asyncio.create_task(removed_node.disconnect_free_connections())
                     self._background_tasks.add(task)
                     task.add_done_callback(self._background_tasks.discard)
 
         for name, node in new.items():
             if name in old:
-                if old[name] is node:
-                    continue
-                task = asyncio.create_task(old[name].disconnect())
-                self._background_tasks.add(task)
-                task.add_done_callback(self._background_tasks.discard)
+                # Preserve the existing node but mark connections for reconnect.
+                # This method is sync so we can't call disconnect_free_connections()
+                # which is async. Instead, we mark free connections for reconnect
+                # and they will be lazily disconnected when acquired via
+                # disconnect_if_needed() to avoid race conditions.
+                # TODO: Make this method async in the next major release to allow
+                # immediate disconnection of free connections.
+                existing_node = old[name]
+                existing_node.update_active_connections_for_reconnect()
+                for conn in existing_node._free:
+                    conn.mark_for_reconnect()
+                continue
+            # New node is detected and should be added to the pool
             old[name] = node
 
-    def update_moved_exception(self, exception):
-        self._moved_exception = exception
+    def move_node_to_end_of_cached_nodes(self, node_name: str) -> None:
+        """
+        Move a failing node to the end of startup_nodes and nodes_cache so it's
+        tried last during reinitialization and when selecting the default node.
+        If the node is not in the respective list, nothing is done.
+        """
+        # Move in startup_nodes
+        if node_name in self.startup_nodes and len(self.startup_nodes) > 1:
+            node = self.startup_nodes.pop(node_name)
+            self.startup_nodes[node_name] = node  # Re-insert at end
 
-    def _update_moved_slots(self) -> None:
-        e = self._moved_exception
+        # Move in nodes_cache - this affects get_nodes_by_server_type ordering
+        # which is used to select the default_node during initialize()
+        if node_name in self.nodes_cache and len(self.nodes_cache) > 1:
+            node = self.nodes_cache.pop(node_name)
+            self.nodes_cache[node_name] = node  # Re-insert at end
+
+    def move_slot(self, e: AskError | MovedError):
         redirected_node = self.get_node(host=e.host, port=e.port)
         if redirected_node:
             # The node already exists
@@ -1363,29 +1544,29 @@ class NodesManager:
                 e.host, e.port, PRIMARY, **self.connection_kwargs
             )
             self.set_nodes(self.nodes_cache, {redirected_node.name: redirected_node})
-        if redirected_node in self.slots_cache[e.slot_id]:
-            # The MOVED error resulted from a failover, and the new slot owner
-            # had previously been a replica.
-            old_primary = self.slots_cache[e.slot_id][0]
-            # Update the old primary to be a replica and add it to the end of
-            # the slot's node list
-            old_primary.server_type = REPLICA
-            self.slots_cache[e.slot_id].append(old_primary)
-            # Remove the old replica, which is now a primary, from the slot's
-            # node list
-            self.slots_cache[e.slot_id].remove(redirected_node)
-            # Override the old primary with the new one
-            self.slots_cache[e.slot_id][0] = redirected_node
-            if self.default_node == old_primary:
-                # Update the default node with the new primary
-                self.default_node = redirected_node
-        else:
+        slot_nodes = self.slots_cache[e.slot_id]
+        if redirected_node not in slot_nodes:
             # The new slot owner is a new server, or a server from a different
             # shard. We need to remove all current nodes from the slot's list
             # (including replications) and add just the new node.
             self.slots_cache[e.slot_id] = [redirected_node]
-        # Reset moved_exception
-        self._moved_exception = None
+        elif redirected_node is not slot_nodes[0]:
+            # The MOVED error resulted from a failover, and the new slot owner
+            # had previously been a replica.
+            old_primary = slot_nodes[0]
+            # Update the old primary to be a replica and add it to the end of
+            # the slot's node list
+            old_primary.server_type = REPLICA
+            slot_nodes.append(old_primary)
+            # Remove the old replica, which is now a primary, from the slot's
+            # node list
+            slot_nodes.remove(redirected_node)
+            # Override the old primary with the new one
+            slot_nodes[0] = redirected_node
+            if self.default_node == old_primary:
+                # Update the default node with the new primary
+                self.default_node = redirected_node
+        # else: circular MOVED to current primary -> no-op
 
     def get_node_from_slot(
         self,
@@ -1393,9 +1574,6 @@ class NodesManager:
         read_from_replicas: bool = False,
         load_balancing_strategy=None,
     ) -> "ClusterNode":
-        if self._moved_exception:
-            self._update_moved_slots()
-
         if read_from_replicas is True and load_balancing_strategy is None:
             load_balancing_strategy = LoadBalancingStrategy.ROUND_ROBIN
 
@@ -1429,135 +1607,147 @@ class NodesManager:
         startup_nodes_reachable = False
         fully_covered = False
         exception = None
-        # Convert to tuple to prevent RuntimeError if self.startup_nodes
-        # is modified during iteration
-        for startup_node in tuple(self.startup_nodes.values()):
-            try:
-                # Make sure cluster mode is enabled on this node
+        epoch = self._epoch
+
+        async with self._initialize_lock:
+            if self._epoch != epoch:
+                # another initialize call has already reinitialized the
+                # nodes since we started waiting for the lock;
+                # we don't need to do it again.
+                return
+
+            # Convert to tuple to prevent RuntimeError if self.startup_nodes
+            # is modified during iteration
+            for startup_node in tuple(self.startup_nodes.values()):
                 try:
-                    self._event_dispatcher.dispatch(
-                        AfterAsyncClusterInstantiationEvent(
-                            self.nodes_cache,
-                            self.connection_kwargs.get("credential_provider", None),
+                    # Make sure cluster mode is enabled on this node
+                    try:
+                        self._event_dispatcher.dispatch(
+                            AfterAsyncClusterInstantiationEvent(
+                                self.nodes_cache,
+                                self.connection_kwargs.get("credential_provider", None),
+                            )
                         )
-                    )
-                    cluster_slots = await startup_node.execute_command("CLUSTER SLOTS")
-                except ResponseError:
-                    raise RedisClusterException(
-                        "Cluster mode is not enabled on this node"
-                    )
-                startup_nodes_reachable = True
-            except Exception as e:
-                # Try the next startup node.
-                # The exception is saved and raised only if we have no more nodes.
-                exception = e
-                continue
+                        cluster_slots = await startup_node.execute_command(
+                            "CLUSTER SLOTS"
+                        )
+                    except ResponseError:
+                        raise RedisClusterException(
+                            "Cluster mode is not enabled on this node"
+                        )
+                    startup_nodes_reachable = True
+                except Exception as e:
+                    # Try the next startup node.
+                    # The exception is saved and raised only if we have no more nodes.
+                    exception = e
+                    continue
 
-            # CLUSTER SLOTS command results in the following output:
-            # [[slot_section[from_slot,to_slot,master,replica1,...,replicaN]]]
-            # where each node contains the following list: [IP, port, node_id]
-            # Therefore, cluster_slots[0][2][0] will be the IP address of the
-            # primary node of the first slot section.
-            # If there's only one server in the cluster, its ``host`` is ''
-            # Fix it to the host in startup_nodes
-            if (
-                len(cluster_slots) == 1
-                and not cluster_slots[0][2][0]
-                and len(self.startup_nodes) == 1
-            ):
-                cluster_slots[0][2][0] = startup_node.host
+                # CLUSTER SLOTS command results in the following output:
+                # [[slot_section[from_slot,to_slot,master,replica1,...,replicaN]]]
+                # where each node contains the following list: [IP, port, node_id]
+                # Therefore, cluster_slots[0][2][0] will be the IP address of the
+                # primary node of the first slot section.
+                # If there's only one server in the cluster, its ``host`` is ''
+                # Fix it to the host in startup_nodes
+                if (
+                    len(cluster_slots) == 1
+                    and not cluster_slots[0][2][0]
+                    and len(self.startup_nodes) == 1
+                ):
+                    cluster_slots[0][2][0] = startup_node.host
 
-            for slot in cluster_slots:
-                for i in range(2, len(slot)):
-                    slot[i] = [str_if_bytes(val) for val in slot[i]]
-                primary_node = slot[2]
-                host = primary_node[0]
-                if host == "":
-                    host = startup_node.host
-                port = int(primary_node[1])
-                host, port = self.remap_host_port(host, port)
-
-                nodes_for_slot = []
-
-                target_node = tmp_nodes_cache.get(get_node_name(host, port))
-                if not target_node:
-                    target_node = ClusterNode(
-                        host, port, PRIMARY, **self.connection_kwargs
-                    )
-                # add this node to the nodes cache
-                tmp_nodes_cache[target_node.name] = target_node
-                nodes_for_slot.append(target_node)
-
-                replica_nodes = slot[3:]
-                for replica_node in replica_nodes:
-                    host = replica_node[0]
-                    port = replica_node[1]
+                for slot in cluster_slots:
+                    for i in range(2, len(slot)):
+                        slot[i] = [str_if_bytes(val) for val in slot[i]]
+                    primary_node = slot[2]
+                    host = primary_node[0]
+                    if host == "":
+                        host = startup_node.host
+                    port = int(primary_node[1])
                     host, port = self.remap_host_port(host, port)
 
-                    target_replica_node = tmp_nodes_cache.get(get_node_name(host, port))
-                    if not target_replica_node:
-                        target_replica_node = ClusterNode(
-                            host, port, REPLICA, **self.connection_kwargs
+                    nodes_for_slot = []
+
+                    target_node = tmp_nodes_cache.get(get_node_name(host, port))
+                    if not target_node:
+                        target_node = ClusterNode(
+                            host, port, PRIMARY, **self.connection_kwargs
                         )
                     # add this node to the nodes cache
-                    tmp_nodes_cache[target_replica_node.name] = target_replica_node
-                    nodes_for_slot.append(target_replica_node)
+                    tmp_nodes_cache[target_node.name] = target_node
+                    nodes_for_slot.append(target_node)
 
-                for i in range(int(slot[0]), int(slot[1]) + 1):
-                    if i not in tmp_slots:
-                        tmp_slots[i] = nodes_for_slot
-                    else:
-                        # Validate that 2 nodes want to use the same slot cache
-                        # setup
-                        tmp_slot = tmp_slots[i][0]
-                        if tmp_slot.name != target_node.name:
-                            disagreements.append(
-                                f"{tmp_slot.name} vs {target_node.name} on slot: {i}"
+                    replica_nodes = slot[3:]
+                    for replica_node in replica_nodes:
+                        host = replica_node[0]
+                        port = replica_node[1]
+                        host, port = self.remap_host_port(host, port)
+
+                        target_replica_node = tmp_nodes_cache.get(
+                            get_node_name(host, port)
+                        )
+                        if not target_replica_node:
+                            target_replica_node = ClusterNode(
+                                host, port, REPLICA, **self.connection_kwargs
                             )
+                        # add this node to the nodes cache
+                        tmp_nodes_cache[target_replica_node.name] = target_replica_node
+                        nodes_for_slot.append(target_replica_node)
 
-                            if len(disagreements) > 5:
-                                raise RedisClusterException(
-                                    f"startup_nodes could not agree on a valid "
-                                    f"slots cache: {', '.join(disagreements)}"
+                    for i in range(int(slot[0]), int(slot[1]) + 1):
+                        if i not in tmp_slots:
+                            tmp_slots[i] = nodes_for_slot
+                        else:
+                            # Validate that 2 nodes want to use the same slot cache
+                            # setup
+                            tmp_slot = tmp_slots[i][0]
+                            if tmp_slot.name != target_node.name:
+                                disagreements.append(
+                                    f"{tmp_slot.name} vs {target_node.name} on slot: {i}"
                                 )
 
-            # Validate if all slots are covered or if we should try next startup node
-            fully_covered = True
-            for i in range(REDIS_CLUSTER_HASH_SLOTS):
-                if i not in tmp_slots:
-                    fully_covered = False
+                                if len(disagreements) > 5:
+                                    raise RedisClusterException(
+                                        f"startup_nodes could not agree on a valid "
+                                        f"slots cache: {', '.join(disagreements)}"
+                                    )
+
+                # Validate if all slots are covered or if we should try next startup node
+                fully_covered = True
+                for i in range(REDIS_CLUSTER_HASH_SLOTS):
+                    if i not in tmp_slots:
+                        fully_covered = False
+                        break
+                if fully_covered:
                     break
-            if fully_covered:
-                break
 
-        if not startup_nodes_reachable:
-            raise RedisClusterException(
-                f"Redis Cluster cannot be connected. Please provide at least "
-                f"one reachable node: {str(exception)}"
-            ) from exception
+            if not startup_nodes_reachable:
+                raise RedisClusterException(
+                    f"Redis Cluster cannot be connected. Please provide at least "
+                    f"one reachable node: {str(exception)}"
+                ) from exception
 
-        # Check if the slots are not fully covered
-        if not fully_covered and self.require_full_coverage:
-            # Despite the requirement that the slots be covered, there
-            # isn't a full coverage
-            raise RedisClusterException(
-                f"All slots are not covered after query all startup_nodes. "
-                f"{len(tmp_slots)} of {REDIS_CLUSTER_HASH_SLOTS} "
-                f"covered..."
-            )
+            # Check if the slots are not fully covered
+            if not fully_covered and self.require_full_coverage:
+                # Despite the requirement that the slots be covered, there
+                # isn't a full coverage
+                raise RedisClusterException(
+                    f"All slots are not covered after query all startup_nodes. "
+                    f"{len(tmp_slots)} of {REDIS_CLUSTER_HASH_SLOTS} "
+                    f"covered..."
+                )
 
-        # Set the tmp variables to the real variables
-        self.slots_cache = tmp_slots
-        self.set_nodes(self.nodes_cache, tmp_nodes_cache, remove_old=True)
+            # Set the tmp variables to the real variables
+            self.slots_cache = tmp_slots
+            self.set_nodes(self.nodes_cache, tmp_nodes_cache, remove_old=True)
 
-        if self._dynamic_startup_nodes:
-            # Populate the startup nodes with all discovered nodes
-            self.set_nodes(self.startup_nodes, self.nodes_cache, remove_old=True)
+            if self._dynamic_startup_nodes:
+                # Populate the startup nodes with all discovered nodes
+                self.set_nodes(self.startup_nodes, self.nodes_cache, remove_old=True)
 
-        # Set the default node
-        self.default_node = self.get_nodes_by_server_type(PRIMARY)[0]
-        # If initialize was called after a MovedError, clear it
-        self._moved_exception = None
+            # Set the default node
+            self.default_node = self.get_nodes_by_server_type(PRIMARY)[0]
+            self._epoch += 1
 
     async def aclose(self, attr: str = "nodes_cache") -> None:
         self.default_node = None
@@ -1746,6 +1936,7 @@ class PipelineCommand:
         self.kwargs = kwargs
         self.position = position
         self.result: Union[Any, Exception] = None
+        self.command_policies: Optional[CommandPolicies] = None
 
     def __repr__(self) -> str:
         return f"[{self.position}] {self.args} ({self.kwargs})"
@@ -1986,16 +2177,51 @@ class PipelineStrategy(AbstractStrategy):
         nodes = {}
         for cmd in todo:
             passed_targets = cmd.kwargs.pop("target_nodes", None)
+            command_policies = await client._policy_resolver.resolve(
+                cmd.args[0].lower()
+            )
+
             if passed_targets and not client._is_node_flag(passed_targets):
                 target_nodes = client._parse_target_nodes(passed_targets)
+
+                if not command_policies:
+                    command_policies = CommandPolicies()
             else:
+                if not command_policies:
+                    command_flag = client.command_flags.get(cmd.args[0])
+                    if not command_flag:
+                        # Fallback to default policy
+                        if not client.get_default_node():
+                            slot = None
+                        else:
+                            slot = await client._determine_slot(*cmd.args)
+                        if slot is None:
+                            command_policies = CommandPolicies()
+                        else:
+                            command_policies = CommandPolicies(
+                                request_policy=RequestPolicy.DEFAULT_KEYED,
+                                response_policy=ResponsePolicy.DEFAULT_KEYED,
+                            )
+                    else:
+                        if command_flag in client._command_flags_mapping:
+                            command_policies = CommandPolicies(
+                                request_policy=client._command_flags_mapping[
+                                    command_flag
+                                ]
+                            )
+                        else:
+                            command_policies = CommandPolicies()
+
                 target_nodes = await client._determine_nodes(
-                    *cmd.args, node_flag=passed_targets
+                    *cmd.args,
+                    request_policy=command_policies.request_policy,
+                    node_flag=passed_targets,
                 )
                 if not target_nodes:
                     raise RedisClusterException(
                         f"No targets were found to execute {cmd.args} command on"
                     )
+            cmd.command_policies = command_policies
             if len(target_nodes) > 1:
                 raise RedisClusterException(f"Too many targets for command {cmd.args}")
             node = target_nodes[0]
@@ -2016,9 +2242,9 @@ class PipelineStrategy(AbstractStrategy):
                 for cmd in todo:
                     if isinstance(cmd.result, (TryAgainError, MovedError, AskError)):
                         try:
-                            cmd.result = await client.execute_command(
-                                *cmd.args, **cmd.kwargs
-                            )
+                            cmd.result = client._policies_callback_mapping[
+                                cmd.command_policies.response_policy
+                            ](await client.execute_command(*cmd.args, **cmd.kwargs))
                         except Exception as e:
                             cmd.result = e
 
@@ -2215,6 +2441,9 @@ class TransactionStrategy(AbstractStrategy):
 
     async def _get_connection_and_send_command(self, *args, **options):
         redis_node, connection = self._get_client_and_connection_for_transaction()
+        # Only disconnect if not watching - disconnecting would lose WATCH state
+        if not self._watching:
+            await redis_node.disconnect_if_needed(connection)
         return await self._send_command_parse_response(
             connection, redis_node, args[0], *args, **options
         )
@@ -2247,7 +2476,10 @@ class TransactionStrategy(AbstractStrategy):
             type(error) in self.SLOT_REDIRECT_ERRORS
             or type(error) in self.CONNECTION_ERRORS
         ):
-            if self._transaction_connection:
+            if self._transaction_connection and self._transaction_node:
+                # Disconnect and release back to pool
+                await self._transaction_connection.disconnect()
+                self._transaction_node.release(self._transaction_connection)
                 self._transaction_connection = None
 
             self._pipe.cluster_client.reinitialize_counter += 1
@@ -2261,9 +2493,7 @@ class TransactionStrategy(AbstractStrategy):
                 self.reinitialize_counter = 0
             else:
                 if isinstance(error, AskError):
-                    self._pipe.cluster_client.nodes_manager.update_moved_exception(
-                        error
-                    )
+                    self._pipe.cluster_client.nodes_manager.move_slot(error)
 
         self._executing = False
 
@@ -2309,6 +2539,9 @@ class TransactionStrategy(AbstractStrategy):
         self._executing = True
 
         redis_node, connection = self._get_client_and_connection_for_transaction()
+        # Only disconnect if not watching - disconnecting would lose WATCH state
+        if not self._watching:
+            await redis_node.disconnect_if_needed(connection)
 
         stack = chain(
             [PipelineCommand(0, "MULTI")],
@@ -2416,8 +2649,10 @@ class TransactionStrategy(AbstractStrategy):
                 self._transaction_connection = None
             except self.CONNECTION_ERRORS:
                 # disconnect will also remove any previous WATCHes
-                if self._transaction_connection:
+                if self._transaction_connection and self._transaction_node:
                     await self._transaction_connection.disconnect()
+                    self._transaction_node.release(self._transaction_connection)
+                    self._transaction_connection = None
 
         # clean up the other instance attributes
         self._transaction_node = None

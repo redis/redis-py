@@ -9,6 +9,7 @@ from unittest import mock
 from unittest.mock import patch
 
 import pytest
+from redis import DataError, RedisClusterException, ResponseError
 import redis
 from redis import exceptions
 from redis._parsers.helpers import (
@@ -18,6 +19,7 @@ from redis._parsers.helpers import (
     parse_info,
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
+from redis.commands.core import DataPersistOptions, HotkeysMetricsTypes
 from redis.commands.json.path import Path
 from redis.commands.search.field import TextField
 from redis.commands.search.query import Query
@@ -729,23 +731,36 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("7.2.0")
     def test_client_setinfo(self, r: redis.Redis):
+        from redis.utils import get_lib_version
+
         r.ping()
         info = r.client_info()
         assert info["lib-name"] == "redis-py"
-        assert info["lib-ver"] == redis.__version__
+        assert info["lib-ver"] == get_lib_version()
         assert r.client_setinfo("lib-name", "test")
         assert r.client_setinfo("lib-ver", "123")
         info = r.client_info()
         assert info["lib-name"] == "test"
         assert info["lib-ver"] == "123"
-        r2 = redis.Redis(lib_name="test2", lib_version="1234")
+
+        # Test deprecated lib_name/lib_version parameters
+        with pytest.warns(DeprecationWarning):
+            r2 = redis.Redis(lib_name="test2", lib_version="1234")
         info = r2.client_info()
         assert info["lib-name"] == "test2"
         assert info["lib-ver"] == "1234"
-        r3 = redis.Redis(lib_name=None, lib_version=None)
-        info = r3.client_info()
-        assert info["lib-name"] == ""
-        assert info["lib-ver"] == ""
+
+    @skip_if_server_version_lt("7.2.0")
+    def test_client_setinfo_with_driver_info(self, r: redis.Redis):
+        from redis import DriverInfo
+        from redis.utils import get_lib_version
+
+        info = DriverInfo().add_upstream_driver("django-redis", "5.4.0")
+        r2 = redis.Redis(driver_info=info)
+        r2.ping()
+        client_info = r2.client_info()
+        assert client_info["lib-name"] == "redis-py(django-redis_v5.4.0)"
+        assert client_info["lib-ver"] == get_lib_version()
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.9")
@@ -1214,6 +1229,314 @@ class TestRedisCommands:
         assert isinstance(t[0], int)
         assert isinstance(t[1], int)
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_start_basic(self, r):
+        """Test basic HOTKEYS START command with CPU metric"""
+        # Reset any previous session
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start collection with CPU metric
+        result = r.hotkeys_start(count=10, metrics=[HotkeysMetricsTypes.CPU])
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_start_with_all_metrics(self, r):
+        """Test HOTKEYS START with both CPU and NET metrics"""
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        result = r.hotkeys_start(
+            count=5, metrics=[HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET]
+        )
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_start_with_duration(self, r):
+        """Test HOTKEYS START with duration parameter"""
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        result = r.hotkeys_start(
+            count=10, metrics=[HotkeysMetricsTypes.CPU], duration=60
+        )
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_start_with_sample_ratio(self, r):
+        """Test HOTKEYS START with sample ratio"""
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        result = r.hotkeys_start(
+            count=10, metrics=[HotkeysMetricsTypes.CPU], sample_ratio=10
+        )
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_start_fail__on_noncluster_setup_with_slots(self, r):
+        """Test HOTKEYS START with specific hash slots"""
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # slots is not supported argument for non-cluster setups
+        with pytest.raises(Exception):
+            r.hotkeys_start(
+                count=10, metrics=[HotkeysMetricsTypes.CPU], slots=[0, 100, 200]
+            )
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_start_with_all_parameters(self, r):
+        """Test HOTKEYS START with all optional parameters"""
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        result = r.hotkeys_start(
+            count=5,
+            metrics=[HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET],
+            duration=30,
+            sample_ratio=5,
+        )
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_stop(self, r):
+        """Test HOTKEYS STOP command"""
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a collection session
+        r.hotkeys_start(count=10, metrics=[HotkeysMetricsTypes.CPU])
+
+        # Stop the session
+        result = r.hotkeys_stop()
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_reset(self, r):
+        """Test HOTKEYS RESET command"""
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a session and generate some data
+        r.hotkeys_start(count=10, metrics=[HotkeysMetricsTypes.CPU])
+
+        # Perform some operations to generate hotkeys data
+        for i in range(5):
+            r.set(f"resetkey{i}", f"value{i}")
+            r.get(f"resetkey{i}")
+
+        # Stop the session
+        r.hotkeys_stop()
+
+        # Get results before reset - should have data
+        result_before = r.hotkeys_get()
+        assert isinstance(result_before, list)
+        for res_elem in result_before:
+            assert isinstance(res_elem, dict)
+            assert b"tracking-active" in res_elem
+
+        # Reset the results
+        result = r.hotkeys_reset()
+        assert result == b"OK"
+
+        # Try to get results after reset - should fail or return empty
+        try:
+            result_after = r.hotkeys_get()
+            # If it doesn't fail, verify the data is cleared
+            # The response might indicate no session exists
+            assert result_after != result_before
+        except Exception:
+            # Expected - no session exists after reset
+            pass
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_get_ongoing_session(self, r):
+        """Test HOTKEYS GET during an ongoing collection session"""
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a collection session
+        r.hotkeys_start(
+            count=10, metrics=[HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET]
+        )
+
+        # Perform some operations to generate hotkeys data
+        for i in range(10):
+            r.set(f"key{i}", f"value{i}")
+            r.get(f"key{i}")
+
+        # Get the results
+        result = r.hotkeys_get()
+
+        # Verify the response structure
+        assert isinstance(result, list)
+        for res_elem in result:
+            assert isinstance(res_elem, dict)
+            # Check tracking-active is 1 (ongoing session)
+            assert res_elem[b"tracking-active"] == 1
+
+        # Stop the session
+        r.hotkeys_stop()
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_get_terminated_session(self, r):
+        """Test HOTKEYS GET after stopping a collection session"""
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a collection session
+        r.hotkeys_start(count=10, metrics=[HotkeysMetricsTypes.CPU])
+
+        # Perform some operations
+        for i in range(5):
+            r.set(f"testkey{i}", f"testvalue{i}")
+
+        # Stop the session
+        r.hotkeys_stop()
+
+        # Get the results
+        result = r.hotkeys_get()
+
+        # Verify the response structure
+        assert isinstance(result, list)
+        for res_elem in result:
+            assert isinstance(res_elem, dict)
+
+            # Check tracking-active is 0 (terminated session)
+            assert res_elem[b"tracking-active"] == 0
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_get_all_fields(self, r):
+        """Test HOTKEYS GET returns all documented fields"""
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a collection session with all parameters
+        r.hotkeys_start(
+            count=5,
+            metrics=[HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET],
+            sample_ratio=1,
+        )
+
+        # Perform operations to generate data
+        for i in range(20):
+            r.set("anyprefix:{3}:key", f"value{i}")
+            r.get(f"anyprefix:{3}:key")
+            r.set("anyprefix:{1}:key", f"value{i}")
+            r.get(f"anyprefix:{1}:key")
+
+        # Stop the session
+        r.hotkeys_stop()
+
+        # Get the results
+        result = r.hotkeys_get()
+        assert isinstance(result, list)
+
+        # Verify all documented fields are present
+        expected_fields = [
+            b"tracking-active",
+            b"sample-ratio",
+            b"selected-slots",
+            b"net-bytes-all-commands-all-slots",
+            b"collection-start-time-unix-ms",
+            b"collection-duration-ms",
+            b"total-cpu-time-user-ms",
+            b"total-cpu-time-sys-ms",
+            b"total-net-bytes",
+            b"by-cpu-time-us",
+            b"by-net-bytes",
+        ]
+
+        for res_elem in result:
+            for field in expected_fields:
+                assert field in res_elem, (
+                    f"Field '{field}' is missing from HOTKEYS GET response"
+                )
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_get_all_fields_decoded(self, decoded_r: redis.Redis):
+        """Test HOTKEYS GET returns all documented fields"""
+        try:
+            decoded_r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a collection session with all parameters
+        decoded_r.hotkeys_start(
+            count=5,
+            metrics=[HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET],
+            sample_ratio=1,
+        )
+
+        # Perform operations to generate data
+        for i in range(20):
+            decoded_r.set("anyprefix:{3}:key", f"value{i}")
+            decoded_r.get(f"anyprefix:{3}:key")
+            decoded_r.set("anyprefix:{1}:key", f"value{i}")
+            decoded_r.get(f"anyprefix:{1}:key")
+
+        # Stop the session
+        decoded_r.hotkeys_stop()
+
+        # Get the results
+        result = decoded_r.hotkeys_get()
+
+        # Verify all documented fields are present
+        expected_fields = [
+            "tracking-active",
+            "sample-ratio",
+            "selected-slots",
+            "net-bytes-all-commands-all-slots",
+            "collection-start-time-unix-ms",
+            "collection-duration-ms",
+            "total-cpu-time-user-ms",
+            "total-cpu-time-sys-ms",
+            "total-net-bytes",
+            "by-cpu-time-us",
+            "by-net-bytes",
+        ]
+
+        for elem in result:
+            for field in expected_fields:
+                assert field in elem, (
+                    f"Field '{field}' is missing from HOTKEYS GET response"
+                )
+
     @skip_if_redis_enterprise()
     def test_bgsave(self, r):
         assert r.bgsave()
@@ -1499,6 +1822,114 @@ class TestRedisCommands:
         del r["a"]
         assert r.get("a") is None
 
+    def _ensure_str(self, x):
+        return x.decode("ascii") if isinstance(x, (bytes, bytearray)) else x
+
+    def _server_xxh3_digest(self, r, key):
+        """
+        Get the server-computed XXH3 hex digest for the key's value.
+        Requires the DIGEST command implemented on the server.
+        """
+        d = r.execute_command("DIGEST", key)
+        return None if d is None else self._ensure_str(d).lower()
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_nonexistent(self, r):
+        r.delete("nope")
+        assert r.delex("nope") == 0
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_unconditional_delete_string(self, r):
+        r.set("k", b"v")
+        assert r.exists("k") == 1
+        assert r.delex("k") == 1
+        assert r.exists("k") == 0
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_unconditional_delete_nonstring_allowed(self, r):
+        # Spec: error happens only when a condition is specified on a non-string key.
+        r.lpush("lst", "a")
+        assert r.delex("lst") == 1
+        assert r.exists("lst") == 0
+
+        r.lpush("lst", "a")
+
+        with pytest.raises(redis.ResponseError):
+            r.delex("lst", ifeq=b"a")
+        assert r.exists("lst") == 1
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_ifeq(self, r):
+        r.set("k", b"abc")
+        assert r.delex("k", ifeq=b"abc") == 1  # matches → deleted
+        assert r.exists("k") == 0
+
+        r.set("k", b"abc")
+        assert r.delex("k", ifeq=b"zzz") == 0  # not match → not deleted
+        assert r.get("k") == b"abc"  # still there
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_ifne(self, r):
+        r.set("k2", b"abc")
+        assert r.delex("k2", ifne=b"zzz") == 1  # different → deleted
+        assert r.exists("k2") == 0
+
+        r.set("k2", b"abc")
+        assert r.delex("k2", ifne=b"abc") == 0  # equal → not deleted
+        assert r.get("k2") == b"abc"
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_with_conditionon_nonstring_values(self, r):
+        r.lpush("nk", "x")
+        with pytest.raises(redis.ResponseError):
+            r.delex("nk", ifeq=b"x")
+        with pytest.raises(redis.ResponseError):
+            r.delex("nk", ifne=b"x")
+        with pytest.raises(redis.ResponseError):
+            r.delex("nk", ifdeq="deadbeef")
+
+    @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.parametrize("val", [b"", b"abc", b"The quick brown fox"])
+    def test_delex_ifdeq_and_ifdne(self, r, val):
+        r.set("h", val)
+        d = self._server_xxh3_digest(r, "h")
+        assert d is not None
+
+        # IFDEQ should delete with exact digest
+        r.set("h", val)
+        assert r.delex("h", ifdeq=d) == 1
+        assert r.exists("h") == 0
+
+        # IFDNE should NOT delete when digest matches
+        r.set("h", val)
+        assert r.delex("h", ifdne=d) == 0
+        assert r.get("h") == val
+
+        # IFDNE should delete when digest doesn't match
+        r.set("h", val)
+        wrong = "0" * len(d)
+        if wrong == d:
+            wrong = "f" * len(d)
+        assert r.delex("h", ifdne=wrong) == 1
+        assert r.exists("h") == 0
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_pipeline(self, r):
+        r.mset({"p1{45}": b"A", "p2{45}": b"B"})
+        p = r.pipeline()
+        p.delex("p1{45}", ifeq=b"A")
+        p.delex("p2{45}", ifne=b"B")  # false → 0
+        p.delex("nope")  # nonexistent → 0
+        out = p.execute()
+        assert out == [1, 0, 0]
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_mutual_exclusion_client_side(self, r):
+        with pytest.raises(ValueError):
+            r.delex("k", ifeq=b"A", ifne=b"B")
+        with pytest.raises(ValueError):
+            r.delex("k", ifdeq="aa", ifdne="bb")
+
     @skip_if_server_version_lt("4.0.0")
     def test_unlink(self, r):
         assert r.unlink("a") == 0
@@ -1664,6 +2095,81 @@ class TestRedisCommands:
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         assert r.expireat("key", expire_at, lt=True) is True
 
+    @skip_if_server_version_lt("8.3.224")
+    def test_digest_nonexistent_returns_none(self, r):
+        assert r.digest("no:such:key") is None
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_digest_wrong_type_raises(self, r):
+        r.lpush("alist", "x")
+        with pytest.raises(Exception):  # or redis.exceptions.ResponseError
+            r.digest("alist")
+
+    @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.parametrize(
+        "value", [b"", b"abc", b"The quick brown fox jumps over the lazy dog"]
+    )
+    def test_digest_response_when_available(self, r, value):
+        key = "k:digest"
+        r.delete(key)
+        r.set(key, value)
+
+        res = r.digest(key)
+
+        # got is str if decode_responses=True; ensure bytes->str for comparison
+        if isinstance(res, bytes):
+            res = res.decode()
+        assert res is not None
+        assert all(c in "0123456789abcdefABCDEF" for c in res)
+
+        assert len(res) == 16
+
+    @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.parametrize(
+        "value",
+        [
+            b"",
+            b"abc",
+            b"The quick brown fox jumps over the lazy dog",
+            "",
+            "abc",
+            "The quick brown fox jumps over the lazy dog",
+        ],
+    )
+    def test_local_digest_matches_server(self, r, value):
+        key = "k:digest"
+        r.delete(key)
+        r.set(key, value)
+
+        res_server = r.digest(key)
+        res_local = r.digest_local(value)
+
+        # Verify type consistency between server and local digest
+        if isinstance(res_server, bytes):
+            assert isinstance(res_local, bytes)
+        else:
+            assert isinstance(res_local, str)
+
+        assert res_server is not None
+        assert len(res_server) == 16
+        assert res_local is not None
+        assert len(res_local) == 16
+        assert res_server == res_local
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_pipeline_digest(self, r):
+        k1, k2 = "k:d1{42}", "k:d2{42}"
+        r.mset({k1: b"A", k2: b"B"})
+        p = r.pipeline()
+        p.digest(k1)
+        p.digest(k2)
+        out = p.execute()
+        assert len(out) == 2
+        for d in out:
+            if isinstance(d, bytes):
+                d = d.decode()
+            assert d is None or len(d) == 16
+
     def test_get_and_set(self, r):
         # get and set can't be tested independently of each other
         assert r.get("a") is None
@@ -1797,6 +2303,337 @@ class TestRedisCommands:
         assert r.mset(d)
         for k, v in d.items():
             assert r[k] == v
+
+    @pytest.mark.onlycluster
+    def test_mset_on_cluster(self, r):
+        # validate that mset command works in cluster client
+        # when the keys are in the same slot
+        d = {"a:{test:1}": b"1", "b:{test:1}": b"2", "c:{test:1}": b"3"}
+        assert r.mset(d)
+        for k, v in d.items():
+            assert r[k] == v
+
+    @pytest.mark.onlycluster
+    def test_mset_on_cluster_multiple_slots(self, r):
+        d = {"a": b"1", "b": b"2", "c": b"3"}
+        with pytest.raises(RedisClusterException):
+            assert r.mset(d)
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_msetex_no_expiration_with_cluster_client(self, r):
+        all_test_keys = ["1:{test:1}", "2:{test:1}"]
+        for key in all_test_keys:
+            r.delete(key)
+
+        # set items from mapping without expiration
+        assert r.msetex(mapping={"1:{test:1}": 1, "2:{test:1}": b"four"}) == 1
+        assert r.mget("1:{test:1}", "2:{test:1}") == [b"1", b"four"]
+        assert r.ttl("1:{test:1}") == -1
+        assert r.ttl("2:{test:1}") == -1
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_msetex_expiration_ex_and_keepttl_with_cluster_client(self, r):
+        all_test_keys = ["1:{test:1}", "2:{test:1}"]
+        for key in all_test_keys:
+            r.delete(key)
+
+        # set items from mapping with expiration - testing ex field
+        assert (
+            r.msetex(
+                mapping={"1:{test:1}": 1, "2:{test:1}": "2"},
+                ex=10,
+            )
+            == 1
+        )
+        ttls = [r.ttl(key) for key in all_test_keys]
+        for ttl in ttls:
+            assert pytest.approx(ttl) == 10
+
+        assert r.mget(*all_test_keys) == [b"1", b"2"]
+        time.sleep(1.1)
+        # validate keepttl
+        assert r.msetex(mapping={"1:{test:1}": 11}, keepttl=True) == 1
+        assert r.ttl("1:{test:1}") < 10
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_msetex_expiration_px_with_cluster_client(self, r):
+        all_test_keys = ["1:{test:1}", "2:{test:1}"]
+        for key in all_test_keys:
+            r.delete(key)
+
+        mapping = {"1:{test:1}": 1, "2:{test:1}": "2"}
+        # set key/value pairs provided in mapping
+        # with expiration - testing px field
+        assert r.msetex(mapping=mapping, px=60000) == 1
+
+        ttls = [r.ttl(key) for key in mapping.keys()]
+        for ttl in ttls:
+            assert pytest.approx(ttl) == 60
+        assert r.mget(*mapping.keys()) == [b"1", b"2"]
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_msetex_expiration_pxat_and_nx_with_cluster_client(self, r):
+        all_test_keys = [
+            "1:{test:1}",
+            "2:{test:1}",
+            "3:{test:1}",
+            "new:{test:1}",
+            "new_2:{test:1}",
+        ]
+        for key in all_test_keys:
+            r.delete(key)
+
+        mapping = {"1:{test:1}": 1, "2:{test:1}": "2", "3:{test:1}": "three"}
+        assert r.msetex(mapping=mapping, ex=30) == 1
+
+        # NX is set with existing keys - nothing should be saved or updated
+        expire_at = redis_server_time(r) + datetime.timedelta(seconds=10)
+        assert (
+            r.msetex(
+                mapping={"1:{test:1}": "new_value", "new:{test:1}": "ok"},
+                pxat=expire_at,
+                data_persist_option=DataPersistOptions.NX,
+            )
+            == 0
+        )
+
+        ttls = [r.ttl(key) for key in mapping.keys()]
+        for ttl in ttls:
+            assert 10 < ttl <= 30
+        assert r.mget(*mapping.keys(), "new:{test:1}") == [b"1", b"2", b"three", None]
+
+        # NX is set with non existing keys - values should be set
+        assert (
+            r.msetex(
+                mapping={"new:{test:1}": "ok", "new_2:{test:1}": "ok_2"},
+                pxat=expire_at,
+                data_persist_option=DataPersistOptions.NX,
+            )
+            == 1
+        )
+        old_ttls = [r.ttl(key) for key in mapping.keys()]
+        new_ttls = [r.ttl(key) for key in ["new:{test:1}", "new_2:{test:1}"]]
+        for ttl in old_ttls:
+            assert 10 < ttl <= 30
+        for ttl in new_ttls:
+            assert ttl <= 11
+        assert r.mget(*mapping.keys(), "new:{test:1}", "new_2:{test:1}") == [
+            b"1",
+            b"2",
+            b"three",
+            b"ok",
+            b"ok_2",
+        ]
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_msetex_expiration_exat_and_xx_with_cluster_client(self, r):
+        all_test_keys = ["1:{test:1}", "2:{test:1}", "3:{test:1}", "new:{test:1}"]
+        for key in all_test_keys:
+            r.delete(key)
+
+        mapping = {"1:{test:1}": 1, "2:{test:1}": "2", "3:{test:1}": "three"}
+        assert r.msetex(mapping, ex=30) == 1
+
+        expire_at = redis_server_time(r) + datetime.timedelta(seconds=10)
+        ## XX is set with unexisting key - nothing should be saved or updated
+        assert (
+            r.msetex(
+                mapping={"1:{test:1}": "new_value", "new:{test:1}": "ok"},
+                exat=expire_at,
+                data_persist_option=DataPersistOptions.XX,
+            )
+            == 0
+        )
+        ttls = [r.ttl(key) for key in mapping.keys()]
+        for ttl in ttls:
+            assert 10 < ttl <= 30
+        assert r.mget(*mapping.keys(), "new:{test:1}") == [b"1", b"2", b"three", None]
+
+        # XX is set with existing keys - values should be updated
+        assert (
+            r.msetex(
+                mapping={"1:{test:1}": "new_value", "2:{test:1}": "new_value_2"},
+                exat=expire_at,
+                data_persist_option=DataPersistOptions.XX,
+            )
+            == 1
+        )
+        ttls = [r.ttl(key) for key in mapping.keys()]
+        assert ttls[0] <= 11
+        assert ttls[1] <= 11
+        assert 10 < ttls[2] <= 30
+        assert r.mget("1:{test:1}", "2:{test:1}", "3:{test:1}", "new:{test:1}") == [
+            b"new_value",
+            b"new_value_2",
+            b"three",
+            None,
+        ]
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_msetex_invalid_inputs_with_cluster_client(self, r):
+        mapping = {"1": 1, "2": "2", "3": "three"}
+        with pytest.raises(exceptions.RedisClusterException):
+            r.msetex(mapping)
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_msetex_no_expiration(self, r):
+        all_test_keys = ["1", "2"]
+        for key in all_test_keys:
+            r.delete(key)
+
+        # # set items from mapping without expiration
+        assert r.msetex(mapping={"1": 1, "2": b"four"}) == 1
+        assert r.mget("1", "2") == [b"1", b"four"]
+        assert r.ttl("1") == -1
+        assert r.ttl("2") == -1
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_msetex_expiration_ex_and_keepttl(self, r):
+        all_test_keys = ["1", "2"]
+        for key in all_test_keys:
+            r.delete(key)
+
+        # set items from mapping with expiration - testing ex field
+        assert (
+            r.msetex(
+                mapping={"1": 1, "2": "2"},
+                ex=10,
+            )
+            == 1
+        )
+        ttls = [r.ttl(key) for key in all_test_keys]
+        for ttl in ttls:
+            assert pytest.approx(ttl) == 10
+
+        assert r.mget(*all_test_keys) == [b"1", b"2"]
+        time.sleep(1.1)
+        # validate keepttl
+        assert r.msetex(mapping={"1": 11}, keepttl=True) == 1
+        assert r.ttl("1") < 10
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_msetex_expiration_px(self, r):
+        all_test_keys = ["1", "2"]
+        for key in all_test_keys:
+            r.delete(key)
+
+        mapping = {"1": 1, "2": "2"}
+        # set key/value pairs provided in mapping
+        # with expiration - testing px field
+        assert r.msetex(mapping=mapping, px=60000) == 1
+
+        ttls = [r.ttl(key) for key in mapping.keys()]
+        for ttl in ttls:
+            assert pytest.approx(ttl) == 60
+        assert r.mget(*mapping.keys()) == [b"1", b"2"]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_msetex_expiration_pxat_and_nx(self, r):
+        all_test_keys = ["1", "2", "3", "new", "new_2"]
+        for key in all_test_keys:
+            r.delete(key)
+
+        mapping = {"1": 1, "2": "2", "3": "three"}
+        assert r.msetex(mapping=mapping, ex=30) == 1
+
+        # NX is set with existing keys - nothing should be saved or updated
+        expire_at = redis_server_time(r) + datetime.timedelta(seconds=10)
+        assert (
+            r.msetex(
+                mapping={"1": "new_value", "new": "ok"},
+                pxat=expire_at,
+                data_persist_option=DataPersistOptions.NX,
+            )
+            == 0
+        )
+        ttls = [r.ttl(key) for key in mapping.keys()]
+        for ttl in ttls:
+            assert 10 < ttl <= 30
+        assert r.mget(*mapping.keys(), "new") == [b"1", b"2", b"three", None]
+
+        # NX is set with non existing keys - values should be set
+        assert (
+            r.msetex(
+                mapping={"new": "ok", "new_2": "ok_2"},
+                pxat=expire_at,
+                data_persist_option=DataPersistOptions.NX,
+            )
+            == 1
+        )
+        old_ttls = [r.ttl(key) for key in mapping.keys()]
+        new_ttls = [r.ttl(key) for key in ["new", "new_2"]]
+        for ttl in old_ttls:
+            assert 10 < ttl <= 30
+        for ttl in new_ttls:
+            assert ttl <= 11
+        assert r.mget(*mapping.keys(), "new", "new_2") == [
+            b"1",
+            b"2",
+            b"three",
+            b"ok",
+            b"ok_2",
+        ]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_msetex_expiration_exat_and_xx(self, r):
+        all_test_keys = ["1", "2", "3", "new"]
+        for key in all_test_keys:
+            r.delete(key)
+
+        mapping = {"1": 1, "2": "2", "3": "three"}
+        assert r.msetex(mapping, ex=30) == 1
+
+        expire_at = redis_server_time(r) + datetime.timedelta(seconds=10)
+        ## XX is set with unexisting key - nothing should be saved or updated
+        assert (
+            r.msetex(
+                mapping={"1": "new_value", "new": "ok"},
+                exat=expire_at,
+                data_persist_option=DataPersistOptions.XX,
+            )
+            == 0
+        )
+        ttls = [r.ttl(key) for key in mapping.keys()]
+        for ttl in ttls:
+            assert 10 < ttl <= 30
+        assert r.mget(*mapping.keys(), "new") == [b"1", b"2", b"three", None]
+
+        # XX is set with existing keys - values should be updated
+        assert (
+            r.msetex(
+                mapping={"1": "new_value", "2": "new_value_2"},
+                exat=expire_at,
+                data_persist_option=DataPersistOptions.XX,
+            )
+            == 1
+        )
+        ttls = [r.ttl(key) for key in mapping.keys()]
+        assert ttls[0] <= 11
+        assert ttls[1] <= 11
+        assert 10 < ttls[2] <= 30
+        assert r.mget("1", "2", "3", "new") == [
+            b"new_value",
+            b"new_value_2",
+            b"three",
+            None,
+        ]
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_msetex_invalid_inputs(self, r):
+        mapping = {"1": 1, "2": "2"}
+        with pytest.raises(exceptions.DataError):
+            r.msetex(mapping, ex=10, keepttl=True)
 
     @pytest.mark.onlynoncluster
     def test_msetnx(self, r):
@@ -2043,6 +2880,101 @@ class TestRedisCommands:
         r.set("a", "2", keepttl=True)
         assert r.get("a") == b"2"
         assert 0 < r.ttl("a") <= 10
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_set_ifeq_true_sets_and_returns_true(self, r):
+        r.delete("k")
+        r.set("k", b"foo")
+        assert r.set("k", b"bar", ifeq=b"foo") is True
+        assert r.get("k") == b"bar"
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_set_ifeq_false_does_not_set_returns_none(self, r):
+        r.delete("k")
+        r.set("k", b"foo")
+        assert r.set("k", b"bar", ifeq=b"nope") is None
+        assert r.get("k") == b"foo"
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_set_ifne_true_sets(self, r):
+        r.delete("k")
+        r.set("k", b"foo")
+        assert r.set("k", b"bar", ifne=b"zzz") is True
+        assert r.get("k") == b"bar"
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_set_ifne_false_does_not_set(self, r):
+        r.delete("k")
+        r.set("k", b"foo")
+        assert r.set("k", b"bar", ifne=b"foo") is None
+        assert r.get("k") == b"foo"
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_set_ifeq_when_key_missing_does_not_create(self, r):
+        r.delete("k")
+        assert r.set("k", b"bar", ifeq=b"foo") is None
+        assert r.exists("k") == 0
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_set_ifne_when_key_missing_creates(self, r):
+        r.delete("k")
+        assert r.set("k", b"bar", ifne=b"foo") is True
+        assert r.get("k") == b"bar"
+
+    @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.parametrize("val", [b"", b"abc", b"The quick brown fox"])
+    def test_set_ifdeq_and_ifdne(self, r, val):
+        r.delete("k")
+        r.set("k", val)
+        d = self._server_xxh3_digest(r, "k")
+        assert d is not None
+
+        # sanity check: local digest matches server's
+        assert d == self._ensure_str(r.digest_local(val))
+
+        # IFDEQ must match to set; if key missing => won't create
+        assert r.set("k", b"X", ifdeq=d) is True
+        assert r.get("k") == b"X"
+
+        r.delete("k")
+        # key missing + IFDEQ => not created
+        assert r.set("k", b"Y", ifdeq=d) is None
+        assert r.exists("k") == 0
+
+        # IFDNE: create when missing, and set when digest differs
+        assert r.set("k", b"bar", ifdne=d) is True
+        prev_d = self._server_xxh3_digest(r, "k")
+        assert prev_d is not None
+        # If digest equal → do not set
+        assert r.set("k", b"zzz", ifdne=prev_d) is None
+        assert r.get("k") == b"bar"
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_set_with_get_returns_previous_value(self, r):
+        r.delete("k")
+        # when key didn’t exist → returns None, and key is created if condition allows it
+        prev = r.set("k", b"v1", get=True, ifne=b"any")  # IFNE on missing creates
+        assert prev is None
+        # subsequent GET returns previous value, regardless of whether set occurs
+        prev2 = r.set("k", b"v2", get=True, ifeq=b"v1")  # matches → set; returns "v1"
+        assert prev2 == b"v1"
+        prev3 = r.set("k", b"v3", get=True, ifeq=b"no")  # no set; returns previous "v2"
+        assert prev3 == b"v2"
+        assert r.get("k") == b"v2"
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_set_mutual_exclusion_client_side(self, r):
+        r.delete("k")
+        with pytest.raises(DataError):
+            r.set("k", b"v", nx=True, ifeq=b"x")
+        with pytest.raises(DataError):
+            r.set("k", b"v", ifdeq="aa", ifdne="bb")
+        with pytest.raises(DataError):
+            r.set("k", b"v", ex=1, px=1)
+        with pytest.raises(DataError):
+            r.set("k", b"v", exat=1, pxat=1)
+        with pytest.raises(DataError):
+            r.set("k", b"v", ex=1, exat=1)
 
     @skip_if_server_version_lt("6.2.0")
     def test_set_get(self, r):
@@ -2317,6 +3249,8 @@ class TestRedisCommands:
         assert r.lrange("a", 0, 2) == [b"1", b"2", b"3"]
         assert r.lrange("a", 2, 10) == [b"3", b"4", b"5"]
         assert r.lrange("a", 0, -1) == [b"1", b"2", b"3", b"4", b"5"]
+        r.rpush(b"345", "12", "22", "32", "42", "52")
+        assert r.lrange(b"345", 0, 0) == [b"12"]
 
     def test_lrem(self, r):
         r.rpush("a", "Z", "b", "Z", "Z", "c", "Z", "Z")
@@ -2408,6 +3342,99 @@ class TestRedisCommands:
         r.rpush("a", "1", "2", "3")
         assert r.rpushx("a", "4") == 4
         assert r.lrange("a", 0, -1) == [b"1", b"2", b"3", b"4"]
+
+    @pytest.mark.onlynoncluster
+    def test_lists_with_byte_keys(self, r):
+        r.rpush(b"b", b"1", b"2", b"3")
+        assert r.lrange(b"b", 0, -1) == [b"1", b"2", b"3"]
+        # LPOS command with byte keys
+        assert r.lpos(b"b", b"2") == 1
+        assert r.lpos(b"b", b"2", rank=1) == 1
+        assert r.lpos(b"b", b"2", rank=2) is None
+        # LCS command with byte keys
+        r.set(b"key1", b"ohmytext")
+        r.set(b"key2", b"mynewtext")
+        assert r.lcs(b"key1", b"key2") == b"mytext"
+        # TYPE command with byte keys
+        assert r.type(b"b") == b"list"
+        assert r.type(b"key1") == b"string"
+        # SCAN command with byte keys
+        r.set(b"scan_key1", b"value1")
+        r.set(b"scan_key2", b"value2")
+        cursor, keys = r.scan(match=b"scan_key*")
+        assert cursor == 0
+        assert set(keys) == {b"scan_key1", b"scan_key2"}
+        # PEXPIRETIME command with byte keys
+        r.set(b"expire_key", b"value")
+        r.pexpire(b"expire_key", 10000)
+        pexpiretime = r.pexpiretime(b"expire_key")
+        assert pexpiretime > 0
+        # LMOVE command with byte keys (src and dest)
+        r.rpush(b"list_src", b"a", b"b", b"c")
+        r.rpush(b"list_dest", b"x")
+        moved = r.lmove(b"list_src", b"list_dest", src=b"LEFT", dest=b"RIGHT")
+        assert moved == b"a"
+        assert r.lrange(b"list_dest", 0, -1) == [b"x", b"a"]
+        # SMOVE command with byte keys (src and dst)
+        r.sadd(b"set_src", b"member1", b"member2")
+        r.sadd(b"set_dest", b"member3")
+        assert r.smove(b"set_src", b"set_dest", b"member1") == 1
+        assert b"member1" in r.smembers(b"set_dest")
+
+    @pytest.mark.onlynoncluster
+    def test_lists_with_memoryview_keys(self, r):
+        # Create memoryview objects for key names
+        mv_b = memoryview(b"b")
+        mv_key1 = memoryview(b"key1")
+        mv_key2 = memoryview(b"key2")
+        mv_scan_key1 = memoryview(b"scan_key1")
+        mv_scan_key2 = memoryview(b"scan_key2")
+        mv_expire_key = memoryview(b"expire_key")
+        mv_list_src = memoryview(b"list_src")
+        mv_list_dest = memoryview(b"list_dest")
+        mv_set_src = memoryview(b"set_src")
+        mv_set_dest = memoryview(b"set_dest")
+
+        r.rpush(mv_b, b"1", b"2", b"3")
+        assert r.lrange(mv_b, 0, -1) == [b"1", b"2", b"3"]
+        # LPOS command with memoryview keys
+        assert r.lpos(mv_b, b"2") == 1
+        assert r.lpos(mv_b, b"2", rank=1) == 1
+        assert r.lpos(mv_b, b"2", rank=2) is None
+        # LCS command with memoryview keys
+        r.set(mv_key1, b"ohmytext")
+        r.set(mv_key2, b"mynewtext")
+        assert r.lcs(mv_key1, mv_key2) == b"mytext"
+        # TYPE command with memoryview keys
+        assert r.type(mv_b) == b"list"
+        assert r.type(mv_key1) == b"string"
+        # SCAN command with memoryview keys
+        r.set(mv_scan_key1, b"value1")
+        r.set(mv_scan_key2, b"value2")
+        cursor, keys = r.scan(match=memoryview(b"scan_key*"))
+        assert cursor == 0
+        assert set(keys) == {b"scan_key1", b"scan_key2"}
+        # PEXPIRETIME command with memoryview keys
+        r.set(mv_expire_key, b"value")
+        r.pexpire(mv_expire_key, 10000)
+        pexpiretime = r.pexpiretime(mv_expire_key)
+        assert pexpiretime > 0
+        # LMOVE command with memoryview keys (src and dest)
+        r.rpush(mv_list_src, b"a", b"b", b"c")
+        r.rpush(mv_list_dest, b"x")
+        moved = r.lmove(
+            mv_list_src,
+            mv_list_dest,
+            src=memoryview(b"LEFT"),
+            dest=memoryview(b"RIGHT"),
+        )
+        assert moved == b"a"
+        assert r.lrange(mv_list_dest, 0, -1) == [b"x", b"a"]
+        # SMOVE command with memoryview keys (src and dst)
+        r.sadd(mv_set_src, b"member1", b"member2")
+        r.sadd(mv_set_dest, b"member3")
+        assert r.smove(mv_set_src, mv_set_dest, b"member1") == 1
+        assert b"member1" in r.smembers(mv_set_dest)
 
     # SCAN COMMANDS
     @pytest.mark.onlynoncluster
@@ -4862,6 +5889,58 @@ class TestRedisCommands:
         consumer = info["groups"][0]["consumers"][0]
         assert isinstance(consumer, dict)
 
+    @skip_if_server_version_lt("8.5.0")
+    def test_xinfo_stream_idempotent_fields(self, r):
+        stream = "stream"
+
+        # Create stream with regular entry
+        r.xadd(stream, {"foo": "bar"})
+        info = r.xinfo_stream(stream)
+
+        # Verify new idempotent producer fields are present with default values
+        assert "idmp-duration" in info
+        assert "idmp-maxsize" in info
+        assert "pids-tracked" in info
+        assert "iids-tracked" in info
+        assert "iids-added" in info
+        assert "iids-duplicates" in info
+
+        # Default values (before any idempotent entries)
+        assert info["pids-tracked"] == 0
+        assert info["iids-tracked"] == 0
+        assert info["iids-added"] == 0
+        assert info["iids-duplicates"] == 0
+
+        # Add idempotent entry
+        r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
+        info = r.xinfo_stream(stream)
+
+        # After adding idempotent entry
+        assert info["pids-tracked"] == 1  # One producer tracked
+        assert info["iids-tracked"] == 1  # One iid tracked
+        assert info["iids-added"] == 1  # One idempotent entry added
+        assert info["iids-duplicates"] == 0  # No duplicates yet
+
+        # Add duplicate entry
+        r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
+        info = r.xinfo_stream(stream)
+
+        # After duplicate
+        assert info["pids-tracked"] == 1  # Still one producer
+        assert info["iids-tracked"] == 1  # Still one iid (duplicate doesn't add new)
+        assert info["iids-added"] == 1  # Still one unique entry
+        assert info["iids-duplicates"] == 1  # One duplicate detected
+
+        # Add entry from different producer
+        r.xadd(stream, {"field2": "value2"}, idmpauto="producer2")
+        info = r.xinfo_stream(stream)
+
+        # After second producer
+        assert info["pids-tracked"] == 2  # Two producers tracked
+        assert info["iids-tracked"] == 2  # Two iids tracked
+        assert info["iids-added"] == 2  # Two unique entries
+        assert info["iids-duplicates"] == 1  # Still one duplicate
+
     @skip_if_server_version_lt("5.0.0")
     def test_xlen(self, r):
         stream = "stream"
@@ -5108,6 +6187,322 @@ class TestRedisCommands:
             {stream_name: [expected_entries]},
         )
 
+    def _validate_xreadgroup_with_claim_min_idle_time_response(
+        self, r, response, expected_entries
+    ):
+        # validate the number of streams
+        assert len(response) == len(expected_entries)
+
+        expected_streams = expected_entries.keys()
+        for str_index, expected_stream in enumerate(expected_streams):
+            expected_entries_per_stream = expected_entries[expected_stream]
+
+            if is_resp2_connection(r):
+                actual_entries_per_stream = response[str_index][1]
+                actual_stream = response[str_index][0]
+                assert actual_stream == expected_stream
+            else:
+                actual_entries_per_stream = response[expected_stream][0]
+
+            # validate the number of entries
+            assert len(actual_entries_per_stream) == len(expected_entries_per_stream)
+
+            for i, entry in enumerate(actual_entries_per_stream):
+                message = (entry[0], entry[1])
+                message_idle = int(entry[2])
+                message_delivered_count = int(entry[3])
+
+                expected_idle = expected_entries_per_stream[i]["min_idle_time"]
+
+                assert message == expected_entries_per_stream[i]["msg"]
+                if expected_idle == 0:
+                    assert message_idle == 0
+                    assert message_delivered_count == 0
+                else:
+                    assert message_idle >= expected_idle
+                    assert message_delivered_count > 0
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_xreadgroup_with_claim_min_idle_time(self, r):
+        stream = "stream"
+        group = "group"
+        consumer_1 = "c1"
+        stream_name = stream.encode()
+
+        try:
+            # before test cleanup
+            r.xgroup_destroy(stream, group)
+        except ResponseError:
+            pass
+
+        m1 = r.xadd(stream, {"key_m1": "val_m1"})
+        m2 = r.xadd(stream, {"key_m2": "val_m2"})
+
+        r.xgroup_create(stream, group, 0)
+
+        # read all the messages - this will save the msgs in PEL
+        r.xreadgroup(group, consumer_1, streams={stream: ">"})
+
+        # wait for 100ms - so that the messages would have been in the PEL for long enough
+        time.sleep(0.1)
+
+        m3 = r.xadd(stream, {"key_m3": "val_m3"})
+        m4 = r.xadd(stream, {"key_m4": "val_m4"})
+
+        expected_entries = {
+            stream_name: [
+                {"msg": get_stream_message(r, stream, m1), "min_idle_time": 100},
+                {"msg": get_stream_message(r, stream, m2), "min_idle_time": 100},
+                {"msg": get_stream_message(r, stream, m3), "min_idle_time": 0},
+                {"msg": get_stream_message(r, stream, m4), "min_idle_time": 0},
+            ]
+        }
+
+        res = r.xreadgroup(
+            group, consumer_1, streams={stream: ">"}, claim_min_idle_time=100
+        )
+
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
+        # validate PEL still holds the messages until they are acknowledged
+        response = r.xpending_range(stream, group, min="-", max="+", count=5)
+        assert len(response) == 4
+
+        # add 2 more messages
+        m5 = r.xadd(stream, {"key_m5": "val_m5"})
+        m6 = r.xadd(stream, {"key_m6": "val_m6"})
+
+        expected_entries = [
+            get_stream_message(r, stream, m5),
+            get_stream_message(r, stream, m6),
+        ]
+        # read all the messages - this will save the msgs in PEL
+        res = r.xreadgroup(group, consumer_1, streams={stream: ">"})
+        assert_resp_response(
+            r,
+            res,
+            [[stream_name, expected_entries]],
+            {stream_name: [expected_entries]},
+        )
+
+        # add 2 more messages
+        m7 = r.xadd(stream, {"key_m7": "val_m7"})
+        m8 = r.xadd(stream, {"key_m8": "val_m8"})
+        # read the messages with claim_min_idle_time=1000
+        # only m7 and m8 should be returned
+        # because the other messages have not been in the PEL for long enough
+        expected_entries = {
+            stream_name: [
+                {"msg": get_stream_message(r, stream, m7), "min_idle_time": 0},
+                {"msg": get_stream_message(r, stream, m8), "min_idle_time": 0},
+            ]
+        }
+        res = r.xreadgroup(
+            group, consumer_1, streams={stream: ">"}, claim_min_idle_time=100
+        )
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_xreadgroup_with_claim_min_idle_time_multiple_streams_same_slots(self, r):
+        stream_1 = "stream1:{same_slot:42}"
+        stream_2 = "stream2:{same_slot:42}"
+        group = "group"
+        consumer_1 = "c1"
+
+        stream_1_name = stream_1.encode()
+        stream_2_name = stream_2.encode()
+
+        # before test cleanup
+        try:
+            r.xgroup_destroy(stream_1, group)
+        except ResponseError:
+            pass
+        try:
+            r.xgroup_destroy(stream_2, group)
+        except ResponseError:
+            pass
+
+        m1_s1 = r.xadd(stream_1, {"key_m1_s1": "val_m1"})
+        m2_s1 = r.xadd(stream_1, {"key_m2_s1": "val_m2"})
+        r.xgroup_create(stream_1, group, 0)
+
+        m1_s2 = r.xadd(stream_2, {"key_m1_s2": "val_m1"})
+        m2_s2 = r.xadd(stream_2, {"key_m2_s2": "val_m2"})
+        r.xgroup_create(stream_2, group, 0)
+
+        # read all the messages - this will save the msgs in PEL
+        r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
+
+        # wait for 100ms - so that the messages would have been in the PEL for long enough
+        time.sleep(0.1)
+
+        m3_s1 = r.xadd(stream_1, {"key_m3_s1": "val_m3"})
+        m4_s2 = r.xadd(stream_2, {"key_m4_s2": "val_m4"})
+
+        expected_entries = {
+            stream_1_name: [
+                {"msg": get_stream_message(r, stream_1, m1_s1), "min_idle_time": 100},
+                {"msg": get_stream_message(r, stream_1, m2_s1), "min_idle_time": 100},
+                {"msg": get_stream_message(r, stream_1, m3_s1), "min_idle_time": 0},
+            ],
+            stream_2_name: [
+                {"msg": get_stream_message(r, stream_2, m1_s2), "min_idle_time": 100},
+                {"msg": get_stream_message(r, stream_2, m2_s2), "min_idle_time": 100},
+                {"msg": get_stream_message(r, stream_2, m4_s2), "min_idle_time": 0},
+            ],
+        }
+
+        res = r.xreadgroup(
+            group,
+            consumer_1,
+            streams={stream_1: ">", stream_2: ">"},
+            claim_min_idle_time=100,
+        )
+
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
+        # validate PEL still holds the messages until they are acknowledged
+        response = r.xpending_range(stream_1, group, min="-", max="+", count=5)
+        assert len(response) == 3
+        response = r.xpending_range(stream_2, group, min="-", max="+", count=5)
+        assert len(response) == 3
+
+        # add 2 more messages
+        r.xadd(stream_1, {"key_m5": "val_m5"})
+        r.xadd(stream_2, {"key_m6": "val_m6"})
+
+        # read all the messages - this will save the msgs in PEL
+        r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
+
+        # add 2 more messages
+        m7 = r.xadd(stream_1, {"key_m7": "val_m7"})
+        m8 = r.xadd(stream_2, {"key_m8": "val_m8"})
+        # read the messages with claim_min_idle_time=1000
+        # only m7 and m8 should be returned
+        # because the other messages have not been in the PEL for long enough
+        expected_entries = {
+            stream_1_name: [
+                {"msg": get_stream_message(r, stream_1, m7), "min_idle_time": 0}
+            ],
+            stream_2_name: [
+                {"msg": get_stream_message(r, stream_2, m8), "min_idle_time": 0}
+            ],
+        }
+        res = r.xreadgroup(
+            group,
+            consumer_1,
+            streams={stream_1: ">", stream_2: ">"},
+            claim_min_idle_time=100,
+        )
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_xreadgroup_with_claim_min_idle_time_multiple_streams(self, r):
+        stream_1 = "stream1"
+        stream_2 = "stream2"
+        group = "group"
+        consumer_1 = "c1"
+
+        stream_1_name = stream_1.encode()
+        stream_2_name = stream_2.encode()
+
+        # before test cleanup
+        try:
+            r.xgroup_destroy(stream_1, group)
+        except ResponseError:
+            pass
+        try:
+            r.xgroup_destroy(stream_2, group)
+        except ResponseError:
+            pass
+
+        m1_s1 = r.xadd(stream_1, {"key_m1_s1": "val_m1"})
+        m2_s1 = r.xadd(stream_1, {"key_m2_s1": "val_m2"})
+        r.xgroup_create(stream_1, group, 0)
+
+        m1_s2 = r.xadd(stream_2, {"key_m1_s2": "val_m1"})
+        m2_s2 = r.xadd(stream_2, {"key_m2_s2": "val_m2"})
+        r.xgroup_create(stream_2, group, 0)
+
+        # read all the messages - this will save the msgs in PEL
+        r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
+
+        # wait for 100ms - so that the messages would have been in the PEL for long enough
+        time.sleep(0.1)
+
+        m3_s1 = r.xadd(stream_1, {"key_m3_s1": "val_m3"})
+        m4_s2 = r.xadd(stream_2, {"key_m4_s2": "val_m4"})
+
+        expected_entries = {
+            stream_1_name: [
+                {"msg": get_stream_message(r, stream_1, m1_s1), "min_idle_time": 100},
+                {"msg": get_stream_message(r, stream_1, m2_s1), "min_idle_time": 100},
+                {"msg": get_stream_message(r, stream_1, m3_s1), "min_idle_time": 0},
+            ],
+            stream_2_name: [
+                {"msg": get_stream_message(r, stream_2, m1_s2), "min_idle_time": 100},
+                {"msg": get_stream_message(r, stream_2, m2_s2), "min_idle_time": 100},
+                {"msg": get_stream_message(r, stream_2, m4_s2), "min_idle_time": 0},
+            ],
+        }
+
+        res = r.xreadgroup(
+            group,
+            consumer_1,
+            streams={stream_1: ">", stream_2: ">"},
+            claim_min_idle_time=100,
+        )
+
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
+        # validate PEL still holds the messages until they are acknowledged
+        response = r.xpending_range(stream_1, group, min="-", max="+", count=5)
+        assert len(response) == 3
+        response = r.xpending_range(stream_2, group, min="-", max="+", count=5)
+        assert len(response) == 3
+
+        # add 2 more messages
+        r.xadd(stream_1, {"key_m5": "val_m5"})
+        r.xadd(stream_2, {"key_m6": "val_m6"})
+
+        # read all the messages - this will save the msgs in PEL
+        r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
+
+        # add 2 more messages
+        m7 = r.xadd(stream_1, {"key_m7": "val_m7"})
+        m8 = r.xadd(stream_2, {"key_m8": "val_m8"})
+        # read the messages with claim_min_idle_time=1000
+        # only m7 and m8 should be returned
+        # because the other messages have not been in the PEL for long enough
+        expected_entries = {
+            stream_1_name: [
+                {"msg": get_stream_message(r, stream_1, m7), "min_idle_time": 0}
+            ],
+            stream_2_name: [
+                {"msg": get_stream_message(r, stream_2, m8), "min_idle_time": 0}
+            ],
+        }
+        res = r.xreadgroup(
+            group,
+            consumer_1,
+            streams={stream_1: ">", stream_2: ">"},
+            claim_min_idle_time=100,
+        )
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
     @skip_if_server_version_lt("5.0.0")
     def test_xrevrange(self, r):
         stream = "stream"
@@ -5329,6 +6724,165 @@ class TestRedisCommands:
         # Test error case
         with pytest.raises(redis.DataError):
             r.xadd(stream, {"foo": "bar"}, ref_policy="INVALID")
+
+    @skip_if_server_version_lt("8.5.0")
+    def test_xadd_idmpauto(self, r):
+        stream = "stream"
+
+        # XADD with IDMPAUTO - first write
+        message_id1 = r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
+
+        # Test XADD with IDMPAUTO - duplicate write returns same ID
+        message_id2 = r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
+        assert message_id1 == message_id2
+
+        # Test XADD with IDMPAUTO - different content creates new entry
+        message_id3 = r.xadd(stream, {"field1": "value2"}, idmpauto="producer1")
+        assert message_id3 != message_id1
+
+        # Test XADD with IDMPAUTO - different producer creates new entry
+        message_id4 = r.xadd(stream, {"field1": "value1"}, idmpauto="producer2")
+        assert message_id4 != message_id1
+
+        # Verify stream has 3 entries (2 unique from producer1, 1 from producer2)
+        assert r.xlen(stream) == 3
+
+    @skip_if_server_version_lt("8.5.0")
+    def test_xadd_idmp(self, r):
+        stream = "stream"
+
+        # XADD with IDMP - first write
+        message_id1 = r.xadd(stream, {"field1": "value1"}, idmp=("producer1", b"msg1"))
+
+        # Test XADD with IDMP - duplicate write returns same ID
+        message_id2 = r.xadd(stream, {"field1": "value1"}, idmp=("producer1", b"msg1"))
+        assert message_id1 == message_id2
+
+        # Test XADD with IDMP - different iid creates new entry
+        message_id3 = r.xadd(stream, {"field1": "value1"}, idmp=("producer1", b"msg2"))
+        assert message_id3 != message_id1
+
+        # Test XADD with IDMP - different producer creates new entry
+        message_id4 = r.xadd(stream, {"field1": "value1"}, idmp=("producer2", b"msg1"))
+        assert message_id4 != message_id1
+
+        # Test XADD with IDMP - shorter binary iid
+        r.xadd(stream, {"field1": "value1"}, idmp=("producer1", b"\x01"))
+
+        # Verify stream has 4 entries
+        assert r.xlen(stream) == 4
+
+    @skip_if_server_version_lt("8.5.0")
+    def test_xadd_idmp_validation(self, r):
+        stream = "stream"
+
+        # Test error: both idmpauto and idmp specified
+        with pytest.raises(redis.DataError):
+            r.xadd(
+                stream,
+                {"foo": "bar"},
+                idmpauto="producer1",
+                idmp=("producer1", b"msg1"),
+            )
+
+        # Test error: idmpauto with explicit id
+        with pytest.raises(redis.DataError):
+            r.xadd(stream, {"foo": "bar"}, id="1234567890-0", idmpauto="producer1")
+
+        # Test error: idmp with explicit id
+        with pytest.raises(redis.DataError):
+            r.xadd(
+                stream, {"foo": "bar"}, id="1234567890-0", idmp=("producer1", b"msg1")
+            )
+
+        # Test error: idmp not a tuple
+        with pytest.raises(redis.DataError):
+            r.xadd(stream, {"foo": "bar"}, idmp="invalid")
+
+        # Test error: idmp tuple with wrong number of elements
+        with pytest.raises(redis.DataError):
+            r.xadd(stream, {"foo": "bar"}, idmp=("producer1",))
+
+        # Test error: idmp tuple with wrong number of elements
+        with pytest.raises(redis.DataError):
+            r.xadd(stream, {"foo": "bar"}, idmp=("producer1", b"msg1", "extra"))
+
+    @skip_if_server_version_lt("8.5.0")
+    def test_xcfgset_idmp_duration(self, r):
+        stream = "stream"
+
+        # Create stream first
+        r.xadd(stream, {"foo": "bar"})
+
+        # Test XCFGSET with IDMP-DURATION only
+        assert r.xcfgset(stream, idmp_duration=120) == b"OK"
+
+        # Test with minimum value
+        assert r.xcfgset(stream, idmp_duration=1) == b"OK"
+
+        # Test with maximum value
+        assert r.xcfgset(stream, idmp_duration=300) == b"OK"
+
+    @skip_if_server_version_lt("8.5.0")
+    def test_xcfgset_idmp_maxsize(self, r):
+        stream = "stream"
+
+        # Create stream first
+        r.xadd(stream, {"foo": "bar"})
+
+        # Test XCFGSET with IDMP-MAXSIZE only
+        assert r.xcfgset(stream, idmp_maxsize=5000) == b"OK"
+
+        # Test with minimum value
+        assert r.xcfgset(stream, idmp_maxsize=1) == b"OK"
+
+        # Test with maximum value
+        assert r.xcfgset(stream, idmp_maxsize=10000) == b"OK"
+
+    @skip_if_server_version_lt("8.5.0")
+    def test_xcfgset_both_parameters(self, r):
+        stream = "stream"
+
+        # Create stream first
+        r.xadd(stream, {"foo": "bar"})
+
+        # Test XCFGSET with both IDMP-DURATION and IDMP-MAXSIZE
+        assert r.xcfgset(stream, idmp_duration=120, idmp_maxsize=5000) == b"OK"
+
+        # Test with different values
+        assert r.xcfgset(stream, idmp_duration=60, idmp_maxsize=10000) == b"OK"
+
+    @skip_if_server_version_lt("8.5.0")
+    def test_xcfgset_validation(self, r):
+        stream = "stream"
+
+        # Test error: no parameters provided
+        with pytest.raises(redis.DataError):
+            r.xcfgset(stream)
+
+        # Test error: idmp_duration too small
+        with pytest.raises(redis.DataError):
+            r.xcfgset(stream, idmp_duration=0)
+
+        # Test error: idmp_duration too large
+        with pytest.raises(redis.DataError):
+            r.xcfgset(stream, idmp_duration=301)
+
+        # Test error: idmp_duration not an integer
+        with pytest.raises(redis.DataError):
+            r.xcfgset(stream, idmp_duration="invalid")
+
+        # Test error: idmp_maxsize too small
+        with pytest.raises(redis.DataError):
+            r.xcfgset(stream, idmp_maxsize=0)
+
+        # Test error: idmp_maxsize too large
+        with pytest.raises(redis.DataError):
+            r.xcfgset(stream, idmp_maxsize=1000001)
+
+        # Test error: idmp_maxsize not an integer
+        with pytest.raises(redis.DataError):
+            r.xcfgset(stream, idmp_maxsize="invalid")
 
     def test_bitfield_operations(self, r):
         # comments show affected bits

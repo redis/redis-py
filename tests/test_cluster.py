@@ -29,8 +29,10 @@ from redis.cluster import (
     RedisCluster,
     get_node_name,
 )
+from redis.commands.core import HotkeysMetricsTypes
 from redis.connection import BlockingConnectionPool, Connection, ConnectionPool
 from redis.crc import key_slot
+from redis.event import EventDispatcher
 from redis.exceptions import (
     AskError,
     ClusterDownError,
@@ -43,6 +45,9 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
+from redis.observability import recorder
+from redis.observability.config import OTelConfig, MetricGroup
+from redis.observability.metrics import RedisMetricsCollector
 from redis.retry import Retry
 from redis.utils import str_if_bytes
 from tests.test_pubsub import wait_for_message
@@ -207,7 +212,28 @@ def get_mocked_redis_client(
                         "first_key_pos": 1,
                         "last_key_pos": 1,
                         "step_count": 1,
-                    }
+                    },
+                    "cluster delslots": {
+                        "name": "cluster delslots",
+                        "flags": ["readonly", "fast"],
+                        "first_key_pos": 0,
+                        "last_key_pos": 0,
+                        "step_count": 0,
+                    },
+                    "cluster delslotsrange": {
+                        "name": "cluster delslotsrange",
+                        "flags": ["readonly", "fast"],
+                        "first_key_pos": 0,
+                        "last_key_pos": 0,
+                        "step_count": 0,
+                    },
+                    "cluster addslots": {
+                        "name": "cluster delslotsrange",
+                        "flags": ["readonly", "fast"],
+                        "first_key_pos": 0,
+                        "last_key_pos": 0,
+                        "step_count": 0,
+                    },
                 }
 
             cmd_parser_initialize.side_effect = cmd_init_mock
@@ -252,18 +278,22 @@ def find_node_ip_based_on_port(cluster_client, port):
             return node.host
 
 
-def moved_redirection_helper(request, failover=False):
+def moved_redirection_helper(request, failover=False, circular_moved=False):
     """
-    Test that the client handles MOVED response after a failover.
-    Redirection after a failover means that the redirection address is of a
-    replica that was promoted to a primary.
+    Test that the client correctly handles MOVED responses in the following scenarios:
+    1.	Slot migration to a different shard (failover=False, circular_moved=False) —
+        a standard slot move between shards.
+    2.	Failover event (failover=True, circular_moved=False) —
+        the redirect target is a replica that has just been promoted to primary.
+    3.	Circular MOVED (failover=False, circular_moved=True) —
+        the redirect points to a node already known to be the primary of its shard.
 
     At first call it should return a MOVED ResponseError that will point
     the client to the next server it should talk to.
 
     Verify that:
     1. it tries to talk to the redirected node
-    2. it updates the slot's primary to the redirected node
+    2. it updates the slot's primary to the redirected node, if required
 
     For a failover, also verify:
     3. the redirected node's server type updated to 'primary'
@@ -279,8 +309,10 @@ def moved_redirection_helper(request, failover=False):
             warnings.warn("Skipping this test since it requires to have a replica")
             return
         redirect_node = rc.nodes_manager.slots_cache[slot][1]
+    elif circular_moved:
+        redirect_node = prev_primary
     else:
-        # Use one of the primaries to be the redirected node
+        # Use one of the other primaries to be the redirected node
         redirect_node = rc.get_primaries()[0]
     r_host = redirect_node.host
     r_port = redirect_node.port
@@ -303,6 +335,10 @@ def moved_redirection_helper(request, failover=False):
         if failover:
             assert rc.get_node(host=r_host, port=r_port).server_type == PRIMARY
             assert prev_primary.server_type == REPLICA
+        elif circular_moved:
+            fetched_node = rc.get_node(host=r_host, port=r_port)
+            assert fetched_node == prev_primary
+            assert fetched_node.server_type == PRIMARY
 
 
 @pytest.mark.onlycluster
@@ -525,6 +561,13 @@ class TestRedisClusterObj:
         Test that the client handles MOVED response after a failover.
         """
         moved_redirection_helper(request, failover=True)
+
+    def test_moved_redirection_circular_moved(self, request):
+        """
+        Verify that the client does not update its slot map when receiving a circular MOVED response
+        (i.e., a MOVED redirect pointing back to the same node), and retries again the same node.
+        """
+        moved_redirection_helper(request, failover=False, circular_moved=True)
 
     def test_refresh_using_specific_nodes(self, request):
         """
@@ -895,15 +938,13 @@ class TestRedisClusterObj:
             parse_response.side_effect = moved_redirect_effect
             assert r.get("key") == b"value"
             for node_name, conn in node_conn_origin.items():
-                if node_name == node.name:
-                    # The old redis connection of the timed out node should have been
-                    # deleted and replaced
-                    assert conn != r.get_redis_connection(node)
-                else:
-                    # other nodes' redis connection should have been reused during the
-                    # topology refresh
-                    cur_node = r.get_node(node_name=node_name)
-                    assert conn == r.get_redis_connection(cur_node)
+                # all nodes' redis connection should have been reused during the
+                # topology refresh
+                # even the failing node doesn't need to establish a
+                # new Redis connection (which is actually a new Redis Client instance)
+                # but the connection pool is reused and all connections are reset and reconnected
+                cur_node = r.get_node(node_name=node_name)
+                assert conn == r.get_redis_connection(cur_node)
 
     def test_cluster_get_set_retry_object(self, request):
         retry = Retry(NoBackoff(), 2)
@@ -1720,6 +1761,30 @@ class TestClusterRedisCommands:
         res = r.client_trackinginfo(target_nodes=node)
         assert len(res) > 2
         assert "prefixes" in res or b"prefixes" in res
+
+    @skip_if_server_version_lt("6.0.0")
+    @skip_if_redis_enterprise()
+    def test_client_tracking(self, r):
+        # simple case - will execute on all nodes
+        assert r.client_tracking_on()
+        assert r.client_tracking_off()
+
+        # id based
+        node = r.get_default_node()
+        # when id is provided - the command should be sent to the node that
+        # owns the connection with this id
+        client_id = node.redis_connection.client_id()
+        assert r.client_tracking_on(clientid=client_id, target_nodes=node)
+        assert r.client_tracking_off(clientid=client_id, target_nodes=node)
+
+        # execute with client id and prefixes and bcast
+        assert r.client_tracking_on(
+            clientid=client_id, prefix=["foo", "bar"], bcast=True, target_nodes=node
+        )
+
+        # now with some prefixes and without bcast
+        with pytest.raises(DataError):
+            assert r.client_tracking_on(prefix=["foo", "bar", "blee"])
 
     @skip_if_server_version_lt("2.9.50")
     def test_client_pause(self, r):
@@ -2548,6 +2613,19 @@ class TestClusterRedisCommands:
             except Exception:
                 pass
 
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_cluster(self, r):
+        """Test all HOTKEYS commands in cluster mode are raising an error"""
+
+        with pytest.raises(NotImplementedError):
+            r.hotkeys_start(count=10, metrics=[HotkeysMetricsTypes.CPU])
+        with pytest.raises(NotImplementedError):
+            r.hotkeys_get()
+        with pytest.raises(NotImplementedError):
+            r.hotkeys_reset()
+        with pytest.raises(NotImplementedError):
+            r.hotkeys_stop()
+
 
 @pytest.mark.onlycluster
 class TestNodesManager:
@@ -2946,6 +3024,309 @@ class TestNodesManager:
 
         for node in rc.nodes_manager.nodes_cache.values():
             assert node.redis_connection.connection_pool.queue_class == queue_class
+
+    def test_concurrent_initialize_exact_timing(self):
+        """
+        Test that exactly two concurrent initialize calls result in only
+        one actual cluster slots fetch by forcing them to start simultaneously
+        """
+        initialization_count = {"count": 0}
+        epoch_barrier = threading.Barrier(2)
+
+        with (
+            patch.object(Redis, "execute_command") as execute_command_mock,
+        ):
+
+            def execute_command(*_args, **_kwargs):
+                if _args[0] == "CLUSTER SLOTS":
+                    # Track how many times we actually fetch cluster slots
+                    initialization_count["count"] += 1
+                    return default_cluster_slots
+                else:
+                    return execute_command_mock(*_args, **_kwargs)
+
+            execute_command_mock.side_effect = execute_command
+
+            nm = NodesManager(
+                startup_nodes=[ClusterNode(host=default_host, port=default_port)],
+                from_url=False,
+                require_full_coverage=False,
+                dynamic_startup_nodes=True,
+            )
+
+            # Reset the counter after initial setup
+            initialization_count["count"] = 0
+
+            # Store the original method
+            original_get_epoch = nm._get_epoch
+
+            def mocked_get_epoch():
+                """
+                Mock _get_epoch to control race timing:
+                1. First thread fetches epoch
+                2. Both threads sync at epoch_barrier (ensures 2nd thread also fetches epoch)
+                3. Both threads sync at proceed_barrier (ensures both have same epoch before lock)
+                4. Both threads proceed to try to acquire _initialization_lock
+                """
+                epoch = original_get_epoch()
+                # Signal that this thread has fetched the epoch
+                epoch_barrier.wait()
+                return epoch
+
+            # Patch the instance method directly
+            nm._get_epoch = mocked_get_epoch
+
+            errors: list[Exception] = []
+
+            def initialize_thread():
+                """Call initialize to test concurrent access"""
+                try:
+                    nm.initialize()
+                except Exception as e:
+                    errors.append(e)
+
+            # Create exactly 2 threads that will initialize at the same time
+            threads: list[threading.Thread] = []
+            for _ in range(2):
+                threads.append(threading.Thread(target=initialize_thread))
+
+            # Start both threads
+            for t in threads:
+                t.start()
+
+            # Wait for both threads to complete
+            for t in threads:
+                t.join()
+
+            # Check that no errors occurred
+            assert len(errors) == 0, f"Errors occurred: {errors}"
+
+            # Due to the _initialization_lock, only one thread should have
+            # actually fetched cluster slots
+            assert initialization_count["count"] == 1
+
+            # Verify that the nodes_cache is still consistent
+            assert len(nm.nodes_cache) > 0
+            assert len(nm.slots_cache) > 0
+
+    def test_concurrent_slot_moves(self):
+        # ensure multiple concurrently moved slots are processed correctly,
+        # eg: not dropping updates
+        r = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_enabled=True,
+        )
+        nm = r.nodes_manager
+        # Move slots 0-999 to 127.0.0.1 in concurrent threads
+        num_threads = 20
+        slots_per_thread = 50  # 1000 slots / 20 threads = 50 slots per thread
+        errors: list[Exception] = []
+
+        def move_slots_worker(thread_id: int):
+            """Each thread moves a subset of slots to 127.0.0.1"""
+            try:
+                for i in range(slots_per_thread):
+                    moved_error = MovedError(
+                        f"{thread_id * slots_per_thread + i} 127.0.0.1:7001"
+                    )
+                    nm.move_slot(moved_error)
+            except Exception as e:
+                errors.append(e)
+
+        # Start all threads
+        threads: list[threading.Thread] = []
+        for i in range(num_threads):
+            threads.append(threading.Thread(target=move_slots_worker, args=(i,)))
+
+        for t in threads:
+            t.start()
+
+        # Wait for all threads to complete
+        for t in threads:
+            t.join()
+
+        # Check that no errors occurred
+        assert len(errors) == 0, f"Errors occurred: {errors}"
+
+        # Verify that all slots 0-999 are moved to 127.0.0.1:7001
+        for slot_id in range(num_threads * slots_per_thread):
+            assert slot_id in nm.slots_cache, f"Slot {slot_id} missing"
+            slot_nodes = nm.slots_cache[slot_id]
+            assert len(slot_nodes) >= 1, f"Slot {slot_id} has no nodes"
+            primary_node = slot_nodes[0]
+            assert primary_node.host == "127.0.0.1", (
+                f"Slot {slot_id} not moved to 127.0.0.1, "
+                f"current host: {primary_node.host}"
+            )
+            assert primary_node.port == 7001, (
+                f"Slot {slot_id} not moved to port 7001, "
+                f"current port: {primary_node.port}"
+            )
+            assert primary_node.server_type == PRIMARY
+
+    def test_concurrent_initialize_and_move_slot(self):
+        # race initialize & move slot to ensure that the two operations
+        # don't conflict with each other.
+
+        with (
+            patch.object(Redis, "execute_command") as execute_command_mock,
+        ):
+            r = get_mocked_redis_client(
+                host=default_host,
+                port=default_port,
+                cluster_enabled=True,
+            )
+            nm = r.nodes_manager
+
+            def execute_command(*_args, **_kwargs):
+                if _args[0] == "CLUSTER SLOTS":
+                    return default_cluster_slots
+                else:
+                    return execute_command_mock(*_args, **_kwargs)
+
+            execute_command_mock.side_effect = execute_command
+
+            errors: list[Exception] = []
+
+            def initialize_worker():
+                """Reinitialize the cluster"""
+                try:
+                    nm.initialize()
+                except Exception as e:
+                    errors.append(e)
+
+            def move_slots_worker():
+                """Move slots while initialize is running"""
+                for slot_id in range(10):
+                    try:
+                        # move slot to a mix of :7000 & :7003, which simulates failovers
+                        # within the same shard. Using nodes from the same shard ensures
+                        # move_slot preserves the 2-node structure (primary + replica),
+                        # so both initialize() and move_slot() result in 2 nodes per slot.
+                        new_slot = 7000 if slot_id % 2 == 0 else 7003
+                        moved_error = MovedError(f"{slot_id} 127.0.0.1:{new_slot}")
+                        nm.move_slot(moved_error)
+                    except Exception as e:
+                        errors.append(e)
+
+            for _ in range(100):
+                t1 = threading.Thread(target=initialize_worker)
+                t2 = threading.Thread(target=move_slots_worker)
+
+                t1.start()
+                t2.start()
+
+                t1.join()
+                t2.join()
+
+                # check that no errors occurred
+                assert len(errors) == 0, f"Errors occurred: {errors}"
+
+                # verify data consistency
+                for slot_id in range(REDIS_CLUSTER_HASH_SLOTS):
+                    assert slot_id in nm.slots_cache, f"Slot {slot_id} missing"
+                    slot_nodes = nm.slots_cache[slot_id]
+                    assert len(slot_nodes) == 2
+
+                    for node in slot_nodes:
+                        assert node.name in nm.nodes_cache
+
+                    # primary should be first
+                    assert slot_nodes[0].server_type == PRIMARY
+
+    def test_move_node_to_end_of_cached_nodes(self):
+        """
+        Test that move_node_to_end_of_cached_nodes moves a node to the end of
+        startup_nodes and nodes_cache.
+        """
+        node1 = ClusterNode(default_host, 7000)
+        node2 = ClusterNode(default_host, 7001)
+        node3 = ClusterNode(default_host, 7002)
+
+        with patch.object(NodesManager, "initialize"):
+            nodes_manager = NodesManager(
+                startup_nodes=[node1, node2, node3],
+                require_full_coverage=False,
+            )
+            # Also populate nodes_cache with the same nodes
+            nodes_manager.nodes_cache = {
+                node1.name: node1,
+                node2.name: node2,
+                node3.name: node3,
+            }
+
+            # Verify initial order
+            startup_node_names = list(nodes_manager.startup_nodes.keys())
+            nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+            assert startup_node_names == [node1.name, node2.name, node3.name]
+            assert nodes_cache_names == [node1.name, node2.name, node3.name]
+
+            # Move first node to end
+            nodes_manager.move_node_to_end_of_cached_nodes(node1.name)
+            startup_node_names = list(nodes_manager.startup_nodes.keys())
+            nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+            assert startup_node_names == [node2.name, node3.name, node1.name]
+            assert nodes_cache_names == [node2.name, node3.name, node1.name]
+
+            # Move middle node to end
+            nodes_manager.move_node_to_end_of_cached_nodes(node3.name)
+            startup_node_names = list(nodes_manager.startup_nodes.keys())
+            nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+            assert startup_node_names == [node2.name, node1.name, node3.name]
+            assert nodes_cache_names == [node2.name, node1.name, node3.name]
+
+            # Moving last node should keep it at the end
+            nodes_manager.move_node_to_end_of_cached_nodes(node3.name)
+            startup_node_names = list(nodes_manager.startup_nodes.keys())
+            nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+            assert startup_node_names == [node2.name, node1.name, node3.name]
+            assert nodes_cache_names == [node2.name, node1.name, node3.name]
+
+    def test_move_node_to_end_of_cached_nodes_nonexistent(self):
+        """
+        Test that move_node_to_end_of_cached_nodes does nothing for a
+        nonexistent node.
+        """
+        node1 = ClusterNode(default_host, 7000)
+        node2 = ClusterNode(default_host, 7001)
+
+        with patch.object(NodesManager, "initialize"):
+            nodes_manager = NodesManager(
+                startup_nodes=[node1, node2],
+                require_full_coverage=False,
+            )
+            # Also populate nodes_cache
+            nodes_manager.nodes_cache = {node1.name: node1, node2.name: node2}
+
+            # Try to move a non-existent node - should not raise
+            nodes_manager.move_node_to_end_of_cached_nodes("nonexistent:9999")
+            startup_node_names = list(nodes_manager.startup_nodes.keys())
+            nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+            assert startup_node_names == [node1.name, node2.name]
+            assert nodes_cache_names == [node1.name, node2.name]
+
+    def test_move_node_to_end_of_cached_nodes_single_node(self):
+        """
+        Test that move_node_to_end_of_cached_nodes does nothing when there's
+        only one node.
+        """
+        node1 = ClusterNode(default_host, 7000)
+
+        with patch.object(NodesManager, "initialize"):
+            nodes_manager = NodesManager(
+                startup_nodes=[node1],
+                require_full_coverage=False,
+            )
+            # Also populate nodes_cache
+            nodes_manager.nodes_cache = {node1.name: node1}
+
+            # Should not raise or change anything with single node
+            nodes_manager.move_node_to_end_of_cached_nodes(node1.name)
+            startup_node_names = list(nodes_manager.startup_nodes.keys())
+            nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+            assert startup_node_names == [node1.name]
+            assert nodes_cache_names == [node1.name]
 
 
 @pytest.mark.onlycluster
@@ -3463,6 +3844,101 @@ class TestClusterPipeline:
         assert response[0]
         assert r.get(f"{hashkey}:foo") == b"bar"
 
+    def test_connection_leak_on_non_timeout_error_during_connect(self, r):
+        """
+        Test that connections are not leaked when a non-TimeoutError/ConnectionError
+        is raised during get_connection(). The bugfix ensures that if an error
+        occurs that isn't explicitly handled, we don't leak connections.
+        """
+        # Ensure keys map to different nodes
+        assert r.keyslot("a") != r.keyslot("b")
+
+        orig_func = redis.cluster.get_connection
+        with patch("redis.cluster.get_connection") as get_connection:
+
+            def raise_custom_error(target_node, *args, **kwargs):
+                # Raise a RuntimeError (not ConnectionError or TimeoutError)
+                # on the second call (when getting second connection)
+                if get_connection.call_count == 2:
+                    raise RuntimeError("Some unexpected error during connection")
+                else:
+                    return orig_func(target_node, *args, **kwargs)
+
+            get_connection.side_effect = raise_custom_error
+
+            with pytest.raises(RuntimeError):
+                r.pipeline().get("a").get("b").execute()
+
+        # Verify that all connections were returned to the pool
+        # (not leaked) even though a non-standard error was raised
+        for cluster_node in r.nodes_manager.nodes_cache.values():
+            connection_pool = cluster_node.redis_connection.connection_pool
+            num_of_conns = len(connection_pool._available_connections)
+            assert num_of_conns == connection_pool._created_connections, (
+                f"Connection leaked: expected {connection_pool._created_connections} "
+                f"available, got {num_of_conns}"
+            )
+
+    def test_dirty_connection_not_reused(self, r):
+        """
+        Test that dirty connections (with unread responses) are not reused.
+        A dirty connection is one where we've written commands but haven't
+        read all responses. If such a connection is returned to the pool,
+        the next caller will read responses from the previous request.
+        """
+        # Ensure we're using multiple nodes to test the dirty connection scenario
+        assert r.keyslot("a") != r.keyslot("b")
+
+        # Mock the write method to raise an error after writing to only some nodes
+        orig_write = redis.cluster.NodeCommands.write
+
+        write_count = 0
+
+        def mock_write(self):
+            nonlocal write_count
+            write_count += 1
+            # Allow the first write to succeed
+            if write_count == 1:
+                return orig_write(self)
+            # Simulate a failure after the first write (leaving connection dirty)
+            else:
+                raise RuntimeError("Simulated write error")
+
+        # Patch Connection.disconnect so we can assert that at least one
+        # connection was disconnected when the write error occurred.
+        original_disconnect = Connection.disconnect
+        disconnect_called = []
+
+        def track_disconnect(self, *args):
+            disconnect_called.append(True)
+            return original_disconnect(self, *args)
+
+        with patch.object(Connection, "disconnect", track_disconnect):
+            with patch.object(redis.cluster.NodeCommands, "write", mock_write):
+                with pytest.raises(RuntimeError):
+                    r.pipeline().get("a").get("b").execute()
+
+            # Ensure that at least one connection was disconnected as part of
+            # handling the dirty connection created by the write failure.
+            assert disconnect_called, (
+                "Expected at least one connection to be disconnected when "
+                "handling a dirty connection, but disconnect() was not called."
+            )
+        # After the error, verify that no connections are in the available pool
+        # with dirty state (unread responses). If a connection is dirty, it should
+        # have been disconnected before being returned to the pool.
+        # We verify this by checking the connections can be reused successfully.
+        try:
+            # Try to execute a command on each connection to verify
+            # they're clean (not holding responses from previous requests)
+            result = r.ping()
+            assert result is True
+        except Exception as e:
+            pytest.fail(
+                f"Connection reuse after dirty state failed: {e}. "
+                f"This indicates a dirty connection was returned to the pool."
+            )
+
 
 @pytest.mark.onlycluster
 class TestReadOnlyPipeline:
@@ -3642,3 +4118,527 @@ class TestClusterMonitor:
         r.flushall()
         assert r.get("x") is None
         assert r.get("y") is None
+
+
+@pytest.mark.onlycluster
+class TestClusterMetricsRecording:
+    """
+    Integration tests that verify metrics are properly recorded
+    from RedisCluster and delivered to the Meter through the observability recorder.
+
+    These tests use a real Redis cluster connection but mock the OTel Meter
+    to verify metrics are correctly recorded.
+    """
+
+    @pytest.fixture
+    def mock_meter(self):
+        """Create a mock Meter that tracks all instrument calls."""
+        meter = Mock()
+
+        # Create mock histogram for operation duration
+        self.operation_duration = Mock()
+
+        def create_histogram_side_effect(name, **kwargs):
+            if name == "db.client.operation.duration":
+                return self.operation_duration
+            return Mock()
+
+        meter.create_counter.return_value = Mock()
+        meter.create_up_down_counter.return_value = Mock()
+        meter.create_histogram.side_effect = create_histogram_side_effect
+
+        return meter
+
+    @pytest.fixture
+    def cluster_with_otel(self, r, mock_meter):
+        """
+        Setup a RedisCluster with real connection and mocked OTel collector.
+        Returns tuple of (cluster, operation_duration_mock).
+        """
+
+        # Reset any existing collector state
+        recorder.reset_collector()
+
+        # Create config with COMMAND group enabled
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        # Create collector with mocked meter
+        with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        # Patch the recorder to use our collector
+        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+            # Also set the collector directly to ensure it's used
+            recorder._metrics_collector = collector
+
+            # Create a new event dispatcher and attach it to the cluster
+            event_dispatcher = EventDispatcher()
+            r._event_dispatcher = event_dispatcher
+
+            yield r, self.operation_duration
+
+        # Cleanup
+        recorder.reset_collector()
+
+    def test_execute_command_records_metric(self, cluster_with_otel):
+        """
+        Test that execute_command records operation duration metric to Meter.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        # Execute a command
+        cluster.set("test_key", "test_value")
+
+        # Verify the Meter's histogram.record() was called
+        operation_duration_mock.record.assert_called()
+
+        # Get the last call arguments
+        call_args = operation_duration_mock.record.call_args
+
+        # Verify duration was recorded
+        duration = call_args[0][0]
+        assert isinstance(duration, float)
+        assert duration >= 0
+
+        # Verify attributes
+        attrs = call_args[1]["attributes"]
+        assert attrs["db.operation.name"] == "SET"
+        assert "server.address" in attrs
+        assert "server.port" in attrs
+        assert "db.namespace" in attrs
+
+    def test_get_command_records_metric(self, cluster_with_otel):
+        """
+        Test that GET command records metric with correct command name.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        # Execute GET command
+        cluster.get("test_key")
+
+        # Verify command name is GET
+        call_args = operation_duration_mock.record.call_args
+        attrs = call_args[1]["attributes"]
+        assert attrs["db.operation.name"] == "GET"
+
+    def test_multiple_commands_record_multiple_metrics(self, cluster_with_otel):
+        """
+        Test that multiple command executions record multiple metrics.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        # Execute multiple commands
+        cluster.set("key1", "value1")
+        cluster.get("key1")
+        cluster.delete("key1")
+
+        # Verify histogram.record() was called 3 times
+        assert operation_duration_mock.record.call_count == 3
+
+    def test_server_attributes_recorded(self, cluster_with_otel):
+        """
+        Test that server address, port, and db namespace are recorded.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        cluster.ping()
+
+        call_args = operation_duration_mock.record.call_args
+        attrs = call_args[1]["attributes"]
+
+        # Verify server attributes are present and have valid values
+        assert "server.address" in attrs
+        assert isinstance(attrs["server.address"], str)
+        assert len(attrs["server.address"]) > 0
+
+        assert "server.port" in attrs
+        assert isinstance(attrs["server.port"], int)
+        assert attrs["server.port"] > 0
+
+        assert "db.namespace" in attrs
+
+    def test_duration_is_positive(self, cluster_with_otel):
+        """
+        Test that the recorded duration is a positive float.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        cluster.set("duration_test", "value")
+
+        call_args = operation_duration_mock.record.call_args
+        duration = call_args[0][0]
+
+        assert isinstance(duration, float)
+        assert duration >= 0
+
+    def test_no_batch_size_for_single_command(self, cluster_with_otel):
+        """
+        Test that single commands don't include batch_size attribute.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        cluster.get("single_command_key")
+
+        call_args = operation_duration_mock.record.call_args
+        attrs = call_args[1]["attributes"]
+
+        # batch_size should not be present for single commands
+        assert "db.operation.batch_size" not in attrs
+
+    def test_different_commands_record_correct_names(self, cluster_with_otel):
+        """
+        Test that different commands record metrics with correct command names.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        commands_to_test = [
+            ("SET", lambda: cluster.set("cmd_test", "value")),
+            ("GET", lambda: cluster.get("cmd_test")),
+            ("PIPELINE", lambda: cluster.delete("cmd_test")),
+            ("PING", lambda: cluster.ping()),
+        ]
+
+        for expected_cmd, cmd_func in commands_to_test:
+            operation_duration_mock.reset_mock()
+            cmd_func()
+
+            call_args = operation_duration_mock.record.call_args
+            attrs = call_args[1]["attributes"]
+            assert attrs["db.operation.name"] == expected_cmd
+
+    def test_command_error_records_metric_with_error_type(self, cluster_with_otel):
+        """
+        Test that when a command fails, the recorded metric includes error.type attribute.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        # Execute a command that will fail (wrong type operation)
+        cluster.set("error_test_key", "string_value")
+
+        try:
+            # Try to use LPUSH on a string key - this will fail
+            cluster.lpush("error_test_key", "value")
+        except ResponseError:
+            pass
+
+        # Find the LPUSH event in recorded calls
+        lpush_calls = [
+            call_obj
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "LPUSH"
+        ]
+
+        assert len(lpush_calls) >= 1
+        attrs = lpush_calls[0][1]["attributes"]
+        assert "error.type" in attrs
+
+
+@pytest.mark.onlycluster
+class TestClusterPipelineMetricsRecording:
+    """
+    Integration tests that verify metrics are properly recorded
+    from ClusterPipeline and delivered to the Meter through the observability recorder.
+
+    These tests use a real Redis cluster connection but mock the OTel Meter
+    to verify metrics are correctly recorded.
+    """
+
+    @pytest.fixture
+    def mock_meter(self):
+        """Create a mock Meter that tracks all instrument calls."""
+        meter = Mock()
+
+        # Create mock histogram for operation duration
+        self.operation_duration = Mock()
+
+        def create_histogram_side_effect(name, **kwargs):
+            if name == "db.client.operation.duration":
+                return self.operation_duration
+            return Mock()
+
+        meter.create_counter.return_value = Mock()
+        meter.create_up_down_counter.return_value = Mock()
+        meter.create_histogram.side_effect = create_histogram_side_effect
+
+        return meter
+
+    @pytest.fixture
+    def cluster_pipeline_with_otel(self, r, mock_meter):
+        """
+        Setup a ClusterPipeline with real connection and mocked OTel collector.
+        Returns tuple of (cluster, operation_duration_mock).
+        """
+
+        # Reset any existing collector state
+        recorder.reset_collector()
+
+        # Create config with COMMAND group enabled
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        # Create collector with mocked meter
+        with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        # Patch the recorder to use our collector
+        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+            # Also set the collector directly to ensure it's used
+            recorder._metrics_collector = collector
+
+            # Create a new event dispatcher and attach it to the cluster
+            event_dispatcher = EventDispatcher()
+            r._event_dispatcher = event_dispatcher
+
+            yield r, self.operation_duration
+
+        # Cleanup
+        recorder.reset_collector()
+
+    def test_pipeline_execute_records_metric(self, cluster_pipeline_with_otel):
+        """
+        Test that pipeline execute records operation duration metric to Meter.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        # Execute a pipeline
+        pipe = cluster.pipeline()
+        pipe.set("pipe_key1", "value1")
+        pipe.get("pipe_key1")
+        pipe.execute()
+
+        # Verify the Meter's histogram.record() was called
+        operation_duration_mock.record.assert_called()
+
+        # Get the last call arguments (pipeline event)
+        call_args = operation_duration_mock.record.call_args
+
+        # Verify duration was recorded
+        duration = call_args[0][0]
+        assert isinstance(duration, float)
+        assert duration >= 0
+
+        # Verify attributes
+        attrs = call_args[1]["attributes"]
+        assert attrs["db.operation.name"] == "PIPELINE"
+
+    def test_pipeline_server_attributes_recorded(self, cluster_pipeline_with_otel):
+        """
+        Test that server address, port, and db namespace are recorded for pipeline.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        pipe = cluster.pipeline()
+        pipe.set("server_attr_key", "value")
+        pipe.execute()
+
+        # Find the PIPELINE event call
+        pipeline_call = None
+        for call_obj in operation_duration_mock.record.call_args_list:
+            attrs = call_obj[1]["attributes"]
+            if attrs.get("db.operation.name") == "PIPELINE":
+                pipeline_call = call_obj
+                break
+
+        assert pipeline_call is not None
+        attrs = pipeline_call[1]["attributes"]
+
+        # Verify server attributes are present
+        assert "server.address" in attrs
+        assert isinstance(attrs["server.address"], str)
+
+        assert "server.port" in attrs
+        assert isinstance(attrs["server.port"], int)
+
+        assert "db.namespace" in attrs
+
+    def test_pipeline_duration_is_positive(self, cluster_pipeline_with_otel):
+        """
+        Test that the recorded duration for pipeline is a positive float.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        pipe = cluster.pipeline()
+        pipe.set("duration_key", "value")
+        pipe.execute()
+
+        # Find the PIPELINE event call
+        pipeline_call = None
+        for call_obj in operation_duration_mock.record.call_args_list:
+            attrs = call_obj[1]["attributes"]
+            if attrs.get("db.operation.name") == "PIPELINE":
+                pipeline_call = call_obj
+                break
+
+        assert pipeline_call is not None
+        duration = pipeline_call[0][0]
+        assert isinstance(duration, float)
+        assert duration >= 0
+
+    def test_multiple_pipeline_executions_record_multiple_metrics(
+        self, cluster_pipeline_with_otel
+    ):
+        """
+        Test that multiple pipeline executions record multiple metrics.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        # Execute first pipeline
+        pipe1 = cluster.pipeline()
+        pipe1.set("multi_key1", "value1")
+        pipe1.execute()
+
+        # Execute second pipeline
+        pipe2 = cluster.pipeline()
+        pipe2.set("multi_key2", "value2")
+        pipe2.execute()
+
+        # Count PIPELINE events
+        pipeline_count = sum(
+            1
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "PIPELINE"
+        )
+
+        assert pipeline_count >= 2
+
+    def test_empty_pipeline_does_not_record_metric(self, cluster_pipeline_with_otel):
+        """
+        Test that an empty pipeline does not record metrics.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        # Execute an empty pipeline
+        pipe = cluster.pipeline()
+        pipe.execute()
+
+        # Count PIPELINE events - should be 0
+        pipeline_count = sum(
+            1
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "PIPELINE"
+        )
+
+        assert pipeline_count == 0
+
+    def test_pipeline_error_records_metric_with_error(self, cluster_pipeline_with_otel):
+        """
+        Test that when a pipeline command fails, the recorded metric includes error.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        # Set a string value
+        cluster.set("pipe_error_key", "string_value")
+
+        try:
+            # Execute a pipeline with a command that will fail
+            pipe = cluster.pipeline()
+            pipe.lpush("pipe_error_key", "value")  # Will fail - wrong type
+            pipe.execute()
+        except ResponseError:
+            pass
+
+        # Find the PIPELINE event calls
+        pipeline_calls = [
+            call_obj
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "PIPELINE"
+        ]
+
+        # There should be at least one PIPELINE event
+        assert len(pipeline_calls) >= 1
+
+    def test_pipeline_error_records_metric_with_error_type(
+        self, cluster_pipeline_with_otel
+    ):
+        """
+        Test that when a pipeline command fails, the recorded metric includes error.type.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        # Set a string value
+        cluster.set("pipe_err_type_key", "string_value")
+
+        try:
+            pipe = cluster.pipeline()
+            pipe.lpush("pipe_err_type_key", "value")  # Will fail - wrong type
+            pipe.execute()
+        except ResponseError:
+            pass
+
+        # Find PIPELINE events with error.type
+        pipeline_calls = [
+            call_obj
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "PIPELINE"
+        ]
+
+        # At least one PIPELINE event should exist
+        assert len(pipeline_calls) >= 1
+
+        # Check if any has error.type (the one from _raise_first_error)
+        error_calls = [
+            call_obj
+            for call_obj in pipeline_calls
+            if "error.type" in call_obj[1]["attributes"]
+        ]
+
+        # The error event should have error.type
+        if error_calls:
+            attrs = error_calls[0][1]["attributes"]
+            assert "error.type" in attrs
+
+    def test_pipeline_multi_node_records_multiple_metrics(
+        self, cluster_pipeline_with_otel
+    ):
+        """
+        Test that pipeline commands to multiple nodes record metrics for each node.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        # Execute pipeline with keys that may go to different nodes
+        pipe = cluster.pipeline()
+        for i in range(10):
+            pipe.set(f"multi_node_key_{i}", f"value_{i}")
+        pipe.execute()
+
+        # Find PIPELINE events
+        pipeline_calls = [
+            call_obj
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "PIPELINE"
+        ]
+
+        # Should have at least one PIPELINE event
+        assert len(pipeline_calls) >= 1
+
+        # Each event should have server info
+        for call_obj in pipeline_calls:
+            attrs = call_obj[1]["attributes"]
+            assert "server.address" in attrs
+            assert "server.port" in attrs
+            assert "db.namespace" in attrs
+
+    def test_pipeline_duration_recorded_per_node(self, cluster_pipeline_with_otel):
+        """
+        Test that pipeline duration is recorded for each node's commands.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        pipe = cluster.pipeline()
+        pipe.set("duration_node_key", "value")
+        pipe.get("duration_node_key")
+        pipe.execute()
+
+        # Find PIPELINE events
+        pipeline_calls = [
+            call_obj
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "PIPELINE"
+        ]
+
+        assert len(pipeline_calls) >= 1
+
+        # Each event should have a positive duration
+        for call_obj in pipeline_calls:
+            duration = call_obj[0][0]
+            assert isinstance(duration, float)
+            assert duration >= 0

@@ -54,7 +54,11 @@ class AsyncCommandExecutor(CommandExecutor):
 
     @abstractmethod
     async def set_active_database(self, database: AsyncDatabase) -> None:
-        """Sets the currently active database."""
+        """Sets the currently active database.
+
+        Args:
+            database: The new active database.
+        """
         pass
 
     @property
@@ -303,7 +307,7 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
             self._active_database is None
             or self._active_database.circuit.state != CBState.CLOSED
             or (
-                self._auto_fallback_interval != DEFAULT_AUTO_FALLBACK_INTERVAL
+                self._auto_fallback_interval > 0
                 and self._next_fallback_attempt <= datetime.now()
             )
         ):

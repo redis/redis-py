@@ -160,6 +160,54 @@ class TestPubSubSubscribeUnsubscribe:
         kwargs = make_subscribe_test_data(pubsub, "pattern")
         await self._test_resubscribe_on_reconnection(**kwargs)
 
+    async def test_resubscribe_binary_channel_on_reconnection(self, pubsub):
+        """Binary channel names that are not valid UTF-8 must survive
+        reconnection without raising ``UnicodeDecodeError``.
+        See https://github.com/redis/redis-py/issues/3912
+        """
+        # b'\x80\x81\x82' is deliberately invalid UTF-8
+        binary_channel = b"\x80\x81\x82"
+        p = pubsub
+        await p.subscribe(binary_channel)
+        assert await wait_for_message(p) is not None  # consume subscribe ack
+
+        # force reconnect
+        await p.connection.disconnect()
+
+        # get_message triggers on_connect → re-subscribe; must not raise
+        messages = []
+        for _ in range(1):
+            message = await wait_for_message(p)
+            assert message is not None
+            messages.append(message)
+
+        assert len(messages) == 1
+        assert messages[0]["type"] == "subscribe"
+        assert messages[0]["channel"] == binary_channel
+
+    async def test_resubscribe_binary_pattern_on_reconnection(self, pubsub):
+        """Binary pattern names that are not valid UTF-8 must survive
+        reconnection without raising ``UnicodeDecodeError``.
+        See https://github.com/redis/redis-py/issues/3912
+        """
+        binary_pattern = b"\x80\x81*"
+        p = pubsub
+        await p.psubscribe(binary_pattern)
+        assert await wait_for_message(p) is not None  # consume psubscribe ack
+
+        # force reconnect
+        await p.connection.disconnect()
+
+        messages = []
+        for _ in range(1):
+            message = await wait_for_message(p)
+            assert message is not None
+            messages.append(message)
+
+        assert len(messages) == 1
+        assert messages[0]["type"] == "psubscribe"
+        assert messages[0]["channel"] == binary_pattern
+
     async def _test_subscribed_property(
         self, p, sub_type, unsub_type, sub_func, unsub_func, keys
     ):
@@ -669,6 +717,63 @@ class TestPubSubPings:
             type="pong", channel=None, data="hello world", pattern=None
         )
         await p.aclose()
+
+
+@pytest.mark.onlynoncluster
+class TestPubSubHealthCheckResponse:
+    """Tests for health check response validation with different decode_responses settings"""
+
+    async def test_health_check_response_decode_false_list_format(self, r: redis.Redis):
+        """Test health_check_response includes list format with decode_responses=False"""
+        p = r.pubsub()
+        # List format: [b"pong", b"redis-py-health-check"]
+        assert [b"pong", b"redis-py-health-check"] in p.health_check_response
+        await p.aclose()
+
+    async def test_health_check_response_decode_false_bytes_format(
+        self, r: redis.Redis
+    ):
+        """Test health_check_response includes bytes format with decode_responses=False"""
+        p = r.pubsub()
+        # Bytes format: b"redis-py-health-check"
+        assert b"redis-py-health-check" in p.health_check_response
+        await p.aclose()
+
+    async def test_health_check_response_decode_true_list_format(self, create_redis):
+        """Test health_check_response includes list format with decode_responses=True"""
+        r = await create_redis(decode_responses=True)
+        p = r.pubsub()
+        # List format: ["pong", "redis-py-health-check"]
+        assert ["pong", "redis-py-health-check"] in p.health_check_response
+        await p.aclose()
+        await r.aclose()
+
+    async def test_health_check_response_decode_true_string_format(self, create_redis):
+        """Test health_check_response includes string format with decode_responses=True"""
+        r = await create_redis(decode_responses=True)
+        p = r.pubsub()
+        # String format: "redis-py-health-check" (THE FIX!)
+        assert "redis-py-health-check" in p.health_check_response
+        await p.aclose()
+        await r.aclose()
+
+    async def test_health_check_response_decode_false_excludes_string(
+        self, r: redis.Redis
+    ):
+        """Test health_check_response excludes string format with decode_responses=False"""
+        p = r.pubsub()
+        # String format should NOT be in the list when decode_responses=False
+        assert "redis-py-health-check" not in p.health_check_response
+        await p.aclose()
+
+    async def test_health_check_response_decode_true_excludes_bytes(self, create_redis):
+        """Test health_check_response excludes bytes format with decode_responses=True"""
+        r = await create_redis(decode_responses=True)
+        p = r.pubsub()
+        # Bytes format should NOT be in the list when decode_responses=True
+        assert b"redis-py-health-check" not in p.health_check_response
+        await p.aclose()
+        await r.aclose()
 
 
 @pytest.mark.onlynoncluster
