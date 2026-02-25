@@ -4519,7 +4519,6 @@ class StreamCommands(CommandsProtocol):
         record_streaming_lag_from_response(
             response=response,
             consumer_group=groupname,
-            consumer_name=consumername,
         )
 
         return response

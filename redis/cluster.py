@@ -3349,7 +3349,6 @@ class PipelineStrategy(AbstractStrategy):
                 record_operation_duration(
                     command_name="PIPELINE",
                     duration_seconds=time.monotonic() - start_time,
-                    batch_size=len(stack),
                     error=r,
                 )
 
@@ -3554,7 +3553,6 @@ class PipelineStrategy(AbstractStrategy):
                     server_address=n.connection.host,
                     server_port=n.connection.port,
                     db_namespace=str(n.connection.db),
-                    batch_size=len(n.commands),
                 )
                 nodes_read += 1
         finally:
@@ -4042,7 +4040,6 @@ class TransactionStrategy(AbstractStrategy):
             server_address=connection.host,
             server_port=connection.port,
             db_namespace=str(connection.db),
-            batch_size=len(self._command_queue),
         )
 
         # EXEC clears any watched keys

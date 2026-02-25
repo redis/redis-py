@@ -532,32 +532,6 @@ class TestClusterTransactionMetricsRecording:
 
         assert "db.namespace" in attrs
 
-    def test_transaction_batch_size_recorded(self, cluster_transaction_with_otel):
-        """
-        Test that transaction batch_size is correctly recorded.
-        """
-        cluster, operation_duration_mock = cluster_transaction_with_otel
-
-        # Execute a transaction with 3 commands
-        with cluster.pipeline(transaction=True) as tx:
-            tx.set("{batch}key1", "value1")
-            tx.get("{batch}key1")
-            tx.delete("{batch}key1")
-            tx.execute()
-
-        # Find the TRANSACTION event call
-        transaction_call = None
-        for call_obj in operation_duration_mock.record.call_args_list:
-            attrs = call_obj[1]["attributes"]
-            if attrs.get("db.operation.name") == "TRANSACTION":
-                transaction_call = call_obj
-                break
-
-        assert transaction_call is not None
-        attrs = transaction_call[1]["attributes"]
-        assert "db.operation.batch.size" in attrs
-        assert attrs["db.operation.batch.size"] == 3
-
     def test_transaction_duration_is_positive(self, cluster_transaction_with_otel):
         """
         Test that the recorded duration for transaction is a positive float.
