@@ -41,7 +41,6 @@ from redis.observability.attributes import (
     # Streaming attributes
     REDIS_CLIENT_STREAM_NAME,
     REDIS_CLIENT_CONSUMER_GROUP,
-    REDIS_CLIENT_CONSUMER_NAME,
     DB_CLIENT_CONNECTION_NAME,
     # Geo failover attributes
     DB_CLIENT_GEOFAILOVER_FAIL_FROM,
@@ -682,7 +681,6 @@ class TestRecordStreamingLag:
             lag_seconds=0.150,
             stream_name="my-stream",
             consumer_group="my-group",
-            consumer_name="consumer-1",
         )
 
         instruments.stream_lag.record.assert_called_once()
@@ -695,7 +693,6 @@ class TestRecordStreamingLag:
         attrs = call_args[1]["attributes"]
         assert attrs[REDIS_CLIENT_STREAM_NAME] == "my-stream"
         assert attrs[REDIS_CLIENT_CONSUMER_GROUP] == "my-group"
-        assert attrs[REDIS_CLIENT_CONSUMER_NAME] == "consumer-1"
 
     def test_record_streaming_lag_minimal(self, setup_recorder):
         """Test recording streaming lag with only required attributes."""
@@ -818,7 +815,6 @@ class TestHideStreamNames:
             lag_seconds=0.150,
             stream_name="secret-stream",
             consumer_group="my-group",
-            consumer_name="consumer-1",
         )
 
         instruments.stream_lag.record.assert_called_once()
@@ -826,17 +822,13 @@ class TestHideStreamNames:
         # Stream name should NOT be in attributes when hidden
         assert REDIS_CLIENT_STREAM_NAME not in attrs
         assert attrs[REDIS_CLIENT_CONSUMER_GROUP] == "my-group"
-        assert attrs[REDIS_CLIENT_CONSUMER_NAME] == "consumer-1"
 
     def test_stream_name_visible_when_not_configured(self, setup_recorder):
         """Test that stream name is visible when hide_stream_names=False (default)."""
         instruments = setup_recorder
 
         record_streaming_lag(
-            lag_seconds=0.150,
-            stream_name="visible-stream",
-            consumer_group="my-group",
-            consumer_name="consumer-1",
+            lag_seconds=0.150, stream_name="visible-stream", consumer_group="my-group"
         )
 
         instruments.stream_lag.record.assert_called_once()
@@ -866,11 +858,7 @@ class TestHideStreamNames:
 
         from redis.observability.recorder import record_streaming_lag_from_response
 
-        record_streaming_lag_from_response(
-            response=response,
-            consumer_group="my-group",
-            consumer_name="consumer-1",
-        )
+        record_streaming_lag_from_response(response=response, consumer_group="my-group")
 
         instruments.stream_lag.record.assert_called_once()
         attrs = instruments.stream_lag.record.call_args[1]["attributes"]
@@ -900,11 +888,7 @@ class TestHideStreamNames:
 
         from redis.observability.recorder import record_streaming_lag_from_response
 
-        record_streaming_lag_from_response(
-            response=response,
-            consumer_group="my-group",
-            consumer_name="consumer-1",
-        )
+        record_streaming_lag_from_response(response=response, consumer_group="my-group")
 
         instruments.stream_lag.record.assert_called_once()
         attrs = instruments.stream_lag.record.call_args[1]["attributes"]
@@ -1165,7 +1149,6 @@ class TestMetricGroupsDisabled:
                 lag_seconds=0.150,
                 stream_name="test-stream",
                 consumer_group="test-group",
-                consumer_name="test-consumer",
             )
 
         # Verify no call to the histogram's record method
