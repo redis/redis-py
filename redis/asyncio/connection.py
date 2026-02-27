@@ -373,10 +373,10 @@ class AbstractConnection:
         except (socket.timeout, asyncio.TimeoutError):
             e = TimeoutError("Timeout connecting to server")
             await record_error_count(
-                server_address=self.host,
-                server_port=self.port,
-                network_peer_address=self.host,
-                network_peer_port=self.port,
+                server_address=getattr(self, "host", None),
+                server_port=getattr(self, "port", None),
+                network_peer_address=getattr(self, "host", None),
+                network_peer_port=getattr(self, "port", None),
                 error_type=e,
                 retry_attempts=actual_retry_attempts,
                 is_internal=False,
@@ -604,10 +604,10 @@ class AbstractConnection:
 
             if failure_count is not None and failure_count > self.retry.get_retries():
                 await record_error_count(
-                    server_address=self.host,
-                    server_port=self.port,
-                    network_peer_address=self.host,
-                    network_peer_port=self.port,
+                    server_address=getattr(self, "host", None),
+                    server_port=getattr(self, "port", None),
+                    network_peer_address=getattr(self, "host", None),
+                    network_peer_port=getattr(self, "port", None),
                     error_type=error,
                     retry_attempts=failure_count,
                 )

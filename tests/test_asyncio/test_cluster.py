@@ -3904,7 +3904,7 @@ class TestAsyncClusterPipelineMetricsRecording:
             return_value=collector,
         ):
             # Also set the collector directly to ensure it's used
-            async_recorder._metrics_collector = collector
+            async_recorder._async_metrics_collector = collector
 
             # Create a new event dispatcher and attach it to the cluster
             event_dispatcher = EventDispatcher()
