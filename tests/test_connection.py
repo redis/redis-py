@@ -638,6 +638,8 @@ class TestUnitCacheProxyConnection:
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection._event_dispatcher = EventDispatcher()
         mock_connection.credential_provider = UsernamePasswordCredentialProvider()
         mock_connection.read_response.return_value = b"OK"
 
@@ -660,6 +662,8 @@ class TestUnitCacheProxyConnection:
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection._event_dispatcher = EventDispatcher()
         mock_connection.credential_provider = UsernamePasswordCredentialProvider()
         mock_connection.read_response.return_value = b"OK"
 
@@ -682,6 +686,8 @@ class TestUnitCacheProxyConnection:
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection._event_dispatcher = EventDispatcher()
         mock_connection.credential_provider = UsernamePasswordCredentialProvider()
         mock_connection.read_response.return_value = b"OK"
 
@@ -704,6 +710,8 @@ class TestUnitCacheProxyConnection:
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection._event_dispatcher = EventDispatcher()
         mock_connection.credential_provider = UsernamePasswordCredentialProvider()
         mock_connection.read_response.return_value = b"OK"
 
@@ -726,6 +734,8 @@ class TestUnitCacheProxyConnection:
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection._event_dispatcher = EventDispatcher()
         mock_connection.credential_provider = UsernamePasswordCredentialProvider()
         mock_connection.read_response.return_value = b"OK"
 
