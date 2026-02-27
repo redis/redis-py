@@ -1,7 +1,8 @@
 import random
 import weakref
-from typing import Optional
+from typing import Optional, Union
 
+from redis._parsers.socket import SENTINEL
 from redis.client import Redis
 from redis.commands import SentinelCommands
 from redis.connection import Connection, ConnectionPool, SSLConnection
@@ -65,12 +66,14 @@ class SentinelManagedConnection(Connection):
         self,
         disable_decoding=False,
         *,
+        timeout: Union[float, object] = SENTINEL,
         disconnect_on_error: Optional[bool] = False,
         push_request: Optional[bool] = False,
     ):
         try:
             return super().read_response(
                 disable_decoding=disable_decoding,
+                timeout=timeout,
                 disconnect_on_error=disconnect_on_error,
                 push_request=push_request,
             )

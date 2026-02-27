@@ -132,7 +132,12 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
             if custom_timeout:
                 sock.settimeout(self._socket_timeout)
 
-    def read_response(self, disable_decoding=False, push_request=False):
+    def read_response(
+        self,
+        disable_decoding=False,
+        push_request=False,
+        timeout: Union[float, object] = SENTINEL,
+    ):
         if not self._reader:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
@@ -152,6 +157,7 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
                 return self.read_response(
                     disable_decoding=disable_decoding,
                     push_request=push_request,
+                    timeout=timeout,
                 )
             return response
 
@@ -161,7 +167,7 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
             response = self._reader.gets()
 
         while response is NOT_ENOUGH_DATA:
-            self.read_from_socket()
+            self.read_from_socket(timeout=timeout)
             if disable_decoding:
                 response = self._reader.gets(False)
             else:

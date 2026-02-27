@@ -1831,3 +1831,282 @@ class TestPubSubMetricsRecording:
             assert recorded_commands == commands
 
         recorder.reset_collector()
+
+
+class TestPubSubTimeoutPropagation:
+    """
+    Tests for timeout propagation through the entire pubsub read chain.
+    Ensures that timeouts are properly passed from get_message() through
+    parse_response() to the parser and socket buffer layers.
+    """
+
+    def test_get_message_timeout_is_respected(self, r):
+        """
+        Test that get_message() with timeout parameter respects the timeout
+        and returns None when no message arrives within the timeout period.
+        """
+        p = r.pubsub()
+        p.subscribe("foo")
+        # Read subscription message
+        msg = wait_for_message(p, timeout=1.0)
+        assert msg is not None
+        assert msg["type"] == "subscribe"
+
+        # Call get_message with a short timeout - should return None
+        # since no message is published
+        start = time.monotonic()
+        msg = p.get_message(timeout=0.1)
+        elapsed = time.monotonic() - start
+        assert msg is None
+        # Verify timeout was actually respected (within reasonable bounds)
+        assert elapsed < 0.5
+
+    def test_get_message_timeout_with_published_message(self, r):
+        """
+        Test that get_message() with timeout returns a message if one
+        arrives before the timeout expires.
+        """
+        p = r.pubsub()
+        p.subscribe("foo")
+        # Read subscription message
+        msg = wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        # Publish a message
+        r.publish("foo", "hello")
+
+        # get_message with timeout should return the message
+        msg = p.get_message(timeout=1.0)
+        assert msg is not None
+        assert msg["type"] == "message"
+        assert msg["data"] == b"hello"
+
+    def test_parse_response_timeout_propagation(self, r):
+        """
+        Test that parse_response() properly propagates timeout to read_response().
+        """
+        p = r.pubsub()
+        p.subscribe("foo")
+        # Read subscription message
+        msg = wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        # Call parse_response with timeout - should respect it
+        start = time.monotonic()
+        response = p.parse_response(block=False, timeout=0.1)
+        elapsed = time.monotonic() - start
+        assert response is None
+        assert elapsed < 0.5
+
+    def test_get_message_timeout_zero_returns_immediately(self, r):
+        """
+        Test that get_message(timeout=0) returns immediately without blocking.
+        """
+        p = r.pubsub()
+        p.subscribe("foo")
+        # Read subscription message
+        msg = wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        # get_message with timeout=0 should return immediately
+        start = time.monotonic()
+        msg = p.get_message(timeout=0)
+        elapsed = time.monotonic() - start
+        assert msg is None
+        assert elapsed < 0.1
+
+    def test_get_message_timeout_none_blocks(self, r):
+        """
+        Test that get_message(timeout=None) blocks indefinitely.
+        We test this by using a thread to publish a message after a delay.
+        """
+        p = r.pubsub()
+        p.subscribe("foo")
+        # Read subscription message
+        msg = wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        # Publish a message after a short delay in a thread
+        def publish_after_delay():
+            time.sleep(0.2)
+            r.publish("foo", "delayed_message")
+
+        thread = threading.Thread(target=publish_after_delay, daemon=True)
+        thread.start()
+
+        # get_message with timeout=None should block until message arrives
+        start = time.monotonic()
+        msg = p.get_message(timeout=None)
+        elapsed = time.monotonic() - start
+        assert msg is not None
+        assert msg["type"] == "message"
+        assert msg["data"] == b"delayed_message"
+        # Should have waited at least 0.2 seconds
+        assert elapsed >= 0.15
+        thread.join(timeout=1.0)
+
+    def test_multiple_messages_with_timeout(self, r):
+        """
+        Test that timeout is properly handled when reading multiple messages.
+        """
+        p = r.pubsub()
+        p.subscribe("foo")
+        # Read subscription message
+        msg = wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        # Publish multiple messages
+        r.publish("foo", "msg1")
+        r.publish("foo", "msg2")
+        r.publish("foo", "msg3")
+
+        # Read all messages with timeout
+        messages = []
+        for _ in range(3):
+            msg = wait_for_message(p, timeout=1.0, func=p.get_message)
+            if msg:
+                messages.append(msg)
+
+        assert len(messages) == 3
+        assert messages[0]["data"] == b"msg1"
+        assert messages[1]["data"] == b"msg2"
+        assert messages[2]["data"] == b"msg3"
+
+    def test_timeout_with_pattern_subscribe(self, r):
+        """
+        Test that timeout works correctly with pattern subscriptions.
+        """
+        p = r.pubsub()
+        p.psubscribe("foo*")
+        # Read subscription message
+        msg = wait_for_message(p, timeout=1.0)
+        assert msg is not None
+        assert msg["type"] == "psubscribe"
+
+        # Publish a message matching the pattern
+        r.publish("foobar", "hello")
+
+        # get_message with timeout should return the message
+        msg = p.get_message(timeout=1.0)
+        assert msg is not None
+        assert msg["type"] == "pmessage"
+        assert msg["data"] == b"hello"
+
+    def test_timeout_with_no_subscription(self, r):
+        """
+        Test that get_message with timeout returns None when subscribed but no messages.
+        """
+        p = r.pubsub()
+        p.subscribe("foo")
+        # Read subscription message
+        msg = wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        # get_message with timeout should return None when no messages
+        msg = p.get_message(timeout=0.1)
+        assert msg is None
+
+
+class TestClusterPubSubTimeoutPropagation:
+    """
+    Tests for timeout propagation in ClusterPubSub for sharded pubsub.
+    """
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_get_sharded_message_timeout_is_respected(self, r):
+        """
+        Test that get_sharded_message() with timeout parameter respects the timeout
+        and returns None when no message arrives within the timeout period.
+        """
+        pubsub = r.pubsub()
+        channel = "test-channel:{0}"
+        pubsub.ssubscribe(channel)
+        # Read subscription message
+        msg = wait_for_message(pubsub, timeout=1.0, func=pubsub.get_sharded_message)
+        assert msg is not None
+        assert msg["type"] == "ssubscribe"
+
+        # Call get_sharded_message with a short timeout - should return None
+        start = time.monotonic()
+        msg = pubsub.get_sharded_message(timeout=0.1)
+        elapsed = time.monotonic() - start
+        assert msg is None
+        # Verify timeout was actually respected
+        assert elapsed < 0.5
+        pubsub.close()
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_get_sharded_message_timeout_with_published_message(self, r):
+        """
+        Test that get_sharded_message() with timeout returns a message if one
+        arrives before the timeout expires.
+        """
+        pubsub = r.pubsub()
+        channel = "test-channel:{0}"
+        pubsub.ssubscribe(channel)
+        # Read subscription message
+        msg = wait_for_message(pubsub, timeout=1.0, func=pubsub.get_sharded_message)
+        assert msg is not None
+
+        # Publish a message
+        r.spublish(channel, "hello")
+
+        # get_sharded_message with timeout should return the message
+        msg = pubsub.get_sharded_message(timeout=1.0)
+        assert msg is not None
+        assert msg["type"] == "smessage"
+        assert msg["data"] == b"hello"
+        pubsub.close()
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_get_sharded_message_timeout_zero_returns_immediately(self, r):
+        """
+        Test that get_sharded_message(timeout=0) returns immediately without blocking.
+        """
+        pubsub = r.pubsub()
+        channel = "test-channel:{0}"
+        pubsub.ssubscribe(channel)
+        # Read subscription message
+        msg = wait_for_message(pubsub, timeout=1.0, func=pubsub.get_sharded_message)
+        assert msg is not None
+
+        # get_sharded_message with timeout=0 should return immediately
+        start = time.monotonic()
+        msg = pubsub.get_sharded_message(timeout=0)
+        elapsed = time.monotonic() - start
+        assert msg is None
+        assert elapsed < 0.1
+        pubsub.close()
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_get_sharded_message_multiple_channels_with_timeout(self, r):
+        """
+        Test that timeout is properly handled when reading from multiple sharded channels.
+        """
+        pubsub = r.pubsub()
+        channel1 = "test-channel:{0}"
+        channel2 = "test-channel:{6}"
+        pubsub.ssubscribe(channel1, channel2)
+        # Read subscription messages
+        for _ in range(2):
+            msg = wait_for_message(pubsub, timeout=1.0, func=pubsub.get_sharded_message)
+            assert msg is not None
+            assert msg["type"] == "ssubscribe"
+
+        # Publish messages to both channels
+        r.spublish(channel1, "msg1")
+        r.spublish(channel2, "msg2")
+
+        # Read messages with timeout
+        messages = []
+        for _ in range(2):
+            msg = wait_for_message(pubsub, timeout=1.0, func=pubsub.get_sharded_message)
+            if msg and msg["type"] == "smessage":
+                messages.append(msg)
+
+        assert len(messages) == 2
+        pubsub.close()

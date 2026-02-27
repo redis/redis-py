@@ -3,16 +3,20 @@ from typing import Any, Union
 from ..exceptions import ConnectionError, InvalidResponse, ResponseError
 from ..typing import EncodableT
 from .base import _AsyncRESPBase, _RESPBase
-from .socket import SERVER_CLOSED_CONNECTION_ERROR
+from .socket import SENTINEL, SERVER_CLOSED_CONNECTION_ERROR
 
 
 class _RESP2Parser(_RESPBase):
     """RESP2 protocol implementation"""
 
-    def read_response(self, disable_decoding=False):
+    def read_response(
+        self, disable_decoding=False, timeout: Union[float, object] = SENTINEL
+    ):
         pos = self._buffer.get_pos() if self._buffer else None
         try:
-            result = self._read_response(disable_decoding=disable_decoding)
+            result = self._read_response(
+                disable_decoding=disable_decoding, timeout=timeout
+            )
         except BaseException:
             if self._buffer:
                 self._buffer.rewind(pos)
@@ -21,8 +25,10 @@ class _RESP2Parser(_RESPBase):
             self._buffer.purge()
             return result
 
-    def _read_response(self, disable_decoding=False):
-        raw = self._buffer.readline()
+    def _read_response(
+        self, disable_decoding=False, timeout: Union[float, object] = SENTINEL
+    ):
+        raw = self._buffer.readline(timeout=timeout)
         if not raw:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
@@ -51,13 +57,13 @@ class _RESP2Parser(_RESPBase):
         elif byte == b"$" and response == b"-1":
             return None
         elif byte == b"$":
-            response = self._buffer.read(int(response))
+            response = self._buffer.read(int(response), timeout=timeout)
         # multi-bulk response
         elif byte == b"*" and response == b"-1":
             return None
         elif byte == b"*":
             response = [
-                self._read_response(disable_decoding=disable_decoding)
+                self._read_response(disable_decoding=disable_decoding, timeout=timeout)
                 for i in range(int(response))
             ]
         else:
