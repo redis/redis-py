@@ -884,8 +884,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         else:
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
-                # p = DEFAULT_RESP_VERSION
-            self.protocol = p
+        self.protocol = p
         if self.protocol == 3 and parser_class == _RESP2Parser:
             # If the protocol is 3 but the parser is RESP2, change it to RESP3
             # This is needed because the parser might be set before the protocol
