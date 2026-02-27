@@ -155,7 +155,7 @@ def setup_async_recorder(metrics_collector, mock_instruments):
     with patch.object(
         recorder,
         "_get_or_create_collector",
-        new_callable=lambda: AsyncMock(return_value=metrics_collector),
+        return_value=metrics_collector,
     ):
         yield mock_instruments
 
@@ -529,10 +529,11 @@ class TestHidePubSubChannelNames:
         with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
+        # Note: _get_or_create_collector is now sync, _get_config is still async
         with patch.object(
             recorder,
             "_get_or_create_collector",
-            new_callable=lambda: AsyncMock(return_value=collector),
+            return_value=collector,
         ):
             with patch.object(
                 recorder,
@@ -633,10 +634,11 @@ class TestRecordStreamingLagFromResponse:
         with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
+        # Note: _get_or_create_collector is now sync, _get_config is still async
         with patch.object(
             recorder,
             "_get_or_create_collector",
-            new_callable=lambda: AsyncMock(return_value=collector),
+            return_value=collector,
         ):
             with patch.object(
                 recorder,
@@ -878,10 +880,11 @@ class TestRecorderDisabled:
         """Test that recording does nothing when collector is None."""
         recorder.reset_collector()
 
+        # Note: _get_or_create_collector is now sync
         with patch.object(
             recorder,
             "_get_or_create_collector",
-            new_callable=lambda: AsyncMock(return_value=None),
+            return_value=None,
         ):
             # Should not raise any exception
             await recorder.record_operation_duration(
@@ -897,10 +900,11 @@ class TestRecorderDisabled:
         """Test is_enabled returns False when collector is None."""
         recorder.reset_collector()
 
+        # Note: _get_or_create_collector is now sync
         with patch.object(
             recorder,
             "_get_or_create_collector",
-            new_callable=lambda: AsyncMock(return_value=None),
+            return_value=None,
         ):
             assert await recorder.is_enabled() is False
 
@@ -910,10 +914,11 @@ class TestRecorderDisabled:
         """Test that all record functions are safe to call when disabled."""
         recorder.reset_collector()
 
+        # Note: _get_or_create_collector is now sync
         with patch.object(
             recorder,
             "_get_or_create_collector",
-            new_callable=lambda: AsyncMock(return_value=None),
+            return_value=None,
         ):
             # None of these should raise
             mock_pool = MagicMock()
@@ -967,10 +972,11 @@ class TestObservableGaugeIntegration:
         with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, mock_config)
 
+        # Note: _get_or_create_collector is now sync
         with patch.object(
             recorder,
             "_get_or_create_collector",
-            new_callable=lambda: AsyncMock(return_value=collector),
+            return_value=collector,
         ):
             # Step 1: Initialize the observable gauge
             await recorder.init_connection_count()
@@ -1009,10 +1015,11 @@ class TestObservableGaugeIntegration:
         with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, mock_config)
 
+        # Note: _get_or_create_collector is now sync
         with patch.object(
             recorder,
             "_get_or_create_collector",
-            new_callable=lambda: AsyncMock(return_value=collector),
+            return_value=collector,
         ):
             await recorder.init_connection_count()
 

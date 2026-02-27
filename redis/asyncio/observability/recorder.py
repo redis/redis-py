@@ -43,9 +43,9 @@ _async_metrics_collector: Optional[RedisMetricsCollector] = None
 CONNECTION_COUNT_REGISTRY_KEY = "connection_count"
 
 
-async def _get_or_create_collector() -> Optional[RedisMetricsCollector]:
+def _get_or_create_collector() -> Optional[RedisMetricsCollector]:
     """
-    Get or create the global metrics collector with async-safe initialization.
+    Get or create the global metrics collector.
 
     Returns:
         RedisMetricsCollector instance if observability is enabled, None otherwise
@@ -123,7 +123,7 @@ async def record_operation_duration(
         >>> # ... execute command ...
         >>> await record_operation_duration('SET', time.monotonic() - start, 'localhost', 6379, '0')
     """
-    collector = await _get_or_create_collector()
+    collector = _get_or_create_collector()
     if collector is None:
         return
 
@@ -155,7 +155,7 @@ async def record_connection_create_time(
         connection_pool: Connection pool implementation
         duration_seconds: Time taken to create connection in seconds
     """
-    collector = await _get_or_create_collector()
+    collector = _get_or_create_collector()
     if collector is None:
         return
 
@@ -172,7 +172,7 @@ async def init_connection_count() -> None:
     """
     Initialize observable gauge for connection count metric.
     """
-    collector = await _get_or_create_collector()
+    collector = _get_or_create_collector()
     if collector is None:
         return
 
@@ -200,7 +200,7 @@ async def register_pools_connection_count(
     """
     Add connection pools to connection count observable registry.
     """
-    collector = await _get_or_create_collector()
+    collector = _get_or_create_collector()
     if collector is None:
         return
 
@@ -232,7 +232,7 @@ async def record_connection_timeout(
     Args:
         pool_name: Connection pool identifier
     """
-    collector = await _get_or_create_collector()
+    collector = _get_or_create_collector()
     if collector is None:
         return
 
@@ -255,7 +255,7 @@ async def record_connection_wait_time(
         pool_name: Connection pool identifier
         duration_seconds: Wait time in seconds
     """
-    collector = await _get_or_create_collector()
+    collector = _get_or_create_collector()
     if collector is None:
         return
 
@@ -279,7 +279,7 @@ async def record_connection_closed(
         close_reason: Reason for closing (e.g. 'error', 'application_close')
         error_type: Error type if closed due to error
     """
-    collector = await _get_or_create_collector()
+    collector = _get_or_create_collector()
     if collector is None:
         return
 
@@ -305,7 +305,7 @@ async def record_connection_relaxed_timeout(
         maint_notification: Maintenance notification type
         relaxed: True to count up (relaxed), False to count down (unrelaxed)
     """
-    collector = await _get_or_create_collector()
+    collector = _get_or_create_collector()
     if collector is None:
         return
 
@@ -328,7 +328,7 @@ async def record_connection_handoff(
     Args:
         pool_name: Connection pool identifier
     """
-    collector = await _get_or_create_collector()
+    collector = _get_or_create_collector()
     if collector is None:
         return
 
@@ -361,7 +361,7 @@ async def record_error_count(
         retry_attempts: Retry attempts
         is_internal: Whether the error is internal (e.g., timeout, network error)
     """
-    collector = await _get_or_create_collector()
+    collector = _get_or_create_collector()
     if collector is None:
         return
 
@@ -392,7 +392,7 @@ async def record_pubsub_message(
         channel: Pub/Sub channel name
         sharded: True if sharded Pub/Sub channel
     """
-    collector = await _get_or_create_collector()
+    collector = _get_or_create_collector()
     if collector is None:
         return
 
@@ -429,7 +429,7 @@ async def record_streaming_lag(
         stream_name: Stream name
         consumer_group: Consumer group name
     """
-    collector = await _get_or_create_collector()
+    collector = _get_or_create_collector()
     if collector is None:
         return
 
@@ -463,7 +463,7 @@ async def record_streaming_lag_from_response(
         response: Response from XREAD/XREADGROUP command
         consumer_group: Consumer group name (for XREADGROUP)
     """
-    collector = await _get_or_create_collector()
+    collector = _get_or_create_collector()
     if collector is None:
         return
 
@@ -535,7 +535,7 @@ async def record_maint_notification_count(
         network_peer_port: Network peer port
         maint_notification: Maintenance notification type (e.g., 'MOVING', 'MIGRATING')
     """
-    collector = await _get_or_create_collector()
+    collector = _get_or_create_collector()
     if collector is None:
         return
 
@@ -564,7 +564,7 @@ async def record_geo_failover(
         fail_to: Database failed to
         reason: Reason for the failover
     """
-    collector = await _get_or_create_collector()
+    collector = _get_or_create_collector()
     if collector is None:
         return
 
@@ -593,5 +593,5 @@ async def is_enabled() -> bool:
     Returns:
         True if metrics are being collected, False otherwise
     """
-    collector = await _get_or_create_collector()
+    collector = _get_or_create_collector()
     return collector is not None

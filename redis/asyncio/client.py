@@ -742,8 +742,8 @@ class Redis(
             await record_operation_duration(
                 command_name=command_name,
                 duration_seconds=time.monotonic() - start_time,
-                server_address=conn.host,
-                server_port=conn.port,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
                 error=error,
                 retry_attempts=failure_count,
@@ -762,10 +762,11 @@ class Redis(
         # Start timing for observability
         start_time = time.monotonic()
         # Track actual retry attempts for error reporting
-        actual_retry_attempts = [0]
+        actual_retry_attempts = 0
 
         def failure_callback(error, failure_count):
-            actual_retry_attempts[0] = failure_count
+            nonlocal actual_retry_attempts
+            actual_retry_attempts = failure_count
             return self._close_connection(
                 conn, error, failure_count, start_time, command_name
             )
@@ -784,19 +785,19 @@ class Redis(
             await record_operation_duration(
                 command_name=command_name,
                 duration_seconds=time.monotonic() - start_time,
-                server_address=conn.host,
-                server_port=conn.port,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
             )
             return result
         except Exception as e:
             await record_error_count(
-                server_address=conn.host,
-                server_port=conn.port,
-                network_peer_address=conn.host,
-                network_peer_port=conn.port,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
+                network_peer_address=getattr(conn, "host", None),
+                network_peer_port=getattr(conn, "port", None),
                 error_type=e,
-                retry_attempts=actual_retry_attempts[0],
+                retry_attempts=actual_retry_attempts,
                 is_internal=False,
             )
             raise
@@ -1105,8 +1106,8 @@ class PubSub:
                 await record_operation_duration(
                     command_name=command_name,
                     duration_seconds=time.monotonic() - start_time,
-                    server_address=conn.host,
-                    server_port=conn.port,
+                    server_address=getattr(conn, "host", None),
+                    server_port=getattr(conn, "port", None),
                     db_namespace=str(conn.db),
                     error=error,
                     retry_attempts=failure_count,
@@ -1130,10 +1131,11 @@ class PubSub:
         # Start timing for observability
         start_time = time.monotonic()
         # Track actual retry attempts for error reporting
-        actual_retry_attempts = [0]
+        actual_retry_attempts = 0
 
         def failure_callback(error, failure_count):
-            actual_retry_attempts[0] = failure_count
+            nonlocal actual_retry_attempts
+            actual_retry_attempts = failure_count
             return self._reconnect(conn, error, failure_count, start_time, command_name)
 
         try:
@@ -1147,20 +1149,20 @@ class PubSub:
                 await record_operation_duration(
                     command_name=command_name,
                     duration_seconds=time.monotonic() - start_time,
-                    server_address=conn.host,
-                    server_port=conn.port,
+                    server_address=getattr(conn, "host", None),
+                    server_port=getattr(conn, "port", None),
                     db_namespace=str(conn.db),
                 )
 
             return response
         except Exception as e:
             await record_error_count(
-                server_address=conn.host,
-                server_port=conn.port,
-                network_peer_address=conn.host,
-                network_peer_port=conn.port,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
+                network_peer_address=getattr(conn, "host", None),
+                network_peer_port=getattr(conn, "port", None),
                 error_type=e,
-                retry_attempts=actual_retry_attempts[0],
+                retry_attempts=actual_retry_attempts,
                 is_internal=False,
             )
             raise
@@ -1593,8 +1595,8 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             await record_operation_duration(
                 command_name=command_name,
                 duration_seconds=time.monotonic() - start_time,
-                server_address=conn.host,
-                server_port=conn.port,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
                 error=error,
                 retry_attempts=failure_count,
@@ -1626,10 +1628,11 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         # Start timing for observability
         start_time = time.monotonic()
         # Track actual retry attempts for error reporting
-        actual_retry_attempts = [0]
+        actual_retry_attempts = 0
 
         def failure_callback(error, failure_count):
-            actual_retry_attempts[0] = failure_count
+            nonlocal actual_retry_attempts
+            actual_retry_attempts = failure_count
             return self._disconnect_reset_raise_on_watching(
                 conn, error, failure_count, start_time, command_name
             )
@@ -1646,20 +1649,20 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             await record_operation_duration(
                 command_name=command_name,
                 duration_seconds=time.monotonic() - start_time,
-                server_address=conn.host,
-                server_port=conn.port,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
             )
 
             return response
         except Exception as e:
             await record_error_count(
-                server_address=conn.host,
-                server_port=conn.port,
-                network_peer_address=conn.host,
-                network_peer_port=conn.port,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
+                network_peer_address=getattr(conn, "host", None),
+                network_peer_port=getattr(conn, "port", None),
                 error_type=e,
-                retry_attempts=actual_retry_attempts[0],
+                retry_attempts=actual_retry_attempts,
                 is_internal=False,
             )
             raise
@@ -1837,8 +1840,8 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             await record_operation_duration(
                 command_name=command_name,
                 duration_seconds=time.monotonic() - start_time,
-                server_address=conn.host,
-                server_port=conn.port,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
                 error=error,
                 retry_attempts=failure_count,
@@ -1877,10 +1880,11 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         # Start timing for observability
         start_time = time.monotonic()
         # Track actual retry attempts for error reporting
-        actual_retry_attempts = [0]
+        actual_retry_attempts = 0
 
         def failure_callback(error, failure_count):
-            actual_retry_attempts[0] = failure_count
+            nonlocal actual_retry_attempts
+            actual_retry_attempts = failure_count
             return self._disconnect_raise_on_watching(
                 conn, error, failure_count, start_time, operation_name
             )
@@ -1895,19 +1899,19 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             await record_operation_duration(
                 command_name=operation_name,
                 duration_seconds=time.monotonic() - start_time,
-                server_address=conn.host,
-                server_port=conn.port,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
             )
             return response
         except Exception as e:
             await record_error_count(
-                server_address=conn.host,
-                server_port=conn.port,
-                network_peer_address=conn.host,
-                network_peer_port=conn.port,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
+                network_peer_address=getattr(conn, "host", None),
+                network_peer_port=getattr(conn, "port", None),
                 error_type=e,
-                retry_attempts=actual_retry_attempts[0],
+                retry_attempts=actual_retry_attempts,
                 is_internal=False,
             )
             raise
