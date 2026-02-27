@@ -50,7 +50,7 @@ from tests.conftest import (
     skip_unless_arch_bits,
 )
 
-from unittest.mock import patch, AsyncMock, Mock
+from unittest.mock import patch, Mock
 from redis.asyncio.observability import recorder as async_recorder
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
