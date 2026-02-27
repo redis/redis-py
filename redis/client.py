@@ -17,13 +17,13 @@ from typing import (
 )
 
 from redis._parsers.encoders import Encoder
-from redis._parsers.socket import SENTINEL
 from redis._parsers.helpers import (
     _RedisCallbacks,
     _RedisCallbacksRESP2,
     _RedisCallbacksRESP3,
     bool_ok,
 )
+from redis._parsers.socket import SENTINEL
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.cache import CacheConfig, CacheInterface
 from redis.commands import (
