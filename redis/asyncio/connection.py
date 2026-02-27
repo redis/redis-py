@@ -352,10 +352,11 @@ class AbstractConnection:
         if self.is_connected:
             return
         # Track actual retry attempts for error reporting
-        actual_retry_attempts = [0]
+        actual_retry_attempts = 0
 
         def failure_callback(error, failure_count):
-            actual_retry_attempts[0] = failure_count
+            nonlocal actual_retry_attempts
+            actual_retry_attempts = failure_count
             return self.disconnect(error=error, failure_count=failure_count)
 
         try:
@@ -377,7 +378,7 @@ class AbstractConnection:
                 network_peer_address=self.host,
                 network_peer_port=self.port,
                 error_type=e,
-                retry_attempts=actual_retry_attempts[0],
+                retry_attempts=actual_retry_attempts,
                 is_internal=False,
             )
             raise e
@@ -389,7 +390,7 @@ class AbstractConnection:
                 network_peer_address=getattr(self, "host", None),
                 network_peer_port=getattr(self, "port", None),
                 error_type=e,
-                retry_attempts=actual_retry_attempts[0],
+                retry_attempts=actual_retry_attempts,
                 is_internal=False,
             )
             raise e

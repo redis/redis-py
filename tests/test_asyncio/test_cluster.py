@@ -3697,10 +3697,11 @@ class TestAsyncClusterMetricsRecording:
             collector = RedisMetricsCollector(mock_meter, config)
 
         # Patch the recorder to use our collector
+        # Note: _get_or_create_collector is now sync
         with patch.object(
             async_recorder,
             "_get_or_create_collector",
-            new=AsyncMock(return_value=collector),
+            return_value=collector,
         ):
             # Also set the collector directly to ensure it's used
             async_recorder._async_metrics_collector = collector
@@ -3896,10 +3897,11 @@ class TestAsyncClusterPipelineMetricsRecording:
             collector = RedisMetricsCollector(mock_meter, config)
 
         # Patch the recorder to use our collector
+        # Note: _get_or_create_collector is now sync
         with patch.object(
             async_recorder,
             "_get_or_create_collector",
-            new=AsyncMock(return_value=collector),
+            return_value=collector,
         ):
             # Also set the collector directly to ensure it's used
             async_recorder._metrics_collector = collector

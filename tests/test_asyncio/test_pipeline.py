@@ -554,10 +554,11 @@ class TestAsyncPipelineOperationDurationMetricsRecording:
             collector = RedisMetricsCollector(mock_meter, config)
 
         # Patch the recorder to use our collector
+        # Note: _get_or_create_collector is now sync
         with patch.object(
             async_recorder,
             "_get_or_create_collector",
-            new=AsyncMock(return_value=collector),
+            return_value=collector,
         ):
             # Create pipeline with mocked connection pool
             pipeline = Pipeline(
@@ -625,10 +626,11 @@ class TestAsyncPipelineOperationDurationMetricsRecording:
         with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
+        # Note: _get_or_create_collector is now sync
         with patch.object(
             async_recorder,
             "_get_or_create_collector",
-            new=AsyncMock(return_value=collector),
+            return_value=collector,
         ):
             # Create pipeline with transaction=False
             pipeline = Pipeline(
@@ -684,10 +686,11 @@ class TestAsyncPipelineOperationDurationMetricsRecording:
         with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
+        # Note: _get_or_create_collector is now sync
         with patch.object(
             async_recorder,
             "_get_or_create_collector",
-            new=AsyncMock(return_value=collector),
+            return_value=collector,
         ):
             # First pipeline execution
             pipeline1 = Pipeline(
@@ -731,10 +734,11 @@ class TestAsyncPipelineOperationDurationMetricsRecording:
         with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
+        # Note: _get_or_create_collector is now sync
         with patch.object(
             async_recorder,
             "_get_or_create_collector",
-            new=AsyncMock(return_value=collector),
+            return_value=collector,
         ):
             pipeline = Pipeline(
                 connection_pool=mock_async_connection_pool,
