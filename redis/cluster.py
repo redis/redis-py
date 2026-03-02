@@ -1475,14 +1475,14 @@ class RedisCluster(
                     failure_count += 1
 
                     if hasattr(e, "connection"):
-                        self._emit_after_command_execution_event(
+                        self._record_command_metric(
                             command_name=args[0],
                             duration_seconds=time.monotonic() - start_time,
                             connection=e.connection,
                             error=e,
                         )
 
-                        self._emit_on_error_event(
+                        self._record_error_metric(
                             error=e,
                             connection=e.connection,
                             retry_attempts=failure_count,
@@ -1491,7 +1491,7 @@ class RedisCluster(
                 else:
                     # raise the exception
                     if hasattr(e, "connection"):
-                        self._emit_on_error_event(
+                        self._record_error_metric(
                             error=e,
                             connection=e.connection,
                             retry_attempts=failure_count,
@@ -1549,18 +1549,20 @@ class RedisCluster(
                         response, **kwargs
                     )
 
-                self._emit_after_command_execution_event(
+                self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
                     connection=connection,
                 )
                 return response
             except AuthenticationError as e:
-                # AuthenticationError can be raised if the connection was not authenticated successfully.
-                # The connection in the error is used to report the metrics based on host and port info.
-                # Prefer the actual connection object when available, and fall back to the target node
-                # (which also contains host and port info) when the connection is not yet set.
                 e.connection = connection if connection is not None else target_node
+                self._record_command_metric(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
                 raise
             except MaxConnectionsError as e:
                 # MaxConnectionsError indicates client-side resource exhaustion
@@ -1571,6 +1573,12 @@ class RedisCluster(
                 # so we use the target node object which contains the host and port info
                 # because we did not get the connection yet
                 e.connection = target_node
+                self._record_command_metric(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
                 raise
             except (ConnectionError, TimeoutError) as e:
                 if is_debug_log_enabled():
@@ -1607,6 +1615,13 @@ class RedisCluster(
 
                 # DON'T set redis_connection = None - keep the pool for reuse
                 self.nodes_manager.initialize()
+                e.connection = connection
+                self._record_command_metric(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
                 raise e
             except MovedError as e:
                 if is_debug_log_enabled():
@@ -1636,13 +1651,13 @@ class RedisCluster(
                 else:
                     self.nodes_manager.move_slot(e)
                 moved = True
-                self._emit_after_command_execution_event(
+                self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
                     connection=connection,
                     error=e,
                 )
-                self._emit_on_error_event(
+                self._record_error_metric(
                     error=e,
                     connection=connection,
                 )
@@ -1657,13 +1672,13 @@ class RedisCluster(
                 if ttl < self.RedisClusterRequestTTL / 2:
                     time.sleep(0.05)
 
-                self._emit_after_command_execution_event(
+                self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
                     connection=connection,
                     error=e,
                 )
-                self._emit_on_error_event(
+                self._record_error_metric(
                     error=e,
                     connection=connection,
                 )
@@ -1678,13 +1693,13 @@ class RedisCluster(
                 redirect_addr = get_node_name(host=e.host, port=e.port)
                 asking = True
 
-                self._emit_after_command_execution_event(
+                self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
                     connection=connection,
                     error=e,
                 )
-                self._emit_on_error_event(
+                self._record_error_metric(
                     error=e,
                     connection=connection,
                 )
@@ -1705,11 +1720,17 @@ class RedisCluster(
                 # object which contains the host and port info
                 # this is used to report the metrics based on host and port info
                 e.connection = connection if connection else target_node
+                self._record_command_metric(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
                 raise
             except ResponseError as e:
                 # this is used to report the metrics based on host and port info
                 e.connection = connection
-                self._emit_after_command_execution_event(
+                self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
                     connection=connection,
@@ -1724,6 +1745,12 @@ class RedisCluster(
                 # object which contains the host and port info
                 # this is used to report the metrics based on host and port info
                 e.connection = connection if connection else target_node
+                self._record_command_metric(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
                 raise e
             finally:
                 if connection is not None:
@@ -1735,9 +1762,15 @@ class RedisCluster(
         # This means that we used an active connection to read from the socket.
         # This is used to report metrics based on the host and port information.
         e.connection = connection
+        self._record_command_metric(
+            command_name=command,
+            duration_seconds=time.monotonic() - start_time,
+            connection=connection,
+            error=e,
+        )
         raise e
 
-    def _emit_after_command_execution_event(
+    def _record_command_metric(
         self,
         command_name: str,
         duration_seconds: float,
@@ -1756,7 +1789,7 @@ class RedisCluster(
             error=error,
         )
 
-    def _emit_on_error_event(
+    def _record_error_metric(
         self,
         error: Exception,
         connection: Connection,
@@ -3533,7 +3566,7 @@ class PipelineStrategy(AbstractStrategy):
             # this allows us to flush all the requests out across the
             # network
             # so that we can read them from different sockets as they come back.
-            # we dont' multiplex on the sockets as they come available,
+            # we don't multiplex on the sockets as they come available,
             # but that shouldn't make too much difference.
 
             # Start timing for observability
@@ -3547,12 +3580,20 @@ class PipelineStrategy(AbstractStrategy):
             for n in node_commands:
                 n.read()
 
+                # Find the first error in this node's commands, if any
+                node_error = None
+                for cmd in n.commands:
+                    if isinstance(cmd.result, Exception):
+                        node_error = cmd.result
+                        break
+
                 record_operation_duration(
                     command_name="PIPELINE",
                     duration_seconds=time.monotonic() - start_time,
                     server_address=n.connection.host,
                     server_port=n.connection.port,
                     db_namespace=str(n.connection.db),
+                    error=node_error,
                 )
                 nodes_read += 1
         finally:
@@ -3898,7 +3939,7 @@ class TransactionStrategy(AbstractStrategy):
                 network_peer_port=error.connection.port,
                 error_type=error,
                 retry_attempts=failure_count,
-                is_internal=False,
+                is_internal=True,
             )
 
         if self._watching:

@@ -2,6 +2,7 @@
 
 import datetime
 import hashlib
+import inspect
 
 # Try to import the xxhash library as an optional dependency
 try:
@@ -32,6 +33,9 @@ from typing import (
     Union,
 )
 
+from redis.asyncio.observability.recorder import (
+    record_streaming_lag_from_response as async_record_streaming_lag,
+)
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
 from redis.typing import (
     AbsExpiryT,
@@ -4452,9 +4456,19 @@ class StreamCommands(CommandsProtocol):
         pieces.extend(values)
         response = self.execute_command("XREAD", *pieces, keys=keys)
 
-        record_streaming_lag_from_response(response=response)
+        if inspect.iscoroutine(response):
+            # Async client - wrap in coroutine that awaits and records
+            async def _record_and_return():
+                actual_response = await response
 
-        return response
+                await async_record_streaming_lag(response=actual_response)
+                return actual_response
+
+            return _record_and_return()
+        else:
+            # Sync client
+            record_streaming_lag_from_response(response=response)
+            return response
 
     def xreadgroup(
         self,
@@ -4516,12 +4530,25 @@ class StreamCommands(CommandsProtocol):
         pieces.extend(streams.values())
         response = self.execute_command("XREADGROUP", *pieces, **options)
 
-        record_streaming_lag_from_response(
-            response=response,
-            consumer_group=groupname,
-        )
+        if inspect.iscoroutine(response):
+            # Async client - wrap in coroutine that awaits and records
+            async def _record_and_return():
+                actual_response = await response
 
-        return response
+                await async_record_streaming_lag(
+                    response=actual_response,
+                    consumer_group=groupname,
+                )
+                return actual_response
+
+            return _record_and_return()
+        else:
+            # Sync client
+            record_streaming_lag_from_response(
+                response=response,
+                consumer_group=groupname,
+            )
+            return response
 
     def xrevrange(
         self,
