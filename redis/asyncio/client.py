@@ -1601,7 +1601,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
                 error=error,
                 retry_attempts=failure_count,
             )
-        await conn.disconnect()
+        await conn.disconnect(error=error, failure_count=failure_count)
         # if we were already watching a variable, the watch is no longer
         # valid since this connection has died. raise a WatchError, which
         # indicates the user should retry this transaction.
