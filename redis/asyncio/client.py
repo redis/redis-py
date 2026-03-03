@@ -738,7 +738,7 @@ class Redis(
         After we disconnect the connection, it will try to reconnect and
         do a health check as part of the send_command logic(on connection level).
         """
-        if error and failure_count <= conn.retry.get_retries():
+        if error and failure_count is not None and failure_count <= conn.retry.get_retries():
             await record_operation_duration(
                 command_name=command_name,
                 duration_seconds=time.monotonic() - start_time,
@@ -1101,7 +1101,7 @@ class PubSub:
 
         In this error handler we are trying to reconnect to the server.
         """
-        if error and failure_count <= conn.retry.get_retries():
+        if error and failure_count is not None and failure_count <= conn.retry.get_retries():
             if command_name:
                 await record_operation_duration(
                     command_name=command_name,
@@ -1591,7 +1591,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         After we disconnect the connection, it will try to reconnect and
         do a health check as part of the send_command logic(on connection level).
         """
-        if error and failure_count <= conn.retry.get_retries():
+        if error and failure_count is not None and failure_count <= conn.retry.get_retries():
             await record_operation_duration(
                 command_name=command_name,
                 duration_seconds=time.monotonic() - start_time,
@@ -1836,7 +1836,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         After we disconnect the connection, it will try to reconnect and
         do a health check as part of the send_command logic(on connection level).
         """
-        if error and failure_count <= conn.retry.get_retries():
+        if error and failure_count is not None and failure_count <= conn.retry.get_retries():
             await record_operation_duration(
                 command_name=command_name,
                 duration_seconds=time.monotonic() - start_time,
