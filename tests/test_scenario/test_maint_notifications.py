@@ -1239,16 +1239,10 @@ class TestStandaloneClientPushNotifications(TestPushNotificationsBase):
         assert errors.empty(), f"Errors occurred in threads: {errors.queue}"
 
 
-# 5 minutes timeout for this test
-# @pytest.mark.skipif(
-#     use_mock_proxy(),
-#     reason="Mock proxy doesn't support sending notifications to new connections.",
-# )
-
-
 def generate_params(
     fault_injector_client: FaultInjectorClient,
     effect_names: list[SlotMigrateEffects],
+    skip_combinations: list[tuple[SlotMigrateEffects, str]] = [],
 ):
     # params should produce list of tuples: (effect_name, trigger_name, bdb_config, bdb_name)
     params = []
@@ -1261,6 +1255,8 @@ def generate_params(
 
             for trigger_info in triggers_data["triggers"]:
                 trigger = trigger_info["name"]
+                if (effect_name, trigger) in skip_combinations:
+                    continue
                 if trigger == "maintenance_mode":
                     continue
                 trigger_requirements = trigger_info["requirements"]
@@ -1741,9 +1737,12 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                 SlotMigrateEffects.REMOVE,
                 SlotMigrateEffects.ADD,
             ],
+            skip_combinations=[
+                (SlotMigrateEffects.SLOT_SHUFFLE, "failover"),
+            ],  # maintenance ends too fast for the test to be reliable
         ),
     )
-    def test_new_connections_receive_last_notification_with_migrating(
+    def test_new_connections_receive_last_smigrating_smigrated_notification(
         self,
         fault_injector_client_oss_api: FaultInjectorClient,
         effect_name: SlotMigrateEffects,

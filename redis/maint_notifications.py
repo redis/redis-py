@@ -1079,7 +1079,8 @@ class OSSMaintNotificationsHandler:
                 # process the same notification twice
                 return
 
-            logger.debug(f"Handling SMIGRATED notification: {notification}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Handling SMIGRATED notification: {notification}")
             self._in_progress.add(notification)
 
             # Extract the information about the src and destination nodes that are affected
@@ -1133,7 +1134,16 @@ class OSSMaintNotificationsHandler:
                         # Some of them might be used by sub sub and we don't know which ones - so we disconnect
                         # all in flight connections after they are done with current command execution
                         for conn in current_node.redis_connection.connection_pool._get_in_use_connections():
+                            add_debug_log_for_notification(
+                                conn, "SMIGRATED - mark for reconnect"
+                            )
                             conn.mark_for_reconnect()
+                    else:
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(
+                                f"SMIGRATED: Node {current_node.name} not affected by maintenance, "
+                                f"skipping mark for reconnect"
+                            )
 
                     if (
                         current_node
