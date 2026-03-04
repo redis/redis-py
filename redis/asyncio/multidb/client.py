@@ -24,6 +24,7 @@ from redis.multidb.exception import (
     NoValidDatabaseException,
     UnhealthyDatabaseException,
 )
+from redis.observability.attributes import GeoFailoverReason
 from redis.typing import ChannelT, EncodableT, KeyT
 from redis.utils import experimental
 
@@ -156,7 +157,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
 
         if database.circuit.state == CBState.CLOSED:
             highest_weighted_db, _ = self._databases.get_top_n(1)[0]
-            await self.command_executor.set_active_database(database)
+            await self.command_executor.set_active_database(
+                database, GeoFailoverReason.MANUAL
+            )
             return
 
         raise NoValidDatabaseException(
@@ -219,7 +222,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             new_database.weight > highest_weight_database.weight
             and new_database.circuit.state == CBState.CLOSED
         ):
-            await self.command_executor.set_active_database(new_database)
+            await self.command_executor.set_active_database(
+                new_database, GeoFailoverReason.AUTOMATIC
+            )
 
     async def remove_database(self, database: AsyncDatabase):
         """
@@ -232,7 +237,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             highest_weight <= weight
             and highest_weighted_db.circuit.state == CBState.CLOSED
         ):
-            await self.command_executor.set_active_database(highest_weighted_db)
+            await self.command_executor.set_active_database(
+                highest_weighted_db, GeoFailoverReason.MANUAL
+            )
 
     async def update_database_weight(self, database: AsyncDatabase, weight: float):
         """
