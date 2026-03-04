@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 import redis
 
 if TYPE_CHECKING:
+    from redis.asyncio.connection import ConnectionPool
     from redis.asyncio.multidb.database import AsyncDatabase
     from redis.connection import ConnectionPoolInterface
     from redis.multidb.database import SyncDatabase
@@ -128,7 +129,7 @@ class AttributeBuilder:
 
     @staticmethod
     def build_operation_attributes(
-        command_name: Optional[str] = None,
+        command_name: Optional[Union[str, bytes]] = None,
         batch_size: Optional[int] = None,  # noqa
         network_peer_address: Optional[str] = None,
         network_peer_port: Optional[int] = None,
@@ -140,7 +141,7 @@ class AttributeBuilder:
         Build attributes for a Redis operation (command execution).
 
         Args:
-            command_name: Redis command name (e.g., 'GET', 'SET', 'MULTI')
+            command_name: Redis command name (e.g., 'GET', 'SET', 'MULTI'), can be str or bytes
             batch_size: Number of commands in batch (for pipelines/transactions)
             network_peer_address: Resolved peer address
             network_peer_port: Peer port number
@@ -154,6 +155,9 @@ class AttributeBuilder:
         attrs: Dict[str, Any] = {}
 
         if command_name is not None:
+            # Ensure command_name is a string (it can be bytes from args[0])
+            if isinstance(command_name, bytes):
+                command_name = command_name.decode("utf-8", errors="replace")
             attrs[DB_OPERATION_NAME] = command_name.upper()
 
         if network_peer_address is not None:
@@ -376,7 +380,7 @@ class AttributeBuilder:
         return f"{server_address}:{server_port}/{db_namespace}"
 
 
-def get_pool_name(pool: "ConnectionPoolInterface") -> str:
+def get_pool_name(pool: Union["ConnectionPoolInterface", "ConnectionPool"]) -> str:
     """
     Get a short string representation of a connection pool for observability.
 
