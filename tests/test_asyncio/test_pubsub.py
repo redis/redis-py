@@ -1360,6 +1360,8 @@ class TestAsyncPubSubTimeoutPropagation:
         msg = await p.get_message(timeout=0.1)
         assert msg is None
         await p.aclose()
+
+
 @pytest.mark.asyncio
 class TestPubSubHandleMessageMetrics:
     """Tests for handle_message recording pubsub metrics."""
