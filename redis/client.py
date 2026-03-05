@@ -967,25 +967,45 @@ class PubSub:
         # NOTE: for python3, we can't pass bytestrings as keyword arguments
         # so we need to decode channel/pattern names back to unicode strings
         # before passing them to [p]subscribe.
+        #
+        # However, channels subscribed without a callback (positional args) may
+        # have binary names that are not valid in the current encoding (e.g.
+        # arbitrary bytes that are not valid UTF-8).  These channels are stored
+        # with a ``None`` handler.  We re-subscribe them as positional args so
+        # that no decoding is required.
         self.pending_unsubscribe_channels.clear()
         self.pending_unsubscribe_patterns.clear()
         self.pending_unsubscribe_shard_channels.clear()
         if self.channels:
-            channels = {
-                self.encoder.decode(k, force=True): v for k, v in self.channels.items()
-            }
-            self.subscribe(**channels)
+            channels_with_handlers = {}
+            channels_without_handlers = []
+            for k, v in self.channels.items():
+                if v is not None:
+                    channels_with_handlers[self.encoder.decode(k, force=True)] = v
+                else:
+                    channels_without_handlers.append(k)
+            if channels_with_handlers or channels_without_handlers:
+                self.subscribe(*channels_without_handlers, **channels_with_handlers)
         if self.patterns:
-            patterns = {
-                self.encoder.decode(k, force=True): v for k, v in self.patterns.items()
-            }
-            self.psubscribe(**patterns)
+            patterns_with_handlers = {}
+            patterns_without_handlers = []
+            for k, v in self.patterns.items():
+                if v is not None:
+                    patterns_with_handlers[self.encoder.decode(k, force=True)] = v
+                else:
+                    patterns_without_handlers.append(k)
+            if patterns_with_handlers or patterns_without_handlers:
+                self.psubscribe(*patterns_without_handlers, **patterns_with_handlers)
         if self.shard_channels:
-            shard_channels = {
-                self.encoder.decode(k, force=True): v
-                for k, v in self.shard_channels.items()
-            }
-            self.ssubscribe(**shard_channels)
+            shard_with_handlers = {}
+            shard_without_handlers = []
+            for k, v in self.shard_channels.items():
+                if v is not None:
+                    shard_with_handlers[self.encoder.decode(k, force=True)] = v
+                else:
+                    shard_without_handlers.append(k)
+            if shard_with_handlers or shard_without_handlers:
+                self.ssubscribe(*shard_without_handlers, **shard_with_handlers)
 
     @property
     def subscribed(self) -> bool:
@@ -1870,7 +1890,6 @@ class Pipeline(Redis):
         failure_count: Optional[int] = None,
         start_time: Optional[float] = None,
         command_name: Optional[str] = None,
-        batch_size: Optional[int] = None,
     ) -> None:
         """
         Close the connection, raise an exception if we were watching.
@@ -1890,7 +1909,6 @@ class Pipeline(Redis):
                 db_namespace=str(conn.db),
                 error=error,
                 retry_attempts=failure_count,
-                batch_size=batch_size,
             )
         conn.disconnect()
         # if we were watching a variable, the watch is no longer valid
@@ -1926,12 +1944,11 @@ class Pipeline(Redis):
         start_time = time.monotonic()
         # Track actual retry attempts for error reporting
         actual_retry_attempts = [0]
-        stack_len = len(stack)
 
         def failure_callback(error, failure_count):
             actual_retry_attempts[0] = failure_count
             self._disconnect_raise_on_watching(
-                conn, error, failure_count, start_time, operation_name, stack_len
+                conn, error, failure_count, start_time, operation_name
             )
 
         try:
@@ -1947,7 +1964,6 @@ class Pipeline(Redis):
                 server_address=getattr(conn, "host", None),
                 server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
-                batch_size=stack_len,
             )
             return response
         except Exception as e:

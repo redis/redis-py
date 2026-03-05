@@ -8,9 +8,11 @@ OTel semantic conventions for database clients.
 import logging
 import time
 from enum import Enum
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional, Union
 
 if TYPE_CHECKING:
+    from redis.asyncio.connection import ConnectionPool
+    from redis.asyncio.multidb.database import AsyncDatabase
     from redis.connection import ConnectionPoolInterface
     from redis.multidb.database import SyncDatabase
 
@@ -25,6 +27,7 @@ from redis.observability.attributes import (
     get_pool_name,
 )
 from redis.observability.config import MetricGroup, OTelConfig
+from redis.utils import deprecated_args
 
 logger = logging.getLogger(__name__)
 
@@ -306,8 +309,8 @@ class RedisMetricsCollector:
 
     def record_geo_failover(
         self,
-        fail_from: "SyncDatabase",
-        fail_to: "SyncDatabase",
+        fail_from: Union["SyncDatabase", "AsyncDatabase"],
+        fail_to: Union["SyncDatabase", "AsyncDatabase"],
         reason: GeoFailoverReason,
     ):
         """
@@ -388,7 +391,7 @@ class RedisMetricsCollector:
 
     def record_connection_create_time(
         self,
-        connection_pool: "ConnectionPoolInterface",
+        connection_pool: Union["ConnectionPoolInterface", "ConnectionPool"],
         duration_seconds: float,
     ) -> None:
         """
@@ -426,6 +429,11 @@ class RedisMetricsCollector:
 
     # Command execution metric recording methods
 
+    @deprecated_args(
+        args_to_warn=["batch_size"],
+        reason="The batch_size argument is no longer used and will be removed in the next major version.",
+        version="7.2.1",
+    )
     def record_operation_duration(
         self,
         command_name: str,
@@ -433,7 +441,7 @@ class RedisMetricsCollector:
         server_address: Optional[str] = None,
         server_port: Optional[int] = None,
         db_namespace: Optional[int] = None,
-        batch_size: Optional[int] = None,
+        batch_size: Optional[int] = None,  # noqa
         error_type: Optional[Exception] = None,
         network_peer_address: Optional[str] = None,
         network_peer_port: Optional[int] = None,
@@ -473,7 +481,6 @@ class RedisMetricsCollector:
         attrs.update(
             self.attr_builder.build_operation_attributes(
                 command_name=command_name,
-                batch_size=batch_size,
                 network_peer_address=network_peer_address,
                 network_peer_port=network_peer_port,
                 retry_attempts=retry_attempts,
@@ -582,12 +589,17 @@ class RedisMetricsCollector:
 
     # Streaming metric recording methods
 
+    @deprecated_args(
+        args_to_warn=["consumer_name"],
+        reason="The consumer_name argument is no longer used and will be removed in the next major version.",
+        version="7.2.1",
+    )
     def record_streaming_lag(
         self,
         lag_seconds: float,
         stream_name: Optional[str] = None,
         consumer_group: Optional[str] = None,
-        consumer_name: Optional[str] = None,
+        consumer_name: Optional[str] = None,  # noqa
     ) -> None:
         """
         Record the lag of a streaming message.
@@ -604,7 +616,6 @@ class RedisMetricsCollector:
         attrs = self.attr_builder.build_streaming_attributes(
             stream_name=stream_name,
             consumer_group=consumer_group,
-            consumer_name=consumer_name,
         )
         self.stream_lag.record(lag_seconds, attributes=attrs)
 

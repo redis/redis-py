@@ -884,8 +884,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         else:
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
-                # p = DEFAULT_RESP_VERSION
-            self.protocol = p
+        self.protocol = p
         if self.protocol == 3 and parser_class == _RESP2Parser:
             # If the protocol is 3 but the parser is RESP2, change it to RESP3
             # This is needed because the parser might be set before the protocol
@@ -985,13 +984,18 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
     ):
         if self._sock:
             return
+        # Track actual retry attempts for error reporting
+        actual_retry_attempts = [0]
+
+        def failure_callback(error, failure_count):
+            actual_retry_attempts[0] = failure_count
+            self.disconnect(error=error, failure_count=failure_count)
+
         try:
             if retry_socket_connect:
                 sock = self.retry.call_with_retry(
                     self._connect,
-                    lambda error, failure_count: self.disconnect(
-                        error=error, failure_count=failure_count
-                    ),
+                    failure_callback,
                     with_failure_count=True,
                 )
             else:
@@ -1004,8 +1008,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 network_peer_address=self.host,
                 network_peer_port=self.port,
                 error_type=e,
-                retry_attempts=0,
-                is_internal=False,
+                retry_attempts=actual_retry_attempts[0],
             )
             raise e
         except OSError as e:
@@ -1016,8 +1019,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 network_peer_address=getattr(self, "host", None),
                 network_peer_port=getattr(self, "port", None),
                 error_type=e,
-                retry_attempts=0,
-                is_internal=False,
+                retry_attempts=actual_retry_attempts[0],
             )
             raise e
 
