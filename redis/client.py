@@ -98,21 +98,18 @@ def is_debug_log_enabled():
 
 
 def add_debug_log_for_operation_failure(connection: "AbstractConnection"):
-    if logger.isEnabledFor(logging.DEBUG):
-        socket_address = None
-        try:
-            socket_address = (
-                connection._sock.getsockname() if connection._sock else None
-            )
-            socket_address = socket_address[1] if socket_address else None
-        except (AttributeError, OSError):
-            pass
+    socket_address = None
+    try:
+        socket_address = connection._sock.getsockname() if connection._sock else None
+        socket_address = socket_address[1] if socket_address else None
+    except (AttributeError, OSError):
+        pass
 
-        logger.debug(
-            f"Operation failed, "
-            f"with connection: {connection}, connected to ip {connection.get_resolved_ip()}, "
-            f"local socket port: {socket_address}",
-        )
+    logger.debug(
+        f"Operation failed, "
+        f"with connection: {connection}, connected to ip {connection.get_resolved_ip()}, "
+        f"local socket port: {socket_address}",
+    )
 
 
 class CaseInsensitiveDict(dict):
