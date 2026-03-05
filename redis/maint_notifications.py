@@ -1006,6 +1006,7 @@ class MaintNotificationsConnectionHandler:
             or not self.config.is_relaxed_timeouts_enabled()
         ):
             return
+        notification = None
         if kwargs.get("notification"):
             notification = kwargs["notification"]
         add_debug_log_for_notification(
