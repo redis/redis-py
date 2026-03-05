@@ -1328,11 +1328,23 @@ class TestClusterClientPushNotificationsWithEffectTriggerBase(
         self._bdb_name = db_config["name"]
         socket_timeout = DEFAULT_OSS_API_CLIENT_SOCKET_TIMEOUT
 
+        auth_ssl_client_certs_config_info = db_config.get(
+            "authentication_ssl_client_certs", None
+        )
+
+        auth_ssl_client_certs = (
+            True
+            if auth_ssl_client_certs_config_info is not None
+            and auth_ssl_client_certs_config_info[0]["client_cert"] is not None
+            else False
+        )
+
         cluster_client_maint_notifications = get_cluster_client_maint_notifications(
             endpoints_config=cluster_endpoint_config,
             disable_retries=True,
             socket_timeout=socket_timeout,
             enable_maintenance_notifications=True,
+            auth_ssl_client_certs=auth_ssl_client_certs,
         )
         return cluster_client_maint_notifications, cluster_endpoint_config
 
