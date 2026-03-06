@@ -2900,7 +2900,7 @@ class ListCommands(CommandsProtocol):
     """
 
     def blpop(
-        self, keys: List, timeout: Optional[Number] = 0
+        self, keys: KeysT, timeout: Optional[Number] = 0
     ) -> Union[Awaitable[list], list]:
         """
         LPOP a value off of the first non-empty list
@@ -2921,7 +2921,7 @@ class ListCommands(CommandsProtocol):
         return self.execute_command("BLPOP", *keys)
 
     def brpop(
-        self, keys: List, timeout: Optional[Number] = 0
+        self, keys: KeysT, timeout: Optional[Number] = 0
     ) -> Union[Awaitable[list], list]:
         """
         RPOP a value off of the first non-empty list
