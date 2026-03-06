@@ -3162,6 +3162,44 @@ class TestClusterConnectionErrorHandling:
 class TestClusterPipeline:
     """Tests for the ClusterPipeline class."""
 
+    async def test_pipeline_nodes_manager_property(self) -> None:
+        """
+        Test that ClusterPipeline exposes nodes_manager property
+        that delegates to the cluster client's nodes_manager.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            pipeline = r.pipeline()
+            # Verify that nodes_manager property exists and returns the same object
+            # as the cluster client's nodes_manager
+            assert pipeline.nodes_manager is r.nodes_manager
+            # Verify that we can access nodes_manager attributes
+            assert pipeline.nodes_manager.default_node is not None
+        finally:
+            await r.aclose()
+
+    async def test_pipeline_set_response_callback(self) -> None:
+        """
+        Test that ClusterPipeline exposes set_response_callback method
+        that delegates to the cluster client's set_response_callback.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            pipeline = r.pipeline()
+
+            # Define a custom callback
+            def custom_callback(response):
+                return f"custom_{response}"
+
+            # Set the callback via the pipeline
+            pipeline.set_response_callback("CUSTOM_CMD", custom_callback)
+
+            # Verify that the callback was set on the cluster client
+            assert "CUSTOM_CMD" in r.response_callbacks
+            assert r.response_callbacks["CUSTOM_CMD"] is custom_callback
+        finally:
+            await r.aclose()
+
     async def test_blocked_arguments(self, r: RedisCluster) -> None:
         """Test handling for blocked pipeline arguments."""
 

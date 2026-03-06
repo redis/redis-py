@@ -1989,6 +1989,15 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
             else TransactionStrategy(self)
         )
 
+    @property
+    def nodes_manager(self) -> "NodesManager":
+        """Get the nodes manager from the cluster client."""
+        return self.cluster_client.nodes_manager
+
+    def set_response_callback(self, command: str, callback: ResponseCallbackT) -> None:
+        """Set a custom response callback on the cluster client."""
+        self.cluster_client.set_response_callback(command, callback)
+
     async def initialize(self) -> "ClusterPipeline":
         await self._execution_strategy.initialize()
         return self

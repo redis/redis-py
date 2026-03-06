@@ -466,6 +466,26 @@ class TestPipeline:
                 {"key1_transaction": "value1", "key2_transaction": "value2"}, ex=10
             )
 
+    async def test_pipeline_json_module_access(self, r):
+        """
+        Test that pipeline can access the json() module.
+        The JSON module requires nodes_manager (for cluster) and set_response_callback
+        on the client during initialization.
+
+        """
+        pipeline = r.pipeline()
+
+        # This should not raise an AttributeError
+        json_pipeline = pipeline.json()
+
+        # Verify the JSON module was created successfully
+        assert json_pipeline is not None
+        assert json_pipeline.client is pipeline
+
+        # Verify that JSON callbacks were registered
+        assert "JSON.SET" in r.response_callbacks
+        assert "JSON.GET" in r.response_callbacks
+
 
 @pytest.mark.asyncio
 class TestAsyncPipelineOperationDurationMetricsRecording:
