@@ -19,6 +19,8 @@ from redis.multidb.healthcheck import (
     HealthCheck,
     DEFAULT_HEALTH_CHECK_PROBES,
     DEFAULT_HEALTH_CHECK_POLICY,
+    DEFAULT_HEALTH_CHECK_DELAY,
+    DEFAULT_HEALTH_CHECK_TIMEOUT,
 )
 
 
@@ -44,7 +46,12 @@ def mock_fs() -> FailoverStrategy:
 
 @pytest.fixture()
 def mock_hc() -> HealthCheck:
-    return Mock(spec=HealthCheck)
+    mock = Mock(spec=HealthCheck)
+    mock.health_check_probes = DEFAULT_HEALTH_CHECK_PROBES
+    # Use minimal delay for faster test execution
+    mock.health_check_delay = 0.01
+    mock.health_check_timeout = DEFAULT_HEALTH_CHECK_TIMEOUT
+    return mock
 
 
 @pytest.fixture()

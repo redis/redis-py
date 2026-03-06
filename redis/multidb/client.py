@@ -48,9 +48,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             else config.health_checks
         )
         self._health_check_interval = config.health_check_interval
-        self._health_check_policy: HealthCheckPolicy = config.health_check_policy.value(
-            config.health_check_probes, config.health_check_probes_delay
-        )
+        self._health_check_policy: HealthCheckPolicy = config.health_check_policy.value()
         self._failure_detectors = (
             config.default_failure_detectors()
             if not config.failure_detectors
@@ -331,27 +329,21 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
             results = {}
 
-            try:
-                for future in as_completed(
-                    futures, timeout=self._health_check_interval
-                ):
-                    try:
-                        database = futures[future]
-                        results[database] = future.result()
-                    except UnhealthyDatabaseException as e:
-                        unhealthy_db = e.database
-                        unhealthy_db.circuit.state = CBState.OPEN
+            for future in as_completed(futures):
+                try:
+                    database = futures[future]
+                    results[database] = future.result()
+                except UnhealthyDatabaseException as e:
+                    unhealthy_db = e.database
+                    unhealthy_db.circuit.state = CBState.OPEN
 
-                        logger.debug(
-                            "Health check failed, due to exception",
-                            exc_info=e.original_exception,
-                        )
+                    logger.debug(
+                        "Health check failed, due to exception",
+                        exc_info=e.original_exception,
+                    )
 
-                        results[unhealthy_db] = False
-            except TimeoutError:
-                raise TimeoutError(
-                    "Health check execution exceeds health_check_interval"
-                )
+                    results[unhealthy_db] = False
+
         return results
 
     def _perform_initial_health_check(self):

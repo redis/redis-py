@@ -53,6 +53,7 @@ class TestMultiDbClient:
                     mock_multi_db_config.failover_strategy.set_databases.call_count == 1
                 )
                 assert client.set("key", "value") == "OK1"
+                # 3 databases × 3 probes = 9 calls minimum
                 assert len(mock_hc.check_health.call_args_list) >= 9
 
                 assert mock_db.circuit.state == CBState.CLOSED
@@ -110,6 +111,7 @@ class TestMultiDbClient:
                 )
                 result = client.set("key", "value")
                 assert result == "OK1"
+                # 3 databases × 3 probes = 9 calls minimum (but one db fails, so >= 7)
                 assert len(mock_hc.check_health.call_args_list) >= 7
 
                 assert mock_db.circuit.state == CBState.CLOSED
@@ -122,7 +124,7 @@ class TestMultiDbClient:
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
             (
-                {"health_check_probes": 1},
+                {},
                 {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
@@ -133,22 +135,24 @@ class TestMultiDbClient:
     def test_execute_command_against_correct_db_on_background_health_check_determine_active_db_unhealthy(
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
-        cb = PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=5))
+        cb = PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=0.1))
         cb.database = mock_db
         mock_db.circuit = cb
 
-        cb1 = PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=5))
+        cb1 = PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=0.1))
         cb1.database = mock_db1
         mock_db1.circuit = cb1
 
-        cb2 = PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=5))
+        cb2 = PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=0.1))
         cb2.database = mock_db2
         mock_db2.circuit = cb2
 
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
-        # Track health check runs across all databases
-        health_check_run = 0
+        # Track health check rounds per database
+        # A round is a complete health check cycle (initial or background)
+        db_rounds = {id(mock_db): 0, id(mock_db1): 0, id(mock_db2): 0}
+        db_probes_in_round = {id(mock_db): 0, id(mock_db1): 0, id(mock_db2): 0}
 
         # Create events for each failover scenario
         db1_became_unhealthy = threading.Event()
@@ -157,58 +161,54 @@ class TestMultiDbClient:
         counter_lock = threading.Lock()
 
         def mock_check_health(database):
-            nonlocal health_check_run
-
-            # Increment run counter for each health check call
             with counter_lock:
-                health_check_run += 1
-                current_run = health_check_run
+                db_probes_in_round[id(database)] += 1
+                # After 3 probes, increment the round counter
+                if db_probes_in_round[id(database)] > 3:
+                    db_rounds[id(database)] += 1
+                    db_probes_in_round[id(database)] = 1
+                current_round = db_rounds[id(database)]
 
-            # Run 1 (health_check_run 1-3): All databases healthy
-            if current_run <= 3:
+            # Round 0 (initial health check): All databases healthy
+            if current_round == 0:
                 return True
 
-            # Run 2 (health_check_run 4-6): mock_db1 unhealthy, others healthy
-            elif current_run <= 6:
+            # Round 1: mock_db1 becomes unhealthy, others healthy
+            if current_round == 1:
                 if database == mock_db1:
-                    if current_run == 6:
-                        db1_became_unhealthy.set()
-                    return False
-
-                # Signal that db1 has become unhealthy after all 3 checks
-                if current_run == 6:
                     db1_became_unhealthy.set()
+                    return False
                 return True
 
-            # Run 3 (health_check_run 7-9): mock_db1 and mock_db2 unhealthy, mock_db healthy
-            elif current_run <= 9:
-                if database == mock_db1 or database == mock_db2:
-                    if current_run == 9:
-                        db2_became_unhealthy.set()
+            # Round 2: mock_db2 also becomes unhealthy, mock_db healthy
+            if current_round == 2:
+                if database == mock_db1:
                     return False
-
-                # Signal that db2 has become unhealthy after all 3 checks
-                if current_run == 9:
+                if database == mock_db2:
                     db2_became_unhealthy.set()
-                return True
-
-            # Run 4 (health_check_run 10-12): mock_db unhealthy, others healthy
-            else:
-                if database == mock_db:
-                    if current_run >= 12:
-                        db_became_unhealthy.set()
                     return False
-
-                # Signal that db has become unhealthy after all 3 checks
-                if current_run >= 12:
-                    db_became_unhealthy.set()
                 return True
+
+            # Round 3: mock_db also becomes unhealthy, but mock_db1 recovers
+            if current_round == 3:
+                if database == mock_db:
+                    db_became_unhealthy.set()
+                    return False
+                if database == mock_db2:
+                    return False
+                # mock_db1 recovers
+                return True
+
+            # Round 4+: mock_db1 is healthy, others unhealthy
+            if database == mock_db1:
+                return True
+            return False
 
         mock_hc.check_health.side_effect = mock_check_health
         mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
-            mock_multi_db_config.health_check_interval = 0.1
+            mock_multi_db_config.health_check_interval = 0.05
             mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
             mock_db.client.execute_command.return_value = "OK"
             mock_db1.client.execute_command.return_value = "OK1"
@@ -227,7 +227,7 @@ class TestMultiDbClient:
                 # (instead of just sleeping)
                 wait_for_condition(
                     lambda: cb1.state == CBState.OPEN,
-                    timeout=0.2,
+                    timeout=0.5,
                     error_message="Timeout waiting for cb1 to open",
                 )
 
@@ -242,7 +242,7 @@ class TestMultiDbClient:
                 # (instead of just sleeping)
                 wait_for_condition(
                     lambda: cb2.state == CBState.OPEN,
-                    timeout=0.2,
+                    timeout=0.5,
                     error_message="Timeout waiting for cb2 to open",
                 )
 
@@ -254,8 +254,15 @@ class TestMultiDbClient:
                 )
                 wait_for_condition(
                     lambda: cb.state == CBState.OPEN,
-                    timeout=0.2,
+                    timeout=0.5,
                     error_message="Timeout waiting for cb to open",
+                )
+
+                # Wait for mock_db1 to recover (circuit breaker to close)
+                wait_for_condition(
+                    lambda: cb1.state == CBState.CLOSED,
+                    timeout=1.0,
+                    error_message="Timeout waiting for cb1 to close (mock_db1 to recover)",
                 )
 
                 assert client.set("key", "value") == "OK1"
@@ -266,7 +273,7 @@ class TestMultiDbClient:
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
             (
-                {"health_check_probes": 1},
+                {},
                 {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
@@ -278,21 +285,33 @@ class TestMultiDbClient:
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        db1_counter = 0
-        error_event = threading.Event()
-        check = False
+
+        # Track health check rounds per database
+        db_rounds = {id(mock_db): 0, id(mock_db1): 0, id(mock_db2): 0}
+        db_probes_in_round = {id(mock_db): 0, id(mock_db1): 0, id(mock_db2): 0}
+        db1_became_unhealthy = threading.Event()
+        counter_lock = threading.Lock()
 
         def mock_check_health(database):
-            nonlocal db1_counter, check
+            with counter_lock:
+                db_probes_in_round[id(database)] += 1
+                if db_probes_in_round[id(database)] > 3:
+                    db_rounds[id(database)] += 1
+                    db_probes_in_round[id(database)] = 1
+                current_round = db_rounds[id(database)]
 
-            if database == mock_db1 and not check:
-                db1_counter += 1
+            # Round 0 (initial health check): All databases healthy
+            if current_round == 0:
+                return True
 
-                if db1_counter > 1:
-                    error_event.set()
-                    check = True
+            # Round 1: mock_db1 becomes unhealthy, others healthy
+            if current_round == 1:
+                if database == mock_db1:
+                    db1_became_unhealthy.set()
                     return False
+                return True
 
+            # Round 2+: All databases healthy (mock_db1 recovers)
             return True
 
         mock_hc.check_health.side_effect = mock_check_health
@@ -302,35 +321,39 @@ class TestMultiDbClient:
             mock_db.client.execute_command.return_value = "OK"
             mock_db1.client.execute_command.return_value = "OK1"
             mock_db2.client.execute_command.return_value = "OK2"
-            mock_multi_db_config.health_check_interval = 0.1
-            mock_multi_db_config.auto_fallback_interval = 0.2
+            mock_multi_db_config.health_check_interval = 0.05
+            mock_multi_db_config.auto_fallback_interval = 0.1
             mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
 
             client = MultiDBClient(mock_multi_db_config)
             try:
                 assert client.set("key", "value") == "OK1"
-                error_event.wait(timeout=0.5)
 
-                # Wait for circuit breaker to actually open (not just the event)
+                # Wait for mock_db1 to become unhealthy
+                assert db1_became_unhealthy.wait(timeout=1.0), (
+                    "Timeout waiting for mock_db1 to become unhealthy"
+                )
+
+                # Wait for circuit breaker to actually open
                 wait_for_condition(
                     lambda: mock_db1.circuit.state == CBState.OPEN,
-                    timeout=0.2,
+                    timeout=0.5,
                     error_message="Timeout waiting for cb1 to open after error event.",
                 )
 
                 # Now the failover strategy will select mock_db2
                 assert client.set("key", "value") == "OK2"
 
-                # Wait for auto fallback interval to pass
+                # Wait for auto fallback interval to pass (mock_db1 recovers in round 2+)
                 wait_for_condition(
                     lambda: mock_db1.circuit.state == CBState.CLOSED,
-                    timeout=0.2,
+                    timeout=1.0,
                     error_message="Timeout waiting for mock_db1 to be healthy again.",
                 )
 
                 # Wait for auto fallback time to pass - this way on next command execution
                 # the active database will be re-evaluated
-                sleep(0.2)
+                sleep(0.1)
 
                 # Now the failover strategy will select mock_db1 again
                 assert client.set("key", "value") == "OK1"
@@ -341,7 +364,7 @@ class TestMultiDbClient:
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
             (
-                {"health_check_probes": 1},
+                {},
                 {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
@@ -353,20 +376,29 @@ class TestMultiDbClient:
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        db1_counter = 0
-        error_event = threading.Event()
-        check = False
+
+        # Track health check rounds per database
+        db_rounds = {id(mock_db): 0, id(mock_db1): 0, id(mock_db2): 0}
+        db_probes_in_round = {id(mock_db): 0, id(mock_db1): 0, id(mock_db2): 0}
+        db1_became_unhealthy = threading.Event()
+        counter_lock = threading.Lock()
 
         def mock_check_health(database):
-            nonlocal db1_counter, check
+            with counter_lock:
+                db_probes_in_round[id(database)] += 1
+                if db_probes_in_round[id(database)] > 3:
+                    db_rounds[id(database)] += 1
+                    db_probes_in_round[id(database)] = 1
+                current_round = db_rounds[id(database)]
 
-            if database == mock_db1 and not check:
-                db1_counter += 1
+            # Round 0 (initial health check): All databases healthy
+            if current_round == 0:
+                return True
 
-                if db1_counter > 1:
-                    error_event.set()
-                    check = True
-                    return False
+            # Round 1+: mock_db1 stays unhealthy (no auto fallback)
+            if database == mock_db1:
+                db1_became_unhealthy.set()
+                return False
 
             return True
 
@@ -377,26 +409,30 @@ class TestMultiDbClient:
             mock_db.client.execute_command.return_value = "OK"
             mock_db1.client.execute_command.return_value = "OK1"
             mock_db2.client.execute_command.return_value = "OK2"
-            mock_multi_db_config.health_check_interval = 0.1
+            mock_multi_db_config.health_check_interval = 0.05
             mock_multi_db_config.auto_fallback_interval = -1
             mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
 
             client = MultiDBClient(mock_multi_db_config)
             try:
                 assert client.set("key", "value") == "OK1"
-                error_event.wait(timeout=0.5)
+
+                # Wait for mock_db1 to become unhealthy
+                assert db1_became_unhealthy.wait(timeout=1.0), (
+                    "Timeout waiting for mock_db1 to become unhealthy"
+                )
+
                 # Wait for circuit breaker state to actually reflect the unhealthy status
-                # (instead of just sleeping)
                 wait_for_condition(
                     lambda: mock_db1.circuit.state == CBState.OPEN,
-                    timeout=0.2,
+                    timeout=0.5,
                     error_message="Timeout waiting for cb1 to open after error event.",
                 )
 
                 assert client.set("key", "value") == "OK2"
-                # Wait half a second - the active database should not change on command
+                # Wait a short time - the active database should not change on command
                 # execution even with higher waits, because auto fallback is disabled
-                sleep(0.5)
+                sleep(0.15)
                 assert client.set("key", "value") == "OK2"
             finally:
                 client.close()
@@ -559,6 +595,7 @@ class TestMultiDbClient:
                 )
 
                 assert client.set("key", "value") == "OK1"
+                # 3 databases × 3 probes = 9 calls minimum
                 assert len(mock_hc.check_health.call_args_list) >= 9
 
                 client.remove_database(mock_db1)
@@ -598,6 +635,7 @@ class TestMultiDbClient:
                 )
 
                 assert client.set("key", "value") == "OK1"
+                # 3 databases × 3 probes = 9 calls minimum
                 assert len(mock_hc.check_health.call_args_list) >= 9
 
                 client.update_database_weight(mock_db2, 0.8)
@@ -644,6 +682,7 @@ class TestMultiDbClient:
                     mock_multi_db_config.failover_strategy.set_databases.call_count == 1
                 )
                 assert client.set("key", "value") == "OK1"
+                # 3 databases × 3 probes = 9 calls minimum
                 assert len(mock_hc.check_health.call_args_list) >= 9
 
                 # Simulate failing command events that lead to a failure detection
@@ -693,14 +732,19 @@ class TestMultiDbClient:
                     mock_multi_db_config.failover_strategy.set_databases.call_count == 1
                 )
                 assert client.set("key", "value") == "OK1"
+                # 3 databases × 3 probes = 9 calls
                 assert len(mock_hc.check_health.call_args_list) == 9
 
                 another_hc = Mock(spec=HealthCheck)
                 another_hc.check_health.return_value = True
+                another_hc.health_check_probes = 3
+                another_hc.health_check_delay = 0.01
+                another_hc.health_check_timeout = 1.0
 
                 client.add_health_check(another_hc)
                 client._check_db_health(mock_db1)
 
+                # 3 databases × 3 probes + 1 database × 3 probes = 12 calls
                 assert len(mock_hc.check_health.call_args_list) == 12
                 assert len(another_hc.check_health.call_args_list) == 3
 
@@ -737,6 +781,7 @@ class TestMultiDbClient:
                     mock_multi_db_config.failover_strategy.set_databases.call_count == 1
                 )
                 assert client.set("key", "value") == "OK1"
+                # 3 databases × 3 probes = 9 calls
                 assert len(mock_hc.check_health.call_args_list) == 9
 
                 client.set_active_database(mock_db)
@@ -754,6 +799,151 @@ class TestMultiDbClient:
                     match="Cannot set active database, database is unhealthy",
                 ):
                     client.set_active_database(mock_db1)
+            finally:
+                client.close()
+
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    def test_custom_health_check_parameters_are_respected(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2
+    ):
+        """
+        Test that custom health check parameters (probes, delay, timeout)
+        override the default values and are properly used during health checks.
+        """
+        from redis.multidb.healthcheck import AbstractHealthCheck
+
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+
+        # Track actual delays between probes
+        probe_timestamps = []
+        probe_lock = threading.Lock()
+
+        class CustomHealthCheck(AbstractHealthCheck):
+            """Custom health check with non-default parameters."""
+
+            def __init__(self):
+                # Use custom values: 5 probes, 0.02s delay, 2.0s timeout
+                super().__init__(
+                    health_check_probes=5,
+                    health_check_delay=0.02,
+                    health_check_timeout=2.0,
+                )
+
+            def check_health(self, database) -> bool:
+                import time
+
+                with probe_lock:
+                    probe_timestamps.append(time.time())
+                return True
+
+        custom_hc = CustomHealthCheck()
+
+        # Verify custom parameters are set correctly
+        assert custom_hc.health_check_probes == 5
+        assert custom_hc.health_check_delay == 0.02
+        assert custom_hc.health_check_timeout == 2.0
+
+        mock_multi_db_config.health_checks = [custom_hc]
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            mock_db1.client.execute_command.return_value = "OK1"
+
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+                # Client should initialize successfully
+                assert client.set("key", "value") == "OK1"
+
+                # With 3 databases and 5 probes each, we should have 15 probes total
+                # (executed in parallel per database, but sequentially within each db)
+                assert len(probe_timestamps) == 15
+
+                # Verify delays between probes within each database
+                # Since probes run in parallel across databases, we need to check
+                # that the minimum delay between consecutive probes is approximately
+                # the configured delay (0.02s)
+                # Sort timestamps and check that there are gaps of ~0.02s
+                sorted_timestamps = sorted(probe_timestamps)
+
+                # With 3 databases running in parallel, each doing 5 probes with 0.02s delay,
+                # the total time should be approximately 4 * 0.02 = 0.08s per database
+                # (4 delays between 5 probes)
+                total_duration = sorted_timestamps[-1] - sorted_timestamps[0]
+                # Should be at least 4 delays worth (0.08s) but not too long
+                assert total_duration >= 0.04, (
+                    f"Total duration {total_duration}s is too short, "
+                    f"expected at least 0.04s for 5 probes with 0.02s delay"
+                )
+            finally:
+                client.close()
+
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    def test_custom_health_check_timeout_triggers_unhealthy(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2
+    ):
+        """
+        Test that a custom health check timeout is respected and triggers
+        UnhealthyDatabaseException when exceeded.
+        """
+        from redis.multidb.healthcheck import AbstractHealthCheck
+        from redis.multidb.exception import InitialHealthCheckFailedError
+        import time
+
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+
+        class SlowHealthCheck(AbstractHealthCheck):
+            """Health check that takes longer than the configured timeout."""
+
+            def __init__(self):
+                # Short timeout (0.1s) but health check will take longer (0.5s)
+                super().__init__(
+                    health_check_probes=1,
+                    health_check_delay=0.01,
+                    health_check_timeout=0.1,
+                )
+
+            def check_health(self, database) -> bool:
+                # Sleep longer than the timeout
+                time.sleep(0.5)
+                return True
+
+        slow_hc = SlowHealthCheck()
+
+        # Verify custom timeout is set
+        assert slow_hc.health_check_timeout == 0.1
+
+        mock_multi_db_config.health_checks = [slow_hc]
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            mock_db1.client.execute_command.return_value = "OK1"
+
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+                # Executing a command triggers initialize() which runs health checks
+                # The health check should timeout and raise InitialHealthCheckFailedError
+                with pytest.raises(InitialHealthCheckFailedError):
+                    client.set("key", "value")
             finally:
                 client.close()
 
