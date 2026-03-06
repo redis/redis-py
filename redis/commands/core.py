@@ -2904,7 +2904,7 @@ class ListCommands(CommandsProtocol):
     ) -> Union[Awaitable[list], list]:
         """
         LPOP a value off of the first non-empty list
-        named in the ``keys`` list.
+        named in ``keys``.
 
         If none of the lists in ``keys`` has a value to LPOP, then block
         for ``timeout`` seconds, or until a value gets pushed on to one
@@ -2925,7 +2925,7 @@ class ListCommands(CommandsProtocol):
     ) -> Union[Awaitable[list], list]:
         """
         RPOP a value off of the first non-empty list
-        named in the ``keys`` list.
+        named in ``keys``.
 
         If none of the lists in ``keys`` has a value to RPOP, then block
         for ``timeout`` seconds, or until a value gets pushed on to one
