@@ -31,6 +31,7 @@ from typing import (
     Set,
     Tuple,
     Union,
+    overload,
 )
 
 from redis.asyncio.observability.recorder import (
@@ -40,6 +41,7 @@ from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisErr
 from redis.typing import (
     AbsExpiryT,
     AnyKeyT,
+    AsyncClientProtocol,
     BitfieldOffsetT,
     ChannelT,
     CommandsProtocol,
@@ -55,6 +57,7 @@ from redis.typing import (
     ResponseT,
     ScriptTextT,
     StreamIdT,
+    SyncClientProtocol,
     TimeoutSecT,
     ZScoreBoundT,
 )
@@ -2064,6 +2067,15 @@ class BasicKeyCommands(CommandsProtocol):
         # Bulk string response is already handled (bytes/str based on decode_responses)
         return self.execute_command("DIGEST", name)
 
+    # --- @overload pattern for get() ---
+    # Sync client returns bytes | None directly
+    @overload
+    def get(self: SyncClientProtocol, name: KeyT) -> Optional[bytes]: ...
+
+    # Async client returns Awaitable[bytes | None]
+    @overload
+    def get(self: AsyncClientProtocol, name: KeyT) -> Awaitable[Optional[bytes]]: ...
+
     def get(self, name: KeyT) -> ResponseT:
         """
         Return the value at key ``name``, or None if the key doesn't exist
@@ -2553,6 +2565,47 @@ class BasicKeyCommands(CommandsProtocol):
                 raise DataError("frequency must be an integer")
 
         return self.execute_command("RESTORE", *params)
+
+    # --- @overload pattern for set() ---
+    # Sync client returns bool | None directly
+    @overload
+    def set(
+        self: SyncClientProtocol,
+        name: KeyT,
+        value: EncodableT,
+        ex: Optional[ExpiryT] = ...,
+        px: Optional[ExpiryT] = ...,
+        nx: bool = ...,
+        xx: bool = ...,
+        keepttl: bool = ...,
+        get: bool = ...,
+        exat: Optional[AbsExpiryT] = ...,
+        pxat: Optional[AbsExpiryT] = ...,
+        ifeq: Optional[Union[bytes, str]] = ...,
+        ifne: Optional[Union[bytes, str]] = ...,
+        ifdeq: Optional[str] = ...,
+        ifdne: Optional[str] = ...,
+    ) -> Optional[bool]: ...
+
+    # Async client returns Awaitable[bool | None]
+    @overload
+    def set(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        value: EncodableT,
+        ex: Optional[ExpiryT] = ...,
+        px: Optional[ExpiryT] = ...,
+        nx: bool = ...,
+        xx: bool = ...,
+        keepttl: bool = ...,
+        get: bool = ...,
+        exat: Optional[AbsExpiryT] = ...,
+        pxat: Optional[AbsExpiryT] = ...,
+        ifeq: Optional[Union[bytes, str]] = ...,
+        ifne: Optional[Union[bytes, str]] = ...,
+        ifdeq: Optional[str] = ...,
+        ifdne: Optional[str] = ...,
+    ) -> Awaitable[Optional[bool]]: ...
 
     @experimental_args(["ifeq", "ifne", "ifdeq", "ifdne"])
     def set(

@@ -1,11 +1,19 @@
 import json
 from enum import Enum
-from typing import Any, Awaitable, Dict, List, Optional, Union
+from typing import Any, Awaitable, Dict, List, Optional, Union, overload
 
 from redis.client import NEVER_DECODE
 from redis.commands.helpers import get_protocol_version
 from redis.exceptions import DataError
-from redis.typing import CommandsProtocol, EncodableT, KeyT, Number
+from redis.typing import (
+    AsyncClientProtocol,
+    CommandsProtocol,
+    EncodableT,
+    KeyT,
+    Number,
+    ResponseT,
+    SyncClientProtocol,
+)
 
 VADD_CMD = "VADD"
 VSIM_CMD = "VSIM"
@@ -128,6 +136,38 @@ class VectorSetCommands(CommandsProtocol):
             pieces.extend(["M", numlinks])
 
         return self.execute_command(VADD_CMD, key, *pieces)
+
+    @overload
+    def vsim(
+        self: SyncClientProtocol,
+        key: KeyT,
+        input: Union[List[float], bytes, str],
+        with_scores: Optional[bool] = ...,
+        with_attribs: Optional[bool] = ...,
+        count: Optional[int] = ...,
+        ef: Optional[Number] = ...,
+        filter: Optional[str] = ...,
+        filter_ef: Optional[str] = ...,
+        truth: Optional[bool] = ...,
+        no_thread: Optional[bool] = ...,
+        epsilon: Optional[Number] = ...,
+    ) -> VSimResult: ...
+
+    @overload
+    def vsim(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        input: Union[List[float], bytes, str],
+        with_scores: Optional[bool] = ...,
+        with_attribs: Optional[bool] = ...,
+        count: Optional[int] = ...,
+        ef: Optional[Number] = ...,
+        filter: Optional[str] = ...,
+        filter_ef: Optional[str] = ...,
+        truth: Optional[bool] = ...,
+        no_thread: Optional[bool] = ...,
+        epsilon: Optional[Number] = ...,
+    ) -> Awaitable[VSimResult]: ...
 
     def vsim(
         self,

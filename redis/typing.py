@@ -6,11 +6,13 @@ from typing import (
     Any,
     Awaitable,
     Iterable,
+    Literal,
     Mapping,
     Protocol,
     Type,
     TypeVar,
     Union,
+    runtime_checkable,
 )
 
 if TYPE_CHECKING:
@@ -19,6 +21,30 @@ if TYPE_CHECKING:
 
 
 Number = Union[int, float]
+
+
+@runtime_checkable
+class AsyncClientProtocol(Protocol):
+    """Protocol for asynchronous Redis clients (redis.asyncio.client.Redis).
+
+    This protocol uses a Literal marker to identify async clients.
+    Used in @overload to provide correct return types for async clients.
+    """
+
+    _is_async_client: Literal[True]
+
+
+@runtime_checkable
+class SyncClientProtocol(Protocol):
+    """Protocol for synchronous Redis clients (redis.client.Redis).
+
+    This protocol uses a Literal marker to identify sync clients.
+    Used in @overload to provide correct return types for sync clients.
+    """
+
+    _is_async_client: Literal[False]
+
+
 EncodedT = Union[bytes, bytearray, memoryview]
 DecodedT = Union[str, int, float]
 EncodableT = Union[EncodedT, DecodedT]

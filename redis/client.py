@@ -10,6 +10,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Literal,
     Mapping,
     Optional,
     Set,
@@ -150,6 +151,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
     It is not safe to pass PubSub or Pipeline objects between threads.
     """
+
+    # Type discrimination marker for @overload self-type pattern
+    _is_async_client: Literal[False] = False
 
     @classmethod
     def from_url(cls, url: str, **kwargs) -> "Redis":

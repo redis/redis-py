@@ -1,4 +1,5 @@
 import json
+from typing import Literal
 
 from redis._parsers.helpers import pairs_to_dict
 from redis.commands.vectorset.utils import (
@@ -18,9 +19,11 @@ from .commands import (
 )
 
 
-class VectorSet(VectorSetCommands):
+class _VectorSetBase(VectorSetCommands):
+    """Base class with shared initialization logic for VectorSet clients."""
+
     def __init__(self, client, **kwargs):
-        """Create a new VectorSet client."""
+        """Initialize VectorSet client with callbacks."""
         # Set the module commands' callbacks
         self._MODULE_CALLBACKS = {
             VEMB_CMD: parse_vemb_result,
@@ -44,3 +47,15 @@ class VectorSet(VectorSetCommands):
 
         for k, v in self._MODULE_CALLBACKS.items():
             self.client.set_response_callback(k, v)
+
+
+class VectorSet(_VectorSetBase):
+    """Sync VectorSet client."""
+
+    _is_async_client: Literal[False] = False
+
+
+class AsyncVectorSet(_VectorSetBase):
+    """Async VectorSet client."""
+
+    _is_async_client: Literal[True] = True
