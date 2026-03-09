@@ -226,6 +226,39 @@ def extract_cluster_fqdn(url):
     return f"https://{cleaned_hostname}"
 
 
+def _prepare_ssl_certificates(cert_chain: bool) -> dict:
+    """
+    Prepare SSL certificates for Redis cluster connection.
+
+    Args:
+        cert_chain: PEM-encoded certificate chain containing client cert + intermediate + CA cert.
+                   This is the full certificate chain that will be used to validate the server.
+
+    Returns:
+        dict: SSL configuration kwargs for RedisCluster
+    """
+    certs_config_path = os.environ.get("MTLS_CONFIG_PATH", None)
+
+    if not cert_chain:
+        return {
+            "ssl_cert_reqs": "none",
+            "ssl_check_hostname": False,
+        }
+
+    if not certs_config_path:
+        raise ValueError(
+            "MTLS enabled test is triggered but MTLS_CONFIG_PATH environment variable not set"
+        )
+
+    # The cert_chain contains the full chain (client cert + intermediate + root CA)
+    # Use it as CA data for validating the server's certificate
+    return {
+        "ssl_cert_reqs": "none",
+        "ssl_keyfile": os.path.join(certs_config_path, "client.key"),
+        "ssl_certfile": os.path.join(certs_config_path, "client.crt"),
+    }
+
+
 @pytest.fixture()
 def client_maint_notifications(endpoints_config):
     return _get_client_maint_notifications(endpoints_config)
@@ -307,8 +340,8 @@ def get_cluster_client_maint_notifications(
     enable_relaxed_timeout: bool = True,
     enable_proactive_reconnect: bool = True,
     disable_retries: bool = False,
+    auth_ssl_client_certs: bool = False,
     socket_timeout: Optional[float] = None,
-    host_config: Optional[str] = None,
 ):
     """Create Redis cluster client with maintenance notifications enabled."""
     # Get credentials from the configuration
@@ -337,6 +370,13 @@ def get_cluster_client_maint_notifications(
     tls_enabled = True if parsed.scheme == "rediss" else False
     logging.info(f"TLS enabled: {tls_enabled}")
 
+    tls_kwargs = {"ssl": tls_enabled}
+
+    if tls_enabled:
+        # Prepare SSL certificate configuration
+        ssl_config = _prepare_ssl_certificates(auth_ssl_client_certs)
+        tls_kwargs.update(ssl_config)
+
     # Configure maintenance notifications
     maintenance_config = MaintNotificationsConfig(
         enabled=enable_maintenance_notifications,
@@ -352,12 +392,10 @@ def get_cluster_client_maint_notifications(
         socket_timeout=CLIENT_TIMEOUT if socket_timeout is None else socket_timeout,
         username=username,
         password=password,
-        ssl=tls_enabled,
-        ssl_cert_reqs="none",
-        ssl_check_hostname=False,
         protocol=protocol,  # RESP3 required for push notifications
         maint_notifications_config=maintenance_config,
         retry=retry,
+        **tls_kwargs,
     )
     logging.info("Redis cluster client created with maintenance notifications enabled")
     logging.info(
