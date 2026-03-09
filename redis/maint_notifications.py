@@ -1006,7 +1006,12 @@ class MaintNotificationsConnectionHandler:
             or not self.config.is_relaxed_timeouts_enabled()
         ):
             return
-        add_debug_log_for_notification(self.connection, "MAINTENANCE_COMPLETED")
+        notification = None
+        if kwargs.get("notification"):
+            notification = kwargs["notification"]
+        add_debug_log_for_notification(
+            self.connection, notification if notification else "MAINTENANCE_COMPLETED"
+        )
         self.connection.reset_tmp_settings(reset_relaxed_timeout=True)
         # Maintenance completed - reset the connection
         # timeouts by providing -1 as the relaxed timeout
@@ -1016,8 +1021,7 @@ class MaintNotificationsConnectionHandler:
         # notifications and skipped end maint notifications
         self.connection.reset_received_notifications()
 
-        if kwargs.get("notification"):
-            notification = kwargs["notification"]
+        if notification:
             record_connection_relaxed_timeout(
                 connection_name=repr(self.connection),
                 maint_notification=notification.__class__.__name__,
@@ -1076,7 +1080,8 @@ class OSSMaintNotificationsHandler:
                 # process the same notification twice
                 return
 
-            logger.debug(f"Handling SMIGRATED notification: {notification}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Handling SMIGRATED notification: {notification}")
             self._in_progress.add(notification)
 
             # Extract the information about the src and destination nodes that are affected
@@ -1130,7 +1135,16 @@ class OSSMaintNotificationsHandler:
                         # Some of them might be used by sub sub and we don't know which ones - so we disconnect
                         # all in flight connections after they are done with current command execution
                         for conn in current_node.redis_connection.connection_pool._get_in_use_connections():
+                            add_debug_log_for_notification(
+                                conn, "SMIGRATED - mark for reconnect"
+                            )
                             conn.mark_for_reconnect()
+                    else:
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(
+                                f"SMIGRATED: Node {current_node.name} not affected by maintenance, "
+                                f"skipping mark for reconnect"
+                            )
 
                     if (
                         current_node

@@ -1,4 +1,5 @@
 import copy
+import logging
 import re
 import threading
 import time
@@ -88,6 +89,20 @@ EMPTY_RESPONSE = "EMPTY_RESPONSE"
 
 # some responses (ie. dump) are binary, and just meant to never be decoded
 NEVER_DECODE = "NEVER_DECODE"
+
+
+logger = logging.getLogger(__name__)
+
+
+def is_debug_log_enabled():
+    return logger.isEnabledFor(logging.DEBUG)
+
+
+def add_debug_log_for_operation_failure(connection: "AbstractConnection"):
+    logger.debug(
+        f"Operation failed, "
+        f"with connection: {connection}, details: {connection.extract_connection_details() if connection else 'no connection'}",
+    )
 
 
 class CaseInsensitiveDict(dict):
@@ -728,6 +743,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         actual_retry_attempts = [0]
 
         def failure_callback(error, failure_count):
+            if is_debug_log_enabled():
+                add_debug_log_for_operation_failure(conn)
             actual_retry_attempts[0] = failure_count
             self._close_connection(conn, error, failure_count, start_time, command_name)
 
@@ -1751,6 +1768,8 @@ class Pipeline(Redis):
         actual_retry_attempts = [0]
 
         def failure_callback(error, failure_count):
+            if is_debug_log_enabled():
+                add_debug_log_for_operation_failure(conn)
             actual_retry_attempts[0] = failure_count
             self._disconnect_reset_raise_on_watching(
                 conn, error, failure_count, start_time, command_name
@@ -1988,6 +2007,8 @@ class Pipeline(Redis):
         actual_retry_attempts = [0]
 
         def failure_callback(error, failure_count):
+            if is_debug_log_enabled():
+                add_debug_log_for_operation_failure(conn)
             actual_retry_attempts[0] = failure_count
             self._disconnect_raise_on_watching(
                 conn, error, failure_count, start_time, operation_name
