@@ -70,6 +70,9 @@ class HealthCheckPolicy(ABC):
 class AbstractHealthCheckPolicy(HealthCheckPolicy):
     """
     Abstract health check policy.
+
+    All exception handling is centralized in execute() - _execute() methods just
+    propagate exceptions naturally.
     """
 
     def execute(self, health_checks: List[HealthCheck], database) -> bool:
@@ -79,13 +82,16 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
                 for health_check in health_checks
             }
 
+            # Check results - handle exceptions and failures
             for future, health_check in futures.items():
                 try:
                     result = future.result(timeout=health_check.health_check_timeout)
 
                     if not result:
+                        # Health check returned False
                         return False
                 except Exception as e:
+                    # Any exception (including TimeoutError) makes the database unhealthy
                     raise UnhealthyDatabaseException("Unhealthy database", database, e)
 
         return True
@@ -106,11 +112,8 @@ class HealthyAllPolicy(AbstractHealthCheckPolicy):
     def _execute(self, health_check: HealthCheck, database) -> bool:
         probes = health_check.health_check_probes
         for attempt in range(probes):
-            try:
-                if not health_check.check_health(database):
-                    return False
-            except Exception as e:
-                raise UnhealthyDatabaseException("Unhealthy database", database, e)
+            if not health_check.check_health(database):
+                return False
 
             if attempt < probes - 1:
                 sleep(health_check.health_check_delay)
@@ -135,10 +138,12 @@ class HealthyMajorityPolicy(AbstractHealthCheckPolicy):
                     allowed_unsuccessful_probes -= 1
                     if allowed_unsuccessful_probes < 0:
                         return False
-            except Exception as e:
+            except Exception:
+                # Count exception as unsuccessful probe
                 allowed_unsuccessful_probes -= 1
                 if allowed_unsuccessful_probes < 0:
-                    raise UnhealthyDatabaseException("Unhealthy database", database, e)
+                    # Re-raise to let execute() handle it
+                    raise
 
             if attempt < probes - 1:
                 sleep(health_check.health_check_delay)
@@ -156,7 +161,7 @@ class HealthyAnyPolicy(AbstractHealthCheckPolicy):
         Executes health check against given database.
         """
         probes = health_check.health_check_probes
-        exception = None
+        last_exception = None
         is_healthy = False
 
         for attempt in range(probes):
@@ -165,13 +170,15 @@ class HealthyAnyPolicy(AbstractHealthCheckPolicy):
                     is_healthy = True
                     break
             except Exception as e:
-                exception = e
+                # Store the exception but continue trying
+                last_exception = e
 
             if attempt < probes - 1:
                 sleep(health_check.health_check_delay)
 
-        if not is_healthy and exception:
-            raise UnhealthyDatabaseException("Unhealthy database", database, exception)
+        # If all probes failed and we have an exception, raise it
+        if not is_healthy and last_exception:
+            raise last_exception
 
         return is_healthy
 
