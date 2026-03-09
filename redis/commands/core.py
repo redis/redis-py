@@ -1,4 +1,4 @@
-# from __future__ import annotations
+from __future__ import annotations
 
 import datetime
 import hashlib
@@ -2568,18 +2568,18 @@ class BasicKeyCommands(CommandsProtocol):
         self: SyncClientProtocol,
         name: KeyT,
         value: EncodableT,
-        ex: Optional[ExpiryT] = ...,
-        px: Optional[ExpiryT] = ...,
+        ex: ExpiryT | None = ...,
+        px: ExpiryT | None = ...,
         nx: bool = ...,
         xx: bool = ...,
         keepttl: bool = ...,
         get: bool = ...,
-        exat: Optional[AbsExpiryT] = ...,
-        pxat: Optional[AbsExpiryT] = ...,
-        ifeq: Optional[Union[bytes, str]] = ...,
-        ifne: Optional[Union[bytes, str]] = ...,
-        ifdeq: Optional[str] = ...,
-        ifdne: Optional[str] = ...,
+        exat: AbsExpiryT | None = ...,
+        pxat: AbsExpiryT | None = ...,
+        ifeq: bytes | str | None = ...,
+        ifne: bytes | str | None = ...,
+        ifdeq: str | None = ...,
+        ifdne: str | None = ...,
     ) -> bool | str | bytes | None: ...
 
     @overload
@@ -2587,18 +2587,18 @@ class BasicKeyCommands(CommandsProtocol):
         self: AsyncClientProtocol,
         name: KeyT,
         value: EncodableT,
-        ex: Optional[ExpiryT] = ...,
-        px: Optional[ExpiryT] = ...,
+        ex: ExpiryT | None = ...,
+        px: ExpiryT | None = ...,
         nx: bool = ...,
         xx: bool = ...,
         keepttl: bool = ...,
         get: bool = ...,
-        exat: Optional[AbsExpiryT] = ...,
-        pxat: Optional[AbsExpiryT] = ...,
-        ifeq: Optional[Union[bytes, str]] = ...,
-        ifne: Optional[Union[bytes, str]] = ...,
-        ifdeq: Optional[str] = ...,
-        ifdne: Optional[str] = ...,
+        exat: AbsExpiryT | None = ...,
+        pxat: AbsExpiryT | None = ...,
+        ifeq: bytes | str | None = ...,
+        ifne: bytes | str | None = ...,
+        ifdeq: str | None = ...,
+        ifdne: str | None = ...,
     ) -> Awaitable[bool | str | bytes | None]: ...
 
     @experimental_args(["ifeq", "ifne", "ifdeq", "ifdne"])
@@ -2606,18 +2606,18 @@ class BasicKeyCommands(CommandsProtocol):
         self,
         name: KeyT,
         value: EncodableT,
-        ex: Optional[ExpiryT] = None,
-        px: Optional[ExpiryT] = None,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
         nx: bool = False,
         xx: bool = False,
         keepttl: bool = False,
         get: bool = False,
-        exat: Optional[AbsExpiryT] = None,
-        pxat: Optional[AbsExpiryT] = None,
-        ifeq: Optional[Union[bytes, str]] = None,
-        ifne: Optional[Union[bytes, str]] = None,
-        ifdeq: Optional[str] = None,  # hex digest of current value
-        ifdne: Optional[str] = None,  # hex digest of current value
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        ifeq: bytes | str | None = None,
+        ifne: bytes | str | None = None,
+        ifdeq: str | None = None,  # hex digest of current value
+        ifdne: str | None = None,  # hex digest of current value
     ) -> (bool | str | bytes | None) | Awaitable[bool | str | bytes | None]:
         """
         Set the value at key ``name`` to ``value``
