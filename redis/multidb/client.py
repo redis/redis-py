@@ -48,7 +48,9 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             else config.health_checks
         )
         self._health_check_interval = config.health_check_interval
-        self._health_check_policy: HealthCheckPolicy = config.health_check_policy.value()
+        self._health_check_policy: HealthCheckPolicy = (
+            config.health_check_policy.value()
+        )
         self._failure_detectors = (
             config.default_failure_detectors()
             if not config.failure_detectors

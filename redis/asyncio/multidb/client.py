@@ -45,10 +45,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             if not config.health_checks
             else config.health_checks
         )
-
         self._health_check_interval = config.health_check_interval
-        self._health_check_policy: HealthCheckPolicy = config.health_check_policy.value(
-            config.health_check_probes, config.health_check_delay
+        self._health_check_policy: HealthCheckPolicy = (
+            config.health_check_policy.value()
         )
         self._failure_detectors = (
             config.default_failure_detectors()
@@ -326,23 +325,15 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         Runs health checks as a recurring task.
         Runs health checks against all databases.
         """
-        try:
-            task_to_db: dict[asyncio.Task, Database] = {}
+        task_to_db: dict[asyncio.Task, Database] = {}
 
-            self._hc_tasks = []
-            for database, _ in self._databases:
-                task = asyncio.create_task(self._check_db_health(database))
-                task_to_db[task] = database
-                self._hc_tasks.append(task)
+        self._hc_tasks = []
+        for database, _ in self._databases:
+            task = asyncio.create_task(self._check_db_health(database))
+            task_to_db[task] = database
+            self._hc_tasks.append(task)
 
-            results = await asyncio.wait_for(
-                asyncio.gather(*self._hc_tasks, return_exceptions=True),
-                timeout=self._health_check_interval,
-            )
-        except asyncio.TimeoutError:
-            raise asyncio.TimeoutError(
-                "Health check execution exceeds health_check_interval"
-            )
+        results = await asyncio.gather(*self._hc_tasks, return_exceptions=True)
 
         # Map end results to databases
         db_results = {

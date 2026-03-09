@@ -1,6 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from time import sleep
 from typing import List, Optional, Tuple, Union

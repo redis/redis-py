@@ -19,7 +19,6 @@ from redis.multidb.healthcheck import (
     HealthCheck,
     DEFAULT_HEALTH_CHECK_PROBES,
     DEFAULT_HEALTH_CHECK_POLICY,
-    DEFAULT_HEALTH_CHECK_DELAY,
     DEFAULT_HEALTH_CHECK_TIMEOUT,
 )
 

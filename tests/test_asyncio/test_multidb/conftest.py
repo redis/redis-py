@@ -15,6 +15,7 @@ from redis.asyncio.multidb.healthcheck import (
     DEFAULT_HEALTH_CHECK_PROBES,
     DEFAULT_HEALTH_CHECK_INTERVAL,
     DEFAULT_HEALTH_CHECK_POLICY,
+    DEFAULT_HEALTH_CHECK_TIMEOUT,
 )
 from redis.data_structure import WeightedList
 from redis.multidb.circuit import State as CBState, CircuitBreaker
@@ -44,7 +45,12 @@ def mock_fs() -> AsyncFailoverStrategy:
 
 @pytest.fixture()
 def mock_hc() -> HealthCheck:
-    return Mock(spec=HealthCheck)
+    mock = Mock(spec=HealthCheck)
+    mock.health_check_probes = DEFAULT_HEALTH_CHECK_PROBES
+    # Use minimal delay for faster test execution
+    mock.health_check_delay = 0.01
+    mock.health_check_timeout = DEFAULT_HEALTH_CHECK_TIMEOUT
+    return mock
 
 
 @pytest.fixture()

@@ -17,65 +17,124 @@ from redis.exceptions import ConnectionError
 from redis.multidb.exception import UnhealthyDatabaseException
 
 
+def _configure_mock_health_check(mock_hc, probes=3, delay=0.01, timeout=1.0):
+    """Helper to configure mock health check with required properties."""
+    mock_hc.health_check_probes = probes
+    mock_hc.health_check_delay = delay
+    mock_hc.health_check_timeout = timeout
+    return mock_hc
+
+
 @pytest.mark.onlynoncluster
 class TestHealthyAllPolicy:
     @pytest.mark.asyncio
     async def test_policy_returns_true_for_all_successful_probes(self):
-        mock_hc1 = Mock(spec=HealthCheck)
-        mock_hc2 = Mock(spec=HealthCheck)
+        mock_hc1 = _configure_mock_health_check(Mock(spec=HealthCheck))
+        mock_hc2 = _configure_mock_health_check(Mock(spec=HealthCheck))
         mock_hc1.check_health.return_value = True
         mock_hc2.check_health.return_value = True
         mock_db = Mock(spec=Database)
 
-        policy = HealthyAllPolicy(3, 0.01)
+        policy = HealthyAllPolicy()
         assert await policy.execute([mock_hc1, mock_hc2], mock_db)
+        # Both health checks run in parallel, each with 3 probes
         assert mock_hc1.check_health.call_count == 3
         assert mock_hc2.check_health.call_count == 3
 
     @pytest.mark.asyncio
-    async def test_policy_returns_false_on_first_failed_probe(self):
-        mock_hc1 = Mock(spec=HealthCheck)
-        mock_hc2 = Mock(spec=HealthCheck)
+    async def test_policy_returns_false_on_failed_probe(self):
+        mock_hc1 = _configure_mock_health_check(Mock(spec=HealthCheck))
+        mock_hc2 = _configure_mock_health_check(Mock(spec=HealthCheck))
         mock_hc1.check_health.side_effect = [True, True, False]
         mock_hc2.check_health.return_value = True
         mock_db = Mock(spec=Database)
 
-        policy = HealthyAllPolicy(3, 0.01)
+        policy = HealthyAllPolicy()
+        # Policy returns False because mock_hc1 fails on the third probe
         assert not await policy.execute([mock_hc1, mock_hc2], mock_db)
+        # Both health checks run in parallel
         assert mock_hc1.check_health.call_count == 3
-        assert mock_hc2.check_health.call_count == 0
+        assert mock_hc2.check_health.call_count == 3
 
     @pytest.mark.asyncio
     async def test_policy_raise_unhealthy_database_exception(self):
-        mock_hc1 = Mock(spec=HealthCheck)
-        mock_hc2 = Mock(spec=HealthCheck)
+        mock_hc1 = _configure_mock_health_check(Mock(spec=HealthCheck))
+        mock_hc2 = _configure_mock_health_check(Mock(spec=HealthCheck))
         mock_hc1.check_health.side_effect = [True, True, ConnectionError]
         mock_hc2.check_health.return_value = True
         mock_db = Mock(spec=Database)
 
-        policy = HealthyAllPolicy(3, 0.01)
+        policy = HealthyAllPolicy()
         with pytest.raises(UnhealthyDatabaseException, match="Unhealthy database"):
             await policy.execute([mock_hc1, mock_hc2], mock_db)
-            assert mock_hc1.check_health.call_count == 3
-            assert mock_hc2.check_health.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_policy_raises_exception_when_health_check_times_out(self):
+        """
+        Verify that health_check_timeout is respected and raises UnhealthyDatabaseException
+        when a health check takes longer than the configured timeout.
+        """
+        import asyncio
+
+        async def slow_health_check(database):
+            await asyncio.sleep(0.5)  # Sleep longer than the timeout
+            return True
+
+        # Configure with a very short timeout (0.1 seconds)
+        mock_hc = _configure_mock_health_check(
+            Mock(spec=HealthCheck), probes=1, delay=0.01, timeout=0.1
+        )
+        mock_hc.check_health.side_effect = slow_health_check
+        mock_db = Mock(spec=Database)
+
+        policy = HealthyAllPolicy()
+        with pytest.raises(
+            UnhealthyDatabaseException, match="Unhealthy database"
+        ) as exc_info:
+            await policy.execute([mock_hc], mock_db)
+
+        # Verify the original exception is a TimeoutError
+        assert isinstance(exc_info.value.original_exception, asyncio.TimeoutError)
+
+    @pytest.mark.asyncio
+    async def test_policy_succeeds_when_health_check_completes_within_timeout(self):
+        """
+        Verify that health checks that complete within the timeout succeed normally.
+        """
+        import asyncio
+
+        async def fast_health_check(database):
+            await asyncio.sleep(0.01)  # Sleep much less than the timeout
+            return True
+
+        # Configure with a generous timeout (1 second)
+        mock_hc = _configure_mock_health_check(
+            Mock(spec=HealthCheck), probes=1, delay=0.01, timeout=1.0
+        )
+        mock_hc.check_health.side_effect = fast_health_check
+        mock_db = Mock(spec=Database)
+
+        policy = HealthyAllPolicy()
+        result = await policy.execute([mock_hc], mock_db)
+        assert result is True
 
 
 @pytest.mark.onlynoncluster
 class TestHealthyMajorityPolicy:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "probes,hc1_side_effect,hc2_side_effect,hc1_call_count,hc2_call_count,expected_result",
+        "probes,hc1_side_effect,hc2_side_effect,expected_result",
         [
-            (3, [True, False, False], [True, True, True], 3, 0, False),
-            (3, [True, True, True], [True, False, False], 3, 3, False),
-            (3, [True, False, True], [True, True, True], 3, 3, True),
-            (3, [True, True, True], [True, False, True], 3, 3, True),
-            (3, [True, True, False], [True, False, True], 3, 3, True),
-            (4, [True, True, False, False], [True, True, True, True], 4, 0, False),
-            (4, [True, True, True, True], [True, True, False, False], 4, 4, False),
-            (4, [False, True, True, True], [True, True, True, True], 4, 4, True),
-            (4, [True, True, True, True], [True, False, True, True], 4, 4, True),
-            (4, [False, True, True, True], [True, True, False, True], 4, 4, True),
+            (3, [True, False, False], [True, True, True], False),
+            (3, [True, True, True], [True, False, False], False),
+            (3, [True, False, True], [True, True, True], True),
+            (3, [True, True, True], [True, False, True], True),
+            (3, [True, True, False], [True, False, True], True),
+            (4, [True, True, False, False], [True, True, True, True], False),
+            (4, [True, True, True, True], [True, True, False, False], False),
+            (4, [False, True, True, True], [True, True, True, True], True),
+            (4, [True, True, True, True], [True, False, True, True], True),
+            (4, [False, True, True, True], [True, True, False, True], True),
         ],
         ids=[
             "HC1 - no majority - odd",
@@ -95,40 +154,35 @@ class TestHealthyMajorityPolicy:
         probes,
         hc1_side_effect,
         hc2_side_effect,
-        hc1_call_count,
-        hc2_call_count,
         expected_result,
     ):
-        mock_hc1 = Mock(spec=HealthCheck)
-        mock_hc2 = Mock(spec=HealthCheck)
+        mock_hc1 = _configure_mock_health_check(Mock(spec=HealthCheck), probes=probes)
+        mock_hc2 = _configure_mock_health_check(Mock(spec=HealthCheck), probes=probes)
         mock_hc1.check_health.side_effect = hc1_side_effect
         mock_hc2.check_health.side_effect = hc2_side_effect
         mock_db = Mock(spec=Database)
 
-        policy = HealthyMajorityPolicy(probes, 0.01)
+        policy = HealthyMajorityPolicy()
         assert await policy.execute([mock_hc1, mock_hc2], mock_db) == expected_result
-        assert mock_hc1.check_health.call_count == hc1_call_count
-        assert mock_hc2.check_health.call_count == hc2_call_count
+        # Both health checks run in parallel; call counts may vary due to early returns
+        assert mock_hc1.check_health.call_count >= 1
+        assert mock_hc2.check_health.call_count >= 1
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "probes,hc1_side_effect,hc2_side_effect,hc1_call_count,hc2_call_count",
+        "probes,hc1_side_effect,hc2_side_effect",
         [
-            (3, [True, ConnectionError, ConnectionError], [True, True, True], 3, 0),
-            (3, [True, True, True], [True, ConnectionError, ConnectionError], 3, 3),
+            (3, [True, ConnectionError, ConnectionError], [True, True, True]),
+            (3, [True, True, True], [True, ConnectionError, ConnectionError]),
             (
                 4,
                 [True, ConnectionError, ConnectionError, True],
                 [True, True, True, True],
-                3,
-                0,
             ),
             (
                 4,
                 [True, True, True, True],
                 [True, ConnectionError, ConnectionError, False],
-                4,
-                3,
             ),
         ],
         ids=[
@@ -139,73 +193,72 @@ class TestHealthyMajorityPolicy:
         ],
     )
     async def test_policy_raise_unhealthy_database_exception_on_majority_probes_exceptions(
-        self, probes, hc1_side_effect, hc2_side_effect, hc1_call_count, hc2_call_count
+        self, probes, hc1_side_effect, hc2_side_effect
     ):
-        mock_hc1 = Mock(spec=HealthCheck)
-        mock_hc2 = Mock(spec=HealthCheck)
+        mock_hc1 = _configure_mock_health_check(Mock(spec=HealthCheck), probes=probes)
+        mock_hc2 = _configure_mock_health_check(Mock(spec=HealthCheck), probes=probes)
         mock_hc1.check_health.side_effect = hc1_side_effect
         mock_hc2.check_health.side_effect = hc2_side_effect
         mock_db = Mock(spec=Database)
 
-        policy = HealthyAllPolicy(3, 0.01)
+        policy = HealthyAllPolicy()
         with pytest.raises(UnhealthyDatabaseException, match="Unhealthy database"):
             await policy.execute([mock_hc1, mock_hc2], mock_db)
-            assert mock_hc1.check_health.call_count == hc1_call_count
-            assert mock_hc2.check_health.call_count == hc2_call_count
 
 
 @pytest.mark.onlynoncluster
 class TestHealthyAnyPolicy:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "hc1_side_effect,hc2_side_effect,hc1_call_count,hc2_call_count,expected_result",
+        "hc1_side_effect,hc2_side_effect,expected_result",
         [
-            ([False, False, False], [True, True, True], 3, 0, False),
-            ([False, False, True], [False, False, False], 3, 3, False),
-            ([False, True, True], [False, False, True], 2, 3, True),
-            ([True, True, True], [False, True, False], 1, 2, True),
+            # HC1 fails all probes, HC2 succeeds - overall False (both HCs must pass)
+            ([False, False, False], [True, True, True], False),
+            # Both fail all probes - overall False
+            ([False, False, False], [False, False, False], False),
+            # Both succeed on at least one probe - overall True
+            ([False, True, True], [False, False, True], True),
+            # Both succeed on first probe - overall True
+            ([True, True, True], [True, True, True], True),
         ],
         ids=[
-            "HC1 - no successful",
-            "HC2 - no successful",
-            "HC1 - successful",
-            "HC2 - successful",
+            "HC1 fails all, HC2 succeeds",
+            "Both fail all probes",
+            "Both succeed on at least one",
+            "Both succeed on first",
         ],
     )
     async def test_policy_returns_true_for_any_successful_probe(
         self,
         hc1_side_effect,
         hc2_side_effect,
-        hc1_call_count,
-        hc2_call_count,
         expected_result,
     ):
-        mock_hc1 = Mock(spec=HealthCheck)
-        mock_hc2 = Mock(spec=HealthCheck)
+        mock_hc1 = _configure_mock_health_check(Mock(spec=HealthCheck))
+        mock_hc2 = _configure_mock_health_check(Mock(spec=HealthCheck))
         mock_hc1.check_health.side_effect = hc1_side_effect
         mock_hc2.check_health.side_effect = hc2_side_effect
         mock_db = Mock(spec=Database)
 
-        policy = HealthyAnyPolicy(3, 0.01)
+        policy = HealthyAnyPolicy()
         assert await policy.execute([mock_hc1, mock_hc2], mock_db) == expected_result
-        assert mock_hc1.check_health.call_count == hc1_call_count
-        assert mock_hc2.check_health.call_count == hc2_call_count
+        # Both health checks run in parallel; call counts depend on when success is found
+        assert mock_hc1.check_health.call_count >= 1
+        assert mock_hc2.check_health.call_count >= 1
 
     @pytest.mark.asyncio
     async def test_policy_raise_unhealthy_database_exception_if_exception_occurs_on_failed_health_check(
         self,
     ):
-        mock_hc1 = Mock(spec=HealthCheck)
-        mock_hc2 = Mock(spec=HealthCheck)
+        mock_hc1 = _configure_mock_health_check(Mock(spec=HealthCheck))
+        mock_hc2 = _configure_mock_health_check(Mock(spec=HealthCheck))
         mock_hc1.check_health.side_effect = [False, False, ConnectionError]
-        mock_hc2.check_health.side_effect = [True, True, True]
+        mock_hc2.check_health.side_effect = [False, False, False]
         mock_db = Mock(spec=Database)
 
-        policy = HealthyAnyPolicy(3, 0.01)
+        policy = HealthyAnyPolicy()
         with pytest.raises(UnhealthyDatabaseException, match="Unhealthy database"):
             await policy.execute([mock_hc1, mock_hc2], mock_db)
-            assert mock_hc1.check_health.call_count == 3
-            assert mock_hc2.check_health.call_count == 0
 
 
 @pytest.mark.onlynoncluster
