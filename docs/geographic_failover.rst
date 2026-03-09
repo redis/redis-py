@@ -342,8 +342,6 @@ You can add custom health checks for specific requirements:
 .. code-block:: python
 
     from redis.multidb.healthcheck import AbstractHealthCheck
-    from redis.retry import Retry
-    from redis.utils import dummy_fail
     class PingHealthCheck(AbstractHealthCheck):
         def __init__(
             self,
