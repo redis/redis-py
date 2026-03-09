@@ -1334,7 +1334,7 @@ class TestClusterClientPushNotificationsWithEffectTriggerBase(
 
         auth_ssl_client_certs = (
             True
-            if auth_ssl_client_certs_config_info is not None
+            if auth_ssl_client_certs_config_info
             and auth_ssl_client_certs_config_info[0]["client_cert"] is not None
             else False
         )
