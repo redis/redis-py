@@ -287,6 +287,10 @@ class ConnectionInterface:
         """
         pass
 
+    @abstractmethod
+    def extract_connection_details(self) -> str:
+        pass
+
 
 class MaintNotificationsAbstractConnection:
     """
@@ -1442,6 +1446,18 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
     def socket_connect_timeout(self, value: Optional[Union[float, int]]):
         self._socket_connect_timeout = value
 
+    def extract_connection_details(self) -> str:
+        socket_address = None
+        if self._sock is None:
+            return "not connected"
+        try:
+            socket_address = self._sock.getsockname() if self._sock else None
+            socket_address = socket_address[1] if socket_address else None
+        except (AttributeError, OSError):
+            pass
+
+        return f"connected to ip {self.get_resolved_ip()}, local socket port: {socket_address}"
+
 
 class Connection(AbstractConnection):
     "Manages TCP communication to and from a Redis server"
@@ -1898,6 +1914,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                         count=len(keys_deleted),
                         reason=CSCReason.INVALIDATION,
                     )
+
+    def extract_connection_details(self) -> str:
+        return self._conn.extract_connection_details()
 
 
 class SSLConnection(Connection):
