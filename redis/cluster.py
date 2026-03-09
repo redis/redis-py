@@ -3951,6 +3951,12 @@ class TransactionStrategy(AbstractStrategy):
             or type(error) in self.CONNECTION_ERRORS
         ):
             if self._transaction_connection:
+                if is_debug_log_enabled():
+                    logger.debug(
+                        f"Operation failed, "
+                        f"with connection: {self._transaction_connection}, "
+                        f"details: {self._transaction_connection.extract_connection_details()}",
+                    )
                 # Disconnect and release back to pool
                 self._transaction_connection.disconnect()
                 node = self._nodes_manager.find_connection_owner(
