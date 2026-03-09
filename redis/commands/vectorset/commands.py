@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import json
 from enum import Enum
-from typing import Any, Awaitable, Dict, List, Optional, Union, overload
+from typing import Any, Awaitable, overload
 
 from redis.client import NEVER_DECODE
 from redis.commands.helpers import get_protocol_version
@@ -11,7 +13,6 @@ from redis.typing import (
     EncodableT,
     KeyT,
     Number,
-    ResponseT,
     SyncClientProtocol,
 )
 
@@ -29,13 +30,22 @@ VRANDMEMBER_CMD = "VRANDMEMBER"
 VRANGE_CMD = "VRANGE"
 
 # Return type for vsim command
-VSimResult = Optional[
-    List[
-        Union[
-            List[EncodableT], Dict[EncodableT, Number], Dict[EncodableT, Dict[str, Any]]
-        ]
-    ]
-]
+VSimResult = (
+    list[list[EncodableT] | dict[EncodableT, Number] | dict[EncodableT, dict[str, Any]]]
+    | None
+)
+
+# Return type for vemb command
+VEmbResult = list[EncodableT] | dict[str, EncodableT] | None
+
+# Return type for vlinks command
+VLinksResult = list[list[str | bytes] | dict[str | bytes, Number]] | None
+
+# Return type for vrandmember command
+VRandMemberResult = list[str] | str | None
+
+# Return type for vgetattr command
+VGetAttrResult = dict | None
 
 
 class QuantizationOptions(Enum):
@@ -59,18 +69,46 @@ class CallbacksOptions(Enum):
 class VectorSetCommands(CommandsProtocol):
     """Redis VectorSet commands"""
 
+    @overload
+    def vadd(
+        self: SyncClientProtocol,
+        key: KeyT,
+        vector: list[float] | bytes,
+        element: str,
+        reduce_dim: int | None = ...,
+        cas: bool | None = ...,
+        quantization: QuantizationOptions | None = ...,
+        ef: Number | None = ...,
+        attributes: dict | str | None = ...,
+        numlinks: int | None = ...,
+    ) -> int: ...
+
+    @overload
+    def vadd(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        vector: list[float] | bytes,
+        element: str,
+        reduce_dim: int | None = ...,
+        cas: bool | None = ...,
+        quantization: QuantizationOptions | None = ...,
+        ef: Number | None = ...,
+        attributes: dict | str | None = ...,
+        numlinks: int | None = ...,
+    ) -> Awaitable[int]: ...
+
     def vadd(
         self,
         key: KeyT,
-        vector: Union[List[float], bytes],
+        vector: list[float] | bytes,
         element: str,
-        reduce_dim: Optional[int] = None,
-        cas: Optional[bool] = False,
-        quantization: Optional[QuantizationOptions] = None,
-        ef: Optional[Number] = None,
-        attributes: Optional[Union[dict, str]] = None,
-        numlinks: Optional[int] = None,
-    ) -> Union[Awaitable[int], int]:
+        reduce_dim: int | None = None,
+        cas: bool | None = False,
+        quantization: QuantizationOptions | None = None,
+        ef: Number | None = None,
+        attributes: dict | str | None = None,
+        numlinks: int | None = None,
+    ) -> Awaitable[int] | int:
         """
         Add vector ``vector`` for element ``element`` to a vector set ``key``.
 
@@ -141,48 +179,48 @@ class VectorSetCommands(CommandsProtocol):
     def vsim(
         self: SyncClientProtocol,
         key: KeyT,
-        input: Union[List[float], bytes, str],
-        with_scores: Optional[bool] = ...,
-        with_attribs: Optional[bool] = ...,
-        count: Optional[int] = ...,
-        ef: Optional[Number] = ...,
-        filter: Optional[str] = ...,
-        filter_ef: Optional[str] = ...,
-        truth: Optional[bool] = ...,
-        no_thread: Optional[bool] = ...,
-        epsilon: Optional[Number] = ...,
+        input: list[float] | bytes | str,
+        with_scores: bool | None = ...,
+        with_attribs: bool | None = ...,
+        count: int | None = ...,
+        ef: Number | None = ...,
+        filter: str | None = ...,
+        filter_ef: str | None = ...,
+        truth: bool | None = ...,
+        no_thread: bool | None = ...,
+        epsilon: Number | None = ...,
     ) -> VSimResult: ...
 
     @overload
     def vsim(
         self: AsyncClientProtocol,
         key: KeyT,
-        input: Union[List[float], bytes, str],
-        with_scores: Optional[bool] = ...,
-        with_attribs: Optional[bool] = ...,
-        count: Optional[int] = ...,
-        ef: Optional[Number] = ...,
-        filter: Optional[str] = ...,
-        filter_ef: Optional[str] = ...,
-        truth: Optional[bool] = ...,
-        no_thread: Optional[bool] = ...,
-        epsilon: Optional[Number] = ...,
+        input: list[float] | bytes | str,
+        with_scores: bool | None = ...,
+        with_attribs: bool | None = ...,
+        count: int | None = ...,
+        ef: Number | None = ...,
+        filter: str | None = ...,
+        filter_ef: str | None = ...,
+        truth: bool | None = ...,
+        no_thread: bool | None = ...,
+        epsilon: Number | None = ...,
     ) -> Awaitable[VSimResult]: ...
 
     def vsim(
         self,
         key: KeyT,
-        input: Union[List[float], bytes, str],
-        with_scores: Optional[bool] = False,
-        with_attribs: Optional[bool] = False,
-        count: Optional[int] = None,
-        ef: Optional[Number] = None,
-        filter: Optional[str] = None,
-        filter_ef: Optional[str] = None,
-        truth: Optional[bool] = False,
-        no_thread: Optional[bool] = False,
-        epsilon: Optional[Number] = None,
-    ) -> Union[Awaitable[VSimResult], VSimResult]:
+        input: list[float] | bytes | str,
+        with_scores: bool | None = False,
+        with_attribs: bool | None = False,
+        count: int | None = None,
+        ef: Number | None = None,
+        filter: str | None = None,
+        filter_ef: str | None = None,
+        truth: bool | None = False,
+        no_thread: bool | None = False,
+        epsilon: Number | None = None,
+    ) -> Awaitable[VSimResult] | VSimResult:
         """
         Compare a vector or element ``input``  with the other vectors in a vector set ``key``.
 
@@ -259,7 +297,13 @@ class VectorSetCommands(CommandsProtocol):
 
         return self.execute_command(VSIM_CMD, key, *pieces, **options)
 
-    def vdim(self, key: KeyT) -> Union[Awaitable[int], int]:
+    @overload
+    def vdim(self: SyncClientProtocol, key: KeyT) -> int: ...
+
+    @overload
+    def vdim(self: AsyncClientProtocol, key: KeyT) -> Awaitable[int]: ...
+
+    def vdim(self, key: KeyT) -> Awaitable[int] | int:
         """
         Get the dimension of a vector set.
 
@@ -273,7 +317,13 @@ class VectorSetCommands(CommandsProtocol):
         """
         return self.execute_command(VDIM_CMD, key)
 
-    def vcard(self, key: KeyT) -> Union[Awaitable[int], int]:
+    @overload
+    def vcard(self: SyncClientProtocol, key: KeyT) -> int: ...
+
+    @overload
+    def vcard(self: AsyncClientProtocol, key: KeyT) -> Awaitable[int]: ...
+
+    def vcard(self, key: KeyT) -> Awaitable[int] | int:
         """
         Get the cardinality(the number of elements) of a vector set with key ``key``.
 
@@ -283,7 +333,13 @@ class VectorSetCommands(CommandsProtocol):
         """
         return self.execute_command(VCARD_CMD, key)
 
-    def vrem(self, key: KeyT, element: str) -> Union[Awaitable[int], int]:
+    @overload
+    def vrem(self: SyncClientProtocol, key: KeyT, element: str) -> int: ...
+
+    @overload
+    def vrem(self: AsyncClientProtocol, key: KeyT, element: str) -> Awaitable[int]: ...
+
+    def vrem(self, key: KeyT, element: str) -> Awaitable[int] | int:
         """
         Remove an element from a vector set.
 
@@ -291,12 +347,25 @@ class VectorSetCommands(CommandsProtocol):
         """
         return self.execute_command(VREM_CMD, key, element)
 
+    @overload
     def vemb(
-        self, key: KeyT, element: str, raw: Optional[bool] = False
-    ) -> Union[
-        Awaitable[Optional[Union[List[EncodableT], Dict[str, EncodableT]]]],
-        Optional[Union[List[EncodableT], Dict[str, EncodableT]]],
-    ]:
+        self: SyncClientProtocol,
+        key: KeyT,
+        element: str,
+        raw: bool | None = ...,
+    ) -> VEmbResult: ...
+
+    @overload
+    def vemb(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        element: str,
+        raw: bool | None = ...,
+    ) -> Awaitable[VEmbResult]: ...
+
+    def vemb(
+        self, key: KeyT, element: str, raw: bool | None = False
+    ) -> Awaitable[VEmbResult] | VEmbResult:
         """
         Get the approximated vector of an element ``element`` from vector set ``key``.
 
@@ -333,16 +402,25 @@ class VectorSetCommands(CommandsProtocol):
 
         return self.execute_command(VEMB_CMD, *pieces, **options)
 
+    @overload
     def vlinks(
-        self, key: KeyT, element: str, with_scores: Optional[bool] = False
-    ) -> Union[
-        Awaitable[
-            Optional[
-                List[Union[List[Union[str, bytes]], Dict[Union[str, bytes], Number]]]
-            ]
-        ],
-        Optional[List[Union[List[Union[str, bytes]], Dict[Union[str, bytes], Number]]]],
-    ]:
+        self: SyncClientProtocol,
+        key: KeyT,
+        element: str,
+        with_scores: bool | None = ...,
+    ) -> VLinksResult: ...
+
+    @overload
+    def vlinks(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        element: str,
+        with_scores: bool | None = ...,
+    ) -> Awaitable[VLinksResult]: ...
+
+    def vlinks(
+        self, key: KeyT, element: str, with_scores: bool | None = False
+    ) -> Awaitable[VLinksResult] | VLinksResult:
         """
         Returns the neighbors for each level the element ``element`` exists in the vector set ``key``.
 
@@ -364,7 +442,13 @@ class VectorSetCommands(CommandsProtocol):
 
         return self.execute_command(VLINKS_CMD, *pieces, **options)
 
-    def vinfo(self, key: KeyT) -> Union[Awaitable[dict], dict]:
+    @overload
+    def vinfo(self: SyncClientProtocol, key: KeyT) -> dict: ...
+
+    @overload
+    def vinfo(self: AsyncClientProtocol, key: KeyT) -> Awaitable[dict]: ...
+
+    def vinfo(self, key: KeyT) -> Awaitable[dict] | dict:
         """
         Get information about a vector set.
 
@@ -372,9 +456,25 @@ class VectorSetCommands(CommandsProtocol):
         """
         return self.execute_command(VINFO_CMD, key)
 
+    @overload
     def vsetattr(
-        self, key: KeyT, element: str, attributes: Optional[Union[dict, str]] = None
-    ) -> Union[Awaitable[int], int]:
+        self: SyncClientProtocol,
+        key: KeyT,
+        element: str,
+        attributes: dict | str | None = ...,
+    ) -> int: ...
+
+    @overload
+    def vsetattr(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        element: str,
+        attributes: dict | str | None = ...,
+    ) -> Awaitable[int]: ...
+
+    def vsetattr(
+        self, key: KeyT, element: str, attributes: dict | str | None = None
+    ) -> Awaitable[int] | int:
         """
         Associate or remove JSON attributes ``attributes`` of element ``element``
         for vector set ``key``.
@@ -391,9 +491,19 @@ class VectorSetCommands(CommandsProtocol):
 
         return self.execute_command(VSETATTR_CMD, key, element, attributes_json)
 
+    @overload
+    def vgetattr(
+        self: SyncClientProtocol, key: KeyT, element: str
+    ) -> VGetAttrResult: ...
+
+    @overload
+    def vgetattr(
+        self: AsyncClientProtocol, key: KeyT, element: str
+    ) -> Awaitable[VGetAttrResult]: ...
+
     def vgetattr(
         self, key: KeyT, element: str
-    ) -> Union[Optional[Awaitable[dict]], Optional[dict]]:
+    ) -> Awaitable[VGetAttrResult] | VGetAttrResult:
         """
         Retrieve the JSON attributes of an element ``element `` for vector set ``key``.
 
@@ -404,11 +514,19 @@ class VectorSetCommands(CommandsProtocol):
         """
         return self.execute_command(VGETATTR_CMD, key, element)
 
+    @overload
     def vrandmember(
-        self, key: KeyT, count: Optional[int] = None
-    ) -> Union[
-        Awaitable[Optional[Union[List[str], str]]], Optional[Union[List[str], str]]
-    ]:
+        self: SyncClientProtocol, key: KeyT, count: int | None = ...
+    ) -> VRandMemberResult: ...
+
+    @overload
+    def vrandmember(
+        self: AsyncClientProtocol, key: KeyT, count: int | None = ...
+    ) -> Awaitable[VRandMemberResult]: ...
+
+    def vrandmember(
+        self, key: KeyT, count: int | None = None
+    ) -> Awaitable[VRandMemberResult] | VRandMemberResult:
         """
         Returns random elements from a vector set ``key``.
 
@@ -432,9 +550,27 @@ class VectorSetCommands(CommandsProtocol):
             pieces.append(count)
         return self.execute_command(VRANDMEMBER_CMD, *pieces)
 
+    @overload
     def vrange(
-        self, key: KeyT, start: str, end: str, count: Optional[int] = None
-    ) -> Union[Awaitable[List[str]], List[str]]:
+        self: SyncClientProtocol,
+        key: KeyT,
+        start: str,
+        end: str,
+        count: int | None = ...,
+    ) -> list[str]: ...
+
+    @overload
+    def vrange(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        start: str,
+        end: str,
+        count: int | None = ...,
+    ) -> Awaitable[list[str]]: ...
+
+    def vrange(
+        self, key: KeyT, start: str, end: str, count: int | None = None
+    ) -> Awaitable[list[str]] | list[str]:
         """
         Return elements in a lexicographical range from a vector set ``key``.
 

@@ -2067,16 +2067,13 @@ class BasicKeyCommands(CommandsProtocol):
         # Bulk string response is already handled (bytes/str based on decode_responses)
         return self.execute_command("DIGEST", name)
 
-    # --- @overload pattern for get() ---
-    # Sync client returns bytes | None directly
     @overload
-    def get(self: SyncClientProtocol, name: KeyT) -> Optional[bytes]: ...
+    def get(self: SyncClientProtocol, name: KeyT) -> bytes | str | None: ...
 
-    # Async client returns Awaitable[bytes | None]
     @overload
-    def get(self: AsyncClientProtocol, name: KeyT) -> Awaitable[Optional[bytes]]: ...
+    def get(self: AsyncClientProtocol, name: KeyT) -> Awaitable[bytes | str | None]: ...
 
-    def get(self, name: KeyT) -> ResponseT:
+    def get(self, name: KeyT) -> (bytes | str | None) | Awaitable[bytes | str | None]:
         """
         Return the value at key ``name``, or None if the key doesn't exist
 
@@ -2566,8 +2563,6 @@ class BasicKeyCommands(CommandsProtocol):
 
         return self.execute_command("RESTORE", *params)
 
-    # --- @overload pattern for set() ---
-    # Sync client returns bool | None directly
     @overload
     def set(
         self: SyncClientProtocol,
@@ -2585,9 +2580,8 @@ class BasicKeyCommands(CommandsProtocol):
         ifne: Optional[Union[bytes, str]] = ...,
         ifdeq: Optional[str] = ...,
         ifdne: Optional[str] = ...,
-    ) -> Optional[bool]: ...
+    ) -> bool | str | bytes | None: ...
 
-    # Async client returns Awaitable[bool | None]
     @overload
     def set(
         self: AsyncClientProtocol,
@@ -2605,7 +2599,7 @@ class BasicKeyCommands(CommandsProtocol):
         ifne: Optional[Union[bytes, str]] = ...,
         ifdeq: Optional[str] = ...,
         ifdne: Optional[str] = ...,
-    ) -> Awaitable[Optional[bool]]: ...
+    ) -> Awaitable[bool | str | bytes | None]: ...
 
     @experimental_args(["ifeq", "ifne", "ifdeq", "ifdne"])
     def set(
@@ -2624,7 +2618,7 @@ class BasicKeyCommands(CommandsProtocol):
         ifne: Optional[Union[bytes, str]] = None,
         ifdeq: Optional[str] = None,  # hex digest of current value
         ifdne: Optional[str] = None,  # hex digest of current value
-    ) -> ResponseT:
+    ) -> (bool | str | bytes | None) | Awaitable[bool | str | bytes | None]:
         """
         Set the value at key ``name`` to ``value``
 

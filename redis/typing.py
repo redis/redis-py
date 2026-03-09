@@ -12,7 +12,6 @@ from typing import (
     Type,
     TypeVar,
     Union,
-    runtime_checkable,
 )
 
 if TYPE_CHECKING:
@@ -23,7 +22,6 @@ if TYPE_CHECKING:
 Number = Union[int, float]
 
 
-@runtime_checkable
 class AsyncClientProtocol(Protocol):
     """Protocol for asynchronous Redis clients (redis.asyncio.client.Redis).
 
@@ -34,7 +32,6 @@ class AsyncClientProtocol(Protocol):
     _is_async_client: Literal[True]
 
 
-@runtime_checkable
 class SyncClientProtocol(Protocol):
     """Protocol for synchronous Redis clients (redis.client.Redis).
 

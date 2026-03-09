@@ -1980,7 +1980,14 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         | Existing :class:`~.RedisCluster` client
     """
 
-    __slots__ = ("cluster_client", "_transaction", "_execution_strategy")
+    __slots__ = (
+        "cluster_client",
+        "_transaction",
+        "_execution_strategy",
+    )
+
+    # Type discrimination marker for @overload self-type pattern
+    _is_async_client: Literal[True] = True
 
     def __init__(
         self, client: RedisCluster, transaction: Optional[bool] = None
