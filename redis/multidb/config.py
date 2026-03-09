@@ -108,7 +108,7 @@ class MultiDbConfig:
         health_checks: Optional list of additional health checks performed on databases.
         health_check_interval: Time interval for executing health checks.
         health_check_probes: Number of attempts to evaluate the health of a database.
-        health_check_probes_delay: Delay between health check attempts.
+        health_check_delay: Delay between health check attempts.
         health_check_timeout: Timeout for the full health check operation (including all probes).
         health_check_policy: Policy for determining database health based on health checks.
         failover_strategy: Optional strategy for handling database failover scenarios.
@@ -149,7 +149,7 @@ class MultiDbConfig:
     health_checks: Optional[List[HealthCheck]] = None
     health_check_interval: float = DEFAULT_HEALTH_CHECK_INTERVAL
     health_check_probes: int = DEFAULT_HEALTH_CHECK_PROBES
-    health_check_probes_delay: float = DEFAULT_HEALTH_CHECK_DELAY
+    health_check_delay: float = DEFAULT_HEALTH_CHECK_DELAY
     health_check_timeout: float = DEFAULT_HEALTH_CHECK_TIMEOUT
     health_check_policy: HealthCheckPolicies = DEFAULT_HEALTH_CHECK_POLICY
     failover_strategy: Optional[FailoverStrategy] = None
@@ -222,7 +222,7 @@ class MultiDbConfig:
         return [
             PingHealthCheck(
                 health_check_probes=self.health_check_probes,
-                health_check_delay=self.health_check_probes_delay,
+                health_check_delay=self.health_check_delay,
                 health_check_timeout=self.health_check_timeout,
             ),
         ]
