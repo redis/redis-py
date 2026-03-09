@@ -201,7 +201,7 @@ class TestHealthyMajorityPolicy:
         mock_hc2.check_health.side_effect = hc2_side_effect
         mock_db = Mock(spec=Database)
 
-        policy = HealthyAllPolicy()
+        policy = HealthyMajorityPolicy()
         with pytest.raises(UnhealthyDatabaseException, match="Unhealthy database"):
             await policy.execute([mock_hc1, mock_hc2], mock_db)
 
