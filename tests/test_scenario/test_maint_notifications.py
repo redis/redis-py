@@ -1239,16 +1239,10 @@ class TestStandaloneClientPushNotifications(TestPushNotificationsBase):
         assert errors.empty(), f"Errors occurred in threads: {errors.queue}"
 
 
-# 5 minutes timeout for this test
-# @pytest.mark.skipif(
-#     use_mock_proxy(),
-#     reason="Mock proxy doesn't support sending notifications to new connections.",
-# )
-
-
 def generate_params(
     fault_injector_client: FaultInjectorClient,
     effect_names: list[SlotMigrateEffects],
+    skip_combinations: list[tuple[SlotMigrateEffects, str]] = [],
 ):
     # params should produce list of tuples: (effect_name, trigger_name, bdb_config, bdb_name)
     params = []
@@ -1261,6 +1255,8 @@ def generate_params(
 
             for trigger_info in triggers_data["triggers"]:
                 trigger = trigger_info["name"]
+                if (effect_name, trigger) in skip_combinations:
+                    continue
                 if trigger == "maintenance_mode":
                     continue
                 trigger_requirements = trigger_info["requirements"]
@@ -1332,11 +1328,23 @@ class TestClusterClientPushNotificationsWithEffectTriggerBase(
         self._bdb_name = db_config["name"]
         socket_timeout = DEFAULT_OSS_API_CLIENT_SOCKET_TIMEOUT
 
+        auth_ssl_client_certs_config_info = db_config.get(
+            "authentication_ssl_client_certs", None
+        )
+
+        auth_ssl_client_certs = (
+            True
+            if auth_ssl_client_certs_config_info
+            and auth_ssl_client_certs_config_info[0]["client_cert"] is not None
+            else False
+        )
+
         cluster_client_maint_notifications = get_cluster_client_maint_notifications(
             endpoints_config=cluster_endpoint_config,
             disable_retries=True,
             socket_timeout=socket_timeout,
             enable_maintenance_notifications=True,
+            auth_ssl_client_certs=auth_ssl_client_certs,
         )
         return cluster_client_maint_notifications, cluster_endpoint_config
 
@@ -1741,9 +1749,12 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                 SlotMigrateEffects.REMOVE,
                 SlotMigrateEffects.ADD,
             ],
+            skip_combinations=[
+                (SlotMigrateEffects.SLOT_SHUFFLE, "failover"),
+            ],  # maintenance ends too fast for the test to be reliable
         ),
     )
-    def test_new_connections_receive_last_notification_with_migrating(
+    def test_new_connections_receive_last_smigrating_smigrated_notification(
         self,
         fault_injector_client_oss_api: FaultInjectorClient,
         effect_name: SlotMigrateEffects,
