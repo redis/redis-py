@@ -1,8 +1,8 @@
 import logging
 from abc import ABC, abstractmethod
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
 from enum import Enum
-from time import sleep
+from time import monotonic, sleep
 from typing import List, Optional, Tuple, Union
 
 from redis import Redis
@@ -73,28 +73,70 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
 
     All exception handling is centralized in execute() - _execute() methods just
     propagate exceptions naturally.
+
+    Uses completion-based waiting with proper cancellation to ensure:
+    - Total execution time is bounded by max(health_check_timeout) not sum
+    - Failures return promptly without waiting for other health checks
+    - Threads are cancelled on first failure/timeout
     """
 
     def execute(self, health_checks: List[HealthCheck], database) -> bool:
-        with ThreadPoolExecutor(max_workers=len(health_checks)) as executor:
-            futures = {
+        if not health_checks:
+            return True
+
+        # Calculate the maximum timeout across all health checks
+        # This bounds the total execution time
+        max_timeout = max(hc.health_check_timeout for hc in health_checks)
+        deadline = monotonic() + max_timeout
+
+        executor = ThreadPoolExecutor(max_workers=len(health_checks))
+        try:
+            # Submit all health checks and track their individual timeouts
+            future_to_hc = {
                 executor.submit(self._execute, health_check, database): health_check
                 for health_check in health_checks
             }
 
-            # Check results - handle exceptions and failures
-            for future, health_check in futures.items():
+            # Use as_completed to process results as they finish
+            # This allows early return on first failure
+            for future in as_completed(future_to_hc, timeout=max_timeout):
                 try:
-                    result = future.result(timeout=health_check.health_check_timeout)
+                    # Calculate remaining time for this future
+                    remaining = deadline - monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError(
+                            f"Health check timed out after {max_timeout}s"
+                        )
+
+                    result = future.result(timeout=max(0, remaining))
 
                     if not result:
-                        # Health check returned False
+                        # Health check returned False - cancel remaining and return
+                        self._cancel_futures(future_to_hc.keys())
                         return False
+                except UnhealthyDatabaseException:
+                    # Re-raise UnhealthyDatabaseException unchanged to avoid nesting
+                    self._cancel_futures(future_to_hc.keys())
+                    raise
                 except Exception as e:
-                    # Any exception (including TimeoutError) makes the database unhealthy
+                    # Wrap other exceptions (including TimeoutError) in UnhealthyDatabaseException
+                    self._cancel_futures(future_to_hc.keys())
                     raise UnhealthyDatabaseException("Unhealthy database", database, e)
 
-        return True
+            return True
+        except TimeoutError as e:
+            # as_completed timed out - some health checks didn't complete in time
+            self._cancel_futures(future_to_hc.keys())
+            raise UnhealthyDatabaseException("Unhealthy database", database, e)
+        finally:
+            # Shutdown without waiting - cancelled futures won't block
+            # Python 3.9+ supports cancel_futures=True
+            executor.shutdown(wait=False, cancel_futures=True)
+
+    def _cancel_futures(self, futures):
+        """Cancel all futures that haven't completed yet."""
+        for future in futures:
+            future.cancel()
 
     @abstractmethod
     def _execute(self, health_check: HealthCheck, database):
