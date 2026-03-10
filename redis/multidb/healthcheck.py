@@ -2,7 +2,7 @@ import logging
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
 from enum import Enum
-from time import monotonic, sleep
+from time import sleep
 from typing import List, Optional, Tuple, Union
 
 from redis import Redis
@@ -84,31 +84,22 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
         if not health_checks:
             return True
 
-        # Calculate the maximum timeout across all health checks
-        # This bounds the total execution time
         max_timeout = max(hc.health_check_timeout for hc in health_checks)
-        deadline = monotonic() + max_timeout
-
         executor = ThreadPoolExecutor(max_workers=len(health_checks))
+
         try:
-            # Submit all health checks and track their individual timeouts
             future_to_hc = {
                 executor.submit(self._execute, health_check, database): health_check
                 for health_check in health_checks
             }
 
-            # Use as_completed to process results as they finish
-            # This allows early return on first failure
+            # This approach is a workaround as we don't have a command_timeout.
+            # The alternative to track per task timeout is to run an additional thread
+            # which is an overkill in this case.
+            # TODO: change to command_timeout when it will be supported
             for future in as_completed(future_to_hc, timeout=max_timeout):
                 try:
-                    # Calculate remaining time for this future
-                    remaining = deadline - monotonic()
-                    if remaining <= 0:
-                        raise TimeoutError(
-                            f"Health check timed out after {max_timeout}s"
-                        )
-
-                    result = future.result(timeout=max(0, remaining))
+                    result = future.result()
 
                     if not result:
                         # Health check returned False - cancel remaining and return
@@ -119,7 +110,6 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
                     self._cancel_futures(future_to_hc.keys())
                     raise
                 except Exception as e:
-                    # Wrap other exceptions (including TimeoutError) in UnhealthyDatabaseException
                     self._cancel_futures(future_to_hc.keys())
                     raise UnhealthyDatabaseException("Unhealthy database", database, e)
 
