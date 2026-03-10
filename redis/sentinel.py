@@ -1,5 +1,8 @@
 import random
+import time
 import weakref
+from collections import defaultdict
+from threading import Event, Lock, Thread
 from typing import Optional
 
 from redis.client import Redis
@@ -104,21 +107,18 @@ class SentinelConnectionPoolProxy:
         self.check_connection = check_connection
         self.service_name = service_name
         self.sentinel_manager = sentinel_manager
+
+        self._lock = Lock()
         self.reset()
 
     def reset(self):
-        self.master_address = None
         self.slave_rr_counter = None
+        with self._lock:
+            self.master_address = None
 
     def get_master_address(self):
         master_address = self.sentinel_manager.discover_master(self.service_name)
-        if self.is_master and self.master_address != master_address:
-            self.master_address = master_address
-            # disconnect any idle connections so that they reconnect
-            # to the new master the next time that they are used.
-            connection_pool = self.connection_pool_ref()
-            if connection_pool is not None:
-                connection_pool.disconnect(inuse_connections=False)
+        self.update_master_address(master_address)
         return master_address
 
     def rotate_slaves(self):
@@ -136,6 +136,23 @@ class SentinelConnectionPoolProxy:
         except MasterNotFoundError:
             pass
         raise SlaveNotFoundError(f"No slave found for {self.service_name!r}")
+
+    def update_master_address(self, master_address):
+        if not self.is_master:
+            return
+
+        changed = False
+        with self._lock:
+            if self.master_address != master_address:
+                self.master_address = master_address
+                changed = True
+
+        if changed:
+            # disconnect any idle connections so that they reconnect
+            # to the new master the next time that they are used.
+            connection_pool = self.connection_pool_ref()
+            if connection_pool is not None:
+                connection_pool.disconnect(inuse_connections=False)
 
 
 class SentinelConnectionPool(ConnectionPool):
@@ -224,6 +241,11 @@ class Sentinel(SentinelCommands):
     not specified, any socket_timeout and socket_keepalive options specified
     in ``connection_kwargs`` will be used.
 
+    ``m̀onitor_failover`` indicates whether the Sentinel client should monitor
+    for master failover events.  If set to True, the client will subscribe to
+    Sentinel's "+switch-master" notifications and update any registered
+    connection pools automatically when a failover occurs.
+
     ``connection_kwargs`` are keyword arguments that will be used when
     establishing a connection to a Redis server.
     """
@@ -234,6 +256,7 @@ class Sentinel(SentinelCommands):
         min_other_sentinels=0,
         sentinel_kwargs=None,
         force_master_ip=None,
+        monitor_failover: bool = False,
         **connection_kwargs,
     ):
         # if sentinel_kwargs isn't defined, use the socket_* options from
@@ -251,6 +274,11 @@ class Sentinel(SentinelCommands):
         self.min_other_sentinels = min_other_sentinels
         self.connection_kwargs = connection_kwargs
         self._force_master_ip = force_master_ip
+
+        self._monitor_failover = monitor_failover
+        self._listener_lock = Lock()
+        self._switch_master_listener = None
+        self._proxies_by_service = defaultdict(weakref.WeakSet)
 
     def execute_command(self, *args, **kwargs):
         """
@@ -355,6 +383,29 @@ class Sentinel(SentinelCommands):
                 return slaves
         return []
 
+    def close(self):
+        with self._listener_lock:
+            if self._switch_master_listener is not None:
+                self._switch_master_listener.stop()
+                self._switch_master_listener.join(timeout=2)
+                self._switch_master_listener = None
+
+    def _register_proxy(self, service_name: str, proxy: SentinelConnectionPoolProxy):
+        self._proxies_by_service[service_name].add(proxy)
+        if not self._monitor_failover:
+            return
+        with self._listener_lock:
+            if self._switch_master_listener is None:
+                self._switch_master_listener = _SwitchMasterListener(self)
+                self._switch_master_listener.start()
+
+    def _on_switch_master(self, service_name: str, new_master_address: tuple[str, int]):
+        proxies = self._proxies_by_service.get(service_name)
+        if not proxies:
+            return
+        for proxy in list(proxies):
+            proxy.update_master_address(new_master_address)
+
     def master_for(
         self,
         service_name,
@@ -389,9 +440,11 @@ class Sentinel(SentinelCommands):
         kwargs["is_master"] = True
         connection_kwargs = dict(self.connection_kwargs)
         connection_kwargs.update(kwargs)
-        return redis_class.from_pool(
-            connection_pool_class(service_name, self, **connection_kwargs)
-        )
+
+        pool = connection_pool_class(service_name, self, **connection_kwargs)
+        self._register_proxy(service_name, pool.proxy)
+
+        return redis_class.from_pool(pool)
 
     def slave_for(
         self,
@@ -423,3 +476,73 @@ class Sentinel(SentinelCommands):
         return redis_class.from_pool(
             connection_pool_class(service_name, self, **connection_kwargs)
         )
+
+
+class _SwitchMasterListener(Thread):
+    def __init__(self, sentinel: Sentinel):
+        super().__init__(daemon=True)
+        self._sentinel = sentinel
+        self._stop = Event()
+
+    def stop(self):
+        self._stop.set()
+
+    def run(self):
+        while not self._stop.is_set():
+            pubsub = None
+
+            try:
+                sentinel = self._get_working_sentinel()
+                if sentinel is None:
+                    time.sleep(1)
+                    continue
+
+                pubsub = sentinel.pubsub(ignore_subscribe_messages=True)
+                pubsub.subscribe("+switch-master")
+
+                while not self._stop.is_set():
+                    msg = pubsub.get_message(timeout=1)
+                    if msg is None:
+                        continue
+                    if msg.get("type") != "message":
+                        continue
+
+                    if (data := msg.get("data")) is None:
+                        continue
+                    if isinstance(data, bytes):
+                        data = data.decode("utf-8", errors="replace")
+
+                    parts = str(data).split()
+                    if len(parts) < 5:
+                        continue
+
+                    service_name = parts[0]
+                    new_master_ip = parts[3]
+                    try:
+                        new_master_port = int(parts[4])
+                    except ValueError:
+                        continue
+
+                    self._sentinel._on_switch_master(
+                        service_name, (new_master_ip, new_master_port)
+                    )
+
+            except (ConnectionError, TimeoutError):
+                time.sleep(0.5)
+            finally:
+                try:
+                    if pubsub is not None:
+                        pubsub.close()
+                except Exception:
+                    pass
+
+    def _get_working_sentinel(self):
+        sentinels = list(self._sentinel.sentinels)
+        for sentinel in sentinels:
+            try:
+                sentinel.ping()
+                return sentinel
+            except (ConnectionError, TimeoutError):
+                continue
+
+        return None
