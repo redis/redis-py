@@ -42,6 +42,11 @@ class IndexDefinition:
 
     def _append_prefix(self, prefix):
         """Append PREFIX."""
+        if isinstance(prefix, str):
+            raise TypeError(
+                "prefix must be a list of strings, not a single string. "
+                "Did you mean prefix=['{}']?".format(prefix)
+            )
         if len(prefix) > 0:
             self.args.append("PREFIX")
             self.args.append(len(prefix))
