@@ -33,6 +33,7 @@ from redis.cache import (
 )
 
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
+from ._parsers.socket import SENTINEL
 from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
@@ -106,8 +107,6 @@ SYM_CRLF = b"\r\n"
 SYM_EMPTY = b""
 
 DEFAULT_RESP_VERSION = 2
-
-SENTINEL = object()
 
 DefaultParser: Type[Union[_RESP2Parser, _RESP3Parser, _HiredisParser]]
 if HIREDIS_AVAILABLE:
@@ -239,6 +238,7 @@ class ConnectionInterface:
         self,
         disable_decoding=False,
         *,
+        timeout: Union[float, object] = SENTINEL,
         disconnect_on_error=True,
         push_request=False,
     ):
@@ -411,6 +411,7 @@ class MaintNotificationsAbstractConnection:
         self,
         disable_decoding=False,
         *,
+        timeout: Union[float, object] = SENTINEL,
         disconnect_on_error=True,
         push_request=False,
     ):
@@ -1329,6 +1330,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         self,
         disable_decoding=False,
         *,
+        timeout: Union[float, object] = SENTINEL,
         disconnect_on_error=True,
         push_request=False,
     ):
@@ -1339,10 +1341,14 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         try:
             if self.protocol in ["3", 3]:
                 response = self._parser.read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
+                    disable_decoding=disable_decoding,
+                    push_request=push_request,
+                    timeout=timeout,
                 )
             else:
-                response = self._parser.read_response(disable_decoding=disable_decoding)
+                response = self._parser.read_response(
+                    disable_decoding=disable_decoding, timeout=timeout
+                )
         except socket.timeout:
             if disconnect_on_error:
                 self.disconnect()
@@ -1707,7 +1713,12 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         return self._conn.can_read(timeout)
 
     def read_response(
-        self, disable_decoding=False, *, disconnect_on_error=True, push_request=False
+        self,
+        disable_decoding=False,
+        *,
+        timeout: Union[float, object] = SENTINEL,
+        disconnect_on_error=True,
+        push_request=False,
     ):
         with self._cache_lock:
             # Check if command response exists in a cache and it's not in progress.
@@ -1734,6 +1745,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
         response = self._conn.read_response(
             disable_decoding=disable_decoding,
+            timeout=timeout,
             disconnect_on_error=disconnect_on_error,
             push_request=push_request,
         )
