@@ -3087,20 +3087,24 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             raise MaxConnectionsError("Too many connections")
         self._created_connections += 1
 
-        # Record new connection created (starts as IDLE)
+        kwargs = dict(self.connection_kwargs)
+
+        # Create the connection first, then record metrics only on success
+        if self.cache is not None:
+            connection = CacheProxyConnection(
+                self.connection_class(**kwargs), self.cache, self._lock
+            )
+        else:
+            connection = self.connection_class(**kwargs)
+
+        # Record new connection created (starts as IDLE) - only after successful construction
         record_connection_count(
             pool_name=get_pool_name(self),
             connection_state=ConnectionState.IDLE,
             counter=1,
         )
 
-        kwargs = dict(self.connection_kwargs)
-
-        if self.cache is not None:
-            return CacheProxyConnection(
-                self.connection_class(**kwargs), self.cache, self._lock
-            )
-        return self.connection_class(**kwargs)
+        return connection
 
     def release(self, connection: "Connection") -> None:
         "Releases the connection back to the pool"
@@ -3296,9 +3300,13 @@ class BlockingConnectionPool(ConnectionPool):
                 self._locked = True
 
             # Record metrics for connections being removed before clearing
-            if hasattr(self, "_connections") and self._connections:
-                free_connections = self._get_free_connections()
-                idle_count = len(free_connections)
+            # Note: Access pool.queue directly to avoid deadlock since we may
+            # already hold self._lock (which is non-reentrant)
+            if hasattr(self, "_connections") and self._connections and hasattr(
+                self, "pool"
+            ):
+                connections_in_queue = {conn for conn in self.pool.queue if conn}
+                idle_count = len(connections_in_queue)
                 in_use_count = len(self._connections) - idle_count
                 if idle_count > 0 or in_use_count > 0:
                     pool_name = get_pool_name(self)
@@ -3347,9 +3355,13 @@ class BlockingConnectionPool(ConnectionPool):
     def __del__(self) -> None:
         """Clean up connection pool and record metrics when garbage collected."""
         try:
-            if hasattr(self, "_connections") and self._connections:
-                free_connections = self._get_free_connections()
-                idle_count = len(free_connections)
+            # Note: Access pool.queue directly to avoid potential deadlock
+            # if GC runs while the lock is held by the same thread
+            if hasattr(self, "_connections") and self._connections and hasattr(
+                self, "pool"
+            ):
+                connections_in_queue = {conn for conn in self.pool.queue if conn}
+                idle_count = len(connections_in_queue)
                 in_use_count = len(self._connections) - idle_count
                 if idle_count > 0 or in_use_count > 0:
                     pool_name = get_pool_name(self)
