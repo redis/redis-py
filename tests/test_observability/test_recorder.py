@@ -1363,89 +1363,128 @@ class TestRecordConnectionCount:
 
         recorder.reset_collector()
 
-    def test_record_connection_count_to_used_state(
+    def test_record_connection_count_increment(
         self, setup_connection_count_recorder, mock_up_down_counter
     ):
-        """Test that recording USED state increments USED and decrements IDLE."""
+        """Test recording connection count increment."""
+        recorder.record_connection_count(
+            pool_name="localhost:6379_abc123",
+            connection_state=ConnectionState.IDLE,
+            counter=1,
+        )
+
+        assert mock_up_down_counter.add.call_count == 1
+
+        calls = mock_up_down_counter.add.call_args_list
+        assert calls[0][0][0] == 1
+        assert (
+            calls[0][1]["attributes"][DB_CLIENT_CONNECTION_POOL_NAME]
+            == "localhost:6379_abc123"
+        )
+        assert calls[0][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "idle"
+
+    def test_record_connection_count_decrement(
+        self, setup_connection_count_recorder, mock_up_down_counter
+    ):
+        """Test recording connection count decrement."""
         recorder.record_connection_count(
             pool_name="localhost:6379_abc123",
             connection_state=ConnectionState.USED,
+            counter=-1,
         )
 
-        # Should be called twice: once for USED (+1), once for IDLE (-1)
-        assert mock_up_down_counter.add.call_count == 2
+        assert mock_up_down_counter.add.call_count == 1
 
         calls = mock_up_down_counter.add.call_args_list
-
-        # First call: USED +1
-        assert calls[0][0][0] == 1
+        assert calls[0][0][0] == -1
         assert (
             calls[0][1]["attributes"][DB_CLIENT_CONNECTION_POOL_NAME]
             == "localhost:6379_abc123"
         )
         assert calls[0][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "used"
 
-        # Second call: IDLE -1
-        assert calls[1][0][0] == -1
-        assert (
-            calls[1][1]["attributes"][DB_CLIENT_CONNECTION_POOL_NAME]
-            == "localhost:6379_abc123"
-        )
-        assert calls[1][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "idle"
-
-    def test_record_connection_count_to_idle_state(
+    def test_record_connection_count_batch_decrement(
         self, setup_connection_count_recorder, mock_up_down_counter
     ):
-        """Test that recording IDLE state increments IDLE and decrements USED."""
+        """Test recording batch connection count decrement (e.g., pool disconnect)."""
         recorder.record_connection_count(
             pool_name="localhost:6379_abc123",
             connection_state=ConnectionState.IDLE,
+            counter=-5,
         )
 
-        # Should be called twice: once for IDLE (+1), once for USED (-1)
-        assert mock_up_down_counter.add.call_count == 2
+        assert mock_up_down_counter.add.call_count == 1
+
+        calls = mock_up_down_counter.add.call_args_list
+        assert calls[0][0][0] == -5
+        assert calls[0][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "idle"
+
+    def test_record_connection_count_lifecycle_scenario(
+        self, setup_connection_count_recorder, mock_up_down_counter
+    ):
+        """Test realistic lifecycle: create connection, acquire, release, re-acquire, disconnect."""
+        # 1. New connection created (goes to IDLE)
+        recorder.record_connection_count(
+            pool_name="pool1",
+            connection_state=ConnectionState.IDLE,
+            counter=1,
+        )
+
+        # 2. Connection acquired from pool (transition: IDLE -> USED)
+        recorder.record_connection_count(
+            pool_name="pool1",
+            connection_state=ConnectionState.IDLE,
+            counter=-1,
+        )
+        recorder.record_connection_count(
+            pool_name="pool1",
+            connection_state=ConnectionState.USED,
+            counter=1,
+        )
+
+        # 3. Connection released to pool (transition: USED -> IDLE)
+        recorder.record_connection_count(
+            pool_name="pool1",
+            connection_state=ConnectionState.USED,
+            counter=-1,
+        )
+        recorder.record_connection_count(
+            pool_name="pool1",
+            connection_state=ConnectionState.IDLE,
+            counter=1,
+        )
+
+        # 4. Pool disconnect (IDLE -> destroyed)
+        recorder.record_connection_count(
+            pool_name="pool1",
+            connection_state=ConnectionState.IDLE,
+            counter=-1,
+        )
+
+        # Total calls: 6
+        assert mock_up_down_counter.add.call_count == 6
 
         calls = mock_up_down_counter.add.call_args_list
 
-        # First call: IDLE +1
+        # Step 1: IDLE +1 (creation)
         assert calls[0][0][0] == 1
         assert calls[0][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "idle"
 
-        # Second call: USED -1
+        # Step 2: IDLE -1, USED +1 (acquire)
         assert calls[1][0][0] == -1
-        assert calls[1][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "used"
-
-    def test_record_connection_count_multiple_pools(
-        self, setup_connection_count_recorder, mock_up_down_counter
-    ):
-        """Test tracking connections across multiple pools."""
-        recorder.record_connection_count(
-            pool_name="pool1", connection_state=ConnectionState.USED
-        )
-        recorder.record_connection_count(
-            pool_name="pool2", connection_state=ConnectionState.USED
-        )
-
-        # Each call updates 2 counters (USED and IDLE), so 4 total
-        assert mock_up_down_counter.add.call_count == 4
-
-        calls = mock_up_down_counter.add.call_args_list
-
-        # First record_connection_count: pool1 USED +1, pool1 IDLE -1
-        assert calls[0][1]["attributes"][DB_CLIENT_CONNECTION_POOL_NAME] == "pool1"
-        assert calls[0][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "used"
-        assert calls[0][0][0] == 1
-        assert calls[1][1]["attributes"][DB_CLIENT_CONNECTION_POOL_NAME] == "pool1"
         assert calls[1][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "idle"
-        assert calls[1][0][0] == -1
-
-        # Second record_connection_count: pool2 USED +1, pool2 IDLE -1
-        assert calls[2][1]["attributes"][DB_CLIENT_CONNECTION_POOL_NAME] == "pool2"
-        assert calls[2][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "used"
         assert calls[2][0][0] == 1
-        assert calls[3][1]["attributes"][DB_CLIENT_CONNECTION_POOL_NAME] == "pool2"
-        assert calls[3][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "idle"
+        assert calls[2][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "used"
+
+        # Step 3: USED -1, IDLE +1 (release)
         assert calls[3][0][0] == -1
+        assert calls[3][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "used"
+        assert calls[4][0][0] == 1
+        assert calls[4][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "idle"
+
+        # Step 4: IDLE -1 (disconnect)
+        assert calls[5][0][0] == -1
+        assert calls[5][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "idle"
 
 
 class TestInitCSCItems:

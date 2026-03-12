@@ -172,17 +172,15 @@ async def record_connection_create_time(
 async def record_connection_count(
     pool_name: str,
     connection_state: ConnectionState,
+    counter: int = 1,
 ) -> None:
     """
-    Record a connection count change.
-
-    When a connection changes state, both counters are updated:
-    - The target state counter is incremented by 1
-    - The opposite state counter is decremented by 1
+    Record a connection count change for a single state.
 
     Args:
         pool_name: Connection pool identifier
-        connection_state: Target state of the connection (IDLE or USED)
+        connection_state: State to update (IDLE or USED)
+        counter: Number to add (positive) or subtract (negative)
     """
     collector = _get_or_create_collector()
     if collector is None:
@@ -192,6 +190,7 @@ async def record_connection_count(
         collector.record_connection_count(
             pool_name=pool_name,
             connection_state=connection_state,
+            counter=counter,
         )
     except Exception:
         pass

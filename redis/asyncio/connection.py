@@ -1347,6 +1347,29 @@ class ConnectionPool:
             )
             is_created = connections_after > connections_before
 
+        # Record state transition: IDLE -> USED
+        # For new connections, first record IDLE +1 (creation), then do the transition
+        # This ensures counters stay balanced if ensure_connection() fails and release() is called
+        pool_name = get_pool_name(self)
+        if is_created:
+            # New connection created - first add to IDLE
+            await record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.IDLE,
+                counter=1,
+            )
+        # Then transition IDLE -> USED
+        await record_connection_count(
+            pool_name=pool_name,
+            connection_state=ConnectionState.IDLE,
+            counter=-1,
+        )
+        await record_connection_count(
+            pool_name=pool_name,
+            connection_state=ConnectionState.USED,
+            counter=1,
+        )
+
         # We now perform the connection check outside of the lock.
         try:
             await self.ensure_connection(connection)
@@ -1356,12 +1379,6 @@ class ConnectionPool:
                     connection_pool=self,
                     duration_seconds=time.monotonic() - start_time_created,
                 )
-
-            # Record connection acquired for observability
-            await record_connection_count(
-                pool_name=get_pool_name(self),
-                connection_state=ConnectionState.USED,
-            )
 
             return connection
         except BaseException:
@@ -1390,6 +1407,8 @@ class ConnectionPool:
 
     def make_connection(self):
         """Create a new connection.  Can be overridden by child classes."""
+        # Note: We don't record IDLE here because async uses a sync make_connection
+        # but async record_connection_count. The recording is handled in get_connection.
         return self.connection_class(**self.connection_kwargs)
 
     async def ensure_connection(self, connection: AbstractConnection):
@@ -1422,10 +1441,17 @@ class ConnectionPool:
             AsyncAfterConnectionReleasedEvent(connection)
         )
 
-        # Record connection released for observability
+        # Record state transition: USED -> IDLE
+        pool_name = get_pool_name(self)
         await record_connection_count(
-            pool_name=get_pool_name(self),
+            pool_name=pool_name,
+            connection_state=ConnectionState.USED,
+            counter=-1,
+        )
+        await record_connection_count(
+            pool_name=pool_name,
             connection_state=ConnectionState.IDLE,
+            counter=1,
         )
 
     async def disconnect(self, inuse_connections: bool = True):
@@ -1436,6 +1462,10 @@ class ConnectionPool:
         current in use, potentially by other tasks. Otherwise only disconnect
         connections that are idle in the pool.
         """
+        # Count connections before disconnecting for observability
+        idle_count = len(self._available_connections)
+        in_use_count = len(self._in_use_connections) if inuse_connections else 0
+
         if inuse_connections:
             connections: Iterable[AbstractConnection] = chain(
                 self._available_connections, self._in_use_connections
@@ -1449,6 +1479,21 @@ class ConnectionPool:
         exc = next((r for r in resp if isinstance(r, BaseException)), None)
         if exc:
             raise exc
+
+        # Record connection pool disconnect for observability
+        pool_name = get_pool_name(self)
+        if idle_count > 0:
+            await record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.IDLE,
+                counter=-idle_count,
+            )
+        if in_use_count > 0:
+            await record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.USED,
+                counter=-in_use_count,
+            )
 
     async def update_active_connections_for_reconnect(self):
         """

@@ -2975,6 +2975,21 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 is_created = True
             self._in_use_connections.add(connection)
 
+        # Record state transition: IDLE -> USED
+        # (make_connection already recorded IDLE +1 for new connections)
+        # This ensures counters stay balanced if connect() fails and release() is called
+        pool_name = get_pool_name(self)
+        record_connection_count(
+            pool_name=pool_name,
+            connection_state=ConnectionState.IDLE,
+            counter=-1,
+        )
+        record_connection_count(
+            pool_name=pool_name,
+            connection_state=ConnectionState.USED,
+            counter=1,
+        )
+
         try:
             # ensure this connection is connected to Redis
             connection.connect()
@@ -3006,12 +3021,6 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 duration_seconds=time.monotonic() - start_time_created,
             )
 
-        # Record connection acquired for observability
-        record_connection_count(
-            pool_name=get_pool_name(self),
-            connection_state=ConnectionState.USED,
-        )
-
         return connection
 
     def get_encoder(self) -> Encoder:
@@ -3028,6 +3037,13 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         if self._created_connections >= self.max_connections:
             raise MaxConnectionsError("Too many connections")
         self._created_connections += 1
+
+        # Record new connection created (starts as IDLE)
+        record_connection_count(
+            pool_name=get_pool_name(self),
+            connection_state=ConnectionState.IDLE,
+            counter=1,
+        )
 
         kwargs = dict(self.connection_kwargs)
 
@@ -3056,10 +3072,17 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                     AfterConnectionReleasedEvent(connection)
                 )
 
-                # Record connection released for observability
+                # Record state transition: USED -> IDLE
+                pool_name = get_pool_name(self)
                 record_connection_count(
-                    pool_name=get_pool_name(self),
+                    pool_name=pool_name,
+                    connection_state=ConnectionState.USED,
+                    counter=-1,
+                )
+                record_connection_count(
+                    pool_name=pool_name,
                     connection_state=ConnectionState.IDLE,
+                    counter=1,
                 )
             else:
                 # Pool doesn't own this connection, do not add it back
@@ -3082,6 +3105,10 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         """
         self._checkpid()
         with self._lock:
+            # Count connections before disconnecting for observability
+            idle_count = len(self._available_connections)
+            in_use_count = len(self._in_use_connections) if inuse_connections else 0
+
             if inuse_connections:
                 connections = chain(
                     self._available_connections, self._in_use_connections
@@ -3091,6 +3118,23 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
             for connection in connections:
                 connection.disconnect()
+
+            # Record connection pool disconnect for observability
+            pool_name = get_pool_name(self)
+            if idle_count > 0:
+                print(idle_count)
+                record_connection_count(
+                    pool_name=pool_name,
+                    connection_state=ConnectionState.IDLE,
+                    counter=-idle_count,
+                )
+            if in_use_count > 0:
+                print(in_use_count)
+                record_connection_count(
+                    pool_name=pool_name,
+                    connection_state=ConnectionState.USED,
+                    counter=-in_use_count,
+                )
 
     def close(self) -> None:
         """Close the pool, disconnecting all connections"""
@@ -3321,6 +3365,21 @@ class BlockingConnectionPool(ConnectionPool):
                     pass
                 self._locked = False
 
+        # Record state transition: IDLE -> USED
+        # (make_connection already recorded IDLE +1 for new connections)
+        # This ensures counters stay balanced if connect() fails and release() is called
+        pool_name = get_pool_name(self)
+        record_connection_count(
+            pool_name=pool_name,
+            connection_state=ConnectionState.IDLE,
+            counter=-1,
+        )
+        record_connection_count(
+            pool_name=pool_name,
+            connection_state=ConnectionState.USED,
+            counter=1,
+        )
+
         try:
             # ensure this connection is connected to Redis
             connection.connect()
@@ -3348,14 +3407,8 @@ class BlockingConnectionPool(ConnectionPool):
             )
 
         record_connection_wait_time(
-            pool_name=get_pool_name(self),
+            pool_name=pool_name,
             duration_seconds=time.monotonic() - start_time_acquired,
-        )
-
-        # Record connection acquired for observability
-        record_connection_count(
-            pool_name=get_pool_name(self),
-            connection_state=ConnectionState.USED,
         )
 
         return connection
@@ -3383,10 +3436,17 @@ class BlockingConnectionPool(ConnectionPool):
             try:
                 self.pool.put_nowait(connection)
 
-                # Record connection released for observability
+                # Record state transition: USED -> IDLE
+                pool_name = get_pool_name(self)
                 record_connection_count(
-                    pool_name=get_pool_name(self),
+                    pool_name=pool_name,
+                    connection_state=ConnectionState.USED,
+                    counter=-1,
+                )
+                record_connection_count(
+                    pool_name=pool_name,
                     connection_state=ConnectionState.IDLE,
+                    counter=1,
                 )
             except Full:
                 # perhaps the pool has been reset() after a fork? regardless,
@@ -3407,12 +3467,35 @@ class BlockingConnectionPool(ConnectionPool):
             if self._in_maintenance:
                 self._lock.acquire()
                 self._locked = True
+
+            # Count connections before disconnecting for observability
+            free_connections = self._get_free_connections()
+            idle_count = len(free_connections)
+
             if inuse_connections:
                 connections = self._connections
+                in_use_count = len(connections) - idle_count
             else:
-                connections = self._get_free_connections()
+                connections = free_connections
+                in_use_count = 0
+
             for connection in connections:
                 connection.disconnect()
+
+            # Record connection pool disconnect for observability
+            pool_name = get_pool_name(self)
+            if idle_count > 0:
+                record_connection_count(
+                    pool_name=pool_name,
+                    connection_state=ConnectionState.IDLE,
+                    counter=-idle_count,
+                )
+            if in_use_count > 0:
+                record_connection_count(
+                    pool_name=pool_name,
+                    connection_state=ConnectionState.USED,
+                    counter=-in_use_count,
+                )
         finally:
             if self._locked:
                 try:

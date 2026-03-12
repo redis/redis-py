@@ -343,49 +343,24 @@ class RedisMetricsCollector:
         self,
         pool_name: str,
         connection_state: ConnectionState,
+        counter: int = 1,
     ) -> None:
         """
-        Record a connection count change.
-
-        When a connection changes state, both counters are updated:
-        - The target state counter is incremented by 1
-        - The opposite state counter is decremented by 1
-
-        For example, when acquiring a connection (IDLE -> USED):
-        - USED counter: +1
-        - IDLE counter: -1
-
-        When releasing a connection (USED -> IDLE):
-        - IDLE counter: +1
-        - USED counter: -1
+        Record a connection count change for a single state.
 
         Args:
             pool_name: Connection pool name
-            connection_state: Target state of the connection (IDLE or USED)
+            connection_state: State to update (IDLE or USED)
+            counter: Number to add (positive) or subtract (negative)
         """
         if not hasattr(self, "connection_count"):
             return
 
-        # Determine the opposite state
-        opposite_state = (
-            ConnectionState.IDLE
-            if connection_state == ConnectionState.USED
-            else ConnectionState.USED
-        )
-
-        # Increment the target state counter
-        target_attrs = self.attr_builder.build_connection_attributes(
+        attrs = self.attr_builder.build_connection_attributes(
             pool_name=pool_name,
             connection_state=connection_state,
         )
-        self.connection_count.add(1, attributes=target_attrs)
-
-        # Decrement the opposite state counter
-        opposite_attrs = self.attr_builder.build_connection_attributes(
-            pool_name=pool_name,
-            connection_state=opposite_state,
-        )
-        self.connection_count.add(-1, attributes=opposite_attrs)
+        self.connection_count.add(counter, attributes=attrs)
 
     @deprecated_function(
         reason="Connection count is now tracked via record_connection_count(). "

@@ -1202,7 +1202,7 @@ class TestMaintNotificationsMetricsRecording:
         handler.handle_notification(notification)
 
         mock_record_connection_relaxed_timeout.assert_called_once_with(
-            pool_name="localhost:6379_abc123",
+            connection_name="localhost:6379_abc123",
             maint_notification="MIGRATING",
             relaxed=True,
         )
@@ -1226,7 +1226,7 @@ class TestMaintNotificationsMetricsRecording:
         handler.handle_notification(notification)
 
         mock_record_connection_relaxed_timeout.assert_called_once_with(
-            pool_name="localhost:6379_abc123",
+            connection_name="localhost:6379_abc123",
             maint_notification="MIGRATED",
             relaxed=False,
         )
