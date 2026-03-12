@@ -1170,7 +1170,9 @@ class OSSMaintNotificationsHandler:
                             conn.mark_for_reconnect()
 
                         record_connection_handoff(
-                            pool_name=get_pool_name(current_node.redis_connection.connection_pool)
+                            pool_name=get_pool_name(
+                                current_node.redis_connection.connection_pool
+                            )
                         )
                     else:
                         if logger.isEnabledFor(logging.DEBUG):
@@ -1189,7 +1191,9 @@ class OSSMaintNotificationsHandler:
                             conn.disconnect()
 
                         record_connection_handoff(
-                            pool_name=get_pool_name(current_node.redis_connection.connection_pool)
+                            pool_name=get_pool_name(
+                                current_node.redis_connection.connection_pool
+                            )
                         )
 
             # mark the notification as processed

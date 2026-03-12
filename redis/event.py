@@ -480,7 +480,7 @@ class InitializeConnectionCountObservability(EventListenerInterface):
 
     @deprecated_function(
         reason="Connection count is now tracked via record_connection_count(). "
-               "This functionality will be removed in the next major version",
+        "This functionality will be removed in the next major version",
         version="7.4.0",
     )
     def listen(self, event: AfterPooledConnectionsInstantiationEvent):
