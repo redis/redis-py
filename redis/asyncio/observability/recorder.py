@@ -229,21 +229,15 @@ async def init_connection_count() -> None:
 
 
 @deprecated_function(
-    reason="Connection count is now tracked via UpDownCounter at connection "
-    "acquire/release time using record_connection_count().",
-    version="5.3.0",
+    reason="Connection count is now tracked via record_connection_count(). "
+    "This functionality will be removed in the next major version",
+    version="7.4.0",
 )
 async def register_pools_connection_count(
     connection_pools: List["ConnectionPool"],
 ) -> None:
     """
     Add connection pools to connection count observable registry.
-
-    .. deprecated:: 5.3.0
-        This function uses an ObservableGauge which has been replaced by an
-        UpDownCounter. Connection count is now tracked automatically via
-        record_connection_count() at connection acquire/release time.
-        This function will be removed in a future version.
     """
     collector = _get_or_create_collector()
     if collector is None:
