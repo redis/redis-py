@@ -1347,28 +1347,28 @@ class ConnectionPool:
             )
             is_created = connections_after > connections_before
 
-        # Record state transition: IDLE -> USED
-        # For new connections, first record IDLE +1 (creation), then do the transition
+        # Record state transition for observability
         # This ensures counters stay balanced if ensure_connection() fails and release() is called
         pool_name = get_pool_name(self)
         if is_created:
-            # New connection created - first add to IDLE
+            # New connection created and acquired: just USED +1
+            await record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.USED,
+                counter=1,
+            )
+        else:
+            # Existing connection acquired from pool: IDLE -> USED
             await record_connection_count(
                 pool_name=pool_name,
                 connection_state=ConnectionState.IDLE,
+                counter=-1,
+            )
+            await record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.USED,
                 counter=1,
             )
-        # Then transition IDLE -> USED
-        await record_connection_count(
-            pool_name=pool_name,
-            connection_state=ConnectionState.IDLE,
-            counter=-1,
-        )
-        await record_connection_count(
-            pool_name=pool_name,
-            connection_state=ConnectionState.USED,
-            counter=1,
-        )
 
         # We now perform the connection check outside of the lock.
         try:

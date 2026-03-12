@@ -3122,14 +3122,12 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             # Record connection pool disconnect for observability
             pool_name = get_pool_name(self)
             if idle_count > 0:
-                print(idle_count)
                 record_connection_count(
                     pool_name=pool_name,
                     connection_state=ConnectionState.IDLE,
                     counter=-idle_count,
                 )
             if in_use_count > 0:
-                print(in_use_count)
                 record_connection_count(
                     pool_name=pool_name,
                     connection_state=ConnectionState.USED,
@@ -3305,6 +3303,14 @@ class BlockingConnectionPool(ConnectionPool):
             else:
                 connection = self.connection_class(**self.connection_kwargs)
             self._connections.append(connection)
+
+            # Record new connection created (starts as IDLE)
+            record_connection_count(
+                pool_name=get_pool_name(self),
+                connection_state=ConnectionState.IDLE,
+                counter=1,
+            )
+
             return connection
         finally:
             if self._locked:
