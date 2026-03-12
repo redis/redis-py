@@ -1476,11 +1476,9 @@ class ConnectionPool:
             *(connection.disconnect() for connection in connections),
             return_exceptions=True,
         )
-        exc = next((r for r in resp if isinstance(r, BaseException)), None)
-        if exc:
-            raise exc
 
         # Record connection pool disconnect for observability
+        # This must happen before raising any exception to avoid inflating counters
         pool_name = get_pool_name(self)
         if idle_count > 0:
             await record_connection_count(
@@ -1494,6 +1492,10 @@ class ConnectionPool:
                 connection_state=ConnectionState.USED,
                 counter=-in_use_count,
             )
+
+        exc = next((r for r in resp if isinstance(r, BaseException)), None)
+        if exc:
+            raise exc
 
     async def update_active_connections_for_reconnect(self):
         """

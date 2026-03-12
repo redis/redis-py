@@ -3089,7 +3089,13 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 # to the pool.
                 # The created connections count should not be changed,
                 # because the connection was not created by the pool.
+                # Still need to decrement USED since it was counted in get_connection()
                 connection.disconnect()
+                record_connection_count(
+                    pool_name=get_pool_name(self),
+                    connection_state=ConnectionState.USED,
+                    counter=-1,
+                )
                 return
 
     def owns_connection(self, connection: "Connection") -> int:
@@ -3435,15 +3441,21 @@ class BlockingConnectionPool(ConnectionPool):
                 # its needed.
                 connection.disconnect()
                 self.pool.put_nowait(None)
+                # Still need to decrement USED since it was counted in get_connection()
+                record_connection_count(
+                    pool_name=get_pool_name(self),
+                    connection_state=ConnectionState.USED,
+                    counter=-1,
+                )
                 return
             if connection.should_reconnect():
                 connection.disconnect()
             # Put the connection back into the pool.
+            pool_name = get_pool_name(self)
             try:
                 self.pool.put_nowait(connection)
 
                 # Record state transition: USED -> IDLE
-                pool_name = get_pool_name(self)
                 record_connection_count(
                     pool_name=pool_name,
                     connection_state=ConnectionState.USED,
@@ -3456,8 +3468,13 @@ class BlockingConnectionPool(ConnectionPool):
                 )
             except Full:
                 # perhaps the pool has been reset() after a fork? regardless,
-                # we don't want this connection
-                pass
+                # we don't want this connection, but still need to decrement USED
+                # since it was counted in get_connection()
+                record_connection_count(
+                    pool_name=pool_name,
+                    connection_state=ConnectionState.USED,
+                    counter=-1,
+                )
         finally:
             if self._locked:
                 try:

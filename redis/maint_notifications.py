@@ -1158,6 +1158,7 @@ class OSSMaintNotificationsHandler:
                 if current_node.redis_connection is None:
                     continue
                 with current_node.redis_connection.connection_pool._lock:
+                    handoff_recorded = False
                     if current_node in affected_nodes:
                         # mark for reconnect all in use connections to the node - this will force them to
                         # disconnect after they complete their current commands
@@ -1174,6 +1175,7 @@ class OSSMaintNotificationsHandler:
                                 current_node.redis_connection.connection_pool
                             )
                         )
+                        handoff_recorded = True
                     else:
                         if logger.isEnabledFor(logging.DEBUG):
                             logger.debug(
@@ -1190,11 +1192,13 @@ class OSSMaintNotificationsHandler:
                         for conn in current_node.redis_connection.connection_pool._get_free_connections():
                             conn.disconnect()
 
-                        record_connection_handoff(
-                            pool_name=get_pool_name(
-                                current_node.redis_connection.connection_pool
+                        # Only record handoff if not already recorded for this node
+                        if not handoff_recorded:
+                            record_connection_handoff(
+                                pool_name=get_pool_name(
+                                    current_node.redis_connection.connection_pool
+                                )
                             )
-                        )
 
             # mark the notification as processed
             self._processed_notifications.add(notification)
