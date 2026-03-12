@@ -1318,8 +1318,66 @@ class ConnectionPool:
         )
 
     def reset(self):
+        # Record metrics for connections being removed before clearing
+        # (only if attributes exist - they won't during __init__)
+        if hasattr(self, "_available_connections") and hasattr(
+            self, "_in_use_connections"
+        ):
+            idle_count = len(self._available_connections)
+            in_use_count = len(self._in_use_connections)
+            if idle_count > 0 or in_use_count > 0:
+                pool_name = get_pool_name(self)
+                # Note: Using sync version since reset() is sync
+                from redis.observability.recorder import (
+                    record_connection_count as sync_record_connection_count,
+                )
+
+                if idle_count > 0:
+                    sync_record_connection_count(
+                        pool_name=pool_name,
+                        connection_state=ConnectionState.IDLE,
+                        counter=-idle_count,
+                    )
+                if in_use_count > 0:
+                    sync_record_connection_count(
+                        pool_name=pool_name,
+                        connection_state=ConnectionState.USED,
+                        counter=-in_use_count,
+                    )
+
         self._available_connections = []
         self._in_use_connections = weakref.WeakSet()
+
+    def __del__(self) -> None:
+        """Clean up connection pool and record metrics when garbage collected."""
+        try:
+            if not hasattr(self, "_available_connections") or not hasattr(
+                self, "_in_use_connections"
+            ):
+                return
+            idle_count = len(self._available_connections)
+            in_use_count = len(self._in_use_connections)
+            if idle_count > 0 or in_use_count > 0:
+                pool_name = get_pool_name(self)
+                # Note: Using sync version since __del__ is sync
+                from redis.observability.recorder import (
+                    record_connection_count as sync_record_connection_count,
+                )
+
+                if idle_count > 0:
+                    sync_record_connection_count(
+                        pool_name=pool_name,
+                        connection_state=ConnectionState.IDLE,
+                        counter=-idle_count,
+                    )
+                if in_use_count > 0:
+                    sync_record_connection_count(
+                        pool_name=pool_name,
+                        connection_state=ConnectionState.USED,
+                        counter=-in_use_count,
+                    )
+        except Exception:
+            pass
 
     def can_get_connection(self) -> bool:
         """Return True if a connection can be retrieved from the pool."""
@@ -1462,10 +1520,6 @@ class ConnectionPool:
         current in use, potentially by other tasks. Otherwise only disconnect
         connections that are idle in the pool.
         """
-        # Count connections before disconnecting for observability
-        idle_count = len(self._available_connections)
-        in_use_count = len(self._in_use_connections) if inuse_connections else 0
-
         if inuse_connections:
             connections: Iterable[AbstractConnection] = chain(
                 self._available_connections, self._in_use_connections
@@ -1476,22 +1530,6 @@ class ConnectionPool:
             *(connection.disconnect() for connection in connections),
             return_exceptions=True,
         )
-
-        # Record connection pool disconnect for observability
-        # This must happen before raising any exception to avoid inflating counters
-        pool_name = get_pool_name(self)
-        if idle_count > 0:
-            await record_connection_count(
-                pool_name=pool_name,
-                connection_state=ConnectionState.IDLE,
-                counter=-idle_count,
-            )
-        if in_use_count > 0:
-            await record_connection_count(
-                pool_name=pool_name,
-                connection_state=ConnectionState.USED,
-                counter=-in_use_count,
-            )
 
         exc = next((r for r in resp if isinstance(r, BaseException)), None)
         if exc:

@@ -2890,6 +2890,28 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         return self.connection_kwargs.get("protocol", None)
 
     def reset(self) -> None:
+        # Record metrics for connections being removed before clearing
+        # (only if attributes exist - they won't during __init__)
+        if hasattr(self, "_available_connections") and hasattr(
+            self, "_in_use_connections"
+        ):
+            idle_count = len(self._available_connections)
+            in_use_count = len(self._in_use_connections)
+            if idle_count > 0 or in_use_count > 0:
+                pool_name = get_pool_name(self)
+                if idle_count > 0:
+                    record_connection_count(
+                        pool_name=pool_name,
+                        connection_state=ConnectionState.IDLE,
+                        counter=-idle_count,
+                    )
+                if in_use_count > 0:
+                    record_connection_count(
+                        pool_name=pool_name,
+                        connection_state=ConnectionState.USED,
+                        counter=-in_use_count,
+                    )
+
         self._created_connections = 0
         self._available_connections = []
         self._in_use_connections = set()
@@ -2904,6 +2926,33 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         # _fork_lock, they will notice that another thread already called
         # reset() and they will immediately release _fork_lock and continue on.
         self.pid = os.getpid()
+
+    def __del__(self) -> None:
+        """Clean up connection pool and record metrics when garbage collected."""
+        try:
+            if not hasattr(self, "_available_connections") or not hasattr(
+                self, "_in_use_connections"
+            ):
+                return
+            # Record metrics for all connections being removed
+            idle_count = len(self._available_connections)
+            in_use_count = len(self._in_use_connections)
+            if idle_count > 0 or in_use_count > 0:
+                pool_name = get_pool_name(self)
+                if idle_count > 0:
+                    record_connection_count(
+                        pool_name=pool_name,
+                        connection_state=ConnectionState.IDLE,
+                        counter=-idle_count,
+                    )
+                if in_use_count > 0:
+                    record_connection_count(
+                        pool_name=pool_name,
+                        connection_state=ConnectionState.USED,
+                        counter=-in_use_count,
+                    )
+        except Exception:
+            pass
 
     def _checkpid(self) -> None:
         # _checkpid() attempts to keep ConnectionPool fork-safe on modern
@@ -3111,10 +3160,6 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         """
         self._checkpid()
         with self._lock:
-            # Count connections before disconnecting for observability
-            idle_count = len(self._available_connections)
-            in_use_count = len(self._in_use_connections) if inuse_connections else 0
-
             if inuse_connections:
                 connections = chain(
                     self._available_connections, self._in_use_connections
@@ -3124,21 +3169,6 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
             for connection in connections:
                 connection.disconnect()
-
-            # Record connection pool disconnect for observability
-            pool_name = get_pool_name(self)
-            if idle_count > 0:
-                record_connection_count(
-                    pool_name=pool_name,
-                    connection_state=ConnectionState.IDLE,
-                    counter=-idle_count,
-                )
-            if in_use_count > 0:
-                record_connection_count(
-                    pool_name=pool_name,
-                    connection_state=ConnectionState.USED,
-                    counter=-in_use_count,
-                )
 
     def close(self) -> None:
         """Close the pool, disconnecting all connections"""
@@ -3264,6 +3294,27 @@ class BlockingConnectionPool(ConnectionPool):
             if self._in_maintenance:
                 self._lock.acquire()
                 self._locked = True
+
+            # Record metrics for connections being removed before clearing
+            if hasattr(self, "_connections") and self._connections:
+                free_connections = self._get_free_connections()
+                idle_count = len(free_connections)
+                in_use_count = len(self._connections) - idle_count
+                if idle_count > 0 or in_use_count > 0:
+                    pool_name = get_pool_name(self)
+                    if idle_count > 0:
+                        record_connection_count(
+                            pool_name=pool_name,
+                            connection_state=ConnectionState.IDLE,
+                            counter=-idle_count,
+                        )
+                    if in_use_count > 0:
+                        record_connection_count(
+                            pool_name=pool_name,
+                            connection_state=ConnectionState.USED,
+                            counter=-in_use_count,
+                        )
+
             self.pool = self.queue_class(self.max_connections)
             while True:
                 try:
@@ -3292,6 +3343,30 @@ class BlockingConnectionPool(ConnectionPool):
         # _fork_lock, they will notice that another thread already called
         # reset() and they will immediately release _fork_lock and continue on.
         self.pid = os.getpid()
+
+    def __del__(self) -> None:
+        """Clean up connection pool and record metrics when garbage collected."""
+        try:
+            if hasattr(self, "_connections") and self._connections:
+                free_connections = self._get_free_connections()
+                idle_count = len(free_connections)
+                in_use_count = len(self._connections) - idle_count
+                if idle_count > 0 or in_use_count > 0:
+                    pool_name = get_pool_name(self)
+                    if idle_count > 0:
+                        record_connection_count(
+                            pool_name=pool_name,
+                            connection_state=ConnectionState.IDLE,
+                            counter=-idle_count,
+                        )
+                    if in_use_count > 0:
+                        record_connection_count(
+                            pool_name=pool_name,
+                            connection_state=ConnectionState.USED,
+                            counter=-in_use_count,
+                        )
+        except Exception:
+            pass
 
     def make_connection(self):
         "Make a fresh connection."
@@ -3484,41 +3559,22 @@ class BlockingConnectionPool(ConnectionPool):
                 self._locked = False
 
     def disconnect(self, inuse_connections: bool = True):
-        "Disconnects either all connections in the pool or just the free connections."
+        """
+        Disconnects either all connections in the pool or just the free connections.
+        """
         self._checkpid()
         try:
             if self._in_maintenance:
                 self._lock.acquire()
                 self._locked = True
 
-            # Count connections before disconnecting for observability
-            free_connections = self._get_free_connections()
-            idle_count = len(free_connections)
-
             if inuse_connections:
                 connections = self._connections
-                in_use_count = len(connections) - idle_count
             else:
-                connections = free_connections
-                in_use_count = 0
+                connections = self._get_free_connections()
 
             for connection in connections:
                 connection.disconnect()
-
-            # Record connection pool disconnect for observability
-            pool_name = get_pool_name(self)
-            if idle_count > 0:
-                record_connection_count(
-                    pool_name=pool_name,
-                    connection_state=ConnectionState.IDLE,
-                    counter=-idle_count,
-                )
-            if in_use_count > 0:
-                record_connection_count(
-                    pool_name=pool_name,
-                    connection_state=ConnectionState.USED,
-                    counter=-in_use_count,
-                )
         finally:
             if self._locked:
                 try:
