@@ -3302,8 +3302,10 @@ class BlockingConnectionPool(ConnectionPool):
             # Record metrics for connections being removed before clearing
             # Note: Access pool.queue directly to avoid deadlock since we may
             # already hold self._lock (which is non-reentrant)
-            if hasattr(self, "_connections") and self._connections and hasattr(
-                self, "pool"
+            if (
+                hasattr(self, "_connections")
+                and self._connections
+                and hasattr(self, "pool")
             ):
                 connections_in_queue = {conn for conn in self.pool.queue if conn}
                 idle_count = len(connections_in_queue)
@@ -3357,8 +3359,10 @@ class BlockingConnectionPool(ConnectionPool):
         try:
             # Note: Access pool.queue directly to avoid potential deadlock
             # if GC runs while the lock is held by the same thread
-            if hasattr(self, "_connections") and self._connections and hasattr(
-                self, "pool"
+            if (
+                hasattr(self, "_connections")
+                and self._connections
+                and hasattr(self, "pool")
             ):
                 connections_in_queue = {conn for conn in self.pool.queue if conn}
                 idle_count = len(connections_in_queue)
