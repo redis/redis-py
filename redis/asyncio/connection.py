@@ -59,6 +59,7 @@ else:
 
 from redis.asyncio.observability.recorder import (
     record_connection_closed,
+    record_connection_count,
     record_connection_create_time,
     record_connection_wait_time,
     record_error_count,
@@ -1356,6 +1357,12 @@ class ConnectionPool:
                     duration_seconds=time.monotonic() - start_time_created,
                 )
 
+            # Record connection acquired for observability
+            await record_connection_count(
+                pool_name=get_pool_name(self),
+                connection_state=ConnectionState.USED,
+            )
+
             return connection
         except BaseException:
             await self.release(connection)
@@ -1406,12 +1413,19 @@ class ConnectionPool:
         # Connections should always be returned to the correct pool,
         # not doing so is an error that will cause an exception here.
         self._in_use_connections.remove(connection)
+
         if connection.should_reconnect():
             await connection.disconnect()
 
         self._available_connections.append(connection)
         await self._event_dispatcher.dispatch_async(
             AsyncAfterConnectionReleasedEvent(connection)
+        )
+
+        # Record connection released for observability
+        await record_connection_count(
+            pool_name=get_pool_name(self),
+            connection_state=ConnectionState.IDLE,
         )
 
     async def disconnect(self, inuse_connections: bool = True):

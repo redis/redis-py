@@ -24,13 +24,14 @@ from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
 from redis.observability.attributes import (
+    ConnectionState,
     GeoFailoverReason,
     PubSubDirection,
 )
 from redis.observability.metrics import CloseReason, RedisMetricsCollector
 from redis.observability.providers import get_observability_instance
 from redis.observability.registry import get_observables_registry_instance
-from redis.utils import str_if_bytes
+from redis.utils import deprecated_function, str_if_bytes
 
 if TYPE_CHECKING:
     from redis.asyncio.connection import ConnectionPool
@@ -168,6 +169,39 @@ async def record_connection_create_time(
         pass
 
 
+async def record_connection_count(
+    pool_name: str,
+    connection_state: ConnectionState,
+) -> None:
+    """
+    Record a connection count change.
+
+    When a connection changes state, both counters are updated:
+    - The target state counter is incremented by 1
+    - The opposite state counter is decremented by 1
+
+    Args:
+        pool_name: Connection pool identifier
+        connection_state: Target state of the connection (IDLE or USED)
+    """
+    collector = _get_or_create_collector()
+    if collector is None:
+        return
+
+    try:
+        collector.record_connection_count(
+            pool_name=pool_name,
+            connection_state=connection_state,
+        )
+    except Exception:
+        pass
+
+
+@deprecated_function(
+    reason="Connection count is now tracked via record_connection_count(). "
+           "This functionality will be removed in the next major version",
+    version="7.4.0",
+)
 async def init_connection_count() -> None:
     """
     Initialize observable gauge for connection count metric.
@@ -194,11 +228,22 @@ async def init_connection_count() -> None:
         pass
 
 
+@deprecated_function(
+    reason="Connection count is now tracked via UpDownCounter at connection "
+    "acquire/release time using record_connection_count().",
+    version="5.3.0",
+)
 async def register_pools_connection_count(
     connection_pools: List["ConnectionPool"],
 ) -> None:
     """
     Add connection pools to connection count observable registry.
+
+    .. deprecated:: 5.3.0
+        This function uses an ObservableGauge which has been replaced by an
+        UpDownCounter. Connection count is now tracked automatically via
+        record_connection_count() at connection acquire/release time.
+        This function will be removed in a future version.
     """
     collector = _get_or_create_collector()
     if collector is None:
@@ -301,7 +346,7 @@ async def record_connection_relaxed_timeout(
     Record a connection timeout relaxation event.
 
     Args:
-        connection_name: Connection identifier
+        connection_name: Connection identifier (pool name)
         maint_notification: Maintenance notification type
         relaxed: True to count up (relaxed), False to count down (unrelaxed)
     """

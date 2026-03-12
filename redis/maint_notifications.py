@@ -577,6 +577,17 @@ def _is_private_fqdn(host: str) -> bool:
     return False
 
 
+notification_types_mapping: dict[type[MaintenanceNotification], str] = {
+    NodeMovingNotification: "MOVING",
+    NodeMigratingNotification: "MIGRATING",
+    NodeMigratedNotification: "MIGRATED",
+    NodeFailingOverNotification: "FAILING_OVER",
+    NodeFailedOverNotification: "FAILED_OVER",
+    OSSNodeMigratingNotification: "SMIGRATING",
+    OSSNodeMigratedNotification: "SMIGRATED",
+}
+
+
 def add_debug_log_for_notification(
     connection: "MaintNotificationsAbstractConnection",
     notification: Union[str, MaintenanceNotification],
@@ -947,16 +958,30 @@ class MaintNotificationsConnectionHandler:
         self.connection = connection
         self.config = config
 
+    def _get_pool_name(self) -> str:
+        """
+        Get the pool name from the connection's pool handler.
+        Falls back to connection representation if pool is not available.
+        """
+        pool_handler = getattr(
+            self.connection, "_maint_notifications_pool_handler", None
+        )
+        if pool_handler and getattr(pool_handler, "pool", None):
+            return get_pool_name(pool_handler.pool)
+        # Fallback for standalone connections without a pool
+        return repr(self.connection)
+
     def handle_notification(self, notification: MaintenanceNotification):
         # get the notification type by checking its class in the _NOTIFICATION_TYPES dict
         notification_type = self._NOTIFICATION_TYPES.get(notification.__class__, None)
+        maint_notification = notification_types_mapping.get(notification.__class__, "")
 
         record_maint_notification_count(
             server_address=self.connection.host,
             server_port=self.connection.port,
             network_peer_address=self.connection.host,
             network_peer_port=self.connection.port,
-            maint_notification=notification.__class__.__name__,
+            maint_notification=maint_notification,
         )
 
         if notification_type is None:
@@ -993,9 +1018,10 @@ class MaintNotificationsConnectionHandler:
             # one start notification before the the final end notification
             self.connection.add_maint_start_notification(notification.id)
 
+        maint_notification = notification_types_mapping.get(notification.__class__, "")
         record_connection_relaxed_timeout(
-            connection_name=repr(self.connection),
-            maint_notification=notification.__class__.__name__,
+            connection_name=self._get_pool_name(),
+            maint_notification=maint_notification,
             relaxed=True,
         )
 
@@ -1022,9 +1048,12 @@ class MaintNotificationsConnectionHandler:
         self.connection.reset_received_notifications()
 
         if notification:
+            maint_notification = notification_types_mapping.get(
+                notification.__class__, ""
+            )
             record_connection_relaxed_timeout(
-                connection_name=repr(self.connection),
-                maint_notification=notification.__class__.__name__,
+                connection_name=self._get_pool_name(),
+                maint_notification=maint_notification,
                 relaxed=False,
             )
 
@@ -1139,6 +1168,10 @@ class OSSMaintNotificationsHandler:
                                 conn, "SMIGRATED - mark for reconnect"
                             )
                             conn.mark_for_reconnect()
+
+                        record_connection_handoff(
+                            pool_name=get_pool_name(current_node.redis_connection.connection_pool)
+                        )
                     else:
                         if logger.isEnabledFor(logging.DEBUG):
                             logger.debug(
@@ -1154,6 +1187,10 @@ class OSSMaintNotificationsHandler:
                         # from the cluster, so we don't need to revert the timeouts
                         for conn in current_node.redis_connection.connection_pool._get_free_connections():
                             conn.disconnect()
+
+                        record_connection_handoff(
+                            pool_name=get_pool_name(current_node.redis_connection.connection_pool)
+                        )
 
             # mark the notification as processed
             self._processed_notifications.add(notification)

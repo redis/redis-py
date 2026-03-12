@@ -69,6 +69,7 @@ from .observability.metrics import CloseReason
 from .observability.recorder import (
     init_csc_items,
     record_connection_closed,
+    record_connection_count,
     record_connection_create_time,
     record_connection_wait_time,
     record_csc_eviction,
@@ -3004,6 +3005,13 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 connection_pool=self,
                 duration_seconds=time.monotonic() - start_time_created,
             )
+
+        # Record connection acquired for observability
+        record_connection_count(
+            pool_name=get_pool_name(self),
+            connection_state=ConnectionState.USED,
+        )
+
         return connection
 
     def get_encoder(self) -> Encoder:
@@ -3046,6 +3054,12 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 self._available_connections.append(connection)
                 self._event_dispatcher.dispatch(
                     AfterConnectionReleasedEvent(connection)
+                )
+
+                # Record connection released for observability
+                record_connection_count(
+                    pool_name=get_pool_name(self),
+                    connection_state=ConnectionState.IDLE,
                 )
             else:
                 # Pool doesn't own this connection, do not add it back
@@ -3338,6 +3352,12 @@ class BlockingConnectionPool(ConnectionPool):
             duration_seconds=time.monotonic() - start_time_acquired,
         )
 
+        # Record connection acquired for observability
+        record_connection_count(
+            pool_name=get_pool_name(self),
+            connection_state=ConnectionState.USED,
+        )
+
         return connection
 
     def release(self, connection):
@@ -3362,6 +3382,12 @@ class BlockingConnectionPool(ConnectionPool):
             # Put the connection back into the pool.
             try:
                 self.pool.put_nowait(connection)
+
+                # Record connection released for observability
+                record_connection_count(
+                    pool_name=get_pool_name(self),
+                    connection_state=ConnectionState.IDLE,
+                )
             except Full:
                 # perhaps the pool has been reset() after a fork? regardless,
                 # we don't want this connection

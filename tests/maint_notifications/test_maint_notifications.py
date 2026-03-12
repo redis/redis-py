@@ -1180,16 +1180,20 @@ class TestMaintNotificationsMetricsRecording:
             server_port=6379,
             network_peer_address="localhost",
             network_peer_port=6379,
-            maint_notification=notification.__class__.__name__,
+            maint_notification="MIGRATING",
         )
 
     @patch("redis.maint_notifications.record_connection_relaxed_timeout")
+    @patch("redis.maint_notifications.get_pool_name")
     def test_connection_handler_calls_record_connection_relaxed_timeout_on_start(
-        self, mock_record_connection_relaxed_timeout
+        self, mock_get_pool_name, mock_record_connection_relaxed_timeout
     ):
         """Test that handle_notification calls record_connection_relaxed_timeout with relaxed=True."""
         mock_connection = Mock()
         mock_connection.maintenance_state = MaintenanceState.NONE
+        mock_connection._maint_notifications_pool_handler = Mock()
+        mock_connection._maint_notifications_pool_handler.pool = Mock()
+        mock_get_pool_name.return_value = "localhost:6379_abc123"
 
         config = MaintNotificationsConfig(enabled=True, relaxed_timeout=20)
         handler = MaintNotificationsConnectionHandler(mock_connection, config)
@@ -1198,18 +1202,22 @@ class TestMaintNotificationsMetricsRecording:
         handler.handle_notification(notification)
 
         mock_record_connection_relaxed_timeout.assert_called_once_with(
-            connection_name=repr(mock_connection),
-            maint_notification=notification.__class__.__name__,
+            pool_name="localhost:6379_abc123",
+            maint_notification="MIGRATING",
             relaxed=True,
         )
 
     @patch("redis.maint_notifications.record_connection_relaxed_timeout")
+    @patch("redis.maint_notifications.get_pool_name")
     def test_connection_handler_calls_record_connection_relaxed_timeout_on_complete(
-        self, mock_record_connection_relaxed_timeout
+        self, mock_get_pool_name, mock_record_connection_relaxed_timeout
     ):
         """Test that handle_notification calls record_connection_relaxed_timeout with relaxed=False."""
         mock_connection = Mock()
         mock_connection.maintenance_state = MaintenanceState.MAINTENANCE
+        mock_connection._maint_notifications_pool_handler = Mock()
+        mock_connection._maint_notifications_pool_handler.pool = Mock()
+        mock_get_pool_name.return_value = "localhost:6379_abc123"
 
         config = MaintNotificationsConfig(relaxed_timeout=20)
         handler = MaintNotificationsConnectionHandler(mock_connection, config)
@@ -1218,8 +1226,8 @@ class TestMaintNotificationsMetricsRecording:
         handler.handle_notification(notification)
 
         mock_record_connection_relaxed_timeout.assert_called_once_with(
-            connection_name=repr(mock_connection),
-            maint_notification=notification.__class__.__name__,
+            pool_name="localhost:6379_abc123",
+            maint_notification="MIGRATED",
             relaxed=False,
         )
 
