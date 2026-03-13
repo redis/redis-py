@@ -80,6 +80,15 @@ XClaimResponse = StreamRangeResponse | list[bytes | str]
 XPendingRangeEntry = dict[str, bytes | str | int]
 XPendingRangeResponse = list[XPendingRangeEntry]
 XReadResponse = list[list[Any]] | dict[bytes | str, list[StreamRangeResponse]]
+BlockingZSetPopResponse = (
+    tuple[bytes | str, bytes | str, float] | list[bytes | str | float] | None
+)
+ZMPopResponse = list[bytes | str | list[list[Any]]] | None
+ZRandMemberResponse = (
+    bytes | str | None | list[bytes | str] | list[bytes | str | float] | list[list[Any]]
+)
+ZSetScoredMembers = list[tuple[bytes | str, Any]] | list[list[Any]]
+ZSetRangeResponse = list[bytes | str] | ZSetScoredMembers
 ZScanResponse = tuple[int, list[tuple[bytes | str, float]]]
 LCSMatch = list[int | tuple[int, int]]
 LCSResult = dict[str, int | list[LCSMatch]]

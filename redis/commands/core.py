@@ -45,6 +45,7 @@ from redis.typing import (
     AsyncClientProtocol,
     BitfieldOffsetT,
     BlockingListPopResponse,
+    BlockingZSetPopResponse,
     ChannelT,
     CommandGetKeysAndFlagsResponse,
     CommandsProtocol,
@@ -71,8 +72,11 @@ from redis.typing import (
     XClaimResponse,
     XPendingRangeResponse,
     XReadResponse,
+    ZMPopResponse,
+    ZRandMemberResponse,
     ZScanResponse,
     ZScoreBoundT,
+    ZSetRangeResponse,
 )
 from redis.utils import (
     deprecated_function,
@@ -7251,7 +7255,19 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZCARD", name, keys=[name])
 
-    def zcount(self, name: KeyT, min: ZScoreBoundT, max: ZScoreBoundT) -> ResponseT:
+    @overload
+    def zcount(
+        self: SyncClientProtocol, name: KeyT, min: ZScoreBoundT, max: ZScoreBoundT
+    ) -> int: ...
+
+    @overload
+    def zcount(
+        self: AsyncClientProtocol, name: KeyT, min: ZScoreBoundT, max: ZScoreBoundT
+    ) -> Awaitable[int]: ...
+
+    def zcount(
+        self, name: KeyT, min: ZScoreBoundT, max: ZScoreBoundT
+    ) -> int | Awaitable[int]:
         """
         Returns the number of elements in the sorted set at key ``name`` with
         a score between ``min`` and ``max``.
@@ -7260,7 +7276,19 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZCOUNT", name, min, max, keys=[name])
 
-    def zdiff(self, keys: KeysT, withscores: bool = False) -> ResponseT:
+    @overload
+    def zdiff(
+        self: SyncClientProtocol, keys: KeysT, withscores: bool = False
+    ) -> ZSetRangeResponse: ...
+
+    @overload
+    def zdiff(
+        self: AsyncClientProtocol, keys: KeysT, withscores: bool = False
+    ) -> Awaitable[ZSetRangeResponse]: ...
+
+    def zdiff(
+        self, keys: KeysT, withscores: bool = False
+    ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Returns the difference between the first and all successive input
         sorted sets provided in ``keys``.
@@ -7272,7 +7300,15 @@ class SortedSetCommands(CommandsProtocol):
             pieces.append("WITHSCORES")
         return self.execute_command("ZDIFF", *pieces, keys=keys)
 
-    def zdiffstore(self, dest: KeyT, keys: KeysT) -> ResponseT:
+    @overload
+    def zdiffstore(self: SyncClientProtocol, dest: KeyT, keys: KeysT) -> int: ...
+
+    @overload
+    def zdiffstore(
+        self: AsyncClientProtocol, dest: KeyT, keys: KeysT
+    ) -> Awaitable[int]: ...
+
+    def zdiffstore(self, dest: KeyT, keys: KeysT) -> int | Awaitable[int]:
         """
         Computes the difference between the first and all successive input
         sorted sets provided in ``keys`` and stores the result in ``dest``.
@@ -7282,7 +7318,19 @@ class SortedSetCommands(CommandsProtocol):
         pieces = [len(keys), *keys]
         return self.execute_command("ZDIFFSTORE", dest, *pieces)
 
-    def zincrby(self, name: KeyT, amount: float, value: EncodableT) -> ResponseT:
+    @overload
+    def zincrby(
+        self: SyncClientProtocol, name: KeyT, amount: float, value: EncodableT
+    ) -> float | None: ...
+
+    @overload
+    def zincrby(
+        self: AsyncClientProtocol, name: KeyT, amount: float, value: EncodableT
+    ) -> Awaitable[float | None]: ...
+
+    def zincrby(self, name: KeyT, amount: float, value: EncodableT) -> (
+        float | None
+    ) | Awaitable[float | None]:
         """
         Increment the score of ``value`` in sorted set ``name`` by ``amount``
 
@@ -7290,9 +7338,25 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZINCRBY", name, amount, value)
 
+    @overload
     def zinter(
-        self, keys: KeysT, aggregate: Optional[str] = None, withscores: bool = False
-    ) -> ResponseT:
+        self: SyncClientProtocol,
+        keys: KeysT,
+        aggregate: str | None = None,
+        withscores: bool = False,
+    ) -> ZSetRangeResponse: ...
+
+    @overload
+    def zinter(
+        self: AsyncClientProtocol,
+        keys: KeysT,
+        aggregate: str | None = None,
+        withscores: bool = False,
+    ) -> Awaitable[ZSetRangeResponse]: ...
+
+    def zinter(
+        self, keys: KeysT, aggregate: str | None = None, withscores: bool = False
+    ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Return the intersect of multiple sorted sets specified by ``keys``.
         With the ``aggregate`` option, it is possible to specify how the
@@ -7306,12 +7370,28 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self._zaggregate("ZINTER", None, keys, aggregate, withscores=withscores)
 
+    @overload
     def zinterstore(
         self,
         dest: KeyT,
-        keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
-        aggregate: Optional[str] = None,
-    ) -> ResponseT:
+        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
+        aggregate: str | None = None,
+    ) -> int: ...
+
+    @overload
+    def zinterstore(
+        self: AsyncClientProtocol,
+        dest: KeyT,
+        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
+        aggregate: str | None = None,
+    ) -> Awaitable[int]: ...
+
+    def zinterstore(
+        self,
+        dest: KeyT,
+        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
+        aggregate: str | None = None,
+    ) -> int | Awaitable[int]:
         """
         Intersect multiple sorted sets specified by ``keys`` into a new
         sorted set, ``dest``. Scores in the destination will be aggregated
@@ -7325,9 +7405,19 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self._zaggregate("ZINTERSTORE", dest, keys, aggregate)
 
+    @overload
+    def zintercard(
+        self: SyncClientProtocol, numkeys: int, keys: List[str], limit: int = 0
+    ) -> int: ...
+
+    @overload
+    def zintercard(
+        self: AsyncClientProtocol, numkeys: int, keys: List[str], limit: int = 0
+    ) -> Awaitable[int]: ...
+
     def zintercard(
         self, numkeys: int, keys: List[str], limit: int = 0
-    ) -> Union[Awaitable[int], int]:
+    ) -> int | Awaitable[int]:
         """
         Return the cardinality of the intersect of multiple sorted sets
         specified by ``keys``.
@@ -7340,7 +7430,19 @@ class SortedSetCommands(CommandsProtocol):
         args = [numkeys, *keys, "LIMIT", limit]
         return self.execute_command("ZINTERCARD", *args, keys=keys)
 
-    def zlexcount(self, name, min, max):
+    @overload
+    def zlexcount(
+        self: SyncClientProtocol, name: KeyT, min: EncodableT, max: EncodableT
+    ) -> int: ...
+
+    @overload
+    def zlexcount(
+        self: AsyncClientProtocol, name: KeyT, min: EncodableT, max: EncodableT
+    ) -> Awaitable[int]: ...
+
+    def zlexcount(
+        self, name: KeyT, min: EncodableT, max: EncodableT
+    ) -> int | Awaitable[int]:
         """
         Return the number of items in the sorted set ``name`` between the
         lexicographical range ``min`` and ``max``.
@@ -7349,7 +7451,19 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZLEXCOUNT", name, min, max, keys=[name])
 
-    def zpopmax(self, name: KeyT, count: Optional[int] = None) -> ResponseT:
+    @overload
+    def zpopmax(
+        self: SyncClientProtocol, name: KeyT, count: int | None = None
+    ) -> ZSetRangeResponse: ...
+
+    @overload
+    def zpopmax(
+        self: AsyncClientProtocol, name: KeyT, count: int | None = None
+    ) -> Awaitable[ZSetRangeResponse]: ...
+
+    def zpopmax(
+        self, name: KeyT, count: int | None = None
+    ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Remove and return up to ``count`` members with the highest scores
         from the sorted set ``name``.
@@ -7360,7 +7474,19 @@ class SortedSetCommands(CommandsProtocol):
         options = {"withscores": True}
         return self.execute_command("ZPOPMAX", name, *args, **options)
 
-    def zpopmin(self, name: KeyT, count: Optional[int] = None) -> ResponseT:
+    @overload
+    def zpopmin(
+        self: SyncClientProtocol, name: KeyT, count: int | None = None
+    ) -> ZSetRangeResponse: ...
+
+    @overload
+    def zpopmin(
+        self: AsyncClientProtocol, name: KeyT, count: int | None = None
+    ) -> Awaitable[ZSetRangeResponse]: ...
+
+    def zpopmin(
+        self, name: KeyT, count: int | None = None
+    ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Remove and return up to ``count`` members with the lowest scores
         from the sorted set ``name``.
@@ -7371,9 +7497,25 @@ class SortedSetCommands(CommandsProtocol):
         options = {"withscores": True}
         return self.execute_command("ZPOPMIN", name, *args, **options)
 
+    @overload
     def zrandmember(
-        self, key: KeyT, count: Optional[int] = None, withscores: bool = False
-    ) -> ResponseT:
+        self: SyncClientProtocol,
+        key: KeyT,
+        count: int | None = None,
+        withscores: bool = False,
+    ) -> ZRandMemberResponse: ...
+
+    @overload
+    def zrandmember(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        count: int | None = None,
+        withscores: bool = False,
+    ) -> Awaitable[ZRandMemberResponse]: ...
+
+    def zrandmember(
+        self, key: KeyT, count: int | None = None, withscores: bool = False
+    ) -> ZRandMemberResponse | Awaitable[ZRandMemberResponse]:
         """
         Return a random element from the sorted set value stored at key.
 
@@ -7397,7 +7539,19 @@ class SortedSetCommands(CommandsProtocol):
 
         return self.execute_command("ZRANDMEMBER", key, *params)
 
-    def bzpopmax(self, keys: KeysT, timeout: TimeoutSecT = 0) -> ResponseT:
+    @overload
+    def bzpopmax(
+        self: SyncClientProtocol, keys: KeysT, timeout: TimeoutSecT = 0
+    ) -> BlockingZSetPopResponse: ...
+
+    @overload
+    def bzpopmax(
+        self: AsyncClientProtocol, keys: KeysT, timeout: TimeoutSecT = 0
+    ) -> Awaitable[BlockingZSetPopResponse]: ...
+
+    def bzpopmax(
+        self, keys: KeysT, timeout: TimeoutSecT = 0
+    ) -> BlockingZSetPopResponse | Awaitable[BlockingZSetPopResponse]:
         """
         ZPOPMAX a value off of the first non-empty sorted set
         named in the ``keys`` list.
@@ -7416,7 +7570,19 @@ class SortedSetCommands(CommandsProtocol):
         keys.append(timeout)
         return self.execute_command("BZPOPMAX", *keys)
 
-    def bzpopmin(self, keys: KeysT, timeout: TimeoutSecT = 0) -> ResponseT:
+    @overload
+    def bzpopmin(
+        self: SyncClientProtocol, keys: KeysT, timeout: TimeoutSecT = 0
+    ) -> BlockingZSetPopResponse: ...
+
+    @overload
+    def bzpopmin(
+        self: AsyncClientProtocol, keys: KeysT, timeout: TimeoutSecT = 0
+    ) -> Awaitable[BlockingZSetPopResponse]: ...
+
+    def bzpopmin(
+        self, keys: KeysT, timeout: TimeoutSecT = 0
+    ) -> BlockingZSetPopResponse | Awaitable[BlockingZSetPopResponse]:
         """
         ZPOPMIN a value off of the first non-empty sorted set
         named in the ``keys`` list.
@@ -7435,14 +7601,34 @@ class SortedSetCommands(CommandsProtocol):
         keys.append(timeout)
         return self.execute_command("BZPOPMIN", *keys)
 
+    @overload
+    def zmpop(
+        self: SyncClientProtocol,
+        num_keys: int,
+        keys: List[str],
+        min: bool | None = False,
+        max: bool | None = False,
+        count: int | None = 1,
+    ) -> ZMPopResponse: ...
+
+    @overload
+    def zmpop(
+        self: AsyncClientProtocol,
+        num_keys: int,
+        keys: List[str],
+        min: bool | None = False,
+        max: bool | None = False,
+        count: int | None = 1,
+    ) -> Awaitable[ZMPopResponse]: ...
+
     def zmpop(
         self,
         num_keys: int,
         keys: List[str],
-        min: Optional[bool] = False,
-        max: Optional[bool] = False,
-        count: Optional[int] = 1,
-    ) -> Union[Awaitable[list], list]:
+        min: bool | None = False,
+        max: bool | None = False,
+        count: int | None = 1,
+    ) -> ZMPopResponse | Awaitable[ZMPopResponse]:
         """
         Pop ``count`` values (default 1) off of the first non-empty sorted set
         named in the ``keys`` list.
@@ -7460,15 +7646,37 @@ class SortedSetCommands(CommandsProtocol):
 
         return self.execute_command("ZMPOP", *args)
 
+    @overload
+    def bzmpop(
+        self: SyncClientProtocol,
+        timeout: float,
+        numkeys: int,
+        keys: List[str],
+        min: bool | None = False,
+        max: bool | None = False,
+        count: int | None = 1,
+    ) -> ZMPopResponse: ...
+
+    @overload
+    def bzmpop(
+        self: AsyncClientProtocol,
+        timeout: float,
+        numkeys: int,
+        keys: List[str],
+        min: bool | None = False,
+        max: bool | None = False,
+        count: int | None = 1,
+    ) -> Awaitable[ZMPopResponse]: ...
+
     def bzmpop(
         self,
         timeout: float,
         numkeys: int,
         keys: List[str],
-        min: Optional[bool] = False,
-        max: Optional[bool] = False,
-        count: Optional[int] = 1,
-    ) -> Optional[list]:
+        min: bool | None = False,
+        max: bool | None = False,
+        count: int | None = 1,
+    ) -> ZMPopResponse | Awaitable[ZMPopResponse]:
         """
         Pop ``count`` values (default 1) off of the first non-empty sorted set
         named in the ``keys`` list.
@@ -7533,6 +7741,36 @@ class SortedSetCommands(CommandsProtocol):
         options["keys"] = [name]
         return self.execute_command(*pieces, **options)
 
+    @overload
+    def zrange(
+        self: SyncClientProtocol,
+        name: KeyT,
+        start: EncodableT,
+        end: EncodableT,
+        desc: bool = False,
+        withscores: bool = False,
+        score_cast_func: type | Callable = float,
+        byscore: bool = False,
+        bylex: bool = False,
+        offset: int | None = None,
+        num: int | None = None,
+    ) -> ZSetRangeResponse: ...
+
+    @overload
+    def zrange(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        start: EncodableT,
+        end: EncodableT,
+        desc: bool = False,
+        withscores: bool = False,
+        score_cast_func: type | Callable = float,
+        byscore: bool = False,
+        bylex: bool = False,
+        offset: int | None = None,
+        num: int | None = None,
+    ) -> Awaitable[ZSetRangeResponse]: ...
+
     def zrange(
         self,
         name: KeyT,
@@ -7540,12 +7778,12 @@ class SortedSetCommands(CommandsProtocol):
         end: EncodableT,
         desc: bool = False,
         withscores: bool = False,
-        score_cast_func: Union[type, Callable] = float,
+        score_cast_func: type | Callable = float,
         byscore: bool = False,
         bylex: bool = False,
-        offset: Optional[int] = None,
-        num: Optional[int] = None,
-    ) -> ResponseT:
+        offset: int | None = None,
+        num: int | None = None,
+    ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Return a range of values from sorted set ``name`` between
         ``start`` and ``end`` sorted in ascending order.
@@ -7594,14 +7832,34 @@ class SortedSetCommands(CommandsProtocol):
             num,
         )
 
+    @overload
+    def zrevrange(
+        self: SyncClientProtocol,
+        name: KeyT,
+        start: int,
+        end: int,
+        withscores: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> ZSetRangeResponse: ...
+
+    @overload
+    def zrevrange(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        start: int,
+        end: int,
+        withscores: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> Awaitable[ZSetRangeResponse]: ...
+
     def zrevrange(
         self,
         name: KeyT,
         start: int,
         end: int,
         withscores: bool = False,
-        score_cast_func: Union[type, Callable] = float,
-    ) -> ResponseT:
+        score_cast_func: type | Callable = float,
+    ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Return a range of values from sorted set ``name`` between
         ``start`` and ``end`` sorted in descending order.
@@ -7622,6 +7880,34 @@ class SortedSetCommands(CommandsProtocol):
         options["keys"] = name
         return self.execute_command(*pieces, **options)
 
+    @overload
+    def zrangestore(
+        self: SyncClientProtocol,
+        dest: KeyT,
+        name: KeyT,
+        start: EncodableT,
+        end: EncodableT,
+        byscore: bool = False,
+        bylex: bool = False,
+        desc: bool = False,
+        offset: int | None = None,
+        num: int | None = None,
+    ) -> int: ...
+
+    @overload
+    def zrangestore(
+        self: AsyncClientProtocol,
+        dest: KeyT,
+        name: KeyT,
+        start: EncodableT,
+        end: EncodableT,
+        byscore: bool = False,
+        bylex: bool = False,
+        desc: bool = False,
+        offset: int | None = None,
+        num: int | None = None,
+    ) -> Awaitable[int]: ...
+
     def zrangestore(
         self,
         dest: KeyT,
@@ -7631,9 +7917,9 @@ class SortedSetCommands(CommandsProtocol):
         byscore: bool = False,
         bylex: bool = False,
         desc: bool = False,
-        offset: Optional[int] = None,
-        num: Optional[int] = None,
-    ) -> ResponseT:
+        offset: int | None = None,
+        num: int | None = None,
+    ) -> int | Awaitable[int]:
         """
         Stores in ``dest`` the result of a range of values from sorted set
         ``name`` between ``start`` and ``end`` sorted in ascending order.
@@ -7672,14 +7958,34 @@ class SortedSetCommands(CommandsProtocol):
             num,
         )
 
+    @overload
+    def zrangebylex(
+        self: SyncClientProtocol,
+        name: KeyT,
+        min: EncodableT,
+        max: EncodableT,
+        start: int | None = None,
+        num: int | None = None,
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def zrangebylex(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        min: EncodableT,
+        max: EncodableT,
+        start: int | None = None,
+        num: int | None = None,
+    ) -> Awaitable[list[bytes | str]]: ...
+
     def zrangebylex(
         self,
         name: KeyT,
         min: EncodableT,
         max: EncodableT,
-        start: Optional[int] = None,
-        num: Optional[int] = None,
-    ) -> ResponseT:
+        start: int | None = None,
+        num: int | None = None,
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return the lexicographical range of values from sorted set ``name``
         between ``min`` and ``max``.
@@ -7696,14 +8002,34 @@ class SortedSetCommands(CommandsProtocol):
             pieces.extend([b"LIMIT", start, num])
         return self.execute_command(*pieces, keys=[name])
 
+    @overload
+    def zrevrangebylex(
+        self: SyncClientProtocol,
+        name: KeyT,
+        max: EncodableT,
+        min: EncodableT,
+        start: int | None = None,
+        num: int | None = None,
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def zrevrangebylex(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        max: EncodableT,
+        min: EncodableT,
+        start: int | None = None,
+        num: int | None = None,
+    ) -> Awaitable[list[bytes | str]]: ...
+
     def zrevrangebylex(
         self,
         name: KeyT,
         max: EncodableT,
         min: EncodableT,
-        start: Optional[int] = None,
-        num: Optional[int] = None,
-    ) -> ResponseT:
+        start: int | None = None,
+        num: int | None = None,
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return the reversed lexicographical range of values from sorted set
         ``name`` between ``max`` and ``min``.
@@ -7720,16 +8046,40 @@ class SortedSetCommands(CommandsProtocol):
             pieces.extend(["LIMIT", start, num])
         return self.execute_command(*pieces, keys=[name])
 
+    @overload
+    def zrangebyscore(
+        self: SyncClientProtocol,
+        name: KeyT,
+        min: ZScoreBoundT,
+        max: ZScoreBoundT,
+        start: int | None = None,
+        num: int | None = None,
+        withscores: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> ZSetRangeResponse: ...
+
+    @overload
+    def zrangebyscore(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        min: ZScoreBoundT,
+        max: ZScoreBoundT,
+        start: int | None = None,
+        num: int | None = None,
+        withscores: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> Awaitable[ZSetRangeResponse]: ...
+
     def zrangebyscore(
         self,
         name: KeyT,
         min: ZScoreBoundT,
         max: ZScoreBoundT,
-        start: Optional[int] = None,
-        num: Optional[int] = None,
+        start: int | None = None,
+        num: int | None = None,
         withscores: bool = False,
-        score_cast_func: Union[type, Callable] = float,
-    ) -> ResponseT:
+        score_cast_func: type | Callable = float,
+    ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Return a range of values from the sorted set ``name`` with scores
         between ``min`` and ``max``.
@@ -7755,16 +8105,40 @@ class SortedSetCommands(CommandsProtocol):
         options["keys"] = [name]
         return self.execute_command(*pieces, **options)
 
+    @overload
+    def zrevrangebyscore(
+        self: SyncClientProtocol,
+        name: KeyT,
+        max: ZScoreBoundT,
+        min: ZScoreBoundT,
+        start: int | None = None,
+        num: int | None = None,
+        withscores: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> ZSetRangeResponse: ...
+
+    @overload
+    def zrevrangebyscore(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        max: ZScoreBoundT,
+        min: ZScoreBoundT,
+        start: int | None = None,
+        num: int | None = None,
+        withscores: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> Awaitable[ZSetRangeResponse]: ...
+
     def zrevrangebyscore(
         self,
         name: KeyT,
         max: ZScoreBoundT,
         min: ZScoreBoundT,
-        start: Optional[int] = None,
-        num: Optional[int] = None,
+        start: int | None = None,
+        num: int | None = None,
         withscores: bool = False,
-        score_cast_func: Union[type, Callable] = float,
-    ):
+        score_cast_func: type | Callable = float,
+    ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Return a range of values from the sorted set ``name`` with scores
         between ``min`` and ``max`` in descending order.
@@ -7790,13 +8164,31 @@ class SortedSetCommands(CommandsProtocol):
         options["keys"] = [name]
         return self.execute_command(*pieces, **options)
 
+    @overload
+    def zrank(
+        self: SyncClientProtocol,
+        name: KeyT,
+        value: EncodableT,
+        withscore: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> int | list[Any] | None: ...
+
+    @overload
+    def zrank(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        value: EncodableT,
+        withscore: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> Awaitable[int | list[Any] | None]: ...
+
     def zrank(
         self,
         name: KeyT,
         value: EncodableT,
         withscore: bool = False,
-        score_cast_func: Union[type, Callable] = float,
-    ) -> ResponseT:
+        score_cast_func: type | Callable = float,
+    ) -> (int | list[Any] | None) | Awaitable[int | list[Any] | None]:
         """
         Returns a 0-based value indicating the rank of ``value`` in sorted set
         ``name``.
@@ -7815,7 +8207,15 @@ class SortedSetCommands(CommandsProtocol):
 
         return self.execute_command(*pieces, **options)
 
-    def zrem(self, name: KeyT, *values: FieldT) -> ResponseT:
+    @overload
+    def zrem(self: SyncClientProtocol, name: KeyT, *values: FieldT) -> int: ...
+
+    @overload
+    def zrem(
+        self: AsyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> Awaitable[int]: ...
+
+    def zrem(self, name: KeyT, *values: FieldT) -> int | Awaitable[int]:
         """
         Remove member ``values`` from sorted set ``name``
 
@@ -7823,7 +8223,19 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZREM", name, *values)
 
-    def zremrangebylex(self, name: KeyT, min: EncodableT, max: EncodableT) -> ResponseT:
+    @overload
+    def zremrangebylex(
+        self: SyncClientProtocol, name: KeyT, min: EncodableT, max: EncodableT
+    ) -> int: ...
+
+    @overload
+    def zremrangebylex(
+        self: AsyncClientProtocol, name: KeyT, min: EncodableT, max: EncodableT
+    ) -> Awaitable[int]: ...
+
+    def zremrangebylex(
+        self, name: KeyT, min: EncodableT, max: EncodableT
+    ) -> int | Awaitable[int]:
         """
         Remove all elements in the sorted set ``name`` between the
         lexicographical range specified by ``min`` and ``max``.
@@ -7834,7 +8246,17 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZREMRANGEBYLEX", name, min, max)
 
-    def zremrangebyrank(self, name: KeyT, min: int, max: int) -> ResponseT:
+    @overload
+    def zremrangebyrank(
+        self: SyncClientProtocol, name: KeyT, min: int, max: int
+    ) -> int: ...
+
+    @overload
+    def zremrangebyrank(
+        self: AsyncClientProtocol, name: KeyT, min: int, max: int
+    ) -> Awaitable[int]: ...
+
+    def zremrangebyrank(self, name: KeyT, min: int, max: int) -> int | Awaitable[int]:
         """
         Remove all elements in the sorted set ``name`` with ranks between
         ``min`` and ``max``. Values are 0-based, ordered from smallest score
@@ -7845,9 +8267,19 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZREMRANGEBYRANK", name, min, max)
 
+    @overload
+    def zremrangebyscore(
+        self: SyncClientProtocol, name: KeyT, min: ZScoreBoundT, max: ZScoreBoundT
+    ) -> int: ...
+
+    @overload
+    def zremrangebyscore(
+        self: AsyncClientProtocol, name: KeyT, min: ZScoreBoundT, max: ZScoreBoundT
+    ) -> Awaitable[int]: ...
+
     def zremrangebyscore(
         self, name: KeyT, min: ZScoreBoundT, max: ZScoreBoundT
-    ) -> ResponseT:
+    ) -> int | Awaitable[int]:
         """
         Remove all elements in the sorted set ``name`` with scores
         between ``min`` and ``max``. Returns the number of elements removed.
@@ -7856,13 +8288,31 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZREMRANGEBYSCORE", name, min, max)
 
+    @overload
+    def zrevrank(
+        self: SyncClientProtocol,
+        name: KeyT,
+        value: EncodableT,
+        withscore: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> int | list[Any] | None: ...
+
+    @overload
+    def zrevrank(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        value: EncodableT,
+        withscore: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> Awaitable[int | list[Any] | None]: ...
+
     def zrevrank(
         self,
         name: KeyT,
         value: EncodableT,
         withscore: bool = False,
-        score_cast_func: Union[type, Callable] = float,
-    ) -> ResponseT:
+        score_cast_func: type | Callable = float,
+    ) -> (int | list[Any] | None) | Awaitable[int | list[Any] | None]:
         """
         Returns a 0-based value indicating the descending rank of
         ``value`` in sorted set ``name``.
@@ -7881,7 +8331,19 @@ class SortedSetCommands(CommandsProtocol):
 
         return self.execute_command(*pieces, **options)
 
-    def zscore(self, name: KeyT, value: EncodableT) -> ResponseT:
+    @overload
+    def zscore(
+        self: SyncClientProtocol, name: KeyT, value: EncodableT
+    ) -> float | None: ...
+
+    @overload
+    def zscore(
+        self: AsyncClientProtocol, name: KeyT, value: EncodableT
+    ) -> Awaitable[float | None]: ...
+
+    def zscore(self, name: KeyT, value: EncodableT) -> (float | None) | Awaitable[
+        float | None
+    ]:
         """
         Return the score of element ``value`` in sorted set ``name``
 
@@ -7889,13 +8351,31 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZSCORE", name, value, keys=[name])
 
+    @overload
+    def zunion(
+        self: SyncClientProtocol,
+        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
+        aggregate: str | None = None,
+        withscores: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> ZSetRangeResponse: ...
+
+    @overload
+    def zunion(
+        self: AsyncClientProtocol,
+        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
+        aggregate: str | None = None,
+        withscores: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> Awaitable[ZSetRangeResponse]: ...
+
     def zunion(
         self,
-        keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
-        aggregate: Optional[str] = None,
+        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
+        aggregate: str | None = None,
         withscores: bool = False,
-        score_cast_func: Union[type, Callable] = float,
-    ) -> ResponseT:
+        score_cast_func: type | Callable = float,
+    ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Return the union of multiple sorted sets specified by ``keys``.
         ``keys`` can be provided as dictionary of keys and their weights.
@@ -7915,12 +8395,28 @@ class SortedSetCommands(CommandsProtocol):
             score_cast_func=score_cast_func,
         )
 
+    @overload
+    def zunionstore(
+        self: SyncClientProtocol,
+        dest: KeyT,
+        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
+        aggregate: str | None = None,
+    ) -> int: ...
+
+    @overload
+    def zunionstore(
+        self: AsyncClientProtocol,
+        dest: KeyT,
+        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
+        aggregate: str | None = None,
+    ) -> Awaitable[int]: ...
+
     def zunionstore(
         self,
         dest: KeyT,
-        keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
-        aggregate: Optional[str] = None,
-    ) -> ResponseT:
+        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
+        aggregate: str | None = None,
+    ) -> int | Awaitable[int]:
         """
         Union multiple sorted sets specified by ``keys`` into
         a new sorted set, ``dest``. Scores in the destination will be
@@ -7930,7 +8426,19 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self._zaggregate("ZUNIONSTORE", dest, keys, aggregate)
 
-    def zmscore(self, key: KeyT, members: List[str]) -> ResponseT:
+    @overload
+    def zmscore(
+        self: SyncClientProtocol, key: KeyT, members: List[str]
+    ) -> list[float | None]: ...
+
+    @overload
+    def zmscore(
+        self: AsyncClientProtocol, key: KeyT, members: List[str]
+    ) -> Awaitable[list[float | None]]: ...
+
+    def zmscore(
+        self, key: KeyT, members: List[str]
+    ) -> list[float | None] | Awaitable[list[float | None]]:
         """
         Returns the scores associated with the specified members
         in the sorted set stored at key.

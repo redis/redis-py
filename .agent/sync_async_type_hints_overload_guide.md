@@ -408,37 +408,37 @@ For commands with protocol-specific differences, use the **most permissive union
 | 227 | `zadd` | `int \| float` | `Awaitable[int \| float]` | ✅ | RESP2: parse_zadd |
 | 228 | `zcard` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 229 | `zcount` | `int` | `Awaitable[int]` | ✅ | Integer reply |
-| 230 | `zdiff` | `list[tuple[bytes \| str, float]] \| list[bytes \| str]` | `Awaitable[...]` | ✅ | RESP2: zset_score_pairs (WITHSCORES) |
+| 230 | `zdiff` | `ZSetRangeResponse` | `Awaitable[ZSetRangeResponse]` | ✅ | `WITHSCORES`: RESP2 tuple pairs / RESP3 raw nested lists |
 | 231 | `zdiffstore` | `int` | `Awaitable[int]` | ✅ | Integer reply |
-| 232 | `zincrby` | `float` | `Awaitable[float]` | ✅ | RESP2: float_or_none / RESP3: raw float |
-| 233 | `zinter` | `list[tuple[bytes \| str, float]] \| list[bytes \| str]` | `Awaitable[...]` | ✅ | RESP2: zset_score_pairs (WITHSCORES) |
+| 232 | `zincrby` | `float \| None` | `Awaitable[float \| None]` | ✅ | RESP2: `float_or_none` / RESP3: raw float |
+| 233 | `zinter` | `ZSetRangeResponse` | `Awaitable[ZSetRangeResponse]` | ✅ | `score_cast_func` means scored branch uses `Any` |
 | 234 | `zinterstore` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 235 | `zintercard` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 236 | `zlexcount` | `int` | `Awaitable[int]` | ✅ | Integer reply |
-| 237 | `zpopmax` | `list[tuple[bytes \| str, float]]` | `Awaitable[list[tuple[bytes \| str, float]]]` | ✅ | RESP2: zset_score_pairs / RESP3: identity |
-| 238 | `zpopmin` | `list[tuple[bytes \| str, float]]` | `Awaitable[list[tuple[bytes \| str, float]]]` | ✅ | RESP2: zset_score_pairs / RESP3: identity |
-| 239 | `zrandmember` | `bytes \| str \| list \| None` | `Awaitable[bytes \| str \| list \| None]` | ✅ | Varies by COUNT/WITHSCORES |
-| 240 | `bzpopmax` | `tuple[bytes \| str, bytes \| str, float] \| None` | `Awaitable[tuple \| None]` | ✅ | RESP2: lambda (key, member, score) |
-| 241 | `bzpopmin` | `tuple[bytes \| str, bytes \| str, float] \| None` | `Awaitable[tuple \| None]` | ✅ | RESP2: lambda (key, member, score) |
-| 242 | `zmpop` | `list \| None` | `Awaitable[list \| None]` | ✅ | No callback - raw |
-| 243 | `bzmpop` | `list \| None` | `Awaitable[list \| None]` | ✅ | No callback - raw |
-| 244 | `zrange` | `list[tuple[bytes \| str, float]] \| list[bytes \| str]` | `Awaitable[...]` | ✅ | RESP2: zset_score_pairs / RESP3: zset_score_pairs_resp3 (WITHSCORES) |
-| 245 | `zrevrange` | `list[tuple[bytes \| str, float]] \| list[bytes \| str]` | `Awaitable[...]` | ✅ | RESP2: zset_score_pairs / RESP3: zset_score_pairs_resp3 (WITHSCORES) |
+| 237 | `zpopmax` | `ZSetRangeResponse` | `Awaitable[ZSetRangeResponse]` | ✅ | RESP2 tuple pairs / RESP3 nested lists |
+| 238 | `zpopmin` | `ZSetRangeResponse` | `Awaitable[ZSetRangeResponse]` | ✅ | RESP2 tuple pairs / RESP3 nested lists |
+| 239 | `zrandmember` | `ZRandMemberResponse` | `Awaitable[ZRandMemberResponse]` | ✅ | COUNT / WITHSCORES shape varies by protocol |
+| 240 | `bzpopmax` | `BlockingZSetPopResponse` | `Awaitable[BlockingZSetPopResponse]` | ✅ | RESP2 tuple / RESP3 raw list / `None` |
+| 241 | `bzpopmin` | `BlockingZSetPopResponse` | `Awaitable[BlockingZSetPopResponse]` | ✅ | RESP2 tuple / RESP3 raw list / `None` |
+| 242 | `zmpop` | `ZMPopResponse` | `Awaitable[ZMPopResponse]` | ✅ | Raw `[key, [[member, score], ...]]` or `None` |
+| 243 | `bzmpop` | `ZMPopResponse` | `Awaitable[ZMPopResponse]` | ✅ | Raw `[key, [[member, score], ...]]` or `None` |
+| 244 | `zrange` | `ZSetRangeResponse` | `Awaitable[ZSetRangeResponse]` | ✅ | `score_cast_func` means scored branch uses `Any` |
+| 245 | `zrevrange` | `ZSetRangeResponse` | `Awaitable[ZSetRangeResponse]` | ✅ | `score_cast_func` means scored branch uses `Any` |
 | 246 | `zrangestore` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 247 | `zrangebylex` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | No callback - raw array |
 | 248 | `zrevrangebylex` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | No callback - raw array |
-| 249 | `zrangebyscore` | `list[tuple[bytes \| str, float]] \| list[bytes \| str]` | `Awaitable[...]` | ✅ | RESP2: zset_score_pairs / RESP3: zset_score_pairs_resp3 (WITHSCORES) |
-| 250 | `zrevrangebyscore` | `list[tuple[bytes \| str, float]] \| list[bytes \| str]` | `Awaitable[...]` | ✅ | RESP2: zset_score_pairs / RESP3: zset_score_pairs_resp3 (WITHSCORES) |
-| 251 | `zrank` | `int \| tuple[int, float] \| None` | `Awaitable[int \| tuple[int, float] \| None]` | ✅ | RESP2: zset_score_for_rank / RESP3: zset_score_for_rank_resp3 (WITHSCORE) |
+| 249 | `zrangebyscore` | `ZSetRangeResponse` | `Awaitable[ZSetRangeResponse]` | ✅ | `score_cast_func` means scored branch uses `Any` |
+| 250 | `zrevrangebyscore` | `ZSetRangeResponse` | `Awaitable[ZSetRangeResponse]` | ✅ | `score_cast_func` means scored branch uses `Any` |
+| 251 | `zrank` | `ZRankResponse` | `Awaitable[ZRankResponse]` | ✅ | `WITHSCORE` returns `[rank, score]`, not tuple |
 | 252 | `zrem` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 253 | `zremrangebylex` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 254 | `zremrangebyrank` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 255 | `zremrangebyscore` | `int` | `Awaitable[int]` | ✅ | Integer reply |
-| 256 | `zrevrank` | `int \| tuple[int, float] \| None` | `Awaitable[int \| tuple[int, float] \| None]` | ✅ | RESP2: zset_score_for_rank / RESP3: zset_score_for_rank_resp3 (WITHSCORE) |
-| 257 | `zscore` | `float \| None` | `Awaitable[float \| None]` | ✅ | RESP2: float_or_none / RESP3: raw float |
-| 258 | `zunion` | `list[tuple[bytes \| str, float]] \| list[bytes \| str]` | `Awaitable[...]` | ✅ | RESP2: zset_score_pairs / RESP3: zset_score_pairs_resp3 (WITHSCORES) |
+| 256 | `zrevrank` | `ZRankResponse` | `Awaitable[ZRankResponse]` | ✅ | `WITHSCORE` returns `[rank, score]`, not tuple |
+| 257 | `zscore` | `float \| None` | `Awaitable[float \| None]` | ✅ | RESP2: `float_or_none` / RESP3: raw float |
+| 258 | `zunion` | `ZSetRangeResponse` | `Awaitable[ZSetRangeResponse]` | ✅ | `score_cast_func` means scored branch uses `Any` |
 | 259 | `zunionstore` | `int` | `Awaitable[int]` | ✅ | Integer reply |
-| 260 | `zmscore` | `list[float \| None]` | `Awaitable[list[float \| None]]` | ✅ | RESP2: parse_zmscore |
+| 260 | `zmscore` | `list[float \| None]` | `Awaitable[list[float \| None]]` | ✅ | RESP2: `parse_zmscore` / RESP3: raw float list |
 
 ### BATCH 10: HyperlogCommands + HashCommands (core.py) - Methods 261-289
 | # | Method | Sync Type | Async Type | Status | Notes |

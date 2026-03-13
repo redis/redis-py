@@ -296,38 +296,38 @@ This document catalogs all command methods that need `@overload` signatures for 
 |---|--------|----------------|--------------|---------------|--------|----------------|
 | 227 | `zadd` | `ResponseT` | `int \| float \| None` | `Awaitable[int \| float \| None]` | ✅ RESP2: parse_zadd / RESP3: no callback - int or float with INCR | 🔲 TODO |
 | 228 | `zcard` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 229 | `zcount` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 230 | `zdiff` | `ResponseT` | `list[bytes \| str] \| list[tuple[bytes \| str, float]]` | `Awaitable[...]` | ✅ RESP2: zset_score_pairs / RESP3: no callback | 🔲 TODO |
-| 231 | `zdiffstore` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 232 | `zincrby` | `ResponseT` | `float` | `Awaitable[float]` | ✅ RESP2: float_or_none / RESP3: no callback (returns float directly) | 🔲 TODO |
-| 233 | `zinter` | `ResponseT` | `list[bytes \| str] \| list[tuple[bytes \| str, float]]` | `Awaitable[...]` | ✅ RESP2: zset_score_pairs / RESP3: identity | 🔲 TODO |
-| 234 | `zinterstore` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 235 | `zintercard` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 236 | `zlexcount` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 237 | `zpopmax` | `ResponseT` | `list[tuple[bytes \| str, float]]` | `Awaitable[list[tuple[bytes \| str, float]]]` | ✅ RESP2: zset_score_pairs / RESP3: identity | 🔲 TODO |
-| 238 | `zpopmin` | `ResponseT` | `list[tuple[bytes \| str, float]]` | `Awaitable[list[tuple[bytes \| str, float]]]` | ✅ RESP2: zset_score_pairs / RESP3: identity | 🔲 TODO |
-| 239 | `zrandmember` | `ResponseT` | `bytes \| str \| list[bytes \| str] \| None` | `Awaitable[...]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 240 | `bzpopmax` | `ResponseT` | `tuple[bytes \| str, bytes \| str, float] \| None` | `Awaitable[...]` | ✅ RESP2: lambda (tuple with float) / RESP3: no callback | 🔲 TODO |
-| 241 | `bzpopmin` | `ResponseT` | `tuple[bytes \| str, bytes \| str, float] \| None` | `Awaitable[...]` | ✅ RESP2: lambda (tuple with float) / RESP3: no callback | 🔲 TODO |
-| 242 | `zmpop` | `ResponseT` | `list \| None` | `Awaitable[list \| None]` | ✅ Array reply - no callback | 🔲 TODO |
-| 243 | `bzmpop` | `ResponseT` | `list \| None` | `Awaitable[list \| None]` | ✅ Array reply or None - no callback | 🔲 TODO |
-| 244 | `zrange` | `ResponseT` | `list[bytes \| str] \| list[tuple[bytes \| str, float]]` | `Awaitable[...]` | ✅ RESP2: zset_score_pairs / RESP3: zset_score_pairs_resp3 | 🔲 TODO |
-| 245 | `zrevrange` | `ResponseT` | `list[bytes \| str] \| list[tuple[bytes \| str, float]]` | `Awaitable[...]` | ✅ RESP2: zset_score_pairs / RESP3: zset_score_pairs_resp3 | 🔲 TODO |
-| 246 | `zrangestore` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 247 | `zrangebylex` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 248 | `zrevrangebylex` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 249 | `zrangebyscore` | `ResponseT` | `list[bytes \| str] \| list[tuple[bytes \| str, float]]` | `Awaitable[...]` | ✅ RESP2: zset_score_pairs / RESP3: zset_score_pairs_resp3 | 🔲 TODO |
-| 250 | `zrevrangebyscore` | `ResponseT` | `list[bytes \| str] \| list[tuple[bytes \| str, float]]` | `Awaitable[...]` | ✅ RESP2: zset_score_pairs / RESP3: zset_score_pairs_resp3 | 🔲 TODO |
-| 251 | `zrank` | `ResponseT` | `int \| tuple[int, float] \| None` | `Awaitable[...]` | ✅ RESP2: zset_score_for_rank / RESP3: zset_score_for_rank_resp3 | 🔲 TODO |
-| 252 | `zrem` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 253 | `zremrangebylex` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 254 | `zremrangebyrank` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 255 | `zremrangebyscore` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 256 | `zrevrank` | `ResponseT` | `int \| tuple[int, float] \| None` | `Awaitable[...]` | ✅ RESP2: zset_score_for_rank / RESP3: zset_score_for_rank_resp3 | 🔲 TODO |
-| 257 | `zscore` | `ResponseT` | `float \| None` | `Awaitable[float \| None]` | ✅ RESP2: float_or_none / RESP3: no callback (returns float directly) | 🔲 TODO |
-| 258 | `zunion` | `ResponseT` | `list[bytes \| str] \| list[tuple[bytes \| str, float]]` | `Awaitable[...]` | ✅ RESP2: zset_score_pairs / RESP3: zset_score_pairs_resp3 | 🔲 TODO |
-| 259 | `zunionstore` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 260 | `zmscore` | `ResponseT` | `list[float \| None]` | `Awaitable[list[float \| None]]` | ✅ RESP2: parse_zmscore / RESP3: no callback | 🔲 TODO |
+| 229 | `zcount` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 230 | `zdiff` | `ResponseT` | `ZSetRangeResponse` | `Awaitable[ZSetRangeResponse]` | ✅ `WITHSCORES`: RESP2 tuple pairs / RESP3 raw nested lists | ✅ DONE |
+| 231 | `zdiffstore` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 232 | `zincrby` | `ResponseT` | `float \| None` | `Awaitable[float \| None]` | ✅ RESP2: `float_or_none` / RESP3: raw float | ✅ DONE |
+| 233 | `zinter` | `ResponseT` | `ZSetRangeResponse` | `Awaitable[ZSetRangeResponse]` | ✅ `score_cast_func` means scored branch uses `Any` | ✅ DONE |
+| 234 | `zinterstore` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 235 | `zintercard` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 236 | `zlexcount` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 237 | `zpopmax` | `ResponseT` | `ZSetRangeResponse` | `Awaitable[ZSetRangeResponse]` | ✅ RESP2 tuple pairs / RESP3 nested lists | ✅ DONE |
+| 238 | `zpopmin` | `ResponseT` | `ZSetRangeResponse` | `Awaitable[ZSetRangeResponse]` | ✅ RESP2 tuple pairs / RESP3 nested lists | ✅ DONE |
+| 239 | `zrandmember` | `ResponseT` | `ZRandMemberResponse` | `Awaitable[ZRandMemberResponse]` | ✅ COUNT / WITHSCORES shape varies by protocol | ✅ DONE |
+| 240 | `bzpopmax` | `ResponseT` | `BlockingZSetPopResponse` | `Awaitable[BlockingZSetPopResponse]` | ✅ RESP2 tuple / RESP3 raw list / `None` | ✅ DONE |
+| 241 | `bzpopmin` | `ResponseT` | `BlockingZSetPopResponse` | `Awaitable[BlockingZSetPopResponse]` | ✅ RESP2 tuple / RESP3 raw list / `None` | ✅ DONE |
+| 242 | `zmpop` | `ResponseT` | `ZMPopResponse` | `Awaitable[ZMPopResponse]` | ✅ Raw `[key, [[member, score], ...]]` or `None` | ✅ DONE |
+| 243 | `bzmpop` | `ResponseT` | `ZMPopResponse` | `Awaitable[ZMPopResponse]` | ✅ Raw `[key, [[member, score], ...]]` or `None` | ✅ DONE |
+| 244 | `zrange` | `ResponseT` | `ZSetRangeResponse` | `Awaitable[ZSetRangeResponse]` | ✅ `score_cast_func` means scored branch uses `Any` | ✅ DONE |
+| 245 | `zrevrange` | `ResponseT` | `ZSetRangeResponse` | `Awaitable[ZSetRangeResponse]` | ✅ `score_cast_func` means scored branch uses `Any` | ✅ DONE |
+| 246 | `zrangestore` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 247 | `zrangebylex` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - raw array | ✅ DONE |
+| 248 | `zrevrangebylex` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - raw array | ✅ DONE |
+| 249 | `zrangebyscore` | `ResponseT` | `ZSetRangeResponse` | `Awaitable[ZSetRangeResponse]` | ✅ `score_cast_func` means scored branch uses `Any` | ✅ DONE |
+| 250 | `zrevrangebyscore` | `ResponseT` | `ZSetRangeResponse` | `Awaitable[ZSetRangeResponse]` | ✅ `score_cast_func` means scored branch uses `Any` | ✅ DONE |
+| 251 | `zrank` | `ResponseT` | `ZRankResponse` | `Awaitable[ZRankResponse]` | ✅ `WITHSCORE` returns `[rank, score]`, not tuple | ✅ DONE |
+| 252 | `zrem` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 253 | `zremrangebylex` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 254 | `zremrangebyrank` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 255 | `zremrangebyscore` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 256 | `zrevrank` | `ResponseT` | `ZRankResponse` | `Awaitable[ZRankResponse]` | ✅ `WITHSCORE` returns `[rank, score]`, not tuple | ✅ DONE |
+| 257 | `zscore` | `ResponseT` | `float \| None` | `Awaitable[float \| None]` | ✅ RESP2: `float_or_none` / RESP3: raw float | ✅ DONE |
+| 258 | `zunion` | `ResponseT` | `ZSetRangeResponse` | `Awaitable[ZSetRangeResponse]` | ✅ `score_cast_func` means scored branch uses `Any` | ✅ DONE |
+| 259 | `zunionstore` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 260 | `zmscore` | `ResponseT` | `list[float \| None]` | `Awaitable[list[float \| None]]` | ✅ RESP2: `parse_zmscore` / RESP3: raw float list | ✅ DONE |
 
 ### HyperlogCommands
 
