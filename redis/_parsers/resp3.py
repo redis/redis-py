@@ -9,7 +9,7 @@ from .base import (
     _AsyncRESPBase,
     _RESPBase,
 )
-from .socket import SERVER_CLOSED_CONNECTION_ERROR
+from .socket import SENTINEL, SERVER_CLOSED_CONNECTION_ERROR
 
 
 class _RESP3Parser(_RESPBase, PushNotificationsParser):
@@ -28,11 +28,18 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
         logger.debug("Push response: " + str(response))
         return response
 
-    def read_response(self, disable_decoding=False, push_request=False):
+    def read_response(
+        self,
+        disable_decoding=False,
+        push_request=False,
+        timeout: Union[float, object] = SENTINEL,
+    ):
         pos = self._buffer.get_pos() if self._buffer is not None else None
         try:
             result = self._read_response(
-                disable_decoding=disable_decoding, push_request=push_request
+                disable_decoding=disable_decoding,
+                push_request=push_request,
+                timeout=timeout,
             )
         except BaseException:
             if self._buffer is not None:
@@ -48,8 +55,13 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
                     pass
             return result
 
-    def _read_response(self, disable_decoding=False, push_request=False):
-        raw = self._buffer.readline()
+    def _read_response(
+        self,
+        disable_decoding=False,
+        push_request=False,
+        timeout: Union[float, object] = SENTINEL,
+    ):
+        raw = self._buffer.readline(timeout=timeout)
         if not raw:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
@@ -58,7 +70,7 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
         # server returned an error
         if byte in (b"-", b"!"):
             if byte == b"!":
-                response = self._buffer.read(int(response))
+                response = self._buffer.read(int(response), timeout=timeout)
             response = response.decode("utf-8", errors="replace")
             error = self.parse_error(response)
             # if the error is a ConnectionError, raise immediately so the user
@@ -87,14 +99,14 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
             return response == b"t"
         # bulk response
         elif byte == b"$":
-            response = self._buffer.read(int(response))
+            response = self._buffer.read(int(response), timeout=timeout)
         # verbatim string response
         elif byte == b"=":
-            response = self._buffer.read(int(response))[4:]
+            response = self._buffer.read(int(response), timeout=timeout)[4:]
         # array response
         elif byte == b"*":
             response = [
-                self._read_response(disable_decoding=disable_decoding)
+                self._read_response(disable_decoding=disable_decoding, timeout=timeout)
                 for _ in range(int(response))
             ]
         # set response
@@ -102,7 +114,7 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
             # redis can return unhashable types (like dict) in a set,
             # so we return sets as list, all the time, for predictability
             response = [
-                self._read_response(disable_decoding=disable_decoding)
+                self._read_response(disable_decoding=disable_decoding, timeout=timeout)
                 for _ in range(int(response))
             ]
         # map response
@@ -112,16 +124,22 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
             # became defined to be left-right in version 3.8
             resp_dict = {}
             for _ in range(int(response)):
-                key = self._read_response(disable_decoding=disable_decoding)
+                key = self._read_response(
+                    disable_decoding=disable_decoding, timeout=timeout
+                )
                 resp_dict[key] = self._read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
+                    disable_decoding=disable_decoding,
+                    push_request=push_request,
+                    timeout=timeout,
                 )
             response = resp_dict
         # push response
         elif byte == b">":
             response = [
                 self._read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
+                    disable_decoding=disable_decoding,
+                    push_request=push_request,
+                    timeout=timeout,
                 )
                 for _ in range(int(response))
             ]
