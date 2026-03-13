@@ -16,6 +16,7 @@ from typing import (
     Dict,
     Generator,
     List,
+    Literal,
     Mapping,
     Optional,
     Set,
@@ -237,6 +238,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         if kwargs.pop("connection_class", None) is SSLConnection:
             kwargs["ssl"] = True
         return cls(**kwargs)
+
+    # Type discrimination marker for @overload self-type pattern
+    _is_async_client: Literal[True] = True
 
     __slots__ = (
         "_initialize",
@@ -1976,7 +1980,14 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         | Existing :class:`~.RedisCluster` client
     """
 
-    __slots__ = ("cluster_client", "_transaction", "_execution_strategy")
+    __slots__ = (
+        "cluster_client",
+        "_transaction",
+        "_execution_strategy",
+    )
+
+    # Type discrimination marker for @overload self-type pattern
+    _is_async_client: Literal[True] = True
 
     def __init__(
         self, client: RedisCluster, transaction: Optional[bool] = None
