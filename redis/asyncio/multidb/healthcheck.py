@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import List, Optional, Tuple, Union
 
-from redis.asyncio import Redis
+from redis.asyncio import Redis, Connection, ConnectionPool
 from redis.asyncio.http.http_client import DEFAULT_TIMEOUT, AsyncHTTPClientWrapper
 from redis.backoff import NoBackoff
 from redis.http.http_client import HttpClient
@@ -44,7 +44,7 @@ class HealthCheck(ABC):
         pass
 
     @abstractmethod
-    async def check_health(self, database) -> bool:
+    async def check_health(self, database, connection: Connection) -> bool:
         """Function to determine the health status."""
         pass
 
@@ -66,11 +66,24 @@ class HealthCheckPolicy(ABC):
         """
         pass
 
+    @abstractmethod
+    async def get_connections(self, database) -> list[ConnectionPool]:
+        """Get connections to the database."""
+        pass
+
+    @abstractmethod
+    async def close(self) -> None:
+        """Close all connections to the database."""
+        pass
+
 
 class AbstractHealthCheckPolicy(HealthCheckPolicy):
     """
     Abstract health check policy.
     """
+
+    def __init__(self):
+        self._connections: dict[int, list[ConnectionPool]] = {}  # keyed by database id
 
     async def execute(self, health_checks: List[HealthCheck], database) -> bool:
         """
@@ -105,12 +118,56 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
 
         return True
 
+    async def get_connections(self, database) -> list[ConnectionPool]:
+        db_id = id(database)
+        conns = self._connections.get(db_id)
+
+        if conns is None:
+            if isinstance(database.client, Redis):
+                conn_kwargs = database.client.get_connection_kwargs()
+                conns = [ConnectionPool(**conn_kwargs)]
+            else:
+                conns = []
+                all_nodes = database.client.get_nodes()
+                for node in all_nodes:
+                    conn_kwargs = node.redis_connection.get_connection_kwargs()
+                    conns.append(ConnectionPool(**conn_kwargs))
+            self._connections[db_id] = conns
+
+        return conns
+
+    async def close(self) -> None:
+        disc_tasks = []
+
+        for db_id in self._connections:
+            for pool in self._connections[db_id]:
+                disc_tasks.append(asyncio.create_task(pool.disconnect()))
+
+        await asyncio.gather(
+            *disc_tasks,
+            return_exceptions=True,
+        )
+        self._connections.clear()
+
     @abstractmethod
     async def _execute(self, health_check: HealthCheck, database) -> bool:
         """
         Executes health check against given database.
         """
         pass
+
+async def _check_health(database, pool: ConnectionPool, health_check: HealthCheck) -> bool:
+    conn = await pool.get_connection()
+    try:
+        if not await health_check.check_health(database, conn):
+            return False
+        return True
+    except Exception:
+        # Disconnect on error to avoid returning broken connection to pool
+        await conn.disconnect()
+        raise
+    finally:
+        await pool.release(conn)
 
 
 class HealthyAllPolicy(AbstractHealthCheckPolicy):
@@ -119,10 +176,21 @@ class HealthyAllPolicy(AbstractHealthCheckPolicy):
     """
 
     async def _execute(self, health_check: HealthCheck, database) -> bool:
+        """
+        Executes health check against given database.
+        """
+        conns = await self.get_connections(database)
         probes = health_check.health_check_probes
         for attempt in range(probes):
-            if not await health_check.check_health(database):
-                return False
+            results = await asyncio.gather(
+                *[_check_health(database, pool, health_check) for pool in conns],
+                return_exceptions=True,
+            )
+            for result in results:
+                if isinstance(result, Exception):
+                    raise result
+                if not result:
+                    return False
 
             if attempt < probes - 1:
                 await asyncio.sleep(health_check.health_check_delay)
@@ -140,19 +208,23 @@ class HealthyMajorityPolicy(AbstractHealthCheckPolicy):
         """
         probes = health_check.health_check_probes
         allowed_unsuccessful_probes = (probes - 1) // 2
+        conns = await self.get_connections(database)
 
         for attempt in range(probes):
-            try:
-                if not await health_check.check_health(database):
+            results = await asyncio.gather(
+                *[_check_health(database, pool, health_check) for pool in conns],
+                return_exceptions=True,
+            )
+            # Check for any exceptions or False results
+            for result in results:
+                if isinstance(result, Exception):
+                    allowed_unsuccessful_probes -= 1
+                    if allowed_unsuccessful_probes < 0:
+                        raise result
+                elif not result:
                     allowed_unsuccessful_probes -= 1
                     if allowed_unsuccessful_probes < 0:
                         return False
-            except Exception:
-                # Count exception as unsuccessful probe
-                allowed_unsuccessful_probes -= 1
-                if allowed_unsuccessful_probes < 0:
-                    # Re-raise to let execute() handle it
-                    raise
 
             if attempt < probes - 1:
                 await asyncio.sleep(health_check.health_check_delay)
@@ -172,15 +244,22 @@ class HealthyAnyPolicy(AbstractHealthCheckPolicy):
         probes = health_check.health_check_probes
         last_exception = None
         is_healthy = False
+        conns = await self.get_connections(database)
 
         for attempt in range(probes):
-            try:
-                if await health_check.check_health(database):
-                    is_healthy = True
+            results = await asyncio.gather(
+                *[_check_health(database, pool, health_check) for pool in conns],
+                return_exceptions=True,
+            )
+            # Check if all results are True (not False and not Exception)
+            if all(r is True for r in results):
+                is_healthy = True
+                break
+            # Store any exception for later
+            for r in results:
+                if isinstance(r, Exception):
+                    last_exception = r
                     break
-            except Exception as e:
-                # Store the exception but continue trying
-                last_exception = e
 
             if attempt < probes - 1:
                 await asyncio.sleep(health_check.health_check_delay)
@@ -227,7 +306,7 @@ class AbstractHealthCheck(HealthCheck):
         return self._health_check_timeout
 
     @abstractmethod
-    async def check_health(self, database) -> bool:
+    async def check_health(self, database, connection: Connection) -> bool:
         pass
 
 
@@ -236,17 +315,10 @@ class PingHealthCheck(AbstractHealthCheck):
     Health check based on PING command.
     """
 
-    async def check_health(self, database) -> bool:
-        if isinstance(database.client, Redis):
-            return await database.client.execute_command("PING")
-        else:
-            # For a cluster checks if all nodes are healthy.
-            all_nodes = database.client.get_nodes()
-            for node in all_nodes:
-                if not await node.redis_connection.execute_command("PING"):
-                    return False
-
-            return True
+    async def check_health(self, database, connection: Connection) -> bool:
+        await connection.send_command("PING")
+        response = await connection.read_response()
+        return response in (b"PONG", "PONG")
 
 
 class LagAwareHealthCheck(AbstractHealthCheck):
@@ -313,7 +385,7 @@ class LagAwareHealthCheck(AbstractHealthCheck):
             health_check_timeout=health_check_timeout,
         )
 
-    async def check_health(self, database) -> bool:
+    async def check_health(self, database, connection: Connection) -> bool:
         if database.health_check_url is None:
             raise ValueError(
                 "Database health check url is not set. Please check DatabaseConfig for the current database."

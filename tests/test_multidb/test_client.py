@@ -1,4 +1,6 @@
+import asyncio
 import threading
+import time
 from time import sleep
 from unittest.mock import MagicMock, patch, Mock
 
@@ -17,7 +19,7 @@ from redis.multidb.exception import (
 )
 from redis.multidb.failover import WeightBasedFailoverStrategy
 from redis.multidb.failure_detector import FailureDetector
-from redis.multidb.healthcheck import HealthCheck
+from redis.asyncio.multidb.healthcheck import HealthCheck, AbstractHealthCheck
 from tests.helpers import wait_for_condition
 from tests.test_multidb.conftest import create_weighted_list
 
@@ -96,7 +98,7 @@ class TestMultiDbClient:
                 return_value="NOT_OK-->Response from unexpected db - mock_db2"
             )
 
-            def mock_check_health(database):
+            async def mock_check_health(database, connection=None):
                 if database == mock_db2:
                     return False
                 else:
@@ -158,10 +160,10 @@ class TestMultiDbClient:
         db1_became_unhealthy = threading.Event()
         db2_became_unhealthy = threading.Event()
         db_became_unhealthy = threading.Event()
-        counter_lock = threading.Lock()
+        counter_lock = asyncio.Lock()
 
-        def mock_check_health(database):
-            with counter_lock:
+        async def mock_check_health(database, connection=None):
+            async with counter_lock:
                 db_probes_in_round[id(database)] += 1
                 # After 3 probes, increment the round counter
                 if db_probes_in_round[id(database)] > 3:
@@ -290,10 +292,10 @@ class TestMultiDbClient:
         db_rounds = {id(mock_db): 0, id(mock_db1): 0, id(mock_db2): 0}
         db_probes_in_round = {id(mock_db): 0, id(mock_db1): 0, id(mock_db2): 0}
         db1_became_unhealthy = threading.Event()
-        counter_lock = threading.Lock()
+        counter_lock = asyncio.Lock()
 
-        def mock_check_health(database):
-            with counter_lock:
+        async def mock_check_health(database, connection=None):
+            async with counter_lock:
                 db_probes_in_round[id(database)] += 1
                 if db_probes_in_round[id(database)] > 3:
                     db_rounds[id(database)] += 1
@@ -381,10 +383,10 @@ class TestMultiDbClient:
         db_rounds = {id(mock_db): 0, id(mock_db1): 0, id(mock_db2): 0}
         db_probes_in_round = {id(mock_db): 0, id(mock_db1): 0, id(mock_db2): 0}
         db1_became_unhealthy = threading.Event()
-        counter_lock = threading.Lock()
+        counter_lock = asyncio.Lock()
 
-        def mock_check_health(database):
-            with counter_lock:
+        async def mock_check_health(database, connection=None):
+            async with counter_lock:
                 db_probes_in_round[id(database)] += 1
                 if db_probes_in_round[id(database)] > 3:
                     db_rounds[id(database)] += 1
@@ -531,7 +533,7 @@ class TestMultiDbClient:
             mock_db2.client.execute_command.return_value = "OK2"
 
             # Health check returns True for existing databases, raises exception for new one
-            def mock_check_health(database):
+            async def mock_check_health(database, connection=None):
                 if database in [mock_db, mock_db2]:
                     return True
                 # Raise an exception for the new database to trigger UnhealthyDatabaseException
@@ -741,8 +743,8 @@ class TestMultiDbClient:
                 another_hc.health_check_delay = 0.01
                 another_hc.health_check_timeout = 1.0
 
-                client.add_health_check(another_hc)
-                client._check_db_health(mock_db1)
+                asyncio.run(client.add_health_check(another_hc))
+                asyncio.run(client._check_db_health(mock_db1))
 
                 # 3 databases × 3 probes + 1 database × 3 probes = 12 calls
                 assert len(mock_hc.check_health.call_args_list) == 12
@@ -821,13 +823,12 @@ class TestMultiDbClient:
         Test that custom health check parameters (probes, delay, timeout)
         override the default values and are properly used during health checks.
         """
-        from redis.multidb.healthcheck import AbstractHealthCheck
 
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
         # Track actual delays between probes
         probe_timestamps = []
-        probe_lock = threading.Lock()
+        probe_lock = asyncio.Lock()
 
         class CustomHealthCheck(AbstractHealthCheck):
             """Custom health check with non-default parameters."""
@@ -840,10 +841,8 @@ class TestMultiDbClient:
                     health_check_timeout=2.0,
                 )
 
-            def check_health(self, database) -> bool:
-                import time
-
-                with probe_lock:
+            async def check_health(self, database, connection=None) -> bool:
+                async with probe_lock:
                     probe_timestamps.append(time.time())
                 return True
 
@@ -906,10 +905,6 @@ class TestMultiDbClient:
         Test that a custom health check timeout is respected and triggers
         UnhealthyDatabaseException when exceeded.
         """
-        from redis.multidb.healthcheck import AbstractHealthCheck
-        from redis.multidb.exception import InitialHealthCheckFailedError
-        import time
-
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
         class SlowHealthCheck(AbstractHealthCheck):
@@ -923,9 +918,9 @@ class TestMultiDbClient:
                     health_check_timeout=0.1,
                 )
 
-            def check_health(self, database) -> bool:
+            async def check_health(self, database) -> bool:
                 # Sleep longer than the timeout
-                time.sleep(0.5)
+                await asyncio.sleep(0.5)
                 return True
 
         slow_hc = SlowHealthCheck()
@@ -1160,7 +1155,7 @@ class TestInitialHealthCheckPolicy:
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
 
-            def mock_check_health(database):
+            async def mock_check_health(database, connection=None):
                 # mock_db2 is unhealthy
                 return database != mock_db2
 
@@ -1202,7 +1197,7 @@ class TestInitialHealthCheckPolicy:
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command.return_value = "OK1"
 
-            def mock_check_health(database):
+            async def mock_check_health(database, connection=None):
                 # mock_db2 is unhealthy, but 2 out of 3 are healthy (majority)
                 return database != mock_db2
 
@@ -1240,7 +1235,7 @@ class TestInitialHealthCheckPolicy:
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
 
-            def mock_check_health(database):
+            async def mock_check_health(database, connection=None):
                 # Only mock_db is healthy (1 out of 3 is not a majority)
                 return database == mock_db
 
@@ -1281,7 +1276,7 @@ class TestInitialHealthCheckPolicy:
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db.client.execute_command.return_value = "OK"
 
-            def mock_check_health(database):
+            async def mock_check_health(database, connection=None):
                 # Only mock_db is healthy
                 return database == mock_db
 

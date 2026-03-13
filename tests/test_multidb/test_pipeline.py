@@ -96,7 +96,7 @@ class TestPipeline:
             pipe.execute.return_value = ["OK1", "value1"]
             mock_db1.client.pipeline.return_value = pipe
 
-            def mock_check_health(database):
+            async def mock_check_health(database, connection=None):
                 if database == mock_db2:
                     return False
                 else:
@@ -161,7 +161,7 @@ class TestPipeline:
         db_became_unhealthy = threading.Event()
         counter_lock = threading.Lock()
 
-        def mock_check_health(database):
+        async def mock_check_health(database, connection=None):
             with counter_lock:
                 db_probes_in_round[id(database)] += 1
                 if db_probes_in_round[id(database)] > 3:
@@ -356,7 +356,7 @@ class TestTransaction:
         ):
             mock_db1.client.transaction.return_value = ["OK1", "value1"]
 
-            def mock_check_health(database):
+            async def mock_check_health(database, connection=None):
                 if database == mock_db2:
                     return False
                 else:
@@ -423,7 +423,7 @@ class TestTransaction:
         db_became_unhealthy = threading.Event()
         counter_lock = threading.Lock()
 
-        def mock_check_health(database):
+        async def mock_check_health(database, connection=None):
             with counter_lock:
                 db_probes_in_round[id(database)] += 1
                 if db_probes_in_round[id(database)] > 3:

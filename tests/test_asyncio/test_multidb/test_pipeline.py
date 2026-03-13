@@ -92,7 +92,7 @@ class TestPipeline:
             pipe.execute.return_value = ["OK1", "value1"]
             mock_db1.client.pipeline.return_value = pipe
 
-            async def mock_check_health(database):
+            async def mock_check_health(database, connection=None):
                 if database == mock_db2:
                     return False
                 else:
@@ -155,7 +155,7 @@ class TestPipeline:
         db_became_unhealthy = asyncio.Event()
         counter_lock = asyncio.Lock()
 
-        async def mock_check_health(database):
+        async def mock_check_health(database, connection=None):
             async with counter_lock:
                 db_probes_in_round[id(database)] += 1
                 # After 3 probes, increment the round counter
@@ -345,7 +345,7 @@ class TestTransaction:
         ):
             mock_db1.client.transaction.return_value = ["OK1", "value1"]
 
-            async def mock_check_health(database):
+            async def mock_check_health(database, connection=None):
                 if database == mock_db2:
                     return False
                 else:
@@ -409,7 +409,7 @@ class TestTransaction:
         db_became_unhealthy = asyncio.Event()
         counter_lock = asyncio.Lock()
 
-        async def mock_check_health(database):
+        async def mock_check_health(database, connection=None):
             async with counter_lock:
                 db_probes_in_round[id(database)] += 1
                 # After 3 probes, increment the round counter

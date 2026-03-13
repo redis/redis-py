@@ -1,4 +1,5 @@
 import asyncio
+import threading
 from time import sleep
 
 import pytest
@@ -94,3 +95,167 @@ class TestBackgroundScheduler:
 
         # Use >= instead of == to account for timing variations on CI runners
         assert len(execute_counter) >= min_call_count
+
+    @pytest.mark.parametrize(
+        "interval,timeout,min_call_count",
+        [
+            (0.012, 0.04, 2),  # At least 2 calls
+            (0.035, 0.04, 1),
+            (0.045, 0.04, 0),
+        ],
+    )
+    def test_run_recurring_coro(self, interval, timeout, min_call_count):
+        """
+        Test that run_recurring_coro executes coroutines in a background thread.
+        This is used by sync MultiDBClient for async health checks.
+        """
+        execute_counter = []
+        one = "arg1"
+        two = 9999
+
+        async def coro_callback(arg1: str, arg2: int):
+            nonlocal execute_counter
+            execute_counter.append(1)
+            assert arg1 == one
+            assert arg2 == two
+
+        scheduler = BackgroundScheduler()
+        scheduler.run_recurring_coro(interval, coro_callback, one, two)
+        assert len(execute_counter) == 0
+
+        sleep(timeout)
+
+        # Use >= instead of == to account for timing variations on CI runners
+        assert len(execute_counter) >= min_call_count
+        scheduler.stop()
+
+    def test_run_recurring_coro_runs_in_background_thread(self):
+        """
+        Verify that run_recurring_coro executes in a separate thread,
+        not blocking the main thread.
+        """
+        main_thread_id = threading.current_thread().ident
+        coro_thread_ids = []
+
+        async def coro_callback():
+            coro_thread_ids.append(threading.current_thread().ident)
+
+        scheduler = BackgroundScheduler()
+        scheduler.run_recurring_coro(0.01, coro_callback)
+
+        sleep(0.05)  # Wait for at least one execution
+
+        assert len(coro_thread_ids) >= 1
+        # Coroutine should run in a different thread than main
+        assert all(tid != main_thread_id for tid in coro_thread_ids)
+        scheduler.stop()
+
+    def test_run_recurring_coro_supports_concurrent_execution(self):
+        """
+        Verify that multiple coroutines scheduled in the same background loop
+        can run concurrently (not blocking each other).
+        """
+        execution_order = []
+        lock = threading.Lock()
+
+        async def slow_coro(name: str):
+            with lock:
+                execution_order.append(f"{name}_start")
+            await asyncio.sleep(0.02)  # Simulate async I/O
+            with lock:
+                execution_order.append(f"{name}_end")
+
+        async def fast_coro(name: str):
+            with lock:
+                execution_order.append(f"{name}_start")
+            await asyncio.sleep(0.005)
+            with lock:
+                execution_order.append(f"{name}_end")
+
+        scheduler = BackgroundScheduler()
+        # Schedule both coroutines - they share the same event loop
+        scheduler.run_recurring_coro(0.01, slow_coro, "slow")
+        scheduler.run_recurring_coro(0.01, fast_coro, "fast")
+
+        sleep(0.1)
+        scheduler.stop()
+
+        # Both coroutines should have executed
+        assert "slow_start" in execution_order
+        assert "fast_start" in execution_order
+
+    def test_run_recurring_coro_with_timeout(self):
+        """
+        Test that asyncio.wait_for works correctly within run_recurring_coro,
+        which is critical for health check timeouts.
+        """
+        results = []
+
+        async def slow_operation():
+            await asyncio.sleep(1.0)  # Takes 1 second
+            return "completed"
+
+        async def coro_with_timeout():
+            try:
+                result = await asyncio.wait_for(slow_operation(), timeout=0.01)
+                results.append(("success", result))
+            except asyncio.TimeoutError:
+                results.append(("timeout", None))
+
+        scheduler = BackgroundScheduler()
+        scheduler.run_recurring_coro(0.02, coro_with_timeout)
+
+        sleep(0.1)
+        scheduler.stop()
+
+        # Should have at least one timeout result
+        assert len(results) >= 1
+        assert all(r[0] == "timeout" for r in results)
+
+    def test_run_recurring_coro_stops_cleanly(self):
+        """
+        Verify that stop() properly terminates the background event loop.
+        """
+        execute_counter = []
+
+        async def coro_callback():
+            execute_counter.append(1)
+
+        scheduler = BackgroundScheduler()
+        scheduler.run_recurring_coro(0.01, coro_callback)
+
+        sleep(0.05)
+        count_before_stop = len(execute_counter)
+        assert count_before_stop >= 1
+
+        scheduler.stop()
+        sleep(0.05)
+
+        # No more executions after stop
+        count_after_stop = len(execute_counter)
+        # Allow for at most 1 more execution due to timing
+        assert count_after_stop <= count_before_stop + 1
+
+    def test_run_recurring_coro_exception_does_not_stop_scheduler(self):
+        """
+        Verify that exceptions in coroutines don't crash the scheduler.
+        """
+        success_count = []
+        error_count = []
+
+        async def flaky_coro():
+            if len(success_count) % 2 == 0:
+                error_count.append(1)
+                raise ValueError("Simulated error")
+            success_count.append(1)
+
+        scheduler = BackgroundScheduler()
+        scheduler.run_recurring_coro(0.01, flaky_coro)
+
+        sleep(0.1)
+        scheduler.stop()
+
+        # Both successes and errors should have occurred
+        # (scheduler continues despite exceptions)
+        total_executions = len(success_count) + len(error_count)
+        assert total_executions >= 2

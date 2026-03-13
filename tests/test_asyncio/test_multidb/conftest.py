@@ -1,4 +1,4 @@
-from unittest.mock import Mock
+from unittest.mock import Mock, AsyncMock, patch
 
 import pytest
 
@@ -12,6 +12,7 @@ from redis.asyncio.multidb.failover import AsyncFailoverStrategy
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector
 from redis.asyncio.multidb.healthcheck import (
     HealthCheck,
+    AbstractHealthCheckPolicy,
     DEFAULT_HEALTH_CHECK_PROBES,
     DEFAULT_HEALTH_CHECK_INTERVAL,
     DEFAULT_HEALTH_CHECK_POLICY,
@@ -21,6 +22,31 @@ from redis.data_structure import WeightedList
 from redis.multidb.circuit import State as CBState, CircuitBreaker
 from redis.asyncio import Redis, ConnectionPool
 from redis.asyncio.multidb.database import Database, Databases
+
+
+@pytest.fixture(autouse=True)
+def mock_health_check_connections(request):
+    """
+    Mock connections for health check policies.
+    Uses real policy classes but mocks only the connection layer.
+
+    Skip this fixture for tests marked with @pytest.mark.no_mock_connections
+    """
+    # Check if the test is marked to skip connection mocking
+    if request.node.get_closest_marker("no_mock_connections"):
+        yield
+        return
+
+    async def mock_get_connections(self, database):
+        mock_pool = AsyncMock()
+        mock_conn = AsyncMock()
+        mock_pool.get_connection = AsyncMock(return_value=mock_conn)
+        mock_pool.release = AsyncMock()
+        mock_pool.disconnect = AsyncMock()
+        return [mock_pool]
+
+    with patch.object(AbstractHealthCheckPolicy, "get_connections", mock_get_connections):
+        yield
 
 
 @pytest.fixture()
@@ -50,55 +76,40 @@ def mock_hc() -> HealthCheck:
     # Use minimal delay for faster test execution
     mock.health_check_delay = 0.01
     mock.health_check_timeout = DEFAULT_HEALTH_CHECK_TIMEOUT
+    # check_health is async, so use AsyncMock
+    mock.check_health = AsyncMock(return_value=True)
     return mock
+
+
+def _create_mock_db(request) -> Database:
+    """Helper to create a mock Database with proper client setup."""
+    db = Mock(spec=Database)
+    db.weight = request.param.get("weight", 1.0)
+    db.client = Mock(spec=Redis)
+    db.client.connection_pool = Mock(spec=ConnectionPool)
+
+    cb = request.param.get("circuit", {})
+    mock_cb = Mock(spec=CircuitBreaker)
+    mock_cb.grace_period = cb.get("grace_period", 1.0)
+    mock_cb.state = cb.get("state", CBState.CLOSED)
+
+    db.circuit = mock_cb
+    return db
 
 
 @pytest.fixture()
 def mock_db(request) -> Database:
-    db = Mock(spec=Database)
-    db.weight = request.param.get("weight", 1.0)
-    db.client = Mock(spec=Redis)
-    db.client.connection_pool = Mock(spec=ConnectionPool)
-
-    cb = request.param.get("circuit", {})
-    mock_cb = Mock(spec=CircuitBreaker)
-    mock_cb.grace_period = cb.get("grace_period", 1.0)
-    mock_cb.state = cb.get("state", CBState.CLOSED)
-
-    db.circuit = mock_cb
-    return db
+    return _create_mock_db(request)
 
 
 @pytest.fixture()
 def mock_db1(request) -> Database:
-    db = Mock(spec=Database)
-    db.weight = request.param.get("weight", 1.0)
-    db.client = Mock(spec=Redis)
-    db.client.connection_pool = Mock(spec=ConnectionPool)
-
-    cb = request.param.get("circuit", {})
-    mock_cb = Mock(spec=CircuitBreaker)
-    mock_cb.grace_period = cb.get("grace_period", 1.0)
-    mock_cb.state = cb.get("state", CBState.CLOSED)
-
-    db.circuit = mock_cb
-    return db
+    return _create_mock_db(request)
 
 
 @pytest.fixture()
 def mock_db2(request) -> Database:
-    db = Mock(spec=Database)
-    db.weight = request.param.get("weight", 1.0)
-    db.client = Mock(spec=Redis)
-    db.client.connection_pool = Mock(spec=ConnectionPool)
-
-    cb = request.param.get("circuit", {})
-    mock_cb = Mock(spec=CircuitBreaker)
-    mock_cb.grace_period = cb.get("grace_period", 1.0)
-    mock_cb.state = cb.get("state", CBState.CLOSED)
-
-    db.circuit = mock_cb
-    return db
+    return _create_mock_db(request)
 
 
 @pytest.fixture()

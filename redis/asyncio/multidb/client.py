@@ -88,13 +88,24 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             await self.initialize()
         return self
 
-    async def __aexit__(self, exc_type, exc_value, traceback):
+    async def aclose(self):
+        # Cancel background tasks
         if self._recurring_hc_task:
             self._recurring_hc_task.cancel()
         if self._half_open_state_task:
             self._half_open_state_task.cancel()
         for hc_task in self._hc_tasks:
             hc_task.cancel()
+
+        # Close health check connection pools
+        await self._health_check_policy.close()
+
+        # Close database client
+        if self.command_executor.active_database:
+            await self.command_executor.active_database.client.aclose()
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        await self.aclose()
 
     async def initialize(self):
         """

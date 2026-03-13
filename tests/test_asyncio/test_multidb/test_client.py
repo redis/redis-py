@@ -95,7 +95,7 @@ class TestMultiDbClient:
                 return_value="NOT_OK-->Response from unexpected db - mock_db2"
             )
 
-            async def mock_check_health(database):
+            async def mock_check_health(database, connection=None):
                 if database == mock_db2:
                     return False
                 else:
@@ -157,7 +157,7 @@ class TestMultiDbClient:
         db_became_unhealthy = asyncio.Event()
         counter_lock = asyncio.Lock()
 
-        async def mock_check_health(database):
+        async def mock_check_health(database, connection=None):
             async with counter_lock:
                 db_probes_in_round[id(database)] += 1
                 # After 3 probes, increment the round counter
@@ -278,7 +278,7 @@ class TestMultiDbClient:
         db1_became_unhealthy = asyncio.Event()
         counter_lock = asyncio.Lock()
 
-        async def mock_check_health(database):
+        async def mock_check_health(database, connection=None):
             async with counter_lock:
                 db_probes_in_round[id(database)] += 1
                 if db_probes_in_round[id(database)] > 3:
@@ -367,7 +367,7 @@ class TestMultiDbClient:
         db1_became_unhealthy = asyncio.Event()
         counter_lock = asyncio.Lock()
 
-        async def mock_check_health(database):
+        async def mock_check_health(database, connection=None):
             async with counter_lock:
                 db_probes_in_round[id(database)] += 1
                 if db_probes_in_round[id(database)] > 3:
@@ -508,7 +508,7 @@ class TestMultiDbClient:
             mock_db2.client.execute_command.return_value = "OK2"
 
             # Health check returns True for existing databases, raises exception for new one
-            async def mock_check_health(database):
+            async def mock_check_health(database, connection=None):
                 if database in [mock_db, mock_db2]:
                     return True
                 # Raise an exception for the new database to trigger UnhealthyDatabaseException
@@ -969,7 +969,7 @@ class TestInitialHealthCheckPolicy:
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
 
-            async def mock_check_health(database):
+            async def mock_check_health(database, connection=None):
                 # mock_db2 is unhealthy
                 return database != mock_db2
 
@@ -1008,7 +1008,7 @@ class TestInitialHealthCheckPolicy:
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command.return_value = "OK1"
 
-            async def mock_check_health(database):
+            async def mock_check_health(database, connection=None):
                 # mock_db2 is unhealthy, but 2 out of 3 are healthy (majority)
                 return database != mock_db2
 
@@ -1043,7 +1043,7 @@ class TestInitialHealthCheckPolicy:
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
 
-            async def mock_check_health(database):
+            async def mock_check_health(database, connection=None):
                 # Only mock_db is healthy (1 out of 3 is not a majority)
                 return database == mock_db
 
@@ -1081,7 +1081,7 @@ class TestInitialHealthCheckPolicy:
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db.client.execute_command.return_value = "OK"
 
-            async def mock_check_health(database):
+            async def mock_check_health(database, connection=None):
                 # Only mock_db is healthy
                 return database == mock_db
 
@@ -1163,7 +1163,7 @@ class TestInitialHealthCheckPolicy:
                     health_check_timeout=2.0,
                 )
 
-            async def check_health(self, database) -> bool:
+            async def check_health(self, database, connection=None) -> bool:
                 import time
 
                 async with probe_lock:
@@ -1244,7 +1244,7 @@ class TestInitialHealthCheckPolicy:
                     health_check_timeout=0.1,
                 )
 
-            async def check_health(self, database) -> bool:
+            async def check_health(self, database, connection=None) -> bool:
                 # Sleep longer than the timeout
                 await asyncio.sleep(0.5)
                 return True
