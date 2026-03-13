@@ -75,12 +75,12 @@ class VectorSetCommands(CommandsProtocol):
         key: KeyT,
         vector: list[float] | bytes,
         element: str,
-        reduce_dim: int | None = ...,
-        cas: bool | None = ...,
-        quantization: QuantizationOptions | None = ...,
-        ef: Number | None = ...,
-        attributes: dict | str | None = ...,
-        numlinks: int | None = ...,
+        reduce_dim: int | None = None,
+        cas: bool | None = False,
+        quantization: QuantizationOptions | None = None,
+        ef: Number | None = None,
+        attributes: dict | str | None = None,
+        numlinks: int | None = None,
     ) -> int: ...
 
     @overload
@@ -89,12 +89,12 @@ class VectorSetCommands(CommandsProtocol):
         key: KeyT,
         vector: list[float] | bytes,
         element: str,
-        reduce_dim: int | None = ...,
-        cas: bool | None = ...,
-        quantization: QuantizationOptions | None = ...,
-        ef: Number | None = ...,
-        attributes: dict | str | None = ...,
-        numlinks: int | None = ...,
+        reduce_dim: int | None = None,
+        cas: bool | None = False,
+        quantization: QuantizationOptions | None = None,
+        ef: Number | None = None,
+        attributes: dict | str | None = None,
+        numlinks: int | None = None,
     ) -> Awaitable[int]: ...
 
     def vadd(
@@ -180,15 +180,15 @@ class VectorSetCommands(CommandsProtocol):
         self: SyncClientProtocol,
         key: KeyT,
         input: list[float] | bytes | str,
-        with_scores: bool | None = ...,
-        with_attribs: bool | None = ...,
-        count: int | None = ...,
-        ef: Number | None = ...,
-        filter: str | None = ...,
-        filter_ef: str | None = ...,
-        truth: bool | None = ...,
-        no_thread: bool | None = ...,
-        epsilon: Number | None = ...,
+        with_scores: bool | None = False,
+        with_attribs: bool | None = False,
+        count: int | None = None,
+        ef: Number | None = None,
+        filter: str | None = None,
+        filter_ef: str | None = None,
+        truth: bool | None = False,
+        no_thread: bool | None = False,
+        epsilon: Number | None = None,
     ) -> VSimResult: ...
 
     @overload
@@ -196,15 +196,15 @@ class VectorSetCommands(CommandsProtocol):
         self: AsyncClientProtocol,
         key: KeyT,
         input: list[float] | bytes | str,
-        with_scores: bool | None = ...,
-        with_attribs: bool | None = ...,
-        count: int | None = ...,
-        ef: Number | None = ...,
-        filter: str | None = ...,
-        filter_ef: str | None = ...,
-        truth: bool | None = ...,
-        no_thread: bool | None = ...,
-        epsilon: Number | None = ...,
+        with_scores: bool | None = False,
+        with_attribs: bool | None = False,
+        count: int | None = None,
+        ef: Number | None = None,
+        filter: str | None = None,
+        filter_ef: str | None = None,
+        truth: bool | None = False,
+        no_thread: bool | None = False,
+        epsilon: Number | None = None,
     ) -> Awaitable[VSimResult]: ...
 
     def vsim(
@@ -352,7 +352,7 @@ class VectorSetCommands(CommandsProtocol):
         self: SyncClientProtocol,
         key: KeyT,
         element: str,
-        raw: bool | None = ...,
+        raw: bool | None = False,
     ) -> VEmbResult: ...
 
     @overload
@@ -360,7 +360,7 @@ class VectorSetCommands(CommandsProtocol):
         self: AsyncClientProtocol,
         key: KeyT,
         element: str,
-        raw: bool | None = ...,
+        raw: bool | None = False,
     ) -> Awaitable[VEmbResult]: ...
 
     def vemb(
@@ -407,7 +407,7 @@ class VectorSetCommands(CommandsProtocol):
         self: SyncClientProtocol,
         key: KeyT,
         element: str,
-        with_scores: bool | None = ...,
+        with_scores: bool | None = False,
     ) -> VLinksResult: ...
 
     @overload
@@ -415,7 +415,7 @@ class VectorSetCommands(CommandsProtocol):
         self: AsyncClientProtocol,
         key: KeyT,
         element: str,
-        with_scores: bool | None = ...,
+        with_scores: bool | None = False,
     ) -> Awaitable[VLinksResult]: ...
 
     def vlinks(
@@ -443,12 +443,12 @@ class VectorSetCommands(CommandsProtocol):
         return self.execute_command(VLINKS_CMD, *pieces, **options)
 
     @overload
-    def vinfo(self: SyncClientProtocol, key: KeyT) -> dict: ...
+    def vinfo(self: SyncClientProtocol, key: KeyT) -> dict | None: ...
 
     @overload
-    def vinfo(self: AsyncClientProtocol, key: KeyT) -> Awaitable[dict]: ...
+    def vinfo(self: AsyncClientProtocol, key: KeyT) -> Awaitable[dict | None]: ...
 
-    def vinfo(self, key: KeyT) -> Awaitable[dict] | dict:
+    def vinfo(self, key: KeyT) -> (dict | None) | Awaitable[dict | None]:
         """
         Get information about a vector set.
 
@@ -461,7 +461,7 @@ class VectorSetCommands(CommandsProtocol):
         self: SyncClientProtocol,
         key: KeyT,
         element: str,
-        attributes: dict | str | None = ...,
+        attributes: dict | str | None = None,
     ) -> int: ...
 
     @overload
@@ -469,7 +469,7 @@ class VectorSetCommands(CommandsProtocol):
         self: AsyncClientProtocol,
         key: KeyT,
         element: str,
-        attributes: dict | str | None = ...,
+        attributes: dict | str | None = None,
     ) -> Awaitable[int]: ...
 
     def vsetattr(
@@ -516,12 +516,12 @@ class VectorSetCommands(CommandsProtocol):
 
     @overload
     def vrandmember(
-        self: SyncClientProtocol, key: KeyT, count: int | None = ...
+        self: SyncClientProtocol, key: KeyT, count: int | None = None
     ) -> VRandMemberResult: ...
 
     @overload
     def vrandmember(
-        self: AsyncClientProtocol, key: KeyT, count: int | None = ...
+        self: AsyncClientProtocol, key: KeyT, count: int | None = None
     ) -> Awaitable[VRandMemberResult]: ...
 
     def vrandmember(
@@ -556,7 +556,7 @@ class VectorSetCommands(CommandsProtocol):
         key: KeyT,
         start: str,
         end: str,
-        count: int | None = ...,
+        count: int | None = None,
     ) -> list[str]: ...
 
     @overload
@@ -565,7 +565,7 @@ class VectorSetCommands(CommandsProtocol):
         key: KeyT,
         start: str,
         end: str,
-        count: int | None = ...,
+        count: int | None = None,
     ) -> Awaitable[list[str]]: ...
 
     def vrange(

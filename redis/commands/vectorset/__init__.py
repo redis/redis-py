@@ -55,7 +55,7 @@ class VectorSet(_VectorSetBase):
     _is_async_client: Literal[False] = False
 
 
-class AsyncVectorSet(_VectorSetBase):
+class AsyncVectorSet(VectorSet):
     """Async VectorSet client."""
 
     _is_async_client: Literal[True] = True

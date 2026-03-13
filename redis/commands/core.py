@@ -40,7 +40,6 @@ from redis.asyncio.observability.recorder import (
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
 from redis.typing import (
     AbsExpiryT,
-    ACLCategoryResponse,
     ACLGetUserData,
     ACLLogData,
     AnyKeyT,
@@ -95,16 +94,16 @@ class ACLCommands(CommandsProtocol):
     @overload
     def acl_cat(
         self: SyncClientProtocol, category: str | None = None, **kwargs
-    ) -> ACLCategoryResponse: ...
+    ) -> list[bytes | str]: ...
 
     @overload
     def acl_cat(
         self: AsyncClientProtocol, category: str | None = None, **kwargs
-    ) -> Awaitable[ACLCategoryResponse]: ...
+    ) -> Awaitable[list[bytes | str]]: ...
 
     def acl_cat(
         self, category: str | None = None, **kwargs
-    ) -> ACLCategoryResponse | Awaitable[ACLCategoryResponse]:
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Returns a list of categories or commands within a category.
 
@@ -207,16 +206,16 @@ class ACLCommands(CommandsProtocol):
         return self.execute_command("ACL GETUSER", username, **kwargs)
 
     @overload
-    def acl_help(self: SyncClientProtocol, **kwargs) -> ACLCategoryResponse: ...
+    def acl_help(self: SyncClientProtocol, **kwargs) -> list[bytes | str]: ...
 
     @overload
     def acl_help(
         self: AsyncClientProtocol, **kwargs
-    ) -> Awaitable[ACLCategoryResponse]: ...
+    ) -> Awaitable[list[bytes | str]]: ...
 
     def acl_help(
         self, **kwargs
-    ) -> ACLCategoryResponse | Awaitable[ACLCategoryResponse]:
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """The ACL HELP command returns helpful text describing
         the different subcommands.
 
@@ -225,16 +224,16 @@ class ACLCommands(CommandsProtocol):
         return self.execute_command("ACL HELP", **kwargs)
 
     @overload
-    def acl_list(self: SyncClientProtocol, **kwargs) -> ACLCategoryResponse: ...
+    def acl_list(self: SyncClientProtocol, **kwargs) -> list[bytes | str]: ...
 
     @overload
     def acl_list(
         self: AsyncClientProtocol, **kwargs
-    ) -> Awaitable[ACLCategoryResponse]: ...
+    ) -> Awaitable[list[bytes | str]]: ...
 
     def acl_list(
         self, **kwargs
-    ) -> ACLCategoryResponse | Awaitable[ACLCategoryResponse]:
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return a list of all ACLs on the server
 
@@ -552,16 +551,16 @@ class ACLCommands(CommandsProtocol):
         return self.execute_command("ACL SETUSER", *pieces, **kwargs)
 
     @overload
-    def acl_users(self: SyncClientProtocol, **kwargs) -> ACLCategoryResponse: ...
+    def acl_users(self: SyncClientProtocol, **kwargs) -> list[bytes | str]: ...
 
     @overload
     def acl_users(
         self: AsyncClientProtocol, **kwargs
-    ) -> Awaitable[ACLCategoryResponse]: ...
+    ) -> Awaitable[list[bytes | str]]: ...
 
     def acl_users(
         self, **kwargs
-    ) -> ACLCategoryResponse | Awaitable[ACLCategoryResponse]:
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """Returns a list of all registered users on the server.
 
         For more information, see https://redis.io/commands/acl-users

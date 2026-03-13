@@ -11,13 +11,14 @@ Work on one batch at a time. Each batch contains methods grouped by command clas
 ### Step 2: For Each Method in the Batch
 1. **Verify the return type** by checking Redis docs at https://redis.io/commands
 2. **Add two `@overload` signatures** before the method when the sync and async return types differ:
-   - One for sync (`self: Redis[...]`) returning the sync type
-   - One for async (`self: AsyncRedis[...]`) returning `Awaitable[sync_type]`
+   - One for sync (`self: SyncClientProtocol`) returning the sync type
+   - One for async (`self: AsyncClientProtocol`) returning `Awaitable[sync_type]`
    - If both clients return the same concrete type, keep a single typed method instead of adding redundant overloads
 3. **Mirror the full input signature exactly** in both overloads:
    - Same parameter names, order, defaults, positional/keyword shape, `*args`, and `**kwargs` as the implementation
    - Use the same modern annotation style as return types: prefer `X | Y` and `T | None` over `Union[...]` / `Optional[...]`
 4. **Keep the original implementation** unchanged except for signature annotation normalization when needed
+   - For implementation return unions, prefer the readable order `SyncType | Awaitable[SyncType]` (for example `(dict | None) | Awaitable[dict | None]`)
 5. **Run type checker** to verify no errors
 
 ### Step 3: Mark Batch Complete
@@ -185,8 +186,8 @@ For commands with protocol-specific differences, use the **most permissive union
 | 33 | `client_unblock` | `bool` | `Awaitable[bool]` | ✅ | Base: bool (converts int) |
 | 34 | `client_pause` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
 | 35 | `client_unpause` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - returns raw OK |
-| 36 | `client_no_evict` | `bool` | `Awaitable[bool]` | 📋 | Base: bool_ok |
-| 37 | `client_no_touch` | `bool` | `Awaitable[bool]` | 📋 | Base: bool_ok |
+| 36 | `client_no_evict` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - returns raw OK |
+| 37 | `client_no_touch` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - returns raw OK |
 | 38 | `command` | `list` | `Awaitable[list]` | ✅ | Base: parse_command / RESP3: parse_command_resp3 |
 | 39 | `command_info` | `None` | `None` | ⚠️ SKIP | N/A |
 | 40 | `command_count` | `int` | `Awaitable[int]` | ✅ | Integer reply |
@@ -196,7 +197,7 @@ For commands with protocol-specific differences, use the **most permissive union
 | 44 | `config_get` | `dict[str, str]` | `Awaitable[dict[str, str]]` | ✅ | RESP2: parse_config_get / RESP3: lambda |
 | 45 | `config_set` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
 | 46 | `config_resetstat` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
-| 47 | `config_rewrite` | `bool` | `Awaitable[bool]` | ✅ | No callback - returns OK |
+| 47 | `config_rewrite` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - returns raw OK |
 | 48 | `dbsize` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 49 | `debug_object` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | RESP2: parse_debug_object / RESP3: raw |
 | 50 | `debug_segfault` | `None` | `None` | ⚠️ SKIP | N/A |
@@ -805,6 +806,6 @@ For each batch:
    - `_RedisCallbacksRESP3` - RESP3-specific overrides
 2. **Protocol-Specific Types** - When RESP2 and RESP3 have different callbacks, use the most permissive union type
 3. **Import considerations** - Make sure `TYPE_CHECKING`, `overload`, and `Awaitable` are imported
-4. **Self-type discrimination** - Use `self: "Redis[bytes]"` and `self: "AsyncRedis[bytes]"` patterns
+4. **Self-type discrimination** - Use `self: SyncClientProtocol` and `self: AsyncClientProtocol`
 5. **Keep original method** - Only add overloads, don't modify the actual implementation
 6. **No callback = raw response** - If a command has no callback, return type depends on `decode_responses`

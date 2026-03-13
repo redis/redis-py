@@ -61,7 +61,6 @@ ConsumerT = _StringLikeT  # Consumer name
 StreamIdT = Union[int, _StringLikeT]
 ScriptTextT = _StringLikeT
 TimeoutSecT = Union[int, float, _StringLikeT]
-ACLCategoryResponse = list[bytes | str]
 ACLGetUserData = (
     dict[str, bool | list[str] | list[list[str]] | list[dict[str, str]]] | None
 )

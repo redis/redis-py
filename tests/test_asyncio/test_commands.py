@@ -28,7 +28,6 @@ from redis.commands.search.field import TextField
 from redis.commands.search.query import Query
 from redis.utils import safe_str
 
-# import redis
 import redis.asyncio as redis
 from tests.conftest import (
     assert_resp_response,
