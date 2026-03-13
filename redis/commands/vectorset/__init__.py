@@ -55,7 +55,13 @@ class VectorSet(_VectorSetBase):
     _is_async_client: Literal[False] = False
 
 
-class AsyncVectorSet(VectorSet):
-    """Async VectorSet client."""
+class AsyncVectorSet(_VectorSetBase):
+    """Async VectorSet client.
+
+    Note: Inherits from _VectorSetBase (not VectorSet) to maintain proper
+    type discrimination. If AsyncVectorSet inherited from VectorSet, the
+    type system would see it as a subtype of SyncClientProtocol, causing
+    @overload resolution to incorrectly infer sync return types.
+    """
 
     _is_async_client: Literal[True] = True

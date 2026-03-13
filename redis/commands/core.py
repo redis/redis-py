@@ -218,9 +218,7 @@ class ACLCommands(CommandsProtocol):
         self: AsyncClientProtocol, **kwargs
     ) -> Awaitable[list[bytes | str]]: ...
 
-    def acl_help(
-        self, **kwargs
-    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+    def acl_help(self, **kwargs) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """The ACL HELP command returns helpful text describing
         the different subcommands.
 
@@ -236,9 +234,7 @@ class ACLCommands(CommandsProtocol):
         self: AsyncClientProtocol, **kwargs
     ) -> Awaitable[list[bytes | str]]: ...
 
-    def acl_list(
-        self, **kwargs
-    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+    def acl_list(self, **kwargs) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return a list of all ACLs on the server
 
@@ -563,9 +559,7 @@ class ACLCommands(CommandsProtocol):
         self: AsyncClientProtocol, **kwargs
     ) -> Awaitable[list[bytes | str]]: ...
 
-    def acl_users(
-        self, **kwargs
-    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+    def acl_users(self, **kwargs) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """Returns a list of all registered users on the server.
 
         For more information, see https://redis.io/commands/acl-users
@@ -4589,9 +4583,9 @@ class ListCommands(CommandsProtocol):
         self: AsyncClientProtocol, src: KeyT, dst: KeyT, timeout: Number | None = 0
     ) -> Awaitable[bytes | str | None]: ...
 
-    def brpoplpush(
-        self, src: KeyT, dst: KeyT, timeout: Number | None = 0
-    ) -> (bytes | str | None) | Awaitable[bytes | str | None]:
+    def brpoplpush(self, src: KeyT, dst: KeyT, timeout: Number | None = 0) -> (
+        bytes | str | None
+    ) | Awaitable[bytes | str | None]:
         """
         Pop a value off the tail of ``src``, push it on the head of ``dst``
         and then return it.
@@ -4685,16 +4679,18 @@ class ListCommands(CommandsProtocol):
         return self.execute_command("LMPOP", *cmd_args)
 
     @overload
-    def lindex(self: SyncClientProtocol, name: KeyT, index: int) -> bytes | str | None: ...
+    def lindex(
+        self: SyncClientProtocol, name: KeyT, index: int
+    ) -> bytes | str | None: ...
 
     @overload
     def lindex(
         self: AsyncClientProtocol, name: KeyT, index: int
     ) -> Awaitable[bytes | str | None]: ...
 
-    def lindex(
-        self, name: KeyT, index: int
-    ) -> (bytes | str | None) | Awaitable[bytes | str | None]:
+    def lindex(self, name: KeyT, index: int) -> (bytes | str | None) | Awaitable[
+        bytes | str | None
+    ]:
         """
         Return the item from list ``name`` at position ``index``
 
@@ -4782,7 +4778,9 @@ class ListCommands(CommandsProtocol):
     def lpush(self: SyncClientProtocol, name: KeyT, *values: FieldT) -> int: ...
 
     @overload
-    def lpush(self: AsyncClientProtocol, name: KeyT, *values: FieldT) -> Awaitable[int]: ...
+    def lpush(
+        self: AsyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> Awaitable[int]: ...
 
     def lpush(self, name: KeyT, *values: FieldT) -> int | Awaitable[int]:
         """
@@ -4926,16 +4924,18 @@ class ListCommands(CommandsProtocol):
             return self.execute_command("RPOP", name)
 
     @overload
-    def rpoplpush(self: SyncClientProtocol, src: KeyT, dst: KeyT) -> bytes | str | None: ...
+    def rpoplpush(
+        self: SyncClientProtocol, src: KeyT, dst: KeyT
+    ) -> bytes | str | None: ...
 
     @overload
     def rpoplpush(
         self: AsyncClientProtocol, src: KeyT, dst: KeyT
     ) -> Awaitable[bytes | str | None]: ...
 
-    def rpoplpush(
-        self, src: KeyT, dst: KeyT
-    ) -> (bytes | str | None) | Awaitable[bytes | str | None]:
+    def rpoplpush(self, src: KeyT, dst: KeyT) -> (bytes | str | None) | Awaitable[
+        bytes | str | None
+    ]:
         """
         RPOP a value off of the ``src`` list and atomically LPUSH it
         on to the ``dst`` list.  Returns the value.
@@ -4948,7 +4948,9 @@ class ListCommands(CommandsProtocol):
     def rpush(self: SyncClientProtocol, name: KeyT, *values: FieldT) -> int: ...
 
     @overload
-    def rpush(self: AsyncClientProtocol, name: KeyT, *values: FieldT) -> Awaitable[int]: ...
+    def rpush(
+        self: AsyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> Awaitable[int]: ...
 
     def rpush(self, name: KeyT, *values: FieldT) -> int | Awaitable[int]:
         """
@@ -4962,7 +4964,9 @@ class ListCommands(CommandsProtocol):
     def rpushx(self: SyncClientProtocol, name: KeyT, *values: str) -> int: ...
 
     @overload
-    def rpushx(self: AsyncClientProtocol, name: KeyT, *values: str) -> Awaitable[int]: ...
+    def rpushx(
+        self: AsyncClientProtocol, name: KeyT, *values: str
+    ) -> Awaitable[int]: ...
 
     def rpushx(self, name: KeyT, *values: str) -> int | Awaitable[int]:
         """
@@ -5621,7 +5625,9 @@ class SetCommands(CommandsProtocol):
     def sadd(self: SyncClientProtocol, name: KeyT, *values: FieldT) -> int: ...
 
     @overload
-    def sadd(self: AsyncClientProtocol, name: KeyT, *values: FieldT) -> Awaitable[int]: ...
+    def sadd(
+        self: AsyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> Awaitable[int]: ...
 
     def sadd(self, name: KeyT, *values: FieldT) -> int | Awaitable[int]:
         """
@@ -5646,14 +5652,18 @@ class SetCommands(CommandsProtocol):
         return self.execute_command("SCARD", name, keys=[name])
 
     @overload
-    def sdiff(self: SyncClientProtocol, keys: List, *args: List) -> set[bytes | str]: ...
+    def sdiff(
+        self: SyncClientProtocol, keys: List, *args: List
+    ) -> set[bytes | str]: ...
 
     @overload
     def sdiff(
         self: AsyncClientProtocol, keys: List, *args: List
     ) -> Awaitable[set[bytes | str]]: ...
 
-    def sdiff(self, keys: List, *args: List) -> set[bytes | str] | Awaitable[set[bytes | str]]:
+    def sdiff(
+        self, keys: List, *args: List
+    ) -> set[bytes | str] | Awaitable[set[bytes | str]]:
         """
         Return the difference of sets specified by ``keys``
 
@@ -5663,7 +5673,9 @@ class SetCommands(CommandsProtocol):
         return self.execute_command("SDIFF", *args, keys=args)
 
     @overload
-    def sdiffstore(self: SyncClientProtocol, dest: str, keys: List, *args: List) -> int: ...
+    def sdiffstore(
+        self: SyncClientProtocol, dest: str, keys: List, *args: List
+    ) -> int: ...
 
     @overload
     def sdiffstore(
@@ -5681,14 +5693,18 @@ class SetCommands(CommandsProtocol):
         return self.execute_command("SDIFFSTORE", dest, *args)
 
     @overload
-    def sinter(self: SyncClientProtocol, keys: List, *args: List) -> set[bytes | str]: ...
+    def sinter(
+        self: SyncClientProtocol, keys: List, *args: List
+    ) -> set[bytes | str]: ...
 
     @overload
     def sinter(
         self: AsyncClientProtocol, keys: List, *args: List
     ) -> Awaitable[set[bytes | str]]: ...
 
-    def sinter(self, keys: List, *args: List) -> set[bytes | str] | Awaitable[set[bytes | str]]:
+    def sinter(
+        self, keys: List, *args: List
+    ) -> set[bytes | str] | Awaitable[set[bytes | str]]:
         """
         Return the intersection of sets specified by ``keys``
 
@@ -5707,7 +5723,9 @@ class SetCommands(CommandsProtocol):
         self: AsyncClientProtocol, numkeys: int, keys: List[KeyT], limit: int = 0
     ) -> Awaitable[int]: ...
 
-    def sintercard(self, numkeys: int, keys: List[KeyT], limit: int = 0) -> int | Awaitable[int]:
+    def sintercard(
+        self, numkeys: int, keys: List[KeyT], limit: int = 0
+    ) -> int | Awaitable[int]:
         """
         Return the cardinality of the intersect of multiple sets specified by ``keys``.
 
@@ -5750,9 +5768,9 @@ class SetCommands(CommandsProtocol):
         self: AsyncClientProtocol, name: KeyT, value: str
     ) -> Awaitable[Literal[0] | Literal[1]]: ...
 
-    def sismember(
-        self, name: KeyT, value: str
-    ) -> (Literal[0] | Literal[1]) | Awaitable[Literal[0] | Literal[1]]:
+    def sismember(self, name: KeyT, value: str) -> (
+        Literal[0] | Literal[1]
+    ) | Awaitable[Literal[0] | Literal[1]]:
         """
         Return whether ``value`` is a member of set ``name``:
         - 1 if the value is a member of the set.
@@ -5828,11 +5846,9 @@ class SetCommands(CommandsProtocol):
         self: AsyncClientProtocol, name: KeyT, count: int | None = None
     ) -> Awaitable[bytes | str | set[bytes | str] | None]: ...
 
-    def spop(
-        self, name: KeyT, count: int | None = None
-    ) -> (bytes | str | set[bytes | str] | None) | Awaitable[
+    def spop(self, name: KeyT, count: int | None = None) -> (
         bytes | str | set[bytes | str] | None
-    ]:
+    ) | Awaitable[bytes | str | set[bytes | str] | None]:
         """
         Remove and return a random member of set ``name``
 
@@ -5851,11 +5867,9 @@ class SetCommands(CommandsProtocol):
         self: AsyncClientProtocol, name: KeyT, number: int | None = None
     ) -> Awaitable[bytes | str | list[bytes | str] | None]: ...
 
-    def srandmember(
-        self, name: KeyT, number: int | None = None
-    ) -> (bytes | str | list[bytes | str] | None) | Awaitable[
+    def srandmember(self, name: KeyT, number: int | None = None) -> (
         bytes | str | list[bytes | str] | None
-    ]:
+    ) | Awaitable[bytes | str | list[bytes | str] | None]:
         """
         If ``number`` is None, returns a random member of set ``name``.
 
@@ -5872,7 +5886,9 @@ class SetCommands(CommandsProtocol):
     def srem(self: SyncClientProtocol, name: KeyT, *values: FieldT) -> int: ...
 
     @overload
-    def srem(self: AsyncClientProtocol, name: KeyT, *values: FieldT) -> Awaitable[int]: ...
+    def srem(
+        self: AsyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> Awaitable[int]: ...
 
     def srem(self, name: KeyT, *values: FieldT) -> int | Awaitable[int]:
         """
@@ -5883,14 +5899,18 @@ class SetCommands(CommandsProtocol):
         return self.execute_command("SREM", name, *values)
 
     @overload
-    def sunion(self: SyncClientProtocol, keys: List, *args: List) -> set[bytes | str]: ...
+    def sunion(
+        self: SyncClientProtocol, keys: List, *args: List
+    ) -> set[bytes | str]: ...
 
     @overload
     def sunion(
         self: AsyncClientProtocol, keys: List, *args: List
     ) -> Awaitable[set[bytes | str]]: ...
 
-    def sunion(self, keys: List, *args: List) -> set[bytes | str] | Awaitable[set[bytes | str]]:
+    def sunion(
+        self, keys: List, *args: List
+    ) -> set[bytes | str] | Awaitable[set[bytes | str]]:
         """
         Return the union of sets specified by ``keys``
 
