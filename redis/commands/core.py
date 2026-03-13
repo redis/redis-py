@@ -8981,11 +8981,6 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HSETNX", name, key, value)
 
-    @deprecated_function(
-        version="4.0.0",
-        reason="Use 'hset' instead.",
-        name="hmset",
-    )
     @overload
     def hmset(self: SyncClientProtocol, name: str, mapping: dict) -> bool: ...
 
@@ -8994,6 +8989,11 @@ class HashCommands(CommandsProtocol):
         self: AsyncClientProtocol, name: str, mapping: dict
     ) -> Awaitable[bool]: ...
 
+    @deprecated_function(
+        version="4.0.0",
+        reason="Use 'hset' instead.",
+        name="hmset",
+    )
     def hmset(self, name: str, mapping: dict) -> bool | Awaitable[bool]:
         """
         Set key to value within hash ``name`` for each corresponding

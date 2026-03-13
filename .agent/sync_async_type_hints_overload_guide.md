@@ -19,6 +19,7 @@ Work on one batch at a time. Each batch contains methods grouped by command clas
    - Use the same modern annotation style as return types: prefer `X | Y` and `T | None` over `Union[...]` / `Optional[...]`
 4. **Keep the original implementation** unchanged except for signature annotation normalization when needed
    - For implementation return unions, prefer the readable order `SyncType | Awaitable[SyncType]` (for example `(dict | None) | Awaitable[dict | None]`)
+   - Runtime decorators such as deprecation or experimental markers must stay on the real implementation, not on `@overload` stubs. Put those decorators immediately above the implementation `def` after the overload block.
 5. **Run type checker** to verify no errors
 
 ### Step 3: Mark Batch Complete
