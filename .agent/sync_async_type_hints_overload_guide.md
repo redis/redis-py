@@ -323,11 +323,11 @@ For commands with protocol-specific differences, use the **most permissive union
 ### BATCH 6: ListCommands (core.py) - Methods 157-178
 | # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 157 | `blpop` | `tuple[bytes \| str, bytes \| str] \| None` | `Awaitable[tuple[bytes \| str, bytes \| str] \| None]` | ✅ | RESP2: lambda tuple / RESP3: raw |
-| 158 | `brpop` | `tuple[bytes \| str, bytes \| str] \| None` | `Awaitable[tuple[bytes \| str, bytes \| str] \| None]` | ✅ | RESP2: lambda tuple / RESP3: raw |
+| 157 | `blpop` | `tuple[bytes \| str, bytes \| str] \| list[bytes \| str] \| None` | `Awaitable[tuple[bytes \| str, bytes \| str] \| list[bytes \| str] \| None]` | ✅ | RESP2: tuple / RESP3: raw list |
+| 158 | `brpop` | `tuple[bytes \| str, bytes \| str] \| list[bytes \| str] \| None` | `Awaitable[tuple[bytes \| str, bytes \| str] \| list[bytes \| str] \| None]` | ✅ | RESP2: tuple / RESP3: raw list |
 | 159 | `brpoplpush` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ | No callback - raw |
-| 160 | `blmpop` | `list[bytes \| str] \| None` | `Awaitable[list[bytes \| str] \| None]` | ✅ | No callback - raw |
-| 161 | `lmpop` | `list[bytes \| str] \| None` | `Awaitable[list[bytes \| str] \| None]` | ✅ | No callback - raw |
+| 160 | `blmpop` | `list[bytes \| str \| list[bytes \| str]] \| None` | `Awaitable[list[bytes \| str \| list[bytes \| str]] \| None]` | ✅ | No callback - nested [key, values] shape |
+| 161 | `lmpop` | `list[bytes \| str \| list[bytes \| str]] \| None` | `Awaitable[list[bytes \| str \| list[bytes \| str]] \| None]` | ✅ | No callback - nested [key, values] shape |
 | 162 | `lindex` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ | No callback - raw |
 | 163 | `linsert` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 164 | `llen` | `int` | `Awaitable[int]` | ✅ | Integer reply |
@@ -343,7 +343,7 @@ For commands with protocol-specific differences, use the **most permissive union
 | 174 | `rpush` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 175 | `rpushx` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 176 | `lpos` | `int \| list[int] \| None` | `Awaitable[int \| list[int] \| None]` | ✅ | Varies by COUNT/RANK |
-| 177 | `sort` | `list[bytes \| str] \| int` | `Awaitable[list[bytes \| str] \| int]` | ✅ | Base: sort_return_tuples |
+| 177 | `sort` | `list[bytes \| str] \| list[tuple[bytes \| str, ...]] \| int` | `Awaitable[list[bytes \| str] \| list[tuple[bytes \| str, ...]] \| int]` | ✅ | Base: sort_return_tuples incl. grouped tuples |
 | 178 | `sort_ro` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | No callback - raw array |
 
 ### BATCH 7: ScanCommands + SetCommands (core.py) - Methods 179-202

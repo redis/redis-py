@@ -45,6 +45,7 @@ from redis.typing import (
     AnyKeyT,
     AsyncClientProtocol,
     BitfieldOffsetT,
+    BlockingListPopResponse,
     ChannelT,
     CommandGetKeysAndFlagsResponse,
     CommandsProtocol,
@@ -55,10 +56,12 @@ from redis.typing import (
     GroupT,
     KeysT,
     KeyT,
+    ListMultiPopResponse,
     Number,
     PatternT,
     ResponseT,
     ScriptTextT,
+    SortResponse,
     StralgoResponse,
     StreamIdT,
     SyncClientProtocol,
@@ -4512,9 +4515,19 @@ class ListCommands(CommandsProtocol):
     see: https://redis.io/topics/data-types#lists
     """
 
+    @overload
     def blpop(
-        self, keys: KeysT, timeout: Optional[Number] = 0
-    ) -> Union[Awaitable[list], list]:
+        self: SyncClientProtocol, keys: KeysT, timeout: Number | None = 0
+    ) -> BlockingListPopResponse: ...
+
+    @overload
+    def blpop(
+        self: AsyncClientProtocol, keys: KeysT, timeout: Number | None = 0
+    ) -> Awaitable[BlockingListPopResponse]: ...
+
+    def blpop(
+        self, keys: KeysT, timeout: Number | None = 0
+    ) -> BlockingListPopResponse | Awaitable[BlockingListPopResponse]:
         """
         LPOP a value off of the first non-empty list
         named in ``keys``.
@@ -4533,9 +4546,19 @@ class ListCommands(CommandsProtocol):
         keys.append(timeout)
         return self.execute_command("BLPOP", *keys)
 
+    @overload
     def brpop(
-        self, keys: KeysT, timeout: Optional[Number] = 0
-    ) -> Union[Awaitable[list], list]:
+        self: SyncClientProtocol, keys: KeysT, timeout: Number | None = 0
+    ) -> BlockingListPopResponse: ...
+
+    @overload
+    def brpop(
+        self: AsyncClientProtocol, keys: KeysT, timeout: Number | None = 0
+    ) -> Awaitable[BlockingListPopResponse]: ...
+
+    def brpop(
+        self, keys: KeysT, timeout: Number | None = 0
+    ) -> BlockingListPopResponse | Awaitable[BlockingListPopResponse]:
         """
         RPOP a value off of the first non-empty list
         named in ``keys``.
@@ -4554,9 +4577,19 @@ class ListCommands(CommandsProtocol):
         keys.append(timeout)
         return self.execute_command("BRPOP", *keys)
 
+    @overload
     def brpoplpush(
-        self, src: KeyT, dst: KeyT, timeout: Optional[Number] = 0
-    ) -> Union[Awaitable[Optional[str]], Optional[str]]:
+        self: SyncClientProtocol, src: KeyT, dst: KeyT, timeout: Number | None = 0
+    ) -> bytes | str | None: ...
+
+    @overload
+    def brpoplpush(
+        self: AsyncClientProtocol, src: KeyT, dst: KeyT, timeout: Number | None = 0
+    ) -> Awaitable[bytes | str | None]: ...
+
+    def brpoplpush(
+        self, src: KeyT, dst: KeyT, timeout: Number | None = 0
+    ) -> (bytes | str | None) | Awaitable[bytes | str | None]:
         """
         Pop a value off the tail of ``src``, push it on the head of ``dst``
         and then return it.
@@ -4571,14 +4604,34 @@ class ListCommands(CommandsProtocol):
             timeout = 0
         return self.execute_command("BRPOPLPUSH", src, dst, timeout)
 
+    @overload
+    def blmpop(
+        self: SyncClientProtocol,
+        timeout: float,
+        numkeys: int,
+        *args: str,
+        direction: str,
+        count: int | None = 1,
+    ) -> ListMultiPopResponse: ...
+
+    @overload
+    def blmpop(
+        self: AsyncClientProtocol,
+        timeout: float,
+        numkeys: int,
+        *args: str,
+        direction: str,
+        count: int | None = 1,
+    ) -> Awaitable[ListMultiPopResponse]: ...
+
     def blmpop(
         self,
         timeout: float,
         numkeys: int,
         *args: str,
         direction: str,
-        count: Optional[int] = 1,
-    ) -> Optional[list]:
+        count: int | None = 1,
+    ) -> ListMultiPopResponse | Awaitable[ListMultiPopResponse]:
         """
         Pop ``count`` values (default 1) from first non-empty in the list
         of provided key names.
@@ -4592,13 +4645,31 @@ class ListCommands(CommandsProtocol):
 
         return self.execute_command("BLMPOP", *cmd_args)
 
+    @overload
+    def lmpop(
+        self: SyncClientProtocol,
+        num_keys: int,
+        *args: str,
+        direction: str,
+        count: int | None = 1,
+    ) -> ListMultiPopResponse: ...
+
+    @overload
+    def lmpop(
+        self: AsyncClientProtocol,
+        num_keys: int,
+        *args: str,
+        direction: str,
+        count: int | None = 1,
+    ) -> Awaitable[ListMultiPopResponse]: ...
+
     def lmpop(
         self,
         num_keys: int,
         *args: str,
         direction: str,
-        count: Optional[int] = 1,
-    ) -> Union[Awaitable[list], list]:
+        count: int | None = 1,
+    ) -> ListMultiPopResponse | Awaitable[ListMultiPopResponse]:
         """
         Pop ``count`` values (default 1) first non-empty list key from the list
         of args provided key names.
@@ -4611,9 +4682,17 @@ class ListCommands(CommandsProtocol):
 
         return self.execute_command("LMPOP", *cmd_args)
 
+    @overload
+    def lindex(self: SyncClientProtocol, name: KeyT, index: int) -> bytes | str | None: ...
+
+    @overload
+    def lindex(
+        self: AsyncClientProtocol, name: KeyT, index: int
+    ) -> Awaitable[bytes | str | None]: ...
+
     def lindex(
         self, name: KeyT, index: int
-    ) -> Union[Awaitable[Optional[str]], Optional[str]]:
+    ) -> (bytes | str | None) | Awaitable[bytes | str | None]:
         """
         Return the item from list ``name`` at position ``index``
 
@@ -4624,9 +4703,19 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LINDEX", name, index, keys=[name])
 
+    @overload
+    def linsert(
+        self: SyncClientProtocol, name: KeyT, where: str, refvalue: str, value: str
+    ) -> int: ...
+
+    @overload
+    def linsert(
+        self: AsyncClientProtocol, name: KeyT, where: str, refvalue: str, value: str
+    ) -> Awaitable[int]: ...
+
     def linsert(
         self, name: KeyT, where: str, refvalue: str, value: str
-    ) -> Union[Awaitable[int], int]:
+    ) -> int | Awaitable[int]:
         """
         Insert ``value`` in list ``name`` either immediately before or after
         [``where``] ``refvalue``
@@ -4638,7 +4727,13 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LINSERT", name, where, refvalue, value)
 
-    def llen(self, name: KeyT) -> Union[Awaitable[int], int]:
+    @overload
+    def llen(self: SyncClientProtocol, name: KeyT) -> int: ...
+
+    @overload
+    def llen(self: AsyncClientProtocol, name: KeyT) -> Awaitable[int]: ...
+
+    def llen(self, name: KeyT) -> int | Awaitable[int]:
         """
         Return the length of the list ``name``
 
@@ -4646,11 +4741,27 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LLEN", name, keys=[name])
 
+    @overload
+    def lpop(
+        self: SyncClientProtocol,
+        name: KeyT,
+        count: int | None = None,
+    ) -> bytes | str | list[bytes | str] | None: ...
+
+    @overload
+    def lpop(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        count: int | None = None,
+    ) -> Awaitable[bytes | str | list[bytes | str] | None]: ...
+
     def lpop(
         self,
         name: KeyT,
-        count: Optional[int] = None,
-    ) -> Union[Awaitable[Union[str, List, None]], Union[str, List, None]]:
+        count: int | None = None,
+    ) -> (bytes | str | list[bytes | str] | None) | Awaitable[
+        bytes | str | list[bytes | str] | None
+    ]:
         """
         Removes and returns the first elements of the list ``name``.
 
@@ -4665,7 +4776,13 @@ class ListCommands(CommandsProtocol):
         else:
             return self.execute_command("LPOP", name)
 
-    def lpush(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
+    @overload
+    def lpush(self: SyncClientProtocol, name: KeyT, *values: FieldT) -> int: ...
+
+    @overload
+    def lpush(self: AsyncClientProtocol, name: KeyT, *values: FieldT) -> Awaitable[int]: ...
+
+    def lpush(self, name: KeyT, *values: FieldT) -> int | Awaitable[int]:
         """
         Push ``values`` onto the head of the list ``name``
 
@@ -4673,7 +4790,15 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LPUSH", name, *values)
 
-    def lpushx(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
+    @overload
+    def lpushx(self: SyncClientProtocol, name: KeyT, *values: FieldT) -> int: ...
+
+    @overload
+    def lpushx(
+        self: AsyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> Awaitable[int]: ...
+
+    def lpushx(self, name: KeyT, *values: FieldT) -> int | Awaitable[int]:
         """
         Push ``value`` onto the head of the list ``name`` if ``name`` exists
 
@@ -4681,7 +4806,19 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LPUSHX", name, *values)
 
-    def lrange(self, name: KeyT, start: int, end: int) -> Union[Awaitable[list], list]:
+    @overload
+    def lrange(
+        self: SyncClientProtocol, name: KeyT, start: int, end: int
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def lrange(
+        self: AsyncClientProtocol, name: KeyT, start: int, end: int
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def lrange(
+        self, name: KeyT, start: int, end: int
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return a slice of the list ``name`` between
         position ``start`` and ``end``
@@ -4693,7 +4830,15 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LRANGE", name, start, end, keys=[name])
 
-    def lrem(self, name: KeyT, count: int, value: str) -> Union[Awaitable[int], int]:
+    @overload
+    def lrem(self: SyncClientProtocol, name: KeyT, count: int, value: str) -> int: ...
+
+    @overload
+    def lrem(
+        self: AsyncClientProtocol, name: KeyT, count: int, value: str
+    ) -> Awaitable[int]: ...
+
+    def lrem(self, name: KeyT, count: int, value: str) -> int | Awaitable[int]:
         """
         Remove the first ``count`` occurrences of elements equal to ``value``
         from the list stored at ``name``.
@@ -4707,7 +4852,15 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LREM", name, count, value)
 
-    def lset(self, name: KeyT, index: int, value: str) -> Union[Awaitable[str], str]:
+    @overload
+    def lset(self: SyncClientProtocol, name: KeyT, index: int, value: str) -> bool: ...
+
+    @overload
+    def lset(
+        self: AsyncClientProtocol, name: KeyT, index: int, value: str
+    ) -> Awaitable[bool]: ...
+
+    def lset(self, name: KeyT, index: int, value: str) -> bool | Awaitable[bool]:
         """
         Set element at ``index`` of list ``name`` to ``value``
 
@@ -4715,7 +4868,15 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LSET", name, index, value)
 
-    def ltrim(self, name: KeyT, start: int, end: int) -> Union[Awaitable[str], str]:
+    @overload
+    def ltrim(self: SyncClientProtocol, name: KeyT, start: int, end: int) -> bool: ...
+
+    @overload
+    def ltrim(
+        self: AsyncClientProtocol, name: KeyT, start: int, end: int
+    ) -> Awaitable[bool]: ...
+
+    def ltrim(self, name: KeyT, start: int, end: int) -> bool | Awaitable[bool]:
         """
         Trim the list ``name``, removing all values not within the slice
         between ``start`` and ``end``
@@ -4727,11 +4888,27 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LTRIM", name, start, end)
 
+    @overload
+    def rpop(
+        self: SyncClientProtocol,
+        name: KeyT,
+        count: int | None = None,
+    ) -> bytes | str | list[bytes | str] | None: ...
+
+    @overload
+    def rpop(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        count: int | None = None,
+    ) -> Awaitable[bytes | str | list[bytes | str] | None]: ...
+
     def rpop(
         self,
         name: KeyT,
-        count: Optional[int] = None,
-    ) -> Union[Awaitable[Union[str, List, None]], Union[str, List, None]]:
+        count: int | None = None,
+    ) -> (bytes | str | list[bytes | str] | None) | Awaitable[
+        bytes | str | list[bytes | str] | None
+    ]:
         """
         Removes and returns the last elements of the list ``name``.
 
@@ -4746,7 +4923,17 @@ class ListCommands(CommandsProtocol):
         else:
             return self.execute_command("RPOP", name)
 
-    def rpoplpush(self, src: KeyT, dst: KeyT) -> Union[Awaitable[str], str]:
+    @overload
+    def rpoplpush(self: SyncClientProtocol, src: KeyT, dst: KeyT) -> bytes | str | None: ...
+
+    @overload
+    def rpoplpush(
+        self: AsyncClientProtocol, src: KeyT, dst: KeyT
+    ) -> Awaitable[bytes | str | None]: ...
+
+    def rpoplpush(
+        self, src: KeyT, dst: KeyT
+    ) -> (bytes | str | None) | Awaitable[bytes | str | None]:
         """
         RPOP a value off of the ``src`` list and atomically LPUSH it
         on to the ``dst`` list.  Returns the value.
@@ -4755,7 +4942,13 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("RPOPLPUSH", src, dst)
 
-    def rpush(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
+    @overload
+    def rpush(self: SyncClientProtocol, name: KeyT, *values: FieldT) -> int: ...
+
+    @overload
+    def rpush(self: AsyncClientProtocol, name: KeyT, *values: FieldT) -> Awaitable[int]: ...
+
+    def rpush(self, name: KeyT, *values: FieldT) -> int | Awaitable[int]:
         """
         Push ``values`` onto the tail of the list ``name``
 
@@ -4763,7 +4956,13 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("RPUSH", name, *values)
 
-    def rpushx(self, name: KeyT, *values: str) -> Union[Awaitable[int], int]:
+    @overload
+    def rpushx(self: SyncClientProtocol, name: KeyT, *values: str) -> int: ...
+
+    @overload
+    def rpushx(self: AsyncClientProtocol, name: KeyT, *values: str) -> Awaitable[int]: ...
+
+    def rpushx(self, name: KeyT, *values: str) -> int | Awaitable[int]:
         """
         Push ``value`` onto the tail of the list ``name`` if ``name`` exists
 
@@ -4771,14 +4970,34 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("RPUSHX", name, *values)
 
+    @overload
+    def lpos(
+        self: SyncClientProtocol,
+        name: KeyT,
+        value: str,
+        rank: int | None = None,
+        count: int | None = None,
+        maxlen: int | None = None,
+    ) -> int | list[int] | None: ...
+
+    @overload
+    def lpos(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        value: str,
+        rank: int | None = None,
+        count: int | None = None,
+        maxlen: int | None = None,
+    ) -> Awaitable[int | list[int] | None]: ...
+
     def lpos(
         self,
         name: KeyT,
         value: str,
-        rank: Optional[int] = None,
-        count: Optional[int] = None,
-        maxlen: Optional[int] = None,
-    ) -> Union[str, List, None]:
+        rank: int | None = None,
+        count: int | None = None,
+        maxlen: int | None = None,
+    ) -> (int | list[int] | None) | Awaitable[int | list[int] | None]:
         """
         Get position of ``value`` within the list ``name``
 
@@ -4816,18 +5035,46 @@ class ListCommands(CommandsProtocol):
 
         return self.execute_command("LPOS", *pieces, keys=[name])
 
+    @overload
+    def sort(
+        self: SyncClientProtocol,
+        name: KeyT,
+        start: int | None = None,
+        num: int | None = None,
+        by: str | None = None,
+        get: list[str] | None = None,
+        desc: bool = False,
+        alpha: bool = False,
+        store: str | None = None,
+        groups: bool | None = False,
+    ) -> SortResponse: ...
+
+    @overload
+    def sort(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        start: int | None = None,
+        num: int | None = None,
+        by: str | None = None,
+        get: list[str] | None = None,
+        desc: bool = False,
+        alpha: bool = False,
+        store: str | None = None,
+        groups: bool | None = False,
+    ) -> Awaitable[SortResponse]: ...
+
     def sort(
         self,
         name: KeyT,
-        start: Optional[int] = None,
-        num: Optional[int] = None,
-        by: Optional[str] = None,
-        get: Optional[List[str]] = None,
+        start: int | None = None,
+        num: int | None = None,
+        by: str | None = None,
+        get: list[str] | None = None,
         desc: bool = False,
         alpha: bool = False,
-        store: Optional[str] = None,
-        groups: Optional[bool] = False,
-    ) -> Union[List, int]:
+        store: str | None = None,
+        groups: bool | None = False,
+    ) -> SortResponse | Awaitable[SortResponse]:
         """
         Sort and return the list, set or sorted set at ``name``.
 
@@ -4889,16 +5136,40 @@ class ListCommands(CommandsProtocol):
         options["keys"] = [name]
         return self.execute_command("SORT", *pieces, **options)
 
+    @overload
+    def sort_ro(
+        self: SyncClientProtocol,
+        key: str,
+        start: int | None = None,
+        num: int | None = None,
+        by: str | None = None,
+        get: list[str] | None = None,
+        desc: bool = False,
+        alpha: bool = False,
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def sort_ro(
+        self: AsyncClientProtocol,
+        key: str,
+        start: int | None = None,
+        num: int | None = None,
+        by: str | None = None,
+        get: list[str] | None = None,
+        desc: bool = False,
+        alpha: bool = False,
+    ) -> Awaitable[list[bytes | str]]: ...
+
     def sort_ro(
         self,
         key: str,
-        start: Optional[int] = None,
-        num: Optional[int] = None,
-        by: Optional[str] = None,
-        get: Optional[List[str]] = None,
+        start: int | None = None,
+        num: int | None = None,
+        by: str | None = None,
+        get: list[str] | None = None,
         desc: bool = False,
         alpha: bool = False,
-    ) -> list:
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Returns the elements contained in the list, set or sorted set at key.
         (read-only variant of the SORT command)

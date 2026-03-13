@@ -204,28 +204,28 @@ This document catalogs all command methods that need `@overload` signatures for 
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 157 | `blpop` | `ResponseT` | `tuple[bytes \| str, bytes \| str] \| None` | `Awaitable[...]` | ✅ RESP2: lambda (tuple or None) / RESP3: no callback | 🔲 TODO |
-| 158 | `brpop` | `ResponseT` | `tuple[bytes \| str, bytes \| str] \| None` | `Awaitable[...]` | ✅ RESP2: lambda (tuple or None) / RESP3: no callback | 🔲 TODO |
-| 159 | `brpoplpush` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 160 | `blmpop` | `ResponseT` | `list[bytes \| str] \| None` | `Awaitable[list[bytes \| str] \| None]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 161 | `lmpop` | `ResponseT` | `list[bytes \| str] \| None` | `Awaitable[list[bytes \| str] \| None]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 162 | `lindex` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 163 | `linsert` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 164 | `llen` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 165 | `lpop` | `ResponseT` | `bytes \| str \| list[bytes \| str] \| None` | `Awaitable[...]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 166 | `lpush` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 167 | `lpushx` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 168 | `lrange` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 169 | `lrem` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 170 | `lset` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 171 | `ltrim` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 172 | `rpop` | `ResponseT` | `bytes \| str \| list[bytes \| str] \| None` | `Awaitable[...]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 173 | `rpoplpush` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 174 | `rpush` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 175 | `rpushx` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 176 | `lpos` | `ResponseT` | `int \| list[int] \| None` | `Awaitable[int \| list[int] \| None]` | ✅ Integer(s) or None - no callback | 🔲 TODO |
-| 177 | `sort` | `ResponseT` | `list[bytes \| str] \| int` | `Awaitable[list[bytes \| str] \| int]` | ✅ Base: sort_return_tuples - depends on decode_responses | 🔲 TODO |
-| 178 | `sort_ro` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
+| 157 | `blpop` | `ResponseT` | `tuple[bytes \| str, bytes \| str] \| list[bytes \| str] \| None` | `Awaitable[...]` | ✅ RESP2: tuple / RESP3: raw list | ✅ Done |
+| 158 | `brpop` | `ResponseT` | `tuple[bytes \| str, bytes \| str] \| list[bytes \| str] \| None` | `Awaitable[...]` | ✅ RESP2: tuple / RESP3: raw list | ✅ Done |
+| 159 | `brpoplpush` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | ✅ Done |
+| 160 | `blmpop` | `ResponseT` | `list[bytes \| str \| list[bytes \| str]] \| None` | `Awaitable[...]` | ✅ No callback - nested [key, values] shape | ✅ Done |
+| 161 | `lmpop` | `ResponseT` | `list[bytes \| str \| list[bytes \| str]] \| None` | `Awaitable[...]` | ✅ No callback - nested [key, values] shape | ✅ Done |
+| 162 | `lindex` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | ✅ Done |
+| 163 | `linsert` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 164 | `llen` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 165 | `lpop` | `ResponseT` | `bytes \| str \| list[bytes \| str] \| None` | `Awaitable[...]` | ✅ No callback - depends on decode_responses | ✅ Done |
+| 166 | `lpush` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 167 | `lpushx` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 168 | `lrange` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - depends on decode_responses | ✅ Done |
+| 169 | `lrem` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 170 | `lset` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ Done |
+| 171 | `ltrim` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ Done |
+| 172 | `rpop` | `ResponseT` | `bytes \| str \| list[bytes \| str] \| None` | `Awaitable[...]` | ✅ No callback - depends on decode_responses | ✅ Done |
+| 173 | `rpoplpush` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | ✅ Done |
+| 174 | `rpush` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 175 | `rpushx` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 176 | `lpos` | `ResponseT` | `int \| list[int] \| None` | `Awaitable[int \| list[int] \| None]` | ✅ Integer(s) or None - no callback | ✅ Done |
+| 177 | `sort` | `ResponseT` | `list[bytes \| str] \| list[tuple[bytes \| str, ...]] \| int` | `Awaitable[...]` | ✅ Base: sort_return_tuples incl. grouped tuples | ✅ Done |
+| 178 | `sort_ro` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - depends on decode_responses | ✅ Done |
 
 ### ScanCommands
 
