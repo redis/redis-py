@@ -501,31 +501,31 @@ For commands with protocol-specific differences, use the **most permissive union
 | 308 | `geodist` | `float \| None` | `Awaitable[float \| None]` | ✅ | Base: float_or_none |
 | 309 | `geohash` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ | RESP2: str_if_bytes / RESP3: raw |
 | 310 | `geopos` | `list[tuple[float, float] \| None]` | `Awaitable[list[tuple[float, float] \| None]]` | ✅ | RESP2: lambda float tuple / RESP3: raw |
-| 311 | `georadius` | `list` | `Awaitable[list]` | ✅ | Base: parse_geosearch_generic |
-| 312 | `georadiusbymember` | `list` | `Awaitable[list]` | ✅ | Base: parse_geosearch_generic |
-| 313 | `geosearch` | `list` | `Awaitable[list]` | ✅ | Base: parse_geosearch_generic |
+| 311 | `georadius` | `list[Any] \| int` | `Awaitable[list[Any] \| int]` | ✅ | `store` / `store_dist` return int, otherwise parsed list |
+| 312 | `georadiusbymember` | `list[Any] \| int` | `Awaitable[list[Any] \| int]` | ✅ | `store` / `store_dist` return int, otherwise parsed list |
+| 313 | `geosearch` | `list[Any]` | `Awaitable[list[Any]]` | ✅ | Base: parse_geosearch_generic |
 | 314 | `geosearchstore` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 315 | `module_load` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
-| 316 | `module_loadex` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
+| 316 | `module_loadex` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - raw OK reply |
 | 317 | `module_unload` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
-| 318 | `module_list` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | RESP2: lambda pairs_to_dict |
+| 318 | `module_list` | `list[dict[Any, Any]]` | `Awaitable[list[dict[Any, Any]]]` | ✅ | RESP2: lambda pairs_to_dict / RESP3: raw dict list |
 | 319 | `command_info` | `None` | `None` | ⚠️ SKIP | N/A |
 | 320 | `command_count` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 321 | `command_getkeys` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | RESP2: str_if_bytes / RESP3: raw |
-| 322 | `command` | `list` | `Awaitable[list]` | ✅ | Base: parse_command / RESP3: parse_command_resp3 |
+| 322 | `command` | `dict[str, dict[str, Any]]` | `Awaitable[dict[str, dict[str, Any]]]` | ✅ | Base: parse_command / RESP3: parse_command_resp3 |
 | 323 | `cluster` | `Any` | `Awaitable[Any]` | ✅ | Subcommand-dependent |
 | 324 | `readwrite` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
 | 325 | `readonly` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
 | 326 | `function_load` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - raw |
 | 327 | `function_delete` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
 | 328 | `function_flush` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
-| 329 | `function_list` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | No callback - raw |
+| 329 | `function_list` | `list[Any]` | `Awaitable[list[Any]]` | ✅ | No callback - raw protocol-dependent list |
 | 330 | `fcall` | `Any` | `Awaitable[Any]` | ✅ | Function-dependent |
 | 331 | `fcall_ro` | `Any` | `Awaitable[Any]` | ✅ | Function-dependent |
 | 332 | `function_dump` | `bytes` | `Awaitable[bytes]` | ✅ | No callback - raw bytes |
 | 333 | `function_restore` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
-| 334 | `function_kill` | `bool` | `Awaitable[bool]` | ✅ | No callback - OK |
-| 335 | `function_stats` | `dict` | `Awaitable[dict]` | ✅ | No callback - raw dict |
+| 334 | `function_kill` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - raw OK reply |
+| 335 | `function_stats` | `Any` | `Awaitable[Any]` | ✅ | No callback - raw protocol-dependent structure |
 
 ### BATCH 13: ClusterCommands (cluster.py) - Methods 336-378
 | # | Method | Sync Type | Async Type | Status | Notes |

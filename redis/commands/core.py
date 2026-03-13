@@ -9681,7 +9681,19 @@ class PubSubCommands(CommandsProtocol):
     see https://redis.io/topics/pubsub
     """
 
-    def publish(self, channel: ChannelT, message: EncodableT, **kwargs) -> ResponseT:
+    @overload
+    def publish(
+        self: SyncClientProtocol, channel: ChannelT, message: EncodableT, **kwargs
+    ) -> int: ...
+
+    @overload
+    def publish(
+        self: AsyncClientProtocol, channel: ChannelT, message: EncodableT, **kwargs
+    ) -> Awaitable[int]: ...
+
+    def publish(
+        self, channel: ChannelT, message: EncodableT, **kwargs
+    ) -> int | Awaitable[int]:
         """
         Publish ``message`` on ``channel``.
         Returns the number of subscribers the message was delivered to.
@@ -9695,7 +9707,19 @@ class PubSubCommands(CommandsProtocol):
         )
         return response
 
-    def spublish(self, shard_channel: ChannelT, message: EncodableT) -> ResponseT:
+    @overload
+    def spublish(
+        self: SyncClientProtocol, shard_channel: ChannelT, message: EncodableT
+    ) -> int: ...
+
+    @overload
+    def spublish(
+        self: AsyncClientProtocol, shard_channel: ChannelT, message: EncodableT
+    ) -> Awaitable[int]: ...
+
+    def spublish(
+        self, shard_channel: ChannelT, message: EncodableT
+    ) -> int | Awaitable[int]:
         """
         Posts a message to the given shard channel.
         Returns the number of clients that received the message
@@ -9710,7 +9734,19 @@ class PubSubCommands(CommandsProtocol):
         )
         return response
 
-    def pubsub_channels(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
+    @overload
+    def pubsub_channels(
+        self: SyncClientProtocol, pattern: PatternT = "*", **kwargs
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def pubsub_channels(
+        self: AsyncClientProtocol, pattern: PatternT = "*", **kwargs
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def pubsub_channels(
+        self, pattern: PatternT = "*", **kwargs
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return a list of channels that have at least one subscriber
 
@@ -9718,7 +9754,19 @@ class PubSubCommands(CommandsProtocol):
         """
         return self.execute_command("PUBSUB CHANNELS", pattern, **kwargs)
 
-    def pubsub_shardchannels(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
+    @overload
+    def pubsub_shardchannels(
+        self: SyncClientProtocol, pattern: PatternT = "*", **kwargs
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def pubsub_shardchannels(
+        self: AsyncClientProtocol, pattern: PatternT = "*", **kwargs
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def pubsub_shardchannels(
+        self, pattern: PatternT = "*", **kwargs
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return a list of shard_channels that have at least one subscriber
 
@@ -9726,7 +9774,13 @@ class PubSubCommands(CommandsProtocol):
         """
         return self.execute_command("PUBSUB SHARDCHANNELS", pattern, **kwargs)
 
-    def pubsub_numpat(self, **kwargs) -> ResponseT:
+    @overload
+    def pubsub_numpat(self: SyncClientProtocol, **kwargs) -> int: ...
+
+    @overload
+    def pubsub_numpat(self: AsyncClientProtocol, **kwargs) -> Awaitable[int]: ...
+
+    def pubsub_numpat(self, **kwargs) -> int | Awaitable[int]:
         """
         Returns the number of subscriptions to patterns
 
@@ -9734,7 +9788,19 @@ class PubSubCommands(CommandsProtocol):
         """
         return self.execute_command("PUBSUB NUMPAT", **kwargs)
 
-    def pubsub_numsub(self, *args: ChannelT, **kwargs) -> ResponseT:
+    @overload
+    def pubsub_numsub(
+        self: SyncClientProtocol, *args: ChannelT, **kwargs
+    ) -> list[tuple[bytes | str, int]]: ...
+
+    @overload
+    def pubsub_numsub(
+        self: AsyncClientProtocol, *args: ChannelT, **kwargs
+    ) -> Awaitable[list[tuple[bytes | str, int]]]: ...
+
+    def pubsub_numsub(
+        self, *args: ChannelT, **kwargs
+    ) -> list[tuple[bytes | str, int]] | Awaitable[list[tuple[bytes | str, int]]]:
         """
         Return a list of (channel, number of subscribers) tuples
         for each channel given in ``*args``
@@ -9743,7 +9809,19 @@ class PubSubCommands(CommandsProtocol):
         """
         return self.execute_command("PUBSUB NUMSUB", *args, **kwargs)
 
-    def pubsub_shardnumsub(self, *args: ChannelT, **kwargs) -> ResponseT:
+    @overload
+    def pubsub_shardnumsub(
+        self: SyncClientProtocol, *args: ChannelT, **kwargs
+    ) -> list[tuple[bytes | str, int]]: ...
+
+    @overload
+    def pubsub_shardnumsub(
+        self: AsyncClientProtocol, *args: ChannelT, **kwargs
+    ) -> Awaitable[list[tuple[bytes | str, int]]]: ...
+
+    def pubsub_shardnumsub(
+        self, *args: ChannelT, **kwargs
+    ) -> list[tuple[bytes | str, int]] | Awaitable[list[tuple[bytes | str, int]]]:
         """
         Return a list of (shard_channel, number of subscribers) tuples
         for each channel given in ``*args``
@@ -9768,12 +9846,28 @@ class ScriptCommands(CommandsProtocol):
         script: str,
         numkeys: int,
         *keys_and_args: Union[KeyT, EncodableT],
-    ) -> Union[Awaitable[str], str]:
+    ) -> Any:
         return self.execute_command(command, script, numkeys, *keys_and_args)
 
+    @overload
     def eval(
-        self, script: str, numkeys: int, *keys_and_args: Union[KeyT, EncodableT]
-    ) -> Union[Awaitable[str], str]:
+        self: SyncClientProtocol,
+        script: str,
+        numkeys: int,
+        *keys_and_args: KeyT | EncodableT,
+    ) -> Any: ...
+
+    @overload
+    def eval(
+        self: AsyncClientProtocol,
+        script: str,
+        numkeys: int,
+        *keys_and_args: KeyT | EncodableT,
+    ) -> Awaitable[Any]: ...
+
+    def eval(
+        self, script: str, numkeys: int, *keys_and_args: KeyT | EncodableT
+    ) -> Any | Awaitable[Any]:
         """
         Execute the Lua ``script``, specifying the ``numkeys`` the script
         will touch and the key names and argument values in ``keys_and_args``.
@@ -9786,9 +9880,25 @@ class ScriptCommands(CommandsProtocol):
         """
         return self._eval("EVAL", script, numkeys, *keys_and_args)
 
+    @overload
     def eval_ro(
-        self, script: str, numkeys: int, *keys_and_args: Union[KeyT, EncodableT]
-    ) -> Union[Awaitable[str], str]:
+        self: SyncClientProtocol,
+        script: str,
+        numkeys: int,
+        *keys_and_args: KeyT | EncodableT,
+    ) -> Any: ...
+
+    @overload
+    def eval_ro(
+        self: AsyncClientProtocol,
+        script: str,
+        numkeys: int,
+        *keys_and_args: KeyT | EncodableT,
+    ) -> Awaitable[Any]: ...
+
+    def eval_ro(
+        self, script: str, numkeys: int, *keys_and_args: KeyT | EncodableT
+    ) -> Any | Awaitable[Any]:
         """
         The read-only variant of the EVAL command
 
@@ -9806,12 +9916,28 @@ class ScriptCommands(CommandsProtocol):
         sha: str,
         numkeys: int,
         *keys_and_args: Union[KeyT, EncodableT],
-    ) -> Union[Awaitable[str], str]:
+    ) -> Any:
         return self.execute_command(command, sha, numkeys, *keys_and_args)
 
+    @overload
     def evalsha(
-        self, sha: str, numkeys: int, *keys_and_args: Union[KeyT, EncodableT]
-    ) -> Union[Awaitable[str], str]:
+        self: SyncClientProtocol,
+        sha: str,
+        numkeys: int,
+        *keys_and_args: KeyT | EncodableT,
+    ) -> Any: ...
+
+    @overload
+    def evalsha(
+        self: AsyncClientProtocol,
+        sha: str,
+        numkeys: int,
+        *keys_and_args: KeyT | EncodableT,
+    ) -> Awaitable[Any]: ...
+
+    def evalsha(
+        self, sha: str, numkeys: int, *keys_and_args: KeyT | EncodableT
+    ) -> Any | Awaitable[Any]:
         """
         Use the ``sha`` to execute a Lua script already registered via EVAL
         or SCRIPT LOAD. Specify the ``numkeys`` the script will touch and the
@@ -9825,9 +9951,25 @@ class ScriptCommands(CommandsProtocol):
         """
         return self._evalsha("EVALSHA", sha, numkeys, *keys_and_args)
 
+    @overload
     def evalsha_ro(
-        self, sha: str, numkeys: int, *keys_and_args: Union[KeyT, EncodableT]
-    ) -> Union[Awaitable[str], str]:
+        self: SyncClientProtocol,
+        sha: str,
+        numkeys: int,
+        *keys_and_args: KeyT | EncodableT,
+    ) -> Any: ...
+
+    @overload
+    def evalsha_ro(
+        self: AsyncClientProtocol,
+        sha: str,
+        numkeys: int,
+        *keys_and_args: KeyT | EncodableT,
+    ) -> Awaitable[Any]: ...
+
+    def evalsha_ro(
+        self, sha: str, numkeys: int, *keys_and_args: KeyT | EncodableT
+    ) -> Any | Awaitable[Any]:
         """
         The read-only variant of the EVALSHA command
 
@@ -9840,7 +9982,15 @@ class ScriptCommands(CommandsProtocol):
         """
         return self._evalsha("EVALSHA_RO", sha, numkeys, *keys_and_args)
 
-    def script_exists(self, *args: str) -> ResponseT:
+    @overload
+    def script_exists(self: SyncClientProtocol, *args: str) -> list[bool]: ...
+
+    @overload
+    def script_exists(
+        self: AsyncClientProtocol, *args: str
+    ) -> Awaitable[list[bool]]: ...
+
+    def script_exists(self, *args: str) -> list[bool] | Awaitable[list[bool]]:
         """
         Check if a script exists in the script cache by specifying the SHAs of
         each script as ``args``. Returns a list of boolean values indicating if
@@ -9855,9 +10005,21 @@ class ScriptCommands(CommandsProtocol):
             "SCRIPT DEBUG is intentionally not implemented in the client."
         )
 
+    @overload
     def script_flush(
-        self, sync_type: Union[Literal["SYNC"], Literal["ASYNC"]] = None
-    ) -> ResponseT:
+        self: SyncClientProtocol,
+        sync_type: Literal["SYNC"] | Literal["ASYNC"] | None = None,
+    ) -> bool: ...
+
+    @overload
+    def script_flush(
+        self: AsyncClientProtocol,
+        sync_type: Literal["SYNC"] | Literal["ASYNC"] | None = None,
+    ) -> Awaitable[bool]: ...
+
+    def script_flush(
+        self, sync_type: Literal["SYNC"] | Literal["ASYNC"] | None = None
+    ) -> bool | Awaitable[bool]:
         """Flush all scripts from the script cache_data.
 
         ``sync_type`` is by default SYNC (synchronous) but it can also be
@@ -9879,7 +10041,13 @@ class ScriptCommands(CommandsProtocol):
             pieces = [sync_type]
         return self.execute_command("SCRIPT FLUSH", *pieces)
 
-    def script_kill(self) -> ResponseT:
+    @overload
+    def script_kill(self: SyncClientProtocol) -> bool: ...
+
+    @overload
+    def script_kill(self: AsyncClientProtocol) -> Awaitable[bool]: ...
+
+    def script_kill(self) -> bool | Awaitable[bool]:
         """
         Kill the currently executing Lua script
 
@@ -9887,7 +10055,15 @@ class ScriptCommands(CommandsProtocol):
         """
         return self.execute_command("SCRIPT KILL")
 
-    def script_load(self, script: ScriptTextT) -> ResponseT:
+    @overload
+    def script_load(self: SyncClientProtocol, script: ScriptTextT) -> str: ...
+
+    @overload
+    def script_load(
+        self: AsyncClientProtocol, script: ScriptTextT
+    ) -> Awaitable[str]: ...
+
+    def script_load(self, script: ScriptTextT) -> str | Awaitable[str]:
         """
         Load a Lua ``script`` into the script cache_data. Returns the SHA.
 
@@ -9928,6 +10104,26 @@ class GeoCommands(CommandsProtocol):
     see: https://redis.com/redis-best-practices/indexing-patterns/geospatial/
     """
 
+    @overload
+    def geoadd(
+        self: SyncClientProtocol,
+        name: KeyT,
+        values: Sequence[EncodableT],
+        nx: bool = False,
+        xx: bool = False,
+        ch: bool = False,
+    ) -> int: ...
+
+    @overload
+    def geoadd(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        values: Sequence[EncodableT],
+        nx: bool = False,
+        xx: bool = False,
+        ch: bool = False,
+    ) -> Awaitable[int]: ...
+
     def geoadd(
         self,
         name: KeyT,
@@ -9935,7 +10131,7 @@ class GeoCommands(CommandsProtocol):
         nx: bool = False,
         xx: bool = False,
         ch: bool = False,
-    ) -> ResponseT:
+    ) -> int | Awaitable[int]:
         """
         Add the specified geospatial items to the specified key identified
         by the ``name`` argument. The Geospatial items are given as ordered
@@ -9970,9 +10166,27 @@ class GeoCommands(CommandsProtocol):
         pieces.extend(values)
         return self.execute_command("GEOADD", *pieces)
 
+    @overload
     def geodist(
-        self, name: KeyT, place1: FieldT, place2: FieldT, unit: Optional[str] = None
-    ) -> ResponseT:
+        self: SyncClientProtocol,
+        name: KeyT,
+        place1: FieldT,
+        place2: FieldT,
+        unit: str | None = None,
+    ) -> float | None: ...
+
+    @overload
+    def geodist(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        place1: FieldT,
+        place2: FieldT,
+        unit: str | None = None,
+    ) -> Awaitable[float | None]: ...
+
+    def geodist(
+        self, name: KeyT, place1: FieldT, place2: FieldT, unit: str | None = None
+    ) -> (float | None) | Awaitable[float | None]:
         """
         Return the distance between ``place1`` and ``place2`` members of the
         ``name`` key.
@@ -9988,7 +10202,19 @@ class GeoCommands(CommandsProtocol):
             pieces.append(unit)
         return self.execute_command("GEODIST", *pieces, keys=[name])
 
-    def geohash(self, name: KeyT, *values: FieldT) -> ResponseT:
+    @overload
+    def geohash(
+        self: SyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> list[bytes | str | None]: ...
+
+    @overload
+    def geohash(
+        self: AsyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> Awaitable[list[bytes | str | None]]: ...
+
+    def geohash(
+        self, name: KeyT, *values: FieldT
+    ) -> list[bytes | str | None] | Awaitable[list[bytes | str | None]]:
         """
         Return the geo hash string for each item of ``values`` members of
         the specified key identified by the ``name`` argument.
@@ -9997,7 +10223,19 @@ class GeoCommands(CommandsProtocol):
         """
         return self.execute_command("GEOHASH", name, *values, keys=[name])
 
-    def geopos(self, name: KeyT, *values: FieldT) -> ResponseT:
+    @overload
+    def geopos(
+        self: SyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> list[tuple[float, float] | None]: ...
+
+    @overload
+    def geopos(
+        self: AsyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> Awaitable[list[tuple[float, float] | None]]: ...
+
+    def geopos(
+        self, name: KeyT, *values: FieldT
+    ) -> list[tuple[float, float] | None] | Awaitable[list[tuple[float, float] | None]]:
         """
         Return the positions of each item of ``values`` as members of
         the specified key identified by the ``name`` argument. Each position
@@ -10007,22 +10245,58 @@ class GeoCommands(CommandsProtocol):
         """
         return self.execute_command("GEOPOS", name, *values, keys=[name])
 
+    @overload
+    def georadius(
+        self: SyncClientProtocol,
+        name: KeyT,
+        longitude: float,
+        latitude: float,
+        radius: float,
+        unit: str | None = None,
+        withdist: bool = False,
+        withcoord: bool = False,
+        withhash: bool = False,
+        count: int | None = None,
+        sort: str | None = None,
+        store: KeyT | None = None,
+        store_dist: KeyT | None = None,
+        any: bool = False,
+    ) -> list[Any] | int: ...
+
+    @overload
+    def georadius(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        longitude: float,
+        latitude: float,
+        radius: float,
+        unit: str | None = None,
+        withdist: bool = False,
+        withcoord: bool = False,
+        withhash: bool = False,
+        count: int | None = None,
+        sort: str | None = None,
+        store: KeyT | None = None,
+        store_dist: KeyT | None = None,
+        any: bool = False,
+    ) -> Awaitable[list[Any] | int]: ...
+
     def georadius(
         self,
         name: KeyT,
         longitude: float,
         latitude: float,
         radius: float,
-        unit: Optional[str] = None,
+        unit: str | None = None,
         withdist: bool = False,
         withcoord: bool = False,
         withhash: bool = False,
-        count: Optional[int] = None,
-        sort: Optional[str] = None,
-        store: Optional[KeyT] = None,
-        store_dist: Optional[KeyT] = None,
+        count: int | None = None,
+        sort: str | None = None,
+        store: KeyT | None = None,
+        store_dist: KeyT | None = None,
         any: bool = False,
-    ) -> ResponseT:
+    ) -> (list[Any] | int) | Awaitable[list[Any] | int]:
         """
         Return the members of the specified key identified by the
         ``name`` argument which are within the borders of the area specified
@@ -10070,21 +10344,55 @@ class GeoCommands(CommandsProtocol):
             any=any,
         )
 
+    @overload
+    def georadiusbymember(
+        self: SyncClientProtocol,
+        name: KeyT,
+        member: FieldT,
+        radius: float,
+        unit: str | None = None,
+        withdist: bool = False,
+        withcoord: bool = False,
+        withhash: bool = False,
+        count: int | None = None,
+        sort: str | None = None,
+        store: KeyT | None = None,
+        store_dist: KeyT | None = None,
+        any: bool = False,
+    ) -> list[Any] | int: ...
+
+    @overload
+    def georadiusbymember(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        member: FieldT,
+        radius: float,
+        unit: str | None = None,
+        withdist: bool = False,
+        withcoord: bool = False,
+        withhash: bool = False,
+        count: int | None = None,
+        sort: str | None = None,
+        store: KeyT | None = None,
+        store_dist: KeyT | None = None,
+        any: bool = False,
+    ) -> Awaitable[list[Any] | int]: ...
+
     def georadiusbymember(
         self,
         name: KeyT,
         member: FieldT,
         radius: float,
-        unit: Optional[str] = None,
+        unit: str | None = None,
         withdist: bool = False,
         withcoord: bool = False,
         withhash: bool = False,
-        count: Optional[int] = None,
-        sort: Optional[str] = None,
+        count: int | None = None,
+        sort: str | None = None,
         store: Union[KeyT, None] = None,
         store_dist: Union[KeyT, None] = None,
         any: bool = False,
-    ) -> ResponseT:
+    ) -> (list[Any] | int) | Awaitable[list[Any] | int]:
         """
         This command is exactly like ``georadius`` with the sole difference
         that instead of taking, as the center of the area to query, a longitude
@@ -10155,23 +10463,61 @@ class GeoCommands(CommandsProtocol):
 
         return self.execute_command(command, *pieces, **kwargs)
 
+    @overload
     def geosearch(
-        self,
+        self: SyncClientProtocol,
         name: KeyT,
-        member: Union[FieldT, None] = None,
-        longitude: Union[float, None] = None,
-        latitude: Union[float, None] = None,
+        member: FieldT | None = None,
+        longitude: float | None = None,
+        latitude: float | None = None,
         unit: str = "m",
-        radius: Union[float, None] = None,
-        width: Union[float, None] = None,
-        height: Union[float, None] = None,
-        sort: Optional[str] = None,
-        count: Optional[int] = None,
+        radius: float | None = None,
+        width: float | None = None,
+        height: float | None = None,
+        sort: str | None = None,
+        count: int | None = None,
         any: bool = False,
         withcoord: bool = False,
         withdist: bool = False,
         withhash: bool = False,
-    ) -> ResponseT:
+    ) -> list[Any]: ...
+
+    @overload
+    def geosearch(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        member: FieldT | None = None,
+        longitude: float | None = None,
+        latitude: float | None = None,
+        unit: str = "m",
+        radius: float | None = None,
+        width: float | None = None,
+        height: float | None = None,
+        sort: str | None = None,
+        count: int | None = None,
+        any: bool = False,
+        withcoord: bool = False,
+        withdist: bool = False,
+        withhash: bool = False,
+    ) -> Awaitable[list[Any]]: ...
+
+    def geosearch(
+        self,
+        name: KeyT,
+        member: FieldT | None = None,
+        longitude: float | None = None,
+        latitude: float | None = None,
+        unit: str = "m",
+        radius: float | None = None,
+        width: float | None = None,
+        height: float | None = None,
+        sort: str | None = None,
+        count: int | None = None,
+        any: bool = False,
+        withcoord: bool = False,
+        withdist: bool = False,
+        withhash: bool = False,
+    ) -> list[Any] | Awaitable[list[Any]]:
         """
         Return the members of specified key identified by the
         ``name`` argument, which are within the borders of the
@@ -10236,22 +10582,58 @@ class GeoCommands(CommandsProtocol):
             store_dist=None,
         )
 
+    @overload
+    def geosearchstore(
+        self: SyncClientProtocol,
+        dest: KeyT,
+        name: KeyT,
+        member: FieldT | None = None,
+        longitude: float | None = None,
+        latitude: float | None = None,
+        unit: str = "m",
+        radius: float | None = None,
+        width: float | None = None,
+        height: float | None = None,
+        sort: str | None = None,
+        count: int | None = None,
+        any: bool = False,
+        storedist: bool = False,
+    ) -> int: ...
+
+    @overload
+    def geosearchstore(
+        self: AsyncClientProtocol,
+        dest: KeyT,
+        name: KeyT,
+        member: FieldT | None = None,
+        longitude: float | None = None,
+        latitude: float | None = None,
+        unit: str = "m",
+        radius: float | None = None,
+        width: float | None = None,
+        height: float | None = None,
+        sort: str | None = None,
+        count: int | None = None,
+        any: bool = False,
+        storedist: bool = False,
+    ) -> Awaitable[int]: ...
+
     def geosearchstore(
         self,
         dest: KeyT,
         name: KeyT,
-        member: Optional[FieldT] = None,
-        longitude: Optional[float] = None,
-        latitude: Optional[float] = None,
+        member: FieldT | None = None,
+        longitude: float | None = None,
+        latitude: float | None = None,
         unit: str = "m",
-        radius: Optional[float] = None,
-        width: Optional[float] = None,
-        height: Optional[float] = None,
-        sort: Optional[str] = None,
-        count: Optional[int] = None,
+        radius: float | None = None,
+        width: float | None = None,
+        height: float | None = None,
+        sort: str | None = None,
+        count: int | None = None,
         any: bool = False,
         storedist: bool = False,
-    ) -> ResponseT:
+    ) -> int | Awaitable[int]:
         """
         This command is like GEOSEARCH, but stores the result in
         ``dest``. By default, it stores the results in the destination
@@ -10359,7 +10741,13 @@ class ModuleCommands(CommandsProtocol):
     see: https://redis.io/topics/modules-intro
     """
 
-    def module_load(self, path, *args) -> ResponseT:
+    @overload
+    def module_load(self: SyncClientProtocol, path, *args) -> bool: ...
+
+    @overload
+    def module_load(self: AsyncClientProtocol, path, *args) -> Awaitable[bool]: ...
+
+    def module_load(self, path, *args) -> bool | Awaitable[bool]:
         """
         Loads the module from ``path``.
         Passes all ``*args`` to the module, during loading.
@@ -10369,12 +10757,28 @@ class ModuleCommands(CommandsProtocol):
         """
         return self.execute_command("MODULE LOAD", path, *args)
 
+    @overload
+    def module_loadex(
+        self: SyncClientProtocol,
+        path: str,
+        options: List[str] | None = None,
+        args: List[str] | None = None,
+    ) -> bytes | str: ...
+
+    @overload
+    def module_loadex(
+        self: AsyncClientProtocol,
+        path: str,
+        options: List[str] | None = None,
+        args: List[str] | None = None,
+    ) -> Awaitable[bytes | str]: ...
+
     def module_loadex(
         self,
         path: str,
-        options: Optional[List[str]] = None,
-        args: Optional[List[str]] = None,
-    ) -> ResponseT:
+        options: List[str] | None = None,
+        args: List[str] | None = None,
+    ) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Loads a module from a dynamic library at runtime with configuration directives.
 
@@ -10390,7 +10794,13 @@ class ModuleCommands(CommandsProtocol):
 
         return self.execute_command("MODULE LOADEX", path, *pieces)
 
-    def module_unload(self, name) -> ResponseT:
+    @overload
+    def module_unload(self: SyncClientProtocol, name) -> bool: ...
+
+    @overload
+    def module_unload(self: AsyncClientProtocol, name) -> Awaitable[bool]: ...
+
+    def module_unload(self, name) -> bool | Awaitable[bool]:
         """
         Unloads the module ``name``.
         Raises ``ModuleError`` if ``name`` is not in loaded modules.
@@ -10399,7 +10809,13 @@ class ModuleCommands(CommandsProtocol):
         """
         return self.execute_command("MODULE UNLOAD", name)
 
-    def module_list(self) -> ResponseT:
+    @overload
+    def module_list(self: SyncClientProtocol) -> list[dict[Any, Any]]: ...
+
+    @overload
+    def module_list(self: AsyncClientProtocol) -> Awaitable[list[dict[Any, Any]]]: ...
+
+    def module_list(self) -> list[dict[Any, Any]] | Awaitable[list[dict[Any, Any]]]:
         """
         Returns a list of dictionaries containing the name and version of
         all loaded modules.
@@ -10413,13 +10829,39 @@ class ModuleCommands(CommandsProtocol):
             "COMMAND INFO is intentionally not implemented in the client."
         )
 
-    def command_count(self) -> ResponseT:
+    @overload
+    def command_count(self: SyncClientProtocol) -> int: ...
+
+    @overload
+    def command_count(self: AsyncClientProtocol) -> Awaitable[int]: ...
+
+    def command_count(self) -> int | Awaitable[int]:
         return self.execute_command("COMMAND COUNT")
 
-    def command_getkeys(self, *args) -> ResponseT:
+    @overload
+    def command_getkeys(self: SyncClientProtocol, *args) -> list[bytes | str]: ...
+
+    @overload
+    def command_getkeys(
+        self: AsyncClientProtocol, *args
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def command_getkeys(
+        self, *args
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         return self.execute_command("COMMAND GETKEYS", *args)
 
-    def command(self) -> ResponseT:
+    @overload
+    def command(self: SyncClientProtocol) -> dict[str, dict[str, Any]]: ...
+
+    @overload
+    def command(
+        self: AsyncClientProtocol,
+    ) -> Awaitable[dict[str, dict[str, Any]]]: ...
+
+    def command(
+        self,
+    ) -> dict[str, dict[str, Any]] | Awaitable[dict[str, dict[str, Any]]]:
         return self.execute_command("COMMAND")
 
 
@@ -10433,10 +10875,24 @@ class ClusterCommands(CommandsProtocol):
     Class for Redis Cluster commands
     """
 
-    def cluster(self, cluster_arg, *args, **kwargs) -> ResponseT:
+    @overload
+    def cluster(self: SyncClientProtocol, cluster_arg, *args, **kwargs) -> Any: ...
+
+    @overload
+    def cluster(
+        self: AsyncClientProtocol, cluster_arg, *args, **kwargs
+    ) -> Awaitable[Any]: ...
+
+    def cluster(self, cluster_arg, *args, **kwargs) -> Any | Awaitable[Any]:
         return self.execute_command(f"CLUSTER {cluster_arg.upper()}", *args, **kwargs)
 
-    def readwrite(self, **kwargs) -> ResponseT:
+    @overload
+    def readwrite(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def readwrite(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
+
+    def readwrite(self, **kwargs) -> bool | Awaitable[bool]:
         """
         Disables read queries for a connection to a Redis Cluster slave node.
 
@@ -10444,7 +10900,13 @@ class ClusterCommands(CommandsProtocol):
         """
         return self.execute_command("READWRITE", **kwargs)
 
-    def readonly(self, **kwargs) -> ResponseT:
+    @overload
+    def readonly(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def readonly(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
+
+    def readonly(self, **kwargs) -> bool | Awaitable[bool]:
         """
         Enables read queries for a connection to a Redis Cluster replica node.
 
@@ -10461,9 +10923,19 @@ class FunctionCommands:
     Redis Function commands
     """
 
+    @overload
     def function_load(
-        self, code: str, replace: Optional[bool] = False
-    ) -> Union[Awaitable[str], str]:
+        self: SyncClientProtocol, code: str, replace: bool | None = False
+    ) -> bytes | str: ...
+
+    @overload
+    def function_load(
+        self: AsyncClientProtocol, code: str, replace: bool | None = False
+    ) -> Awaitable[bytes | str]: ...
+
+    def function_load(self, code: str, replace: bool | None = False) -> (
+        bytes | str
+    ) | Awaitable[bytes | str]:
         """
         Load a library to Redis.
         :param code: the source code (must start with
@@ -10478,7 +10950,13 @@ class FunctionCommands:
         pieces.append(code)
         return self.execute_command("FUNCTION LOAD", *pieces)
 
-    def function_delete(self, library: str) -> Union[Awaitable[str], str]:
+    @overload
+    def function_delete(self: SyncClientProtocol, library: str) -> bool: ...
+
+    @overload
+    def function_delete(self: AsyncClientProtocol, library: str) -> Awaitable[bool]: ...
+
+    def function_delete(self, library: str) -> bool | Awaitable[bool]:
         """
         Delete the library called ``library`` and all its functions.
 
@@ -10486,7 +10964,15 @@ class FunctionCommands:
         """
         return self.execute_command("FUNCTION DELETE", library)
 
-    def function_flush(self, mode: str = "SYNC") -> Union[Awaitable[str], str]:
+    @overload
+    def function_flush(self: SyncClientProtocol, mode: str = "SYNC") -> bool: ...
+
+    @overload
+    def function_flush(
+        self: AsyncClientProtocol, mode: str = "SYNC"
+    ) -> Awaitable[bool]: ...
+
+    def function_flush(self, mode: str = "SYNC") -> bool | Awaitable[bool]:
         """
         Deletes all the libraries.
 
@@ -10494,9 +10980,23 @@ class FunctionCommands:
         """
         return self.execute_command("FUNCTION FLUSH", mode)
 
+    @overload
     def function_list(
-        self, library: Optional[str] = "*", withcode: Optional[bool] = False
-    ) -> Union[Awaitable[List], List]:
+        self: SyncClientProtocol,
+        library: str | None = "*",
+        withcode: bool | None = False,
+    ) -> list[Any]: ...
+
+    @overload
+    def function_list(
+        self: AsyncClientProtocol,
+        library: str | None = "*",
+        withcode: bool | None = False,
+    ) -> Awaitable[list[Any]]: ...
+
+    def function_list(
+        self, library: str | None = "*", withcode: bool | None = False
+    ) -> list[Any] | Awaitable[list[Any]]:
         """
         Return information about the functions and libraries.
 
@@ -10511,14 +11011,22 @@ class FunctionCommands:
             args.append("WITHCODE")
         return self.execute_command("FUNCTION LIST", *args)
 
-    def _fcall(
-        self, command: str, function, numkeys: int, *keys_and_args: Any
-    ) -> Union[Awaitable[str], str]:
+    def _fcall(self, command: str, function, numkeys: int, *keys_and_args: Any) -> Any:
         return self.execute_command(command, function, numkeys, *keys_and_args)
+
+    @overload
+    def fcall(
+        self: SyncClientProtocol, function, numkeys: int, *keys_and_args: Any
+    ) -> Any: ...
+
+    @overload
+    def fcall(
+        self: AsyncClientProtocol, function, numkeys: int, *keys_and_args: Any
+    ) -> Awaitable[Any]: ...
 
     def fcall(
         self, function, numkeys: int, *keys_and_args: Any
-    ) -> Union[Awaitable[str], str]:
+    ) -> Any | Awaitable[Any]:
         """
         Invoke a function.
 
@@ -10526,9 +11034,19 @@ class FunctionCommands:
         """
         return self._fcall("FCALL", function, numkeys, *keys_and_args)
 
+    @overload
+    def fcall_ro(
+        self: SyncClientProtocol, function, numkeys: int, *keys_and_args: Any
+    ) -> Any: ...
+
+    @overload
+    def fcall_ro(
+        self: AsyncClientProtocol, function, numkeys: int, *keys_and_args: Any
+    ) -> Awaitable[Any]: ...
+
     def fcall_ro(
         self, function, numkeys: int, *keys_and_args: Any
-    ) -> Union[Awaitable[str], str]:
+    ) -> Any | Awaitable[Any]:
         """
         This is a read-only variant of the FCALL command that cannot
         execute commands that modify data.
@@ -10537,7 +11055,13 @@ class FunctionCommands:
         """
         return self._fcall("FCALL_RO", function, numkeys, *keys_and_args)
 
-    def function_dump(self) -> Union[Awaitable[str], str]:
+    @overload
+    def function_dump(self: SyncClientProtocol) -> bytes: ...
+
+    @overload
+    def function_dump(self: AsyncClientProtocol) -> Awaitable[bytes]: ...
+
+    def function_dump(self) -> bytes | Awaitable[bytes]:
         """
         Return the serialized payload of loaded libraries.
 
@@ -10550,9 +11074,19 @@ class FunctionCommands:
 
         return self.execute_command("FUNCTION DUMP", **options)
 
+    @overload
     def function_restore(
-        self, payload: str, policy: Optional[str] = "APPEND"
-    ) -> Union[Awaitable[str], str]:
+        self: SyncClientProtocol, payload: str, policy: str | None = "APPEND"
+    ) -> bool: ...
+
+    @overload
+    def function_restore(
+        self: AsyncClientProtocol, payload: str, policy: str | None = "APPEND"
+    ) -> Awaitable[bool]: ...
+
+    def function_restore(
+        self, payload: str, policy: str | None = "APPEND"
+    ) -> bool | Awaitable[bool]:
         """
         Restore libraries from the serialized ``payload``.
         You can use the optional policy argument to provide a policy
@@ -10562,7 +11096,13 @@ class FunctionCommands:
         """
         return self.execute_command("FUNCTION RESTORE", payload, policy)
 
-    def function_kill(self) -> Union[Awaitable[str], str]:
+    @overload
+    def function_kill(self: SyncClientProtocol) -> bytes | str: ...
+
+    @overload
+    def function_kill(self: AsyncClientProtocol) -> Awaitable[bytes | str]: ...
+
+    def function_kill(self) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Kill a function that is currently executing.
 
@@ -10570,7 +11110,13 @@ class FunctionCommands:
         """
         return self.execute_command("FUNCTION KILL")
 
-    def function_stats(self) -> Union[Awaitable[List], List]:
+    @overload
+    def function_stats(self: SyncClientProtocol) -> Any: ...
+
+    @overload
+    def function_stats(self: AsyncClientProtocol) -> Awaitable[Any]: ...
+
+    def function_stats(self) -> Any | Awaitable[Any]:
         """
         Return information about the function that's currently running
         and information about the available execution engines.

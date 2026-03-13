@@ -372,77 +372,77 @@ This document catalogs all command methods that need `@overload` signatures for 
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 290 | `publish` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 291 | `spublish` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 292 | `pubsub_channels` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 293 | `pubsub_shardchannels` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 294 | `pubsub_numpat` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 295 | `pubsub_numsub` | `ResponseT` | `list[tuple[bytes \| str, int]]` | `Awaitable[...]` | ✅ Base: parse_pubsub_numsub - depends on decode_responses | 🔲 TODO |
-| 296 | `pubsub_shardnumsub` | `ResponseT` | `list[tuple[bytes \| str, int]]` | `Awaitable[...]` | ✅ Base: parse_pubsub_numsub - depends on decode_responses | 🔲 TODO |
+| 290 | `publish` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 291 | `spublish` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 292 | `pubsub_channels` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - raw array | ✅ DONE |
+| 293 | `pubsub_shardchannels` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - raw array | ✅ DONE |
+| 294 | `pubsub_numpat` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 295 | `pubsub_numsub` | `ResponseT` | `list[tuple[bytes \| str, int]]` | `Awaitable[list[tuple[bytes \| str, int]]]` | ✅ Base: `parse_pubsub_numsub` | ✅ DONE |
+| 296 | `pubsub_shardnumsub` | `ResponseT` | `list[tuple[bytes \| str, int]]` | `Awaitable[list[tuple[bytes \| str, int]]]` | ✅ Base: `parse_pubsub_numsub` | ✅ DONE |
 
 ### ScriptCommands
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 297 | `eval` | `ResponseT` | `Any` | `Awaitable[Any]` | ✅ No callback - return depends on script | 🔲 TODO |
-| 298 | `eval_ro` | `ResponseT` | `Any` | `Awaitable[Any]` | ✅ No callback - return depends on script | 🔲 TODO |
-| 299 | `evalsha` | `ResponseT` | `Any` | `Awaitable[Any]` | ✅ No callback - return depends on script | 🔲 TODO |
-| 300 | `evalsha_ro` | `ResponseT` | `Any` | `Awaitable[Any]` | ✅ No callback - return depends on script | 🔲 TODO |
-| 301 | `script_exists` | `ResponseT` | `list[bool]` | `Awaitable[list[bool]]` | ✅ Base: lambda (list(map(bool, r))) | 🔲 TODO |
+| 297 | `eval` | `ResponseT` | `Any` | `Awaitable[Any]` | ✅ No callback - return depends on script | ✅ DONE |
+| 298 | `eval_ro` | `ResponseT` | `Any` | `Awaitable[Any]` | ✅ No callback - return depends on script | ✅ DONE |
+| 299 | `evalsha` | `ResponseT` | `Any` | `Awaitable[Any]` | ✅ No callback - return depends on script | ✅ DONE |
+| 300 | `evalsha_ro` | `ResponseT` | `Any` | `Awaitable[Any]` | ✅ No callback - return depends on script | ✅ DONE |
+| 301 | `script_exists` | `ResponseT` | `list[bool]` | `Awaitable[list[bool]]` | ✅ Base: lambda (list(map(bool, r))) | ✅ DONE |
 | 302 | `script_debug` | `None` | `None` | `None` | ⚠️ Separate Async | ⏭️ N/A |
-| 303 | `script_flush` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 304 | `script_kill` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 305 | `script_load` | `ResponseT` | `str` | `Awaitable[str]` | ✅ Base: str_if_bytes - always str | 🔲 TODO |
+| 303 | `script_flush` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 304 | `script_kill` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 305 | `script_load` | `ResponseT` | `str` | `Awaitable[str]` | ✅ Base: str_if_bytes - always str | ✅ DONE |
 | 306 | `register_script` | `Script` | `Script` | `AsyncScript` | ⚠️ Returns different class | ⏭️ N/A |
 
 ### GeoCommands
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 307 | `geoadd` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 308 | `geodist` | `ResponseT` | `float \| None` | `Awaitable[float \| None]` | ✅ Base: float_or_none | 🔲 TODO |
-| 309 | `geohash` | `ResponseT` | `list[str]` | `Awaitable[list[str]]` | ✅ RESP2: lambda (str_if_bytes) / RESP3: no callback | 🔲 TODO |
-| 310 | `geopos` | `ResponseT` | `list[tuple[float, float] \| None]` | `Awaitable[...]` | ✅ RESP2: lambda (float tuples) / RESP3: no callback | 🔲 TODO |
-| 311 | `georadius` | `ResponseT` | `list` | `Awaitable[list]` | ✅ Base: parse_geosearch_generic - depends on decode_responses | 🔲 TODO |
-| 312 | `georadiusbymember` | `ResponseT` | `list` | `Awaitable[list]` | ✅ Base: parse_geosearch_generic - depends on decode_responses | 🔲 TODO |
-| 313 | `geosearch` | `ResponseT` | `list` | `Awaitable[list]` | ✅ Base: parse_geosearch_generic - depends on decode_responses | 🔲 TODO |
-| 314 | `geosearchstore` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
+| 307 | `geoadd` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 308 | `geodist` | `ResponseT` | `float \| None` | `Awaitable[float \| None]` | ✅ Base: float_or_none | ✅ DONE |
+| 309 | `geohash` | `ResponseT` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ RESP2: `str_if_bytes` / RESP3: raw | ✅ DONE |
+| 310 | `geopos` | `ResponseT` | `list[tuple[float, float] \| None]` | `Awaitable[list[tuple[float, float] \| None]]` | ✅ RESP2: float tuples / RESP3: raw | ✅ DONE |
+| 311 | `georadius` | `ResponseT` | `list[Any] \| int` | `Awaitable[list[Any] \| int]` | ✅ `store` / `store_dist` return int, otherwise parsed list | ✅ DONE |
+| 312 | `georadiusbymember` | `ResponseT` | `list[Any] \| int` | `Awaitable[list[Any] \| int]` | ✅ `store` / `store_dist` return int, otherwise parsed list | ✅ DONE |
+| 313 | `geosearch` | `ResponseT` | `list[Any]` | `Awaitable[list[Any]]` | ✅ Base: parse_geosearch_generic | ✅ DONE |
+| 314 | `geosearchstore` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
 
 ### ModuleCommands
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 315 | `module_load` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool (MODULE LOAD) | 🔲 TODO |
-| 316 | `module_loadex` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Returns OK - no specific callback | 🔲 TODO |
-| 317 | `module_unload` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool (MODULE UNLOAD) | 🔲 TODO |
-| 318 | `module_list` | `ResponseT` | `list[dict]` | `Awaitable[list[dict]]` | ✅ RESP2: lambda (pairs_to_dict) / RESP3: no callback | 🔲 TODO |
+| 315 | `module_load` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool (MODULE LOAD) | ✅ DONE |
+| 316 | `module_loadex` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - raw OK reply | ✅ DONE |
+| 317 | `module_unload` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool (MODULE UNLOAD) | ✅ DONE |
+| 318 | `module_list` | `ResponseT` | `list[dict[Any, Any]]` | `Awaitable[list[dict[Any, Any]]]` | ✅ RESP2: lambda (pairs_to_dict) / RESP3: raw dict list | ✅ DONE |
 | 319 | `command_info` | `None` | `None` | `None` | ⚠️ Separate Async | ⏭️ N/A |
-| 320 | `command_count` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 321 | `command_getkeys` | `ResponseT` | `list[str]` (RESP2) / `list[bytes \| str]` (RESP3) | `Awaitable[...]` | ✅ RESP2: lambda (str_if_bytes) / RESP3: no callback | 🔲 TODO |
-| 322 | `command` | *(none)* | `dict` | `Awaitable[dict]` | ✅ Base: parse_command / RESP3: parse_command_resp3 | 🔲 TODO |
+| 320 | `command_count` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 321 | `command_getkeys` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ RESP2: str_if_bytes / RESP3: raw | ✅ DONE |
+| 322 | `command` | *(none)* | `dict[str, dict[str, Any]]` | `Awaitable[dict[str, dict[str, Any]]]` | ✅ Base: parse_command / RESP3: parse_command_resp3 | ✅ DONE |
 
 ### ClusterCommands
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 323 | `cluster` | `ResponseT` | `Any` | `Awaitable[Any]` | ✅ Generic cluster command - varies | 🔲 TODO |
-| 324 | `readwrite` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 325 | `readonly` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
+| 323 | `cluster` | `ResponseT` | `Any` | `Awaitable[Any]` | ✅ Generic cluster command - varies | ✅ DONE |
+| 324 | `readwrite` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 325 | `readonly` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
 
 ### FunctionCommands
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 326 | `function_load` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 327 | `function_delete` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 328 | `function_flush` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 329 | `function_list` | `ResponseT` | `list` | `Awaitable[list]` | ✅ No specific callback - custom parsing | 🔲 TODO |
-| 330 | `fcall` | `ResponseT` | `Any` | `Awaitable[Any]` | ✅ No callback - return depends on function | 🔲 TODO |
-| 331 | `fcall_ro` | `ResponseT` | `Any` | `Awaitable[Any]` | ✅ No callback - return depends on function | 🔲 TODO |
-| 332 | `function_dump` | `ResponseT` | `bytes` | `Awaitable[bytes]` | ✅ No callback - binary dump | 🔲 TODO |
-| 333 | `function_restore` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 334 | `function_kill` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Returns OK - no specific callback | 🔲 TODO |
-| 335 | `function_stats` | `ResponseT` | `dict` | `Awaitable[dict]` | ✅ No specific callback - custom parsing | 🔲 TODO |
+| 326 | `function_load` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - raw reply | ✅ DONE |
+| 327 | `function_delete` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 328 | `function_flush` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 329 | `function_list` | `ResponseT` | `list[Any]` | `Awaitable[list[Any]]` | ✅ No callback - raw protocol-dependent list shape | ✅ DONE |
+| 330 | `fcall` | `ResponseT` | `Any` | `Awaitable[Any]` | ✅ No callback - return depends on function | ✅ DONE |
+| 331 | `fcall_ro` | `ResponseT` | `Any` | `Awaitable[Any]` | ✅ No callback - return depends on function | ✅ DONE |
+| 332 | `function_dump` | `ResponseT` | `bytes` | `Awaitable[bytes]` | ✅ No callback - binary dump with NEVER_DECODE | ✅ DONE |
+| 333 | `function_restore` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 334 | `function_kill` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - raw OK reply | ✅ DONE |
+| 335 | `function_stats` | `ResponseT` | `Any` | `Awaitable[Any]` | ✅ No callback - raw protocol-dependent structure | ✅ DONE |
 
 ---
 
