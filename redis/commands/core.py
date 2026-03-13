@@ -28,7 +28,6 @@ from typing import (
     Mapping,
     Optional,
     Sequence,
-    Set,
     Tuple,
     Union,
     overload,
@@ -54,18 +53,21 @@ from redis.typing import (
     ExpiryT,
     FieldT,
     GroupT,
+    HScanResponse,
     KeysT,
     KeyT,
     ListMultiPopResponse,
     Number,
     PatternT,
     ResponseT,
+    ScanResponse,
     ScriptTextT,
     SortResponse,
     StralgoResponse,
     StreamIdT,
     SyncClientProtocol,
     TimeoutSecT,
+    ZScanResponse,
     ZScoreBoundT,
 )
 from redis.utils import (
@@ -5203,14 +5205,34 @@ class ScanCommands(CommandsProtocol):
     see: https://redis.io/commands/scan
     """
 
+    @overload
+    def scan(
+        self: SyncClientProtocol,
+        cursor: int = 0,
+        match: PatternT | None = None,
+        count: int | None = None,
+        _type: str | None = None,
+        **kwargs,
+    ) -> ScanResponse: ...
+
+    @overload
+    def scan(
+        self: AsyncClientProtocol,
+        cursor: int = 0,
+        match: PatternT | None = None,
+        count: int | None = None,
+        _type: str | None = None,
+        **kwargs,
+    ) -> Awaitable[ScanResponse]: ...
+
     def scan(
         self,
         cursor: int = 0,
-        match: Union[PatternT, None] = None,
-        count: Optional[int] = None,
-        _type: Optional[str] = None,
+        match: PatternT | None = None,
+        count: int | None = None,
+        _type: str | None = None,
         **kwargs,
-    ) -> ResponseT:
+    ) -> ScanResponse | Awaitable[ScanResponse]:
         """
         Incrementally return lists of key names. Also return a cursor
         indicating the scan position.
@@ -5264,13 +5286,31 @@ class ScanCommands(CommandsProtocol):
             )
             yield from data
 
+    @overload
+    def sscan(
+        self: SyncClientProtocol,
+        name: KeyT,
+        cursor: int = 0,
+        match: PatternT | None = None,
+        count: int | None = None,
+    ) -> ScanResponse: ...
+
+    @overload
+    def sscan(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        cursor: int = 0,
+        match: PatternT | None = None,
+        count: int | None = None,
+    ) -> Awaitable[ScanResponse]: ...
+
     def sscan(
         self,
         name: KeyT,
         cursor: int = 0,
-        match: Union[PatternT, None] = None,
-        count: Optional[int] = None,
-    ) -> ResponseT:
+        match: PatternT | None = None,
+        count: int | None = None,
+    ) -> ScanResponse | Awaitable[ScanResponse]:
         """
         Incrementally return lists of elements in a set. Also return a cursor
         indicating the scan position.
@@ -5307,14 +5347,34 @@ class ScanCommands(CommandsProtocol):
             cursor, data = self.sscan(name, cursor=cursor, match=match, count=count)
             yield from data
 
+    @overload
+    def hscan(
+        self: SyncClientProtocol,
+        name: KeyT,
+        cursor: int = 0,
+        match: PatternT | None = None,
+        count: int | None = None,
+        no_values: bool | None = None,
+    ) -> HScanResponse: ...
+
+    @overload
+    def hscan(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        cursor: int = 0,
+        match: PatternT | None = None,
+        count: int | None = None,
+        no_values: bool | None = None,
+    ) -> Awaitable[HScanResponse]: ...
+
     def hscan(
         self,
         name: KeyT,
         cursor: int = 0,
-        match: Union[PatternT, None] = None,
-        count: Optional[int] = None,
-        no_values: Union[bool, None] = None,
-    ) -> ResponseT:
+        match: PatternT | None = None,
+        count: int | None = None,
+        no_values: bool | None = None,
+    ) -> HScanResponse | Awaitable[HScanResponse]:
         """
         Incrementally return key/value slices in a hash. Also return a cursor
         indicating the scan position.
@@ -5363,14 +5423,34 @@ class ScanCommands(CommandsProtocol):
             else:
                 yield from data.items()
 
+    @overload
+    def zscan(
+        self: SyncClientProtocol,
+        name: KeyT,
+        cursor: int = 0,
+        match: PatternT | None = None,
+        count: int | None = None,
+        score_cast_func: type | Callable = float,
+    ) -> ZScanResponse: ...
+
+    @overload
+    def zscan(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        cursor: int = 0,
+        match: PatternT | None = None,
+        count: int | None = None,
+        score_cast_func: type | Callable = float,
+    ) -> Awaitable[ZScanResponse]: ...
+
     def zscan(
         self,
         name: KeyT,
         cursor: int = 0,
-        match: Union[PatternT, None] = None,
-        count: Optional[int] = None,
-        score_cast_func: Union[type, Callable] = float,
-    ) -> ResponseT:
+        match: PatternT | None = None,
+        count: int | None = None,
+        score_cast_func: type | Callable = float,
+    ) -> ZScanResponse | Awaitable[ZScanResponse]:
         """
         Incrementally return lists of elements in a sorted set. Also return a
         cursor indicating the scan position.
@@ -5537,7 +5617,13 @@ class SetCommands(CommandsProtocol):
     see: https://redis.io/topics/data-types#sets
     """
 
-    def sadd(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
+    @overload
+    def sadd(self: SyncClientProtocol, name: KeyT, *values: FieldT) -> int: ...
+
+    @overload
+    def sadd(self: AsyncClientProtocol, name: KeyT, *values: FieldT) -> Awaitable[int]: ...
+
+    def sadd(self, name: KeyT, *values: FieldT) -> int | Awaitable[int]:
         """
         Add ``value(s)`` to set ``name``
 
@@ -5545,7 +5631,13 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SADD", name, *values)
 
-    def scard(self, name: KeyT) -> Union[Awaitable[int], int]:
+    @overload
+    def scard(self: SyncClientProtocol, name: KeyT) -> int: ...
+
+    @overload
+    def scard(self: AsyncClientProtocol, name: KeyT) -> Awaitable[int]: ...
+
+    def scard(self, name: KeyT) -> int | Awaitable[int]:
         """
         Return the number of elements in set ``name``
 
@@ -5553,7 +5645,15 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SCARD", name, keys=[name])
 
-    def sdiff(self, keys: List, *args: List) -> Union[Awaitable[list], list]:
+    @overload
+    def sdiff(self: SyncClientProtocol, keys: List, *args: List) -> set[bytes | str]: ...
+
+    @overload
+    def sdiff(
+        self: AsyncClientProtocol, keys: List, *args: List
+    ) -> Awaitable[set[bytes | str]]: ...
+
+    def sdiff(self, keys: List, *args: List) -> set[bytes | str] | Awaitable[set[bytes | str]]:
         """
         Return the difference of sets specified by ``keys``
 
@@ -5562,9 +5662,15 @@ class SetCommands(CommandsProtocol):
         args = list_or_args(keys, args)
         return self.execute_command("SDIFF", *args, keys=args)
 
+    @overload
+    def sdiffstore(self: SyncClientProtocol, dest: str, keys: List, *args: List) -> int: ...
+
+    @overload
     def sdiffstore(
-        self, dest: str, keys: List, *args: List
-    ) -> Union[Awaitable[int], int]:
+        self: AsyncClientProtocol, dest: str, keys: List, *args: List
+    ) -> Awaitable[int]: ...
+
+    def sdiffstore(self, dest: str, keys: List, *args: List) -> int | Awaitable[int]:
         """
         Store the difference of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
@@ -5574,7 +5680,15 @@ class SetCommands(CommandsProtocol):
         args = list_or_args(keys, args)
         return self.execute_command("SDIFFSTORE", dest, *args)
 
-    def sinter(self, keys: List, *args: List) -> Union[Awaitable[list], list]:
+    @overload
+    def sinter(self: SyncClientProtocol, keys: List, *args: List) -> set[bytes | str]: ...
+
+    @overload
+    def sinter(
+        self: AsyncClientProtocol, keys: List, *args: List
+    ) -> Awaitable[set[bytes | str]]: ...
+
+    def sinter(self, keys: List, *args: List) -> set[bytes | str] | Awaitable[set[bytes | str]]:
         """
         Return the intersection of sets specified by ``keys``
 
@@ -5583,9 +5697,17 @@ class SetCommands(CommandsProtocol):
         args = list_or_args(keys, args)
         return self.execute_command("SINTER", *args, keys=args)
 
+    @overload
     def sintercard(
-        self, numkeys: int, keys: List[KeyT], limit: int = 0
-    ) -> Union[Awaitable[int], int]:
+        self: SyncClientProtocol, numkeys: int, keys: List[KeyT], limit: int = 0
+    ) -> int: ...
+
+    @overload
+    def sintercard(
+        self: AsyncClientProtocol, numkeys: int, keys: List[KeyT], limit: int = 0
+    ) -> Awaitable[int]: ...
+
+    def sintercard(self, numkeys: int, keys: List[KeyT], limit: int = 0) -> int | Awaitable[int]:
         """
         Return the cardinality of the intersect of multiple sets specified by ``keys``.
 
@@ -5598,9 +5720,17 @@ class SetCommands(CommandsProtocol):
         args = [numkeys, *keys, "LIMIT", limit]
         return self.execute_command("SINTERCARD", *args, keys=keys)
 
+    @overload
     def sinterstore(
-        self, dest: KeyT, keys: List, *args: List
-    ) -> Union[Awaitable[int], int]:
+        self: SyncClientProtocol, dest: KeyT, keys: List, *args: List
+    ) -> int: ...
+
+    @overload
+    def sinterstore(
+        self: AsyncClientProtocol, dest: KeyT, keys: List, *args: List
+    ) -> Awaitable[int]: ...
+
+    def sinterstore(self, dest: KeyT, keys: List, *args: List) -> int | Awaitable[int]:
         """
         Store the intersection of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
@@ -5610,9 +5740,19 @@ class SetCommands(CommandsProtocol):
         args = list_or_args(keys, args)
         return self.execute_command("SINTERSTORE", dest, *args)
 
+    @overload
+    def sismember(
+        self: SyncClientProtocol, name: KeyT, value: str
+    ) -> Literal[0] | Literal[1]: ...
+
+    @overload
+    def sismember(
+        self: AsyncClientProtocol, name: KeyT, value: str
+    ) -> Awaitable[Literal[0] | Literal[1]]: ...
+
     def sismember(
         self, name: KeyT, value: str
-    ) -> Union[Awaitable[Union[Literal[0], Literal[1]]], Union[Literal[0], Literal[1]]]:
+    ) -> (Literal[0] | Literal[1]) | Awaitable[Literal[0] | Literal[1]]:
         """
         Return whether ``value`` is a member of set ``name``:
         - 1 if the value is a member of the set.
@@ -5622,7 +5762,15 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SISMEMBER", name, value, keys=[name])
 
-    def smembers(self, name: KeyT) -> Union[Awaitable[Set], Set]:
+    @overload
+    def smembers(self: SyncClientProtocol, name: KeyT) -> set[bytes | str]: ...
+
+    @overload
+    def smembers(
+        self: AsyncClientProtocol, name: KeyT
+    ) -> Awaitable[set[bytes | str]]: ...
+
+    def smembers(self, name: KeyT) -> set[bytes | str] | Awaitable[set[bytes | str]]:
         """
         Return all members of the set ``name``
 
@@ -5630,12 +5778,19 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SMEMBERS", name, keys=[name])
 
+    @overload
+    def smismember(
+        self: SyncClientProtocol, name: KeyT, values: List, *args: List
+    ) -> list[Literal[0] | Literal[1]]: ...
+
+    @overload
+    def smismember(
+        self: AsyncClientProtocol, name: KeyT, values: List, *args: List
+    ) -> Awaitable[list[Literal[0] | Literal[1]]]: ...
+
     def smismember(
         self, name: KeyT, values: List, *args: List
-    ) -> Union[
-        Awaitable[List[Union[Literal[0], Literal[1]]]],
-        List[Union[Literal[0], Literal[1]]],
-    ]:
+    ) -> list[Literal[0] | Literal[1]] | Awaitable[list[Literal[0] | Literal[1]]]:
         """
         Return whether each value in ``values`` is a member of the set ``name``
         as a list of ``int`` in the order of ``values``:
@@ -5647,7 +5802,15 @@ class SetCommands(CommandsProtocol):
         args = list_or_args(values, args)
         return self.execute_command("SMISMEMBER", name, *args, keys=[name])
 
-    def smove(self, src: KeyT, dst: KeyT, value: str) -> Union[Awaitable[bool], bool]:
+    @overload
+    def smove(self: SyncClientProtocol, src: KeyT, dst: KeyT, value: str) -> bool: ...
+
+    @overload
+    def smove(
+        self: AsyncClientProtocol, src: KeyT, dst: KeyT, value: str
+    ) -> Awaitable[bool]: ...
+
+    def smove(self, src: KeyT, dst: KeyT, value: str) -> bool | Awaitable[bool]:
         """
         Move ``value`` from set ``src`` to set ``dst`` atomically
 
@@ -5655,9 +5818,21 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SMOVE", src, dst, value)
 
+    @overload
     def spop(
-        self, name: KeyT, count: Optional[int] = None
-    ) -> Union[Awaitable[Union[str, List, None]], str, List, None]:
+        self: SyncClientProtocol, name: KeyT, count: int | None = None
+    ) -> bytes | str | set[bytes | str] | None: ...
+
+    @overload
+    def spop(
+        self: AsyncClientProtocol, name: KeyT, count: int | None = None
+    ) -> Awaitable[bytes | str | set[bytes | str] | None]: ...
+
+    def spop(
+        self, name: KeyT, count: int | None = None
+    ) -> (bytes | str | set[bytes | str] | None) | Awaitable[
+        bytes | str | set[bytes | str] | None
+    ]:
         """
         Remove and return a random member of set ``name``
 
@@ -5666,9 +5841,21 @@ class SetCommands(CommandsProtocol):
         args = (count is not None) and [count] or []
         return self.execute_command("SPOP", name, *args)
 
+    @overload
     def srandmember(
-        self, name: KeyT, number: Optional[int] = None
-    ) -> Union[Awaitable[Union[str, List, None]], str, List, None]:
+        self: SyncClientProtocol, name: KeyT, number: int | None = None
+    ) -> bytes | str | list[bytes | str] | None: ...
+
+    @overload
+    def srandmember(
+        self: AsyncClientProtocol, name: KeyT, number: int | None = None
+    ) -> Awaitable[bytes | str | list[bytes | str] | None]: ...
+
+    def srandmember(
+        self, name: KeyT, number: int | None = None
+    ) -> (bytes | str | list[bytes | str] | None) | Awaitable[
+        bytes | str | list[bytes | str] | None
+    ]:
         """
         If ``number`` is None, returns a random member of set ``name``.
 
@@ -5681,7 +5868,13 @@ class SetCommands(CommandsProtocol):
         args = (number is not None) and [number] or []
         return self.execute_command("SRANDMEMBER", name, *args)
 
-    def srem(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
+    @overload
+    def srem(self: SyncClientProtocol, name: KeyT, *values: FieldT) -> int: ...
+
+    @overload
+    def srem(self: AsyncClientProtocol, name: KeyT, *values: FieldT) -> Awaitable[int]: ...
+
+    def srem(self, name: KeyT, *values: FieldT) -> int | Awaitable[int]:
         """
         Remove ``values`` from set ``name``
 
@@ -5689,7 +5882,15 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SREM", name, *values)
 
-    def sunion(self, keys: List, *args: List) -> Union[Awaitable[List], List]:
+    @overload
+    def sunion(self: SyncClientProtocol, keys: List, *args: List) -> set[bytes | str]: ...
+
+    @overload
+    def sunion(
+        self: AsyncClientProtocol, keys: List, *args: List
+    ) -> Awaitable[set[bytes | str]]: ...
+
+    def sunion(self, keys: List, *args: List) -> set[bytes | str] | Awaitable[set[bytes | str]]:
         """
         Return the union of sets specified by ``keys``
 
@@ -5698,9 +5899,17 @@ class SetCommands(CommandsProtocol):
         args = list_or_args(keys, args)
         return self.execute_command("SUNION", *args, keys=args)
 
+    @overload
     def sunionstore(
-        self, dest: KeyT, keys: List, *args: List
-    ) -> Union[Awaitable[int], int]:
+        self: SyncClientProtocol, dest: KeyT, keys: List, *args: List
+    ) -> int: ...
+
+    @overload
+    def sunionstore(
+        self: AsyncClientProtocol, dest: KeyT, keys: List, *args: List
+    ) -> Awaitable[int]: ...
+
+    def sunionstore(self, dest: KeyT, keys: List, *args: List) -> int | Awaitable[int]:
         """
         Store the union of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.

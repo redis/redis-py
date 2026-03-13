@@ -231,35 +231,35 @@ This document catalogs all command methods that need `@overload` signatures for 
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 179 | `scan` | `ResponseT` | `tuple[int, list[bytes \| str]]` | `Awaitable[tuple[int, list[bytes \| str]]]` | ✅ Base: parse_scan - depends on decode_responses | 🔲 TODO |
+| 179 | `scan` | `ResponseT` | `tuple[int, list[bytes \| str]]` | `Awaitable[tuple[int, list[bytes \| str]]]` | ✅ Base: parse_scan - depends on decode_responses | ✅ Done |
 | 180 | `scan_iter` | `Iterator` | `Iterator[bytes \| str]` | `AsyncIterator[bytes \| str]` | 🔄 Iterator - separate impl | ⏭️ N/A |
-| 181 | `sscan` | `ResponseT` | `tuple[int, list[bytes \| str]]` | `Awaitable[tuple[int, list[bytes \| str]]]` | ✅ Base: parse_scan - depends on decode_responses | 🔲 TODO |
+| 181 | `sscan` | `ResponseT` | `tuple[int, list[bytes \| str]]` | `Awaitable[tuple[int, list[bytes \| str]]]` | ✅ Base: parse_scan - depends on decode_responses | ✅ Done |
 | 182 | `sscan_iter` | `Iterator` | `Iterator[bytes \| str]` | `AsyncIterator[bytes \| str]` | 🔄 Iterator - separate impl | ⏭️ N/A |
-| 183 | `hscan` | `ResponseT` | `tuple[int, dict[bytes \| str, bytes \| str]]` | `Awaitable[tuple[int, dict[bytes \| str, bytes \| str]]]` | ✅ Base: parse_hscan - depends on decode_responses | 🔲 TODO |
+| 183 | `hscan` | `ResponseT` | `tuple[int, dict[bytes \| str, bytes \| str] \| list[bytes \| str]]` | `Awaitable[tuple[int, dict[bytes \| str, bytes \| str] \| list[bytes \| str]]]` | ✅ Base: parse_hscan - `NOVALUES` returns key list | ✅ Done |
 | 184 | `hscan_iter` | `Iterator` | `Iterator[tuple[bytes \| str, bytes \| str]]` | `AsyncIterator[tuple[bytes \| str, bytes \| str]]` | 🔄 Iterator - separate impl | ⏭️ N/A |
-| 185 | `zscan` | `ResponseT` | `tuple[int, list[tuple[bytes \| str, float]]]` | `Awaitable[tuple[int, list[tuple[bytes \| str, float]]]]` | ✅ Base: parse_zscan - depends on decode_responses | 🔲 TODO |
+| 185 | `zscan` | `ResponseT` | `tuple[int, list[tuple[bytes \| str, float]]]` | `Awaitable[tuple[int, list[tuple[bytes \| str, float]]]]` | ✅ Base: parse_zscan - depends on decode_responses | ✅ Done |
 | 186 | `zscan_iter` | `Iterator` | `Iterator[tuple[bytes \| str, float]]` | `AsyncIterator[tuple[bytes \| str, float]]` | 🔄 Iterator - separate impl | ⏭️ N/A |
 
 ### SetCommands
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 187 | `sadd` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 188 | `scard` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 189 | `sdiff` | `ResponseT` | `set[bytes \| str]` | `Awaitable[set[bytes \| str]]` | ✅ RESP2 & RESP3: lambda (set or empty set) | 🔲 TODO |
-| 190 | `sdiffstore` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 191 | `sinter` | `ResponseT` | `set[bytes \| str]` | `Awaitable[set[bytes \| str]]` | ✅ RESP2 & RESP3: lambda (set or empty set) | 🔲 TODO |
-| 192 | `sintercard` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 193 | `sinterstore` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 194 | `sismember` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply (0 or 1) - no callback | 🔲 TODO |
-| 195 | `smembers` | `ResponseT` | `set[bytes \| str]` | `Awaitable[set[bytes \| str]]` | ✅ RESP2 & RESP3: lambda (set or empty set) | 🔲 TODO |
-| 196 | `smismember` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers (0 or 1) - no callback | 🔲 TODO |
-| 197 | `smove` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | 🔲 TODO |
-| 198 | `spop` | `ResponseT` | `bytes \| str \| list[bytes \| str] \| None` | `Awaitable[...]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 199 | `srandmember` | `ResponseT` | `bytes \| str \| list[bytes \| str] \| None` | `Awaitable[...]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 200 | `srem` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 201 | `sunion` | `ResponseT` | `set[bytes \| str]` | `Awaitable[set[bytes \| str]]` | ✅ RESP2 & RESP3: lambda (set or empty set) | 🔲 TODO |
-| 202 | `sunionstore` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
+| 187 | `sadd` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 188 | `scard` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 189 | `sdiff` | `ResponseT` | `set[bytes \| str]` | `Awaitable[set[bytes \| str]]` | ✅ RESP2 & RESP3: lambda (set or empty set) | ✅ Done |
+| 190 | `sdiffstore` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 191 | `sinter` | `ResponseT` | `set[bytes \| str]` | `Awaitable[set[bytes \| str]]` | ✅ RESP2 & RESP3: lambda (set or empty set) | ✅ Done |
+| 192 | `sintercard` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 193 | `sinterstore` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 194 | `sismember` | `ResponseT` | `Literal[0] \| Literal[1]` | `Awaitable[Literal[0] \| Literal[1]]` | ✅ Integer reply (0 or 1) - no callback | ✅ Done |
+| 195 | `smembers` | `ResponseT` | `set[bytes \| str]` | `Awaitable[set[bytes \| str]]` | ✅ RESP2 & RESP3: lambda (set or empty set) | ✅ Done |
+| 196 | `smismember` | `ResponseT` | `list[Literal[0] \| Literal[1]]` | `Awaitable[list[Literal[0] \| Literal[1]]]` | ✅ Array of integers (0 or 1) - no callback | ✅ Done |
+| 197 | `smove` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | ✅ Done |
+| 198 | `spop` | `ResponseT` | `bytes \| str \| set[bytes \| str] \| None` | `Awaitable[...]` | ✅ No callback - single item or set when count is used | ✅ Done |
+| 199 | `srandmember` | `ResponseT` | `bytes \| str \| list[bytes \| str] \| None` | `Awaitable[...]` | ✅ No callback - depends on `number` | ✅ Done |
+| 200 | `srem` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 201 | `sunion` | `ResponseT` | `set[bytes \| str]` | `Awaitable[set[bytes \| str]]` | ✅ RESP2 & RESP3: lambda (set or empty set) | ✅ Done |
+| 202 | `sunionstore` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
 
 ### StreamCommands
 

@@ -353,7 +353,7 @@ For commands with protocol-specific differences, use the **most permissive union
 | 180 | `scan_iter` | `Iterator` | `AsyncIterator` | 🔄 SKIP | Iterator |
 | 181 | `sscan` | `tuple[int, list[bytes \| str]]` | `Awaitable[tuple[int, list[bytes \| str]]]` | ✅ | Base: parse_scan |
 | 182 | `sscan_iter` | `Iterator` | `AsyncIterator` | 🔄 SKIP | Iterator |
-| 183 | `hscan` | `tuple[int, dict[bytes \| str, bytes \| str]]` | `Awaitable[tuple[int, dict[bytes \| str, bytes \| str]]]` | ✅ | Base: parse_hscan |
+| 183 | `hscan` | `tuple[int, dict[bytes \| str, bytes \| str] \| list[bytes \| str]]` | `Awaitable[tuple[int, dict[bytes \| str, bytes \| str] \| list[bytes \| str]]]` | ✅ | Base: parse_hscan, `NOVALUES` returns key list |
 | 184 | `hscan_iter` | `Iterator` | `AsyncIterator` | 🔄 SKIP | Iterator |
 | 185 | `zscan` | `tuple[int, list[tuple[bytes \| str, float]]]` | `Awaitable[tuple[int, list[tuple[bytes \| str, float]]]]` | ✅ | Base: parse_zscan |
 | 186 | `zscan_iter` | `Iterator` | `AsyncIterator` | 🔄 SKIP | Iterator |
@@ -364,11 +364,11 @@ For commands with protocol-specific differences, use the **most permissive union
 | 191 | `sinter` | `set[bytes \| str]` | `Awaitable[set[bytes \| str]]` | ✅ | RESP2+RESP3: lambda set |
 | 192 | `sintercard` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 193 | `sinterstore` | `int` | `Awaitable[int]` | ✅ | Integer reply |
-| 194 | `sismember` | `bool` | `Awaitable[bool]` | ✅ | Integer 0/1 as bool |
+| 194 | `Literal[0] \| Literal[1]` | `Awaitable[Literal[0] \| Literal[1]]` | ✅ | Integer 0/1 - no callback |
 | 195 | `smembers` | `set[bytes \| str]` | `Awaitable[set[bytes \| str]]` | ✅ | RESP2+RESP3: lambda set |
 | 196 | `smismember` | `list[int]` | `Awaitable[list[int]]` | ✅ | Array of 0/1 |
 | 197 | `smove` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
-| 198 | `spop` | `bytes \| str \| set[bytes \| str] \| None` | `Awaitable[bytes \| str \| set[bytes \| str] \| None]` | ✅ | Varies by COUNT |
+| 198 | `spop` | `bytes \| str \| set[bytes \| str] \| None` | `Awaitable[bytes \| str \| set[bytes \| str] \| None]` | ✅ | Varies by COUNT, count form returns a set |
 | 199 | `srandmember` | `bytes \| str \| list[bytes \| str] \| None` | `Awaitable[bytes \| str \| list[bytes \| str] \| None]` | ✅ | Varies by NUMBER |
 | 200 | `srem` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 201 | `sunion` | `set[bytes \| str]` | `Awaitable[set[bytes \| str]]` | ✅ | RESP2+RESP3: lambda set |
