@@ -380,9 +380,9 @@ For commands with protocol-specific differences, use the **most permissive union
 | 203 | `xack` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 204 | `xackdel` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 205 | `xadd` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - stream ID |
-| 206 | `xcfgset` | `bool` | `Awaitable[bool]` | ✅ | OK reply |
-| 207 | `xautoclaim` | `tuple[bytes \| str, list, list]` | `Awaitable[tuple[bytes \| str, list, list]]` | ✅ | Base: parse_xautoclaim |
-| 208 | `xclaim` | `list[tuple[bytes \| str, dict]]` | `Awaitable[list[tuple[bytes \| str, dict]]]` | ✅ | Base: parse_xclaim |
+| 206 | `xcfgset` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - raw OK |
+| 207 | `xautoclaim` | `list[Any]` | `Awaitable[list[Any]]` | ✅ | Base: parse_xautoclaim / JUSTID special case |
+| 208 | `xclaim` | `list[tuple[bytes \| str \| None, dict \| None]] \| list[bytes \| str]` | `Awaitable[list[tuple[bytes \| str \| None, dict \| None]] \| list[bytes \| str]]` | ✅ | Base: parse_xclaim / JUSTID returns ID list |
 | 209 | `xdel` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 210 | `xdelex` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 211 | `xgroup_create` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
@@ -392,14 +392,14 @@ For commands with protocol-specific differences, use the **most permissive union
 | 215 | `xgroup_setid` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
 | 216 | `xinfo_consumers` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | RESP2: parse_list_of_dicts / RESP3: lambda |
 | 217 | `xinfo_groups` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | RESP2: parse_list_of_dicts / RESP3: lambda |
-| 218 | `xinfo_stream` | `dict` | `Awaitable[dict]` | ✅ | Base: parse_xinfo_stream |
+| 218 | `xinfo_stream` | `dict[str, Any]` | `Awaitable[dict[str, Any]]` | ✅ | Base: parse_xinfo_stream |
 | 219 | `xlen` | `int` | `Awaitable[int]` | ✅ | Integer reply |
-| 220 | `xpending` | `dict` | `Awaitable[dict]` | ✅ | Base: parse_xpending |
-| 221 | `xpending_range` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | No callback - raw |
-| 222 | `xrange` | `list[tuple[bytes \| str, dict]]` | `Awaitable[list[tuple[bytes \| str, dict]]]` | ✅ | Base: parse_stream_list |
-| 223 | `xread` | `list \| None` | `Awaitable[list \| None]` | ✅ | Base: parse_xread / RESP3: parse_xread_resp3 |
-| 224 | `xreadgroup` | `list \| None` | `Awaitable[list \| None]` | ✅ | Base: parse_xread / RESP3: parse_xread_resp3 |
-| 225 | `xrevrange` | `list[tuple[bytes \| str, dict]]` | `Awaitable[list[tuple[bytes \| str, dict]]]` | ✅ | Base: parse_stream_list |
+| 220 | `xpending` | `dict[str, Any]` | `Awaitable[dict[str, Any]]` | ✅ | Base: parse_xpending |
+| 221 | `xpending_range` | `list[dict[str, bytes \| str \| int]]` | `Awaitable[list[dict[str, bytes \| str \| int]]]` | ✅ | parse_xpending_range detail rows |
+| 222 | `xrange` | `list[tuple[bytes \| str \| None, dict \| None]] \| None` | `Awaitable[list[tuple[bytes \| str \| None, dict \| None]] \| None]` | ✅ | Base: parse_stream_list |
+| 223 | `xread` | `list \| dict` | `Awaitable[list \| dict]` | ✅ | RESP2: parse_xread / RESP3: parse_xread_resp3 |
+| 224 | `xreadgroup` | `list \| dict` | `Awaitable[list \| dict]` | ✅ | RESP2: parse_xread / RESP3: parse_xread_resp3 |
+| 225 | `xrevrange` | `list[tuple[bytes \| str \| None, dict \| None]] \| None` | `Awaitable[list[tuple[bytes \| str \| None, dict \| None]] \| None]` | ✅ | Base: parse_stream_list |
 | 226 | `xtrim` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 
 ### BATCH 9: SortedSetCommands Part 1 (core.py) - Methods 227-260

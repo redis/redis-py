@@ -65,8 +65,12 @@ from redis.typing import (
     SortResponse,
     StralgoResponse,
     StreamIdT,
+    StreamRangeResponse,
     SyncClientProtocol,
     TimeoutSecT,
+    XClaimResponse,
+    XPendingRangeResponse,
+    XReadResponse,
     ZScanResponse,
     ZScoreBoundT,
 )
@@ -5949,7 +5953,19 @@ class StreamCommands(CommandsProtocol):
     see: https://redis.io/topics/streams-intro
     """
 
-    def xack(self, name: KeyT, groupname: GroupT, *ids: StreamIdT) -> ResponseT:
+    @overload
+    def xack(
+        self: SyncClientProtocol, name: KeyT, groupname: GroupT, *ids: StreamIdT
+    ) -> int: ...
+
+    @overload
+    def xack(
+        self: AsyncClientProtocol, name: KeyT, groupname: GroupT, *ids: StreamIdT
+    ) -> Awaitable[int]: ...
+
+    def xack(
+        self, name: KeyT, groupname: GroupT, *ids: StreamIdT
+    ) -> int | Awaitable[int]:
         """
         Acknowledges the successful processing of one or more messages.
 
@@ -5962,13 +5978,31 @@ class StreamCommands(CommandsProtocol):
         """
         return self.execute_command("XACK", name, groupname, *ids)
 
+    @overload
+    def xackdel(
+        self: SyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        *ids: StreamIdT,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] = "KEEPREF",
+    ) -> int: ...
+
+    @overload
+    def xackdel(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        *ids: StreamIdT,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] = "KEEPREF",
+    ) -> Awaitable[int]: ...
+
     def xackdel(
         self,
         name: KeyT,
         groupname: GroupT,
         *ids: StreamIdT,
         ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] = "KEEPREF",
-    ) -> ResponseT:
+    ) -> int | Awaitable[int]:
         """
         Combines the functionality of XACK and XDEL. Acknowledges the specified
         message IDs in the given consumer group and simultaneously attempts to
@@ -5984,6 +6018,38 @@ class StreamCommands(CommandsProtocol):
         pieces.extend(ids)
         return self.execute_command("XACKDEL", *pieces)
 
+    @overload
+    def xadd(
+        self: SyncClientProtocol,
+        name: KeyT,
+        fields: Dict[FieldT, EncodableT],
+        id: StreamIdT = "*",
+        maxlen: int | None = None,
+        approximate: bool = True,
+        nomkstream: bool = False,
+        minid: StreamIdT | None = None,
+        limit: int | None = None,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] | None = None,
+        idmpauto: str | None = None,
+        idmp: tuple[str, bytes] | None = None,
+    ) -> bytes | str: ...
+
+    @overload
+    def xadd(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        fields: Dict[FieldT, EncodableT],
+        id: StreamIdT = "*",
+        maxlen: int | None = None,
+        approximate: bool = True,
+        nomkstream: bool = False,
+        minid: StreamIdT | None = None,
+        limit: int | None = None,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] | None = None,
+        idmpauto: str | None = None,
+        idmp: tuple[str, bytes] | None = None,
+    ) -> Awaitable[bytes | str]: ...
+
     def xadd(
         self,
         name: KeyT,
@@ -5993,11 +6059,11 @@ class StreamCommands(CommandsProtocol):
         approximate: bool = True,
         nomkstream: bool = False,
         minid: Union[StreamIdT, None] = None,
-        limit: Optional[int] = None,
-        ref_policy: Optional[Literal["KEEPREF", "DELREF", "ACKED"]] = None,
-        idmpauto: Optional[str] = None,
-        idmp: Optional[tuple[str, bytes]] = None,
-    ) -> ResponseT:
+        limit: int | None = None,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] | None = None,
+        idmpauto: str | None = None,
+        idmp: tuple[str, bytes] | None = None,
+    ) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Add to a stream.
         name: name of the stream
@@ -6074,12 +6140,28 @@ class StreamCommands(CommandsProtocol):
             pieces.extend(pair)
         return self.execute_command("XADD", name, *pieces)
 
+    @overload
+    def xcfgset(
+        self: SyncClientProtocol,
+        name: KeyT,
+        idmp_duration: int | None = None,
+        idmp_maxsize: int | None = None,
+    ) -> bytes | str: ...
+
+    @overload
+    def xcfgset(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        idmp_duration: int | None = None,
+        idmp_maxsize: int | None = None,
+    ) -> Awaitable[bytes | str]: ...
+
     def xcfgset(
         self,
         name: KeyT,
-        idmp_duration: Optional[int] = None,
-        idmp_maxsize: Optional[int] = None,
-    ) -> ResponseT:
+        idmp_duration: int | None = None,
+        idmp_maxsize: int | None = None,
+    ) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Configure the idempotency parameters for a stream's IDMP map.
 
@@ -6138,6 +6220,30 @@ class StreamCommands(CommandsProtocol):
 
         return self.execute_command("XCFGSET", name, *pieces)
 
+    @overload
+    def xautoclaim(
+        self: SyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        consumername: ConsumerT,
+        min_idle_time: int,
+        start_id: StreamIdT = "0-0",
+        count: int | None = None,
+        justid: bool = False,
+    ) -> list[Any]: ...
+
+    @overload
+    def xautoclaim(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        consumername: ConsumerT,
+        min_idle_time: int,
+        start_id: StreamIdT = "0-0",
+        count: int | None = None,
+        justid: bool = False,
+    ) -> Awaitable[list[Any]]: ...
+
     def xautoclaim(
         self,
         name: KeyT,
@@ -6145,9 +6251,9 @@ class StreamCommands(CommandsProtocol):
         consumername: ConsumerT,
         min_idle_time: int,
         start_id: StreamIdT = "0-0",
-        count: Optional[int] = None,
+        count: int | None = None,
         justid: bool = False,
-    ) -> ResponseT:
+    ) -> list[Any] | Awaitable[list[Any]]:
         """
         Transfers ownership of pending stream entries that match the specified
         criteria. Conceptually, equivalent to calling XPENDING and then XCLAIM,
@@ -6189,6 +6295,36 @@ class StreamCommands(CommandsProtocol):
 
         return self.execute_command("XAUTOCLAIM", *pieces, **kwargs)
 
+    @overload
+    def xclaim(
+        self: SyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        consumername: ConsumerT,
+        min_idle_time: int,
+        message_ids: Union[List[StreamIdT], Tuple[StreamIdT]],
+        idle: int | None = None,
+        time: int | None = None,
+        retrycount: int | None = None,
+        force: bool = False,
+        justid: bool = False,
+    ) -> XClaimResponse: ...
+
+    @overload
+    def xclaim(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        consumername: ConsumerT,
+        min_idle_time: int,
+        message_ids: Union[List[StreamIdT], Tuple[StreamIdT]],
+        idle: int | None = None,
+        time: int | None = None,
+        retrycount: int | None = None,
+        force: bool = False,
+        justid: bool = False,
+    ) -> Awaitable[XClaimResponse]: ...
+
     def xclaim(
         self,
         name: KeyT,
@@ -6196,12 +6332,12 @@ class StreamCommands(CommandsProtocol):
         consumername: ConsumerT,
         min_idle_time: int,
         message_ids: Union[List[StreamIdT], Tuple[StreamIdT]],
-        idle: Optional[int] = None,
-        time: Optional[int] = None,
-        retrycount: Optional[int] = None,
+        idle: int | None = None,
+        time: int | None = None,
+        retrycount: int | None = None,
         force: bool = False,
         justid: bool = False,
-    ) -> ResponseT:
+    ) -> XClaimResponse | Awaitable[XClaimResponse]:
         """
         Changes the ownership of a pending message.
 
@@ -6272,7 +6408,15 @@ class StreamCommands(CommandsProtocol):
             kwargs["parse_justid"] = True
         return self.execute_command("XCLAIM", *pieces, **kwargs)
 
-    def xdel(self, name: KeyT, *ids: StreamIdT) -> ResponseT:
+    @overload
+    def xdel(self: SyncClientProtocol, name: KeyT, *ids: StreamIdT) -> int: ...
+
+    @overload
+    def xdel(
+        self: AsyncClientProtocol, name: KeyT, *ids: StreamIdT
+    ) -> Awaitable[int]: ...
+
+    def xdel(self, name: KeyT, *ids: StreamIdT) -> int | Awaitable[int]:
         """
         Deletes one or more messages from a stream.
 
@@ -6284,12 +6428,28 @@ class StreamCommands(CommandsProtocol):
         """
         return self.execute_command("XDEL", name, *ids)
 
+    @overload
+    def xdelex(
+        self: SyncClientProtocol,
+        name: KeyT,
+        *ids: StreamIdT,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] = "KEEPREF",
+    ) -> int: ...
+
+    @overload
+    def xdelex(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        *ids: StreamIdT,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] = "KEEPREF",
+    ) -> Awaitable[int]: ...
+
     def xdelex(
         self,
         name: KeyT,
         *ids: StreamIdT,
         ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] = "KEEPREF",
-    ) -> ResponseT:
+    ) -> int | Awaitable[int]:
         """
         Extended version of XDEL that provides more control over how message entries
         are deleted concerning consumer groups.
@@ -6304,14 +6464,34 @@ class StreamCommands(CommandsProtocol):
         pieces.extend(ids)
         return self.execute_command("XDELEX", *pieces)
 
+    @overload
+    def xgroup_create(
+        self: SyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        id: StreamIdT = "$",
+        mkstream: bool = False,
+        entries_read: int | None = None,
+    ) -> bool: ...
+
+    @overload
+    def xgroup_create(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        id: StreamIdT = "$",
+        mkstream: bool = False,
+        entries_read: int | None = None,
+    ) -> Awaitable[bool]: ...
+
     def xgroup_create(
         self,
         name: KeyT,
         groupname: GroupT,
         id: StreamIdT = "$",
         mkstream: bool = False,
-        entries_read: Optional[int] = None,
-    ) -> ResponseT:
+        entries_read: int | None = None,
+    ) -> bool | Awaitable[bool]:
         """
         Create a new consumer group associated with a stream.
         name: name of the stream.
@@ -6328,9 +6508,22 @@ class StreamCommands(CommandsProtocol):
 
         return self.execute_command(*pieces)
 
+    @overload
+    def xgroup_delconsumer(
+        self: SyncClientProtocol, name: KeyT, groupname: GroupT, consumername: ConsumerT
+    ) -> int: ...
+
+    @overload
+    def xgroup_delconsumer(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        consumername: ConsumerT,
+    ) -> Awaitable[int]: ...
+
     def xgroup_delconsumer(
         self, name: KeyT, groupname: GroupT, consumername: ConsumerT
-    ) -> ResponseT:
+    ) -> int | Awaitable[int]:
         """
         Remove a specific consumer from a consumer group.
         Returns the number of pending messages that the consumer had before it
@@ -6343,7 +6536,17 @@ class StreamCommands(CommandsProtocol):
         """
         return self.execute_command("XGROUP DELCONSUMER", name, groupname, consumername)
 
-    def xgroup_destroy(self, name: KeyT, groupname: GroupT) -> ResponseT:
+    @overload
+    def xgroup_destroy(
+        self: SyncClientProtocol, name: KeyT, groupname: GroupT
+    ) -> bool: ...
+
+    @overload
+    def xgroup_destroy(
+        self: AsyncClientProtocol, name: KeyT, groupname: GroupT
+    ) -> Awaitable[bool]: ...
+
+    def xgroup_destroy(self, name: KeyT, groupname: GroupT) -> bool | Awaitable[bool]:
         """
         Destroy a consumer group.
         name: name of the stream.
@@ -6353,9 +6556,22 @@ class StreamCommands(CommandsProtocol):
         """
         return self.execute_command("XGROUP DESTROY", name, groupname)
 
+    @overload
+    def xgroup_createconsumer(
+        self: SyncClientProtocol, name: KeyT, groupname: GroupT, consumername: ConsumerT
+    ) -> int: ...
+
+    @overload
+    def xgroup_createconsumer(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        consumername: ConsumerT,
+    ) -> Awaitable[int]: ...
+
     def xgroup_createconsumer(
         self, name: KeyT, groupname: GroupT, consumername: ConsumerT
-    ) -> ResponseT:
+    ) -> int | Awaitable[int]:
         """
         Consumers in a consumer group are auto-created every time a new
         consumer name is mentioned by some command.
@@ -6370,13 +6586,31 @@ class StreamCommands(CommandsProtocol):
             "XGROUP CREATECONSUMER", name, groupname, consumername
         )
 
+    @overload
+    def xgroup_setid(
+        self: SyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        id: StreamIdT,
+        entries_read: int | None = None,
+    ) -> bool: ...
+
+    @overload
+    def xgroup_setid(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        id: StreamIdT,
+        entries_read: int | None = None,
+    ) -> Awaitable[bool]: ...
+
     def xgroup_setid(
         self,
         name: KeyT,
         groupname: GroupT,
         id: StreamIdT,
-        entries_read: Optional[int] = None,
-    ) -> ResponseT:
+        entries_read: int | None = None,
+    ) -> bool | Awaitable[bool]:
         """
         Set the consumer group last delivered ID to something else.
         name: name of the stream.
@@ -6390,7 +6624,19 @@ class StreamCommands(CommandsProtocol):
             pieces.extend(["ENTRIESREAD", entries_read])
         return self.execute_command("XGROUP SETID", *pieces)
 
-    def xinfo_consumers(self, name: KeyT, groupname: GroupT) -> ResponseT:
+    @overload
+    def xinfo_consumers(
+        self: SyncClientProtocol, name: KeyT, groupname: GroupT
+    ) -> list[dict[str, Any]]: ...
+
+    @overload
+    def xinfo_consumers(
+        self: AsyncClientProtocol, name: KeyT, groupname: GroupT
+    ) -> Awaitable[list[dict[str, Any]]]: ...
+
+    def xinfo_consumers(
+        self, name: KeyT, groupname: GroupT
+    ) -> list[dict[str, Any]] | Awaitable[list[dict[str, Any]]]:
         """
         Returns general information about the consumers in the group.
         name: name of the stream.
@@ -6400,7 +6646,17 @@ class StreamCommands(CommandsProtocol):
         """
         return self.execute_command("XINFO CONSUMERS", name, groupname)
 
-    def xinfo_groups(self, name: KeyT) -> ResponseT:
+    @overload
+    def xinfo_groups(self: SyncClientProtocol, name: KeyT) -> list[dict[str, Any]]: ...
+
+    @overload
+    def xinfo_groups(
+        self: AsyncClientProtocol, name: KeyT
+    ) -> Awaitable[list[dict[str, Any]]]: ...
+
+    def xinfo_groups(
+        self, name: KeyT
+    ) -> list[dict[str, Any]] | Awaitable[list[dict[str, Any]]]:
         """
         Returns general information about the consumer groups of the stream.
         name: name of the stream.
@@ -6409,7 +6665,19 @@ class StreamCommands(CommandsProtocol):
         """
         return self.execute_command("XINFO GROUPS", name)
 
-    def xinfo_stream(self, name: KeyT, full: bool = False) -> ResponseT:
+    @overload
+    def xinfo_stream(
+        self: SyncClientProtocol, name: KeyT, full: bool = False
+    ) -> dict[str, Any]: ...
+
+    @overload
+    def xinfo_stream(
+        self: AsyncClientProtocol, name: KeyT, full: bool = False
+    ) -> Awaitable[dict[str, Any]]: ...
+
+    def xinfo_stream(
+        self, name: KeyT, full: bool = False
+    ) -> dict[str, Any] | Awaitable[dict[str, Any]]:
         """
         Returns general information about the stream.
         name: name of the stream.
@@ -6424,7 +6692,13 @@ class StreamCommands(CommandsProtocol):
             options = {"full": full}
         return self.execute_command("XINFO STREAM", *pieces, **options)
 
-    def xlen(self, name: KeyT) -> ResponseT:
+    @overload
+    def xlen(self: SyncClientProtocol, name: KeyT) -> int: ...
+
+    @overload
+    def xlen(self: AsyncClientProtocol, name: KeyT) -> Awaitable[int]: ...
+
+    def xlen(self, name: KeyT) -> int | Awaitable[int]:
         """
         Returns the number of elements in a given stream.
 
@@ -6432,7 +6706,19 @@ class StreamCommands(CommandsProtocol):
         """
         return self.execute_command("XLEN", name, keys=[name])
 
-    def xpending(self, name: KeyT, groupname: GroupT) -> ResponseT:
+    @overload
+    def xpending(
+        self: SyncClientProtocol, name: KeyT, groupname: GroupT
+    ) -> dict[str, Any]: ...
+
+    @overload
+    def xpending(
+        self: AsyncClientProtocol, name: KeyT, groupname: GroupT
+    ) -> Awaitable[dict[str, Any]]: ...
+
+    def xpending(
+        self, name: KeyT, groupname: GroupT
+    ) -> dict[str, Any] | Awaitable[dict[str, Any]]:
         """
         Returns information about pending messages of a group.
         name: name of the stream.
@@ -6442,6 +6728,30 @@ class StreamCommands(CommandsProtocol):
         """
         return self.execute_command("XPENDING", name, groupname, keys=[name])
 
+    @overload
+    def xpending_range(
+        self: SyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        min: StreamIdT,
+        max: StreamIdT,
+        count: int,
+        consumername: ConsumerT | None = None,
+        idle: int | None = None,
+    ) -> XPendingRangeResponse: ...
+
+    @overload
+    def xpending_range(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        min: StreamIdT,
+        max: StreamIdT,
+        count: int,
+        consumername: ConsumerT | None = None,
+        idle: int | None = None,
+    ) -> Awaitable[XPendingRangeResponse]: ...
+
     def xpending_range(
         self,
         name: KeyT,
@@ -6449,9 +6759,9 @@ class StreamCommands(CommandsProtocol):
         min: StreamIdT,
         max: StreamIdT,
         count: int,
-        consumername: Union[ConsumerT, None] = None,
-        idle: Optional[int] = None,
-    ) -> ResponseT:
+        consumername: ConsumerT | None = None,
+        idle: int | None = None,
+    ) -> XPendingRangeResponse | Awaitable[XPendingRangeResponse]:
         """
         Returns information about pending messages, in a range.
 
@@ -6499,13 +6809,31 @@ class StreamCommands(CommandsProtocol):
 
         return self.execute_command("XPENDING", *pieces, parse_detail=True)
 
+    @overload
+    def xrange(
+        self: SyncClientProtocol,
+        name: KeyT,
+        min: StreamIdT = "-",
+        max: StreamIdT = "+",
+        count: int | None = None,
+    ) -> StreamRangeResponse | None: ...
+
+    @overload
+    def xrange(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        min: StreamIdT = "-",
+        max: StreamIdT = "+",
+        count: int | None = None,
+    ) -> Awaitable[StreamRangeResponse | None]: ...
+
     def xrange(
         self,
         name: KeyT,
         min: StreamIdT = "-",
         max: StreamIdT = "+",
-        count: Optional[int] = None,
-    ) -> ResponseT:
+        count: int | None = None,
+    ) -> (StreamRangeResponse | None) | Awaitable[StreamRangeResponse | None]:
         """
         Read stream values within an interval.
 
@@ -6531,12 +6859,28 @@ class StreamCommands(CommandsProtocol):
 
         return self.execute_command("XRANGE", name, *pieces, keys=[name])
 
+    @overload
+    def xread(
+        self: SyncClientProtocol,
+        streams: Dict[KeyT, StreamIdT],
+        count: int | None = None,
+        block: int | None = None,
+    ) -> XReadResponse: ...
+
+    @overload
+    def xread(
+        self: AsyncClientProtocol,
+        streams: Dict[KeyT, StreamIdT],
+        count: int | None = None,
+        block: int | None = None,
+    ) -> Awaitable[XReadResponse]: ...
+
     def xread(
         self,
         streams: Dict[KeyT, StreamIdT],
-        count: Optional[int] = None,
-        block: Optional[int] = None,
-    ) -> ResponseT:
+        count: int | None = None,
+        block: int | None = None,
+    ) -> XReadResponse | Awaitable[XReadResponse]:
         """
         Block and monitor multiple streams for new data.
 
@@ -6583,16 +6927,40 @@ class StreamCommands(CommandsProtocol):
             record_streaming_lag_from_response(response=response)
             return response
 
+    @overload
+    def xreadgroup(
+        self: SyncClientProtocol,
+        groupname: str,
+        consumername: str,
+        streams: Dict[KeyT, StreamIdT],
+        count: int | None = None,
+        block: int | None = None,
+        noack: bool = False,
+        claim_min_idle_time: int | None = None,
+    ) -> XReadResponse: ...
+
+    @overload
+    def xreadgroup(
+        self: AsyncClientProtocol,
+        groupname: str,
+        consumername: str,
+        streams: Dict[KeyT, StreamIdT],
+        count: int | None = None,
+        block: int | None = None,
+        noack: bool = False,
+        claim_min_idle_time: int | None = None,
+    ) -> Awaitable[XReadResponse]: ...
+
     def xreadgroup(
         self,
         groupname: str,
         consumername: str,
         streams: Dict[KeyT, StreamIdT],
-        count: Optional[int] = None,
-        block: Optional[int] = None,
+        count: int | None = None,
+        block: int | None = None,
         noack: bool = False,
-        claim_min_idle_time: Optional[int] = None,
-    ) -> ResponseT:
+        claim_min_idle_time: int | None = None,
+    ) -> XReadResponse | Awaitable[XReadResponse]:
         """
         Read from a stream via a consumer group.
 
@@ -6663,13 +7031,31 @@ class StreamCommands(CommandsProtocol):
             )
             return response
 
+    @overload
+    def xrevrange(
+        self: SyncClientProtocol,
+        name: KeyT,
+        max: StreamIdT = "+",
+        min: StreamIdT = "-",
+        count: int | None = None,
+    ) -> StreamRangeResponse | None: ...
+
+    @overload
+    def xrevrange(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        max: StreamIdT = "+",
+        min: StreamIdT = "-",
+        count: int | None = None,
+    ) -> Awaitable[StreamRangeResponse | None]: ...
+
     def xrevrange(
         self,
         name: KeyT,
         max: StreamIdT = "+",
         min: StreamIdT = "-",
-        count: Optional[int] = None,
-    ) -> ResponseT:
+        count: int | None = None,
+    ) -> (StreamRangeResponse | None) | Awaitable[StreamRangeResponse | None]:
         """
         Read stream values within an interval, in reverse order.
 
@@ -6695,15 +7081,37 @@ class StreamCommands(CommandsProtocol):
 
         return self.execute_command("XREVRANGE", name, *pieces, keys=[name])
 
+    @overload
+    def xtrim(
+        self: SyncClientProtocol,
+        name: KeyT,
+        maxlen: int | None = None,
+        approximate: bool = True,
+        minid: StreamIdT | None = None,
+        limit: int | None = None,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] | None = None,
+    ) -> int: ...
+
+    @overload
+    def xtrim(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        maxlen: int | None = None,
+        approximate: bool = True,
+        minid: StreamIdT | None = None,
+        limit: int | None = None,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] | None = None,
+    ) -> Awaitable[int]: ...
+
     def xtrim(
         self,
         name: KeyT,
-        maxlen: Optional[int] = None,
+        maxlen: int | None = None,
         approximate: bool = True,
-        minid: Union[StreamIdT, None] = None,
-        limit: Optional[int] = None,
-        ref_policy: Optional[Literal["KEEPREF", "DELREF", "ACKED"]] = None,
-    ) -> ResponseT:
+        minid: StreamIdT | None = None,
+        limit: int | None = None,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] | None = None,
+    ) -> int | Awaitable[int]:
         """
         Trims old messages from a stream.
         name: name of the stream.

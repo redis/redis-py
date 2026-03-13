@@ -265,30 +265,30 @@ This document catalogs all command methods that need `@overload` signatures for 
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 203 | `xack` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 204 | `xackdel` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 205 | `xadd` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - stream ID depends on decode_responses | 🔲 TODO |
-| 206 | `xcfgset` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Returns OK - no specific callback | 🔲 TODO |
-| 207 | `xautoclaim` | `ResponseT` | `tuple` | `Awaitable[tuple]` | ✅ Base: parse_xautoclaim - mixed types | 🔲 TODO |
-| 208 | `xclaim` | `ResponseT` | `list[tuple[bytes \| str, dict]]` | `Awaitable[...]` | ✅ Base: parse_xclaim - depends on decode_responses | 🔲 TODO |
-| 209 | `xdel` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 210 | `xdelex` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 211 | `xgroup_create` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 212 | `xgroup_delconsumer` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 213 | `xgroup_destroy` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | 🔲 TODO |
-| 214 | `xgroup_createconsumer` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 215 | `xgroup_setid` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 216 | `xinfo_consumers` | `ResponseT` | `list[dict[str, Any]]` | `Awaitable[list[dict[str, Any]]]` | ✅ RESP2: parse_list_of_dicts / RESP3: lambda (str keys) | 🔲 TODO |
-| 217 | `xinfo_groups` | `ResponseT` | `list[dict[str, Any]]` | `Awaitable[list[dict[str, Any]]]` | ✅ RESP2: parse_list_of_dicts / RESP3: lambda (str keys) | 🔲 TODO |
-| 218 | `xinfo_stream` | `ResponseT` | `dict` | `Awaitable[dict]` | ✅ Base: parse_xinfo_stream | 🔲 TODO |
-| 219 | `xlen` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 220 | `xpending` | `ResponseT` | `dict` | `Awaitable[dict]` | ✅ Base: parse_xpending | 🔲 TODO |
-| 221 | `xpending_range` | `ResponseT` | `list[dict]` | `Awaitable[list[dict]]` | ✅ No specific callback - custom parsing | 🔲 TODO |
-| 222 | `xrange` | `ResponseT` | `list[tuple[bytes \| str, dict]]` | `Awaitable[...]` | ✅ Base: parse_stream_list - depends on decode_responses | 🔲 TODO |
-| 223 | `xread` | `ResponseT` | `list` | `Awaitable[list]` | ✅ Base: parse_xread / RESP3: parse_xread_resp3 | 🔲 TODO |
-| 224 | `xreadgroup` | `ResponseT` | `list` | `Awaitable[list]` | ✅ Base: parse_xread / RESP3: parse_xread_resp3 | 🔲 TODO |
-| 225 | `xrevrange` | `ResponseT` | `list[tuple[bytes \| str, dict]]` | `Awaitable[...]` | ✅ Base: parse_stream_list - depends on decode_responses | 🔲 TODO |
-| 226 | `xtrim` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
+| 203 | `xack` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 204 | `xackdel` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 205 | `xadd` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - stream ID depends on decode_responses | ✅ Done |
+| 206 | `xcfgset` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - returns raw OK | ✅ Done |
+| 207 | `xautoclaim` | `ResponseT` | `list[Any]` | `Awaitable[list[Any]]` | ✅ Base: parse_xautoclaim - mixed list shape / JUSTID special case | ✅ Done |
+| 208 | `xclaim` | `ResponseT` | `list[tuple[bytes \| str \| None, dict[bytes \| str, bytes \| str] \| None]] \| list[bytes \| str]` | `Awaitable[...]` | ✅ Base: parse_xclaim / JUSTID returns ID list | ✅ Done |
+| 209 | `xdel` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 210 | `xdelex` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 211 | `xgroup_create` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ Done |
+| 212 | `xgroup_delconsumer` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 213 | `xgroup_destroy` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | ✅ Done |
+| 214 | `xgroup_createconsumer` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 215 | `xgroup_setid` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ Done |
+| 216 | `xinfo_consumers` | `ResponseT` | `list[dict[str, Any]]` | `Awaitable[list[dict[str, Any]]]` | ✅ RESP2: parse_list_of_dicts / RESP3: lambda | ✅ Done |
+| 217 | `xinfo_groups` | `ResponseT` | `list[dict[str, Any]]` | `Awaitable[list[dict[str, Any]]]` | ✅ RESP2: parse_list_of_dicts / RESP3: lambda | ✅ Done |
+| 218 | `xinfo_stream` | `ResponseT` | `dict[str, Any]` | `Awaitable[dict[str, Any]]` | ✅ Base: parse_xinfo_stream | ✅ Done |
+| 219 | `xlen` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 220 | `xpending` | `ResponseT` | `dict[str, Any]` | `Awaitable[dict[str, Any]]` | ✅ Base: parse_xpending | ✅ Done |
+| 221 | `xpending_range` | `ResponseT` | `list[dict[str, bytes \| str \| int]]` | `Awaitable[list[dict[str, bytes \| str \| int]]]` | ✅ parse_xpending_range detail rows | ✅ Done |
+| 222 | `xrange` | `ResponseT` | `list[tuple[bytes \| str \| None, dict[bytes \| str, bytes \| str] \| None]] \| None` | `Awaitable[...]` | ✅ Base: parse_stream_list | ✅ Done |
+| 223 | `xread` | `ResponseT` | `list[list[Any]] \| dict[bytes \| str, list[list[tuple[bytes \| str \| None, dict[bytes \| str, bytes \| str] \| None]]]]` | `Awaitable[...]` | ✅ RESP2: parse_xread / RESP3: parse_xread_resp3 | ✅ Done |
+| 224 | `xreadgroup` | `ResponseT` | `list[list[Any]] \| dict[bytes \| str, list[list[tuple[bytes \| str \| None, dict[bytes \| str, bytes \| str] \| None]]]]` | `Awaitable[...]` | ✅ RESP2: parse_xread / RESP3: parse_xread_resp3 | ✅ Done |
+| 225 | `xrevrange` | `ResponseT` | `list[tuple[bytes \| str \| None, dict[bytes \| str, bytes \| str] \| None]] \| None` | `Awaitable[...]` | ✅ Base: parse_stream_list | ✅ Done |
+| 226 | `xtrim` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
 
 ### SortedSetCommands
 
