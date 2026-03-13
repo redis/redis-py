@@ -8495,7 +8495,15 @@ class HyperlogCommands(CommandsProtocol):
     see: https://redis.io/topics/data-types-intro#hyperloglogs
     """
 
-    def pfadd(self, name: KeyT, *values: FieldT) -> ResponseT:
+    @overload
+    def pfadd(self: SyncClientProtocol, name: KeyT, *values: FieldT) -> int: ...
+
+    @overload
+    def pfadd(
+        self: AsyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> Awaitable[int]: ...
+
+    def pfadd(self, name: KeyT, *values: FieldT) -> int | Awaitable[int]:
         """
         Adds the specified elements to the specified HyperLogLog.
 
@@ -8503,7 +8511,13 @@ class HyperlogCommands(CommandsProtocol):
         """
         return self.execute_command("PFADD", name, *values)
 
-    def pfcount(self, *sources: KeyT) -> ResponseT:
+    @overload
+    def pfcount(self: SyncClientProtocol, *sources: KeyT) -> int: ...
+
+    @overload
+    def pfcount(self: AsyncClientProtocol, *sources: KeyT) -> Awaitable[int]: ...
+
+    def pfcount(self, *sources: KeyT) -> int | Awaitable[int]:
         """
         Return the approximated cardinality of
         the set observed by the HyperLogLog at key(s).
@@ -8512,7 +8526,15 @@ class HyperlogCommands(CommandsProtocol):
         """
         return self.execute_command("PFCOUNT", *sources)
 
-    def pfmerge(self, dest: KeyT, *sources: KeyT) -> ResponseT:
+    @overload
+    def pfmerge(self: SyncClientProtocol, dest: KeyT, *sources: KeyT) -> bool: ...
+
+    @overload
+    def pfmerge(
+        self: AsyncClientProtocol, dest: KeyT, *sources: KeyT
+    ) -> Awaitable[bool]: ...
+
+    def pfmerge(self, dest: KeyT, *sources: KeyT) -> bool | Awaitable[bool]:
         """
         Merge N different HyperLogLogs into a single one.
 
@@ -8540,7 +8562,13 @@ class HashCommands(CommandsProtocol):
     see: https://redis.io/topics/data-types-intro#redis-hashes
     """
 
-    def hdel(self, name: str, *keys: str) -> Union[Awaitable[int], int]:
+    @overload
+    def hdel(self: SyncClientProtocol, name: str, *keys: str) -> int: ...
+
+    @overload
+    def hdel(self: AsyncClientProtocol, name: str, *keys: str) -> Awaitable[int]: ...
+
+    def hdel(self, name: str, *keys: str) -> int | Awaitable[int]:
         """
         Delete ``keys`` from hash ``name``
 
@@ -8548,7 +8576,13 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HDEL", name, *keys)
 
-    def hexists(self, name: str, key: str) -> Union[Awaitable[bool], bool]:
+    @overload
+    def hexists(self: SyncClientProtocol, name: str, key: str) -> bool: ...
+
+    @overload
+    def hexists(self: AsyncClientProtocol, name: str, key: str) -> Awaitable[bool]: ...
+
+    def hexists(self, name: str, key: str) -> bool | Awaitable[bool]:
         """
         Returns a boolean indicating if ``key`` exists within hash ``name``
 
@@ -8556,9 +8590,17 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HEXISTS", name, key, keys=[name])
 
+    @overload
+    def hget(self: SyncClientProtocol, name: str, key: str) -> bytes | str | None: ...
+
+    @overload
     def hget(
-        self, name: str, key: str
-    ) -> Union[Awaitable[Optional[str]], Optional[str]]:
+        self: AsyncClientProtocol, name: str, key: str
+    ) -> Awaitable[bytes | str | None]: ...
+
+    def hget(self, name: str, key: str) -> (bytes | str | None) | Awaitable[
+        bytes | str | None
+    ]:
         """
         Return the value of ``key`` within the hash ``name``
 
@@ -8566,7 +8608,19 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HGET", name, key, keys=[name])
 
-    def hgetall(self, name: str) -> Union[Awaitable[dict], dict]:
+    @overload
+    def hgetall(
+        self: SyncClientProtocol, name: str
+    ) -> dict[bytes | str, bytes | str]: ...
+
+    @overload
+    def hgetall(
+        self: AsyncClientProtocol, name: str
+    ) -> Awaitable[dict[bytes | str, bytes | str]]: ...
+
+    def hgetall(
+        self, name: str
+    ) -> dict[bytes | str, bytes | str] | Awaitable[dict[bytes | str, bytes | str]]:
         """
         Return a Python dict of the hash's name/value pairs
 
@@ -8574,11 +8628,19 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HGETALL", name, keys=[name])
 
+    @overload
+    def hgetdel(
+        self: SyncClientProtocol, name: str, *keys: str
+    ) -> list[bytes | str | None]: ...
+
+    @overload
+    def hgetdel(
+        self: AsyncClientProtocol, name: str, *keys: str
+    ) -> Awaitable[list[bytes | str | None]]: ...
+
     def hgetdel(
         self, name: str, *keys: str
-    ) -> Union[
-        Awaitable[Optional[List[Union[str, bytes]]]], Optional[List[Union[str, bytes]]]
-    ]:
+    ) -> list[bytes | str | None] | Awaitable[list[bytes | str | None]]:
         """
         Return the value of ``key`` within the hash ``name`` and
         delete the field in the hash.
@@ -8593,18 +8655,40 @@ class HashCommands(CommandsProtocol):
 
         return self.execute_command("HGETDEL", name, "FIELDS", len(keys), *keys)
 
+    @overload
+    def hgetex(
+        self: SyncClientProtocol,
+        name: KeyT,
+        *keys: str,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        persist: bool = False,
+    ) -> list[bytes | str | None]: ...
+
+    @overload
+    def hgetex(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        *keys: str,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        persist: bool = False,
+    ) -> Awaitable[list[bytes | str | None]]: ...
+
     def hgetex(
         self,
         name: KeyT,
         *keys: str,
-        ex: Optional[ExpiryT] = None,
-        px: Optional[ExpiryT] = None,
-        exat: Optional[AbsExpiryT] = None,
-        pxat: Optional[AbsExpiryT] = None,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
         persist: bool = False,
-    ) -> Union[
-        Awaitable[Optional[List[Union[str, bytes]]]], Optional[List[Union[str, bytes]]]
-    ]:
+    ) -> list[bytes | str | None] | Awaitable[list[bytes | str | None]]:
         """
         Return the values of ``key`` and ``keys`` within the hash ``name``
         and optionally set their expiration.
@@ -8647,9 +8731,17 @@ class HashCommands(CommandsProtocol):
             *keys,
         )
 
+    @overload
     def hincrby(
-        self, name: str, key: str, amount: int = 1
-    ) -> Union[Awaitable[int], int]:
+        self: SyncClientProtocol, name: str, key: str, amount: int = 1
+    ) -> int: ...
+
+    @overload
+    def hincrby(
+        self: AsyncClientProtocol, name: str, key: str, amount: int = 1
+    ) -> Awaitable[int]: ...
+
+    def hincrby(self, name: str, key: str, amount: int = 1) -> int | Awaitable[int]:
         """
         Increment the value of ``key`` in hash ``name`` by ``amount``
 
@@ -8657,9 +8749,19 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HINCRBY", name, key, amount)
 
+    @overload
+    def hincrbyfloat(
+        self: SyncClientProtocol, name: str, key: str, amount: float = 1.0
+    ) -> float: ...
+
+    @overload
+    def hincrbyfloat(
+        self: AsyncClientProtocol, name: str, key: str, amount: float = 1.0
+    ) -> Awaitable[float]: ...
+
     def hincrbyfloat(
         self, name: str, key: str, amount: float = 1.0
-    ) -> Union[Awaitable[float], float]:
+    ) -> float | Awaitable[float]:
         """
         Increment the value of ``key`` in hash ``name`` by floating ``amount``
 
@@ -8667,7 +8769,13 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HINCRBYFLOAT", name, key, amount)
 
-    def hkeys(self, name: str) -> Union[Awaitable[List], List]:
+    @overload
+    def hkeys(self: SyncClientProtocol, name: str) -> list[bytes | str]: ...
+
+    @overload
+    def hkeys(self: AsyncClientProtocol, name: str) -> Awaitable[list[bytes | str]]: ...
+
+    def hkeys(self, name: str) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return the list of keys within hash ``name``
 
@@ -8675,7 +8783,13 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HKEYS", name, keys=[name])
 
-    def hlen(self, name: str) -> Union[Awaitable[int], int]:
+    @overload
+    def hlen(self: SyncClientProtocol, name: str) -> int: ...
+
+    @overload
+    def hlen(self: AsyncClientProtocol, name: str) -> Awaitable[int]: ...
+
+    def hlen(self, name: str) -> int | Awaitable[int]:
         """
         Return the number of elements in hash ``name``
 
@@ -8683,14 +8797,34 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HLEN", name, keys=[name])
 
+    @overload
+    def hset(
+        self: SyncClientProtocol,
+        name: str,
+        key: str | None = None,
+        value: str | None = None,
+        mapping: dict | None = None,
+        items: list | None = None,
+    ) -> int: ...
+
+    @overload
+    def hset(
+        self: AsyncClientProtocol,
+        name: str,
+        key: str | None = None,
+        value: str | None = None,
+        mapping: dict | None = None,
+        items: list | None = None,
+    ) -> Awaitable[int]: ...
+
     def hset(
         self,
         name: str,
-        key: Optional[str] = None,
-        value: Optional[str] = None,
-        mapping: Optional[dict] = None,
-        items: Optional[list] = None,
-    ) -> Union[Awaitable[int], int]:
+        key: str | None = None,
+        value: str | None = None,
+        mapping: dict | None = None,
+        items: list | None = None,
+    ) -> int | Awaitable[int]:
         """
         Set ``key`` to ``value`` within hash ``name``,
         ``mapping`` accepts a dict of key/value pairs that will be
@@ -8716,20 +8850,52 @@ class HashCommands(CommandsProtocol):
 
         return self.execute_command("HSET", name, *pieces)
 
+    @overload
+    def hsetex(
+        self: SyncClientProtocol,
+        name: str,
+        key: str | None = None,
+        value: str | None = None,
+        mapping: dict | None = None,
+        items: list | None = None,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        data_persist_option: HashDataPersistOptions | None = None,
+        keepttl: bool = False,
+    ) -> int: ...
+
+    @overload
+    def hsetex(
+        self: AsyncClientProtocol,
+        name: str,
+        key: str | None = None,
+        value: str | None = None,
+        mapping: dict | None = None,
+        items: list | None = None,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        data_persist_option: HashDataPersistOptions | None = None,
+        keepttl: bool = False,
+    ) -> Awaitable[int]: ...
+
     def hsetex(
         self,
         name: str,
-        key: Optional[str] = None,
-        value: Optional[str] = None,
-        mapping: Optional[dict] = None,
-        items: Optional[list] = None,
-        ex: Optional[ExpiryT] = None,
-        px: Optional[ExpiryT] = None,
-        exat: Optional[AbsExpiryT] = None,
-        pxat: Optional[AbsExpiryT] = None,
-        data_persist_option: Optional[HashDataPersistOptions] = None,
+        key: str | None = None,
+        value: str | None = None,
+        mapping: dict | None = None,
+        items: list | None = None,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        data_persist_option: HashDataPersistOptions | None = None,
         keepttl: bool = False,
-    ) -> Union[Awaitable[int], int]:
+    ) -> int | Awaitable[int]:
         """
         Set ``key`` to ``value`` within hash ``name``
 
@@ -8798,7 +8964,15 @@ class HashCommands(CommandsProtocol):
             "HSETEX", name, *exp_options, "FIELDS", int(len(pieces) / 2), *pieces
         )
 
-    def hsetnx(self, name: str, key: str, value: str) -> Union[Awaitable[bool], bool]:
+    @overload
+    def hsetnx(self: SyncClientProtocol, name: str, key: str, value: str) -> int: ...
+
+    @overload
+    def hsetnx(
+        self: AsyncClientProtocol, name: str, key: str, value: str
+    ) -> Awaitable[int]: ...
+
+    def hsetnx(self, name: str, key: str, value: str) -> int | Awaitable[int]:
         """
         Set ``key`` to ``value`` within hash ``name`` if ``key`` does not
         exist.  Returns 1 if HSETNX created a field, otherwise 0.
@@ -8812,7 +8986,15 @@ class HashCommands(CommandsProtocol):
         reason="Use 'hset' instead.",
         name="hmset",
     )
-    def hmset(self, name: str, mapping: dict) -> Union[Awaitable[str], str]:
+    @overload
+    def hmset(self: SyncClientProtocol, name: str, mapping: dict) -> bool: ...
+
+    @overload
+    def hmset(
+        self: AsyncClientProtocol, name: str, mapping: dict
+    ) -> Awaitable[bool]: ...
+
+    def hmset(self, name: str, mapping: dict) -> bool | Awaitable[bool]:
         """
         Set key to value within hash ``name`` for each corresponding
         key and value from the ``mapping`` dict.
@@ -8826,7 +9008,19 @@ class HashCommands(CommandsProtocol):
             items.extend(pair)
         return self.execute_command("HMSET", name, *items)
 
-    def hmget(self, name: str, keys: List, *args: List) -> Union[Awaitable[List], List]:
+    @overload
+    def hmget(
+        self: SyncClientProtocol, name: str, keys: List, *args: List
+    ) -> list[bytes | str | None]: ...
+
+    @overload
+    def hmget(
+        self: AsyncClientProtocol, name: str, keys: List, *args: List
+    ) -> Awaitable[list[bytes | str | None]]: ...
+
+    def hmget(
+        self, name: str, keys: List, *args: List
+    ) -> list[bytes | str | None] | Awaitable[list[bytes | str | None]]:
         """
         Returns a list of values ordered identically to ``keys``
 
@@ -8835,7 +9029,13 @@ class HashCommands(CommandsProtocol):
         args = list_or_args(keys, args)
         return self.execute_command("HMGET", name, *args, keys=[name])
 
-    def hvals(self, name: str) -> Union[Awaitable[List], List]:
+    @overload
+    def hvals(self: SyncClientProtocol, name: str) -> list[bytes | str]: ...
+
+    @overload
+    def hvals(self: AsyncClientProtocol, name: str) -> Awaitable[list[bytes | str]]: ...
+
+    def hvals(self, name: str) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return the list of values within hash ``name``
 
@@ -8843,7 +9043,13 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HVALS", name, keys=[name])
 
-    def hstrlen(self, name: str, key: str) -> Union[Awaitable[int], int]:
+    @overload
+    def hstrlen(self: SyncClientProtocol, name: str, key: str) -> int: ...
+
+    @overload
+    def hstrlen(self: AsyncClientProtocol, name: str, key: str) -> Awaitable[int]: ...
+
+    def hstrlen(self, name: str, key: str) -> int | Awaitable[int]:
         """
         Return the number of bytes stored in the value of ``key``
         within hash ``name``
@@ -8851,6 +9057,30 @@ class HashCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/hstrlen
         """
         return self.execute_command("HSTRLEN", name, key, keys=[name])
+
+    @overload
+    def hexpire(
+        self: SyncClientProtocol,
+        name: KeyT,
+        seconds: ExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> list[int]: ...
+
+    @overload
+    def hexpire(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        seconds: ExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> Awaitable[list[int]]: ...
 
     def hexpire(
         self,
@@ -8861,7 +9091,7 @@ class HashCommands(CommandsProtocol):
         xx: bool = False,
         gt: bool = False,
         lt: bool = False,
-    ) -> ResponseT:
+    ) -> list[int] | Awaitable[list[int]]:
         """
         Sets or updates the expiration time for fields within a hash key, using relative
         time in seconds.
@@ -8912,6 +9142,30 @@ class HashCommands(CommandsProtocol):
             "HEXPIRE", name, seconds, *options, "FIELDS", len(fields), *fields
         )
 
+    @overload
+    def hpexpire(
+        self: SyncClientProtocol,
+        name: KeyT,
+        milliseconds: ExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> list[int]: ...
+
+    @overload
+    def hpexpire(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        milliseconds: ExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> Awaitable[list[int]]: ...
+
     def hpexpire(
         self,
         name: KeyT,
@@ -8921,7 +9175,7 @@ class HashCommands(CommandsProtocol):
         xx: bool = False,
         gt: bool = False,
         lt: bool = False,
-    ) -> ResponseT:
+    ) -> list[int] | Awaitable[list[int]]:
         """
         Sets or updates the expiration time for fields within a hash key, using relative
         time in milliseconds.
@@ -8972,6 +9226,30 @@ class HashCommands(CommandsProtocol):
             "HPEXPIRE", name, milliseconds, *options, "FIELDS", len(fields), *fields
         )
 
+    @overload
+    def hexpireat(
+        self: SyncClientProtocol,
+        name: KeyT,
+        unix_time_seconds: AbsExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> list[int]: ...
+
+    @overload
+    def hexpireat(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        unix_time_seconds: AbsExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> Awaitable[list[int]]: ...
+
     def hexpireat(
         self,
         name: KeyT,
@@ -8981,7 +9259,7 @@ class HashCommands(CommandsProtocol):
         xx: bool = False,
         gt: bool = False,
         lt: bool = False,
-    ) -> ResponseT:
+    ) -> list[int] | Awaitable[list[int]]:
         """
         Sets or updates the expiration time for fields within a hash key, using an
         absolute Unix timestamp in seconds.
@@ -9038,6 +9316,30 @@ class HashCommands(CommandsProtocol):
             *fields,
         )
 
+    @overload
+    def hpexpireat(
+        self: SyncClientProtocol,
+        name: KeyT,
+        unix_time_milliseconds: AbsExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> list[int]: ...
+
+    @overload
+    def hpexpireat(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        unix_time_milliseconds: AbsExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> Awaitable[list[int]]: ...
+
     def hpexpireat(
         self,
         name: KeyT,
@@ -9047,7 +9349,7 @@ class HashCommands(CommandsProtocol):
         xx: bool = False,
         gt: bool = False,
         lt: bool = False,
-    ) -> ResponseT:
+    ) -> list[int] | Awaitable[list[int]]:
         """
         Sets or updates the expiration time for fields within a hash key, using an
         absolute Unix timestamp in milliseconds.
@@ -9104,7 +9406,15 @@ class HashCommands(CommandsProtocol):
             *fields,
         )
 
-    def hpersist(self, name: KeyT, *fields: str) -> ResponseT:
+    @overload
+    def hpersist(self: SyncClientProtocol, name: KeyT, *fields: str) -> list[int]: ...
+
+    @overload
+    def hpersist(
+        self: AsyncClientProtocol, name: KeyT, *fields: str
+    ) -> Awaitable[list[int]]: ...
+
+    def hpersist(self, name: KeyT, *fields: str) -> list[int] | Awaitable[list[int]]:
         """
         Removes the expiration time for each specified field in a hash.
 
@@ -9123,7 +9433,15 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HPERSIST", name, "FIELDS", len(fields), *fields)
 
-    def hexpiretime(self, key: KeyT, *fields: str) -> ResponseT:
+    @overload
+    def hexpiretime(self: SyncClientProtocol, key: KeyT, *fields: str) -> list[int]: ...
+
+    @overload
+    def hexpiretime(
+        self: AsyncClientProtocol, key: KeyT, *fields: str
+    ) -> Awaitable[list[int]]: ...
+
+    def hexpiretime(self, key: KeyT, *fields: str) -> list[int] | Awaitable[list[int]]:
         """
         Returns the expiration times of hash fields as Unix timestamps in seconds.
 
@@ -9145,7 +9463,17 @@ class HashCommands(CommandsProtocol):
             "HEXPIRETIME", key, "FIELDS", len(fields), *fields, keys=[key]
         )
 
-    def hpexpiretime(self, key: KeyT, *fields: str) -> ResponseT:
+    @overload
+    def hpexpiretime(
+        self: SyncClientProtocol, key: KeyT, *fields: str
+    ) -> list[int]: ...
+
+    @overload
+    def hpexpiretime(
+        self: AsyncClientProtocol, key: KeyT, *fields: str
+    ) -> Awaitable[list[int]]: ...
+
+    def hpexpiretime(self, key: KeyT, *fields: str) -> list[int] | Awaitable[list[int]]:
         """
         Returns the expiration times of hash fields as Unix timestamps in milliseconds.
 
@@ -9167,7 +9495,15 @@ class HashCommands(CommandsProtocol):
             "HPEXPIRETIME", key, "FIELDS", len(fields), *fields, keys=[key]
         )
 
-    def httl(self, key: KeyT, *fields: str) -> ResponseT:
+    @overload
+    def httl(self: SyncClientProtocol, key: KeyT, *fields: str) -> list[int]: ...
+
+    @overload
+    def httl(
+        self: AsyncClientProtocol, key: KeyT, *fields: str
+    ) -> Awaitable[list[int]]: ...
+
+    def httl(self, key: KeyT, *fields: str) -> list[int] | Awaitable[list[int]]:
         """
         Returns the TTL (Time To Live) in seconds for each specified field within a hash
         key.
@@ -9189,7 +9525,15 @@ class HashCommands(CommandsProtocol):
             "HTTL", key, "FIELDS", len(fields), *fields, keys=[key]
         )
 
-    def hpttl(self, key: KeyT, *fields: str) -> ResponseT:
+    @overload
+    def hpttl(self: SyncClientProtocol, key: KeyT, *fields: str) -> list[int]: ...
+
+    @overload
+    def hpttl(
+        self: AsyncClientProtocol, key: KeyT, *fields: str
+    ) -> Awaitable[list[int]]: ...
+
+    def hpttl(self, key: KeyT, *fields: str) -> list[int] | Awaitable[list[int]]:
         """
         Returns the TTL (Time To Live) in milliseconds for each specified field within a
         hash key.

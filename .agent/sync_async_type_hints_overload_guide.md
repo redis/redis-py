@@ -450,15 +450,15 @@ For commands with protocol-specific differences, use the **most permissive union
 | 265 | `hexists` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
 | 266 | `hget` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ | No callback - raw |
 | 267 | `hgetall` | `dict[bytes \| str, bytes \| str]` | `Awaitable[dict[bytes \| str, bytes \| str]]` | ✅ | RESP2: pairs_to_dict / RESP3: identity |
-| 268 | `hgetdel` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ | No callback - raw array |
-| 269 | `hgetex` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ | No callback - raw array |
+| 268 | `hgetdel` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ | No callback - one result per requested field |
+| 269 | `hgetex` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ | No callback - one result per requested field |
 | 270 | `hincrby` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 271 | `hincrbyfloat` | `float` | `Awaitable[float]` | ✅ | Base: float |
 | 272 | `hkeys` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | No callback - raw array |
 | 273 | `hlen` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 274 | `hset` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 275 | `hsetex` | `int` | `Awaitable[int]` | ✅ | Integer reply |
-| 276 | `hsetnx` | `bool` | `Awaitable[bool]` | ✅ | Integer 0/1 as bool |
+| 276 | `hsetnx` | `int` | `Awaitable[int]` | ✅ | No callback - integer 0/1 reply |
 | 277 | `hmset` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
 | 278 | `hmget` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ | No callback - raw array |
 | 279 | `hvals` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | No callback - raw array |

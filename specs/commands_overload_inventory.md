@@ -333,40 +333,40 @@ This document catalogs all command methods that need `@overload` signatures for 
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 261 | `pfadd` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply (0 or 1) - no callback | 🔲 TODO |
-| 262 | `pfcount` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 263 | `pfmerge` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
+| 261 | `pfadd` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply (0 or 1) - no callback | ✅ DONE |
+| 262 | `pfcount` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 263 | `pfmerge` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
 
 ### HashCommands
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 264 | `hdel` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 265 | `hexists` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | 🔲 TODO |
-| 266 | `hget` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 267 | `hgetall` | `ResponseT` | `dict[bytes \| str, bytes \| str]` | `Awaitable[dict[bytes \| str, bytes \| str]]` | ✅ RESP2: pairs_to_dict / RESP3: identity | 🔲 TODO |
-| 268 | `hgetdel` | `ResponseT` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 269 | `hgetex` | `ResponseT` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 270 | `hincrby` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 271 | `hincrbyfloat` | `ResponseT` | `float` | `Awaitable[float]` | ✅ Base: float | 🔲 TODO |
-| 272 | `hkeys` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 273 | `hlen` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 274 | `hset` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 275 | `hsetex` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 276 | `hsetnx` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply (0 or 1) - no callback | 🔲 TODO |
-| 277 | `hmset` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | 🔲 TODO |
-| 278 | `hmget` | `ResponseT` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 279 | `hvals` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 280 | `hstrlen` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 281 | `hexpire` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers - no callback | 🔲 TODO |
-| 282 | `hpexpire` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers - no callback | 🔲 TODO |
-| 283 | `hexpireat` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers - no callback | 🔲 TODO |
-| 284 | `hpexpireat` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers - no callback | 🔲 TODO |
-| 285 | `hpersist` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers - no callback | 🔲 TODO |
-| 286 | `hexpiretime` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers - no callback | 🔲 TODO |
-| 287 | `hpexpiretime` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers - no callback | 🔲 TODO |
-| 288 | `httl` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers - no callback | 🔲 TODO |
-| 289 | `hpttl` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers - no callback | 🔲 TODO |
+| 264 | `hdel` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 265 | `hexists` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | ✅ DONE |
+| 266 | `hget` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | ✅ DONE |
+| 267 | `hgetall` | `ResponseT` | `dict[bytes \| str, bytes \| str]` | `Awaitable[dict[bytes \| str, bytes \| str]]` | ✅ RESP2: pairs_to_dict / RESP3: identity | ✅ DONE |
+| 268 | `hgetdel` | `ResponseT` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ No callback - one result per requested field | ✅ DONE |
+| 269 | `hgetex` | `ResponseT` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ No callback - one result per requested field | ✅ DONE |
+| 270 | `hincrby` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 271 | `hincrbyfloat` | `ResponseT` | `float` | `Awaitable[float]` | ✅ Base: float | ✅ DONE |
+| 272 | `hkeys` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - raw array | ✅ DONE |
+| 273 | `hlen` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 274 | `hset` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 275 | `hsetex` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 276 | `hsetnx` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply (0 or 1) - no callback | ✅ DONE |
+| 277 | `hmset` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | ✅ DONE |
+| 278 | `hmget` | `ResponseT` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ No callback - raw array | ✅ DONE |
+| 279 | `hvals` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - raw array | ✅ DONE |
+| 280 | `hstrlen` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 281 | `hexpire` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers - no callback | ✅ DONE |
+| 282 | `hpexpire` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers - no callback | ✅ DONE |
+| 283 | `hexpireat` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers - no callback | ✅ DONE |
+| 284 | `hpexpireat` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers - no callback | ✅ DONE |
+| 285 | `hpersist` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers - no callback | ✅ DONE |
+| 286 | `hexpiretime` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers - no callback | ✅ DONE |
+| 287 | `hpexpiretime` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers - no callback | ✅ DONE |
+| 288 | `httl` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers - no callback | ✅ DONE |
+| 289 | `hpttl` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers - no callback | ✅ DONE |
 
 ### PubSubCommands
 
