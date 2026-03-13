@@ -10,9 +10,10 @@ Work on one batch at a time. Each batch contains methods grouped by command clas
 
 ### Step 2: For Each Method in the Batch
 1. **Verify the return type** by checking Redis docs at https://redis.io/commands
-2. **Add two `@overload` signatures** before the method:
+2. **Add two `@overload` signatures** before the method when the sync and async return types differ:
    - One for sync (`self: Redis[...]`) returning the sync type
    - One for async (`self: AsyncRedis[...]`) returning `Awaitable[sync_type]`
+   - If both clients return the same concrete type, keep a single typed method instead of adding redundant overloads
 3. **Mirror the full input signature exactly** in both overloads:
    - Same parameter names, order, defaults, positional/keyword shape, `*args`, and `**kwargs` as the implementation
    - Use the same modern annotation style as return types: prefer `X | Y` and `T | None` over `Union[...]` / `Optional[...]`
@@ -152,7 +153,7 @@ For commands with protocol-specific differences, use the **most permissive union
 | 5 | `acl_getuser` | `dict \| None` | `Awaitable[dict \| None]` | ✅ | Base: parse_acl_getuser |
 | 6 | `acl_help` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | RESP2: str_if_bytes / RESP3: raw |
 | 7 | `acl_list` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | RESP2: str_if_bytes / RESP3: raw |
-| 8 | `acl_log` | `list[dict] \| bool` | `Awaitable[list[dict] \| bool]` | ✅ | Base: parse_acl_log / RESP3: lambda |
+| 8 | `acl_log` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | Base: parse_acl_log / RESP3: lambda |
 | 9 | `acl_log_reset` | `bool` | `Awaitable[bool]` | ✅ | Via acl_log with RESET |
 | 10 | `acl_load` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
 | 11 | `acl_save` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
@@ -175,15 +176,15 @@ For commands with protocol-specific differences, use the **most permissive union
 | 24 | `client_getredir` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 25 | `client_reply` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback |
 | 26 | `client_id` | `int` | `Awaitable[int]` | ✅ | Integer reply |
-| 27 | `client_tracking_on` | `bool` | `Awaitable[bool]` | ✅ | Uses CLIENT TRACKING |
-| 28 | `client_tracking_off` | `bool` | `Awaitable[bool]` | ✅ | Uses CLIENT TRACKING |
-| 29 | `client_tracking` | `bool` | `Awaitable[bool]` | ✅ | Uses CLIENT TRACKING |
+| 27 | `client_tracking_on` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - returns raw OK |
+| 28 | `client_tracking_off` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - returns raw OK |
+| 29 | `client_tracking` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - returns raw OK |
 | 30 | `client_trackinginfo` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | RESP2: str_if_bytes / RESP3: raw |
 | 31 | `client_setname` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
 | 32 | `client_setinfo` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
 | 33 | `client_unblock` | `bool` | `Awaitable[bool]` | ✅ | Base: bool (converts int) |
 | 34 | `client_pause` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
-| 35 | `client_unpause` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 35 | `client_unpause` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - returns raw OK |
 | 36 | `client_no_evict` | `bool` | `Awaitable[bool]` | 📋 | Base: bool_ok |
 | 37 | `client_no_touch` | `bool` | `Awaitable[bool]` | 📋 | Base: bool_ok |
 | 38 | `command` | `list` | `Awaitable[list]` | ✅ | Base: parse_command / RESP3: parse_command_resp3 |
@@ -563,8 +564,8 @@ For commands with protocol-specific differences, use the **most permissive union
 | 368 | `cluster_links` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | No callback - raw |
 | 369 | `cluster_flushslots` | `bool` | `Awaitable[bool]` | ✅ | No callback - OK |
 | 370 | `cluster_bumpepoch` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - raw |
-| 371 | `client_tracking_on` | `bool` | `Awaitable[bool]` | ⚠️ SKIP | Cluster-specific |
-| 372 | `client_tracking_off` | `bool` | `Awaitable[bool]` | ⚠️ SKIP | Cluster-specific |
+| 371 | `client_tracking_on` | `bytes \| str` | `Awaitable[bytes \| str]` | ⚠️ SKIP | Cluster-specific, no callback |
+| 372 | `client_tracking_off` | `bytes \| str` | `Awaitable[bytes \| str]` | ⚠️ SKIP | Cluster-specific, no callback |
 | 373 | `hotkeys_start` | `bytes \| str` | `Awaitable[bytes \| str]` | ⚠️ SKIP | Cluster-specific |
 | 374 | `hotkeys_stop` | `bytes \| str` | `Awaitable[bytes \| str]` | ⚠️ SKIP | Cluster-specific |
 | 375 | `hotkeys_reset` | `bytes \| str` | `Awaitable[bytes \| str]` | ⚠️ SKIP | Cluster-specific |

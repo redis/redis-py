@@ -65,7 +65,8 @@ ACLCategoryResponse = list[bytes | str]
 ACLGetUserData = (
     dict[str, bool | list[str] | list[list[str]] | list[dict[str, str]]] | None
 )
-ACLLogData = list[dict[str, str | float | dict[str, str | int]]] | bool
+ACLLogEntry = dict[str, str | float | dict[str, str | int]]
+ACLLogData = list[ACLLogEntry]
 
 # Mapping is not covariant in the key type, which prevents
 # Mapping[_StringLikeT, X] from accepting arguments of type Dict[str, X]. Using

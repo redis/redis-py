@@ -40,7 +40,7 @@ This document catalogs all command methods that need `@overload` signatures for 
 | 5 | `acl_getuser` | `ResponseT` | `dict[str, str \| list[str] \| list[list[str]] \| list[dict[str, str]]] \| None` | `Awaitable[...]` | ✅ Base: parse_acl_getuser (str keys/values) | ✅ Done |
 | 6 | `acl_help` | `ResponseT` | `list[str]` (RESP2) / `list[bytes \| str]` (RESP3) | `Awaitable[...]` | ✅ RESP2: str_if_bytes / RESP3: no callback (raw) | ✅ Done |
 | 7 | `acl_list` | `ResponseT` | `list[str]` (RESP2) / `list[bytes \| str]` (RESP3) | `Awaitable[...]` | ✅ RESP2: str_if_bytes / RESP3: no callback (raw) | ✅ Done |
-| 8 | `acl_log` | `ResponseT` | `list[dict[str, str \| float \| dict[str, str \| int]]] \| bool` | `Awaitable[...]` | ✅ Base: parse_acl_log / RESP3: lambda (all str keys/values) | ✅ Done |
+| 8 | `acl_log` | `ResponseT` | `list[dict[str, str \| float \| dict[str, str \| int]]]` | `Awaitable[...]` | ✅ Base: parse_acl_log / RESP3: lambda (all str keys/values) | ✅ Done |
 | 9 | `acl_log_reset` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Via acl_log with RESET → bool_ok | ✅ Done |
 | 10 | `acl_load` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ Done |
 | 11 | `acl_save` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ Done |
@@ -136,43 +136,43 @@ This document catalogs all command methods that need `@overload` signatures for 
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 94 | `append` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 95 | `bitcount` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 96 | `bitfield` | `BitFieldOperation` | `BitFieldOperation` | `BitFieldOperation` | 📋 Explicit - builder pattern | 🔲 TODO |
-| 97 | `bitfield_ro` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers - no callback | 🔲 TODO |
-| 98 | `bitop` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 99 | `bitpos` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 100 | `copy` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | 🔲 TODO |
-| 101 | `decrby` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 102 | `delete` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
+| 94 | `append` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 95 | `bitcount` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 96 | `bitfield` | `BitFieldOperation` | `BitFieldOperation` | `BitFieldOperation` | 📋 Explicit - builder pattern | ✅ Done |
+| 97 | `bitfield_ro` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Array of integers - no callback | ✅ Done |
+| 98 | `bitop` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 99 | `bitpos` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 100 | `copy` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | ✅ Done |
+| 101 | `decrby` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 102 | `delete` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
 | 103 | `__delitem__` | `None` | `None` | N/A | ❌ Dunder - raises TypeError in async | ⏭️ N/A |
-| 104 | `delex` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 105 | `dump` | `ResponseT` | `bytes` | `Awaitable[bytes]` | ✅ Always bytes (serialized format) - no callback | 🔲 TODO |
-| 106 | `exists` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 107 | `expire` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | 🔲 TODO |
-| 108 | `expireat` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | 🔲 TODO |
-| 109 | `expiretime` | `int` | `int` | `Awaitable[int]` | 📋 Integer reply - no callback | 🔲 TODO |
-| 110 | `digest_local` | `bytes \| str` | `bytes \| str` | `Awaitable[bytes \| str]` | 📋 Explicit - local computation | 🔲 TODO |
-| 111 | `digest` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
+| 104 | `delex` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 105 | `dump` | `ResponseT` | `bytes \| None` | `Awaitable[bytes \| None]` | ✅ Always bytes (serialized format) - no callback | ✅ Done |
+| 106 | `exists` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 107 | `expire` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | ✅ Done |
+| 108 | `expireat` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | ✅ Done |
+| 109 | `expiretime` | `int` | `int` | `Awaitable[int]` | 📋 Integer reply - no callback | ✅ Done |
+| 110 | `digest_local` | `bytes \| str` | `bytes \| str` | `bytes \| str` | 📋 Explicit - local computation | ✅ Done |
+| 111 | `digest` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | ✅ Done |
 | 112 | `get` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | ✅ Done |
-| 113 | `getdel` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 114 | `getex` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
+| 113 | `getdel` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | ✅ Done |
+| 114 | `getex` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | ✅ Done |
 | 115 | `__getitem__` | `bytes \| str` | `bytes \| str` | N/A | ❌ Dunder - depends on decode_responses | ⏭️ N/A |
-| 116 | `getbit` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply (0 or 1) - no callback | 🔲 TODO |
-| 117 | `getrange` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 118 | `getset` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 119 | `incrby` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 120 | `incrbyfloat` | `ResponseT` | `float` | `Awaitable[float]` | ✅ Base: float | 🔲 TODO |
-| 121 | `keys` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 122 | `lmove` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 123 | `blmove` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 124 | `mget` | `ResponseT` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 125 | `mset` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 126 | `msetex` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 127 | `msetnx` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | 🔲 TODO |
-| 128 | `move` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | 🔲 TODO |
-| 129 | `persist` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | 🔲 TODO |
-| 130 | `pexpire` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | 🔲 TODO |
+| 116 | `getbit` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply (0 or 1) - no callback | ✅ Done |
+| 117 | `getrange` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - depends on decode_responses | ✅ Done |
+| 118 | `getset` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | ✅ Done |
+| 119 | `incrby` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 120 | `incrbyfloat` | `ResponseT` | `float` | `Awaitable[float]` | ✅ Base: float | ✅ Done |
+| 121 | `keys` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - depends on decode_responses | ✅ Done |
+| 122 | `lmove` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | ✅ Done |
+| 123 | `blmove` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | ✅ Done |
+| 124 | `mget` | `ResponseT` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ No callback - depends on decode_responses | ✅ Done |
+| 125 | `mset` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ Done |
+| 126 | `msetex` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 127 | `msetnx` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | ✅ Done |
+| 128 | `move` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | ✅ Done |
+| 129 | `persist` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | ✅ Done |
+| 130 | `pexpire` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | ✅ Done |
 | 131 | `pexpireat` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | 🔲 TODO |
 | 132 | `pexpiretime` | `int` | `int` | `Awaitable[int]` | 📋 Integer reply - no callback | 🔲 TODO |
 | 133 | `psetex` | *(none)* | `bool` | `Awaitable[bool]` | ✅ Base: bool | 🔲 TODO |
