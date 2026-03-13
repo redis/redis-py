@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import pytest_asyncio
 from redis import DataError, RedisClusterException, ResponseError
-import redis
+
 from redis import exceptions
 from redis._parsers.helpers import (
     _RedisCallbacks,
@@ -27,6 +27,9 @@ from redis.commands.json.path import Path
 from redis.commands.search.field import TextField
 from redis.commands.search.query import Query
 from redis.utils import safe_str
+
+# import redis
+import redis.asyncio as redis
 from tests.conftest import (
     assert_resp_response,
     assert_resp_response_in,
@@ -543,7 +546,7 @@ class TestRedisCommands:
 
         # Test deprecated lib_name/lib_version parameters
         with pytest.warns(DeprecationWarning):
-            r2 = redis.asyncio.Redis(lib_name="test2", lib_version="1234")
+            r2 = redis.Redis(lib_name="test2", lib_version="1234")
         info = await r2.client_info()
         assert info["lib-name"] == "test2"
         assert info["lib-ver"] == "1234"
@@ -555,7 +558,7 @@ class TestRedisCommands:
         from redis.utils import get_lib_version
 
         info = DriverInfo().add_upstream_driver("celery", "5.4.1")
-        r2 = redis.asyncio.Redis(driver_info=info)
+        r2 = redis.Redis(driver_info=info)
         await r2.ping()
         client_info = await r2.client_info()
         assert client_info["lib-name"] == "redis-py(celery_v5.4.1)"

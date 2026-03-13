@@ -40,6 +40,9 @@ from redis.asyncio.observability.recorder import (
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
 from redis.typing import (
     AbsExpiryT,
+    ACLCategoryResponse,
+    ACLGetUserData,
+    ACLLogData,
     AnyKeyT,
     AsyncClientProtocol,
     BitfieldOffsetT,
@@ -87,7 +90,19 @@ class ACLCommands(CommandsProtocol):
     see: https://redis.io/topics/acl
     """
 
-    def acl_cat(self, category: Optional[str] = None, **kwargs) -> ResponseT:
+    @overload
+    def acl_cat(
+        self: SyncClientProtocol, category: str | None = None, **kwargs
+    ) -> ACLCategoryResponse: ...
+
+    @overload
+    def acl_cat(
+        self: AsyncClientProtocol, category: str | None = None, **kwargs
+    ) -> Awaitable[ACLCategoryResponse]: ...
+
+    def acl_cat(
+        self, category: str | None = None, **kwargs
+    ) -> ACLCategoryResponse | Awaitable[ACLCategoryResponse]:
         """
         Returns a list of categories or commands within a category.
 
@@ -100,7 +115,19 @@ class ACLCommands(CommandsProtocol):
         pieces: list[EncodableT] = [category] if category else []
         return self.execute_command("ACL CAT", *pieces, **kwargs)
 
-    def acl_dryrun(self, username, *args, **kwargs):
+    @overload
+    def acl_dryrun(
+        self: SyncClientProtocol, username: str, *args: EncodableT, **kwargs
+    ) -> bytes | str: ...
+
+    @overload
+    def acl_dryrun(
+        self: AsyncClientProtocol, username: str, *args: EncodableT, **kwargs
+    ) -> Awaitable[bytes | str]: ...
+
+    def acl_dryrun(self, username: str, *args: EncodableT, **kwargs) -> (
+        bytes | str
+    ) | Awaitable[bytes | str]:
         """
         Simulate the execution of a given command by a given ``username``.
 
@@ -108,7 +135,15 @@ class ACLCommands(CommandsProtocol):
         """
         return self.execute_command("ACL DRYRUN", username, *args, **kwargs)
 
-    def acl_deluser(self, *username: str, **kwargs) -> ResponseT:
+    @overload
+    def acl_deluser(self: SyncClientProtocol, *username: str, **kwargs) -> int: ...
+
+    @overload
+    def acl_deluser(
+        self: AsyncClientProtocol, *username: str, **kwargs
+    ) -> Awaitable[int]: ...
+
+    def acl_deluser(self, *username: str, **kwargs) -> int | Awaitable[int]:
         """
         Delete the ACL for the specified ``username``\\s
 
@@ -116,7 +151,19 @@ class ACLCommands(CommandsProtocol):
         """
         return self.execute_command("ACL DELUSER", *username, **kwargs)
 
-    def acl_genpass(self, bits: Optional[int] = None, **kwargs) -> ResponseT:
+    @overload
+    def acl_genpass(
+        self: SyncClientProtocol, bits: int | None = None, **kwargs
+    ) -> bytes | str: ...
+
+    @overload
+    def acl_genpass(
+        self: AsyncClientProtocol, bits: int | None = None, **kwargs
+    ) -> Awaitable[bytes | str]: ...
+
+    def acl_genpass(self, bits: int | None = None, **kwargs) -> (
+        bytes | str
+    ) | Awaitable[bytes | str]:
         """Generate a random password value.
         If ``bits`` is supplied then use this number of bits, rounded to
         the next multiple of 4.
@@ -135,7 +182,19 @@ class ACLCommands(CommandsProtocol):
                 )
         return self.execute_command("ACL GENPASS", *pieces, **kwargs)
 
-    def acl_getuser(self, username: str, **kwargs) -> ResponseT:
+    @overload
+    def acl_getuser(
+        self: SyncClientProtocol, username: str, **kwargs
+    ) -> ACLGetUserData: ...
+
+    @overload
+    def acl_getuser(
+        self: AsyncClientProtocol, username: str, **kwargs
+    ) -> Awaitable[ACLGetUserData]: ...
+
+    def acl_getuser(
+        self, username: str, **kwargs
+    ) -> ACLGetUserData | Awaitable[ACLGetUserData]:
         """
         Get the ACL details for the specified ``username``.
 
@@ -145,7 +204,17 @@ class ACLCommands(CommandsProtocol):
         """
         return self.execute_command("ACL GETUSER", username, **kwargs)
 
-    def acl_help(self, **kwargs) -> ResponseT:
+    @overload
+    def acl_help(self: SyncClientProtocol, **kwargs) -> ACLCategoryResponse: ...
+
+    @overload
+    def acl_help(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[ACLCategoryResponse]: ...
+
+    def acl_help(
+        self, **kwargs
+    ) -> ACLCategoryResponse | Awaitable[ACLCategoryResponse]:
         """The ACL HELP command returns helpful text describing
         the different subcommands.
 
@@ -153,7 +222,17 @@ class ACLCommands(CommandsProtocol):
         """
         return self.execute_command("ACL HELP", **kwargs)
 
-    def acl_list(self, **kwargs) -> ResponseT:
+    @overload
+    def acl_list(self: SyncClientProtocol, **kwargs) -> ACLCategoryResponse: ...
+
+    @overload
+    def acl_list(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[ACLCategoryResponse]: ...
+
+    def acl_list(
+        self, **kwargs
+    ) -> ACLCategoryResponse | Awaitable[ACLCategoryResponse]:
         """
         Return a list of all ACLs on the server
 
@@ -161,7 +240,19 @@ class ACLCommands(CommandsProtocol):
         """
         return self.execute_command("ACL LIST", **kwargs)
 
-    def acl_log(self, count: Optional[int] = None, **kwargs) -> ResponseT:
+    @overload
+    def acl_log(
+        self: SyncClientProtocol, count: int | None = None, **kwargs
+    ) -> ACLLogData: ...
+
+    @overload
+    def acl_log(
+        self: AsyncClientProtocol, count: int | None = None, **kwargs
+    ) -> Awaitable[ACLLogData]: ...
+
+    def acl_log(
+        self, count: int | None = None, **kwargs
+    ) -> ACLLogData | Awaitable[ACLLogData]:
         """
         Get ACL logs as a list.
         :param int count: Get logs[0:count].
@@ -177,7 +268,13 @@ class ACLCommands(CommandsProtocol):
 
         return self.execute_command("ACL LOG", *args, **kwargs)
 
-    def acl_log_reset(self, **kwargs) -> ResponseT:
+    @overload
+    def acl_log_reset(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def acl_log_reset(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
+
+    def acl_log_reset(self, **kwargs) -> bool | Awaitable[bool]:
         """
         Reset ACL logs.
         :rtype: Boolean.
@@ -187,7 +284,13 @@ class ACLCommands(CommandsProtocol):
         args = [b"RESET"]
         return self.execute_command("ACL LOG", *args, **kwargs)
 
-    def acl_load(self, **kwargs) -> ResponseT:
+    @overload
+    def acl_load(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def acl_load(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
+
+    def acl_load(self, **kwargs) -> bool | Awaitable[bool]:
         """
         Load ACL rules from the configured ``aclfile``.
 
@@ -198,7 +301,13 @@ class ACLCommands(CommandsProtocol):
         """
         return self.execute_command("ACL LOAD", **kwargs)
 
-    def acl_save(self, **kwargs) -> ResponseT:
+    @overload
+    def acl_save(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def acl_save(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
+
+    def acl_save(self, **kwargs) -> bool | Awaitable[bool]:
         """
         Save ACL rules to the configured ``aclfile``.
 
@@ -209,24 +318,64 @@ class ACLCommands(CommandsProtocol):
         """
         return self.execute_command("ACL SAVE", **kwargs)
 
+    @overload
     def acl_setuser(
-        self,
+        self: SyncClientProtocol,
         username: str,
         enabled: bool = False,
         nopass: bool = False,
-        passwords: Optional[Union[str, Iterable[str]]] = None,
-        hashed_passwords: Optional[Union[str, Iterable[str]]] = None,
-        categories: Optional[Iterable[str]] = None,
-        commands: Optional[Iterable[str]] = None,
-        keys: Optional[Iterable[KeyT]] = None,
-        channels: Optional[Iterable[ChannelT]] = None,
-        selectors: Optional[Iterable[Tuple[str, KeyT]]] = None,
+        passwords: str | Iterable[str] | None = None,
+        hashed_passwords: str | Iterable[str] | None = None,
+        categories: Iterable[str] | None = None,
+        commands: Iterable[str] | None = None,
+        keys: Iterable[KeyT] | None = None,
+        channels: Iterable[ChannelT] | None = None,
+        selectors: Iterable[Tuple[str, KeyT]] | None = None,
         reset: bool = False,
         reset_keys: bool = False,
         reset_channels: bool = False,
         reset_passwords: bool = False,
         **kwargs,
-    ) -> ResponseT:
+    ) -> bool: ...
+
+    @overload
+    def acl_setuser(
+        self: AsyncClientProtocol,
+        username: str,
+        enabled: bool = False,
+        nopass: bool = False,
+        passwords: str | Iterable[str] | None = None,
+        hashed_passwords: str | Iterable[str] | None = None,
+        categories: Iterable[str] | None = None,
+        commands: Iterable[str] | None = None,
+        keys: Iterable[KeyT] | None = None,
+        channels: Iterable[ChannelT] | None = None,
+        selectors: Iterable[Tuple[str, KeyT]] | None = None,
+        reset: bool = False,
+        reset_keys: bool = False,
+        reset_channels: bool = False,
+        reset_passwords: bool = False,
+        **kwargs,
+    ) -> Awaitable[bool]: ...
+
+    def acl_setuser(
+        self,
+        username: str,
+        enabled: bool = False,
+        nopass: bool = False,
+        passwords: str | Iterable[str] | None = None,
+        hashed_passwords: str | Iterable[str] | None = None,
+        categories: Iterable[str] | None = None,
+        commands: Iterable[str] | None = None,
+        keys: Iterable[KeyT] | None = None,
+        channels: Iterable[ChannelT] | None = None,
+        selectors: Iterable[Tuple[str, KeyT]] | None = None,
+        reset: bool = False,
+        reset_keys: bool = False,
+        reset_channels: bool = False,
+        reset_passwords: bool = False,
+        **kwargs,
+    ) -> bool | Awaitable[bool]:
         """
         Create or update an ACL user.
 
@@ -400,14 +549,30 @@ class ACLCommands(CommandsProtocol):
 
         return self.execute_command("ACL SETUSER", *pieces, **kwargs)
 
-    def acl_users(self, **kwargs) -> ResponseT:
+    @overload
+    def acl_users(self: SyncClientProtocol, **kwargs) -> ACLCategoryResponse: ...
+
+    @overload
+    def acl_users(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[ACLCategoryResponse]: ...
+
+    def acl_users(
+        self, **kwargs
+    ) -> ACLCategoryResponse | Awaitable[ACLCategoryResponse]:
         """Returns a list of all registered users on the server.
 
         For more information, see https://redis.io/commands/acl-users
         """
         return self.execute_command("ACL USERS", **kwargs)
 
-    def acl_whoami(self, **kwargs) -> ResponseT:
+    @overload
+    def acl_whoami(self: SyncClientProtocol, **kwargs) -> bytes | str: ...
+
+    @overload
+    def acl_whoami(self: AsyncClientProtocol, **kwargs) -> Awaitable[bytes | str]: ...
+
+    def acl_whoami(self, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
         """Get the username for the current connection
 
         For more information, see https://redis.io/commands/acl-whoami
@@ -428,7 +593,25 @@ class ManagementCommands(CommandsProtocol):
     Redis management commands
     """
 
-    def auth(self, password: str, username: Optional[str] = None, **kwargs):
+    @overload
+    def auth(
+        self: SyncClientProtocol,
+        password: str,
+        username: str | None = None,
+        **kwargs,
+    ) -> bool: ...
+
+    @overload
+    def auth(
+        self: AsyncClientProtocol,
+        password: str,
+        username: str | None = None,
+        **kwargs,
+    ) -> Awaitable[bool]: ...
+
+    def auth(
+        self, password: str, username: str | None = None, **kwargs
+    ) -> bool | Awaitable[bool]:
         """
         Authenticates the user. If you do not pass username, Redis will try to
         authenticate for the "default" user. If you do pass username, it will
@@ -441,14 +624,36 @@ class ManagementCommands(CommandsProtocol):
         pieces.append(password)
         return self.execute_command("AUTH", *pieces, **kwargs)
 
-    def bgrewriteaof(self, **kwargs):
+    @overload
+    def bgrewriteaof(self: SyncClientProtocol, **kwargs) -> bool | bytes | str: ...
+
+    @overload
+    def bgrewriteaof(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[bool | bytes | str]: ...
+
+    def bgrewriteaof(self, **kwargs) -> (bool | bytes | str) | Awaitable[
+        bool | bytes | str
+    ]:
         """Tell the Redis server to rewrite the AOF file from data in memory.
 
         For more information, see https://redis.io/commands/bgrewriteaof
         """
         return self.execute_command("BGREWRITEAOF", **kwargs)
 
-    def bgsave(self, schedule: bool = True, **kwargs) -> ResponseT:
+    @overload
+    def bgsave(
+        self: SyncClientProtocol, schedule: bool = True, **kwargs
+    ) -> bool | bytes | str: ...
+
+    @overload
+    def bgsave(
+        self: AsyncClientProtocol, schedule: bool = True, **kwargs
+    ) -> Awaitable[bool | bytes | str]: ...
+
+    def bgsave(self, schedule: bool = True, **kwargs) -> (
+        bool | bytes | str
+    ) | Awaitable[bool | bytes | str]:
         """
         Tell the Redis server to save its data to disk.  Unlike save(),
         this method is asynchronous and returns immediately.
@@ -460,7 +665,13 @@ class ManagementCommands(CommandsProtocol):
             pieces.append("SCHEDULE")
         return self.execute_command("BGSAVE", *pieces, **kwargs)
 
-    def role(self) -> ResponseT:
+    @overload
+    def role(self: SyncClientProtocol) -> list[Any]: ...
+
+    @overload
+    def role(self: AsyncClientProtocol) -> Awaitable[list[Any]]: ...
+
+    def role(self) -> list[Any] | Awaitable[list[Any]]:
         """
         Provide information on the role of a Redis instance in
         the context of replication, by returning if the instance
@@ -470,24 +681,60 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("ROLE")
 
-    def client_kill(self, address: str, **kwargs) -> ResponseT:
+    @overload
+    def client_kill(self: SyncClientProtocol, address: str, **kwargs) -> bool | int: ...
+
+    @overload
+    def client_kill(
+        self: AsyncClientProtocol, address: str, **kwargs
+    ) -> Awaitable[bool | int]: ...
+
+    def client_kill(self, address: str, **kwargs) -> (bool | int) | Awaitable[
+        bool | int
+    ]:
         """Disconnects the client at ``address`` (ip:port)
 
         For more information, see https://redis.io/commands/client-kill
         """
         return self.execute_command("CLIENT KILL", address, **kwargs)
 
+    @overload
+    def client_kill_filter(
+        self: SyncClientProtocol,
+        _id: str | None = None,
+        _type: str | None = None,
+        addr: str | None = None,
+        skipme: bool | None = None,
+        laddr: bool | None = None,
+        user: str | None = None,
+        maxage: int | None = None,
+        **kwargs,
+    ) -> int: ...
+
+    @overload
+    def client_kill_filter(
+        self: AsyncClientProtocol,
+        _id: str | None = None,
+        _type: str | None = None,
+        addr: str | None = None,
+        skipme: bool | None = None,
+        laddr: bool | None = None,
+        user: str | None = None,
+        maxage: int | None = None,
+        **kwargs,
+    ) -> Awaitable[int]: ...
+
     def client_kill_filter(
         self,
-        _id: Optional[str] = None,
-        _type: Optional[str] = None,
-        addr: Optional[str] = None,
-        skipme: Optional[bool] = None,
-        laddr: Optional[bool] = None,
-        user: Optional[str] = None,
-        maxage: Optional[int] = None,
+        _id: str | None = None,
+        _type: str | None = None,
+        addr: str | None = None,
+        skipme: bool | None = None,
+        laddr: bool | None = None,
+        user: str | None = None,
+        maxage: int | None = None,
         **kwargs,
-    ) -> ResponseT:
+    ) -> int | Awaitable[int]:
         """
         Disconnects client(s) using a variety of filter options
         :param _id: Kills a client by its unique ID field
@@ -531,7 +778,17 @@ class ManagementCommands(CommandsProtocol):
             )
         return self.execute_command("CLIENT KILL", *args, **kwargs)
 
-    def client_info(self, **kwargs) -> ResponseT:
+    @overload
+    def client_info(self: SyncClientProtocol, **kwargs) -> dict[str, str | int]: ...
+
+    @overload
+    def client_info(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[dict[str, str | int]]: ...
+
+    def client_info(
+        self, **kwargs
+    ) -> dict[str, str | int] | Awaitable[dict[str, str | int]]:
         """
         Returns information and statistics about the current
         client connection.
@@ -540,9 +797,25 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT INFO", **kwargs)
 
+    @overload
     def client_list(
-        self, _type: Optional[str] = None, client_id: List[EncodableT] = [], **kwargs
-    ) -> ResponseT:
+        self: SyncClientProtocol,
+        _type: str | None = None,
+        client_id: List[EncodableT] = [],
+        **kwargs,
+    ) -> list[dict[str, str]]: ...
+
+    @overload
+    def client_list(
+        self: AsyncClientProtocol,
+        _type: str | None = None,
+        client_id: List[EncodableT] = [],
+        **kwargs,
+    ) -> Awaitable[list[dict[str, str]]]: ...
+
+    def client_list(
+        self, _type: str | None = None, client_id: List[EncodableT] = [], **kwargs
+    ) -> list[dict[str, str]] | Awaitable[list[dict[str, str]]]:
         """
         Returns a list of currently connected clients.
         If type of client specified, only that type will be returned.
@@ -567,7 +840,17 @@ class ManagementCommands(CommandsProtocol):
             args += client_id
         return self.execute_command("CLIENT LIST", *args, **kwargs)
 
-    def client_getname(self, **kwargs) -> ResponseT:
+    @overload
+    def client_getname(self: SyncClientProtocol, **kwargs) -> bytes | str | None: ...
+
+    @overload
+    def client_getname(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[bytes | str | None]: ...
+
+    def client_getname(self, **kwargs) -> (bytes | str | None) | Awaitable[
+        bytes | str | None
+    ]:
         """
         Returns the current connection name
 
@@ -575,7 +858,13 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT GETNAME", **kwargs)
 
-    def client_getredir(self, **kwargs) -> ResponseT:
+    @overload
+    def client_getredir(self: SyncClientProtocol, **kwargs) -> int: ...
+
+    @overload
+    def client_getredir(self: AsyncClientProtocol, **kwargs) -> Awaitable[int]: ...
+
+    def client_getredir(self, **kwargs) -> int | Awaitable[int]:
         """
         Returns the ID (an integer) of the client to whom we are
         redirecting tracking notifications.
@@ -584,9 +873,23 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT GETREDIR", **kwargs)
 
+    @overload
     def client_reply(
-        self, reply: Union[Literal["ON"], Literal["OFF"], Literal["SKIP"]], **kwargs
-    ) -> ResponseT:
+        self: SyncClientProtocol,
+        reply: Literal["ON", "OFF", "SKIP"],
+        **kwargs,
+    ) -> bytes | str: ...
+
+    @overload
+    def client_reply(
+        self: AsyncClientProtocol,
+        reply: Literal["ON", "OFF", "SKIP"],
+        **kwargs,
+    ) -> Awaitable[bytes | str]: ...
+
+    def client_reply(self, reply: Literal["ON", "OFF", "SKIP"], **kwargs) -> (
+        bytes | str
+    ) | Awaitable[bytes | str]:
         """
         Enable and disable redis server replies.
 
@@ -608,7 +911,13 @@ class ManagementCommands(CommandsProtocol):
             raise DataError(f"CLIENT REPLY must be one of {replies!r}")
         return self.execute_command("CLIENT REPLY", reply, **kwargs)
 
-    def client_id(self, **kwargs) -> ResponseT:
+    @overload
+    def client_id(self: SyncClientProtocol, **kwargs) -> int: ...
+
+    @overload
+    def client_id(self: AsyncClientProtocol, **kwargs) -> Awaitable[int]: ...
+
+    def client_id(self, **kwargs) -> int | Awaitable[int]:
         """
         Returns the current connection id
 
@@ -616,15 +925,37 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT ID", **kwargs)
 
+    @overload
     def client_tracking_on(
-        self,
-        clientid: Optional[int] = None,
+        self: SyncClientProtocol,
+        clientid: int | None = None,
         prefix: Sequence[KeyT] = [],
         bcast: bool = False,
         optin: bool = False,
         optout: bool = False,
         noloop: bool = False,
-    ) -> ResponseT:
+    ) -> bytes | str: ...
+
+    @overload
+    def client_tracking_on(
+        self: AsyncClientProtocol,
+        clientid: int | None = None,
+        prefix: Sequence[KeyT] = [],
+        bcast: bool = False,
+        optin: bool = False,
+        optout: bool = False,
+        noloop: bool = False,
+    ) -> Awaitable[bytes | str]: ...
+
+    def client_tracking_on(
+        self,
+        clientid: int | None = None,
+        prefix: Sequence[KeyT] = [],
+        bcast: bool = False,
+        optin: bool = False,
+        optout: bool = False,
+        noloop: bool = False,
+    ) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Turn on the tracking mode.
         For more information, about the options look at client_tracking func.
@@ -635,15 +966,37 @@ class ManagementCommands(CommandsProtocol):
             True, clientid, prefix, bcast, optin, optout, noloop
         )
 
+    @overload
     def client_tracking_off(
-        self,
-        clientid: Optional[int] = None,
+        self: SyncClientProtocol,
+        clientid: int | None = None,
         prefix: Sequence[KeyT] = [],
         bcast: bool = False,
         optin: bool = False,
         optout: bool = False,
         noloop: bool = False,
-    ) -> ResponseT:
+    ) -> bytes | str: ...
+
+    @overload
+    def client_tracking_off(
+        self: AsyncClientProtocol,
+        clientid: int | None = None,
+        prefix: Sequence[KeyT] = [],
+        bcast: bool = False,
+        optin: bool = False,
+        optout: bool = False,
+        noloop: bool = False,
+    ) -> Awaitable[bytes | str]: ...
+
+    def client_tracking_off(
+        self,
+        clientid: int | None = None,
+        prefix: Sequence[KeyT] = [],
+        bcast: bool = False,
+        optin: bool = False,
+        optout: bool = False,
+        noloop: bool = False,
+    ) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Turn off the tracking mode.
         For more information, about the options look at client_tracking func.
@@ -654,17 +1007,43 @@ class ManagementCommands(CommandsProtocol):
             False, clientid, prefix, bcast, optin, optout, noloop
         )
 
+    @overload
     def client_tracking(
-        self,
+        self: SyncClientProtocol,
         on: bool = True,
-        clientid: Optional[int] = None,
+        clientid: int | None = None,
         prefix: Sequence[KeyT] = [],
         bcast: bool = False,
         optin: bool = False,
         optout: bool = False,
         noloop: bool = False,
         **kwargs,
-    ) -> ResponseT:
+    ) -> bytes | str: ...
+
+    @overload
+    def client_tracking(
+        self: AsyncClientProtocol,
+        on: bool = True,
+        clientid: int | None = None,
+        prefix: Sequence[KeyT] = [],
+        bcast: bool = False,
+        optin: bool = False,
+        optout: bool = False,
+        noloop: bool = False,
+        **kwargs,
+    ) -> Awaitable[bytes | str]: ...
+
+    def client_tracking(
+        self,
+        on: bool = True,
+        clientid: int | None = None,
+        prefix: Sequence[KeyT] = [],
+        bcast: bool = False,
+        optin: bool = False,
+        optout: bool = False,
+        noloop: bool = False,
+        **kwargs,
+    ) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Enables the tracking feature of the Redis server, that is used
         for server assisted client side caching.
@@ -714,7 +1093,19 @@ class ManagementCommands(CommandsProtocol):
 
         return self.execute_command("CLIENT TRACKING", *pieces, **kwargs)
 
-    def client_trackinginfo(self, **kwargs) -> ResponseT:
+    @overload
+    def client_trackinginfo(
+        self: SyncClientProtocol, **kwargs
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def client_trackinginfo(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def client_trackinginfo(
+        self, **kwargs
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Returns the information about the current client connection's
         use of the server assisted client side cache.
@@ -723,7 +1114,15 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT TRACKINGINFO", **kwargs)
 
-    def client_setname(self, name: str, **kwargs) -> ResponseT:
+    @overload
+    def client_setname(self: SyncClientProtocol, name: str, **kwargs) -> bool: ...
+
+    @overload
+    def client_setname(
+        self: AsyncClientProtocol, name: str, **kwargs
+    ) -> Awaitable[bool]: ...
+
+    def client_setname(self, name: str, **kwargs) -> bool | Awaitable[bool]:
         """
         Sets the current connection name
 
@@ -737,16 +1136,36 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT SETNAME", name, **kwargs)
 
-    def client_setinfo(self, attr: str, value: str, **kwargs) -> ResponseT:
+    @overload
+    def client_setinfo(
+        self: SyncClientProtocol, attr: str, value: str, **kwargs
+    ) -> bool: ...
+
+    @overload
+    def client_setinfo(
+        self: AsyncClientProtocol, attr: str, value: str, **kwargs
+    ) -> Awaitable[bool]: ...
+
+    def client_setinfo(self, attr: str, value: str, **kwargs) -> bool | Awaitable[bool]:
         """
         Sets the current connection library name or version
         For mor information see https://redis.io/commands/client-setinfo
         """
         return self.execute_command("CLIENT SETINFO", attr, value, **kwargs)
 
+    @overload
+    def client_unblock(
+        self: SyncClientProtocol, client_id: int, error: bool = False, **kwargs
+    ) -> bool: ...
+
+    @overload
+    def client_unblock(
+        self: AsyncClientProtocol, client_id: int, error: bool = False, **kwargs
+    ) -> Awaitable[bool]: ...
+
     def client_unblock(
         self, client_id: int, error: bool = False, **kwargs
-    ) -> ResponseT:
+    ) -> bool | Awaitable[bool]:
         """
         Unblocks a connection by its client id.
         If ``error`` is True, unblocks the client with a special error message.
@@ -760,7 +1179,19 @@ class ManagementCommands(CommandsProtocol):
             args.append(b"ERROR")
         return self.execute_command(*args, **kwargs)
 
-    def client_pause(self, timeout: int, all: bool = True, **kwargs) -> ResponseT:
+    @overload
+    def client_pause(
+        self: SyncClientProtocol, timeout: int, all: bool = True, **kwargs
+    ) -> bool: ...
+
+    @overload
+    def client_pause(
+        self: AsyncClientProtocol, timeout: int, all: bool = True, **kwargs
+    ) -> Awaitable[bool]: ...
+
+    def client_pause(
+        self, timeout: int, all: bool = True, **kwargs
+    ) -> bool | Awaitable[bool]:
         """
         Suspend all the Redis clients for the specified amount of time.
 
@@ -788,7 +1219,15 @@ class ManagementCommands(CommandsProtocol):
             args.append("WRITE")
         return self.execute_command(*args, **kwargs)
 
-    def client_unpause(self, **kwargs) -> ResponseT:
+    @overload
+    def client_unpause(self: SyncClientProtocol, **kwargs) -> bytes | str: ...
+
+    @overload
+    def client_unpause(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[bytes | str]: ...
+
+    def client_unpause(self, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Unpause all redis clients
 
@@ -796,7 +1235,15 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT UNPAUSE", **kwargs)
 
-    def client_no_evict(self, mode: str) -> Union[Awaitable[str], str]:
+    @overload
+    def client_no_evict(self: SyncClientProtocol, mode: str) -> bytes | str: ...
+
+    @overload
+    def client_no_evict(
+        self: AsyncClientProtocol, mode: str
+    ) -> Awaitable[bytes | str]: ...
+
+    def client_no_evict(self, mode: str) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Sets the client eviction mode for the current connection.
 
@@ -804,7 +1251,15 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT NO-EVICT", mode)
 
-    def client_no_touch(self, mode: str) -> Union[Awaitable[str], str]:
+    @overload
+    def client_no_touch(self: SyncClientProtocol, mode: str) -> bytes | str: ...
+
+    @overload
+    def client_no_touch(
+        self: AsyncClientProtocol, mode: str
+    ) -> Awaitable[bytes | str]: ...
+
+    def client_no_touch(self, mode: str) -> (bytes | str) | Awaitable[bytes | str]:
         """
         # The command controls whether commands sent by the client will alter
         # the LRU/LFU of the keys they access.
@@ -815,7 +1270,17 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT NO-TOUCH", mode)
 
-    def command(self, **kwargs):
+    @overload
+    def command(self: SyncClientProtocol, **kwargs) -> dict[str, dict[str, Any]]: ...
+
+    @overload
+    def command(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[dict[str, dict[str, Any]]]: ...
+
+    def command(
+        self, **kwargs
+    ) -> dict[str, dict[str, Any]] | Awaitable[dict[str, dict[str, Any]]]:
         """
         Returns dict reply of details about all Redis commands.
 
@@ -828,15 +1293,37 @@ class ManagementCommands(CommandsProtocol):
             "COMMAND INFO is intentionally not implemented in the client."
         )
 
-    def command_count(self, **kwargs) -> ResponseT:
+    @overload
+    def command_count(self: SyncClientProtocol, **kwargs) -> int: ...
+
+    @overload
+    def command_count(self: AsyncClientProtocol, **kwargs) -> Awaitable[int]: ...
+
+    def command_count(self, **kwargs) -> int | Awaitable[int]:
         return self.execute_command("COMMAND COUNT", **kwargs)
+
+    @overload
+    def command_list(
+        self: SyncClientProtocol,
+        module: str | None = None,
+        category: str | None = None,
+        pattern: str | None = None,
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def command_list(
+        self: AsyncClientProtocol,
+        module: str | None = None,
+        category: str | None = None,
+        pattern: str | None = None,
+    ) -> Awaitable[list[bytes | str]]: ...
 
     def command_list(
         self,
-        module: Optional[str] = None,
-        category: Optional[str] = None,
-        pattern: Optional[str] = None,
-    ) -> ResponseT:
+        module: str | None = None,
+        category: str | None = None,
+        pattern: str | None = None,
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return an array of the server's command names.
         You can use one of the following filters:
@@ -859,7 +1346,19 @@ class ManagementCommands(CommandsProtocol):
 
         return self.execute_command("COMMAND LIST", *pieces)
 
-    def command_getkeysandflags(self, *args: str) -> List[Union[str, List[str]]]:
+    @overload
+    def command_getkeysandflags(
+        self: SyncClientProtocol, *args: str
+    ) -> list[list[bytes | str]]: ...
+
+    @overload
+    def command_getkeysandflags(
+        self: AsyncClientProtocol, *args: str
+    ) -> Awaitable[list[list[bytes | str]]]: ...
+
+    def command_getkeysandflags(
+        self, *args: str
+    ) -> list[list[bytes | str]] | Awaitable[list[list[bytes | str]]]:
         """
         Returns array of keys from a full Redis command and their usage flags.
 
@@ -876,9 +1375,19 @@ class ManagementCommands(CommandsProtocol):
             "COMMAND DOCS is intentionally not implemented in the client."
         )
 
+    @overload
+    def config_get(
+        self: SyncClientProtocol, pattern: PatternT = "*", *args: PatternT, **kwargs
+    ) -> dict[str | None, str | None]: ...
+
+    @overload
+    def config_get(
+        self: AsyncClientProtocol, pattern: PatternT = "*", *args: PatternT, **kwargs
+    ) -> Awaitable[dict[str | None, str | None]]: ...
+
     def config_get(
         self, pattern: PatternT = "*", *args: PatternT, **kwargs
-    ) -> ResponseT:
+    ) -> dict[str | None, str | None] | Awaitable[dict[str | None, str | None]]:
         """
         Return a dictionary of configuration based on the ``pattern``
 
@@ -886,20 +1395,44 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CONFIG GET", pattern, *args, **kwargs)
 
+    @overload
+    def config_set(
+        self: SyncClientProtocol,
+        name: KeyT,
+        value: EncodableT,
+        *args: Union[KeyT, EncodableT],
+        **kwargs,
+    ) -> bool: ...
+
+    @overload
+    def config_set(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        value: EncodableT,
+        *args: Union[KeyT, EncodableT],
+        **kwargs,
+    ) -> Awaitable[bool]: ...
+
     def config_set(
         self,
         name: KeyT,
         value: EncodableT,
         *args: Union[KeyT, EncodableT],
         **kwargs,
-    ) -> ResponseT:
+    ) -> bool | Awaitable[bool]:
         """Set config item ``name`` with ``value``
 
         For more information, see https://redis.io/commands/config-set
         """
         return self.execute_command("CONFIG SET", name, value, *args, **kwargs)
 
-    def config_resetstat(self, **kwargs) -> ResponseT:
+    @overload
+    def config_resetstat(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def config_resetstat(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
+
+    def config_resetstat(self, **kwargs) -> bool | Awaitable[bool]:
         """
         Reset runtime statistics
 
@@ -907,7 +1440,15 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CONFIG RESETSTAT", **kwargs)
 
-    def config_rewrite(self, **kwargs) -> ResponseT:
+    @overload
+    def config_rewrite(self: SyncClientProtocol, **kwargs) -> bytes | str: ...
+
+    @overload
+    def config_rewrite(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[bytes | str]: ...
+
+    def config_rewrite(self, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Rewrite config file with the minimal change to reflect running config.
 
@@ -915,7 +1456,13 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CONFIG REWRITE", **kwargs)
 
-    def dbsize(self, **kwargs) -> ResponseT:
+    @overload
+    def dbsize(self: SyncClientProtocol, **kwargs) -> int: ...
+
+    @overload
+    def dbsize(self: AsyncClientProtocol, **kwargs) -> Awaitable[int]: ...
+
+    def dbsize(self, **kwargs) -> int | Awaitable[int]:
         """
         Returns the number of keys in the current database
 
@@ -923,7 +1470,19 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("DBSIZE", **kwargs)
 
-    def debug_object(self, key: KeyT, **kwargs) -> ResponseT:
+    @overload
+    def debug_object(
+        self: SyncClientProtocol, key: KeyT, **kwargs
+    ) -> dict[str, str | int] | bytes | str: ...
+
+    @overload
+    def debug_object(
+        self: AsyncClientProtocol, key: KeyT, **kwargs
+    ) -> Awaitable[dict[str, str | int] | bytes | str]: ...
+
+    def debug_object(self, key: KeyT, **kwargs) -> (
+        dict[str, str | int] | bytes | str
+    ) | Awaitable[dict[str, str | int] | bytes | str]:
         """
         Returns version specific meta information about a given key
 
@@ -940,7 +1499,17 @@ class ManagementCommands(CommandsProtocol):
             """
         )
 
-    def echo(self, value: EncodableT, **kwargs) -> ResponseT:
+    @overload
+    def echo(self: SyncClientProtocol, value: EncodableT, **kwargs) -> bytes | str: ...
+
+    @overload
+    def echo(
+        self: AsyncClientProtocol, value: EncodableT, **kwargs
+    ) -> Awaitable[bytes | str]: ...
+
+    def echo(self, value: EncodableT, **kwargs) -> (bytes | str) | Awaitable[
+        bytes | str
+    ]:
         """
         Echo the string back from the server
 
@@ -948,7 +1517,17 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("ECHO", value, **kwargs)
 
-    def flushall(self, asynchronous: bool = False, **kwargs) -> ResponseT:
+    @overload
+    def flushall(
+        self: SyncClientProtocol, asynchronous: bool = False, **kwargs
+    ) -> bool: ...
+
+    @overload
+    def flushall(
+        self: AsyncClientProtocol, asynchronous: bool = False, **kwargs
+    ) -> Awaitable[bool]: ...
+
+    def flushall(self, asynchronous: bool = False, **kwargs) -> bool | Awaitable[bool]:
         """
         Delete all keys in all databases on the current host.
 
@@ -962,7 +1541,17 @@ class ManagementCommands(CommandsProtocol):
             args.append(b"ASYNC")
         return self.execute_command("FLUSHALL", *args, **kwargs)
 
-    def flushdb(self, asynchronous: bool = False, **kwargs) -> ResponseT:
+    @overload
+    def flushdb(
+        self: SyncClientProtocol, asynchronous: bool = False, **kwargs
+    ) -> bool: ...
+
+    @overload
+    def flushdb(
+        self: AsyncClientProtocol, asynchronous: bool = False, **kwargs
+    ) -> Awaitable[bool]: ...
+
+    def flushdb(self, asynchronous: bool = False, **kwargs) -> bool | Awaitable[bool]:
         """
         Delete all keys in the current database.
 
@@ -976,7 +1565,13 @@ class ManagementCommands(CommandsProtocol):
             args.append(b"ASYNC")
         return self.execute_command("FLUSHDB", *args, **kwargs)
 
-    def sync(self) -> ResponseT:
+    @overload
+    def sync(self: SyncClientProtocol) -> bytes: ...
+
+    @overload
+    def sync(self: AsyncClientProtocol) -> Awaitable[bytes]: ...
+
+    def sync(self) -> bytes | Awaitable[bytes]:
         """
         Initiates a replication stream from the master.
 
@@ -988,7 +1583,15 @@ class ManagementCommands(CommandsProtocol):
         options[NEVER_DECODE] = []
         return self.execute_command("SYNC", **options)
 
-    def psync(self, replicationid: str, offset: int):
+    @overload
+    def psync(self: SyncClientProtocol, replicationid: str, offset: int) -> bytes: ...
+
+    @overload
+    def psync(
+        self: AsyncClientProtocol, replicationid: str, offset: int
+    ) -> Awaitable[bytes]: ...
+
+    def psync(self, replicationid: str, offset: int) -> bytes | Awaitable[bytes]:
         """
         Initiates a replication stream from the master.
         Newer version for `sync`.
@@ -1001,7 +1604,15 @@ class ManagementCommands(CommandsProtocol):
         options[NEVER_DECODE] = []
         return self.execute_command("PSYNC", replicationid, offset, **options)
 
-    def swapdb(self, first: int, second: int, **kwargs) -> ResponseT:
+    @overload
+    def swapdb(self: SyncClientProtocol, first: int, second: int, **kwargs) -> bool: ...
+
+    @overload
+    def swapdb(
+        self: AsyncClientProtocol, first: int, second: int, **kwargs
+    ) -> Awaitable[bool]: ...
+
+    def swapdb(self, first: int, second: int, **kwargs) -> bool | Awaitable[bool]:
         """
         Swap two databases
 
@@ -1009,14 +1620,38 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("SWAPDB", first, second, **kwargs)
 
-    def select(self, index: int, **kwargs) -> ResponseT:
+    @overload
+    def select(self: SyncClientProtocol, index: int, **kwargs) -> bool: ...
+
+    @overload
+    def select(self: AsyncClientProtocol, index: int, **kwargs) -> Awaitable[bool]: ...
+
+    def select(self, index: int, **kwargs) -> bool | Awaitable[bool]:
         """Select the Redis logical database at index.
 
         See: https://redis.io/commands/select
         """
         return self.execute_command("SELECT", index, **kwargs)
 
-    def info(self, section: Optional[str] = None, *args: str, **kwargs) -> ResponseT:
+    @overload
+    def info(
+        self: SyncClientProtocol,
+        section: Optional[str] = None,
+        *args: str,
+        **kwargs,
+    ) -> dict[str, Any]: ...
+
+    @overload
+    def info(
+        self: AsyncClientProtocol,
+        section: Optional[str] = None,
+        *args: str,
+        **kwargs,
+    ) -> Awaitable[dict[str, Any]]: ...
+
+    def info(
+        self, section: Optional[str] = None, *args: str, **kwargs
+    ) -> dict[str, Any] | Awaitable[dict[str, Any]]:
         """
         Returns a dictionary containing information about the Redis server
 
@@ -1033,7 +1668,15 @@ class ManagementCommands(CommandsProtocol):
         else:
             return self.execute_command("INFO", section, *args, **kwargs)
 
-    def lastsave(self, **kwargs) -> ResponseT:
+    @overload
+    def lastsave(self: SyncClientProtocol, **kwargs) -> datetime.datetime: ...
+
+    @overload
+    def lastsave(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[datetime.datetime]: ...
+
+    def lastsave(self, **kwargs) -> datetime.datetime | Awaitable[datetime.datetime]:
         """
         Return a Python datetime object representing the last time the
         Redis database was saved to disk
@@ -1070,7 +1713,19 @@ class ManagementCommands(CommandsProtocol):
             """
         )
 
-    def lolwut(self, *version_numbers: Union[str, float], **kwargs) -> ResponseT:
+    @overload
+    def lolwut(
+        self: SyncClientProtocol, *version_numbers: Union[str, float], **kwargs
+    ) -> bytes | str: ...
+
+    @overload
+    def lolwut(
+        self: AsyncClientProtocol, *version_numbers: Union[str, float], **kwargs
+    ) -> Awaitable[bytes | str]: ...
+
+    def lolwut(self, *version_numbers: Union[str, float], **kwargs) -> (
+        bytes | str
+    ) | Awaitable[bytes | str]:
         """
         Get the Redis version and a piece of generative computer art
 
@@ -1081,12 +1736,46 @@ class ManagementCommands(CommandsProtocol):
         else:
             return self.execute_command("LOLWUT", **kwargs)
 
-    def reset(self) -> ResponseT:
+    @overload
+    def reset(self: SyncClientProtocol) -> bytes | str: ...
+
+    @overload
+    def reset(self: AsyncClientProtocol) -> Awaitable[bytes | str]: ...
+
+    def reset(self) -> (bytes | str) | Awaitable[bytes | str]:
         """Perform a full reset on the connection's server-side context.
 
         See: https://redis.io/commands/reset
         """
         return self.execute_command("RESET")
+
+    @overload
+    def migrate(
+        self: SyncClientProtocol,
+        host: str,
+        port: int,
+        keys: KeysT,
+        destination_db: int,
+        timeout: int,
+        copy: bool = False,
+        replace: bool = False,
+        auth: str | None = None,
+        **kwargs,
+    ) -> bytes | str: ...
+
+    @overload
+    def migrate(
+        self: AsyncClientProtocol,
+        host: str,
+        port: int,
+        keys: KeysT,
+        destination_db: int,
+        timeout: int,
+        copy: bool = False,
+        replace: bool = False,
+        auth: str | None = None,
+        **kwargs,
+    ) -> Awaitable[bytes | str]: ...
 
     def migrate(
         self,
@@ -1097,9 +1786,9 @@ class ManagementCommands(CommandsProtocol):
         timeout: int,
         copy: bool = False,
         replace: bool = False,
-        auth: Optional[str] = None,
+        auth: str | None = None,
         **kwargs,
-    ) -> ResponseT:
+    ) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Migrate 1 or more keys from the current Redis server to a different
         server specified by the ``host``, ``port`` and ``destination_db``.
@@ -1136,7 +1825,15 @@ class ManagementCommands(CommandsProtocol):
             "MIGRATE", host, port, "", destination_db, timeout, *pieces, **kwargs
         )
 
-    def object(self, infotype: str, key: KeyT, **kwargs) -> ResponseT:
+    @overload
+    def object(self: SyncClientProtocol, infotype: str, key: KeyT, **kwargs) -> Any: ...
+
+    @overload
+    def object(
+        self: AsyncClientProtocol, infotype: str, key: KeyT, **kwargs
+    ) -> Awaitable[Any]: ...
+
+    def object(self, infotype: str, key: KeyT, **kwargs) -> Any | Awaitable[Any]:
         """
         Return the encoding, idletime, or refcount about the key
         """
@@ -1162,7 +1859,15 @@ class ManagementCommands(CommandsProtocol):
             """
         )
 
-    def memory_stats(self, **kwargs) -> ResponseT:
+    @overload
+    def memory_stats(self: SyncClientProtocol, **kwargs) -> dict[str, Any]: ...
+
+    @overload
+    def memory_stats(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[dict[str, Any]]: ...
+
+    def memory_stats(self, **kwargs) -> dict[str, Any] | Awaitable[dict[str, Any]]:
         """
         Return a dictionary of memory stats
 
@@ -1170,7 +1875,15 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("MEMORY STATS", **kwargs)
 
-    def memory_malloc_stats(self, **kwargs) -> ResponseT:
+    @overload
+    def memory_malloc_stats(self: SyncClientProtocol, **kwargs) -> bytes | str: ...
+
+    @overload
+    def memory_malloc_stats(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[bytes | str]: ...
+
+    def memory_malloc_stats(self, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Return an internal statistics report from the memory allocator.
 
@@ -1178,9 +1891,19 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("MEMORY MALLOC-STATS", **kwargs)
 
+    @overload
     def memory_usage(
-        self, key: KeyT, samples: Optional[int] = None, **kwargs
-    ) -> ResponseT:
+        self: SyncClientProtocol, key: KeyT, samples: int | None = None, **kwargs
+    ) -> int | None: ...
+
+    @overload
+    def memory_usage(
+        self: AsyncClientProtocol, key: KeyT, samples: int | None = None, **kwargs
+    ) -> Awaitable[int | None]: ...
+
+    def memory_usage(self, key: KeyT, samples: int | None = None, **kwargs) -> (
+        int | None
+    ) | Awaitable[int | None]:
         """
         Return the total memory usage for key, its value and associated
         administrative overheads.
@@ -1196,7 +1919,13 @@ class ManagementCommands(CommandsProtocol):
             args.extend([b"SAMPLES", samples])
         return self.execute_command("MEMORY USAGE", key, *args, **kwargs)
 
-    def memory_purge(self, **kwargs) -> ResponseT:
+    @overload
+    def memory_purge(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def memory_purge(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
+
+    def memory_purge(self, **kwargs) -> bool | Awaitable[bool]:
         """
         Attempts to purge dirty pages for reclamation by allocator
 
@@ -1213,7 +1942,17 @@ class ManagementCommands(CommandsProtocol):
             "LATENCY HISTOGRAM is intentionally not implemented in the client."
         )
 
-    def latency_history(self, event: str) -> ResponseT:
+    @overload
+    def latency_history(self: SyncClientProtocol, event: str) -> list[list[int]]: ...
+
+    @overload
+    def latency_history(
+        self: AsyncClientProtocol, event: str
+    ) -> Awaitable[list[list[int]]]: ...
+
+    def latency_history(
+        self, event: str
+    ) -> list[list[int]] | Awaitable[list[list[int]]]:
         """
         Returns the raw data of the ``event``'s latency spikes time series.
 
@@ -1221,7 +1960,17 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("LATENCY HISTORY", event)
 
-    def latency_latest(self) -> ResponseT:
+    @overload
+    def latency_latest(self: SyncClientProtocol) -> list[list[bytes | str | int]]: ...
+
+    @overload
+    def latency_latest(
+        self: AsyncClientProtocol,
+    ) -> Awaitable[list[list[bytes | str | int]]]: ...
+
+    def latency_latest(
+        self,
+    ) -> list[list[bytes | str | int]] | Awaitable[list[list[bytes | str | int]]]:
         """
         Reports the latest latency events logged.
 
@@ -1229,13 +1978,25 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("LATENCY LATEST")
 
-    def latency_reset(self, *events: str) -> ResponseT:
+    @overload
+    def latency_reset(self: SyncClientProtocol, *events: str) -> int: ...
+
+    @overload
+    def latency_reset(self: AsyncClientProtocol, *events: str) -> Awaitable[int]: ...
+
+    def latency_reset(self, *events: str) -> int | Awaitable[int]:
         """
         Resets the latency spikes time series of all, or only some, events.
 
         For more information, see https://redis.io/commands/latency-reset
         """
         return self.execute_command("LATENCY RESET", *events)
+
+    @overload
+    def ping(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def ping(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
 
     def ping(self, **kwargs) -> Union[Awaitable[bool], bool]:
         """
@@ -1252,7 +2013,13 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("PING", **kwargs)
 
-    def quit(self, **kwargs) -> ResponseT:
+    @overload
+    def quit(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def quit(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
+
+    def quit(self, **kwargs) -> bool | Awaitable[bool]:
         """
         Ask the server to close the connection.
 
@@ -1260,7 +2027,15 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("QUIT", **kwargs)
 
-    def replicaof(self, *args, **kwargs) -> ResponseT:
+    @overload
+    def replicaof(self: SyncClientProtocol, *args, **kwargs) -> bytes | str: ...
+
+    @overload
+    def replicaof(
+        self: AsyncClientProtocol, *args, **kwargs
+    ) -> Awaitable[bytes | str]: ...
+
+    def replicaof(self, *args, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Update the replication settings of a redis replica, on the fly.
 
@@ -1273,7 +2048,13 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("REPLICAOF", *args, **kwargs)
 
-    def save(self, **kwargs) -> ResponseT:
+    @overload
+    def save(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def save(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
+
+    def save(self, **kwargs) -> bool | Awaitable[bool]:
         """
         Tell the Redis server to save its data to disk,
         blocking until the save is complete
@@ -1324,9 +2105,25 @@ class ManagementCommands(CommandsProtocol):
             return
         raise RedisError("SHUTDOWN seems to have failed.")
 
+    @overload
     def slaveof(
-        self, host: Optional[str] = None, port: Optional[int] = None, **kwargs
-    ) -> ResponseT:
+        self: SyncClientProtocol,
+        host: str | None = None,
+        port: int | None = None,
+        **kwargs,
+    ) -> bool: ...
+
+    @overload
+    def slaveof(
+        self: AsyncClientProtocol,
+        host: str | None = None,
+        port: int | None = None,
+        **kwargs,
+    ) -> Awaitable[bool]: ...
+
+    def slaveof(
+        self, host: str | None = None, port: int | None = None, **kwargs
+    ) -> bool | Awaitable[bool]:
         """
         Set the server to be a replicated slave of the instance identified
         by the ``host`` and ``port``. If called without arguments, the
@@ -1338,7 +2135,19 @@ class ManagementCommands(CommandsProtocol):
             return self.execute_command("SLAVEOF", b"NO", b"ONE", **kwargs)
         return self.execute_command("SLAVEOF", host, port, **kwargs)
 
-    def slowlog_get(self, num: Optional[int] = None, **kwargs) -> ResponseT:
+    @overload
+    def slowlog_get(
+        self: SyncClientProtocol, num: int | None = None, **kwargs
+    ) -> list[dict[str, Any]]: ...
+
+    @overload
+    def slowlog_get(
+        self: AsyncClientProtocol, num: int | None = None, **kwargs
+    ) -> Awaitable[list[dict[str, Any]]]: ...
+
+    def slowlog_get(
+        self, num: int | None = None, **kwargs
+    ) -> list[dict[str, Any]] | Awaitable[list[dict[str, Any]]]:
         """
         Get the entries from the slowlog. If ``num`` is specified, get the
         most recent ``num`` items.
@@ -1355,7 +2164,13 @@ class ManagementCommands(CommandsProtocol):
             kwargs[NEVER_DECODE] = []
         return self.execute_command(*args, **kwargs)
 
-    def slowlog_len(self, **kwargs) -> ResponseT:
+    @overload
+    def slowlog_len(self: SyncClientProtocol, **kwargs) -> int: ...
+
+    @overload
+    def slowlog_len(self: AsyncClientProtocol, **kwargs) -> Awaitable[int]: ...
+
+    def slowlog_len(self, **kwargs) -> int | Awaitable[int]:
         """
         Get the number of items in the slowlog
 
@@ -1363,7 +2178,13 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("SLOWLOG LEN", **kwargs)
 
-    def slowlog_reset(self, **kwargs) -> ResponseT:
+    @overload
+    def slowlog_reset(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def slowlog_reset(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
+
+    def slowlog_reset(self, **kwargs) -> bool | Awaitable[bool]:
         """
         Remove all items in the slowlog
 
@@ -1371,7 +2192,13 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("SLOWLOG RESET", **kwargs)
 
-    def time(self, **kwargs) -> ResponseT:
+    @overload
+    def time(self: SyncClientProtocol, **kwargs) -> tuple[int, int]: ...
+
+    @overload
+    def time(self: AsyncClientProtocol, **kwargs) -> Awaitable[tuple[int, int]]: ...
+
+    def time(self, **kwargs) -> tuple[int, int] | Awaitable[tuple[int, int]]:
         """
         Returns the server time as a 2-item tuple of ints:
         (seconds since epoch, microseconds into this second).
@@ -1380,7 +2207,17 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("TIME", **kwargs)
 
-    def wait(self, num_replicas: int, timeout: int, **kwargs) -> ResponseT:
+    @overload
+    def wait(
+        self: SyncClientProtocol, num_replicas: int, timeout: int, **kwargs
+    ) -> int: ...
+
+    @overload
+    def wait(
+        self: AsyncClientProtocol, num_replicas: int, timeout: int, **kwargs
+    ) -> Awaitable[int]: ...
+
+    def wait(self, num_replicas: int, timeout: int, **kwargs) -> int | Awaitable[int]:
         """
         Redis synchronous replication
         That returns the number of replicas that processed the query when
@@ -1391,9 +2228,27 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("WAIT", num_replicas, timeout, **kwargs)
 
+    @overload
+    def waitaof(
+        self: SyncClientProtocol,
+        num_local: int,
+        num_replicas: int,
+        timeout: int,
+        **kwargs,
+    ) -> list[int]: ...
+
+    @overload
+    def waitaof(
+        self: AsyncClientProtocol,
+        num_local: int,
+        num_replicas: int,
+        timeout: int,
+        **kwargs,
+    ) -> Awaitable[list[int]]: ...
+
     def waitaof(
         self, num_local: int, num_replicas: int, timeout: int, **kwargs
-    ) -> ResponseT:
+    ) -> list[int] | Awaitable[list[int]]:
         """
         This command blocks the current client until all previous write
         commands by that client are acknowledged as having been fsynced
@@ -1424,15 +2279,37 @@ class ManagementCommands(CommandsProtocol):
             "FAILOVER is intentionally not implemented in the client."
         )
 
+    @overload
+    def hotkeys_start(
+        self: SyncClientProtocol,
+        metrics: List[HotkeysMetricsTypes],
+        count: int | None = None,
+        duration: int | None = None,
+        sample_ratio: int | None = None,
+        slots: List[int] | None = None,
+        **kwargs,
+    ) -> bytes | str: ...
+
+    @overload
+    def hotkeys_start(
+        self: AsyncClientProtocol,
+        metrics: List[HotkeysMetricsTypes],
+        count: int | None = None,
+        duration: int | None = None,
+        sample_ratio: int | None = None,
+        slots: List[int] | None = None,
+        **kwargs,
+    ) -> Awaitable[bytes | str]: ...
+
     def hotkeys_start(
         self,
         metrics: List[HotkeysMetricsTypes],
-        count: Optional[int] = None,
-        duration: Optional[int] = None,
-        sample_ratio: Optional[int] = None,
-        slots: Optional[List[int]] = None,
+        count: int | None = None,
+        duration: int | None = None,
+        sample_ratio: int | None = None,
+        slots: List[int] | None = None,
         **kwargs,
-    ) -> Union[Awaitable[Union[str, bytes]], Union[str, bytes]]:
+    ) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Start collecting hotkeys data.
         Returns an error if there is an ongoing collection session.
@@ -1472,9 +2349,13 @@ class ManagementCommands(CommandsProtocol):
 
         return self.execute_command(*args, **kwargs)
 
-    def hotkeys_stop(
-        self, **kwargs
-    ) -> Union[Awaitable[Union[str, bytes]], Union[str, bytes]]:
+    @overload
+    def hotkeys_stop(self: SyncClientProtocol, **kwargs) -> bytes | str: ...
+
+    @overload
+    def hotkeys_stop(self: AsyncClientProtocol, **kwargs) -> Awaitable[bytes | str]: ...
+
+    def hotkeys_stop(self, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Stop the ongoing hotkeys collection session (if any).
         The results of the last collection session are kept for consumption with HOTKEYS GET.
@@ -1483,9 +2364,15 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("HOTKEYS STOP", **kwargs)
 
+    @overload
+    def hotkeys_reset(self: SyncClientProtocol, **kwargs) -> bytes | str: ...
+
+    @overload
     def hotkeys_reset(
-        self, **kwargs
-    ) -> Union[Awaitable[Union[str, bytes]], Union[str, bytes]]:
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[bytes | str]: ...
+
+    def hotkeys_reset(self, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Discard the last hotkeys collection session results (in order to save memory).
         Error if there is an ongoing collection session.
@@ -1494,11 +2381,21 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("HOTKEYS RESET", **kwargs)
 
+    @overload
+    def hotkeys_get(
+        self: SyncClientProtocol, **kwargs
+    ) -> list[dict[str | bytes, Any]]: ...
+
+    @overload
+    def hotkeys_get(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[list[dict[str | bytes, Any]]]: ...
+
     def hotkeys_get(
         self, **kwargs
     ) -> Union[
-        Awaitable[list[dict[Union[str, bytes], Any]]],
-        list[dict[Union[str, bytes], Any]],
+        Awaitable[list[dict[str | bytes, Any]]],
+        list[dict[str | bytes, Any]],
     ]:
         """
         Retrieve the result of the ongoing collection session (if any),

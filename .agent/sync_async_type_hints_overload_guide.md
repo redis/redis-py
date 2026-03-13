@@ -13,8 +13,11 @@ Work on one batch at a time. Each batch contains methods grouped by command clas
 2. **Add two `@overload` signatures** before the method:
    - One for sync (`self: Redis[...]`) returning the sync type
    - One for async (`self: AsyncRedis[...]`) returning `Awaitable[sync_type]`
-3. **Keep the original implementation** unchanged
-4. **Run type checker** to verify no errors
+3. **Mirror the full input signature exactly** in both overloads:
+   - Same parameter names, order, defaults, positional/keyword shape, `*args`, and `**kwargs` as the implementation
+   - Use the same modern annotation style as return types: prefer `X | Y` and `T | None` over `Union[...]` / `Optional[...]`
+4. **Keep the original implementation** unchanged except for signature annotation normalization when needed
+5. **Run type checker** to verify no errors
 
 ### Step 3: Mark Batch Complete
 After implementing all methods in a batch, update status in inventory.
@@ -24,21 +27,37 @@ After implementing all methods in a batch, update status in inventory.
 ## Overload Pattern Template
 
 ```python
-from typing import overload, Awaitable, TYPE_CHECKING
+from typing import Awaitable, overload
 
-if TYPE_CHECKING:
-    from redis import Redis
-    from redis.asyncio import Redis as AsyncRedis
+from redis.typing import AsyncClientProtocol, SyncClientProtocol
 
 class SomeCommands:
     @overload
-    def method(self: "Redis[bytes]", arg: str) -> SyncReturnType: ...
+    def method(self: SyncClientProtocol, arg: str | None = None) -> SyncReturnType: ...
     @overload
-    def method(self: "AsyncRedis[bytes]", arg: str) -> Awaitable[SyncReturnType]: ...
-    def method(self, arg: str) -> ResponseT:
-        # original implementation
+    def method(
+        self: AsyncClientProtocol, arg: str | None = None
+    ) -> Awaitable[SyncReturnType]: ...
+    def method(
+        self, arg: str | None = None
+    ) -> SyncReturnType | Awaitable[SyncReturnType]:
+        # original implementation unchanged
         ...
 ```
+
+### Protocol Definitions (in `redis/typing.py`)
+
+```python
+class SyncClientProtocol(Protocol):
+    """Marker for sync clients."""
+    _is_async_client: Literal[False]
+
+class AsyncClientProtocol(Protocol):
+    """Marker for async clients."""
+    _is_async_client: Literal[True]
+```
+
+**Note:** We use Protocol-based discrimination (not `Redis[bytes]` / `AsyncRedis[str]`) to avoid multiplying overloads by `decode_responses` setting.
 
 ---
 
@@ -54,617 +73,684 @@ class SomeCommands:
 
 ---
 
+## CRITICAL: Response Callback System
+
+Understanding the callback system is essential for determining accurate return types.
+
+### Three-Tier Callback Architecture
+
+The `redis-py` library uses three callback dictionaries in `redis/_parsers/helpers.py`:
+
+| Dictionary | Lines | Purpose |
+|------------|-------|---------|
+| `_RedisCallbacks` | 754-844 | **Base callbacks** - shared by both RESP2 and RESP3 |
+| `_RedisCallbacksRESP2` | 847-896 | **RESP2-specific** overrides/additions |
+| `_RedisCallbacksRESP3` | 899-947 | **RESP3-specific** overrides/additions |
+
+### How Callbacks Are Applied
+
+1. When a command is executed, the library checks for a callback in this order:
+   - If using RESP2: Check `_RedisCallbacksRESP2` first, then fall back to `_RedisCallbacks`
+   - If using RESP3: Check `_RedisCallbacksRESP3` first, then fall back to `_RedisCallbacks`
+
+2. If no callback exists, the raw response is returned (depends on `decode_responses` setting)
+
+### Key Callback Functions
+
+| Callback | Return Type | Notes |
+|----------|-------------|-------|
+| `bool_ok` | `bool` | Converts "OK" to `True` |
+| `bool` | `bool` | Converts int to bool |
+| `str_if_bytes` | `str` | Converts bytes to str regardless of decode_responses |
+| `float_or_none` | `float \| None` | Parses float, returns None if null |
+| `parse_scan` | `tuple[int, list]` | Cursor + keys |
+| `parse_info` | `dict[str, Any]` | Parses INFO output |
+| `zset_score_pairs` | `list[tuple[..., float]]` | For sorted set with scores (RESP2) |
+| `zset_score_pairs_resp3` | `list[tuple[..., float]]` | For sorted set with scores (RESP3) |
+
+### Protocol-Specific Return Types
+
+**IMPORTANT**: Some commands have different return types depending on protocol version:
+
+| Command | RESP2 Return | RESP3 Return | Reason |
+|---------|--------------|--------------|--------|
+| `acl_cat` | `list[str]` | `list[bytes \| str]` | RESP2 has `str_if_bytes`, RESP3 has no callback |
+| `acl_genpass` | `str` | `bytes \| str` | RESP2 has `str_if_bytes`, RESP3 has no callback |
+| `client_getname` | `str \| None` | `bytes \| str \| None` | RESP2 has `str_if_bytes`, RESP3 has no callback |
+| `geohash` | `list[str]` | `list[bytes \| str]` | RESP2 has `str_if_bytes`, RESP3 has no callback |
+| `hgetall` | `dict` (pairs_to_dict) | `dict` (identity) | Different parsing logic |
+| `zincrby`, `zscore` | `float` (float_or_none) | `float` (raw) | RESP2 parses, RESP3 returns directly |
+
+### How to Determine Return Type
+
+1. **Check `_RedisCallbacks`** (base) - Is there a callback for the command?
+2. **Check `_RedisCallbacksRESP2`** - Is there a RESP2-specific override?
+3. **Check `_RedisCallbacksRESP3`** - Is there a RESP3-specific override?
+4. **If no callback** - Return type depends on `decode_responses`:
+   - Bulk string: `bytes | str`
+   - Integer: `int`
+   - Array: `list[...]`
+   - Null: `None`
+
+### Recommended Typing Strategy
+
+For commands with protocol-specific differences, use the **most permissive union type**:
+- If RESP2 returns `str` and RESP3 returns `bytes | str`, use `bytes | str`
+- This ensures type safety regardless of protocol version
+
+---
+
 ## Batches
 
 ### BATCH 1: ACLCommands (core.py)
-| # | Method | Sync Type | Async Type | Status | Batch |
+| # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 1 | `acl_cat` | `list[str]` | `Awaitable[list[str]]` | ✅ | 1 |
-| 2 | `acl_dryrun` | `str` | `Awaitable[str]` | ✅ | 1 |
-| 3 | `acl_deluser` | `int` | `Awaitable[int]` | ✅ | 1 |
-| 4 | `acl_genpass` | `str` | `Awaitable[str]` | ✅ | 1 |
-| 5 | `acl_getuser` | `dict` | `Awaitable[dict]` | ✅ | 1 |
-| 6 | `acl_help` | `list[str]` | `Awaitable[list[str]]` | ✅ | 1 |
-| 7 | `acl_list` | `list[str]` | `Awaitable[list[str]]` | ✅ | 1 |
-| 8 | `acl_log` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | 1 |
-| 9 | `acl_log_reset` | `bool` | `Awaitable[bool]` | ✅ | 1 |
-| 10 | `acl_load` | `bool` | `Awaitable[bool]` | ✅ | 1 |
-| 11 | `acl_save` | `bool` | `Awaitable[bool]` | ✅ | 1 |
-| 12 | `acl_setuser` | `bool` | `Awaitable[bool]` | ✅ | 1 |
-| 13 | `acl_users` | `list[str]` | `Awaitable[list[str]]` | ✅ | 1 |
-| 14 | `acl_whoami` | `str` | `Awaitable[str]` | ✅ | 1 |
+| 1 | `acl_cat` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | RESP2: str_if_bytes / RESP3: raw |
+| 2 | `acl_dryrun` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback |
+| 3 | `acl_deluser` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 4 | `acl_genpass` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | RESP2: str_if_bytes / RESP3: raw |
+| 5 | `acl_getuser` | `dict \| None` | `Awaitable[dict \| None]` | ✅ | Base: parse_acl_getuser |
+| 6 | `acl_help` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | RESP2: str_if_bytes / RESP3: raw |
+| 7 | `acl_list` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | RESP2: str_if_bytes / RESP3: raw |
+| 8 | `acl_log` | `list[dict] \| bool` | `Awaitable[list[dict] \| bool]` | ✅ | Base: parse_acl_log / RESP3: lambda |
+| 9 | `acl_log_reset` | `bool` | `Awaitable[bool]` | ✅ | Via acl_log with RESET |
+| 10 | `acl_load` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 11 | `acl_save` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 12 | `acl_setuser` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 13 | `acl_users` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | RESP2: str_if_bytes / RESP3: raw |
+| 14 | `acl_whoami` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | RESP2: str_if_bytes / RESP3: raw |
 
 ### BATCH 2: ManagementCommands Part 1 (core.py) - Methods 15-50
-| # | Method | Sync Type | Async Type | Status | Batch |
+| # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 15 | `auth` | `bool` | `Awaitable[bool]` | ✅ | 2 |
-| 16 | `bgrewriteaof` | `bool` | `Awaitable[bool]` | ✅ | 2 |
-| 17 | `bgsave` | `bool` | `Awaitable[bool]` | ✅ | 2 |
-| 18 | `role` | `list` | `Awaitable[list]` | ✅ | 2 |
-| 19 | `client_kill` | `bool` | `Awaitable[bool]` | ✅ | 2 |
-| 20 | `client_kill_filter` | `int` | `Awaitable[int]` | ✅ | 2 |
-| 21 | `client_info` | `dict` | `Awaitable[dict]` | ✅ | 2 |
-| 22 | `client_list` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | 2 |
-| 23 | `client_getname` | `str \| None` | `Awaitable[str \| None]` | ✅ | 2 |
-| 24 | `client_getredir` | `int` | `Awaitable[int]` | ✅ | 2 |
-| 25 | `client_reply` | `str` | `Awaitable[str]` | ✅ | 2 |
-| 26 | `client_id` | `int` | `Awaitable[int]` | ✅ | 2 |
-| 27 | `client_tracking_on` | `bool` | `Awaitable[bool]` | ✅ | 2 |
-| 28 | `client_tracking_off` | `bool` | `Awaitable[bool]` | ✅ | 2 |
-| 29 | `client_tracking` | `bool` | `Awaitable[bool]` | ✅ | 2 |
-| 30 | `client_trackinginfo` | `dict` | `Awaitable[dict]` | ✅ | 2 |
-| 31 | `client_setname` | `bool` | `Awaitable[bool]` | ✅ | 2 |
-| 32 | `client_setinfo` | `bool` | `Awaitable[bool]` | ✅ | 2 |
-| 33 | `client_unblock` | `bool` | `Awaitable[bool]` | ✅ | 2 |
-| 34 | `client_pause` | `bool` | `Awaitable[bool]` | ✅ | 2 |
-| 35 | `client_unpause` | `bool` | `Awaitable[bool]` | ✅ | 2 |
-| 36 | `client_no_evict` | `str` | `Awaitable[str]` | 📋 | 2 |
-| 37 | `client_no_touch` | `str` | `Awaitable[str]` | 📋 | 2 |
-| 38 | `command` | `list` | `Awaitable[list]` | ✅ | 2 |
-| 39 | `command_info` | `None` | `None` | ⚠️ SKIP | 2 |
-| 40 | `command_count` | `int` | `Awaitable[int]` | ✅ | 2 |
-| 41 | `command_list` | `list[str]` | `Awaitable[list[str]]` | ✅ | 2 |
-| 42 | `command_getkeysandflags` | `List[Union[str, List[str]]]` | `Awaitable[...]` | 📋 | 2 |
-| 43 | `command_docs` | `dict` | `Awaitable[dict]` | ✅ | 2 |
-| 44 | `config_get` | `dict` | `Awaitable[dict]` | ✅ | 2 |
-| 45 | `config_set` | `bool` | `Awaitable[bool]` | ✅ | 2 |
-| 46 | `config_resetstat` | `bool` | `Awaitable[bool]` | ✅ | 2 |
-| 47 | `config_rewrite` | `bool` | `Awaitable[bool]` | ✅ | 2 |
-| 48 | `dbsize` | `int` | `Awaitable[int]` | ✅ | 2 |
-| 49 | `debug_object` | `str` | `Awaitable[str]` | ✅ | 2 |
-| 50 | `debug_segfault` | `None` | `None` | ⚠️ SKIP | 2 |
+| 15 | `auth` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
+| 16 | `bgrewriteaof` | `bool \| bytes \| str` | `Awaitable[bool \| bytes \| str]` | ✅ | RESP2: True / RESP3: raw |
+| 17 | `bgsave` | `bool \| bytes \| str` | `Awaitable[bool \| bytes \| str]` | ✅ | RESP2: True / RESP3: raw |
+| 18 | `role` | `list` | `Awaitable[list]` | ✅ | No callback - mixed types |
+| 19 | `client_kill` | `bool \| int` | `Awaitable[bool \| int]` | ✅ | Base: parse_client_kill |
+| 20 | `client_kill_filter` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 21 | `client_info` | `dict[str, str]` | `Awaitable[dict[str, str]]` | ✅ | Base: parse_client_info |
+| 22 | `client_list` | `list[dict[str, str]]` | `Awaitable[list[dict[str, str]]]` | ✅ | Base: parse_client_list |
+| 23 | `client_getname` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ | RESP2: str_if_bytes / RESP3: raw |
+| 24 | `client_getredir` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 25 | `client_reply` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback |
+| 26 | `client_id` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 27 | `client_tracking_on` | `bool` | `Awaitable[bool]` | ✅ | Uses CLIENT TRACKING |
+| 28 | `client_tracking_off` | `bool` | `Awaitable[bool]` | ✅ | Uses CLIENT TRACKING |
+| 29 | `client_tracking` | `bool` | `Awaitable[bool]` | ✅ | Uses CLIENT TRACKING |
+| 30 | `client_trackinginfo` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | RESP2: str_if_bytes / RESP3: raw |
+| 31 | `client_setname` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 32 | `client_setinfo` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 33 | `client_unblock` | `bool` | `Awaitable[bool]` | ✅ | Base: bool (converts int) |
+| 34 | `client_pause` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 35 | `client_unpause` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 36 | `client_no_evict` | `bool` | `Awaitable[bool]` | 📋 | Base: bool_ok |
+| 37 | `client_no_touch` | `bool` | `Awaitable[bool]` | 📋 | Base: bool_ok |
+| 38 | `command` | `list` | `Awaitable[list]` | ✅ | Base: parse_command / RESP3: parse_command_resp3 |
+| 39 | `command_info` | `None` | `None` | ⚠️ SKIP | N/A |
+| 40 | `command_count` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 41 | `command_list` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | No callback - raw |
+| 42 | `command_getkeysandflags` | `list[list[bytes \| str]]` | `Awaitable[list[list[bytes \| str]]]` | 📋 | No callback - raw |
+| 43 | `command_docs` | `dict` | `Awaitable[dict]` | ✅ | No callback - raw dict |
+| 44 | `config_get` | `dict[str, str]` | `Awaitable[dict[str, str]]` | ✅ | RESP2: parse_config_get / RESP3: lambda |
+| 45 | `config_set` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 46 | `config_resetstat` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 47 | `config_rewrite` | `bool` | `Awaitable[bool]` | ✅ | No callback - returns OK |
+| 48 | `dbsize` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 49 | `debug_object` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | RESP2: parse_debug_object / RESP3: raw |
+| 50 | `debug_segfault` | `None` | `None` | ⚠️ SKIP | N/A |
 
 ### BATCH 3: ManagementCommands Part 2 (core.py) - Methods 51-93
-| # | Method | Sync Type | Async Type | Status | Batch |
+| # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 51 | `echo` | `bytes` | `Awaitable[bytes]` | ✅ | 3 |
-| 52 | `flushall` | `bool` | `Awaitable[bool]` | ✅ | 3 |
-| 53 | `flushdb` | `bool` | `Awaitable[bool]` | ✅ | 3 |
-| 54 | `sync` | `bytes` | `Awaitable[bytes]` | ✅ | 3 |
-| 55 | `psync` | `bytes` | `Awaitable[bytes]` | ✅ | 3 |
-| 56 | `swapdb` | `bool` | `Awaitable[bool]` | ✅ | 3 |
-| 57 | `select` | `bool` | `Awaitable[bool]` | ✅ | 3 |
-| 58 | `info` | `dict` | `Awaitable[dict]` | ✅ | 3 |
-| 59 | `lastsave` | `datetime` | `Awaitable[datetime]` | ✅ | 3 |
-| 60 | `latency_doctor` | `str` | `Awaitable[str]` | ✅ | 3 |
-| 61 | `latency_graph` | `str` | `Awaitable[str]` | ✅ | 3 |
-| 62 | `lolwut` | `str` | `Awaitable[str]` | ✅ | 3 |
-| 63 | `reset` | `bool` | `Awaitable[bool]` | ✅ | 3 |
-| 64 | `migrate` | `bool` | `Awaitable[bool]` | ✅ | 3 |
-| 65 | `object` | `Any` | `Awaitable[Any]` | ✅ | 3 |
-| 66 | `memory_doctor` | `None` | `None` | ⚠️ SKIP | 3 |
-| 67 | `memory_help` | `None` | `None` | ⚠️ SKIP | 3 |
-| 68 | `memory_stats` | `dict` | `Awaitable[dict]` | ✅ | 3 |
-| 69 | `memory_malloc_stats` | `str` | `Awaitable[str]` | ✅ | 3 |
-| 70 | `memory_usage` | `int` | `Awaitable[int]` | ✅ | 3 |
-| 71 | `memory_purge` | `bool` | `Awaitable[bool]` | ✅ | 3 |
-| 72 | `latency_histogram` | `dict` | `Awaitable[dict]` | ✅ | 3 |
-| 73 | `latency_history` | `list` | `Awaitable[list]` | ✅ | 3 |
-| 74 | `latency_latest` | `list` | `Awaitable[list]` | ✅ | 3 |
-| 75 | `latency_reset` | `int` | `Awaitable[int]` | ✅ | 3 |
-| 76 | `ping` | `bool` | `Awaitable[bool]` | 📋 | 3 |
-| 77 | `quit` | `bool` | `Awaitable[bool]` | ✅ | 3 |
-| 78 | `replicaof` | `bool` | `Awaitable[bool]` | ✅ | 3 |
-| 79 | `save` | `bool` | `Awaitable[bool]` | ✅ | 3 |
-| 80 | `shutdown` | `None` | `None` | ⚠️ SKIP | 3 |
-| 81 | `slaveof` | `bool` | `Awaitable[bool]` | ✅ | 3 |
-| 82 | `slowlog_get` | `list` | `Awaitable[list]` | ✅ | 3 |
-| 83 | `slowlog_len` | `int` | `Awaitable[int]` | ✅ | 3 |
-| 84 | `slowlog_reset` | `bool` | `Awaitable[bool]` | ✅ | 3 |
-| 85 | `time` | `list` | `Awaitable[list]` | ✅ | 3 |
-| 86 | `wait` | `int` | `Awaitable[int]` | ✅ | 3 |
-| 87 | `waitaof` | `list` | `Awaitable[list]` | ✅ | 3 |
-| 88 | `hello` | `dict` | `Awaitable[dict]` | ✅ | 3 |
-| 89 | `failover` | `bool` | `Awaitable[bool]` | ✅ | 3 |
-| 90 | `hotkeys_start` | `str \| bytes` | `Awaitable[str \| bytes]` | 📋 | 3 |
-| 91 | `hotkeys_stop` | `str \| bytes` | `Awaitable[str \| bytes]` | 📋 | 3 |
-| 92 | `hotkeys_reset` | `str \| bytes` | `Awaitable[str \| bytes]` | 📋 | 3 |
-| 93 | `hotkeys_get` | `list[dict]` | `Awaitable[list[dict]]` | 📋 | 3 |
+| 51 | `echo` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - raw |
+| 52 | `flushall` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 53 | `flushdb` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 54 | `sync` | `bytes` | `Awaitable[bytes]` | ✅ | No callback - raw bytes |
+| 55 | `psync` | `bytes` | `Awaitable[bytes]` | ✅ | No callback - raw bytes |
+| 56 | `swapdb` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 57 | `select` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 58 | `info` | `dict[str, Any]` | `Awaitable[dict[str, Any]]` | ✅ | Base: parse_info |
+| 59 | `lastsave` | `datetime` | `Awaitable[datetime]` | ✅ | Base: timestamp_to_datetime |
+| 60 | `latency_doctor` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - raw |
+| 61 | `latency_graph` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - raw |
+| 62 | `lolwut` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - raw |
+| 63 | `reset` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | RESP2: str_if_bytes / RESP3: raw |
+| 64 | `migrate` | `bool \| bytes \| str` | `Awaitable[bool \| bytes \| str]` | ✅ | No callback - NOKEY or OK |
+| 65 | `object` | `Any` | `Awaitable[Any]` | ✅ | Varies by subcommand |
+| 66 | `memory_doctor` | `None` | `None` | ⚠️ SKIP | N/A |
+| 67 | `memory_help` | `None` | `None` | ⚠️ SKIP | N/A |
+| 68 | `memory_stats` | `dict[str, Any]` | `Awaitable[dict[str, Any]]` | ✅ | RESP2: parse_memory_stats / RESP3: lambda |
+| 69 | `memory_malloc_stats` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - raw |
+| 70 | `memory_usage` | `int \| None` | `Awaitable[int \| None]` | ✅ | Integer or nil reply |
+| 71 | `memory_purge` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 72 | `latency_histogram` | `dict` | `Awaitable[dict]` | ✅ | No callback - raw dict |
+| 73 | `latency_history` | `list[tuple[int, int]]` | `Awaitable[list[tuple[int, int]]]` | ✅ | No callback - array of arrays |
+| 74 | `latency_latest` | `list[tuple[bytes \| str, int, int, int]]` | `Awaitable[list[tuple[bytes \| str, int, int, int]]]` | ✅ | First element is key name |
+| 75 | `latency_reset` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 76 | `ping` | `bool` | `Awaitable[bool]` | 📋 | Base: lambda - returns True if PONG |
+| 77 | `quit` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 78 | `replicaof` | `bool` | `Awaitable[bool]` | ✅ | No callback - OK |
+| 79 | `save` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 80 | `shutdown` | `None` | `None` | ⚠️ SKIP | N/A |
+| 81 | `slaveof` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 82 | `slowlog_get` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | Base: parse_slowlog_get |
+| 83 | `slowlog_len` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 84 | `slowlog_reset` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 85 | `time` | `tuple[int, int]` | `Awaitable[tuple[int, int]]` | ✅ | Base: lambda - tuple(secs, usecs) |
+| 86 | `wait` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 87 | `waitaof` | `list[int]` | `Awaitable[list[int]]` | ✅ | Array of integers |
+| 88 | `hello` | `dict` | `Awaitable[dict]` | ✅ | No callback - raw dict |
+| 89 | `failover` | `bool` | `Awaitable[bool]` | ✅ | No callback - OK |
+| 90 | `hotkeys_start` | `bytes \| str` | `Awaitable[bytes \| str]` | 📋 | No callback - raw |
+| 91 | `hotkeys_stop` | `bytes \| str` | `Awaitable[bytes \| str]` | 📋 | No callback - raw |
+| 92 | `hotkeys_reset` | `bytes \| str` | `Awaitable[bytes \| str]` | 📋 | No callback - raw |
+| 93 | `hotkeys_get` | `list[dict]` | `Awaitable[list[dict]]` | 📋 | RESP2: lambda pairs_to_dict |
 
 ### BATCH 4: BasicKeyCommands Part 1 (core.py) - Methods 94-130
-| # | Method | Sync Type | Async Type | Status | Batch |
+| # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 94 | `append` | `int` | `Awaitable[int]` | ✅ | 4 |
-| 95 | `bitcount` | `int` | `Awaitable[int]` | ✅ | 4 |
-| 96 | `bitfield` | `BitFieldOperation` | `BitFieldOperation` | 📋 | 4 |
-| 97 | `bitfield_ro` | `list[int]` | `Awaitable[list[int]]` | ✅ | 4 |
-| 98 | `bitop` | `int` | `Awaitable[int]` | ✅ | 4 |
-| 99 | `bitpos` | `int` | `Awaitable[int]` | ✅ | 4 |
-| 100 | `copy` | `bool` | `Awaitable[bool]` | ✅ | 4 |
-| 101 | `decrby` | `int` | `Awaitable[int]` | ✅ | 4 |
-| 102 | `delete` | `int` | `Awaitable[int]` | ✅ | 4 |
-| 103 | `__delitem__` | `None` | N/A | ❌ SKIP | 4 |
-| 104 | `delex` | `int` | `Awaitable[int]` | ✅ | 4 |
-| 105 | `dump` | `bytes` | `Awaitable[bytes]` | ✅ | 4 |
-| 106 | `exists` | `int` | `Awaitable[int]` | ✅ | 4 |
-| 107 | `expire` | `bool` | `Awaitable[bool]` | ✅ | 4 |
-| 108 | `expireat` | `bool` | `Awaitable[bool]` | ✅ | 4 |
-| 109 | `expiretime` | `int` | `Awaitable[int]` | 📋 | 4 |
-| 110 | `digest_local` | `bytes \| str` | `Awaitable[bytes \| str]` | 📋 | 4 |
-| 111 | `digest` | `str \| bytes \| None` | `Awaitable[str \| bytes \| None]` | ✅ | 4 |
-| 112 | `get` | `bytes \| None` | `Awaitable[bytes \| None]` | ✅ DONE | 4 |
-| 113 | `getdel` | `bytes \| None` | `Awaitable[bytes \| None]` | ✅ | 4 |
-| 114 | `getex` | `bytes \| None` | `Awaitable[bytes \| None]` | ✅ | 4 |
-| 115 | `__getitem__` | `bytes` | N/A | ❌ SKIP | 4 |
-| 116 | `getbit` | `int` | `Awaitable[int]` | ✅ | 4 |
-| 117 | `getrange` | `bytes` | `Awaitable[bytes]` | ✅ | 4 |
-| 118 | `getset` | `bytes \| None` | `Awaitable[bytes \| None]` | ✅ | 4 |
-| 119 | `incrby` | `int` | `Awaitable[int]` | ✅ | 4 |
-| 120 | `incrbyfloat` | `float` | `Awaitable[float]` | ✅ | 4 |
-| 121 | `keys` | `list[bytes]` | `Awaitable[list[bytes]]` | ✅ | 4 |
-| 122 | `lmove` | `bytes` | `Awaitable[bytes]` | ✅ | 4 |
-| 123 | `blmove` | `bytes \| None` | `Awaitable[bytes \| None]` | ✅ | 4 |
-| 124 | `mget` | `list` | `Awaitable[list]` | ✅ | 4 |
-| 125 | `mset` | `bool` | `Awaitable[bool]` | ✅ | 4 |
-| 126 | `msetex` | `int` | `Awaitable[int]` | ✅ | 4 |
-| 127 | `msetnx` | `bool` | `Awaitable[bool]` | ✅ | 4 |
-| 128 | `move` | `bool` | `Awaitable[bool]` | ✅ | 4 |
-| 129 | `persist` | `bool` | `Awaitable[bool]` | ✅ | 4 |
-| 130 | `pexpire` | `bool` | `Awaitable[bool]` | ✅ | 4 |
+| 94 | `append` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 95 | `bitcount` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 96 | `bitfield` | `BitFieldOperation` | `BitFieldOperation` | 📋 | Returns operation builder |
+| 97 | `bitfield_ro` | `list[int]` | `Awaitable[list[int]]` | ✅ | Array of integers |
+| 98 | `bitop` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 99 | `bitpos` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 100 | `copy` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
+| 101 | `decrby` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 102 | `delete` | `int` | `Awaitable[int]` | ✅ | Integer reply - count deleted |
+| 103 | `__delitem__` | `None` | N/A | ❌ SKIP | Dunder |
+| 104 | `delex` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 105 | `dump` | `bytes \| None` | `Awaitable[bytes \| None]` | ✅ | Always bytes (serialized) |
+| 106 | `exists` | `int` | `Awaitable[int]` | ✅ | Integer reply - count |
+| 107 | `expire` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
+| 108 | `expireat` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
+| 109 | `expiretime` | `int` | `Awaitable[int]` | 📋 | Integer - timestamp |
+| 110 | `digest_local` | `bytes \| str` | `Awaitable[bytes \| str]` | 📋 | No callback - raw |
+| 111 | `digest` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ | No callback - raw |
+| 112 | `get` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ DONE | No callback - raw |
+| 113 | `getdel` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ | No callback - raw |
+| 114 | `getex` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ | No callback - raw |
+| 115 | `__getitem__` | `bytes \| str` | N/A | ❌ SKIP | Dunder |
+| 116 | `getbit` | `int` | `Awaitable[int]` | ✅ | Integer reply - 0 or 1 |
+| 117 | `getrange` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - raw |
+| 118 | `getset` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ | No callback - raw |
+| 119 | `incrby` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 120 | `incrbyfloat` | `float` | `Awaitable[float]` | ✅ | Base: float |
+| 121 | `keys` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | No callback - raw array |
+| 122 | `lmove` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ | No callback - raw |
+| 123 | `blmove` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ | No callback - raw |
+| 124 | `mget` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ | No callback - raw array |
+| 125 | `mset` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 126 | `msetex` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 127 | `msetnx` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
+| 128 | `move` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
+| 129 | `persist` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
+| 130 | `pexpire` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
 
 ### BATCH 5: BasicKeyCommands Part 2 (core.py) - Methods 131-156
-| # | Method | Sync Type | Async Type | Status | Batch |
+| # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 131 | `pexpireat` | `bool` | `Awaitable[bool]` | ✅ | 5 |
-| 132 | `pexpiretime` | `int` | `Awaitable[int]` | 📋 | 5 |
-| 133 | `psetex` | `bool` | `Awaitable[bool]` | ✅ | 5 |
-| 134 | `pttl` | `int` | `Awaitable[int]` | ✅ | 5 |
-| 135 | `hrandfield` | `bytes \| list` | `Awaitable[bytes \| list]` | ✅ | 5 |
-| 136 | `randomkey` | `bytes \| None` | `Awaitable[bytes \| None]` | ✅ | 5 |
-| 137 | `rename` | `bool` | `Awaitable[bool]` | ✅ | 5 |
-| 138 | `renamenx` | `bool` | `Awaitable[bool]` | ✅ | 5 |
-| 139 | `restore` | `bool` | `Awaitable[bool]` | ✅ | 5 |
-| 140 | `set` | `bool \| None` | `Awaitable[bool \| None]` | ✅ DONE | 5 |
-| 141 | `__setitem__` | `None` | N/A | ❌ SKIP | 5 |
-| 142 | `setbit` | `int` | `Awaitable[int]` | ✅ | 5 |
-| 143 | `setex` | `bool` | `Awaitable[bool]` | ✅ | 5 |
-| 144 | `setnx` | `bool` | `Awaitable[bool]` | ✅ | 5 |
-| 145 | `setrange` | `int` | `Awaitable[int]` | ✅ | 5 |
-| 146 | `stralgo` | `Any` | `Awaitable[Any]` | ✅ | 5 |
-| 147 | `strlen` | `int` | `Awaitable[int]` | ✅ | 5 |
-| 148 | `substr` | `bytes` | `Awaitable[bytes]` | ✅ | 5 |
-| 149 | `touch` | `int` | `Awaitable[int]` | ✅ | 5 |
-| 150 | `ttl` | `int` | `Awaitable[int]` | ✅ | 5 |
-| 151 | `type` | `str` | `Awaitable[str]` | ✅ | 5 |
-| 152 | `watch` | `bool` | `Awaitable[bool]` | ⚠️ SKIP | 5 |
-| 153 | `unwatch` | `bool` | `Awaitable[bool]` | ⚠️ SKIP | 5 |
-| 154 | `unlink` | `int` | `Awaitable[int]` | ✅ | 5 |
-| 155 | `lcs` | `str \| int \| list` | `Awaitable[str \| int \| list]` | ✅ | 5 |
-| 156 | `__contains__` | `bool` | N/A | ❌ SKIP | 5 |
+| 131 | `pexpireat` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
+| 132 | `pexpiretime` | `int` | `Awaitable[int]` | 📋 | Integer - timestamp in ms |
+| 133 | `psetex` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
+| 134 | `pttl` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 135 | `hrandfield` | `bytes \| str \| list \| None` | `Awaitable[bytes \| str \| list \| None]` | ✅ | Varies by COUNT param |
+| 136 | `randomkey` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ | No callback - raw |
+| 137 | `rename` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 138 | `renamenx` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
+| 139 | `restore` | `bool` | `Awaitable[bool]` | ✅ | No callback - OK |
+| 140 | `set` | `bool \| None` | `Awaitable[bool \| None]` | ✅ DONE | Base: parse_set_result |
+| 141 | `__setitem__` | `None` | N/A | ❌ SKIP | Dunder |
+| 142 | `setbit` | `int` | `Awaitable[int]` | ✅ | Integer reply - prev bit |
+| 143 | `setex` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
+| 144 | `setnx` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
+| 145 | `setrange` | `int` | `Awaitable[int]` | ✅ | Integer reply - new length |
+| 146 | `stralgo` | `dict \| bytes \| str \| int` | `Awaitable[dict \| bytes \| str \| int]` | ✅ | RESP2: parse_stralgo / RESP3: lambda |
+| 147 | `strlen` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 148 | `substr` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - raw |
+| 149 | `touch` | `int` | `Awaitable[int]` | ✅ | Integer reply - count |
+| 150 | `ttl` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 151 | `type` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - raw |
+| 152 | `watch` | `bool` | `Awaitable[bool]` | ⚠️ SKIP | Transaction |
+| 153 | `unwatch` | `bool` | `Awaitable[bool]` | ⚠️ SKIP | Transaction |
+| 154 | `unlink` | `int` | `Awaitable[int]` | ✅ | Integer reply - count |
+| 155 | `lcs` | `bytes \| str \| int \| dict` | `Awaitable[bytes \| str \| int \| dict]` | ✅ | Varies by options |
+| 156 | `__contains__` | `bool` | N/A | ❌ SKIP | Dunder |
 
 ### BATCH 6: ListCommands (core.py) - Methods 157-178
-| # | Method | Sync Type | Async Type | Status | Batch |
+| # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 157 | `blpop` | `list` | `Awaitable[list]` | ✅ | 6 |
-| 158 | `brpop` | `list` | `Awaitable[list]` | ✅ | 6 |
-| 159 | `brpoplpush` | `str \| None` | `Awaitable[str \| None]` | ✅ | 6 |
-| 160 | `blmpop` | `list \| None` | `Awaitable[list \| None]` | ✅ | 6 |
-| 161 | `lmpop` | `list` | `Awaitable[list]` | ✅ | 6 |
-| 162 | `lindex` | `str \| None` | `Awaitable[str \| None]` | ✅ | 6 |
-| 163 | `linsert` | `int` | `Awaitable[int]` | ✅ | 6 |
-| 164 | `llen` | `int` | `Awaitable[int]` | ✅ | 6 |
-| 165 | `lpop` | `str \| list \| None` | `Awaitable[str \| list \| None]` | ✅ | 6 |
-| 166 | `lpush` | `int` | `Awaitable[int]` | ✅ | 6 |
-| 167 | `lpushx` | `int` | `Awaitable[int]` | ✅ | 6 |
-| 168 | `lrange` | `list` | `Awaitable[list]` | ✅ | 6 |
-| 169 | `lrem` | `int` | `Awaitable[int]` | ✅ | 6 |
-| 170 | `lset` | `str` | `Awaitable[str]` | ✅ | 6 |
-| 171 | `ltrim` | `str` | `Awaitable[str]` | ✅ | 6 |
-| 172 | `rpop` | `str \| list \| None` | `Awaitable[str \| list \| None]` | ✅ | 6 |
-| 173 | `rpoplpush` | `str` | `Awaitable[str]` | ✅ | 6 |
-| 174 | `rpush` | `int` | `Awaitable[int]` | ✅ | 6 |
-| 175 | `rpushx` | `int` | `Awaitable[int]` | ✅ | 6 |
-| 176 | `lpos` | `str \| list \| None` | `Awaitable[str \| list \| None]` | ✅ | 6 |
-| 177 | `sort` | `list \| int` | `Awaitable[list \| int]` | ✅ | 6 |
-| 178 | `sort_ro` | `list` | `Awaitable[list]` | ✅ | 6 |
+| 157 | `blpop` | `tuple[bytes \| str, bytes \| str] \| None` | `Awaitable[tuple[bytes \| str, bytes \| str] \| None]` | ✅ | RESP2: lambda tuple / RESP3: raw |
+| 158 | `brpop` | `tuple[bytes \| str, bytes \| str] \| None` | `Awaitable[tuple[bytes \| str, bytes \| str] \| None]` | ✅ | RESP2: lambda tuple / RESP3: raw |
+| 159 | `brpoplpush` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ | No callback - raw |
+| 160 | `blmpop` | `list[bytes \| str] \| None` | `Awaitable[list[bytes \| str] \| None]` | ✅ | No callback - raw |
+| 161 | `lmpop` | `list[bytes \| str] \| None` | `Awaitable[list[bytes \| str] \| None]` | ✅ | No callback - raw |
+| 162 | `lindex` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ | No callback - raw |
+| 163 | `linsert` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 164 | `llen` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 165 | `lpop` | `bytes \| str \| list[bytes \| str] \| None` | `Awaitable[bytes \| str \| list[bytes \| str] \| None]` | ✅ | Varies by COUNT |
+| 166 | `lpush` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 167 | `lpushx` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 168 | `lrange` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | No callback - raw array |
+| 169 | `lrem` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 170 | `lset` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 171 | `ltrim` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 172 | `rpop` | `bytes \| str \| list[bytes \| str] \| None` | `Awaitable[bytes \| str \| list[bytes \| str] \| None]` | ✅ | Varies by COUNT |
+| 173 | `rpoplpush` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ | No callback - raw |
+| 174 | `rpush` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 175 | `rpushx` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 176 | `lpos` | `int \| list[int] \| None` | `Awaitable[int \| list[int] \| None]` | ✅ | Varies by COUNT/RANK |
+| 177 | `sort` | `list[bytes \| str] \| int` | `Awaitable[list[bytes \| str] \| int]` | ✅ | Base: sort_return_tuples |
+| 178 | `sort_ro` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | No callback - raw array |
 
 ### BATCH 7: ScanCommands + SetCommands (core.py) - Methods 179-202
-| # | Method | Sync Type | Async Type | Status | Batch |
+| # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 179 | `scan` | `tuple[int, list]` | `Awaitable[tuple[int, list]]` | ✅ | 7 |
-| 180 | `scan_iter` | `Iterator` | `AsyncIterator` | 🔄 SKIP | 7 |
-| 181 | `sscan` | `tuple[int, list]` | `Awaitable[tuple[int, list]]` | ✅ | 7 |
-| 182 | `sscan_iter` | `Iterator` | `AsyncIterator` | 🔄 SKIP | 7 |
-| 183 | `hscan` | `tuple[int, dict]` | `Awaitable[tuple[int, dict]]` | ✅ | 7 |
-| 184 | `hscan_iter` | `Iterator` | `AsyncIterator` | 🔄 SKIP | 7 |
-| 185 | `zscan` | `tuple[int, list]` | `Awaitable[tuple[int, list]]` | ✅ | 7 |
-| 186 | `zscan_iter` | `Iterator` | `AsyncIterator` | 🔄 SKIP | 7 |
-| 187 | `sadd` | `int` | `Awaitable[int]` | ✅ | 7 |
-| 188 | `scard` | `int` | `Awaitable[int]` | ✅ | 7 |
-| 189 | `sdiff` | `list` | `Awaitable[list]` | ✅ | 7 |
-| 190 | `sdiffstore` | `int` | `Awaitable[int]` | ✅ | 7 |
-| 191 | `sinter` | `list` | `Awaitable[list]` | ✅ | 7 |
-| 192 | `sintercard` | `int` | `Awaitable[int]` | ✅ | 7 |
-| 193 | `sinterstore` | `int` | `Awaitable[int]` | ✅ | 7 |
-| 194 | `sismember` | `Literal[0, 1]` | `Awaitable[Literal[0, 1]]` | ✅ | 7 |
-| 195 | `smembers` | `Set` | `Awaitable[Set]` | ✅ | 7 |
-| 196 | `smismember` | `list[Literal[0, 1]]` | `Awaitable[list[Literal[0, 1]]]` | ✅ | 7 |
-| 197 | `smove` | `bool` | `Awaitable[bool]` | ✅ | 7 |
-| 198 | `spop` | `str \| list \| None` | `Awaitable[str \| list \| None]` | ✅ | 7 |
-| 199 | `srandmember` | `str \| list \| None` | `Awaitable[str \| list \| None]` | ✅ | 7 |
-| 200 | `srem` | `int` | `Awaitable[int]` | ✅ | 7 |
-| 201 | `sunion` | `list` | `Awaitable[list]` | ✅ | 7 |
-| 202 | `sunionstore` | `int` | `Awaitable[int]` | ✅ | 7 |
+| 179 | `scan` | `tuple[int, list[bytes \| str]]` | `Awaitable[tuple[int, list[bytes \| str]]]` | ✅ | Base: parse_scan |
+| 180 | `scan_iter` | `Iterator` | `AsyncIterator` | 🔄 SKIP | Iterator |
+| 181 | `sscan` | `tuple[int, list[bytes \| str]]` | `Awaitable[tuple[int, list[bytes \| str]]]` | ✅ | Base: parse_scan |
+| 182 | `sscan_iter` | `Iterator` | `AsyncIterator` | 🔄 SKIP | Iterator |
+| 183 | `hscan` | `tuple[int, dict[bytes \| str, bytes \| str]]` | `Awaitable[tuple[int, dict[bytes \| str, bytes \| str]]]` | ✅ | Base: parse_hscan |
+| 184 | `hscan_iter` | `Iterator` | `AsyncIterator` | 🔄 SKIP | Iterator |
+| 185 | `zscan` | `tuple[int, list[tuple[bytes \| str, float]]]` | `Awaitable[tuple[int, list[tuple[bytes \| str, float]]]]` | ✅ | Base: parse_zscan |
+| 186 | `zscan_iter` | `Iterator` | `AsyncIterator` | 🔄 SKIP | Iterator |
+| 187 | `sadd` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 188 | `scard` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 189 | `sdiff` | `set[bytes \| str]` | `Awaitable[set[bytes \| str]]` | ✅ | RESP2+RESP3: lambda set |
+| 190 | `sdiffstore` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 191 | `sinter` | `set[bytes \| str]` | `Awaitable[set[bytes \| str]]` | ✅ | RESP2+RESP3: lambda set |
+| 192 | `sintercard` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 193 | `sinterstore` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 194 | `sismember` | `bool` | `Awaitable[bool]` | ✅ | Integer 0/1 as bool |
+| 195 | `smembers` | `set[bytes \| str]` | `Awaitable[set[bytes \| str]]` | ✅ | RESP2+RESP3: lambda set |
+| 196 | `smismember` | `list[int]` | `Awaitable[list[int]]` | ✅ | Array of 0/1 |
+| 197 | `smove` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
+| 198 | `spop` | `bytes \| str \| set[bytes \| str] \| None` | `Awaitable[bytes \| str \| set[bytes \| str] \| None]` | ✅ | Varies by COUNT |
+| 199 | `srandmember` | `bytes \| str \| list[bytes \| str] \| None` | `Awaitable[bytes \| str \| list[bytes \| str] \| None]` | ✅ | Varies by NUMBER |
+| 200 | `srem` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 201 | `sunion` | `set[bytes \| str]` | `Awaitable[set[bytes \| str]]` | ✅ | RESP2+RESP3: lambda set |
+| 202 | `sunionstore` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 
 ### BATCH 8: StreamCommands (core.py) - Methods 203-226
-| # | Method | Sync Type | Async Type | Status | Batch |
+| # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 203 | `xack` | `int` | `Awaitable[int]` | ✅ | 8 |
-| 204 | `xackdel` | `int` | `Awaitable[int]` | ✅ | 8 |
-| 205 | `xadd` | `bytes` | `Awaitable[bytes]` | ✅ | 8 |
-| 206 | `xcfgset` | `bool` | `Awaitable[bool]` | ✅ | 8 |
-| 207 | `xautoclaim` | `tuple` | `Awaitable[tuple]` | ✅ | 8 |
-| 208 | `xclaim` | `list` | `Awaitable[list]` | ✅ | 8 |
-| 209 | `xdel` | `int` | `Awaitable[int]` | ✅ | 8 |
-| 210 | `xdelex` | `int` | `Awaitable[int]` | ✅ | 8 |
-| 211 | `xgroup_create` | `bool` | `Awaitable[bool]` | ✅ | 8 |
-| 212 | `xgroup_delconsumer` | `int` | `Awaitable[int]` | ✅ | 8 |
-| 213 | `xgroup_destroy` | `int` | `Awaitable[int]` | ✅ | 8 |
-| 214 | `xgroup_createconsumer` | `int` | `Awaitable[int]` | ✅ | 8 |
-| 215 | `xgroup_setid` | `bool` | `Awaitable[bool]` | ✅ | 8 |
-| 216 | `xinfo_consumers` | `list` | `Awaitable[list]` | ✅ | 8 |
-| 217 | `xinfo_groups` | `list` | `Awaitable[list]` | ✅ | 8 |
-| 218 | `xinfo_stream` | `dict` | `Awaitable[dict]` | ✅ | 8 |
-| 219 | `xlen` | `int` | `Awaitable[int]` | ✅ | 8 |
-| 220 | `xpending` | `dict` | `Awaitable[dict]` | ✅ | 8 |
-| 221 | `xpending_range` | `list` | `Awaitable[list]` | ✅ | 8 |
-| 222 | `xrange` | `list` | `Awaitable[list]` | ✅ | 8 |
-| 223 | `xread` | `list` | `Awaitable[list]` | ✅ | 8 |
-| 224 | `xreadgroup` | `list` | `Awaitable[list]` | ✅ | 8 |
-| 225 | `xrevrange` | `list` | `Awaitable[list]` | ✅ | 8 |
-| 226 | `xtrim` | `int` | `Awaitable[int]` | ✅ | 8 |
+| 203 | `xack` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 204 | `xackdel` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 205 | `xadd` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - stream ID |
+| 206 | `xcfgset` | `bool` | `Awaitable[bool]` | ✅ | OK reply |
+| 207 | `xautoclaim` | `tuple[bytes \| str, list, list]` | `Awaitable[tuple[bytes \| str, list, list]]` | ✅ | Base: parse_xautoclaim |
+| 208 | `xclaim` | `list[tuple[bytes \| str, dict]]` | `Awaitable[list[tuple[bytes \| str, dict]]]` | ✅ | Base: parse_xclaim |
+| 209 | `xdel` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 210 | `xdelex` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 211 | `xgroup_create` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 212 | `xgroup_delconsumer` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 213 | `xgroup_destroy` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
+| 214 | `xgroup_createconsumer` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 215 | `xgroup_setid` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 216 | `xinfo_consumers` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | RESP2: parse_list_of_dicts / RESP3: lambda |
+| 217 | `xinfo_groups` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | RESP2: parse_list_of_dicts / RESP3: lambda |
+| 218 | `xinfo_stream` | `dict` | `Awaitable[dict]` | ✅ | Base: parse_xinfo_stream |
+| 219 | `xlen` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 220 | `xpending` | `dict` | `Awaitable[dict]` | ✅ | Base: parse_xpending |
+| 221 | `xpending_range` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | No callback - raw |
+| 222 | `xrange` | `list[tuple[bytes \| str, dict]]` | `Awaitable[list[tuple[bytes \| str, dict]]]` | ✅ | Base: parse_stream_list |
+| 223 | `xread` | `list \| None` | `Awaitable[list \| None]` | ✅ | Base: parse_xread / RESP3: parse_xread_resp3 |
+| 224 | `xreadgroup` | `list \| None` | `Awaitable[list \| None]` | ✅ | Base: parse_xread / RESP3: parse_xread_resp3 |
+| 225 | `xrevrange` | `list[tuple[bytes \| str, dict]]` | `Awaitable[list[tuple[bytes \| str, dict]]]` | ✅ | Base: parse_stream_list |
+| 226 | `xtrim` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 
 ### BATCH 9: SortedSetCommands Part 1 (core.py) - Methods 227-260
-| # | Method | Sync Type | Async Type | Status | Batch |
+| # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 227 | `zadd` | `int \| float` | `Awaitable[int \| float]` | ✅ | 9 |
-| 228 | `zcard` | `int` | `Awaitable[int]` | ✅ | 9 |
-| 229 | `zcount` | `int` | `Awaitable[int]` | ✅ | 9 |
-| 230 | `zdiff` | `list` | `Awaitable[list]` | ✅ | 9 |
-| 231 | `zdiffstore` | `int` | `Awaitable[int]` | ✅ | 9 |
-| 232 | `zincrby` | `float` | `Awaitable[float]` | ✅ | 9 |
-| 233 | `zinter` | `list` | `Awaitable[list]` | ✅ | 9 |
-| 234 | `zinterstore` | `int` | `Awaitable[int]` | ✅ | 9 |
-| 235 | `zintercard` | `int` | `Awaitable[int]` | ✅ | 9 |
-| 236 | `zlexcount` | `int` | `Awaitable[int]` | ✅ | 9 |
-| 237 | `zpopmax` | `list` | `Awaitable[list]` | ✅ | 9 |
-| 238 | `zpopmin` | `list` | `Awaitable[list]` | ✅ | 9 |
-| 239 | `zrandmember` | `str \| list` | `Awaitable[str \| list]` | ✅ | 9 |
-| 240 | `bzpopmax` | `list` | `Awaitable[list]` | ✅ | 9 |
-| 241 | `bzpopmin` | `list` | `Awaitable[list]` | ✅ | 9 |
-| 242 | `zmpop` | `list` | `Awaitable[list]` | ✅ | 9 |
-| 243 | `bzmpop` | `list \| None` | `Awaitable[list \| None]` | ✅ | 9 |
-| 244 | `zrange` | `list` | `Awaitable[list]` | ✅ | 9 |
-| 245 | `zrevrange` | `list` | `Awaitable[list]` | ✅ | 9 |
-| 246 | `zrangestore` | `int` | `Awaitable[int]` | ✅ | 9 |
-| 247 | `zrangebylex` | `list` | `Awaitable[list]` | ✅ | 9 |
-| 248 | `zrevrangebylex` | `list` | `Awaitable[list]` | ✅ | 9 |
-| 249 | `zrangebyscore` | `list` | `Awaitable[list]` | ✅ | 9 |
-| 250 | `zrevrangebyscore` | `list` | `Awaitable[list]` | ✅ | 9 |
-| 251 | `zrank` | `int \| None` | `Awaitable[int \| None]` | ✅ | 9 |
-| 252 | `zrem` | `int` | `Awaitable[int]` | ✅ | 9 |
-| 253 | `zremrangebylex` | `int` | `Awaitable[int]` | ✅ | 9 |
-| 254 | `zremrangebyrank` | `int` | `Awaitable[int]` | ✅ | 9 |
-| 255 | `zremrangebyscore` | `int` | `Awaitable[int]` | ✅ | 9 |
-| 256 | `zrevrank` | `int \| None` | `Awaitable[int \| None]` | ✅ | 9 |
-| 257 | `zscore` | `float \| None` | `Awaitable[float \| None]` | ✅ | 9 |
-| 258 | `zunion` | `list` | `Awaitable[list]` | ✅ | 9 |
-| 259 | `zunionstore` | `int` | `Awaitable[int]` | ✅ | 9 |
-| 260 | `zmscore` | `list` | `Awaitable[list]` | ✅ | 9 |
+| 227 | `zadd` | `int \| float` | `Awaitable[int \| float]` | ✅ | RESP2: parse_zadd |
+| 228 | `zcard` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 229 | `zcount` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 230 | `zdiff` | `list[tuple[bytes \| str, float]] \| list[bytes \| str]` | `Awaitable[...]` | ✅ | RESP2: zset_score_pairs (WITHSCORES) |
+| 231 | `zdiffstore` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 232 | `zincrby` | `float` | `Awaitable[float]` | ✅ | RESP2: float_or_none / RESP3: raw float |
+| 233 | `zinter` | `list[tuple[bytes \| str, float]] \| list[bytes \| str]` | `Awaitable[...]` | ✅ | RESP2: zset_score_pairs (WITHSCORES) |
+| 234 | `zinterstore` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 235 | `zintercard` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 236 | `zlexcount` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 237 | `zpopmax` | `list[tuple[bytes \| str, float]]` | `Awaitable[list[tuple[bytes \| str, float]]]` | ✅ | RESP2: zset_score_pairs / RESP3: identity |
+| 238 | `zpopmin` | `list[tuple[bytes \| str, float]]` | `Awaitable[list[tuple[bytes \| str, float]]]` | ✅ | RESP2: zset_score_pairs / RESP3: identity |
+| 239 | `zrandmember` | `bytes \| str \| list \| None` | `Awaitable[bytes \| str \| list \| None]` | ✅ | Varies by COUNT/WITHSCORES |
+| 240 | `bzpopmax` | `tuple[bytes \| str, bytes \| str, float] \| None` | `Awaitable[tuple \| None]` | ✅ | RESP2: lambda (key, member, score) |
+| 241 | `bzpopmin` | `tuple[bytes \| str, bytes \| str, float] \| None` | `Awaitable[tuple \| None]` | ✅ | RESP2: lambda (key, member, score) |
+| 242 | `zmpop` | `list \| None` | `Awaitable[list \| None]` | ✅ | No callback - raw |
+| 243 | `bzmpop` | `list \| None` | `Awaitable[list \| None]` | ✅ | No callback - raw |
+| 244 | `zrange` | `list[tuple[bytes \| str, float]] \| list[bytes \| str]` | `Awaitable[...]` | ✅ | RESP2: zset_score_pairs / RESP3: zset_score_pairs_resp3 (WITHSCORES) |
+| 245 | `zrevrange` | `list[tuple[bytes \| str, float]] \| list[bytes \| str]` | `Awaitable[...]` | ✅ | RESP2: zset_score_pairs / RESP3: zset_score_pairs_resp3 (WITHSCORES) |
+| 246 | `zrangestore` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 247 | `zrangebylex` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | No callback - raw array |
+| 248 | `zrevrangebylex` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | No callback - raw array |
+| 249 | `zrangebyscore` | `list[tuple[bytes \| str, float]] \| list[bytes \| str]` | `Awaitable[...]` | ✅ | RESP2: zset_score_pairs / RESP3: zset_score_pairs_resp3 (WITHSCORES) |
+| 250 | `zrevrangebyscore` | `list[tuple[bytes \| str, float]] \| list[bytes \| str]` | `Awaitable[...]` | ✅ | RESP2: zset_score_pairs / RESP3: zset_score_pairs_resp3 (WITHSCORES) |
+| 251 | `zrank` | `int \| tuple[int, float] \| None` | `Awaitable[int \| tuple[int, float] \| None]` | ✅ | RESP2: zset_score_for_rank / RESP3: zset_score_for_rank_resp3 (WITHSCORE) |
+| 252 | `zrem` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 253 | `zremrangebylex` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 254 | `zremrangebyrank` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 255 | `zremrangebyscore` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 256 | `zrevrank` | `int \| tuple[int, float] \| None` | `Awaitable[int \| tuple[int, float] \| None]` | ✅ | RESP2: zset_score_for_rank / RESP3: zset_score_for_rank_resp3 (WITHSCORE) |
+| 257 | `zscore` | `float \| None` | `Awaitable[float \| None]` | ✅ | RESP2: float_or_none / RESP3: raw float |
+| 258 | `zunion` | `list[tuple[bytes \| str, float]] \| list[bytes \| str]` | `Awaitable[...]` | ✅ | RESP2: zset_score_pairs / RESP3: zset_score_pairs_resp3 (WITHSCORES) |
+| 259 | `zunionstore` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 260 | `zmscore` | `list[float \| None]` | `Awaitable[list[float \| None]]` | ✅ | RESP2: parse_zmscore |
 
 ### BATCH 10: HyperlogCommands + HashCommands (core.py) - Methods 261-289
-| # | Method | Sync Type | Async Type | Status | Batch |
+| # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 261 | `pfadd` | `int` | `Awaitable[int]` | ✅ | 10 |
-| 262 | `pfcount` | `int` | `Awaitable[int]` | ✅ | 10 |
-| 263 | `pfmerge` | `bool` | `Awaitable[bool]` | ✅ | 10 |
-| 264 | `hdel` | `int` | `Awaitable[int]` | ✅ | 10 |
-| 265 | `hexists` | `bool` | `Awaitable[bool]` | ✅ | 10 |
-| 266 | `hget` | `str \| None` | `Awaitable[str \| None]` | ✅ | 10 |
-| 267 | `hgetall` | `dict` | `Awaitable[dict]` | ✅ | 10 |
-| 268 | `hgetdel` | `list \| None` | `Awaitable[list \| None]` | ✅ | 10 |
-| 269 | `hgetex` | `list \| None` | `Awaitable[list \| None]` | ✅ | 10 |
-| 270 | `hincrby` | `int` | `Awaitable[int]` | ✅ | 10 |
-| 271 | `hincrbyfloat` | `float` | `Awaitable[float]` | ✅ | 10 |
-| 272 | `hkeys` | `list` | `Awaitable[list]` | ✅ | 10 |
-| 273 | `hlen` | `int` | `Awaitable[int]` | ✅ | 10 |
-| 274 | `hset` | `int` | `Awaitable[int]` | ✅ | 10 |
-| 275 | `hsetex` | `int` | `Awaitable[int]` | ✅ | 10 |
-| 276 | `hsetnx` | `bool` | `Awaitable[bool]` | ✅ | 10 |
-| 277 | `hmset` | `str` | `Awaitable[str]` | ✅ | 10 |
-| 278 | `hmget` | `list` | `Awaitable[list]` | ✅ | 10 |
-| 279 | `hvals` | `list` | `Awaitable[list]` | ✅ | 10 |
-| 280 | `hstrlen` | `int` | `Awaitable[int]` | ✅ | 10 |
-| 281 | `hexpire` | `list` | `Awaitable[list]` | ✅ | 10 |
-| 282 | `hpexpire` | `list` | `Awaitable[list]` | ✅ | 10 |
-| 283 | `hexpireat` | `list` | `Awaitable[list]` | ✅ | 10 |
-| 284 | `hpexpireat` | `list` | `Awaitable[list]` | ✅ | 10 |
-| 285 | `hpersist` | `list` | `Awaitable[list]` | ✅ | 10 |
-| 286 | `hexpiretime` | `list` | `Awaitable[list]` | ✅ | 10 |
-| 287 | `hpexpiretime` | `list` | `Awaitable[list]` | ✅ | 10 |
-| 288 | `httl` | `list` | `Awaitable[list]` | ✅ | 10 |
-| 289 | `hpttl` | `list` | `Awaitable[list]` | ✅ | 10 |
+| 261 | `pfadd` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 262 | `pfcount` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 263 | `pfmerge` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 264 | `hdel` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 265 | `hexists` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
+| 266 | `hget` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ | No callback - raw |
+| 267 | `hgetall` | `dict[bytes \| str, bytes \| str]` | `Awaitable[dict[bytes \| str, bytes \| str]]` | ✅ | RESP2: pairs_to_dict / RESP3: identity |
+| 268 | `hgetdel` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ | No callback - raw array |
+| 269 | `hgetex` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ | No callback - raw array |
+| 270 | `hincrby` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 271 | `hincrbyfloat` | `float` | `Awaitable[float]` | ✅ | Base: float |
+| 272 | `hkeys` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | No callback - raw array |
+| 273 | `hlen` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 274 | `hset` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 275 | `hsetex` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 276 | `hsetnx` | `bool` | `Awaitable[bool]` | ✅ | Integer 0/1 as bool |
+| 277 | `hmset` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
+| 278 | `hmget` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ | No callback - raw array |
+| 279 | `hvals` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | No callback - raw array |
+| 280 | `hstrlen` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 281 | `hexpire` | `list[int]` | `Awaitable[list[int]]` | ✅ | Array of integers |
+| 282 | `hpexpire` | `list[int]` | `Awaitable[list[int]]` | ✅ | Array of integers |
+| 283 | `hexpireat` | `list[int]` | `Awaitable[list[int]]` | ✅ | Array of integers |
+| 284 | `hpexpireat` | `list[int]` | `Awaitable[list[int]]` | ✅ | Array of integers |
+| 285 | `hpersist` | `list[int]` | `Awaitable[list[int]]` | ✅ | Array of integers |
+| 286 | `hexpiretime` | `list[int]` | `Awaitable[list[int]]` | ✅ | Array of integers |
+| 287 | `hpexpiretime` | `list[int]` | `Awaitable[list[int]]` | ✅ | Array of integers |
+| 288 | `httl` | `list[int]` | `Awaitable[list[int]]` | ✅ | Array of integers |
+| 289 | `hpttl` | `list[int]` | `Awaitable[list[int]]` | ✅ | Array of integers |
 
 ### BATCH 11: PubSubCommands + ScriptCommands (core.py) - Methods 290-306
-| # | Method | Sync Type | Async Type | Status | Batch |
+| # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 290 | `publish` | `int` | `Awaitable[int]` | ✅ | 11 |
-| 291 | `spublish` | `int` | `Awaitable[int]` | ✅ | 11 |
-| 292 | `pubsub_channels` | `list` | `Awaitable[list]` | ✅ | 11 |
-| 293 | `pubsub_shardchannels` | `list` | `Awaitable[list]` | ✅ | 11 |
-| 294 | `pubsub_numpat` | `int` | `Awaitable[int]` | ✅ | 11 |
-| 295 | `pubsub_numsub` | `list` | `Awaitable[list]` | ✅ | 11 |
-| 296 | `pubsub_shardnumsub` | `list` | `Awaitable[list]` | ✅ | 11 |
-| 297 | `eval` | `str` | `Awaitable[str]` | ✅ | 11 |
-| 298 | `eval_ro` | `str` | `Awaitable[str]` | ✅ | 11 |
-| 299 | `evalsha` | `str` | `Awaitable[str]` | ✅ | 11 |
-| 300 | `evalsha_ro` | `str` | `Awaitable[str]` | ✅ | 11 |
-| 301 | `script_exists` | `list[bool]` | `Awaitable[list[bool]]` | ✅ | 11 |
-| 302 | `script_debug` | `None` | `None` | ⚠️ SKIP | 11 |
-| 303 | `script_flush` | `bool` | `Awaitable[bool]` | ✅ | 11 |
-| 304 | `script_kill` | `bool` | `Awaitable[bool]` | ✅ | 11 |
-| 305 | `script_load` | `str` | `Awaitable[str]` | ✅ | 11 |
-| 306 | `register_script` | `Script` | `AsyncScript` | ⚠️ SKIP | 11 |
+| 290 | `publish` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 291 | `spublish` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 292 | `pubsub_channels` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | No callback - raw |
+| 293 | `pubsub_shardchannels` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | No callback - raw |
+| 294 | `pubsub_numpat` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 295 | `pubsub_numsub` | `list[tuple[bytes \| str, int]]` | `Awaitable[list[tuple[bytes \| str, int]]]` | ✅ | Base: parse_pubsub_numsub |
+| 296 | `pubsub_shardnumsub` | `list[tuple[bytes \| str, int]]` | `Awaitable[list[tuple[bytes \| str, int]]]` | ✅ | Base: parse_pubsub_numsub |
+| 297 | `eval` | `Any` | `Awaitable[Any]` | ✅ | Script-dependent |
+| 298 | `eval_ro` | `Any` | `Awaitable[Any]` | ✅ | Script-dependent |
+| 299 | `evalsha` | `Any` | `Awaitable[Any]` | ✅ | Script-dependent |
+| 300 | `evalsha_ro` | `Any` | `Awaitable[Any]` | ✅ | Script-dependent |
+| 301 | `script_exists` | `list[bool]` | `Awaitable[list[bool]]` | ✅ | Base: lambda map bool |
+| 302 | `script_debug` | `None` | `None` | ⚠️ SKIP | N/A |
+| 303 | `script_flush` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 304 | `script_kill` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 305 | `script_load` | `str` | `Awaitable[str]` | ✅ | Base: str_if_bytes |
+| 306 | `register_script` | `Script` | `AsyncScript` | ⚠️ SKIP | Different classes |
 
 ### BATCH 12: GeoCommands + ModuleCommands + ClusterCommands + FunctionCommands (core.py) - Methods 307-335
-| # | Method | Sync Type | Async Type | Status | Batch |
+| # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 307 | `geoadd` | `int` | `Awaitable[int]` | ✅ | 12 |
-| 308 | `geodist` | `float \| None` | `Awaitable[float \| None]` | ✅ | 12 |
-| 309 | `geohash` | `list` | `Awaitable[list]` | ✅ | 12 |
-| 310 | `geopos` | `list` | `Awaitable[list]` | ✅ | 12 |
-| 311 | `georadius` | `list` | `Awaitable[list]` | ✅ | 12 |
-| 312 | `georadiusbymember` | `list` | `Awaitable[list]` | ✅ | 12 |
-| 313 | `geosearch` | `list` | `Awaitable[list]` | ✅ | 12 |
-| 314 | `geosearchstore` | `int` | `Awaitable[int]` | ✅ | 12 |
-| 315 | `module_load` | `bool` | `Awaitable[bool]` | ✅ | 12 |
-| 316 | `module_loadex` | `bool` | `Awaitable[bool]` | ✅ | 12 |
-| 317 | `module_unload` | `bool` | `Awaitable[bool]` | ✅ | 12 |
-| 318 | `module_list` | `list` | `Awaitable[list]` | ✅ | 12 |
-| 319 | `command_info` | `None` | `None` | ⚠️ SKIP | 12 |
-| 320 | `command_count` | `int` | `Awaitable[int]` | ✅ | 12 |
-| 321 | `command_getkeys` | `list` | `Awaitable[list]` | ✅ | 12 |
-| 322 | `command` | `list` | `Awaitable[list]` | ✅ | 12 |
-| 323 | `cluster` | `Any` | `Awaitable[Any]` | ✅ | 12 |
-| 324 | `readwrite` | `bool` | `Awaitable[bool]` | ✅ | 12 |
-| 325 | `readonly` | `bool` | `Awaitable[bool]` | ✅ | 12 |
-| 326 | `function_load` | `str` | `Awaitable[str]` | ✅ | 12 |
-| 327 | `function_delete` | `str` | `Awaitable[str]` | ✅ | 12 |
-| 328 | `function_flush` | `str` | `Awaitable[str]` | ✅ | 12 |
-| 329 | `function_list` | `list` | `Awaitable[list]` | ✅ | 12 |
-| 330 | `fcall` | `str` | `Awaitable[str]` | ✅ | 12 |
-| 331 | `fcall_ro` | `str` | `Awaitable[str]` | ✅ | 12 |
-| 332 | `function_dump` | `str` | `Awaitable[str]` | ✅ | 12 |
-| 333 | `function_restore` | `str` | `Awaitable[str]` | ✅ | 12 |
-| 334 | `function_kill` | `str` | `Awaitable[str]` | ✅ | 12 |
-| 335 | `function_stats` | `list` | `Awaitable[list]` | ✅ | 12 |
+| 307 | `geoadd` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 308 | `geodist` | `float \| None` | `Awaitable[float \| None]` | ✅ | Base: float_or_none |
+| 309 | `geohash` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ | RESP2: str_if_bytes / RESP3: raw |
+| 310 | `geopos` | `list[tuple[float, float] \| None]` | `Awaitable[list[tuple[float, float] \| None]]` | ✅ | RESP2: lambda float tuple / RESP3: raw |
+| 311 | `georadius` | `list` | `Awaitable[list]` | ✅ | Base: parse_geosearch_generic |
+| 312 | `georadiusbymember` | `list` | `Awaitable[list]` | ✅ | Base: parse_geosearch_generic |
+| 313 | `geosearch` | `list` | `Awaitable[list]` | ✅ | Base: parse_geosearch_generic |
+| 314 | `geosearchstore` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 315 | `module_load` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
+| 316 | `module_loadex` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
+| 317 | `module_unload` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
+| 318 | `module_list` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | RESP2: lambda pairs_to_dict |
+| 319 | `command_info` | `None` | `None` | ⚠️ SKIP | N/A |
+| 320 | `command_count` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 321 | `command_getkeys` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | RESP2: str_if_bytes / RESP3: raw |
+| 322 | `command` | `list` | `Awaitable[list]` | ✅ | Base: parse_command / RESP3: parse_command_resp3 |
+| 323 | `cluster` | `Any` | `Awaitable[Any]` | ✅ | Subcommand-dependent |
+| 324 | `readwrite` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 325 | `readonly` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 326 | `function_load` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - raw |
+| 327 | `function_delete` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 328 | `function_flush` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 329 | `function_list` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | No callback - raw |
+| 330 | `fcall` | `Any` | `Awaitable[Any]` | ✅ | Function-dependent |
+| 331 | `fcall_ro` | `Any` | `Awaitable[Any]` | ✅ | Function-dependent |
+| 332 | `function_dump` | `bytes` | `Awaitable[bytes]` | ✅ | No callback - raw bytes |
+| 333 | `function_restore` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 334 | `function_kill` | `bool` | `Awaitable[bool]` | ✅ | No callback - OK |
+| 335 | `function_stats` | `dict` | `Awaitable[dict]` | ✅ | No callback - raw dict |
 
 ### BATCH 13: ClusterCommands (cluster.py) - Methods 336-378
-| # | Method | Sync Type | Async Type | Status | Batch |
+| # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 336 | `mget_nonatomic` | `list` | `Awaitable[list]` | ⚠️ SKIP | 13 |
-| 337 | `mset_nonatomic` | `list[bool]` | `Awaitable[list[bool]]` | ⚠️ SKIP | 13 |
-| 338 | `exists` | `int` | `Awaitable[int]` | 📋 | 13 |
-| 339 | `delete` | `int` | `Awaitable[int]` | 📋 | 13 |
-| 340 | `touch` | `int` | `Awaitable[int]` | 📋 | 13 |
-| 341 | `unlink` | `int` | `Awaitable[int]` | 📋 | 13 |
-| 342 | `slaveof` | `NoReturn` | `NoReturn` | 📋 SKIP | 13 |
-| 343 | `replicaof` | `NoReturn` | `NoReturn` | 📋 SKIP | 13 |
-| 344 | `swapdb` | `NoReturn` | `NoReturn` | 📋 SKIP | 13 |
-| 345 | `cluster_myid` | `str` | `Awaitable[str]` | ✅ | 13 |
-| 346 | `cluster_addslots` | `bool` | `Awaitable[bool]` | ✅ | 13 |
-| 347 | `cluster_addslotsrange` | `bool` | `Awaitable[bool]` | ✅ | 13 |
-| 348 | `cluster_countkeysinslot` | `int` | `Awaitable[int]` | ✅ | 13 |
-| 349 | `cluster_count_failure_report` | `int` | `Awaitable[int]` | ✅ | 13 |
-| 350 | `cluster_delslots` | `list[bool]` | `Awaitable[list[bool]]` | ⚠️ SKIP | 13 |
-| 351 | `cluster_delslotsrange` | `bool` | `Awaitable[bool]` | ✅ | 13 |
-| 352 | `cluster_failover` | `bool` | `Awaitable[bool]` | ✅ | 13 |
-| 353 | `cluster_info` | `dict` | `Awaitable[dict]` | ✅ | 13 |
-| 354 | `cluster_keyslot` | `int` | `Awaitable[int]` | ✅ | 13 |
-| 355 | `cluster_meet` | `bool` | `Awaitable[bool]` | ✅ | 13 |
-| 356 | `cluster_nodes` | `str` | `Awaitable[str]` | ✅ | 13 |
-| 357 | `cluster_replicate` | `bool` | `Awaitable[bool]` | ✅ | 13 |
-| 358 | `cluster_reset` | `bool` | `Awaitable[bool]` | ✅ | 13 |
-| 359 | `cluster_save_config` | `bool` | `Awaitable[bool]` | ✅ | 13 |
-| 360 | `cluster_get_keys_in_slot` | `list` | `Awaitable[list]` | ✅ | 13 |
-| 361 | `cluster_set_config_epoch` | `bool` | `Awaitable[bool]` | ✅ | 13 |
-| 362 | `cluster_setslot` | `bool` | `Awaitable[bool]` | ✅ | 13 |
-| 363 | `cluster_setslot_stable` | `bool` | `Awaitable[bool]` | ✅ | 13 |
-| 364 | `cluster_replicas` | `list` | `Awaitable[list]` | ✅ | 13 |
-| 365 | `cluster_slots` | `list` | `Awaitable[list]` | ✅ | 13 |
-| 366 | `cluster_shards` | `list` | `Awaitable[list]` | ✅ | 13 |
-| 367 | `cluster_myshardid` | `str` | `Awaitable[str]` | ✅ | 13 |
-| 368 | `cluster_links` | `list` | `Awaitable[list]` | ✅ | 13 |
-| 369 | `cluster_flushslots` | `None` | `Awaitable[None]` | ✅ | 13 |
-| 370 | `cluster_bumpepoch` | `None` | `Awaitable[None]` | ✅ | 13 |
-| 371 | `client_tracking_on` | `bool` | `Awaitable[bool]` | ⚠️ SKIP | 13 |
-| 372 | `client_tracking_off` | `bool` | `Awaitable[bool]` | ⚠️ SKIP | 13 |
-| 373 | `hotkeys_start` | `str \| bytes` | `Awaitable[str \| bytes]` | ⚠️ SKIP | 13 |
-| 374 | `hotkeys_stop` | `str \| bytes` | `Awaitable[str \| bytes]` | ⚠️ SKIP | 13 |
-| 375 | `hotkeys_reset` | `str \| bytes` | `Awaitable[str \| bytes]` | ⚠️ SKIP | 13 |
-| 376 | `hotkeys_get` | `list[dict]` | `Awaitable[list[dict]]` | ⚠️ SKIP | 13 |
-| 377 | `stralgo` | `Any` | `Awaitable[Any]` | ✅ | 13 |
-| 378 | `scan_iter` | `Iterator` | `AsyncIterator` | 🔄 SKIP | 13 |
+| 336 | `mget_nonatomic` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ⚠️ SKIP | Complex multi-node |
+| 337 | `mset_nonatomic` | `list[bool]` | `Awaitable[list[bool]]` | ⚠️ SKIP | Complex multi-node |
+| 338 | `exists` | `int` | `Awaitable[int]` | 📋 | Integer reply |
+| 339 | `delete` | `int` | `Awaitable[int]` | 📋 | Integer reply |
+| 340 | `touch` | `int` | `Awaitable[int]` | 📋 | Integer reply |
+| 341 | `unlink` | `int` | `Awaitable[int]` | 📋 | Integer reply |
+| 342 | `slaveof` | `NoReturn` | `NoReturn` | 📋 SKIP | Raises error |
+| 343 | `replicaof` | `NoReturn` | `NoReturn` | 📋 SKIP | Raises error |
+| 344 | `swapdb` | `NoReturn` | `NoReturn` | 📋 SKIP | Raises error |
+| 345 | `cluster_myid` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - raw |
+| 346 | `cluster_addslots` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 347 | `cluster_addslotsrange` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 348 | `cluster_countkeysinslot` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 349 | `cluster_count_failure_report` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 350 | `cluster_delslots` | `list[bool]` | `Awaitable[list[bool]]` | ⚠️ SKIP | Complex multi-node |
+| 351 | `cluster_delslotsrange` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 352 | `cluster_failover` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 353 | `cluster_info` | `dict[str, str]` | `Awaitable[dict[str, str]]` | ✅ | Base: parse_cluster_info |
+| 354 | `cluster_keyslot` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 355 | `cluster_meet` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 356 | `cluster_nodes` | `str` | `Awaitable[str]` | ✅ | Base: parse_cluster_nodes |
+| 357 | `cluster_replicate` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 358 | `cluster_reset` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 359 | `cluster_save_config` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 360 | `cluster_get_keys_in_slot` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | RESP2: str_if_bytes / RESP3: raw |
+| 361 | `cluster_set_config_epoch` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 362 | `cluster_setslot` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 363 | `cluster_setslot_stable` | `bool` | `Awaitable[bool]` | ✅ | No callback - OK |
+| 364 | `cluster_replicas` | `str` | `Awaitable[str]` | ✅ | Base: parse_cluster_nodes |
+| 365 | `cluster_slots` | `list` | `Awaitable[list]` | ✅ | No callback - raw |
+| 366 | `cluster_shards` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | No callback - raw |
+| 367 | `cluster_myshardid` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - raw |
+| 368 | `cluster_links` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | No callback - raw |
+| 369 | `cluster_flushslots` | `bool` | `Awaitable[bool]` | ✅ | No callback - OK |
+| 370 | `cluster_bumpepoch` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - raw |
+| 371 | `client_tracking_on` | `bool` | `Awaitable[bool]` | ⚠️ SKIP | Cluster-specific |
+| 372 | `client_tracking_off` | `bool` | `Awaitable[bool]` | ⚠️ SKIP | Cluster-specific |
+| 373 | `hotkeys_start` | `bytes \| str` | `Awaitable[bytes \| str]` | ⚠️ SKIP | Cluster-specific |
+| 374 | `hotkeys_stop` | `bytes \| str` | `Awaitable[bytes \| str]` | ⚠️ SKIP | Cluster-specific |
+| 375 | `hotkeys_reset` | `bytes \| str` | `Awaitable[bytes \| str]` | ⚠️ SKIP | Cluster-specific |
+| 376 | `hotkeys_get` | `list[dict]` | `Awaitable[list[dict]]` | ⚠️ SKIP | Cluster-specific |
+| 377 | `stralgo` | `dict \| bytes \| str \| int` | `Awaitable[dict \| bytes \| str \| int]` | ✅ | RESP2: parse_stralgo / RESP3: lambda |
+| 378 | `scan_iter` | `Iterator` | `AsyncIterator` | 🔄 SKIP | Iterator |
 
 ### BATCH 14: SentinelCommands (sentinel.py) - Methods 379-391
-| # | Method | Sync Type | Async Type | Status | Batch |
+| # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 379 | `sentinel` | `Any` | `Awaitable[Any]` | ⚠️ SKIP | 14 |
-| 380 | `sentinel_get_master_addr_by_name` | `tuple` | `Awaitable[tuple]` | ✅ | 14 |
-| 381 | `sentinel_master` | `dict` | `Awaitable[dict]` | ✅ | 14 |
-| 382 | `sentinel_masters` | `dict` | `Awaitable[dict]` | ✅ | 14 |
-| 383 | `sentinel_monitor` | `bool` | `Awaitable[bool]` | ✅ | 14 |
-| 384 | `sentinel_remove` | `bool` | `Awaitable[bool]` | ✅ | 14 |
-| 385 | `sentinel_sentinels` | `list` | `Awaitable[list]` | ✅ | 14 |
-| 386 | `sentinel_set` | `bool` | `Awaitable[bool]` | ✅ | 14 |
-| 387 | `sentinel_slaves` | `list` | `Awaitable[list]` | ✅ | 14 |
-| 388 | `sentinel_reset` | `bool` | `Awaitable[bool]` | ✅ | 14 |
-| 389 | `sentinel_failover` | `bool` | `Awaitable[bool]` | ✅ | 14 |
-| 390 | `sentinel_ckquorum` | `bool` | `Awaitable[bool]` | ✅ | 14 |
-| 391 | `sentinel_flushconfig` | `bool` | `Awaitable[bool]` | ✅ | 14 |
+| 379 | `sentinel` | `Any` | `Awaitable[Any]` | ⚠️ SKIP | Async differs |
+| 380 | `sentinel_get_master_addr_by_name` | `tuple[str, int] \| None` | `Awaitable[tuple[str, int] \| None]` | ✅ | Base: parse_sentinel_get_master |
+| 381 | `sentinel_master` | `dict` | `Awaitable[dict]` | ✅ | RESP2: parse_sentinel_master / RESP3: parse_sentinel_state_resp3 |
+| 382 | `sentinel_masters` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | RESP2: parse_sentinel_masters / RESP3: parse_sentinel_masters_resp3 |
+| 383 | `sentinel_monitor` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 384 | `sentinel_remove` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 385 | `sentinel_sentinels` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | RESP2: parse_sentinel_slaves_and_sentinels / RESP3: _resp3 |
+| 386 | `sentinel_set` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 387 | `sentinel_slaves` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | RESP2: parse_sentinel_slaves_and_sentinels / RESP3: _resp3 |
+| 388 | `sentinel_reset` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 389 | `sentinel_failover` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 390 | `sentinel_ckquorum` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
+| 391 | `sentinel_flushconfig` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
 
 ### BATCH 15: SearchCommands (search/commands.py) - Methods 392-424
-| # | Method | Sync Type | Async Type | Status | Batch |
+| # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 392 | `batch_indexer` | `BatchIndexer` | `BatchIndexer` | 📋 SKIP | 15 |
-| 393 | `create_index` | `bool` | `Awaitable[bool]` | ✅ | 15 |
-| 394 | `alter_schema_add` | `bool` | `Awaitable[bool]` | ✅ | 15 |
-| 395 | `dropindex` | `bool` | `Awaitable[bool]` | ✅ | 15 |
-| 396 | `add_document` | `bool` | `Awaitable[bool]` | ✅ | 15 |
-| 397 | `add_document_hash` | `bool` | `Awaitable[bool]` | ✅ | 15 |
-| 398 | `delete_document` | `bool` | `Awaitable[bool]` | ✅ | 15 |
-| 399 | `load_document` | `Document` | `Awaitable[Document]` | ⚠️ SKIP | 15 |
-| 400 | `get` | `Document` | `Awaitable[Document]` | ✅ | 15 |
-| 401 | `info` | `dict` | `Awaitable[dict]` | ⚠️ SKIP | 15 |
-| 402 | `get_params_args` | `list` | `list` | 📋 SKIP | 15 |
-| 403 | `search` | `Result` | `Awaitable[Result]` | ⚠️ SKIP | 15 |
-| 404 | `hybrid_search` | `HybridResult` | `Awaitable[HybridResult]` | ⚠️ SKIP | 15 |
-| 405 | `explain` | `str` | `Awaitable[str]` | ✅ | 15 |
-| 406 | `explain_cli` | `list` | `Awaitable[list]` | ✅ | 15 |
-| 407 | `aggregate` | `AggregateResult` | `Awaitable[AggregateResult]` | ⚠️ SKIP | 15 |
-| 408 | `profile` | `tuple` | `Awaitable[tuple]` | ✅ | 15 |
-| 409 | `spellcheck` | `dict` | `Awaitable[dict]` | ⚠️ SKIP | 15 |
-| 410 | `dict_add` | `int` | `Awaitable[int]` | ✅ | 15 |
-| 411 | `dict_del` | `int` | `Awaitable[int]` | ✅ | 15 |
-| 412 | `dict_dump` | `list` | `Awaitable[list]` | ✅ | 15 |
-| 413 | `config_set` | `bool` | `Awaitable[bool]` | ⚠️ SKIP | 15 |
-| 414 | `config_get` | `str` | `Awaitable[str]` | ⚠️ SKIP | 15 |
-| 415 | `tagvals` | `list` | `Awaitable[list]` | ✅ | 15 |
-| 416 | `aliasadd` | `bool` | `Awaitable[bool]` | ✅ | 15 |
-| 417 | `aliasupdate` | `bool` | `Awaitable[bool]` | ✅ | 15 |
-| 418 | `aliasdel` | `bool` | `Awaitable[bool]` | ✅ | 15 |
-| 419 | `sugadd` | `int` | `Awaitable[int]` | ⚠️ SKIP | 15 |
-| 420 | `suglen` | `int` | `Awaitable[int]` | ✅ | 15 |
-| 421 | `sugdel` | `int` | `Awaitable[int]` | ✅ | 15 |
-| 422 | `sugget` | `list` | `Awaitable[list]` | ⚠️ SKIP | 15 |
-| 423 | `synupdate` | `bool` | `Awaitable[bool]` | ✅ | 15 |
-| 424 | `syndump` | `dict` | `Awaitable[dict]` | ✅ | 15 |
+| 392 | `batch_indexer` | `BatchIndexer` | `BatchIndexer` | 📋 SKIP | Builder pattern |
+| 393 | `create_index` | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 394 | `alter_schema_add` | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 395 | `dropindex` | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 396 | `add_document` | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 397 | `add_document_hash` | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 398 | `delete_document` | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 399 | `load_document` | `Document` | `Awaitable[Document]` | ⚠️ SKIP | Async result parsing |
+| 400 | `get` | `Document` | `Awaitable[Document]` | ✅ | Module-specific |
+| 401 | `info` | `dict` | `Awaitable[dict]` | ⚠️ SKIP | Async result parsing |
+| 402 | `get_params_args` | `list` | `list` | 📋 SKIP | Helper method |
+| 403 | `search` | `Result` | `Awaitable[Result]` | ⚠️ SKIP | Async result parsing |
+| 404 | `hybrid_search` | `HybridResult` | `Awaitable[HybridResult]` | ⚠️ SKIP | Async result parsing |
+| 405 | `explain` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - raw |
+| 406 | `explain_cli` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | No callback - raw |
+| 407 | `aggregate` | `AggregateResult` | `Awaitable[AggregateResult]` | ⚠️ SKIP | Async result parsing |
+| 408 | `profile` | `tuple` | `Awaitable[tuple]` | ✅ | Module-specific |
+| 409 | `spellcheck` | `dict` | `Awaitable[dict]` | ⚠️ SKIP | Async result parsing |
+| 410 | `dict_add` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 411 | `dict_del` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 412 | `dict_dump` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | No callback - raw |
+| 413 | `config_set` | `bool` | `Awaitable[bool]` | ⚠️ SKIP | Async result parsing |
+| 414 | `config_get` | `dict` | `Awaitable[dict]` | ⚠️ SKIP | Async result parsing |
+| 415 | `tagvals` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | No callback - raw |
+| 416 | `aliasadd` | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 417 | `aliasupdate` | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 418 | `aliasdel` | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 419 | `sugadd` | `int` | `Awaitable[int]` | ⚠️ SKIP | Async result parsing |
+| 420 | `suglen` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 421 | `sugdel` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 422 | `sugget` | `list` | `Awaitable[list]` | ⚠️ SKIP | Async result parsing |
+| 423 | `synupdate` | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 424 | `syndump` | `dict[bytes \| str, list[bytes \| str]]` | `Awaitable[dict[bytes \| str, list[bytes \| str]]]` | ✅ | No callback - raw |
 
 ### BATCH 16: JSONCommands (json/commands.py) - Methods 425-452
-| # | Method | Sync Type | Async Type | Status | Batch |
+| # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 425 | `arrappend` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | 16 |
-| 426 | `arrindex` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | 16 |
-| 427 | `arrinsert` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | 16 |
-| 428 | `arrlen` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | 16 |
-| 429 | `arrpop` | `list[str \| None]` | `Awaitable[list[str \| None]]` | ✅ | 16 |
-| 430 | `arrtrim` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | 16 |
-| 431 | `type` | `list[str]` | `Awaitable[list[str]]` | ✅ | 16 |
-| 432 | `resp` | `list` | `Awaitable[list]` | ✅ | 16 |
-| 433 | `objkeys` | `list` | `Awaitable[list]` | ✅ | 16 |
-| 434 | `objlen` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | 16 |
-| 435 | `numincrby` | `str` | `Awaitable[str]` | ✅ | 16 |
-| 436 | `nummultby` | `str` | `Awaitable[str]` | ✅ | 16 |
-| 437 | `clear` | `int` | `Awaitable[int]` | ✅ | 16 |
-| 438 | `delete` | `int` | `Awaitable[int]` | ✅ | 16 |
-| 439 | `get` | `list \| None` | `Awaitable[list \| None]` | ✅ | 16 |
-| 440 | `mget` | `list` | `Awaitable[list]` | ✅ | 16 |
-| 441 | `set` | `str \| None` | `Awaitable[str \| None]` | ✅ | 16 |
-| 442 | `mset` | `str \| None` | `Awaitable[str \| None]` | ✅ | 16 |
-| 443 | `merge` | `str \| None` | `Awaitable[str \| None]` | ✅ | 16 |
-| 444 | `set_file` | `str \| None` | `Awaitable[str \| None]` | 📋 | 16 |
-| 445 | `set_path` | `dict[str, bool]` | `Awaitable[dict[str, bool]]` | 📋 | 16 |
-| 446 | `strlen` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | 16 |
-| 447 | `toggle` | `bool \| list` | `Awaitable[bool \| list]` | ✅ | 16 |
-| 448 | `strappend` | `int \| list` | `Awaitable[int \| list]` | ✅ | 16 |
-| 449 | `debug` | `int \| list[str]` | `Awaitable[int \| list[str]]` | ✅ | 16 |
-| 450 | `jsonget` | `Any` | `Awaitable[Any]` | ✅ | 16 |
-| 451 | `jsonmget` | `Any` | `Awaitable[Any]` | ✅ | 16 |
-| 452 | `jsonset` | `Any` | `Awaitable[Any]` | ✅ | 16 |
+| 425 | `arrappend` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | Module int array |
+| 426 | `arrindex` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | Module int array |
+| 427 | `arrinsert` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | Module int array |
+| 428 | `arrlen` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | Module int array |
+| 429 | `arrpop` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ | Depends on decode_responses |
+| 430 | `arrtrim` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | Module int array |
+| 431 | `type` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | Depends on decode_responses |
+| 432 | `resp` | `list` | `Awaitable[list]` | ✅ | JSON structure |
+| 433 | `objkeys` | `list[list[bytes \| str] \| None]` | `Awaitable[list[list[bytes \| str] \| None]]` | ✅ | Depends on decode_responses |
+| 434 | `objlen` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | Module int array |
+| 435 | `numincrby` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | Depends on decode_responses |
+| 436 | `nummultby` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | Depends on decode_responses |
+| 437 | `clear` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 438 | `delete` | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 439 | `get` | `Any` | `Awaitable[Any]` | ✅ | JSON parsed |
+| 440 | `mget` | `list[Any]` | `Awaitable[list[Any]]` | ✅ | JSON parsed |
+| 441 | `set` | `bool \| None` | `Awaitable[bool \| None]` | ✅ | OK or None |
+| 442 | `mset` | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 443 | `merge` | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 444 | `set_file` | `bool \| None` | `Awaitable[bool \| None]` | 📋 | Explicit |
+| 445 | `set_path` | `dict[str, bool]` | `Awaitable[dict[str, bool]]` | 📋 | Explicit |
+| 446 | `strlen` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | Module int array |
+| 447 | `toggle` | `bool \| list[bool]` | `Awaitable[bool \| list[bool]]` | ✅ | Module bool |
+| 448 | `strappend` | `int \| list[int \| None]` | `Awaitable[int \| list[int \| None]]` | ✅ | Module int |
+| 449 | `debug` | `int \| list[bytes \| str]` | `Awaitable[int \| list[bytes \| str]]` | ✅ | Module mixed |
+| 450 | `jsonget` | `Any` | `Awaitable[Any]` | ✅ | Deprecated alias |
+| 451 | `jsonmget` | `Any` | `Awaitable[Any]` | ✅ | Deprecated alias |
+| 452 | `jsonset` | `Any` | `Awaitable[Any]` | ✅ | Deprecated alias |
 
 ### BATCH 17: TimeSeriesCommands (timeseries/commands.py) - Methods 453-469
-| # | Method | Sync Type | Async Type | Status | Batch |
+| # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 453 | `create` | `bool` | `Awaitable[bool]` | ✅ | 17 |
-| 454 | `alter` | `bool` | `Awaitable[bool]` | ✅ | 17 |
-| 455 | `add` | `int` | `Awaitable[int]` | ✅ | 17 |
-| 456 | `madd` | `list[int]` | `Awaitable[list[int]]` | ✅ | 17 |
-| 457 | `incrby` | `int` | `Awaitable[int]` | ✅ | 17 |
-| 458 | `decrby` | `int` | `Awaitable[int]` | ✅ | 17 |
-| 459 | `delete` | `int` | `Awaitable[int]` | ✅ | 17 |
-| 460 | `createrule` | `bool` | `Awaitable[bool]` | ✅ | 17 |
-| 461 | `deleterule` | `bool` | `Awaitable[bool]` | ✅ | 17 |
-| 462 | `range` | `list` | `Awaitable[list]` | ✅ | 17 |
-| 463 | `revrange` | `list` | `Awaitable[list]` | ✅ | 17 |
-| 464 | `mrange` | `list` | `Awaitable[list]` | ✅ | 17 |
-| 465 | `mrevrange` | `list` | `Awaitable[list]` | ✅ | 17 |
-| 466 | `get` | `tuple` | `Awaitable[tuple]` | ✅ | 17 |
-| 467 | `mget` | `list` | `Awaitable[list]` | ✅ | 17 |
-| 468 | `info` | `TSInfo` | `Awaitable[TSInfo]` | 📋 | 17 |
-| 469 | `queryindex` | `list` | `Awaitable[list]` | ✅ | 17 |
+| 453 | `create` | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 454 | `alter` | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 455 | `add` | `int` | `Awaitable[int]` | ✅ | Timestamp |
+| 456 | `madd` | `list[int]` | `Awaitable[list[int]]` | ✅ | Timestamps |
+| 457 | `incrby` | `int` | `Awaitable[int]` | ✅ | Timestamp |
+| 458 | `decrby` | `int` | `Awaitable[int]` | ✅ | Timestamp |
+| 459 | `delete` | `int` | `Awaitable[int]` | ✅ | Count deleted |
+| 460 | `createrule` | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 461 | `deleterule` | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 462 | `range` | `list[tuple[int, float]]` | `Awaitable[list[tuple[int, float]]]` | ✅ | Parsed samples |
+| 463 | `revrange` | `list[tuple[int, float]]` | `Awaitable[list[tuple[int, float]]]` | ✅ | Parsed samples |
+| 464 | `mrange` | `list` | `Awaitable[list]` | ✅ | Complex structure |
+| 465 | `mrevrange` | `list` | `Awaitable[list]` | ✅ | Complex structure |
+| 466 | `get` | `tuple[int, float] \| list` | `Awaitable[tuple[int, float] \| list]` | ✅ | Parsed sample |
+| 467 | `mget` | `list` | `Awaitable[list]` | ✅ | Complex structure |
+| 468 | `info` | `TSInfo` | `Awaitable[TSInfo]` | 📋 | Explicit type |
+| 469 | `queryindex` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | Depends on decode_responses |
 
 ### BATCH 18: BloomFilter Commands (bf/commands.py) - Methods 470-491
-| # | Method | Sync Type | Async Type | Status | Batch |
+| # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 470 | `create` (BF) | `bool` | `Awaitable[bool]` | ✅ | 18 |
-| 471 | `add` (BF) | `bool` | `Awaitable[bool]` | ✅ | 18 |
-| 472 | `madd` (BF) | `list[bool]` | `Awaitable[list[bool]]` | ✅ | 18 |
-| 473 | `insert` (BF) | `list[bool]` | `Awaitable[list[bool]]` | ✅ | 18 |
-| 474 | `exists` (BF) | `bool` | `Awaitable[bool]` | ✅ | 18 |
-| 475 | `mexists` (BF) | `list[bool]` | `Awaitable[list[bool]]` | ✅ | 18 |
-| 476 | `scandump` (BF) | `tuple` | `Awaitable[tuple]` | ✅ | 18 |
-| 477 | `loadchunk` (BF) | `bool` | `Awaitable[bool]` | ✅ | 18 |
-| 478 | `info` (BF) | `dict` | `Awaitable[dict]` | ✅ | 18 |
-| 479 | `card` (BF) | `int` | `Awaitable[int]` | ✅ | 18 |
-| 480 | `create` (CF) | `bool` | `Awaitable[bool]` | ✅ | 18 |
-| 481 | `add` (CF) | `bool` | `Awaitable[bool]` | ✅ | 18 |
-| 482 | `addnx` (CF) | `bool` | `Awaitable[bool]` | ✅ | 18 |
-| 483 | `insert` (CF) | `list[bool]` | `Awaitable[list[bool]]` | ✅ | 18 |
-| 484 | `insertnx` (CF) | `list[bool]` | `Awaitable[list[bool]]` | ✅ | 18 |
-| 485 | `exists` (CF) | `bool` | `Awaitable[bool]` | ✅ | 18 |
-| 486 | `mexists` (CF) | `list[bool]` | `Awaitable[list[bool]]` | ✅ | 18 |
-| 487 | `delete` (CF) | `bool` | `Awaitable[bool]` | ✅ | 18 |
-| 488 | `count` (CF) | `int` | `Awaitable[int]` | ✅ | 18 |
-| 489 | `scandump` (CF) | `tuple` | `Awaitable[tuple]` | ✅ | 18 |
-| 490 | `loadchunk` (CF) | `bool` | `Awaitable[bool]` | ✅ | 18 |
-| 491 | `info` (CF) | `dict` | `Awaitable[dict]` | ✅ | 18 |
+| 470 | `create` (BF) | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 471 | `add` (BF) | `int` | `Awaitable[int]` | ✅ | 0 or 1 |
+| 472 | `madd` (BF) | `list[int]` | `Awaitable[list[int]]` | ✅ | 0s and 1s |
+| 473 | `insert` (BF) | `list[int]` | `Awaitable[list[int]]` | ✅ | 0s and 1s |
+| 474 | `exists` (BF) | `int` | `Awaitable[int]` | ✅ | 0 or 1 |
+| 475 | `mexists` (BF) | `list[int]` | `Awaitable[list[int]]` | ✅ | 0s and 1s |
+| 476 | `scandump` (BF) | `tuple[int, bytes \| None]` | `Awaitable[tuple[int, bytes \| None]]` | ✅ | Cursor + data |
+| 477 | `loadchunk` (BF) | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 478 | `info` (BF) | `dict` | `Awaitable[dict]` | ✅ | Parsed info |
+| 479 | `card` (BF) | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 480 | `create` (CF) | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 481 | `add` (CF) | `int` | `Awaitable[int]` | ✅ | 0 or 1 |
+| 482 | `addnx` (CF) | `int` | `Awaitable[int]` | ✅ | 0 or 1 |
+| 483 | `insert` (CF) | `list[int]` | `Awaitable[list[int]]` | ✅ | 0s and 1s |
+| 484 | `insertnx` (CF) | `list[int]` | `Awaitable[list[int]]` | ✅ | 0s and 1s |
+| 485 | `exists` (CF) | `int` | `Awaitable[int]` | ✅ | 0 or 1 |
+| 486 | `mexists` (CF) | `list[int]` | `Awaitable[list[int]]` | ✅ | 0s and 1s |
+| 487 | `delete` (CF) | `int` | `Awaitable[int]` | ✅ | 0 or 1 |
+| 488 | `count` (CF) | `int` | `Awaitable[int]` | ✅ | Integer reply |
+| 489 | `scandump` (CF) | `tuple[int, bytes \| None]` | `Awaitable[tuple[int, bytes \| None]]` | ✅ | Cursor + data |
+| 490 | `loadchunk` (CF) | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 491 | `info` (CF) | `dict` | `Awaitable[dict]` | ✅ | Parsed info |
 
 ### BATCH 19: TOPKCommands + TDigestCommands + CMSCommands (bf/commands.py) - Methods 492-518
-| # | Method | Sync Type | Async Type | Status | Batch |
+| # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 492 | `reserve` (TOPK) | `bool` | `Awaitable[bool]` | ✅ | 19 |
-| 493 | `add` (TOPK) | `list` | `Awaitable[list]` | ✅ | 19 |
-| 494 | `incrby` (TOPK) | `list` | `Awaitable[list]` | ✅ | 19 |
-| 495 | `query` (TOPK) | `list[bool]` | `Awaitable[list[bool]]` | ✅ | 19 |
-| 496 | `count` (TOPK) | `list[int]` | `Awaitable[list[int]]` | ✅ | 19 |
-| 497 | `list` (TOPK) | `list` | `Awaitable[list]` | ✅ | 19 |
-| 498 | `info` (TOPK) | `dict` | `Awaitable[dict]` | ✅ | 19 |
-| 499 | `create` (TD) | `bool` | `Awaitable[bool]` | ✅ | 19 |
-| 500 | `reset` (TD) | `bool` | `Awaitable[bool]` | ✅ | 19 |
-| 501 | `add` (TD) | `bool` | `Awaitable[bool]` | ✅ | 19 |
-| 502 | `merge` (TD) | `bool` | `Awaitable[bool]` | ✅ | 19 |
-| 503 | `min` (TD) | `float` | `Awaitable[float]` | ✅ | 19 |
-| 504 | `max` (TD) | `float` | `Awaitable[float]` | ✅ | 19 |
-| 505 | `quantile` (TD) | `list[float]` | `Awaitable[list[float]]` | ✅ | 19 |
-| 506 | `cdf` (TD) | `list[float]` | `Awaitable[list[float]]` | ✅ | 19 |
-| 507 | `info` (TD) | `dict` | `Awaitable[dict]` | ✅ | 19 |
-| 508 | `trimmed_mean` (TD) | `float` | `Awaitable[float]` | ✅ | 19 |
-| 509 | `rank` (TD) | `list[int]` | `Awaitable[list[int]]` | ✅ | 19 |
-| 510 | `revrank` (TD) | `list[int]` | `Awaitable[list[int]]` | ✅ | 19 |
-| 511 | `byrank` (TD) | `list[float]` | `Awaitable[list[float]]` | ✅ | 19 |
-| 512 | `byrevrank` (TD) | `list[float]` | `Awaitable[list[float]]` | ✅ | 19 |
-| 513 | `initbydim` (CMS) | `bool` | `Awaitable[bool]` | ✅ | 19 |
-| 514 | `initbyprob` (CMS) | `bool` | `Awaitable[bool]` | ✅ | 19 |
-| 515 | `incrby` (CMS) | `list[int]` | `Awaitable[list[int]]` | ✅ | 19 |
-| 516 | `query` (CMS) | `list[int]` | `Awaitable[list[int]]` | ✅ | 19 |
-| 517 | `merge` (CMS) | `bool` | `Awaitable[bool]` | ✅ | 19 |
-| 518 | `info` (CMS) | `dict` | `Awaitable[dict]` | ✅ | 19 |
+| 492 | `reserve` (TOPK) | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 493 | `add` (TOPK) | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ | Depends on decode_responses |
+| 494 | `incrby` (TOPK) | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ | Depends on decode_responses |
+| 495 | `query` (TOPK) | `list[int]` | `Awaitable[list[int]]` | ✅ | 0s and 1s |
+| 496 | `count` (TOPK) | `list[int]` | `Awaitable[list[int]]` | ✅ | Counts |
+| 497 | `list` (TOPK) | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | Depends on decode_responses |
+| 498 | `info` (TOPK) | `dict` | `Awaitable[dict]` | ✅ | Parsed info |
+| 499 | `create` (TD) | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 500 | `reset` (TD) | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 501 | `add` (TD) | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 502 | `merge` (TD) | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 503 | `min` (TD) | `float` | `Awaitable[float]` | ✅ | Float reply |
+| 504 | `max` (TD) | `float` | `Awaitable[float]` | ✅ | Float reply |
+| 505 | `quantile` (TD) | `list[float]` | `Awaitable[list[float]]` | ✅ | Floats |
+| 506 | `cdf` (TD) | `list[float]` | `Awaitable[list[float]]` | ✅ | Floats |
+| 507 | `info` (TD) | `dict` | `Awaitable[dict]` | ✅ | Parsed info |
+| 508 | `trimmed_mean` (TD) | `float` | `Awaitable[float]` | ✅ | Float reply |
+| 509 | `rank` (TD) | `list[int]` | `Awaitable[list[int]]` | ✅ | Integers |
+| 510 | `revrank` (TD) | `list[int]` | `Awaitable[list[int]]` | ✅ | Integers |
+| 511 | `byrank` (TD) | `list[float]` | `Awaitable[list[float]]` | ✅ | Floats |
+| 512 | `byrevrank` (TD) | `list[float]` | `Awaitable[list[float]]` | ✅ | Floats |
+| 513 | `initbydim` (CMS) | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 514 | `initbyprob` (CMS) | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 515 | `incrby` (CMS) | `list[int]` | `Awaitable[list[int]]` | ✅ | Integers |
+| 516 | `query` (CMS) | `list[int]` | `Awaitable[list[int]]` | ✅ | Integers |
+| 517 | `merge` (CMS) | `bool` | `Awaitable[bool]` | ✅ | Module OK |
+| 518 | `info` (CMS) | `dict` | `Awaitable[dict]` | ✅ | Parsed info |
 
 ### BATCH 20: VectorSetCommands (vectorset/commands.py) - Methods 519-530 ✅ DONE
-| # | Method | Sync Type | Async Type | Status | Batch |
+| # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 519 | `vadd` | `int` | `Awaitable[int]` | ✅ DONE | 20 |
-| 520 | `vsim` | `VSimResult` | `Awaitable[VSimResult]` | 📋 DONE | 20 |
-| 521 | `vdim` | `int` | `Awaitable[int]` | ✅ DONE | 20 |
-| 522 | `vcard` | `int` | `Awaitable[int]` | ✅ DONE | 20 |
-| 523 | `vrem` | `int` | `Awaitable[int]` | ✅ DONE | 20 |
-| 524 | `vemb` | `VEmbResult` | `Awaitable[VEmbResult]` | 📋 DONE | 20 |
-| 525 | `vlinks` | `VLinksResult` | `Awaitable[VLinksResult]` | 📋 DONE | 20 |
-| 526 | `vinfo` | `dict` | `Awaitable[dict]` | ✅ DONE | 20 |
-| 527 | `vsetattr` | `int` | `Awaitable[int]` | ✅ DONE | 20 |
-| 528 | `vgetattr` | `VGetAttrResult` | `Awaitable[VGetAttrResult]` | 📋 DONE | 20 |
-| 529 | `vrandmember` | `VRandMemberResult` | `Awaitable[VRandMemberResult]` | 📋 DONE | 20 |
-| 530 | `vrange` | `list[str]` | `Awaitable[list[str]]` | ✅ DONE | 20 |
+| 519 | `vadd` | `int` | `Awaitable[int]` | ✅ DONE | Integer reply |
+| 520 | `vsim` | `VSimResult` | `Awaitable[VSimResult]` | 📋 DONE | Explicit type |
+| 521 | `vdim` | `int` | `Awaitable[int]` | ✅ DONE | Integer reply |
+| 522 | `vcard` | `int` | `Awaitable[int]` | ✅ DONE | Integer reply |
+| 523 | `vrem` | `int` | `Awaitable[int]` | ✅ DONE | Integer reply |
+| 524 | `vemb` | `VEmbResult` | `Awaitable[VEmbResult]` | 📋 DONE | Explicit type |
+| 525 | `vlinks` | `VLinksResult` | `Awaitable[VLinksResult]` | 📋 DONE | Explicit type |
+| 526 | `vinfo` | `dict` | `Awaitable[dict]` | ✅ DONE | Standard dict |
+| 527 | `vsetattr` | `int` | `Awaitable[int]` | ✅ DONE | Integer reply |
+| 528 | `vgetattr` | `VGetAttrResult` | `Awaitable[VGetAttrResult]` | 📋 DONE | Explicit type |
+| 529 | `vrandmember` | `VRandMemberResult` | `Awaitable[VRandMemberResult]` | 📋 DONE | Explicit type |
+| 530 | `vrange` | `list[str]` | `Awaitable[list[str]]` | ✅ DONE | Standard list |
 
 ---
 
@@ -701,7 +787,8 @@ For each batch:
 - [ ] Review all methods in the batch
 - [ ] Skip methods marked with ⚠️ SKIP, 🔄 SKIP, ❌ SKIP
 - [ ] For each ✅ method:
-  - [ ] Verify return type against Redis docs
+  - [ ] Check the Notes column for callback info
+  - [ ] Verify return type against `redis/_parsers/helpers.py` callback dictionaries
   - [ ] Add two `@overload` signatures
   - [ ] Run type checker
 - [ ] Test changes
@@ -711,8 +798,12 @@ For each batch:
 
 ## Notes
 
-1. **Type verification is critical** - The types listed are inferred and may need adjustment
-2. **Import considerations** - Make sure `TYPE_CHECKING`, `overload`, and `Awaitable` are imported
-3. **Self-type discrimination** - Use `self: "Redis[bytes]"` and `self: "AsyncRedis[bytes]"` patterns
-4. **Keep original method** - Only add overloads, don't modify the actual implementation
-
+1. **Callback System is Critical** - Always check the three-tier callback hierarchy in `redis/_parsers/helpers.py`:
+   - `_RedisCallbacks` (base) - shared by RESP2 and RESP3
+   - `_RedisCallbacksRESP2` - RESP2-specific overrides
+   - `_RedisCallbacksRESP3` - RESP3-specific overrides
+2. **Protocol-Specific Types** - When RESP2 and RESP3 have different callbacks, use the most permissive union type
+3. **Import considerations** - Make sure `TYPE_CHECKING`, `overload`, and `Awaitable` are imported
+4. **Self-type discrimination** - Use `self: "Redis[bytes]"` and `self: "AsyncRedis[bytes]"` patterns
+5. **Keep original method** - Only add overloads, don't modify the actual implementation
+6. **No callback = raw response** - If a command has no callback, return type depends on `decode_responses`

@@ -61,6 +61,12 @@ ConsumerT = _StringLikeT  # Consumer name
 StreamIdT = Union[int, _StringLikeT]
 ScriptTextT = _StringLikeT
 TimeoutSecT = Union[int, float, _StringLikeT]
+ACLCategoryResponse = list[bytes | str]
+ACLGetUserData = (
+    dict[str, bool | list[str] | list[list[str]] | list[dict[str, str]]] | None
+)
+ACLLogData = list[dict[str, str | float | dict[str, str | int]]] | bool
+
 # Mapping is not covariant in the key type, which prevents
 # Mapping[_StringLikeT, X] from accepting arguments of type Dict[str, X]. Using
 # a TypeVar instead of a Union allows mappings with any of the permitted types
