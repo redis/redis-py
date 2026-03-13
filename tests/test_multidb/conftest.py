@@ -1,4 +1,4 @@
-from unittest.mock import Mock
+from unittest.mock import Mock, AsyncMock, patch
 
 import pytest
 
@@ -15,11 +15,32 @@ from redis.multidb.config import (
 from redis.multidb.database import Database, Databases
 from redis.multidb.failover import FailoverStrategy
 from redis.multidb.failure_detector import FailureDetector
-from redis.multidb.healthcheck import (
+from redis.asyncio.multidb.healthcheck import (
     HealthCheck,
+    AbstractHealthCheckPolicy,
     DEFAULT_HEALTH_CHECK_PROBES,
     DEFAULT_HEALTH_CHECK_POLICY,
+    DEFAULT_HEALTH_CHECK_TIMEOUT,
 )
+
+
+@pytest.fixture(autouse=True)
+def mock_health_check_connections():
+    """
+    Mock connections for health check policies.
+    Uses real policy classes but mocks only the connection layer.
+    """
+
+    async def mock_get_connections(self, database):
+        mock_pool = AsyncMock()
+        mock_conn = AsyncMock()
+        mock_pool.get_connection = AsyncMock(return_value=mock_conn)
+        mock_pool.release = AsyncMock()
+        mock_pool.disconnect = AsyncMock()
+        return [mock_pool]
+
+    with patch.object(AbstractHealthCheckPolicy, "get_connections", mock_get_connections):
+        yield
 
 
 @pytest.fixture()
@@ -44,55 +65,46 @@ def mock_fs() -> FailoverStrategy:
 
 @pytest.fixture()
 def mock_hc() -> HealthCheck:
-    return Mock(spec=HealthCheck)
+    from unittest.mock import AsyncMock
+    mock = Mock(spec=HealthCheck)
+    mock.health_check_probes = DEFAULT_HEALTH_CHECK_PROBES
+    # Use minimal delay for faster test execution
+    mock.health_check_delay = 0.01
+    mock.health_check_timeout = DEFAULT_HEALTH_CHECK_TIMEOUT
+    # check_health is now async, so use AsyncMock
+    mock.check_health = AsyncMock(return_value=True)
+    return mock
+
+
+def _create_mock_db(request) -> Database:
+    """Helper to create a mock Database with proper client setup."""
+    db = Mock(spec=Database)
+    db.weight = request.param.get("weight", 1.0)
+    db.client = Mock(spec=Redis)
+    db.client.connection_pool = Mock(spec=ConnectionPool)
+
+    cb = request.param.get("circuit", {})
+    mock_cb = Mock(spec=CircuitBreaker)
+    mock_cb.grace_period = cb.get("grace_period", 1.0)
+    mock_cb.state = cb.get("state", CBState.CLOSED)
+
+    db.circuit = mock_cb
+    return db
 
 
 @pytest.fixture()
 def mock_db(request) -> Database:
-    db = Mock(spec=Database)
-    db.weight = request.param.get("weight", 1.0)
-    db.client = Mock(spec=Redis)
-    db.client.connection_pool = Mock(spec=ConnectionPool)
-
-    cb = request.param.get("circuit", {})
-    mock_cb = Mock(spec=CircuitBreaker)
-    mock_cb.grace_period = cb.get("grace_period", 1.0)
-    mock_cb.state = cb.get("state", CBState.CLOSED)
-
-    db.circuit = mock_cb
-    return db
+    return _create_mock_db(request)
 
 
 @pytest.fixture()
 def mock_db1(request) -> Database:
-    db = Mock(spec=Database)
-    db.weight = request.param.get("weight", 1.0)
-    db.client = Mock(spec=Redis)
-    db.client.connection_pool = Mock(spec=ConnectionPool)
-
-    cb = request.param.get("circuit", {})
-    mock_cb = Mock(spec=CircuitBreaker)
-    mock_cb.grace_period = cb.get("grace_period", 1.0)
-    mock_cb.state = cb.get("state", CBState.CLOSED)
-
-    db.circuit = mock_cb
-    return db
+    return _create_mock_db(request)
 
 
 @pytest.fixture()
 def mock_db2(request) -> Database:
-    db = Mock(spec=Database)
-    db.weight = request.param.get("weight", 1.0)
-    db.client = Mock(spec=Redis)
-    db.client.connection_pool = Mock(spec=ConnectionPool)
-
-    cb = request.param.get("circuit", {})
-    mock_cb = Mock(spec=CircuitBreaker)
-    mock_cb.grace_period = cb.get("grace_period", 1.0)
-    mock_cb.state = cb.get("state", CBState.CLOSED)
-
-    db.circuit = mock_cb
-    return db
+    return _create_mock_db(request)
 
 
 @pytest.fixture()
@@ -115,7 +127,7 @@ def mock_multi_db_config(request, mock_fd, mock_fs, mock_hc, mock_ed) -> MultiDb
         databases_config=[Mock(spec=DatabaseConfig)],
         failure_detectors=[mock_fd],
         health_check_interval=hc_interval,
-        health_check_probes_delay=0.05,
+        health_check_delay=0.05,
         health_check_policy=health_check_policy,
         health_check_probes=health_check_probes,
         failover_strategy=mock_fs,

@@ -79,6 +79,76 @@ class BackgroundScheduler:
         )
         thread.start()
 
+    def run_recurring_coro(
+        self, interval: float, coro: Callable[..., Coroutine[Any, Any, Any]], *args
+    ):
+        """
+        Runs recurring coroutine with given interval in seconds in a background thread.
+        Creates a new event loop in the background thread and schedules the coroutine.
+
+        This is useful for sync code that needs to run async health checks.
+        """
+        with self._lock:
+            if self._stopped:
+                return
+
+        # Run loop in a separate thread to unblock main thread.
+        loop = asyncio.new_event_loop()
+
+        with self._lock:
+            self._event_loops.append(loop)
+
+        thread = threading.Thread(
+            target=_start_event_loop_in_thread,
+            args=(loop, self._call_later_recurring_coro, interval, coro, *args),
+            daemon=True,
+        )
+        thread.start()
+
+    def _call_later_recurring_coro(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        interval: float,
+        coro: Callable[..., Coroutine[Any, Any, Any]],
+        *args,
+    ):
+        """Schedule first execution of recurring coroutine."""
+        with self._lock:
+            if self._stopped:
+                return
+        self._call_later(
+            loop, interval, self._execute_recurring_coro, loop, interval, coro, *args
+        )
+
+    def _execute_recurring_coro(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        interval: float,
+        coro: Callable[..., Coroutine[Any, Any, Any]],
+        *args,
+    ):
+        """
+        Executes recurring coroutine with given interval in seconds.
+        """
+        with self._lock:
+            if self._stopped:
+                return
+
+        try:
+            # Schedule the coroutine to run in the event loop
+            asyncio.ensure_future(coro(*args), loop=loop)
+        except Exception:
+            # Silently ignore exceptions during shutdown
+            pass
+
+        with self._lock:
+            if self._stopped:
+                return
+
+        self._call_later(
+            loop, interval, self._execute_recurring_coro, loop, interval, coro, *args
+        )
+
     async def run_recurring_async(
         self, interval: float, coro: Callable[..., Coroutine[Any, Any, Any]], *args
     ):
@@ -90,7 +160,11 @@ class BackgroundScheduler:
             if self._stopped:
                 return
 
-        loop = asyncio.get_running_loop()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+
         wrapped = _async_to_sync_wrapper(loop, coro, *args)
 
         def tick():

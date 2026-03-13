@@ -193,6 +193,7 @@ MultiDbConfig
         health_check_interval: float = DEFAULT_HEALTH_CHECK_INTERVAL # seconds
         health_check_probes: int = DEFAULT_HEALTH_CHECK_PROBES
         health_check_delay: float = DEFAULT_HEALTH_CHECK_DELAY # seconds
+        health_check_timeout: float = DEFAULT_HEALTH_CHECK_TIMEOUT # seconds
         health_check_policy: HealthCheckPolicies = DEFAULT_HEALTH_CHECK_POLICY,
 
         # Failure detector
@@ -341,21 +342,23 @@ You can add custom health checks for specific requirements:
 .. code-block:: python
 
     from redis.multidb.healthcheck import AbstractHealthCheck
-    from redis.retry import Retry
-    from redis.utils import dummy_fail
     class PingHealthCheck(AbstractHealthCheck):
-        def __init__(self, retry: Retry):
-            super().__init__(retry=retry)
-        def check_health(self, database) -> bool:
-            return self._retry.call_with_retry(
-                lambda: self._returns_pong(database),
-                lambda _: dummy_fail()
+        def __init__(
+            self,
+            health_check_probes: int = 10,
+            health_check_delay: float = 0.1,
+            health_check_timeout: float = 2,
+        ):
+            super().__init__(
+                health_check_probes=health_check_probes,
+                health_check_delay=health_check_delay,
+                health_check_timeout=health_check_timeout,
             )
-        def _returns_pong(self, database) -> bool:
+
+        def check_health(self, database) -> bool:
             expected_message = ["PONG", b"PONG"]
             actual_message = database.client.execute_command("PING")
             return actual_message in expected_message
-
 
 Failure Detection (Reactive Monitoring)
 -----------------
