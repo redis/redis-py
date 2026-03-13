@@ -79,7 +79,7 @@ This document catalogs all command methods that need `@overload` signatures for 
 | 39 | `command_info` | `None` | `None` | `None` | ⚠️ Separate Async | ⏭️ N/A |
 | 40 | `command_count` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
 | 41 | `command_list` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - depends on decode_responses | ✅ Done |
-| 42 | `command_getkeysandflags` | `List[Union[str, List[str]]]` | `list[list[bytes \| str]]` | `Awaitable[list[list[bytes \| str]]]` | 📋 No callback - depends on decode_responses | ✅ Done |
+| 42 | `command_getkeysandflags` | `List[Union[str, List[str]]]` | `list[list[bytes \| str \| list[bytes \| str]]]` | `Awaitable[list[list[bytes \| str \| list[bytes \| str]]]]` | ✅ No callback - mixed [key, flags] shape | ✅ Done |
 | 43 | `command_docs` | *(none)* | `dict` | `Awaitable[dict]` | ✅ Intentionally unsupported in `core.py` | ⏭️ N/A (NotImplementedError) |
 | 44 | `config_get` | `ResponseT` | `dict[str \| None, str \| None]` | `Awaitable[dict[str \| None, str \| None]]` | ✅ RESP2: parse_config_get / RESP3: lambda | ✅ Done |
 | 45 | `config_set` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ Done |
@@ -173,31 +173,31 @@ This document catalogs all command methods that need `@overload` signatures for 
 | 128 | `move` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | ✅ Done |
 | 129 | `persist` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | ✅ Done |
 | 130 | `pexpire` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | ✅ Done |
-| 131 | `pexpireat` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | 🔲 TODO |
-| 132 | `pexpiretime` | `int` | `int` | `Awaitable[int]` | 📋 Integer reply - no callback | 🔲 TODO |
-| 133 | `psetex` | *(none)* | `bool` | `Awaitable[bool]` | ✅ Base: bool | 🔲 TODO |
-| 134 | `pttl` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 135 | `hrandfield` | `ResponseT` | `bytes \| str \| list[bytes \| str] \| None` | `Awaitable[bytes \| str \| list[bytes \| str] \| None]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 136 | `randomkey` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 137 | `rename` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 138 | `renamenx` | *(none)* | `bool` | `Awaitable[bool]` | ✅ Base: bool | 🔲 TODO |
-| 139 | `restore` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Returns OK - no specific callback | 🔲 TODO |
+| 131 | `pexpireat` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | ✅ Done |
+| 132 | `pexpiretime` | `int` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 133 | `psetex` | *(none)* | `bool` | `Awaitable[bool]` | ✅ Base: bool | ✅ Done |
+| 134 | `pttl` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 135 | `hrandfield` | `ResponseT` | `bytes \| str \| list[bytes \| str] \| None` | `Awaitable[bytes \| str \| list[bytes \| str] \| None]` | ✅ No callback - depends on decode_responses | ✅ Done |
+| 136 | `randomkey` | `ResponseT` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ No callback - depends on decode_responses | ✅ Done |
+| 137 | `rename` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ Done |
+| 138 | `renamenx` | *(none)* | `bool` | `Awaitable[bool]` | ✅ Base: bool | ✅ Done |
+| 139 | `restore` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - returns raw OK | ✅ Done |
 | 140 | `set` | `ResponseT` | `bool \| bytes \| str \| None` | `Awaitable[bool \| bytes \| str \| None]` | ✅ Base: parse_set_result - bool or value with GET | ✅ Done |
 | 141 | `__setitem__` | `None` | `None` | N/A | ❌ Dunder - raises TypeError in async | ⏭️ N/A |
-| 142 | `setbit` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply (0 or 1) - no callback | 🔲 TODO |
-| 143 | `setex` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | 🔲 TODO |
-| 144 | `setnx` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | 🔲 TODO |
-| 145 | `setrange` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 146 | `stralgo` | `ResponseT` | `str \| int \| dict[str, str]` | `Awaitable[...]` | ✅ RESP2: parse_stralgo / RESP3: lambda (str keys/values) | 🔲 TODO |
-| 147 | `strlen` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 148 | `substr` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 149 | `touch` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 150 | `ttl` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 151 | `type` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
+| 142 | `setbit` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply (0 or 1) - no callback | ✅ Done |
+| 143 | `setex` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | ✅ Done |
+| 144 | `setnx` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool | ✅ Done |
+| 145 | `setrange` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 146 | `stralgo` | `ResponseT` | `str \| int \| dict[str, int \| list[list[int \| tuple[int, int]]]]` | `Awaitable[...]` | ✅ RESP2: parse_stralgo / RESP3: lambda | ✅ Done |
+| 147 | `strlen` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 148 | `substr` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - depends on decode_responses | ✅ Done |
+| 149 | `touch` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 150 | `ttl` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 151 | `type` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - depends on decode_responses | ✅ Done |
 | 152 | `watch` | `bool` | `bool` | `Awaitable[bool]` | ⚠️ Base: bool_ok - Separate Async | ⏭️ N/A |
 | 153 | `unwatch` | `bool` | `bool` | `Awaitable[bool]` | ⚠️ Base: bool_ok - Separate Async | ⏭️ N/A |
-| 154 | `unlink` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 155 | `lcs` | `ResponseT` | `bytes \| str \| int \| dict` | `Awaitable[bytes \| str \| int \| dict]` | ✅ Varies by options - no specific callback | 🔲 TODO |
+| 154 | `unlink` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ Done |
+| 155 | `lcs` | `ResponseT` | `bytes \| str \| int \| list[Any] \| dict[Any, Any]` | `Awaitable[...]` | ✅ Raw reply varies by options and protocol | ✅ Done |
 | 156 | `__contains__` | `bool` | `bool` | N/A | ❌ Dunder - raises TypeError in async | ⏭️ N/A |
 
 ### ListCommands

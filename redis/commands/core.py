@@ -47,6 +47,7 @@ from redis.typing import (
     AsyncClientProtocol,
     BitfieldOffsetT,
     ChannelT,
+    CommandGetKeysAndFlagsResponse,
     CommandsProtocol,
     ConsumerT,
     EncodableT,
@@ -59,6 +60,7 @@ from redis.typing import (
     PatternT,
     ResponseT,
     ScriptTextT,
+    StralgoResponse,
     StreamIdT,
     SyncClientProtocol,
     TimeoutSecT,
@@ -1349,16 +1351,16 @@ class ManagementCommands(CommandsProtocol):
     @overload
     def command_getkeysandflags(
         self: SyncClientProtocol, *args: str
-    ) -> list[list[bytes | str]]: ...
+    ) -> CommandGetKeysAndFlagsResponse: ...
 
     @overload
     def command_getkeysandflags(
         self: AsyncClientProtocol, *args: str
-    ) -> Awaitable[list[list[bytes | str]]]: ...
+    ) -> Awaitable[CommandGetKeysAndFlagsResponse]: ...
 
     def command_getkeysandflags(
         self, *args: str
-    ) -> list[list[bytes | str]] | Awaitable[list[list[bytes | str]]]:
+    ) -> CommandGetKeysAndFlagsResponse | Awaitable[CommandGetKeysAndFlagsResponse]:
         """
         Returns array of keys from a full Redis command and their usage flags.
 
@@ -2711,9 +2713,7 @@ class BasicKeyCommands(CommandsProtocol):
         self: AsyncClientProtocol, operation: str, dest: KeyT, *keys: KeyT
     ) -> Awaitable[int]: ...
 
-    def bitop(
-        self, operation: str, dest: KeyT, *keys: KeyT
-    ) -> int | Awaitable[int]:
+    def bitop(self, operation: str, dest: KeyT, *keys: KeyT) -> int | Awaitable[int]:
         """
         Perform a bitwise operation using ``operation`` between ``keys`` and
         store the result in ``dest``.
@@ -3137,7 +3137,9 @@ class BasicKeyCommands(CommandsProtocol):
     ) -> Awaitable[str | bytes | None]: ...
 
     @experimental_method()
-    def digest(self, name: KeyT) -> (str | bytes | None) | Awaitable[str | bytes | None]:
+    def digest(self, name: KeyT) -> (str | bytes | None) | Awaitable[
+        str | bytes | None
+    ]:
         """
         Return the digest of the value stored at the specified key.
 
@@ -3184,9 +3186,9 @@ class BasicKeyCommands(CommandsProtocol):
         self: AsyncClientProtocol, name: KeyT
     ) -> Awaitable[bytes | str | None]: ...
 
-    def getdel(
-        self, name: KeyT
-    ) -> (bytes | str | None) | Awaitable[bytes | str | None]:
+    def getdel(self, name: KeyT) -> (bytes | str | None) | Awaitable[
+        bytes | str | None
+    ]:
         """
         Get the value at key ``name`` and delete the key. This command
         is similar to GET, except for the fact that it also deletes
@@ -3297,9 +3299,9 @@ class BasicKeyCommands(CommandsProtocol):
         self: AsyncClientProtocol, key: KeyT, start: int, end: int
     ) -> Awaitable[bytes | str]: ...
 
-    def getrange(
-        self, key: KeyT, start: int, end: int
-    ) -> (bytes | str) | Awaitable[bytes | str]:
+    def getrange(self, key: KeyT, start: int, end: int) -> (bytes | str) | Awaitable[
+        bytes | str
+    ]:
         """
         Returns the substring of the string value stored at ``key``,
         determined by the offsets ``start`` and ``end`` (both are inclusive)
@@ -3318,9 +3320,9 @@ class BasicKeyCommands(CommandsProtocol):
         self: AsyncClientProtocol, name: KeyT, value: EncodableT
     ) -> Awaitable[bytes | str | None]: ...
 
-    def getset(
-        self, name: KeyT, value: EncodableT
-    ) -> (bytes | str | None) | Awaitable[bytes | str | None]:
+    def getset(self, name: KeyT, value: EncodableT) -> (bytes | str | None) | Awaitable[
+        bytes | str | None
+    ]:
         """
         Sets the value at key ``name`` to ``value``
         and returns the old value at key ``name`` atomically.
@@ -3361,9 +3363,7 @@ class BasicKeyCommands(CommandsProtocol):
         self: AsyncClientProtocol, name: KeyT, amount: float = 1.0
     ) -> Awaitable[float]: ...
 
-    def incrbyfloat(
-        self, name: KeyT, amount: float = 1.0
-    ) -> float | Awaitable[float]:
+    def incrbyfloat(self, name: KeyT, amount: float = 1.0) -> float | Awaitable[float]:
         """
         Increments the value at key ``name`` by floating ``amount``.
         If no key exists, the value will be initialized as ``amount``
@@ -3373,7 +3373,9 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("INCRBYFLOAT", name, amount)
 
     @overload
-    def keys(self: SyncClientProtocol, pattern: PatternT = "*", **kwargs) -> list[bytes | str]: ...
+    def keys(
+        self: SyncClientProtocol, pattern: PatternT = "*", **kwargs
+    ) -> list[bytes | str]: ...
 
     @overload
     def keys(
@@ -3489,16 +3491,16 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("MGET", *args, **options)
 
     @overload
-    def mset(self: SyncClientProtocol, mapping: Mapping[AnyKeyT, EncodableT]) -> bool: ...
+    def mset(
+        self: SyncClientProtocol, mapping: Mapping[AnyKeyT, EncodableT]
+    ) -> bool: ...
 
     @overload
     def mset(
         self: AsyncClientProtocol, mapping: Mapping[AnyKeyT, EncodableT]
     ) -> Awaitable[bool]: ...
 
-    def mset(
-        self, mapping: Mapping[AnyKeyT, EncodableT]
-    ) -> bool | Awaitable[bool]:
+    def mset(self, mapping: Mapping[AnyKeyT, EncodableT]) -> bool | Awaitable[bool]:
         """
         Sets key/values based on a mapping. Mapping is a dictionary of
         key/value pairs. Both keys and values should be strings or types that
@@ -3605,16 +3607,16 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command(*pieces, *exp_options)
 
     @overload
-    def msetnx(self: SyncClientProtocol, mapping: Mapping[AnyKeyT, EncodableT]) -> bool: ...
+    def msetnx(
+        self: SyncClientProtocol, mapping: Mapping[AnyKeyT, EncodableT]
+    ) -> bool: ...
 
     @overload
     def msetnx(
         self: AsyncClientProtocol, mapping: Mapping[AnyKeyT, EncodableT]
     ) -> Awaitable[bool]: ...
 
-    def msetnx(
-        self, mapping: Mapping[AnyKeyT, EncodableT]
-    ) -> bool | Awaitable[bool]:
+    def msetnx(self, mapping: Mapping[AnyKeyT, EncodableT]) -> bool | Awaitable[bool]:
         """
         Sets key/values based on a mapping if none of the keys are already set.
         Mapping is a dictionary of key/value pairs. Both keys and values
@@ -3718,6 +3720,28 @@ class BasicKeyCommands(CommandsProtocol):
             exp_option.append("LT")
         return self.execute_command("PEXPIRE", name, time, *exp_option)
 
+    @overload
+    def pexpireat(
+        self: SyncClientProtocol,
+        name: KeyT,
+        when: AbsExpiryT,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> bool: ...
+
+    @overload
+    def pexpireat(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        when: AbsExpiryT,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> Awaitable[bool]: ...
+
     def pexpireat(
         self,
         name: KeyT,
@@ -3726,7 +3750,7 @@ class BasicKeyCommands(CommandsProtocol):
         xx: bool = False,
         gt: bool = False,
         lt: bool = False,
-    ) -> ResponseT:
+    ) -> bool | Awaitable[bool]:
         """
         Set an expire flag on key ``name`` with given ``option``. ``when``
         can be represented as an integer representing unix time in
@@ -3753,7 +3777,13 @@ class BasicKeyCommands(CommandsProtocol):
             exp_option.append("LT")
         return self.execute_command("PEXPIREAT", name, when, *exp_option)
 
-    def pexpiretime(self, key: str) -> int:
+    @overload
+    def pexpiretime(self: SyncClientProtocol, key: str) -> int: ...
+
+    @overload
+    def pexpiretime(self: AsyncClientProtocol, key: str) -> Awaitable[int]: ...
+
+    def pexpiretime(self, key: str) -> int | Awaitable[int]:
         """
         Returns the absolute Unix timestamp (since January 1, 1970) in milliseconds
         at which the given key will expire.
@@ -3762,7 +3792,19 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("PEXPIRETIME", key)
 
-    def psetex(self, name: KeyT, time_ms: ExpiryT, value: EncodableT):
+    @overload
+    def psetex(
+        self: SyncClientProtocol, name: KeyT, time_ms: ExpiryT, value: EncodableT
+    ) -> bool: ...
+
+    @overload
+    def psetex(
+        self: AsyncClientProtocol, name: KeyT, time_ms: ExpiryT, value: EncodableT
+    ) -> Awaitable[bool]: ...
+
+    def psetex(
+        self, name: KeyT, time_ms: ExpiryT, value: EncodableT
+    ) -> bool | Awaitable[bool]:
         """
         Set the value of key ``name`` to ``value`` that expires in ``time_ms``
         milliseconds. ``time_ms`` can be represented by an integer or a Python
@@ -3774,7 +3816,13 @@ class BasicKeyCommands(CommandsProtocol):
             time_ms = int(time_ms.total_seconds() * 1000)
         return self.execute_command("PSETEX", name, time_ms, value)
 
-    def pttl(self, name: KeyT) -> ResponseT:
+    @overload
+    def pttl(self: SyncClientProtocol, name: KeyT) -> int: ...
+
+    @overload
+    def pttl(self: AsyncClientProtocol, name: KeyT) -> Awaitable[int]: ...
+
+    def pttl(self, name: KeyT) -> int | Awaitable[int]:
         """
         Returns the number of milliseconds until the key ``name`` will expire
 
@@ -3782,9 +3830,27 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("PTTL", name)
 
+    @overload
     def hrandfield(
-        self, key: str, count: Optional[int] = None, withvalues: bool = False
-    ) -> ResponseT:
+        self: SyncClientProtocol,
+        key: str,
+        count: int | None = None,
+        withvalues: bool = False,
+    ) -> bytes | str | list[bytes | str] | None: ...
+
+    @overload
+    def hrandfield(
+        self: AsyncClientProtocol,
+        key: str,
+        count: int | None = None,
+        withvalues: bool = False,
+    ) -> Awaitable[bytes | str | list[bytes | str] | None]: ...
+
+    def hrandfield(
+        self, key: str, count: int | None = None, withvalues: bool = False
+    ) -> (bytes | str | list[bytes | str] | None) | Awaitable[
+        bytes | str | list[bytes | str] | None
+    ]:
         """
         Return a random field from the hash value stored at key.
 
@@ -3806,7 +3872,17 @@ class BasicKeyCommands(CommandsProtocol):
 
         return self.execute_command("HRANDFIELD", key, *params)
 
-    def randomkey(self, **kwargs) -> ResponseT:
+    @overload
+    def randomkey(self: SyncClientProtocol, **kwargs) -> bytes | str | None: ...
+
+    @overload
+    def randomkey(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[bytes | str | None]: ...
+
+    def randomkey(self, **kwargs) -> (bytes | str | None) | Awaitable[
+        bytes | str | None
+    ]:
         """
         Returns the name of a random key
 
@@ -3814,7 +3890,13 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("RANDOMKEY", **kwargs)
 
-    def rename(self, src: KeyT, dst: KeyT) -> ResponseT:
+    @overload
+    def rename(self: SyncClientProtocol, src: KeyT, dst: KeyT) -> bool: ...
+
+    @overload
+    def rename(self: AsyncClientProtocol, src: KeyT, dst: KeyT) -> Awaitable[bool]: ...
+
+    def rename(self, src: KeyT, dst: KeyT) -> bool | Awaitable[bool]:
         """
         Rename key ``src`` to ``dst``
 
@@ -3822,13 +3904,45 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("RENAME", src, dst)
 
-    def renamenx(self, src: KeyT, dst: KeyT):
+    @overload
+    def renamenx(self: SyncClientProtocol, src: KeyT, dst: KeyT) -> bool: ...
+
+    @overload
+    def renamenx(
+        self: AsyncClientProtocol, src: KeyT, dst: KeyT
+    ) -> Awaitable[bool]: ...
+
+    def renamenx(self, src: KeyT, dst: KeyT) -> bool | Awaitable[bool]:
         """
         Rename key ``src`` to ``dst`` if ``dst`` doesn't already exist
 
         For more information, see https://redis.io/commands/renamenx
         """
         return self.execute_command("RENAMENX", src, dst)
+
+    @overload
+    def restore(
+        self: SyncClientProtocol,
+        name: KeyT,
+        ttl: float,
+        value: EncodableT,
+        replace: bool = False,
+        absttl: bool = False,
+        idletime: int | None = None,
+        frequency: int | None = None,
+    ) -> bytes | str: ...
+
+    @overload
+    def restore(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        ttl: float,
+        value: EncodableT,
+        replace: bool = False,
+        absttl: bool = False,
+        idletime: int | None = None,
+        frequency: int | None = None,
+    ) -> Awaitable[bytes | str]: ...
 
     def restore(
         self,
@@ -3837,9 +3951,9 @@ class BasicKeyCommands(CommandsProtocol):
         value: EncodableT,
         replace: bool = False,
         absttl: bool = False,
-        idletime: Optional[int] = None,
-        frequency: Optional[int] = None,
-    ) -> ResponseT:
+        idletime: int | None = None,
+        frequency: int | None = None,
+    ) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Create a key using the provided serialized value, previously obtained
         using DUMP.
@@ -4034,7 +4148,17 @@ class BasicKeyCommands(CommandsProtocol):
     def __setitem__(self, name: KeyT, value: EncodableT):
         self.set(name, value)
 
-    def setbit(self, name: KeyT, offset: int, value: int) -> ResponseT:
+    @overload
+    def setbit(
+        self: SyncClientProtocol, name: KeyT, offset: int, value: int
+    ) -> int: ...
+
+    @overload
+    def setbit(
+        self: AsyncClientProtocol, name: KeyT, offset: int, value: int
+    ) -> Awaitable[int]: ...
+
+    def setbit(self, name: KeyT, offset: int, value: int) -> int | Awaitable[int]:
         """
         Flag the ``offset`` in ``name`` as ``value``. Returns an integer
         indicating the previous value of ``offset``.
@@ -4044,7 +4168,19 @@ class BasicKeyCommands(CommandsProtocol):
         value = value and 1 or 0
         return self.execute_command("SETBIT", name, offset, value)
 
-    def setex(self, name: KeyT, time: ExpiryT, value: EncodableT) -> ResponseT:
+    @overload
+    def setex(
+        self: SyncClientProtocol, name: KeyT, time: ExpiryT, value: EncodableT
+    ) -> bool: ...
+
+    @overload
+    def setex(
+        self: AsyncClientProtocol, name: KeyT, time: ExpiryT, value: EncodableT
+    ) -> Awaitable[bool]: ...
+
+    def setex(
+        self, name: KeyT, time: ExpiryT, value: EncodableT
+    ) -> bool | Awaitable[bool]:
         """
         Set the value of key ``name`` to ``value`` that expires in ``time``
         seconds. ``time`` can be represented by an integer or a Python
@@ -4056,7 +4192,15 @@ class BasicKeyCommands(CommandsProtocol):
             time = int(time.total_seconds())
         return self.execute_command("SETEX", name, time, value)
 
-    def setnx(self, name: KeyT, value: EncodableT) -> ResponseT:
+    @overload
+    def setnx(self: SyncClientProtocol, name: KeyT, value: EncodableT) -> bool: ...
+
+    @overload
+    def setnx(
+        self: AsyncClientProtocol, name: KeyT, value: EncodableT
+    ) -> Awaitable[bool]: ...
+
+    def setnx(self, name: KeyT, value: EncodableT) -> bool | Awaitable[bool]:
         """
         Set the value of key ``name`` to ``value`` if key doesn't exist
 
@@ -4064,7 +4208,19 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("SETNX", name, value)
 
-    def setrange(self, name: KeyT, offset: int, value: EncodableT) -> ResponseT:
+    @overload
+    def setrange(
+        self: SyncClientProtocol, name: KeyT, offset: int, value: EncodableT
+    ) -> int: ...
+
+    @overload
+    def setrange(
+        self: AsyncClientProtocol, name: KeyT, offset: int, value: EncodableT
+    ) -> Awaitable[int]: ...
+
+    def setrange(
+        self, name: KeyT, offset: int, value: EncodableT
+    ) -> int | Awaitable[int]:
         """
         Overwrite bytes in the value of ``name`` starting at ``offset`` with
         ``value``. If ``offset`` plus the length of ``value`` exceeds the
@@ -4079,18 +4235,46 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("SETRANGE", name, offset, value)
 
+    @overload
+    def stralgo(
+        self: SyncClientProtocol,
+        algo: Literal["LCS"],
+        value1: KeyT,
+        value2: KeyT,
+        specific_argument: Literal["strings"] | Literal["keys"] = "strings",
+        len: bool = False,
+        idx: bool = False,
+        minmatchlen: int | None = None,
+        withmatchlen: bool = False,
+        **kwargs,
+    ) -> StralgoResponse: ...
+
+    @overload
+    def stralgo(
+        self: AsyncClientProtocol,
+        algo: Literal["LCS"],
+        value1: KeyT,
+        value2: KeyT,
+        specific_argument: Literal["strings"] | Literal["keys"] = "strings",
+        len: bool = False,
+        idx: bool = False,
+        minmatchlen: int | None = None,
+        withmatchlen: bool = False,
+        **kwargs,
+    ) -> Awaitable[StralgoResponse]: ...
+
     def stralgo(
         self,
         algo: Literal["LCS"],
         value1: KeyT,
         value2: KeyT,
-        specific_argument: Union[Literal["strings"], Literal["keys"]] = "strings",
+        specific_argument: Literal["strings"] | Literal["keys"] = "strings",
         len: bool = False,
         idx: bool = False,
-        minmatchlen: Optional[int] = None,
+        minmatchlen: int | None = None,
         withmatchlen: bool = False,
         **kwargs,
-    ) -> ResponseT:
+    ) -> StralgoResponse | Awaitable[StralgoResponse]:
         """
         Implements complex algorithms that operate on strings.
         Right now the only algorithm implemented is the LCS algorithm
@@ -4143,7 +4327,13 @@ class BasicKeyCommands(CommandsProtocol):
             **kwargs,
         )
 
-    def strlen(self, name: KeyT) -> ResponseT:
+    @overload
+    def strlen(self: SyncClientProtocol, name: KeyT) -> int: ...
+
+    @overload
+    def strlen(self: AsyncClientProtocol, name: KeyT) -> Awaitable[int]: ...
+
+    def strlen(self, name: KeyT) -> int | Awaitable[int]:
         """
         Return the number of bytes stored in the value of ``name``
 
@@ -4151,14 +4341,32 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("STRLEN", name, keys=[name])
 
-    def substr(self, name: KeyT, start: int, end: int = -1) -> ResponseT:
+    @overload
+    def substr(
+        self: SyncClientProtocol, name: KeyT, start: int, end: int = -1
+    ) -> bytes | str: ...
+
+    @overload
+    def substr(
+        self: AsyncClientProtocol, name: KeyT, start: int, end: int = -1
+    ) -> Awaitable[bytes | str]: ...
+
+    def substr(self, name: KeyT, start: int, end: int = -1) -> (
+        bytes | str
+    ) | Awaitable[bytes | str]:
         """
         Return a substring of the string at key ``name``. ``start`` and ``end``
         are 0-based integers specifying the portion of the string to return.
         """
         return self.execute_command("SUBSTR", name, start, end, keys=[name])
 
-    def touch(self, *args: KeyT) -> ResponseT:
+    @overload
+    def touch(self: SyncClientProtocol, *args: KeyT) -> int: ...
+
+    @overload
+    def touch(self: AsyncClientProtocol, *args: KeyT) -> Awaitable[int]: ...
+
+    def touch(self, *args: KeyT) -> int | Awaitable[int]:
         """
         Alters the last access time of a key(s) ``*args``. A key is ignored
         if it does not exist.
@@ -4167,7 +4375,13 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("TOUCH", *args)
 
-    def ttl(self, name: KeyT) -> ResponseT:
+    @overload
+    def ttl(self: SyncClientProtocol, name: KeyT) -> int: ...
+
+    @overload
+    def ttl(self: AsyncClientProtocol, name: KeyT) -> Awaitable[int]: ...
+
+    def ttl(self, name: KeyT) -> int | Awaitable[int]:
         """
         Returns the number of seconds until the key ``name`` will expire
 
@@ -4175,7 +4389,13 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("TTL", name)
 
-    def type(self, name: KeyT) -> ResponseT:
+    @overload
+    def type(self: SyncClientProtocol, name: KeyT) -> bytes | str: ...
+
+    @overload
+    def type(self: AsyncClientProtocol, name: KeyT) -> Awaitable[bytes | str]: ...
+
+    def type(self, name: KeyT) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Returns the type of key ``name``
 
@@ -4199,7 +4419,13 @@ class BasicKeyCommands(CommandsProtocol):
         """
         warnings.warn(DeprecationWarning("Call UNWATCH from a Pipeline object"))
 
-    def unlink(self, *names: KeyT) -> ResponseT:
+    @overload
+    def unlink(self: SyncClientProtocol, *names: KeyT) -> int: ...
+
+    @overload
+    def unlink(self: AsyncClientProtocol, *names: KeyT) -> Awaitable[int]: ...
+
+    def unlink(self, *names: KeyT) -> int | Awaitable[int]:
         """
         Unlink one or more keys specified by ``names``
 
@@ -4207,30 +4433,54 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("UNLINK", *names)
 
+    @overload
+    def lcs(
+        self: SyncClientProtocol,
+        key1: str,
+        key2: str,
+        len: bool | None = False,
+        idx: bool | None = False,
+        minmatchlen: int | None = 0,
+        withmatchlen: bool | None = False,
+    ) -> bytes | str | int | list[Any] | dict[Any, Any]: ...
+
+    @overload
+    def lcs(
+        self: AsyncClientProtocol,
+        key1: str,
+        key2: str,
+        len: bool | None = False,
+        idx: bool | None = False,
+        minmatchlen: int | None = 0,
+        withmatchlen: bool | None = False,
+    ) -> Awaitable[bytes | str | int | list[Any] | dict[Any, Any]]: ...
+
     def lcs(
         self,
         key1: str,
         key2: str,
-        len: Optional[bool] = False,
-        idx: Optional[bool] = False,
-        minmatchlen: Optional[int] = 0,
-        withmatchlen: Optional[bool] = False,
-    ) -> Union[str, int, list]:
+        len: bool | None = False,
+        idx: bool | None = False,
+        minmatchlen: int | None = 0,
+        withmatchlen: bool | None = False,
+    ) -> (bytes | str | int | list[Any] | dict[Any, Any]) | Awaitable[
+        bytes | str | int | list[Any] | dict[Any, Any]
+    ]:
         """
         Find the longest common subsequence between ``key1`` and ``key2``.
-        If ``len`` is true the length of the match will will be returned.
+        If ``len`` is true the length of the match will be returned.
         If ``idx`` is true the match position in each strings will be returned.
         ``minmatchlen`` restrict the list of matches to the ones of
         the given ``minmatchlen``.
         If ``withmatchlen`` the length of the match also will be returned.
         For more information, see https://redis.io/commands/lcs
         """
-        pieces = [key1, key2]
+        pieces: list[str | int] = [key1, key2]
         if len:
             pieces.append("LEN")
         if idx:
             pieces.append("IDX")
-        if minmatchlen != 0:
+        if minmatchlen is not None and minmatchlen != 0:
             pieces.extend(["MINMATCHLEN", minmatchlen])
         if withmatchlen:
             pieces.append("WITHMATCHLEN")

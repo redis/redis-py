@@ -67,6 +67,11 @@ ACLGetUserData = (
 )
 ACLLogEntry = dict[str, str | float | dict[str, str | int]]
 ACLLogData = list[ACLLogEntry]
+CommandGetKeysAndFlagsEntry = list[bytes | str | list[bytes | str]]
+CommandGetKeysAndFlagsResponse = list[CommandGetKeysAndFlagsEntry]
+LCSMatch = list[int | tuple[int, int]]
+LCSResult = dict[str, int | list[LCSMatch]]
+StralgoResponse = str | int | LCSResult
 
 # Mapping is not covariant in the key type, which prevents
 # Mapping[_StringLikeT, X] from accepting arguments of type Dict[str, X]. Using

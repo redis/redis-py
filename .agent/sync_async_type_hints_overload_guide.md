@@ -191,7 +191,7 @@ For commands with protocol-specific differences, use the **most permissive union
 | 39 | `command_info` | `None` | `None` | ⚠️ SKIP | N/A |
 | 40 | `command_count` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 41 | `command_list` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | No callback - raw |
-| 42 | `command_getkeysandflags` | `list[list[bytes \| str]]` | `Awaitable[list[list[bytes \| str]]]` | 📋 | No callback - raw |
+| 42 | `command_getkeysandflags` | `list[list[bytes \| str \| list[bytes \| str]]]` | `Awaitable[list[list[bytes \| str \| list[bytes \| str]]]]` | ✅ | No callback - mixed [key, flags] shape |
 | 43 | `command_docs` | `dict` | `Awaitable[dict]` | ✅ | No callback - raw dict |
 | 44 | `config_get` | `dict[str, str]` | `Awaitable[dict[str, str]]` | ✅ | RESP2: parse_config_get / RESP3: lambda |
 | 45 | `config_set` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
@@ -293,21 +293,21 @@ For commands with protocol-specific differences, use the **most permissive union
 | # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
 | 131 | `pexpireat` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
-| 132 | `pexpiretime` | `int` | `Awaitable[int]` | 📋 | Integer - timestamp in ms |
+| 132 | `pexpiretime` | `int` | `Awaitable[int]` | ✅ | Integer - timestamp in ms |
 | 133 | `psetex` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
 | 134 | `pttl` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 135 | `hrandfield` | `bytes \| str \| list \| None` | `Awaitable[bytes \| str \| list \| None]` | ✅ | Varies by COUNT param |
 | 136 | `randomkey` | `bytes \| str \| None` | `Awaitable[bytes \| str \| None]` | ✅ | No callback - raw |
 | 137 | `rename` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
 | 138 | `renamenx` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
-| 139 | `restore` | `bool` | `Awaitable[bool]` | ✅ | No callback - OK |
+| 139 | `restore` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - raw OK |
 | 140 | `set` | `bool \| None` | `Awaitable[bool \| None]` | ✅ DONE | Base: parse_set_result |
 | 141 | `__setitem__` | `None` | N/A | ❌ SKIP | Dunder |
 | 142 | `setbit` | `int` | `Awaitable[int]` | ✅ | Integer reply - prev bit |
 | 143 | `setex` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
 | 144 | `setnx` | `bool` | `Awaitable[bool]` | ✅ | Base: bool |
 | 145 | `setrange` | `int` | `Awaitable[int]` | ✅ | Integer reply - new length |
-| 146 | `stralgo` | `dict \| bytes \| str \| int` | `Awaitable[dict \| bytes \| str \| int]` | ✅ | RESP2: parse_stralgo / RESP3: lambda |
+| 146 | `stralgo` | `dict \| str \| int` | `Awaitable[dict \| str \| int]` | ✅ | RESP2: parse_stralgo / RESP3: lambda |
 | 147 | `strlen` | `int` | `Awaitable[int]` | ✅ | Integer reply |
 | 148 | `substr` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | No callback - raw |
 | 149 | `touch` | `int` | `Awaitable[int]` | ✅ | Integer reply - count |
@@ -316,7 +316,7 @@ For commands with protocol-specific differences, use the **most permissive union
 | 152 | `watch` | `bool` | `Awaitable[bool]` | ⚠️ SKIP | Transaction |
 | 153 | `unwatch` | `bool` | `Awaitable[bool]` | ⚠️ SKIP | Transaction |
 | 154 | `unlink` | `int` | `Awaitable[int]` | ✅ | Integer reply - count |
-| 155 | `lcs` | `bytes \| str \| int \| dict` | `Awaitable[bytes \| str \| int \| dict]` | ✅ | Varies by options |
+| 155 | `lcs` | `bytes \| str \| int \| list \| dict` | `Awaitable[bytes \| str \| int \| list \| dict]` | ✅ | Raw reply varies by options and protocol |
 | 156 | `__contains__` | `bool` | N/A | ❌ SKIP | Dunder |
 
 ### BATCH 6: ListCommands (core.py) - Methods 157-178
