@@ -1,7 +1,6 @@
 import asyncio
-import concurrent
 import logging
-from typing import Any, Callable, Coroutine, List, Optional
+from typing import Any, Callable, List, Optional
 
 from redis.asyncio.multidb.healthcheck import HealthCheck, HealthCheckPolicy
 from redis.background import BackgroundScheduler
@@ -361,6 +360,15 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
                 db_results[unhealthy_db] = False
             elif isinstance(result, Exception):
+                # Generic exceptions also indicate unhealthy database -
+                # update circuit state to maintain consistency with results
+                database.circuit.state = CBState.OPEN
+
+                logger.debug(
+                    "Health check failed, due to exception",
+                    exc_info=result,
+                )
+
                 db_results[database] = False
 
         return db_results
@@ -414,30 +422,20 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         """
         Closes the client and all its resources.
         """
+        # Close health check policy BEFORE stopping the scheduler.
+        # The policy's connection pools were created on the shared health check
+        # event loop, so they must be disconnected on that same loop to avoid
+        # leaking sockets/file descriptors.
         if self._bg_scheduler:
+            try:
+                self._bg_scheduler.run_coro_sync(self._health_check_policy.close)
+            except RuntimeError:
+                # Scheduler already stopped or never started
+                pass
             self._bg_scheduler.stop()
+
         if self.command_executor.active_database:
             self.command_executor.active_database.client.close()
-
-        # Close health check policy - must wait for cleanup to complete
-        _run_coro_and_wait(self._health_check_policy.close())
-
-
-def _run_coro_and_wait(coro: Coroutine):
-    """
-    Execute coroutine and wait for completion.
-    If inside a running event loop, uses run_coroutine_threadsafe to block until done.
-    Otherwise, uses asyncio.run().
-    """
-    try:
-        asyncio.get_running_loop()
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(asyncio.run, coro)
-            future.result()  # Block until complete
-    except RuntimeError:
-        # No running event loop - safe to use asyncio.run()
-        asyncio.run(coro)
 
 
 def _half_open_circuit(circuit: CircuitBreaker):
