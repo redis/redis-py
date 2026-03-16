@@ -185,14 +185,24 @@ class BackgroundScheduler:
 
     def _ensure_health_check_loop(self):
         """Ensure the shared health check loop and thread are running."""
+        # Fast path: if loop is already running, return immediately
+        if self._health_check_loop_ready.is_set():
+            with self._lock:
+                if (
+                    self._health_check_loop is not None
+                    and self._health_check_loop.is_running()
+                ):
+                    return
+
         with self._lock:
+            # Double-check after acquiring the lock
             if (
                 self._health_check_loop is not None
                 and self._health_check_loop.is_running()
             ):
                 return
 
-            # Reset the event for a fresh start
+            # Clear the event - we're about to start a new loop
             self._health_check_loop_ready.clear()
 
             # Create a new event loop for health checks
@@ -206,8 +216,10 @@ class BackgroundScheduler:
             )
             self._health_check_thread.start()
 
-        # Wait for loop to be running (outside the lock to avoid blocking other threads)
-        self._health_check_loop_ready.wait()
+            # Wait for loop to be running INSIDE the lock.
+            # This prevents other threads from trying to create another loop
+            # before this one is fully started.
+            self._health_check_loop_ready.wait()
 
     def _run_health_check_loop(self):
         """Run the shared health check event loop."""
@@ -314,26 +326,60 @@ class BackgroundScheduler:
         """
         Runs recurring coroutine with given interval in seconds in the current event loop.
         To be used only from an async context. No additional threads are created.
+
+        Prevents overlapping executions by scheduling the next run only after
+        the current one completes.
+
+        Raises:
+            RuntimeError: If called without a running event loop (programming error)
         """
         with self._lock:
             if self._stopped:
                 return
 
+        # This is an async method - it must be awaited in a running event loop.
+        # If get_running_loop() raises RuntimeError, let it propagate as that
+        # indicates a programming error (calling async method outside async context).
         loop = asyncio.get_running_loop()
 
-        wrapped = _async_to_sync_wrapper(coro, *args)
-
-        def tick():
+        def schedule_next():
+            """Schedule the next execution after the current one completes."""
             with self._lock:
                 if self._stopped:
                     return
-            # Schedule the coroutine
-            wrapped()
-            # Schedule next tick
-            self._next_timer = loop.call_later(interval, tick)
+            self._next_timer = loop.call_later(interval, execute_and_reschedule)
 
-        # Schedule first tick
-        self._next_timer = loop.call_later(interval, tick)
+        def execute_and_reschedule():
+            """Execute the coroutine and schedule next run after completion."""
+            with self._lock:
+                if self._stopped:
+                    return
+
+            def on_complete(task: asyncio.Task):
+                """Callback when coroutine completes - schedule next execution."""
+                # Log any exceptions (prevents "Task exception was never retrieved")
+                if task.cancelled():
+                    pass
+                elif task.exception() is not None:
+                    logging.getLogger(__name__).debug(
+                        "Recurring async coroutine raised exception",
+                        exc_info=task.exception(),
+                    )
+                # Schedule next execution AFTER this one completes
+                schedule_next()
+
+            try:
+                task = asyncio.ensure_future(coro(*args))
+                task.add_done_callback(on_complete)
+            except Exception:
+                # If scheduling fails, still try to schedule next run
+                logging.getLogger(__name__).debug(
+                    "Failed to schedule recurring async coroutine", exc_info=True
+                )
+                schedule_next()
+
+        # Schedule first execution
+        self._next_timer = loop.call_later(interval, execute_and_reschedule)
 
     def _call_later(
         self, loop: asyncio.AbstractEventLoop, delay: float, callback: Callable, *args
@@ -414,19 +460,3 @@ def _start_event_loop_in_thread(
             pass
         finally:
             event_loop.close()
-
-
-def _async_to_sync_wrapper(coro_func, *args, **kwargs):
-    """
-    Wraps an asynchronous function so it can be used with loop.call_later.
-
-    :param coro_func: The coroutine function to wrap.
-    :param args: Positional arguments to pass to the coroutine function.
-    :param kwargs: Keyword arguments to pass to the coroutine function.
-    :return: A regular function suitable for loop.call_later.
-    """
-
-    def wrapped():
-        asyncio.ensure_future(coro_func(*args, **kwargs))
-
-    return wrapped
