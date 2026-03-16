@@ -110,7 +110,10 @@ class BackgroundScheduler:
         )
 
     def run_coro_sync(
-        self, coro: Callable[..., Coroutine[Any, Any, Any]], *args
+        self,
+        coro: Callable[..., Coroutine[Any, Any, Any]],
+        *args,
+        timeout: float | None = 10.0,
     ) -> Any:
         """
         Runs a coroutine synchronously and returns its result.
@@ -123,11 +126,15 @@ class BackgroundScheduler:
         Args:
             coro: Coroutine function to execute
             *args: Arguments to pass to the coroutine
+            timeout: Maximum seconds to wait for the result. None means wait
+                forever. Default is 10 seconds to avoid blocking indefinitely
+                if the event loop is busy with long-running health checks.
 
         Returns:
             The result of the coroutine
 
         Raises:
+            TimeoutError: If the coroutine doesn't complete within timeout
             Any exception raised by the coroutine
         """
 
@@ -143,7 +150,12 @@ class BackgroundScheduler:
 
         # Submit the coroutine to the shared loop and wait for result
         future = asyncio.run_coroutine_threadsafe(coro(*args), loop)
-        return future.result()
+        try:
+            return future.result(timeout=timeout)
+        except TimeoutError:
+            # Cancel the future to avoid leaving orphaned tasks
+            future.cancel()
+            raise
 
     def run_coro_fire_and_forget(
         self, coro: Callable[..., Coroutine[Any, Any, Any]], *args
@@ -183,8 +195,16 @@ class BackgroundScheduler:
         future = asyncio.run_coroutine_threadsafe(coro(*args), loop)
         future.add_done_callback(on_complete)
 
-    def _ensure_health_check_loop(self):
-        """Ensure the shared health check loop and thread are running."""
+    def _ensure_health_check_loop(self, timeout: float = 5.0):
+        """
+        Ensure the shared health check loop and thread are running.
+
+        Args:
+            timeout: Maximum seconds to wait for the loop to start.
+
+        Raises:
+            RuntimeError: If the loop fails to start within the timeout.
+        """
         # Fast path: if loop is already running, return immediately
         if self._health_check_loop_ready.is_set():
             with self._lock:
@@ -216,10 +236,24 @@ class BackgroundScheduler:
             )
             self._health_check_thread.start()
 
-            # Wait for loop to be running INSIDE the lock.
+            # Wait for loop to be running INSIDE the lock with a timeout.
             # This prevents other threads from trying to create another loop
-            # before this one is fully started.
-            self._health_check_loop_ready.wait()
+            # before this one is fully started, while avoiding permanent deadlock
+            # if the background thread fails to start the loop.
+            if not self._health_check_loop_ready.wait(timeout=timeout):
+                # Timeout expired - the loop failed to start
+                # Clean up the failed loop to allow retry
+                failed_loop = self._health_check_loop
+                self._health_check_loop = None
+                if failed_loop in self._event_loops:
+                    self._event_loops.remove(failed_loop)
+                try:
+                    failed_loop.close()
+                except Exception:
+                    pass
+                raise RuntimeError(
+                    f"Health check event loop failed to start within {timeout} seconds"
+                )
 
     def _run_health_check_loop(self):
         """Run the shared health check event loop."""
