@@ -14,6 +14,9 @@ class BackgroundScheduler:
         self._event_loops = []
         self._lock = threading.Lock()
         self._stopped = False
+        # Dedicated loop for health checks - ensures all health checks use the same loop
+        self._health_check_loop: asyncio.AbstractEventLoop | None = None
+        self._health_check_thread: threading.Thread | None = None
 
     def __del__(self):
         self.stop()
@@ -85,7 +88,7 @@ class BackgroundScheduler:
     ):
         """
         Runs recurring coroutine with given interval in seconds in a background thread.
-        Creates a new event loop in the background thread and schedules the coroutine.
+        Uses a shared event loop to ensure connection pools remain valid across calls.
 
         This is useful for sync code that needs to run async health checks.
         """
@@ -93,18 +96,94 @@ class BackgroundScheduler:
             if self._stopped:
                 return
 
-        # Run loop in a separate thread to unblock main thread.
-        loop = asyncio.new_event_loop()
+        # Use the shared health check loop, creating it if needed
+        self._ensure_health_check_loop()
 
         with self._lock:
-            self._event_loops.append(loop)
+            loop = self._health_check_loop
 
-        thread = threading.Thread(
-            target=_start_event_loop_in_thread,
-            args=(loop, self._call_later_recurring_coro, interval, coro, *args),
-            daemon=True,
+        # Schedule recurring execution in the shared loop
+        loop.call_soon_threadsafe(
+            self._call_later_recurring_coro, loop, interval, coro, *args
         )
-        thread.start()
+
+    def run_coro_sync(
+        self, coro: Callable[..., Coroutine[Any, Any, Any]], *args
+    ) -> Any:
+        """
+        Runs a coroutine synchronously and returns its result.
+        Uses the shared health check event loop to ensure connection pools
+        created here remain valid for subsequent recurring health checks.
+
+        This is useful for running the initial health check before starting
+        recurring checks.
+
+        Args:
+            coro: Coroutine function to execute
+            *args: Arguments to pass to the coroutine
+
+        Returns:
+            The result of the coroutine
+
+        Raises:
+            Any exception raised by the coroutine
+        """
+
+        with self._lock:
+            if self._stopped:
+                raise RuntimeError("Scheduler is stopped")
+
+        # Ensure the shared loop exists
+        self._ensure_health_check_loop()
+
+        with self._lock:
+            loop = self._health_check_loop
+
+        # Submit the coroutine to the shared loop and wait for result
+        future = asyncio.run_coroutine_threadsafe(coro(*args), loop)
+        return future.result()
+
+    def _ensure_health_check_loop(self):
+        """Ensure the shared health check loop and thread are running."""
+        with self._lock:
+            if (
+                self._health_check_loop is not None
+                and self._health_check_loop.is_running()
+            ):
+                return
+
+            # Create a new event loop for health checks
+            self._health_check_loop = asyncio.new_event_loop()
+            self._event_loops.append(self._health_check_loop)
+
+            # Start the loop in a background thread
+            self._health_check_thread = threading.Thread(
+                target=self._run_health_check_loop,
+                daemon=True,
+            )
+            self._health_check_thread.start()
+
+            # Wait for loop to be running
+            while not self._health_check_loop.is_running():
+                pass
+
+    def _run_health_check_loop(self):
+        """Run the shared health check event loop."""
+        asyncio.set_event_loop(self._health_check_loop)
+        try:
+            self._health_check_loop.run_forever()
+        finally:
+            try:
+                pending = asyncio.all_tasks(self._health_check_loop)
+                for task in pending:
+                    task.cancel()
+                self._health_check_loop.run_until_complete(
+                    asyncio.gather(*pending, return_exceptions=True)
+                )
+            except Exception:
+                pass
+            finally:
+                self._health_check_loop.close()
 
     def _call_later_recurring_coro(
         self,

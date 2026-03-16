@@ -94,11 +94,14 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         Perform initialization of databases to define their initial state.
         """
 
-        # Initial databases check to define initial state
-        asyncio.run(self._perform_initial_health_check())
+        # Initial databases check to define initial state.
+        # Uses run_coro_sync to run in the shared background loop - this ensures
+        # connection pools created during initial health check remain valid for
+        # subsequent recurring health checks (they use the same event loop).
+        self._bg_scheduler.run_coro_sync(self._perform_initial_health_check)
 
         # Starts recurring health checks on the background.
-        # Uses run_recurring_coro to run async health checks in a background thread
+        # Uses run_recurring_coro which shares the same event loop as run_coro_sync
         self._bg_scheduler.run_recurring_coro(
             self._health_check_interval,
             self._check_databases_health,
@@ -144,7 +147,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         if not exists:
             raise ValueError("Given database is not a member of database list")
 
-        asyncio.run(self._check_db_health(database))
+        self._bg_scheduler.run_coro_sync(self._check_db_health, database)
 
         if database.circuit.state == CBState.CLOSED:
             highest_weighted_db, _ = self._databases.get_top_n(1)[0]
@@ -205,7 +208,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         )
 
         try:
-            asyncio.run(self._check_db_health(database))
+            self._bg_scheduler.run_coro_sync(self._check_db_health, database)
         except UnhealthyDatabaseException:
             if not skip_initial_health_check:
                 raise
