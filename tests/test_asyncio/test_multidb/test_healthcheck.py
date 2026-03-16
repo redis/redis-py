@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -754,22 +755,24 @@ class TestAbstractHealthCheckPolicy:
         """
         Verify that execute() runs multiple health checks concurrently.
         """
-        import asyncio
-        import time
 
-        execution_times = []
+        # Track concurrent execution
+        concurrent_count = 0
+        max_concurrent = 0
 
-        async def slow_health_check(database, connection=None):
-            start = time.monotonic()
-            await asyncio.sleep(0.05)
-            execution_times.append(time.monotonic() - start)
+        async def tracking_health_check(database, connection=None):
+            nonlocal concurrent_count, max_concurrent
+            concurrent_count += 1
+            max_concurrent = max(max_concurrent, concurrent_count)
+            await asyncio.sleep(0.01)  # Small delay to allow overlap detection
+            concurrent_count -= 1
             return True
 
         mock_hc1 = _configure_mock_health_check(Mock(spec=HealthCheck), probes=1)
-        mock_hc1.check_health.side_effect = slow_health_check
+        mock_hc1.check_health.side_effect = tracking_health_check
 
         mock_hc2 = _configure_mock_health_check(Mock(spec=HealthCheck), probes=1)
-        mock_hc2.check_health.side_effect = slow_health_check
+        mock_hc2.check_health.side_effect = tracking_health_check
 
         mock_db = Mock(spec=Database)
 
@@ -784,16 +787,15 @@ class TestAbstractHealthCheckPolicy:
 
         policy.get_connections = mock_get_connections
 
-        start = time.monotonic()
         result = await policy.execute([mock_hc1, mock_hc2], mock_db)
-        total_time = time.monotonic() - start
 
         assert result is True
-        # If running sequentially, would take ~0.2s (2 health checks * 1 probe * 0.05s * 2 calls)
-        # If running concurrently, should take ~0.05s
-        # Use 0.15s threshold to avoid flaky failures while still detecting sequential execution
-        assert total_time < 0.15, (
-            f"Expected concurrent execution < 0.15s, got {total_time}s"
+        # Both health checks should have been called
+        assert mock_hc1.check_health.call_count == 1
+        assert mock_hc2.check_health.call_count == 1
+        # If running concurrently, max_concurrent should be 2
+        assert max_concurrent == 2, (
+            f"Expected 2 concurrent executions, got max {max_concurrent}"
         )
 
     @pytest.mark.asyncio
