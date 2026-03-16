@@ -393,10 +393,8 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         self, circuit: CircuitBreaker, old_state: CBState, new_state: CBState
     ):
         if new_state == CBState.HALF_OPEN:
-            # Schedule health check - use fire-and-forget with proper exception handling
-            _schedule_coro_fire_and_forget(
-                self._check_db_health(circuit.database),
-                "HALF_OPEN health check",
+            self._bg_scheduler.run_coro_fire_and_forget(
+                self._check_db_health, circuit.database
             )
             return
 
@@ -440,33 +438,6 @@ def _run_coro_and_wait(coro: Coroutine):
     except RuntimeError:
         # No running event loop - safe to use asyncio.run()
         asyncio.run(coro)
-
-
-def _schedule_coro_fire_and_forget(coro: Coroutine, description: str = "coroutine"):
-    """
-    Schedule coroutine for execution without waiting for result.
-    Properly handles exceptions to avoid 'Task exception was never retrieved' warnings.
-    """
-    try:
-        loop = asyncio.get_running_loop()
-
-        def on_complete(task: asyncio.Task):
-            if task.cancelled():
-                logger.debug(f"{description} was cancelled")
-            elif task.exception() is not None:
-                logger.debug(
-                    f"{description} raised exception",
-                    exc_info=task.exception(),
-                )
-
-        task = asyncio.ensure_future(coro, loop=loop)
-        task.add_done_callback(on_complete)
-    except RuntimeError:
-        # No running event loop - use asyncio.run() which awaits completion
-        try:
-            asyncio.run(coro)
-        except Exception:
-            logger.debug(f"{description} raised exception", exc_info=True)
 
 
 def _half_open_circuit(circuit: CircuitBreaker):

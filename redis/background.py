@@ -17,6 +17,8 @@ class BackgroundScheduler:
         # Dedicated loop for health checks - ensures all health checks use the same loop
         self._health_check_loop: asyncio.AbstractEventLoop | None = None
         self._health_check_thread: threading.Thread | None = None
+        # Event to signal when health check loop is ready
+        self._health_check_loop_ready = threading.Event()
 
     def __del__(self):
         self.stop()
@@ -143,6 +145,44 @@ class BackgroundScheduler:
         future = asyncio.run_coroutine_threadsafe(coro(*args), loop)
         return future.result()
 
+    def run_coro_fire_and_forget(
+        self, coro: Callable[..., Coroutine[Any, Any, Any]], *args
+    ) -> None:
+        """
+        Schedule a coroutine for execution on the shared health check loop
+        without waiting for the result. Exceptions are logged but not raised.
+
+        This is useful for HALF_OPEN recovery health checks that need to run
+        on the same event loop where connection pools were created.
+
+        Args:
+            coro: Coroutine function to execute
+            *args: Arguments to pass to the coroutine
+        """
+        with self._lock:
+            if self._stopped:
+                return
+
+        # Ensure the shared loop exists
+        self._ensure_health_check_loop()
+
+        with self._lock:
+            loop = self._health_check_loop
+
+        def on_complete(future: asyncio.Future):
+            """Log any exceptions from the coroutine."""
+            if future.cancelled():
+                logging.getLogger(__name__).debug("Fire-and-forget coroutine cancelled")
+            elif future.exception() is not None:
+                logging.getLogger(__name__).debug(
+                    "Fire-and-forget coroutine raised exception",
+                    exc_info=future.exception(),
+                )
+
+        # Schedule on the shared loop without waiting
+        future = asyncio.run_coroutine_threadsafe(coro(*args), loop)
+        future.add_done_callback(on_complete)
+
     def _ensure_health_check_loop(self):
         """Ensure the shared health check loop and thread are running."""
         with self._lock:
@@ -151,6 +191,9 @@ class BackgroundScheduler:
                 and self._health_check_loop.is_running()
             ):
                 return
+
+            # Reset the event for a fresh start
+            self._health_check_loop_ready.clear()
 
             # Create a new event loop for health checks
             self._health_check_loop = asyncio.new_event_loop()
@@ -163,13 +206,17 @@ class BackgroundScheduler:
             )
             self._health_check_thread.start()
 
-            # Wait for loop to be running
-            while not self._health_check_loop.is_running():
-                pass
+        # Wait for loop to be running (outside the lock to avoid blocking other threads)
+        self._health_check_loop_ready.wait()
 
     def _run_health_check_loop(self):
         """Run the shared health check event loop."""
         asyncio.set_event_loop(self._health_check_loop)
+
+        # Signal that the loop is ready before running
+        # Use call_soon to signal after run_forever starts processing
+        self._health_check_loop.call_soon(self._health_check_loop_ready.set)
+
         try:
             self._health_check_loop.run_forever()
         finally:
