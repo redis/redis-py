@@ -789,11 +789,11 @@ class TestAbstractHealthCheckPolicy:
         total_time = time.monotonic() - start
 
         assert result is True
-        # If running sequentially, would take ~0.1s (2 * 0.05s)
+        # If running sequentially, would take ~0.2s (2 health checks * 1 probe * 0.05s * 2 calls)
         # If running concurrently, should take ~0.05s
-        # Allow generous margin for CI variability (but still less than sequential)
-        assert total_time < 0.095, (
-            f"Expected concurrent execution < 0.095s, got {total_time}s"
+        # Use 0.15s threshold to avoid flaky failures while still detecting sequential execution
+        assert total_time < 0.15, (
+            f"Expected concurrent execution < 0.15s, got {total_time}s"
         )
 
     @pytest.mark.asyncio
