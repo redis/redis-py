@@ -2845,8 +2845,23 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
         self.reset()
 
+    # Keys that should be redacted in __repr__ to avoid exposing sensitive information
+    SENSITIVE_REPR_KEYS = frozenset(
+        {
+            "password",
+            "username",
+            "ssl_password",
+            "credential_provider",
+        }
+    )
+
     def __repr__(self) -> str:
-        conn_kwargs = ",".join([f"{k}={v}" for k, v in self.connection_kwargs.items()])
+        conn_kwargs = ",".join(
+            [
+                f"{k}={'<REDACTED>' if k in self.SENSITIVE_REPR_KEYS else v}"
+                for k, v in self.connection_kwargs.items()
+            ]
+        )
         return (
             f"<{self.__class__.__module__}.{self.__class__.__name__}"
             f"(<{self.connection_class.__module__}.{self.connection_class.__name__}"

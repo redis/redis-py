@@ -45,6 +45,7 @@ jobs:
           ignore-vulns: |
             GHSA-w596-4wvx-j9j6  # subversion related git pull, dependency for pytest. There is no impact here.
             CVE-2026-26007 # dependency for entraid tests
+            CVE-2026-32597 # PyJWT does not validate the crit (Critical) Header Parameter defined in RFC 7515, this will be fixed in the next release
 
   lint:
     name: Code linters
