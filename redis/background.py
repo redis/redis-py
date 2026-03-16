@@ -273,10 +273,7 @@ class BackgroundScheduler:
             if self._stopped:
                 return
 
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
+        loop = asyncio.get_running_loop()
 
         wrapped = _async_to_sync_wrapper(loop, coro, *args)
 
