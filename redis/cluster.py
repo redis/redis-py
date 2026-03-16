@@ -1563,7 +1563,7 @@ class RedisCluster(
                 self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
-                    connection=connection,
+                    connection=e.connection,
                     error=e,
                 )
                 raise
@@ -1579,7 +1579,7 @@ class RedisCluster(
                 self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
-                    connection=connection,
+                    connection=e.connection,
                     error=e,
                 )
                 raise
@@ -1618,11 +1618,10 @@ class RedisCluster(
 
                 # DON'T set redis_connection = None - keep the pool for reuse
                 self.nodes_manager.initialize()
-                e.connection = connection
                 self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
-                    connection=connection,
+                    connection=e.connection,
                     error=e,
                 )
                 raise e
@@ -1726,17 +1725,19 @@ class RedisCluster(
                 self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
-                    connection=connection,
+                    connection=e.connection,
                     error=e,
                 )
                 raise
             except ResponseError as e:
                 # this is used to report the metrics based on host and port info
-                e.connection = connection
+                # ResponseError typically happens after get_connection() succeeds,
+                # so connection should be available
+                e.connection = connection if connection else target_node
                 self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
-                    connection=connection,
+                    connection=e.connection,
                     error=e,
                 )
                 raise
@@ -1751,7 +1752,7 @@ class RedisCluster(
                 self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
-                    connection=connection,
+                    connection=e.connection,
                     error=e,
                 )
                 raise e
@@ -1783,12 +1784,16 @@ class RedisCluster(
         """
         Records operation duration metric directly.
         """
+        host = connection.host if connection else "unknown"
+        port = connection.port if connection else 0
+        db = str(connection.db) if connection and hasattr(connection, "db") else "0"
+
         record_operation_duration(
             command_name=command_name,
             duration_seconds=duration_seconds,
-            server_address=connection.host,
-            server_port=connection.port,
-            db_namespace=str(connection.db),
+            server_address=host,
+            server_port=port,
+            db_namespace=db,
             error=error,
         )
 

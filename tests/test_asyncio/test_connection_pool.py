@@ -418,6 +418,31 @@ class TestBlockingConnectionPool:
         expected = "path=abc,db=0,client_name=test-client"
         assert expected in repr(pool)
 
+    def test_repr_redacts_sensitive_information(self):
+        """Test that __repr__ redacts sensitive values like password and username."""
+        pool = ConnectionPool(
+            host="localhost",
+            port=6379,
+            password="secret_password_123",
+            username="myuser",
+            ssl_password="ssl_secret_456",
+            db=0,
+        )
+        repr_output = repr(pool)
+
+        # Verify sensitive values are redacted
+        assert "secret_password_123" not in repr_output
+        assert "myuser" not in repr_output
+        assert "ssl_secret_456" not in repr_output
+
+        # Verify the REDACTED placeholder is present
+        assert "<REDACTED>" in repr_output
+
+        # Verify non-sensitive values are still visible
+        assert "host=localhost" in repr_output
+        assert "port=6379" in repr_output
+        assert "db=0" in repr_output
+
 
 class TestConnectionPoolURLParsing:
     def test_hostname(self):
