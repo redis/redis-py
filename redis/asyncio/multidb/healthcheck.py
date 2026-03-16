@@ -169,8 +169,7 @@ async def _check_health(
         if not await health_check.check_health(database, conn):
             return False
         return True
-    except Exception:
-        # Disconnect on error to avoid returning broken connection to pool
+    except BaseException:
         await conn.disconnect()
         raise
     finally:
