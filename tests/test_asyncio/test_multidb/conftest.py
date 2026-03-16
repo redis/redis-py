@@ -45,7 +45,9 @@ def mock_health_check_connections(request):
         mock_pool.disconnect = AsyncMock()
         return [mock_pool]
 
-    with patch.object(AbstractHealthCheckPolicy, "get_connections", mock_get_connections):
+    with patch.object(
+        AbstractHealthCheckPolicy, "get_connections", mock_get_connections
+    ):
         yield
 
 

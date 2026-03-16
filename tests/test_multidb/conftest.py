@@ -39,7 +39,9 @@ def mock_health_check_connections():
         mock_pool.disconnect = AsyncMock()
         return [mock_pool]
 
-    with patch.object(AbstractHealthCheckPolicy, "get_connections", mock_get_connections):
+    with patch.object(
+        AbstractHealthCheckPolicy, "get_connections", mock_get_connections
+    ):
         yield
 
 
@@ -66,6 +68,7 @@ def mock_fs() -> FailoverStrategy:
 @pytest.fixture()
 def mock_hc() -> HealthCheck:
     from unittest.mock import AsyncMock
+
     mock = Mock(spec=HealthCheck)
     mock.health_check_probes = DEFAULT_HEALTH_CHECK_PROBES
     # Use minimal delay for faster test execution

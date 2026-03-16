@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, Coroutine, List, Optional
 
 from redis.asyncio.multidb.healthcheck import HealthCheck, HealthCheckPolicy
 from redis.background import BackgroundScheduler
@@ -76,12 +76,17 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             auto_fallback_interval=self._auto_fallback_interval,
         )
         self.initialized = False
-        self._hc_lock = asyncio.Lock()
         self._bg_scheduler = BackgroundScheduler()
         self._config = config
 
     def __del__(self):
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            # Suppress exceptions during garbage collection.
+            # close() may fail if called during interpreter shutdown
+            # or while an event loop is already running.
+            pass
 
     def initialize(self):
         """
@@ -261,12 +266,11 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         """
         self._failure_detectors.append(failure_detector)
 
-    async def add_health_check(self, healthcheck: HealthCheck):
+    def add_health_check(self, healthcheck: HealthCheck):
         """
         Adds a new health check to the database.
         """
-        async with self._hc_lock:
-            self._health_checks.append(healthcheck)
+        self._health_checks.append(healthcheck)
 
     def execute_command(self, *args, **options):
         """
@@ -385,7 +389,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         self, circuit: CircuitBreaker, old_state: CBState, new_state: CBState
     ):
         if new_state == CBState.HALF_OPEN:
-            asyncio.run(self._check_db_health(circuit.database))
+            _execute_in_loop(self._check_db_health(circuit.database))
             return
 
         if old_state == CBState.CLOSED and new_state == CBState.OPEN:
@@ -409,7 +413,19 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         if self.command_executor.active_database:
             self.command_executor.active_database.client.close()
 
-        asyncio.run(self._health_check_policy.close())
+        # Close health check policy in the appropriate context
+        _execute_in_loop(self._health_check_policy.close())
+
+
+def _execute_in_loop(coro: Coroutine):
+    """
+    Execute coroutine in existing or new event loop.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        asyncio.ensure_future(coro, loop=loop)
+    except RuntimeError:
+        asyncio.run(coro)
 
 
 def _half_open_circuit(circuit: CircuitBreaker):

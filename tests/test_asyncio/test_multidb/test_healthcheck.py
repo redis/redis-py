@@ -10,9 +10,8 @@ from redis.asyncio.multidb.healthcheck import (
     HealthyAllPolicy,
     HealthyMajorityPolicy,
     HealthyAnyPolicy,
-    AbstractHealthCheckPolicy,
 )
-from redis.asyncio import Redis, ConnectionPool
+from redis.asyncio import Redis
 from redis.http.http_client import HttpError
 from redis.multidb.circuit import State as CBState
 from redis.exceptions import ConnectionError
@@ -349,7 +348,9 @@ class TestLagAwareHealthCheck:
         hc._http_client = mock_http
 
         db = Database(mock_client, mock_cb, 1.0, "https://healthcheck.example.com")
-        mock_conn = AsyncMock()  # Not used by LagAwareHealthCheck but required by signature
+        mock_conn = (
+            AsyncMock()
+        )  # Not used by LagAwareHealthCheck but required by signature
 
         assert await hc.check_health(db, mock_conn) is True
         # Base URL must be set correctly
@@ -392,7 +393,9 @@ class TestLagAwareHealthCheck:
         hc._http_client = mock_http
 
         db = Database(mock_client, mock_cb, 1.0, "https://healthcheck.example.com")
-        mock_conn = AsyncMock()  # Not used by LagAwareHealthCheck but required by signature
+        mock_conn = (
+            AsyncMock()
+        )  # Not used by LagAwareHealthCheck but required by signature
 
         assert await hc.check_health(db, mock_conn) is True
         assert mock_http.get.call_count == 2
@@ -428,7 +431,9 @@ class TestLagAwareHealthCheck:
         hc._http_client = mock_http
 
         db = Database(mock_client, mock_cb, 1.0, "https://healthcheck.example.com")
-        mock_conn = AsyncMock()  # Not used by LagAwareHealthCheck but required by signature
+        mock_conn = (
+            AsyncMock()
+        )  # Not used by LagAwareHealthCheck but required by signature
 
         with pytest.raises(ValueError, match="Could not find a matching bdb"):
             await hc.check_health(db, mock_conn)
@@ -460,7 +465,9 @@ class TestLagAwareHealthCheck:
         hc._http_client = mock_http
 
         db = Database(mock_client, mock_cb, 1.0, "https://healthcheck.example.com")
-        mock_conn = AsyncMock()  # Not used by LagAwareHealthCheck but required by signature
+        mock_conn = (
+            AsyncMock()
+        )  # Not used by LagAwareHealthCheck but required by signature
 
         with pytest.raises(HttpError, match="busy") as e:
             await hc.check_health(db, mock_conn)
@@ -544,7 +551,11 @@ class TestAbstractHealthCheckPolicy:
 
         # Create mock cluster client (not Redis instance)
         mock_cluster_client = Mock()
-        mock_cluster_client.get_nodes.return_value = [mock_node1, mock_node2, mock_node3]
+        mock_cluster_client.get_nodes.return_value = [
+            mock_node1,
+            mock_node2,
+            mock_node3,
+        ]
 
         mock_db = Mock(spec=Database)
         mock_db.client = mock_cluster_client

@@ -259,3 +259,41 @@ class TestBackgroundScheduler:
         # (scheduler continues despite exceptions)
         total_executions = len(success_count) + len(error_count)
         assert total_executions >= 2
+
+    def test_run_recurring_coro_prevents_overlapping_executions(self):
+        """
+        Verify that the next execution is scheduled only after the current one completes,
+        preventing overlapping runs when execution takes longer than the interval.
+        """
+        execution_log = []
+        lock = threading.Lock()
+
+        async def slow_coro():
+            with lock:
+                execution_log.append(("start", len(execution_log)))
+            await asyncio.sleep(0.05)  # Takes 50ms, longer than 10ms interval
+            with lock:
+                execution_log.append(("end", len(execution_log)))
+
+        scheduler = BackgroundScheduler()
+        # Interval is 10ms but execution takes 50ms
+        scheduler.run_recurring_coro(0.01, slow_coro)
+
+        sleep(0.2)
+        scheduler.stop()
+
+        # Verify no overlapping: each "start" should be followed by "end" before next "start"
+        # With overlap prevention, pattern should be: start, end, start, end, ...
+        starts = [i for i, (event, _) in enumerate(execution_log) if event == "start"]
+        ends = [i for i, (event, _) in enumerate(execution_log) if event == "end"]
+
+        # Each start should have a corresponding end before the next start
+        for i, start_idx in enumerate(starts[:-1]):
+            # Find the end that follows this start
+            corresponding_ends = [e for e in ends if e > start_idx]
+            assert len(corresponding_ends) > 0, "Start without corresponding end"
+            # The end should come before the next start
+            next_start_idx = starts[i + 1]
+            assert corresponding_ends[0] < next_start_idx, (
+                "Overlapping execution detected"
+            )

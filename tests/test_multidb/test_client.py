@@ -743,7 +743,7 @@ class TestMultiDbClient:
                 another_hc.health_check_delay = 0.01
                 another_hc.health_check_timeout = 1.0
 
-                asyncio.run(client.add_health_check(another_hc))
+                client.add_health_check(another_hc)
                 asyncio.run(client._check_db_health(mock_db1))
 
                 # 3 databases × 3 probes + 1 database × 3 probes = 12 calls

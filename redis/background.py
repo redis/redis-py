@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import threading
 from typing import Any, Callable, Coroutine
 
@@ -129,25 +130,58 @@ class BackgroundScheduler:
     ):
         """
         Executes recurring coroutine with given interval in seconds.
+        Schedules next execution only after current one completes to prevent overlap.
         """
         with self._lock:
             if self._stopped:
                 return
 
+        def on_complete(task: asyncio.Task):
+            """Callback when coroutine completes - schedule next execution."""
+            # Log any exceptions (prevents "Task exception was never retrieved")
+            if task.cancelled():
+                pass  # Task was cancelled, ignore
+            elif task.exception() is not None:
+                # Log the exception but don't crash the scheduler
+                logging.getLogger(__name__).debug(
+                    "Background coroutine raised exception",
+                    exc_info=task.exception(),
+                )
+
+            # Schedule next execution after completion
+            with self._lock:
+                if self._stopped:
+                    return
+
+            self._call_later(
+                loop,
+                interval,
+                self._execute_recurring_coro,
+                loop,
+                interval,
+                coro,
+                *args,
+            )
+
         try:
             # Schedule the coroutine to run in the event loop
-            asyncio.ensure_future(coro(*args), loop=loop)
+            task = asyncio.ensure_future(coro(*args), loop=loop)
+            # Add callback to handle completion and schedule next run
+            task.add_done_callback(on_complete)
         except Exception:
-            # Silently ignore exceptions during shutdown
-            pass
-
-        with self._lock:
-            if self._stopped:
-                return
-
-        self._call_later(
-            loop, interval, self._execute_recurring_coro, loop, interval, coro, *args
-        )
+            # If scheduling fails (e.g., during shutdown), try to schedule next run anyway
+            with self._lock:
+                if self._stopped:
+                    return
+            self._call_later(
+                loop,
+                interval,
+                self._execute_recurring_coro,
+                loop,
+                interval,
+                coro,
+                *args,
+            )
 
     async def run_recurring_async(
         self, interval: float, coro: Callable[..., Coroutine[Any, Any, Any]], *args

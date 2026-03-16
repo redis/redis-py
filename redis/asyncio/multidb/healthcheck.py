@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import List, Optional, Tuple, Union
 
-from redis.asyncio import Redis, Connection, ConnectionPool
+from redis.asyncio import Connection, ConnectionPool, Redis
 from redis.asyncio.http.http_client import DEFAULT_TIMEOUT, AsyncHTTPClientWrapper
 from redis.backoff import NoBackoff
 from redis.http.http_client import HttpClient
@@ -156,7 +156,10 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
         """
         pass
 
-async def _check_health(database, pool: ConnectionPool, health_check: HealthCheck) -> bool:
+
+async def _check_health(
+    database, pool: ConnectionPool, health_check: HealthCheck
+) -> bool:
     conn = await pool.get_connection()
     try:
         if not await health_check.check_health(database, conn):
