@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import threading
 from typing import Any, Callable, List, Optional
 
 from redis.asyncio.multidb.healthcheck import HealthCheck, HealthCheckPolicy
@@ -77,6 +78,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         )
         self.initialized = False
         self._bg_scheduler = BackgroundScheduler()
+        self._hc_lock = threading.Lock()
         self._config = config
 
     def __del__(self):
@@ -273,7 +275,8 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         """
         Adds a new health check to the database.
         """
-        self._health_checks.append(healthcheck)
+        with self._hc_lock:
+            self._health_checks.append(healthcheck)
 
     def execute_command(self, *args, **options):
         """
@@ -314,10 +317,11 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         """
         Runs health checks on the given database until first failure.
         """
+        with self._hc_lock:
+            health_checks = list(self._health_checks)
+
         # Health check will setup circuit state
-        is_healthy = await self._health_check_policy.execute(
-            self._health_checks, database
-        )
+        is_healthy = await self._health_check_policy.execute(health_checks, database)
 
         if not is_healthy:
             if database.circuit.state != CBState.OPEN:
