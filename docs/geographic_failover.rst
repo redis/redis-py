@@ -337,11 +337,14 @@ reverse proxy behind an actual REST API endpoint.
 
 **Custom Health Checks**
 ~~~~~~~~~~~~~~~~~~~~~
-You can add custom health checks for specific requirements:
+You can add custom health checks for specific requirements. Please notice that all health checks are executed within
+asyncio event loop, so please ensure that `check_health` method is async:
 
 .. code-block:: python
 
-    from redis.multidb.healthcheck import AbstractHealthCheck
+    from redis.asyncio.multidb.healthcheck import AbstractHealthCheck
+    from redis.asyncio import Connection
+
     class PingHealthCheck(AbstractHealthCheck):
         def __init__(
             self,
@@ -355,10 +358,10 @@ You can add custom health checks for specific requirements:
                 health_check_timeout=health_check_timeout,
             )
 
-        def check_health(self, database) -> bool:
-            expected_message = ["PONG", b"PONG"]
-            actual_message = database.client.execute_command("PING")
-            return actual_message in expected_message
+        async def check_health(self, database, connection: Connection) -> bool:
+            await connection.send_command("PING")
+            response = await connection.read_response()
+            return response in (b"PONG", "PONG")
 
 Failure Detection (Reactive Monitoring)
 -----------------

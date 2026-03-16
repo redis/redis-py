@@ -1,4 +1,5 @@
 import asyncio
+import concurrent
 import logging
 from typing import Any, Callable, Coroutine, List, Optional
 
@@ -389,7 +390,11 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         self, circuit: CircuitBreaker, old_state: CBState, new_state: CBState
     ):
         if new_state == CBState.HALF_OPEN:
-            _execute_in_loop(self._check_db_health(circuit.database))
+            # Schedule health check - use fire-and-forget with proper exception handling
+            _schedule_coro_fire_and_forget(
+                self._check_db_health(circuit.database),
+                "HALF_OPEN health check",
+            )
             return
 
         if old_state == CBState.CLOSED and new_state == CBState.OPEN:
@@ -413,19 +418,52 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         if self.command_executor.active_database:
             self.command_executor.active_database.client.close()
 
-        # Close health check policy in the appropriate context
-        _execute_in_loop(self._health_check_policy.close())
+        # Close health check policy - must wait for cleanup to complete
+        _run_coro_and_wait(self._health_check_policy.close())
 
 
-def _execute_in_loop(coro: Coroutine):
+def _run_coro_and_wait(coro: Coroutine):
     """
-    Execute coroutine in existing or new event loop.
+    Execute coroutine and wait for completion.
+    If inside a running event loop, uses run_coroutine_threadsafe to block until done.
+    Otherwise, uses asyncio.run().
+    """
+    try:
+        asyncio.get_running_loop()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(asyncio.run, coro)
+            future.result()  # Block until complete
+    except RuntimeError:
+        # No running event loop - safe to use asyncio.run()
+        asyncio.run(coro)
+
+
+def _schedule_coro_fire_and_forget(coro: Coroutine, description: str = "coroutine"):
+    """
+    Schedule coroutine for execution without waiting for result.
+    Properly handles exceptions to avoid 'Task exception was never retrieved' warnings.
     """
     try:
         loop = asyncio.get_running_loop()
-        asyncio.ensure_future(coro, loop=loop)
+
+        def on_complete(task: asyncio.Task):
+            if task.cancelled():
+                logger.debug(f"{description} was cancelled")
+            elif task.exception() is not None:
+                logger.debug(
+                    f"{description} raised exception",
+                    exc_info=task.exception(),
+                )
+
+        task = asyncio.ensure_future(coro, loop=loop)
+        task.add_done_callback(on_complete)
     except RuntimeError:
-        asyncio.run(coro)
+        # No running event loop - use asyncio.run() which awaits completion
+        try:
+            asyncio.run(coro)
+        except Exception:
+            logger.debug(f"{description} raised exception", exc_info=True)
 
 
 def _half_open_circuit(circuit: CircuitBreaker):

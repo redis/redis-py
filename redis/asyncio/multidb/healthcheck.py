@@ -4,9 +4,11 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import List, Optional, Tuple, Union
 
-from redis.asyncio import Connection, ConnectionPool, Redis
+from redis.asyncio import Connection, ConnectionPool
+from redis.asyncio import Redis as AsyncRedis
 from redis.asyncio.http.http_client import DEFAULT_TIMEOUT, AsyncHTTPClientWrapper
 from redis.backoff import NoBackoff
+from redis.client import Redis as SyncRedis
 from redis.http.http_client import HttpClient
 from redis.multidb.exception import UnhealthyDatabaseException
 from redis.retry import Retry
@@ -123,10 +125,12 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
         conns = self._connections.get(db_id)
 
         if conns is None:
-            if isinstance(database.client, Redis):
+            # Check for both sync and async standalone Redis clients
+            if isinstance(database.client, (AsyncRedis, SyncRedis)):
                 conn_kwargs = database.client.get_connection_kwargs()
                 conns = [ConnectionPool(**conn_kwargs)]
             else:
+                # Cluster client - get connections for all nodes
                 conns = []
                 all_nodes = database.client.get_nodes()
                 for node in all_nodes:
@@ -203,6 +207,7 @@ class HealthyAllPolicy(AbstractHealthCheckPolicy):
 class HealthyMajorityPolicy(AbstractHealthCheckPolicy):
     """
     Policy that returns True if a majority of health check probes are successful.
+    A probe is successful only if all nodes (connections) pass the health check.
     """
 
     async def _execute(self, health_check: HealthCheck, database) -> bool:
@@ -212,22 +217,32 @@ class HealthyMajorityPolicy(AbstractHealthCheckPolicy):
         probes = health_check.health_check_probes
         allowed_unsuccessful_probes = (probes - 1) // 2
         conns = await self.get_connections(database)
+        last_exception = None
 
         for attempt in range(probes):
             results = await asyncio.gather(
                 *[_check_health(database, pool, health_check) for pool in conns],
                 return_exceptions=True,
             )
-            # Check for any exceptions or False results
+
+            # A probe is successful only if ALL nodes pass (no exceptions, all True)
+            probe_failed = False
             for result in results:
                 if isinstance(result, Exception):
-                    allowed_unsuccessful_probes -= 1
-                    if allowed_unsuccessful_probes < 0:
-                        raise result
+                    probe_failed = True
+                    last_exception = result
+                    break
                 elif not result:
-                    allowed_unsuccessful_probes -= 1
-                    if allowed_unsuccessful_probes < 0:
-                        return False
+                    probe_failed = True
+                    break
+
+            if probe_failed:
+                allowed_unsuccessful_probes -= 1
+                if allowed_unsuccessful_probes < 0:
+                    # Majority of probes have failed
+                    if last_exception:
+                        raise last_exception
+                    return False
 
             if attempt < probes - 1:
                 await asyncio.sleep(health_check.health_check_delay)
@@ -394,9 +409,10 @@ class LagAwareHealthCheck(AbstractHealthCheck):
                 "Database health check url is not set. Please check DatabaseConfig for the current database."
             )
 
-        if isinstance(database.client, Redis):
+        if isinstance(database.client, (AsyncRedis, SyncRedis)):
             db_host = database.client.get_connection_kwargs()["host"]
         else:
+            # Cluster client
             db_host = database.client.startup_nodes[0].host
 
         base_url = f"{database.health_check_url}:{self._rest_api_port}"

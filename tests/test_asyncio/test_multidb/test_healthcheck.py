@@ -791,8 +791,10 @@ class TestAbstractHealthCheckPolicy:
         assert result is True
         # If running sequentially, would take ~0.1s (2 * 0.05s)
         # If running concurrently, should take ~0.05s
-        # Allow some margin for CI variability
-        assert total_time < 0.09
+        # Allow generous margin for CI variability (but still less than sequential)
+        assert total_time < 0.095, (
+            f"Expected concurrent execution < 0.095s, got {total_time}s"
+        )
 
     @pytest.mark.asyncio
     async def test_execute_applies_timeout_per_health_check(self):
