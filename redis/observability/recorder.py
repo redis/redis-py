@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Callable, List, Optional
 
 from redis.observability.attributes import (
     AttributeBuilder,
+    ConnectionState,
     CSCReason,
     CSCResult,
     GeoFailoverReason,
@@ -32,7 +33,7 @@ from redis.observability.attributes import (
 from redis.observability.metrics import CloseReason, RedisMetricsCollector
 from redis.observability.providers import get_observability_instance
 from redis.observability.registry import get_observables_registry_instance
-from redis.utils import deprecated_args, str_if_bytes
+from redis.utils import deprecated_args, deprecated_function, str_if_bytes
 
 if TYPE_CHECKING:
     from redis.connection import ConnectionPoolInterface
@@ -42,8 +43,8 @@ if TYPE_CHECKING:
 # Global metrics collector instance (lazy-initialized)
 _metrics_collector: Optional[RedisMetricsCollector] = None
 
-CONNECTION_COUNT_REGISTRY_KEY = "connection_count"
 CSC_ITEMS_REGISTRY_KEY = "csc_items"
+CONNECTION_COUNT_REGISTRY_KEY = "connection_count"
 
 
 @deprecated_args(
@@ -145,9 +146,33 @@ def record_connection_create_time(
         pass
 
 
-def init_connection_count() -> None:
+def record_connection_count(
+    pool_name: str,
+    connection_state: ConnectionState,
+    counter: int = 1,
+) -> None:
     """
-    Initialize observable gauge for connection count metric.
+    Record a connection count change for a single state.
+
+    Args:
+        pool_name: Connection pool identifier
+        connection_state: State to update (IDLE or USED)
+        counter: Number to add (positive) or subtract (negative)
+
+    Example:
+        # New connection created (goes to IDLE first)
+        >>> record_connection_count('pool_abc123', ConnectionState.IDLE, 1)
+
+        # Acquire from pool (transition)
+        >>> record_connection_count('pool_abc123', ConnectionState.IDLE, -1)
+        >>> record_connection_count('pool_abc123', ConnectionState.USED, 1)
+
+        # Release to pool (transition)
+        >>> record_connection_count('pool_abc123', ConnectionState.USED, -1)
+        >>> record_connection_count('pool_abc123', ConnectionState.IDLE, 1)
+
+        # Pool disconnect 5 idle connections
+        >>> record_connection_count('pool_abc123', ConnectionState.IDLE, -5)
     """
     global _metrics_collector
 
@@ -155,6 +180,29 @@ def init_connection_count() -> None:
         _metrics_collector = _get_or_create_collector()
         if _metrics_collector is None:
             return
+
+    try:
+        _metrics_collector.record_connection_count(
+            pool_name=pool_name,
+            connection_state=connection_state,
+            counter=counter,
+        )
+    except Exception:
+        pass
+
+
+@deprecated_function(
+    reason="Connection count is now tracked via record_connection_count(). "
+    "This functionality will be removed in the next major version",
+    version="7.4.0",
+)
+def init_connection_count() -> None:
+    """
+    Initialize observable gauge for connection count metric.
+    """
+    collector = _get_or_create_collector()
+    if collector is None:
+        return
 
     def observable_callback(__):
         observables_registry = get_observables_registry_instance()
@@ -167,25 +215,27 @@ def init_connection_count() -> None:
         return observations
 
     try:
-        _metrics_collector.init_connection_count(
+        collector.init_connection_count(
             callback=observable_callback,
         )
     except Exception:
         pass
 
 
+@deprecated_function(
+    reason="Connection count is now tracked via record_connection_count(). "
+    "This functionality will be removed in the next major version",
+    version="7.4.0",
+)
 def register_pools_connection_count(
     connection_pools: List["ConnectionPoolInterface"],
 ) -> None:
     """
     Add connection pools to connection count observable registry.
     """
-    global _metrics_collector
-
-    if _metrics_collector is None:
-        _metrics_collector = _get_or_create_collector()
-        if _metrics_collector is None:
-            return
+    collector = _get_or_create_collector()
+    if collector is None:
+        return
 
     try:
         # Lazy import
@@ -309,7 +359,7 @@ def record_connection_relaxed_timeout(
         relaxed: True to count up (relaxed), False to count down (unrelaxed)
 
     Example:
-        >>> record_connection_relaxed_timeout('Connection<localhost:6379>', 'MOVING', True)
+        >>> record_connection_relaxed_timeout('localhost:6379_a1b2c3d4', 'MOVING', True)
     """
     global _metrics_collector
 

@@ -20,6 +20,7 @@ from redis.observability.attributes import (
     REDIS_CLIENT_CONNECTION_CLOSE_REASON,
     REDIS_CLIENT_CONNECTION_NOTIFICATION,
     AttributeBuilder,
+    ConnectionState,
     CSCReason,
     CSCResult,
     GeoFailoverReason,
@@ -27,7 +28,7 @@ from redis.observability.attributes import (
     get_pool_name,
 )
 from redis.observability.config import MetricGroup, OTelConfig
-from redis.utils import deprecated_args
+from redis.utils import deprecated_args, deprecated_function
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,6 @@ class RedisMetricsCollector:
         self.meter = meter
         self.config = config
         self.attr_builder = AttributeBuilder()
-        self.connection_count = None
 
         # Initialize enabled metric instruments
 
@@ -154,6 +154,19 @@ class RedisMetricsCollector:
             name="redis.client.connection.handoff",
             unit="{handoff}",
             description="Connections that have been handed off (e.g., after a MOVING notification)",
+        )
+
+        # DEPRECATED: This attribute is kept for backward compatibility.
+        # It requires manual initialization via init_connection_count() with a callback.
+        # Use connection_count_updown instead for push-based tracking.
+        # Will be removed in the next major version.
+        self.connection_count = None
+
+        # New push-based connection count tracking via UpDownCounter
+        self.connection_count_updown = self.meter.create_up_down_counter(
+            name="db.client.connection.count",
+            unit="{connection}",
+            description="Number of connections currently in the pool by state",
         )
 
     def _init_connection_advanced_metrics(self) -> None:
@@ -333,6 +346,34 @@ class RedisMetricsCollector:
 
         return self.geo_failovers.add(1, attributes=attrs)
 
+    def record_connection_count(
+        self,
+        pool_name: str,
+        connection_state: ConnectionState,
+        counter: int = 1,
+    ) -> None:
+        """
+        Record a connection count change for a single state.
+
+        Args:
+            pool_name: Connection pool name
+            connection_state: State to update (IDLE or USED)
+            counter: Number to add (positive) or subtract (negative)
+        """
+        if not hasattr(self, "connection_count_updown"):
+            return
+
+        attrs = self.attr_builder.build_connection_attributes(
+            pool_name=pool_name,
+            connection_state=connection_state,
+        )
+        self.connection_count_updown.add(counter, attributes=attrs)
+
+    @deprecated_function(
+        reason="Connection count is now tracked via record_connection_count(). "
+        "This functionality will be removed in the next major version",
+        version="7.4.0",
+    )
     def init_connection_count(
         self,
         callback: Callable,
@@ -341,18 +382,19 @@ class RedisMetricsCollector:
         Initialize observable gauge for connection count metric.
 
         Args:
-            callback: Callback function to retrieve connection count
+            callback: Callback function to retrieve connection counts
         """
-        if (
-            MetricGroup.CONNECTION_BASIC not in self.config.metric_groups
-            and not self.connection_count
-        ):
+        if MetricGroup.CONNECTION_BASIC not in self.config.metric_groups:
             return
 
+        # DEPRECATED: Create observable gauge for backward compatibility
+        # This gauge uses a different metric name to avoid conflicts with
+        # the new push-based connection_count_updown counter
         self.connection_count = self.meter.create_observable_gauge(
-            name="db.client.connection.count",
+            name="db.client.connection.count.deprecated",
             unit="{connection}",
-            description="Number of connections in the pool",
+            description="The number of connections that are currently in state "
+            "described by the state attribute (deprecated - use db.client.connection.count instead)",
             callbacks=[callback],
         )
 
@@ -539,9 +581,7 @@ class RedisMetricsCollector:
         if not hasattr(self, "connection_relaxed_timeout"):
             return
 
-        attrs = self.attr_builder.build_connection_attributes(
-            connection_name=connection_name
-        )
+        attrs = self.attr_builder.build_connection_attributes(pool_name=connection_name)
         attrs[REDIS_CLIENT_CONNECTION_NOTIFICATION] = maint_notification
         self.connection_relaxed_timeout.add(1 if relaxed else -1, attributes=attrs)
 
