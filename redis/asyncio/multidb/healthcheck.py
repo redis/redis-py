@@ -178,13 +178,9 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
 
     async def close(self) -> None:
         """Close all health check clients."""
-        close_tasks = []
-
-        for client in self._clients.values():
-            if isinstance(client, AsyncRedisCluster):
-                close_tasks.append(asyncio.create_task(client.aclose()))
-            else:
-                close_tasks.append(asyncio.create_task(client.aclose()))
+        close_tasks = [
+            asyncio.create_task(client.aclose()) for client in self._clients.values()
+        ]
 
         if close_tasks:
             await asyncio.gather(*close_tasks, return_exceptions=True)
