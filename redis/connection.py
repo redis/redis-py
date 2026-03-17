@@ -2907,22 +2907,23 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         if hasattr(self, "_available_connections") and hasattr(
             self, "_in_use_connections"
         ):
-            idle_count = len(self._available_connections)
-            in_use_count = len(self._in_use_connections)
-            if idle_count > 0 or in_use_count > 0:
-                pool_name = get_pool_name(self)
-                if idle_count > 0:
-                    record_connection_count(
-                        pool_name=pool_name,
-                        connection_state=ConnectionState.IDLE,
-                        counter=-idle_count,
-                    )
-                if in_use_count > 0:
-                    record_connection_count(
-                        pool_name=pool_name,
-                        connection_state=ConnectionState.USED,
-                        counter=-in_use_count,
-                    )
+            with self._lock:
+                idle_count = len(self._available_connections)
+                in_use_count = len(self._in_use_connections)
+                if idle_count > 0 or in_use_count > 0:
+                    pool_name = get_pool_name(self)
+                    if idle_count > 0:
+                        record_connection_count(
+                            pool_name=pool_name,
+                            connection_state=ConnectionState.IDLE,
+                            counter=-idle_count,
+                        )
+                    if in_use_count > 0:
+                        record_connection_count(
+                            pool_name=pool_name,
+                            connection_state=ConnectionState.USED,
+                            counter=-in_use_count,
+                        )
 
         self._created_connections = 0
         self._available_connections = []
@@ -3157,7 +3158,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 # Still need to decrement USED since it was counted in get_connection()
                 connection.disconnect()
                 record_connection_count(
-                    pool_name=get_pool_name(self),
+                    pool_name="unknown_pool",
                     connection_state=ConnectionState.USED,
                     counter=-1,
                 )
@@ -3319,23 +3320,24 @@ class BlockingConnectionPool(ConnectionPool):
                 and self._connections
                 and hasattr(self, "pool")
             ):
-                connections_in_queue = {conn for conn in self.pool.queue if conn}
-                idle_count = len(connections_in_queue)
-                in_use_count = len(self._connections) - idle_count
-                if idle_count > 0 or in_use_count > 0:
-                    pool_name = get_pool_name(self)
-                    if idle_count > 0:
-                        record_connection_count(
-                            pool_name=pool_name,
-                            connection_state=ConnectionState.IDLE,
-                            counter=-idle_count,
-                        )
-                    if in_use_count > 0:
-                        record_connection_count(
-                            pool_name=pool_name,
-                            connection_state=ConnectionState.USED,
-                            counter=-in_use_count,
-                        )
+                with self._lock:
+                    connections_in_queue = {conn for conn in self.pool.queue if conn}
+                    idle_count = len(connections_in_queue)
+                    in_use_count = len(self._connections) - idle_count
+                    if idle_count > 0 or in_use_count > 0:
+                        pool_name = get_pool_name(self)
+                        if idle_count > 0:
+                            record_connection_count(
+                                pool_name=pool_name,
+                                connection_state=ConnectionState.IDLE,
+                                counter=-idle_count,
+                            )
+                        if in_use_count > 0:
+                            record_connection_count(
+                                pool_name=pool_name,
+                                connection_state=ConnectionState.USED,
+                                counter=-in_use_count,
+                            )
 
             self.pool = self.queue_class(self.max_connections)
             while True:
@@ -3546,7 +3548,7 @@ class BlockingConnectionPool(ConnectionPool):
                 self.pool.put_nowait(None)
                 # Still need to decrement USED since it was counted in get_connection()
                 record_connection_count(
-                    pool_name=get_pool_name(self),
+                    pool_name="unknown_pool",
                     connection_state=ConnectionState.USED,
                     counter=-1,
                 )
