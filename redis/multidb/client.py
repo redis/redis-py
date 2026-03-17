@@ -422,8 +422,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         if self._bg_scheduler:
             try:
                 self._bg_scheduler.run_coro_sync(self._health_check_policy.close)
-            except RuntimeError:
-                # Scheduler already stopped or never started
+            except Exception:
                 pass
             self._bg_scheduler.stop()
 
