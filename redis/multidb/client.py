@@ -363,17 +363,6 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
                 )
 
                 db_results[unhealthy_db] = False
-            elif isinstance(result, Exception):
-                # Generic exceptions also indicate unhealthy database -
-                # update circuit state to maintain consistency with results
-                database.circuit.state = CBState.OPEN
-
-                logger.debug(
-                    "Health check failed, due to exception",
-                    exc_info=result,
-                )
-
-                db_results[database] = False
 
         return db_results
 

@@ -4,14 +4,18 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import List, Optional, Tuple, Union
 
-from redis.asyncio import Connection, ConnectionPool
 from redis.asyncio import Redis as AsyncRedis
+from redis.asyncio.cluster import RedisCluster as AsyncRedisCluster
 from redis.asyncio.http.http_client import DEFAULT_TIMEOUT, AsyncHTTPClientWrapper
 from redis.backoff import NoBackoff
 from redis.client import Redis as SyncRedis
+from redis.cluster import RedisCluster as SyncRedisCluster
 from redis.http.http_client import HttpClient
 from redis.multidb.exception import UnhealthyDatabaseException
 from redis.retry import Retry
+
+# Type alias for async Redis clients (standalone or cluster)
+AsyncRedisClientT = Union[AsyncRedis, AsyncRedisCluster]
 
 DEFAULT_HEALTH_CHECK_PROBES = 3
 DEFAULT_HEALTH_CHECK_INTERVAL = 5
@@ -46,8 +50,18 @@ class HealthCheck(ABC):
         pass
 
     @abstractmethod
-    async def check_health(self, database, connection: Connection) -> bool:
-        """Function to determine the health status."""
+    async def check_health(self, database, hc_client: AsyncRedisClientT) -> bool:
+        """
+        Function to determine the health status.
+
+        Args:
+            database: The database being checked
+            hc_client: A Redis client (AsyncRedis or AsyncRedisCluster) to use for
+                health checks. This client follows topology changes automatically.
+
+        Returns:
+            True if the database is healthy, False otherwise.
+        """
         pass
 
 
@@ -69,13 +83,15 @@ class HealthCheckPolicy(ABC):
         pass
 
     @abstractmethod
-    async def get_connections(self, database) -> list[ConnectionPool]:
-        """Get connections to the database."""
+    async def get_client(self, database) -> AsyncRedisClientT:
+        """
+        Get a health check client for the database.
+        """
         pass
 
     @abstractmethod
     async def close(self) -> None:
-        """Close all connections to the database."""
+        """Close all health check clients."""
         pass
 
 
@@ -85,7 +101,8 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
     """
 
     def __init__(self):
-        self._connections: dict[int, list[ConnectionPool]] = {}  # keyed by database id
+        # Single client per database, keyed by database id
+        self._clients: dict[int, AsyncRedisClientT] = {}
 
     async def execute(self, health_checks: List[HealthCheck], database) -> bool:
         """
@@ -120,38 +137,59 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
 
         return True
 
-    async def get_connections(self, database) -> list[ConnectionPool]:
-        db_id = id(database)
-        conns = self._connections.get(db_id)
+    async def get_client(self, database) -> AsyncRedisClientT:
+        """
+        Get or create a health check client for the database.
 
-        if conns is None:
+        Creates a single client instance per database that follows topology
+        changes automatically. For cluster databases, the client handles
+        node discovery and slot mapping internally.
+        """
+        db_id = id(database)
+        client = self._clients.get(db_id)
+
+        if client is None:
             # Check for both sync and async standalone Redis clients
             if isinstance(database.client, (AsyncRedis, SyncRedis)):
                 conn_kwargs = database.client.get_connection_kwargs()
-                conns = [ConnectionPool(**conn_kwargs)]
+                client = AsyncRedis(**conn_kwargs)
+            elif isinstance(database.client, (AsyncRedisCluster, SyncRedisCluster)):
+                # Cluster client - create a single cluster client that handles
+                # topology changes internally
+                conn_kwargs = database.client.connection_kwargs.copy()
+                startup_nodes = database.client.startup_nodes
+                # Use the first node as the startup node
+                if startup_nodes:
+                    first_node = startup_nodes[0]
+                    client = AsyncRedisCluster(
+                        host=first_node.host,
+                        port=first_node.port,
+                        **conn_kwargs,
+                    )
+                else:
+                    raise ValueError(
+                        "Cluster client has no nodes - cannot create health check client"
+                    )
             else:
-                # Cluster client - get connections for all nodes
-                conns = []
-                all_nodes = database.client.get_nodes()
-                for node in all_nodes:
-                    conn_kwargs = node.redis_connection.get_connection_kwargs()
-                    conns.append(ConnectionPool(**conn_kwargs))
-            self._connections[db_id] = conns
+                raise TypeError(f"Unsupported client type: {type(database.client)}")
+            self._clients[db_id] = client
 
-        return conns
+        return client
 
     async def close(self) -> None:
-        disc_tasks = []
+        """Close all health check clients."""
+        close_tasks = []
 
-        for db_id in self._connections:
-            for pool in self._connections[db_id]:
-                disc_tasks.append(asyncio.create_task(pool.disconnect()))
+        for client in self._clients.values():
+            if isinstance(client, AsyncRedisCluster):
+                close_tasks.append(asyncio.create_task(client.aclose()))
+            else:
+                close_tasks.append(asyncio.create_task(client.aclose()))
 
-        await asyncio.gather(
-            *disc_tasks,
-            return_exceptions=True,
-        )
-        self._connections.clear()
+        if close_tasks:
+            await asyncio.gather(*close_tasks, return_exceptions=True)
+
+        self._clients.clear()
 
     @abstractmethod
     async def _execute(self, health_check: HealthCheck, database) -> bool:
@@ -159,21 +197,6 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
         Executes health check against given database.
         """
         pass
-
-
-async def _check_health(
-    database, pool: ConnectionPool, health_check: HealthCheck
-) -> bool:
-    conn = await pool.get_connection()
-    try:
-        if not await health_check.check_health(database, conn):
-            return False
-        return True
-    except BaseException:
-        await conn.disconnect()
-        raise
-    finally:
-        await pool.release(conn)
 
 
 class HealthyAllPolicy(AbstractHealthCheckPolicy):
@@ -184,64 +207,60 @@ class HealthyAllPolicy(AbstractHealthCheckPolicy):
     async def _execute(self, health_check: HealthCheck, database) -> bool:
         """
         Executes health check against given database.
+
+        Uses a single client that handles topology changes automatically.
         """
-        conns = await self.get_connections(database)
+        client = await self.get_client(database)
         probes = health_check.health_check_probes
+
         for attempt in range(probes):
-            results = await asyncio.gather(
-                *[_check_health(database, pool, health_check) for pool in conns],
-                return_exceptions=True,
-            )
-            for result in results:
-                if isinstance(result, Exception):
-                    raise result
-                if not result:
-                    return False
+            result = await health_check.check_health(database, client)
+            if not result:
+                return False
 
             if attempt < probes - 1:
                 await asyncio.sleep(health_check.health_check_delay)
+
         return True
 
 
 class HealthyMajorityPolicy(AbstractHealthCheckPolicy):
     """
     Policy that returns True if a majority of health check probes are successful.
-    A probe is successful only if all nodes (connections) pass the health check.
+
+    Majority means more than half must pass:
+    - 3 probes: need 2+ to pass (1 failure allowed)
+    - 4 probes: need 3+ to pass (1 failure allowed, tie = unhealthy)
+    - 5 probes: need 3+ to pass (2 failures allowed)
     """
 
     async def _execute(self, health_check: HealthCheck, database) -> bool:
         """
         Executes health check against given database.
+
+        Uses a single client that handles topology changes automatically.
         """
         probes = health_check.health_check_probes
+        # Strict majority: more than half must pass
+        # (probes - 1) // 2 gives the max allowed failures
         allowed_unsuccessful_probes = (probes - 1) // 2
-        conns = await self.get_connections(database)
+        client = await self.get_client(database)
         last_exception = None
 
         for attempt in range(probes):
-            results = await asyncio.gather(
-                *[_check_health(database, pool, health_check) for pool in conns],
-                return_exceptions=True,
-            )
-
-            # A probe is successful only if ALL nodes pass (no exceptions, all True)
-            probe_failed = False
-            for result in results:
-                if isinstance(result, Exception):
-                    probe_failed = True
-                    last_exception = result
-                    break
-                elif not result:
-                    probe_failed = True
-                    break
-
-            if probe_failed:
+            try:
+                result = await health_check.check_health(database, client)
+                if not result:
+                    # Probe failed (returned False)
+                    allowed_unsuccessful_probes -= 1
+                    if allowed_unsuccessful_probes < 0:
+                        return False
+            except Exception as e:
+                # Probe failed (exception)
+                last_exception = e
                 allowed_unsuccessful_probes -= 1
                 if allowed_unsuccessful_probes < 0:
-                    # Majority of probes have failed
-                    if last_exception:
-                        raise last_exception
-                    return False
+                    raise last_exception
 
             if attempt < probes - 1:
                 await asyncio.sleep(health_check.health_check_delay)
@@ -254,38 +273,33 @@ class HealthyAnyPolicy(AbstractHealthCheckPolicy):
     Policy that returns True if at least one health check probe is successful.
     """
 
-    async def _execute(self, health_check: HealthCheck, database):
+    async def _execute(self, health_check: HealthCheck, database) -> bool:
         """
         Executes health check against given database.
+
+        Uses a single client that handles topology changes automatically.
         """
         probes = health_check.health_check_probes
         last_exception = None
-        is_healthy = False
-        conns = await self.get_connections(database)
+        client = await self.get_client(database)
 
         for attempt in range(probes):
-            results = await asyncio.gather(
-                *[_check_health(database, pool, health_check) for pool in conns],
-                return_exceptions=True,
-            )
-            # Check if all results are True (not False and not Exception)
-            if all(r is True for r in results):
-                is_healthy = True
-                break
-            # Store any exception for later
-            for r in results:
-                if isinstance(r, Exception):
-                    last_exception = r
-                    break
+            try:
+                result = await health_check.check_health(database, client)
+                if result:
+                    # At least one probe succeeded
+                    return True
+            except Exception as e:
+                last_exception = e
 
             if attempt < probes - 1:
                 await asyncio.sleep(health_check.health_check_delay)
 
-        # If all probes failed and we have an exception, raise it
-        if not is_healthy and last_exception:
+        # All probes failed
+        if last_exception:
             raise last_exception
 
-        return is_healthy
+        return False
 
 
 class HealthCheckPolicies(Enum):
@@ -323,7 +337,7 @@ class AbstractHealthCheck(HealthCheck):
         return self._health_check_timeout
 
     @abstractmethod
-    async def check_health(self, database, connection: Connection) -> bool:
+    async def check_health(self, database, hc_client: AsyncRedisClientT) -> bool:
         pass
 
 
@@ -332,10 +346,17 @@ class PingHealthCheck(AbstractHealthCheck):
     Health check based on PING command.
     """
 
-    async def check_health(self, database, connection: Connection) -> bool:
-        await connection.send_command("PING")
-        response = await connection.read_response()
-        return response in (b"PONG", "PONG")
+    async def check_health(self, database, hc_client: AsyncRedisClientT) -> bool:
+        if isinstance(hc_client, AsyncRedis):
+            return await hc_client.execute_command("PING")
+        else:
+            # For a cluster checks if all nodes are healthy.
+            all_nodes = hc_client.get_nodes()
+            for node in all_nodes:
+                if not await node.redis_connection.execute_command("PING"):
+                    return False
+
+            return True
 
 
 class LagAwareHealthCheck(AbstractHealthCheck):
@@ -402,7 +423,14 @@ class LagAwareHealthCheck(AbstractHealthCheck):
             health_check_timeout=health_check_timeout,
         )
 
-    async def check_health(self, database, connection: Connection) -> bool:
+    async def check_health(self, database, hc_client: AsyncRedisClientT) -> bool:
+        """
+        Check database health via Redis Enterprise REST API.
+
+        Note: The client parameter is not used for this health check as it
+        relies on the REST API instead of Redis protocol. The client is
+        accepted for interface compatibility.
+        """
         if database.health_check_url is None:
             raise ValueError(
                 "Database health check url is not set. Please check DatabaseConfig for the current database."
@@ -412,7 +440,7 @@ class LagAwareHealthCheck(AbstractHealthCheck):
             db_host = database.client.get_connection_kwargs()["host"]
         else:
             # Cluster client
-            db_host = database.client.startup_nodes[0].host
+            db_host = database.client.get_nodes()[0].host
 
         base_url = f"{database.health_check_url}:{self._rest_api_port}"
         self._http_client.client.base_url = base_url

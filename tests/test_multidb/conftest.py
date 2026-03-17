@@ -27,21 +27,17 @@ from redis.asyncio.multidb.healthcheck import (
 @pytest.fixture(autouse=True)
 def mock_health_check_connections():
     """
-    Mock connections for health check policies.
-    Uses real policy classes but mocks only the connection layer.
+    Mock clients for health check policies.
+    Uses real policy classes but mocks only the client layer.
     """
 
-    async def mock_get_connections(self, database):
-        mock_pool = AsyncMock()
-        mock_conn = AsyncMock()
-        mock_pool.get_connection = AsyncMock(return_value=mock_conn)
-        mock_pool.release = AsyncMock()
-        mock_pool.disconnect = AsyncMock()
-        return [mock_pool]
+    async def mock_get_client(self, database):
+        mock_client = AsyncMock()
+        mock_client.ping = AsyncMock(return_value=True)
+        mock_client.aclose = AsyncMock()
+        return mock_client
 
-    with patch.object(
-        AbstractHealthCheckPolicy, "get_connections", mock_get_connections
-    ):
+    with patch.object(AbstractHealthCheckPolicy, "get_client", mock_get_client):
         yield
 
 
