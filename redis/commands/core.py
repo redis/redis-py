@@ -30,6 +30,7 @@ from typing import (
     Set,
     Tuple,
     Union,
+    overload,
 )
 
 from redis.asyncio.observability.recorder import (
@@ -71,6 +72,8 @@ from redis.typing import (
     ResponseTypeOptionalLMPop,
     ResponseTypeStrAlgoResult,
     ScriptTextT,
+    StrAlgoIdxResponse,
+    StrAlgoIdxWithLenResponse,
     StrAlgoResultType,
     StreamIdT,
     TimeoutSecT,
@@ -2589,6 +2592,44 @@ class BasicKeyCommands(
 
         return self.execute_command("RESTORE", *params)
 
+    @overload
+    def set(
+        self,
+        name: KeyT,
+        value: EncodableT,
+        ex: Optional[ExpiryT] = None,
+        px: Optional[ExpiryT] = None,
+        nx: bool = False,
+        xx: bool = False,
+        keepttl: bool = False,
+        get: Literal[True] = ...,
+        exat: Optional[AbsExpiryT] = None,
+        pxat: Optional[AbsExpiryT] = None,
+        ifeq: Optional[Union[bytes, str]] = None,
+        ifne: Optional[Union[bytes, str]] = None,
+        ifdeq: Optional[str] = None,
+        ifdne: Optional[str] = None,
+    ) -> ResponseTypeOptionalAnyString: ...
+
+    @overload
+    def set(
+        self,
+        name: KeyT,
+        value: EncodableT,
+        ex: Optional[ExpiryT] = None,
+        px: Optional[ExpiryT] = None,
+        nx: bool = False,
+        xx: bool = False,
+        keepttl: bool = False,
+        get: Literal[False] = False,
+        exat: Optional[AbsExpiryT] = None,
+        pxat: Optional[AbsExpiryT] = None,
+        ifeq: Optional[Union[bytes, str]] = None,
+        ifne: Optional[Union[bytes, str]] = None,
+        ifdeq: Optional[str] = None,
+        ifdne: Optional[str] = None,
+    ) -> ResponseTypeBoolean: ...
+
     @experimental_args(["ifeq", "ifne", "ifdeq", "ifdne"])
     def set(
         self,
@@ -2606,7 +2647,7 @@ class BasicKeyCommands(
         ifne: Optional[Union[bytes, str]] = None,
         ifdeq: Optional[str] = None,  # hex digest of current value
         ifdne: Optional[str] = None,  # hex digest of current value
-    ) -> ResponseTypeBoolean:
+    ) -> Union[ResponseTypeBoolean, ResponseTypeOptionalAnyString]:
         """
         Set the value at key ``name`` to ``value``
 
@@ -2885,6 +2926,39 @@ class BasicKeyCommands(
         """
         return self.execute_command("UNLINK", *names)
 
+    @overload
+    def lcs(
+        self,
+        key1: str,
+        key2: str,
+        len: Optional[bool] = False,
+        idx: Literal[True] = ...,
+        minmatchlen: Optional[int] = 0,
+        withmatchlen: Optional[bool] = False,
+    ) -> Union[StrAlgoIdxResponse, StrAlgoIdxWithLenResponse]: ...
+
+    @overload
+    def lcs(
+        self,
+        key1: str,
+        key2: str,
+        len: Literal[True],
+        idx: Literal[False] = False,
+        minmatchlen: Optional[int] = 0,
+        withmatchlen: Optional[bool] = False,
+    ) -> ResponseTypeInteger: ...
+
+    @overload
+    def lcs(
+        self,
+        key1: str,
+        key2: str,
+        len: Literal[False] = False,
+        idx: Literal[False] = False,
+        minmatchlen: Optional[int] = 0,
+        withmatchlen: Optional[bool] = False,
+    ) -> ResponseTypeAnyString: ...
+
     def lcs(
         self,
         key1: str,
@@ -2893,7 +2967,7 @@ class BasicKeyCommands(
         idx: Optional[bool] = False,
         minmatchlen: Optional[int] = 0,
         withmatchlen: Optional[bool] = False,
-    ) -> ResponseTypeAnyString:
+    ) -> ResponseTypeStrAlgoResult:
         """
         Find the longest common subsequence between ``key1`` and ``key2``.
         If ``len`` is true the length of the match will will be returned.
