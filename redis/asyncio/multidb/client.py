@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable, List, Optional, Union
+from typing import Any, Awaitable, Callable, List, Literal, Optional, Union
 
 from redis.asyncio.client import PubSubHandler
 from redis.asyncio.multidb.command_executor import DefaultCommandExecutor
@@ -440,6 +440,8 @@ class Pipeline(AsyncRedisModuleCommands, AsyncCoreCommands):
     """
     Pipeline implementation for multiple logical Redis databases.
     """
+
+    _is_async_client: Literal[True] = True
 
     def __init__(self, client: MultiDBClient):
         self._command_stack = []

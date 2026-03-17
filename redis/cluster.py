@@ -554,6 +554,9 @@ class AbstractRedisCluster:
 class RedisCluster(
     AbstractRedisCluster, MaintNotificationsAbstractRedisCluster, RedisClusterCommands
 ):
+    # Type discrimination marker for @overload self-type pattern
+    _is_async_client: Literal[False] = False
+
     @classmethod
     def from_url(cls, url: str, **kwargs: Any) -> "RedisCluster":
         """

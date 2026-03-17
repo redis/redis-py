@@ -13,6 +13,7 @@ from typing import (
     Dict,
     Iterable,
     List,
+    Literal,
     Mapping,
     MutableMapping,
     Optional,
@@ -128,6 +129,9 @@ class Redis(
     configuration, an instance will either use a ConnectionPool, or
     Connection object to talk to redis.
     """
+
+    # Type discrimination marker for @overload self-type pattern
+    _is_async_client: Literal[True] = True
 
     response_callbacks: MutableMapping[Union[str, bytes], ResponseCallbackT]
 
