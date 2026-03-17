@@ -2,7 +2,7 @@
 
 ## Tasks
 
-1. Understand the introduction, basics, and cluster specifics of keyspache notifications in Redis OSS
+1. Understand the introduction, basics, and cluster specifics of keyspace notifications in Redis OSS
 2. Take the requirements into account
 3. Understand the implementation example based on the referenced PR
 4. Implement a similar abstraction for redis-py
@@ -33,7 +33,7 @@ Redis allows to notify clients whenever a key is modified. The mechanism that is
 By using a cluster client, it should be possible to:
 
 - Consume keyspace and key event notifications across the cluster via a new API for subscribing to `keyspace` and `keyevent` channels
-- Support multiple logical 
+- Support multiple logical databases for standalone clients (via `SELECT <db_index>`), while Redis OSS Cluster continues to use database 0 only
 - Take the differences in behavior between normally published messages and keyspace notifications into account - Keyspace notifications aren't propagated between nodes via the cluster bus
 - Automatically react to topology changes (e.g. node added/removed, slot migration, ...) by resubscribing to the relevant channels
 
@@ -46,9 +46,9 @@ Please take a look at https://github.com/StackExchange/StackExchange.Redis/pull/
 ## Test cases
 
 - Create a key on node 1 and verify that the notification about the creation of the key is received
-- Updated a key on node 1 and verify that the keyspace notification is received
+- Update a key on node 1 and verify that the keyspace notification is received
 - Update a key on node 2 and verify that the key event notification is received
 - Delete a key on node 3 and verify that the deletion notification is received
-- Modify a bunch of keys across nodes 1, 2 and 3 that all match the sane pattern and check that all notifications are received
+- Modify a bunch of keys across nodes 1, 2 and 3 that all match the same pattern and check that all notifications are received
 - Move a bunch of slots from node 1 to node 2 that impact some pre-defined keys and ensure that keyspace notifications and key event notifications are received correctly before and after the migration
 

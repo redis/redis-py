@@ -4,8 +4,8 @@ Tests for Redis keyspace notifications support.
 
 import pytest
 import time
+from unittest.mock import MagicMock, Mock
 
-import redis
 from redis import RedisCluster
 from redis.keyspace_notifications import (
     ClusterKeyspaceNotifications,
@@ -19,8 +19,10 @@ from redis.keyspace_notifications import (
 )
 
 
+@pytest.mark.onlycluster
 class TestEventType:
     """Tests for EventType constants."""
+
     def test_common_event_types(self):
         """Test that common event type constants are defined."""
         assert EventType.SET == "set"
@@ -28,6 +30,7 @@ class TestEventType:
         assert EventType.EXPIRE == "expire"
         assert EventType.EXPIRED == "expired"
         assert EventType.LPUSH == "lpush"
+
 
 class TestPatternDetection:
     """Tests for pattern detection function."""
@@ -112,6 +115,7 @@ class TestKeyspaceChannelClass:
         assert channel1 == channel2
         assert channel1 != channel3
 
+
 class TestKeyeventChannelClass:
     """Tests for KeyeventChannel class."""
 
@@ -190,6 +194,7 @@ class TestKeyeventChannelClass:
         channel3 = KeyeventChannel(EventType.DEL, db=0)
         assert channel1 == channel2
         assert channel1 != channel3
+
 
 class TestChannelDetection:
     """Tests for channel type detection functions."""
@@ -326,20 +331,14 @@ class TestKeyNotification:
 
     def test_try_parse(self):
         """Test the try_parse class method."""
-        notification = KeyNotification.try_parse(
-            "__keyspace@0__:mykey",
-            "set"
-        )
+        notification = KeyNotification.try_parse("__keyspace@0__:mykey", "set")
         assert notification is not None
         assert notification.key == "mykey"
         assert notification.event_type == "set"
 
     def test_try_parse_with_bytes(self):
         """Test try_parse with bytes input."""
-        notification = KeyNotification.try_parse(
-            b"__keyevent@0__:del",
-            b"mykey"
-        )
+        notification = KeyNotification.try_parse(b"__keyevent@0__:del", b"mykey")
         assert notification is not None
         assert notification.key == "mykey"
         assert notification.event_type == "del"
@@ -360,18 +359,14 @@ class TestKeyNotification:
 
     def test_database_wildcard(self):
         """Test parsing channel with wildcard database."""
-        notification = KeyNotification.try_parse(
-            "__keyspace@*__:mykey",
-            "set"
-        )
+        notification = KeyNotification.try_parse("__keyspace@*__:mykey", "set")
         assert notification is not None
         assert notification.database == -1  # -1 indicates wildcard
 
     def test_future_event_type(self):
         """Test that future/unknown event types work as plain strings."""
         notification = KeyNotification.try_parse(
-            "__keyspace@0__:mykey",
-            "some_future_event"
+            "__keyspace@0__:mykey", "some_future_event"
         )
         assert notification is not None
         # Event type is just the string - no UNKNOWN enum needed
@@ -408,20 +403,31 @@ class TestKeyNotificationIntegration:
         # Set a key to trigger notification
         redis_client.set("test_ksn:key1", "value1")
 
-        # Get the notification
-        msg = pubsub.get_message(timeout=1.0)
-        if msg:
-            notification = KeyNotification.from_message(msg)
-            if notification:
-                assert notification.key == "test_ksn:key1"
-                assert notification.event_type == "set"
+        # Poll until we receive a notification or timeout
+        # Use a deadline to avoid silent test passes when no notification is received
+        deadline = time.monotonic() + 5.0
+        notification = None
+        while time.monotonic() < deadline:
+            msg = pubsub.get_message(timeout=0.5)
+            if msg:
+                notification = KeyNotification.from_message(msg)
+                if notification:
+                    break
 
         pubsub.close()
         redis_client.delete("test_ksn:key1")
 
+        # Assert we actually received a notification
+        if notification is None:
+            pytest.skip(
+                "No keyspace notification received - server may not be emitting notifications"
+            )
+
+        assert notification.key == "test_ksn:key1"
+        assert notification.event_type == "set"
+
 
 class TestClusterKeyspaceNotificationsMocked:
-
     """
     Mock-based unit tests for ClusterKeyspaceNotifications.
 
@@ -432,8 +438,6 @@ class TestClusterKeyspaceNotificationsMocked:
 
     def _create_mock_node(self, name, host, port, server_type="primary"):
         """Create a mock ClusterNode."""
-        from unittest.mock import Mock, MagicMock
-
         node = Mock()
         node.name = name
         node.host = host
@@ -451,7 +455,6 @@ class TestClusterKeyspaceNotificationsMocked:
 
     def _create_mock_cluster(self, nodes):
         """Create a mock RedisCluster with the given nodes."""
-        from unittest.mock import Mock
 
         cluster = Mock()
         cluster.get_nodes = Mock(return_value=nodes)
@@ -481,7 +484,6 @@ class TestClusterKeyspaceNotificationsMocked:
         notifications should continue to work after slot migration without
         any manual intervention.
         """
-        from unittest.mock import Mock
 
         # Create two mock primary nodes
         node1, pubsub1 = self._create_mock_node(
@@ -569,7 +571,6 @@ class TestClusterKeyspaceNotificationsMocked:
 
         This is the key design decision that makes slot migrations transparent.
         """
-        from unittest.mock import Mock
 
         # Create three mock primary nodes
         node1, pubsub1 = self._create_mock_node(
@@ -613,7 +614,6 @@ class TestClusterKeyspaceNotificationsMocked:
         """
         Test that pattern subscriptions are created on all primary nodes.
         """
-        from unittest.mock import Mock
 
         # Create two mock primary nodes
         node1, pubsub1 = self._create_mock_node(
@@ -637,10 +637,13 @@ class TestClusterKeyspaceNotificationsMocked:
         # Cleanup
         notifications.close()
 
+
+@pytest.mark.onlycluster
 class TestClusterKeyspaceNotifications:
     """
     A very basic usability test for subscribing to keyspace notifications in a cluster.
     """
+
     def test_keyspace_subscribe(self):
         cluster = RedisCluster.from_url("redis://localhost:16379")
         notifications = ClusterKeyspaceNotifications(cluster)
@@ -648,7 +651,7 @@ class TestClusterKeyspaceNotifications:
         commands = [
             cluster.set("test:key", "value"),
             cluster.set("test:key2", "value2"),
-            cluster.delete("test:key2")
+            cluster.delete("test:key2"),
         ]
 
         for i in range(len(commands)):
@@ -656,7 +659,7 @@ class TestClusterKeyspaceNotifications:
             print(f"Message: {msg}")
             assert msg is not None
             assert msg.key.startswith("test:")
-            if i == len(commands)-1:
+            if i == len(commands) - 1:
                 assert msg.event_type == "del"
             else:
                 assert msg.event_type == "set"
@@ -666,6 +669,7 @@ class TestClusterKeyspaceNotifications:
     """
     Use a handler in a background thread with run_in_thread().
     """
+
     def test_keyspace_subscribe_with_handler(self):
         received = []
 
@@ -705,6 +709,7 @@ class TestClusterKeyspaceNotifications:
     """
     A very basic usability test for subscribing to keyevent notifications in a cluster.
     """
+
     def test_keyevent_subscribe(self):
         cluster = RedisCluster.from_url("redis://localhost:16379")
         notifications = ClusterKeyspaceNotifications(cluster)
