@@ -24,13 +24,14 @@ from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
 from redis.observability.attributes import (
+    ConnectionState,
     GeoFailoverReason,
     PubSubDirection,
 )
 from redis.observability.metrics import CloseReason, RedisMetricsCollector
 from redis.observability.providers import get_observability_instance
 from redis.observability.registry import get_observables_registry_instance
-from redis.utils import str_if_bytes
+from redis.utils import deprecated_function, str_if_bytes
 
 if TYPE_CHECKING:
     from redis.asyncio.connection import ConnectionPool
@@ -168,6 +169,38 @@ async def record_connection_create_time(
         pass
 
 
+async def record_connection_count(
+    pool_name: str,
+    connection_state: ConnectionState,
+    counter: int = 1,
+) -> None:
+    """
+    Record a connection count change for a single state.
+
+    Args:
+        pool_name: Connection pool identifier
+        connection_state: State to update (IDLE or USED)
+        counter: Number to add (positive) or subtract (negative)
+    """
+    collector = _get_or_create_collector()
+    if collector is None:
+        return
+
+    try:
+        collector.record_connection_count(
+            pool_name=pool_name,
+            connection_state=connection_state,
+            counter=counter,
+        )
+    except Exception:
+        pass
+
+
+@deprecated_function(
+    reason="Connection count is now tracked via record_connection_count(). "
+    "This functionality will be removed in the next major version",
+    version="7.4.0",
+)
 async def init_connection_count() -> None:
     """
     Initialize observable gauge for connection count metric.
@@ -194,6 +227,11 @@ async def init_connection_count() -> None:
         pass
 
 
+@deprecated_function(
+    reason="Connection count is now tracked via record_connection_count(). "
+    "This functionality will be removed in the next major version",
+    version="7.4.0",
+)
 async def register_pools_connection_count(
     connection_pools: List["ConnectionPool"],
 ) -> None:
@@ -301,7 +339,7 @@ async def record_connection_relaxed_timeout(
     Record a connection timeout relaxation event.
 
     Args:
-        connection_name: Connection identifier
+        connection_name: Connection identifier (pool name)
         maint_notification: Maintenance notification type
         relaxed: True to count up (relaxed), False to count down (unrelaxed)
     """
