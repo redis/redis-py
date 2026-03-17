@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import threading
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Literal, Optional
 
 from redis.asyncio.multidb.healthcheck import HealthCheck, HealthCheckPolicy
 from redis.background import BackgroundScheduler
@@ -438,6 +438,8 @@ class Pipeline(RedisModuleCommands, CoreCommands):
     """
     Pipeline implementation for multiple logical Redis databases.
     """
+
+    _is_async_client: Literal[False] = False
 
     def __init__(self, client: MultiDBClient):
         self._command_stack = []

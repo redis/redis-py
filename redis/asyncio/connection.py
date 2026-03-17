@@ -59,6 +59,7 @@ else:
 
 from redis.asyncio.observability.recorder import (
     record_connection_closed,
+    record_connection_count,
     record_connection_create_time,
     record_connection_wait_time,
     record_error_count,
@@ -1308,8 +1309,23 @@ class ConnectionPool:
         if self._event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
 
+    # Keys that should be redacted in __repr__ to avoid exposing sensitive information
+    SENSITIVE_REPR_KEYS = frozenset(
+        {
+            "password",
+            "username",
+            "ssl_password",
+            "credential_provider",
+        }
+    )
+
     def __repr__(self):
-        conn_kwargs = ",".join([f"{k}={v}" for k, v in self.connection_kwargs.items()])
+        conn_kwargs = ",".join(
+            [
+                f"{k}={'<REDACTED>' if k in self.SENSITIVE_REPR_KEYS else v}"
+                for k, v in self.connection_kwargs.items()
+            ]
+        )
         return (
             f"<{self.__class__.__module__}.{self.__class__.__name__}"
             f"(<{self.connection_class.__module__}.{self.connection_class.__name__}"
@@ -1317,8 +1333,66 @@ class ConnectionPool:
         )
 
     def reset(self):
+        # Record metrics for connections being removed before clearing
+        # (only if attributes exist - they won't during __init__)
+        if hasattr(self, "_available_connections") and hasattr(
+            self, "_in_use_connections"
+        ):
+            idle_count = len(self._available_connections)
+            in_use_count = len(self._in_use_connections)
+            if idle_count > 0 or in_use_count > 0:
+                pool_name = get_pool_name(self)
+                # Note: Using sync version since reset() is sync
+                from redis.observability.recorder import (
+                    record_connection_count as sync_record_connection_count,
+                )
+
+                if idle_count > 0:
+                    sync_record_connection_count(
+                        pool_name=pool_name,
+                        connection_state=ConnectionState.IDLE,
+                        counter=-idle_count,
+                    )
+                if in_use_count > 0:
+                    sync_record_connection_count(
+                        pool_name=pool_name,
+                        connection_state=ConnectionState.USED,
+                        counter=-in_use_count,
+                    )
+
         self._available_connections = []
         self._in_use_connections = weakref.WeakSet()
+
+    def __del__(self) -> None:
+        """Clean up connection pool and record metrics when garbage collected."""
+        try:
+            if not hasattr(self, "_available_connections") or not hasattr(
+                self, "_in_use_connections"
+            ):
+                return
+            idle_count = len(self._available_connections)
+            in_use_count = len(self._in_use_connections)
+            if idle_count > 0 or in_use_count > 0:
+                pool_name = get_pool_name(self)
+                # Note: Using sync version since __del__ is sync
+                from redis.observability.recorder import (
+                    record_connection_count as sync_record_connection_count,
+                )
+
+                if idle_count > 0:
+                    sync_record_connection_count(
+                        pool_name=pool_name,
+                        connection_state=ConnectionState.IDLE,
+                        counter=-idle_count,
+                    )
+                if in_use_count > 0:
+                    sync_record_connection_count(
+                        pool_name=pool_name,
+                        connection_state=ConnectionState.USED,
+                        counter=-in_use_count,
+                    )
+        except Exception:
+            pass
 
     def can_get_connection(self) -> bool:
         """Return True if a connection can be retrieved from the pool."""
@@ -1345,6 +1419,29 @@ class ConnectionPool:
                 self._in_use_connections
             )
             is_created = connections_after > connections_before
+
+        # Record state transition for observability
+        # This ensures counters stay balanced if ensure_connection() fails and release() is called
+        pool_name = get_pool_name(self)
+        if is_created:
+            # New connection created and acquired: just USED +1
+            await record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.USED,
+                counter=1,
+            )
+        else:
+            # Existing connection acquired from pool: IDLE -> USED
+            await record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.IDLE,
+                counter=-1,
+            )
+            await record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.USED,
+                counter=1,
+            )
 
         # We now perform the connection check outside of the lock.
         try:
@@ -1383,6 +1480,8 @@ class ConnectionPool:
 
     def make_connection(self):
         """Create a new connection.  Can be overridden by child classes."""
+        # Note: We don't record IDLE here because async uses a sync make_connection
+        # but async record_connection_count. The recording is handled in get_connection.
         return self.connection_class(**self.connection_kwargs)
 
     async def ensure_connection(self, connection: AbstractConnection):
@@ -1406,12 +1505,26 @@ class ConnectionPool:
         # Connections should always be returned to the correct pool,
         # not doing so is an error that will cause an exception here.
         self._in_use_connections.remove(connection)
+
         if connection.should_reconnect():
             await connection.disconnect()
 
         self._available_connections.append(connection)
         await self._event_dispatcher.dispatch_async(
             AsyncAfterConnectionReleasedEvent(connection)
+        )
+
+        # Record state transition: USED -> IDLE
+        pool_name = get_pool_name(self)
+        await record_connection_count(
+            pool_name=pool_name,
+            connection_state=ConnectionState.USED,
+            counter=-1,
+        )
+        await record_connection_count(
+            pool_name=pool_name,
+            connection_state=ConnectionState.IDLE,
+            counter=1,
         )
 
     async def disconnect(self, inuse_connections: bool = True):
@@ -1432,6 +1545,7 @@ class ConnectionPool:
             *(connection.disconnect() for connection in connections),
             return_exceptions=True,
         )
+
         exc = next((r for r in resp if isinstance(r, BaseException)), None)
         if exc:
             raise exc
