@@ -12,6 +12,7 @@ from redis.connection import (
 )
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.keyspace_notifications import (
+    ChannelType,
     ClusterKeyspaceNotifications,
     EventType,
     KeyeventChannel,
@@ -20,9 +21,6 @@ from redis.keyspace_notifications import (
     KeyspaceNotifications,
     NotifyKeyspaceEvents,
     StandaloneKeyspaceWorkerThread,
-    is_keyevent_channel,
-    is_keyspace_channel,
-    is_keyspace_notification_channel,
 )
 from redis.exceptions import (
     AuthenticationError,
@@ -70,6 +68,7 @@ __all__ = [
     "AuthenticationWrongNumberOfArgsError",
     "BlockingConnectionPool",
     "BusyLoadingError",
+    "ChannelType",
     "ChildDeadlockedError",
     "ClusterKeyspaceNotifications",
     "Connection",
@@ -84,9 +83,6 @@ __all__ = [
     "default_backoff",
     "InvalidPipelineStack",
     "InvalidResponse",
-    "is_keyevent_channel",
-    "is_keyspace_channel",
-    "is_keyspace_notification_channel",
     "KeyeventChannel",
     "KeyNotification",
     "KeyspaceChannel",

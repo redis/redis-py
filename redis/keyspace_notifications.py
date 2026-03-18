@@ -6,23 +6,22 @@ notifications. Keyspace notifications allow clients to receive events when
 keys are modified in Redis.
 
 Note: Keyspace notifications must be enabled on the Redis server via the
-``notify-keyspace-events`` configuration option. See the Redis documentation
-for details: https://redis.io/docs/latest/develop/pubsub/keyspace-notifications/
+``notify-keyspace-events`` configuration option. This is a server-side
+configuration that should be done by your infrastructure/operations team.
+See the Redis documentation for details:
+https://redis.io/docs/latest/develop/pubsub/keyspace-notifications/
 
 Standalone Redis Example:
     >>> from redis import Redis
     >>> from redis.keyspace_notifications import (
     ...     KeyspaceNotifications,
     ...     KeyspaceChannel,
-    ...     NotifyKeyspaceEvents,
     ...     EventType,
     ... )
     >>>
     >>> r = Redis()
-    >>> # Enable notifications (or configure on server)
-    >>> ksn = KeyspaceNotifications(
-    ...     r, notify_keyspace_events=NotifyKeyspaceEvents.ALL
-    ... )
+    >>> # Server must have notify-keyspace-events configured (e.g., "KEA")
+    >>> ksn = KeyspaceNotifications(r)
     >>>
     >>> # Subscribe using Channel class (patterns auto-detected)
     >>> channel = KeyspaceChannel("user:*")
@@ -39,15 +38,12 @@ Redis Cluster Example:
     >>> from redis.keyspace_notifications import (
     ...     ClusterKeyspaceNotifications,
     ...     KeyspaceChannel,
-    ...     NotifyKeyspaceEvents,
     ...     EventType,
     ... )
     >>>
     >>> rc = RedisCluster(host="localhost", port=7000)
-    >>> # Enable notifications on all cluster nodes (or configure on server)
-    >>> ksn = ClusterKeyspaceNotifications(
-    ...     rc, notify_keyspace_events=NotifyKeyspaceEvents.ALL
-    ... )
+    >>> # Server must have notify-keyspace-events configured (e.g., "KEA")
+    >>> ksn = ClusterKeyspaceNotifications(rc)
     >>>
     >>> # Subscribe using Channel class (patterns auto-detected)
     >>> channel = KeyspaceChannel("user:*")
@@ -72,7 +68,6 @@ from redis.exceptions import (
     ConnectionError,
     MovedError,
     RedisError,
-    ResponseError,
     TimeoutError,
 )
 from redis.utils import safe_str
@@ -204,18 +199,18 @@ class EventType:
 
 class NotifyKeyspaceEvents(str, Enum):
     """
-    Configuration values for Redis notify-keyspace-events setting.
+    Configuration values for Redis notify-keyspace-events server setting.
 
     These values control which keyspace notifications Redis will publish.
     Multiple flags can be combined (e.g., "Kg" for keyspace + generic events).
 
+    Note: This enum documents the available configuration values. The actual
+    configuration must be done on the Redis server side, not by the client.
+
     See: https://redis.io/docs/latest/develop/use/keyspace-notifications/
 
-    Example:
-        >>> notifications = ClusterKeyspaceNotifications(
-        ...     cluster,
-        ...     notify_keyspace_events=NotifyKeyspaceEvents.ALL
-        ... )
+    Example server configuration (redis.conf or CONFIG SET):
+        notify-keyspace-events KEA
     """
 
     # Composite presets (most commonly used)
@@ -605,21 +600,57 @@ class KeyeventChannel:
         return hash(self._channel_str)
 
 
-def is_keyspace_channel(channel: Union[str, bytes]) -> bool:
-    """Check if a channel is a keyspace notification channel."""
-    channel = safe_str(channel)
-    return channel.startswith(KeyspaceChannel.PREFIX)
+class ChannelType(Enum):
+    """
+    Enum representing the type of a Redis keyspace notification channel.
+
+    Redis provides two types of keyspace notifications:
+    - KEYSPACE: Notifies about events on specific keys. The channel format is
+      `__keyspace@{db}__:{key}` and the message data contains the event type.
+    - KEYEVENT: Notifies about specific event types. The channel format is
+      `__keyevent@{db}__:{event}` and the message data contains the key name.
+
+    Examples:
+        >>> get_channel_type("__keyspace@0__:mykey")
+        ChannelType.KEYSPACE
+        >>> get_channel_type("__keyevent@0__:set")
+        ChannelType.KEYEVENT
+        >>> get_channel_type("regular_channel") is None
+        True
+    """
+
+    KEYSPACE = "keyspace"
+    KEYEVENT = "keyevent"
 
 
-def is_keyevent_channel(channel: Union[str, bytes]) -> bool:
-    """Check if a channel is a keyevent notification channel."""
-    channel = safe_str(channel)
-    return channel.startswith(KeyeventChannel.PREFIX)
+def get_channel_type(channel: Union[str, bytes]) -> Optional[ChannelType]:
+    """
+    Determine the type of a Redis keyspace notification channel.
 
+    Args:
+        channel: The channel name to check (string or bytes).
 
-def is_keyspace_notification_channel(channel: Union[str, bytes]) -> bool:
-    """Check if a channel is any type of keyspace notification channel."""
-    return is_keyspace_channel(channel) or is_keyevent_channel(channel)
+    Returns:
+        ChannelType.KEYSPACE if it's a keyspace notification channel,
+        ChannelType.KEYEVENT if it's a keyevent notification channel,
+        None if it's not a keyspace notification channel.
+
+    Examples:
+        >>> get_channel_type("__keyspace@0__:mykey")
+        ChannelType.KEYSPACE
+        >>> get_channel_type("__keyevent@0__:set")
+        ChannelType.KEYEVENT
+        >>> get_channel_type("regular_channel") is None
+        True
+        >>> get_channel_type(b"__keyspace@0__:mykey")
+        ChannelType.KEYSPACE
+    """
+    channel_str = safe_str(channel)
+    if channel_str.startswith(KeyspaceChannel.PREFIX):
+        return ChannelType.KEYSPACE
+    if channel_str.startswith(KeyeventChannel.PREFIX):
+        return ChannelType.KEYEVENT
+    return None
 
 
 def _is_pattern(
@@ -686,21 +717,19 @@ class KeyspaceNotifications:
         redis_client,
         key_prefix: Optional[Union[str, bytes]] = None,
         ignore_subscribe_messages: bool = True,
-        notify_keyspace_events: Optional[Union[str, NotifyKeyspaceEvents]] = None,
     ):
         """
         Initialize the standalone keyspace notification manager.
+
+        Note: Keyspace notifications must be enabled on the Redis server via
+        the ``notify-keyspace-events`` configuration option. This is a server-side
+        configuration that should be done by your infrastructure/operations team.
 
         Args:
             redis_client: A Redis client instance
             key_prefix: Optional prefix to filter and strip from keys in notifications
             ignore_subscribe_messages: If True, subscribe/unsubscribe confirmations
                                       are not returned by get_message/listen
-            notify_keyspace_events: Configures the notify-keyspace-events setting.
-                                   Defaults to None (no configuration).
-                                   Set to NotifyKeyspaceEvents.ALL or a string like "KEA"
-                                   to enable notifications. Note: CONFIG SET may fail on
-                                   managed Redis services where CONFIG is disabled.
         """
         self.redis = redis_client
         self.key_prefix = key_prefix
@@ -712,42 +741,6 @@ class KeyspaceNotifications:
         self._subscribed_patterns: Dict[str, Any] = {}  # pattern -> handler
         self._subscribed_channels: Dict[str, Any] = {}  # channel -> handler
         self._closed = False
-
-        # Store the notify-keyspace-events configuration
-        self._notify_keyspace_events: Optional[str] = None
-        if notify_keyspace_events is not None:
-            self._notify_keyspace_events = (
-                notify_keyspace_events.value
-                if isinstance(notify_keyspace_events, NotifyKeyspaceEvents)
-                else notify_keyspace_events
-            )
-            self._configure_keyspace_notifications(self._notify_keyspace_events)
-
-    def _configure_keyspace_notifications(
-        self, events: Union[str, NotifyKeyspaceEvents]
-    ) -> None:
-        """
-        Configure notify-keyspace-events on the Redis server.
-
-        Args:
-            events: The notify-keyspace-events configuration value
-
-        Raises:
-            RedisError: If CONFIG SET fails (e.g., on managed Redis)
-        """
-        events_str = (
-            events.value if isinstance(events, NotifyKeyspaceEvents) else events
-        )
-        try:
-            self.redis.config_set("notify-keyspace-events", events_str)
-        except ResponseError as e:
-            raise RedisError(
-                f"Failed to configure notify-keyspace-events: {e}. "
-                f"This often occurs on managed Redis services where CONFIG "
-                f"is disabled. Either configure keyspace notifications on your "
-                f"Redis server/service directly, or set notify_keyspace_events=None "
-                f"to skip automatic configuration."
-            ) from e
 
     def subscribe(
         self,
@@ -1095,22 +1088,19 @@ class ClusterKeyspaceNotifications:
         redis_cluster,
         key_prefix: Optional[Union[str, bytes]] = None,
         ignore_subscribe_messages: bool = True,
-        notify_keyspace_events: Optional[Union[str, NotifyKeyspaceEvents]] = None,
     ):
         """
         Initialize the cluster keyspace notification manager.
+
+        Note: Keyspace notifications must be enabled on all Redis cluster nodes via
+        the ``notify-keyspace-events`` configuration option. This is a server-side
+        configuration that should be done by your infrastructure/operations team.
 
         Args:
             redis_cluster: A RedisCluster instance
             key_prefix: Optional prefix to filter and strip from keys in notifications
             ignore_subscribe_messages: If True, subscribe/unsubscribe confirmations
                                       are not returned by get_message/listen
-            notify_keyspace_events: Configures the notify-keyspace-events setting on
-                                   all cluster nodes. Defaults to None (no configuration).
-                                   Set to NotifyKeyspaceEvents.ALL or a string like "KEA"
-                                   to enable notifications. Note: CONFIG SET may fail on
-                                   managed Redis services where CONFIG is disabled.
-                                   See NotifyKeyspaceEvents for available options.
         """
         self.cluster = redis_cluster
         self.key_prefix = key_prefix
@@ -1135,53 +1125,6 @@ class ClusterKeyspaceNotifications:
         # Periodic topology check interval (in seconds)
         self._topology_check_interval: float = 1.0
         self._last_topology_check: float = 0.0
-
-        # Store the notify-keyspace-events configuration for applying to new nodes
-        self._notify_keyspace_events: Optional[str] = None
-        if notify_keyspace_events is not None:
-            # Normalize to string value for storage
-            self._notify_keyspace_events = (
-                notify_keyspace_events.value
-                if isinstance(notify_keyspace_events, NotifyKeyspaceEvents)
-                else notify_keyspace_events
-            )
-
-        # Enable keyspace notifications on all nodes if requested
-        if self._notify_keyspace_events is not None:
-            self._configure_keyspace_notifications(self._notify_keyspace_events)
-
-    def _configure_keyspace_notifications(
-        self, events: Union[str, NotifyKeyspaceEvents]
-    ) -> None:
-        """
-        Configure notify-keyspace-events on all primary nodes in the cluster.
-
-        Args:
-            events: The notify-keyspace-events configuration value
-                   (e.g., NotifyKeyspaceEvents.ALL or "KEA")
-
-        Raises:
-            RedisError: If CONFIG SET fails (e.g., on managed Redis where
-                       CONFIG is disabled). The error message includes
-                       guidance on how to proceed.
-        """
-        # Get the string value (handles both enum and plain strings)
-        events_str = (
-            events.value if isinstance(events, NotifyKeyspaceEvents) else events
-        )
-        for node in self._get_all_primary_nodes():
-            redis_conn = self.cluster.get_redis_connection(node)
-            try:
-                redis_conn.config_set("notify-keyspace-events", events_str)
-            except ResponseError as e:
-                raise RedisError(
-                    f"Failed to configure notify-keyspace-events on node "
-                    f"{node.name}: {e}. This often occurs on managed Redis "
-                    f"services where CONFIG is disabled. Either configure "
-                    f"keyspace notifications on your Redis server/service "
-                    f"directly, or set notify_keyspace_events=None to skip "
-                    f"automatic configuration."
-                ) from e
 
     def _get_all_primary_nodes(self):
         """Get all primary nodes in the cluster."""
@@ -1533,8 +1476,7 @@ class ClusterKeyspaceNotifications:
                     ) or self._subscribed_channels.get(message.get("channel"))
                     if handler:
                         handler(notification)
-                        # Continue polling for more messages
-                        continue
+                        return None  # Handler consumed the notification
                     return notification
                 # If not a keyspace notification, continue checking other nodes
 
@@ -1638,18 +1580,6 @@ class ClusterKeyspaceNotifications:
         new_nodes = set(current_primaries.keys()) - set(self._node_pubsubs.keys())
         for node_name in new_nodes:
             node = current_primaries[node_name]
-
-            # Configure notify-keyspace-events on new node before subscribing
-            if self._notify_keyspace_events is not None:
-                try:
-                    redis_conn = self.cluster.get_redis_connection(node)
-                    redis_conn.config_set(
-                        "notify-keyspace-events", self._notify_keyspace_events
-                    )
-                except Exception:
-                    # Log or ignore - node may not be ready yet
-                    pass
-
             pubsub = self._ensure_node_pubsub(node)
 
             if self._subscribed_patterns:

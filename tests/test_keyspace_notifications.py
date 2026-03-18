@@ -6,8 +6,8 @@ import pytest
 import time
 from unittest.mock import MagicMock, Mock
 
-from redis import RedisCluster
 from redis.keyspace_notifications import (
+    ChannelType,
     ClusterKeyspaceNotifications,
     EventType,
     KeyeventChannel,
@@ -15,13 +15,10 @@ from redis.keyspace_notifications import (
     KeyspaceChannel,
     KeyspaceNotifications,
     _is_pattern,
-    is_keyevent_channel,
-    is_keyspace_channel,
-    is_keyspace_notification_channel,
+    get_channel_type,
 )
 
 
-@pytest.mark.onlycluster
 class TestEventType:
     """Tests for EventType constants."""
 
@@ -76,8 +73,6 @@ class TestKeyspaceChannelClass:
 
     def test_basic_channel(self):
         """Test basic keyspace channel creation."""
-        from redis.keyspace_notifications import KeyspaceChannel
-
         channel = KeyspaceChannel("mykey", db=0)
         assert str(channel) == "__keyspace@0__:mykey"
         assert channel.key_or_pattern == "mykey"
@@ -85,32 +80,24 @@ class TestKeyspaceChannelClass:
 
     def test_channel_default_db(self):
         """Test keyspace channel defaults to database 0."""
-        from redis.keyspace_notifications import KeyspaceChannel
-
         channel = KeyspaceChannel("mykey")
         assert str(channel) == "__keyspace@0__:mykey"
         assert channel.db == 0
 
     def test_pattern_channel(self):
         """Test keyspace channel with pattern."""
-        from redis.keyspace_notifications import KeyspaceChannel
-
         channel = KeyspaceChannel("user:*", db=0)
         assert str(channel) == "__keyspace@0__:user:*"
         assert channel.is_pattern is True
 
     def test_equality_with_string(self):
         """Test equality comparison with string."""
-        from redis.keyspace_notifications import KeyspaceChannel
-
         channel = KeyspaceChannel("mykey", db=0)
         assert channel == "__keyspace@0__:mykey"
         assert channel != "__keyspace@1__:mykey"
 
     def test_equality_with_channel(self):
         """Test equality comparison with another channel."""
-        from redis.keyspace_notifications import KeyspaceChannel
-
         channel1 = KeyspaceChannel("mykey", db=0)
         channel2 = KeyspaceChannel("mykey", db=0)
         channel3 = KeyspaceChannel("otherkey", db=0)
@@ -123,8 +110,6 @@ class TestKeyeventChannelClass:
 
     def test_basic_channel(self):
         """Test basic keyevent channel creation."""
-        from redis.keyspace_notifications import KeyeventChannel
-
         channel = KeyeventChannel(EventType.SET, db=0)
         assert str(channel) == "__keyevent@0__:set"
         assert channel.event == "set"
@@ -132,23 +117,17 @@ class TestKeyeventChannelClass:
 
     def test_channel_with_string_event(self):
         """Test keyevent channel with string event type."""
-        from redis.keyspace_notifications import KeyeventChannel
-
         channel = KeyeventChannel("del", db=0)
         assert str(channel) == "__keyevent@0__:del"
 
     def test_channel_default_db(self):
         """Test keyevent channel defaults to database 0."""
-        from redis.keyspace_notifications import KeyeventChannel
-
         channel = KeyeventChannel(EventType.SET)
         assert str(channel) == "__keyevent@0__:set"
         assert channel.db == 0
 
     def test_pattern_channel(self):
         """Test keyevent channel with pattern."""
-        from redis.keyspace_notifications import KeyeventChannel
-
         # Pattern for all GET-related events (get, getex, getdel, getset)
         channel = KeyeventChannel("get*")
         assert str(channel) == "__keyevent@0__:get*"
@@ -160,16 +139,12 @@ class TestKeyeventChannelClass:
 
     def test_all_events_factory(self):
         """Test KeyeventChannel.all_events() factory method."""
-        from redis.keyspace_notifications import KeyeventChannel
-
         channel = KeyeventChannel.all_events()
         assert str(channel) == "__keyevent@0__:*"
         assert channel.is_pattern is True
 
     def test_is_pattern_property(self):
         """Test is_pattern property."""
-        from redis.keyspace_notifications import KeyeventChannel
-
         exact = KeyeventChannel(EventType.SET)
         assert exact.is_pattern is False
 
@@ -181,16 +156,12 @@ class TestKeyeventChannelClass:
 
     def test_equality_with_string(self):
         """Test equality comparison with string."""
-        from redis.keyspace_notifications import KeyeventChannel
-
         channel = KeyeventChannel(EventType.SET, db=0)
         assert channel == "__keyevent@0__:set"
         assert channel != "__keyevent@1__:set"
 
     def test_equality_with_channel(self):
         """Test equality comparison with another channel."""
-        from redis.keyspace_notifications import KeyeventChannel
-
         channel1 = KeyeventChannel(EventType.SET, db=0)
         channel2 = KeyeventChannel("set", db=0)
         channel3 = KeyeventChannel(EventType.DEL, db=0)
@@ -199,32 +170,33 @@ class TestKeyeventChannelClass:
 
 
 class TestChannelDetection:
-    """Tests for channel type detection functions."""
+    """Tests for channel type detection using get_channel_type()."""
 
-    def test_is_keyspace_channel(self):
+    def test_keyspace_channel_detection(self):
         """Test keyspace channel detection."""
-        assert is_keyspace_channel("__keyspace@0__:mykey") is True
-        assert is_keyspace_channel("__keyspace@5__:user:123") is True
-        assert is_keyspace_channel("__keyevent@0__:set") is False
-        assert is_keyspace_channel("regular_channel") is False
+        assert get_channel_type("__keyspace@0__:mykey") == ChannelType.KEYSPACE
+        assert get_channel_type("__keyspace@5__:user:123") == ChannelType.KEYSPACE
+        assert get_channel_type("__keyevent@0__:set") != ChannelType.KEYSPACE
+        assert get_channel_type("regular_channel") is None
 
-    def test_is_keyevent_channel(self):
+    def test_keyevent_channel_detection(self):
         """Test keyevent channel detection."""
-        assert is_keyevent_channel("__keyevent@0__:set") is True
-        assert is_keyevent_channel("__keyevent@5__:del") is True
-        assert is_keyevent_channel("__keyspace@0__:mykey") is False
-        assert is_keyevent_channel("regular_channel") is False
+        assert get_channel_type("__keyevent@0__:set") == ChannelType.KEYEVENT
+        assert get_channel_type("__keyevent@5__:del") == ChannelType.KEYEVENT
+        assert get_channel_type("__keyspace@0__:mykey") != ChannelType.KEYEVENT
+        assert get_channel_type("regular_channel") is None
 
-    def test_is_keyspace_notification_channel(self):
-        """Test general keyspace notification channel detection."""
-        assert is_keyspace_notification_channel("__keyspace@0__:mykey") is True
-        assert is_keyspace_notification_channel("__keyevent@0__:set") is True
-        assert is_keyspace_notification_channel("regular_channel") is False
+    def test_non_notification_channel(self):
+        """Test that non-notification channels return None."""
+        assert get_channel_type("regular_channel") is None
+        assert get_channel_type("some:other:channel") is None
+        assert get_channel_type("__other@0__:something") is None
 
     def test_bytes_input(self):
         """Test that bytes input is handled correctly."""
-        assert is_keyspace_channel(b"__keyspace@0__:mykey") is True
-        assert is_keyevent_channel(b"__keyevent@0__:set") is True
+        assert get_channel_type(b"__keyspace@0__:mykey") == ChannelType.KEYSPACE
+        assert get_channel_type(b"__keyevent@0__:set") == ChannelType.KEYEVENT
+        assert get_channel_type(b"regular_channel") is None
 
 
 class TestKeyNotification:
@@ -276,6 +248,8 @@ class TestKeyNotification:
         assert notification is not None
         assert notification.key == "user:456"
         assert notification.event_type == "del"
+        assert notification.database == 0
+        assert notification.is_keyspace is True
 
     def test_from_message_with_key_prefix(self):
         """Test parsing with key prefix filtering and stripping."""
@@ -355,6 +329,7 @@ class TestKeyNotification:
         }
         notification = KeyNotification.from_message(message)
 
+        assert notification is not None
         assert notification.key_starts_with("user:") is True
         assert notification.key_starts_with("cache:") is False
         assert notification.key_starts_with(b"user:") is True
@@ -374,59 +349,6 @@ class TestKeyNotification:
         # Event type is just the string - no UNKNOWN enum needed
         assert notification.event_type == "some_future_event"
         assert isinstance(notification.event_type, str)
-
-
-class TestKeyNotificationIntegration:
-    """Integration tests that require a running Redis server."""
-
-    @pytest.fixture
-    def redis_client(self, r):
-        """Get a Redis client from the test fixtures."""
-        return r
-
-    @pytest.mark.onlynoncluster
-    def test_keyspace_notification_subscribe(self, redis_client):
-        """Test subscribing to keyspace notifications."""
-        # This test requires notify-keyspace-events to be configured
-        # Skip if not configured
-        config = redis_client.config_get("notify-keyspace-events")
-        if not config.get("notify-keyspace-events"):
-            pytest.skip("Keyspace notifications not enabled")
-
-        pubsub = redis_client.pubsub()
-        channel = KeyspaceChannel("test_ksn:*")
-        pubsub.psubscribe(str(channel))
-
-        # Get the subscribe confirmation
-        msg = pubsub.get_message(timeout=1.0)
-        assert msg is not None
-        assert msg["type"] == "psubscribe"
-
-        # Set a key to trigger notification
-        redis_client.set("test_ksn:key1", "value1")
-
-        # Poll until we receive a notification or timeout
-        # Use a deadline to avoid silent test passes when no notification is received
-        deadline = time.monotonic() + 5.0
-        notification = None
-        while time.monotonic() < deadline:
-            msg = pubsub.get_message(timeout=0.5)
-            if msg:
-                notification = KeyNotification.from_message(msg)
-                if notification:
-                    break
-
-        pubsub.close()
-        redis_client.delete("test_ksn:key1")
-
-        # Assert we actually received a notification
-        if notification is None:
-            pytest.skip(
-                "No keyspace notification received - server may not be emitting notifications"
-            )
-
-        assert notification.key == "test_ksn:key1"
-        assert notification.event_type == "set"
 
 
 class TestClusterKeyspaceNotificationsMocked:
@@ -471,20 +393,13 @@ class TestClusterKeyspaceNotificationsMocked:
 
         return cluster
 
-    def test_slot_migration_receives_notification_from_new_node(self):
+    def test_receives_notification_from_any_primary_node(self):
         """
-        Test that after slot migration, notifications are received from the
-        new node that owns the slot.
-
-        This test simulates:
-        1. A cluster with 2 primary nodes
-        2. Subscribing to a key's notifications (subscribes to ALL primaries)
-        3. Slot migration: the key moves from node1 to node2
-        4. After migration, notifications come from node2
+        Test that notifications can be received from any primary node.
 
         Since ClusterKeyspaceNotifications subscribes to ALL primary nodes,
-        notifications should continue to work after slot migration without
-        any manual intervention.
+        it receives notifications regardless of which node sends them.
+        This makes slot ownership transparent to the caller.
         """
 
         # Create two mock primary nodes
@@ -515,20 +430,17 @@ class TestClusterKeyspaceNotificationsMocked:
         pubsub1.subscribe.assert_called_once()
         pubsub2.subscribe.assert_called_once()
 
-        # --- BEFORE MIGRATION ---
-        # Simulate notification from node1 (the original owner)
-        before_migration_msg = {
+        # --- Notification from node1 ---
+        msg_from_node1 = {
             "type": "message",
             "channel": b"__keyspace@0__:mykey",
             "data": b"set",
             "pattern": None,
         }
 
-        # Set up pubsub1 to return the message, pubsub2 returns None
-        pubsub1.get_message.return_value = before_migration_msg
+        pubsub1.get_message.return_value = msg_from_node1
         pubsub2.get_message.return_value = None
 
-        # Get the notification
         notification = notifications.get_message(
             ignore_subscribe_messages=True, timeout=1.0
         )
@@ -537,31 +449,24 @@ class TestClusterKeyspaceNotificationsMocked:
         assert notification.key == test_key
         assert notification.event_type == EventType.SET
 
-        # --- AFTER MIGRATION ---
-        # Simulate slot migration: now node2 owns the slot
-        # node1 no longer sends notifications for this key
+        # --- Notification from node2 ---
         pubsub1.get_message.return_value = None
 
-        # node2 now sends the notification
-        after_migration_msg = {
+        msg_from_node2 = {
             "type": "message",
             "channel": b"__keyspace@0__:mykey",
-            "data": b"set",
+            "data": b"del",
             "pattern": None,
         }
-        pubsub2.get_message.return_value = after_migration_msg
+        pubsub2.get_message.return_value = msg_from_node2
 
-        # Get the notification - should come from node2
         notification = notifications.get_message(
             ignore_subscribe_messages=True, timeout=1.0
         )
 
-        assert notification is not None, (
-            "Should receive notification after migration - "
-            "ClusterKeyspaceNotifications subscribes to all primaries"
-        )
+        assert notification is not None
         assert notification.key == test_key
-        assert notification.event_type == EventType.SET
+        assert notification.event_type == EventType.DEL
 
         # Cleanup
         notifications.close()
@@ -644,16 +549,19 @@ class TestClusterKeyspaceNotificationsMocked:
 class TestClusterKeyspaceNotifications:
     """
     A very basic usability test for subscribing to keyspace notifications in a cluster.
+
+    Note: These tests require keyspace notifications to be enabled on the Redis server.
+    The r_with_keyspace_notifications fixture handles this configuration automatically.
     """
 
-    def test_keyspace_subscribe(self):
-        cluster = RedisCluster.from_url("redis://localhost:16379")
-        notifications = ClusterKeyspaceNotifications(cluster)
+    def test_keyspace_subscribe(self, r_with_keyspace_notifications):
+        r = r_with_keyspace_notifications
+        notifications = ClusterKeyspaceNotifications(r)
         notifications.subscribe(KeyspaceChannel("test:*"))
         commands = [
-            cluster.set("test:key", "value"),
-            cluster.set("test:key2", "value2"),
-            cluster.delete("test:key2"),
+            r.set("test:key", "value"),
+            r.set("test:key2", "value2"),
+            r.delete("test:key2"),
         ]
 
         for i in range(len(commands)):
@@ -668,11 +576,9 @@ class TestClusterKeyspaceNotifications:
 
         notifications.close()
 
-    """
-    Use a handler in a background thread with run_in_thread().
-    """
-
-    def test_keyspace_subscribe_with_handler(self):
+    def test_keyspace_subscribe_with_handler(self, r_with_keyspace_notifications):
+        """Use a handler in a background thread with run_in_thread()."""
+        r = r_with_keyspace_notifications
         received = []
 
         def handler(msg):
@@ -684,10 +590,7 @@ class TestClusterKeyspaceNotifications:
             else:
                 assert msg.event_type == "set"
 
-        cluster = RedisCluster.from_url("redis://localhost:16379")
-
-        # Keyspace notifications are enabled by default (notify_keyspace_events="KEA")
-        notifications = ClusterKeyspaceNotifications(cluster)
+        notifications = ClusterKeyspaceNotifications(r)
         notifications.subscribe(KeyspaceChannel("test:*"), handler=handler)
 
         # Start background thread that polls for messages and triggers handlers
@@ -695,9 +598,9 @@ class TestClusterKeyspaceNotifications:
 
         time.sleep(0.1)  # Allow subscription to complete
 
-        cluster.set("test:key", "value")
-        cluster.set("test:key2", "value2")
-        cluster.delete("test:key2")
+        r.set("test:key", "value")
+        r.set("test:key2", "value2")
+        r.delete("test:key2")
 
         # Wait for handlers to be called
         time.sleep(1.0)
@@ -708,20 +611,17 @@ class TestClusterKeyspaceNotifications:
         # Verify we received all 3 notifications
         assert len(received) == 3
 
-    """
-    A very basic usability test for subscribing to keyevent notifications in a cluster.
-    """
-
-    def test_keyevent_subscribe(self):
-        cluster = RedisCluster.from_url("redis://localhost:16379")
-        notifications = ClusterKeyspaceNotifications(cluster)
+    def test_keyevent_subscribe(self, r_with_keyspace_notifications):
+        """Test subscribing to keyevent notifications in a cluster."""
+        r = r_with_keyspace_notifications
+        notifications = ClusterKeyspaceNotifications(r)
         notifications.subscribe_keyevent(EventType.SET)
         time.sleep(0.1)  # Allow subscription to complete
 
         # Only SET operations will trigger notifications (not DELETE)
-        cluster.set("test:key", "value")
-        cluster.set("test:key2", "value2")
-        cluster.delete("test:key2")  # This won't trigger a SET event
+        r.set("test:key", "value")
+        r.set("test:key2", "value2")
+        r.delete("test:key2")  # This won't trigger a SET event
 
         # Expect exactly 2 SET notifications
         for _ in range(2):
@@ -733,7 +633,8 @@ class TestClusterKeyspaceNotifications:
         notifications.close()
 
 
-class TestKeyspaceNotificationsMocked:
+@pytest.mark.onlynoncluster
+class TestStandaloneClientKeyspaceNotificationsMocked:
     """
     Mock-based unit tests for KeyspaceNotifications (standalone Redis).
 
@@ -748,7 +649,6 @@ class TestKeyspaceNotificationsMocked:
         mock_pubsub.get_message = Mock(return_value=None)
         mock_pubsub.close = Mock()
         redis_client.pubsub = Mock(return_value=mock_pubsub)
-        redis_client.config_set = Mock()
         return redis_client, mock_pubsub
 
     def test_subscribe_exact_channel(self):
@@ -929,7 +829,7 @@ class TestKeyspaceNotificationsMocked:
 
     def test_subscribed_property(self):
         """Test the subscribed property."""
-        redis_client, mock_pubsub = self._create_mock_redis()
+        redis_client, _ = self._create_mock_redis()
 
         notifications = KeyspaceNotifications(redis_client)
         assert not notifications.subscribed
@@ -941,14 +841,6 @@ class TestKeyspaceNotificationsMocked:
         assert not notifications.subscribed
 
         notifications.close()
-
-    def test_configure_keyspace_notifications(self):
-        """Test that notify_keyspace_events configures the server."""
-        redis_client, mock_pubsub = self._create_mock_redis()
-
-        KeyspaceNotifications(redis_client, notify_keyspace_events="KEA")
-
-        redis_client.config_set.assert_called_once_with("notify-keyspace-events", "KEA")
 
     def test_key_prefix_filtering(self):
         """Test that key_prefix filters notifications."""
