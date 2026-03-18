@@ -1,8 +1,9 @@
 import asyncio
+import inspect
 import logging
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Type, Union
 
 from redis.asyncio import Redis as AsyncRedis
 from redis.asyncio.cluster import RedisCluster as AsyncRedisCluster
@@ -16,6 +17,28 @@ from redis.retry import Retry
 
 # Type alias for async Redis clients (standalone or cluster)
 AsyncRedisClientT = Union[AsyncRedis, AsyncRedisCluster]
+
+
+def _get_init_params(cls: Type) -> frozenset:
+    """Extract parameter names from a class's __init__ method."""
+    sig = inspect.signature(cls.__init__)
+    return frozenset(
+        name
+        for name, param in sig.parameters.items()
+        if name != "self"
+        and param.kind
+        in (
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+    )
+
+
+def _filter_kwargs(kwargs: dict, cls: Type) -> dict:
+    """Filter kwargs to only include parameters accepted by the class's __init__."""
+    allowed = _get_init_params(cls)
+    return {k: v for k, v in kwargs.items() if k in allowed}
+
 
 DEFAULT_HEALTH_CHECK_PROBES = 3
 DEFAULT_HEALTH_CHECK_INTERVAL = 5
@@ -152,11 +175,13 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
             # Check for both sync and async standalone Redis clients
             if isinstance(database.client, (AsyncRedis, SyncRedis)):
                 conn_kwargs = database.client.get_connection_kwargs()
-                client = AsyncRedis(**conn_kwargs)
+                filtered_kwargs = _filter_kwargs(conn_kwargs, AsyncRedis)
+                client = AsyncRedis(**filtered_kwargs)
             elif isinstance(database.client, (AsyncRedisCluster, SyncRedisCluster)):
                 # Cluster client - create a single cluster client that handles
                 # topology changes internally
-                conn_kwargs = database.client.connection_kwargs.copy()
+                conn_kwargs = database.client.get_connection_kwargs().copy()
+                filtered_kwargs = _filter_kwargs(conn_kwargs, AsyncRedisCluster)
                 startup_nodes = database.client.startup_nodes
                 # Use the first node as the startup node
                 if startup_nodes:
@@ -164,7 +189,7 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
                     client = AsyncRedisCluster(
                         host=first_node.host,
                         port=first_node.port,
-                        **conn_kwargs,
+                        **filtered_kwargs,
                     )
                 else:
                     raise ValueError(
