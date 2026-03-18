@@ -10,8 +10,10 @@ from redis import RedisCluster
 from redis.keyspace_notifications import (
     ClusterKeyspaceNotifications,
     EventType,
+    KeyeventChannel,
     KeyNotification,
     KeyspaceChannel,
+    KeyspaceNotifications,
     _is_pattern,
     is_keyevent_channel,
     is_keyspace_channel,
@@ -727,5 +729,244 @@ class TestClusterKeyspaceNotifications:
             assert msg is not None
             assert msg.key.startswith("test:")
             assert msg.event_type == "set"
+
+        notifications.close()
+
+
+class TestKeyspaceNotificationsMocked:
+    """
+    Mock-based unit tests for KeyspaceNotifications (standalone Redis).
+
+    These tests use mocks to simulate Redis behavior without requiring
+    a running Redis server.
+    """
+
+    def _create_mock_redis(self):
+        """Create a mock Redis client with pubsub."""
+        redis_client = Mock()
+        mock_pubsub = MagicMock()
+        mock_pubsub.get_message = Mock(return_value=None)
+        mock_pubsub.close = Mock()
+        redis_client.pubsub = Mock(return_value=mock_pubsub)
+        redis_client.config_set = Mock()
+        return redis_client, mock_pubsub
+
+    def test_subscribe_exact_channel(self):
+        """Test subscribing to an exact keyspace channel."""
+        redis_client, mock_pubsub = self._create_mock_redis()
+
+        notifications = KeyspaceNotifications(redis_client)
+        channel = KeyspaceChannel("mykey", db=0)
+        notifications.subscribe(channel)
+
+        # Verify subscribe was called (exact channel, not pattern)
+        mock_pubsub.subscribe.assert_called_once()
+        assert "__keyspace@0__:mykey" in mock_pubsub.subscribe.call_args.args
+
+        notifications.close()
+
+    def test_subscribe_pattern_channel(self):
+        """Test subscribing to a pattern keyspace channel."""
+        redis_client, mock_pubsub = self._create_mock_redis()
+
+        notifications = KeyspaceNotifications(redis_client)
+        channel = KeyspaceChannel("user:*", db=0)
+        notifications.subscribe(channel)
+
+        # Verify psubscribe was called (pattern subscription)
+        mock_pubsub.psubscribe.assert_called_once()
+        assert "__keyspace@0__:user:*" in mock_pubsub.psubscribe.call_args.args
+
+        notifications.close()
+
+    def test_subscribe_keyevent(self):
+        """Test subscribing to a keyevent channel."""
+        redis_client, mock_pubsub = self._create_mock_redis()
+
+        notifications = KeyspaceNotifications(redis_client)
+        notifications.subscribe_keyevent(EventType.SET, db=0)
+
+        # KeyeventChannel with "set" is exact, not pattern
+        mock_pubsub.subscribe.assert_called_once()
+        assert "__keyevent@0__:set" in mock_pubsub.subscribe.call_args.args
+
+        notifications.close()
+
+    def test_subscribe_keyspace_convenience(self):
+        """Test the subscribe_keyspace convenience method."""
+        redis_client, mock_pubsub = self._create_mock_redis()
+
+        notifications = KeyspaceNotifications(redis_client)
+        notifications.subscribe_keyspace("cache:*", db=0)
+
+        # Pattern should use psubscribe
+        mock_pubsub.psubscribe.assert_called_once()
+        assert "__keyspace@0__:cache:*" in mock_pubsub.psubscribe.call_args.args
+
+        notifications.close()
+
+    def test_unsubscribe(self):
+        """Test unsubscribing from channels."""
+        redis_client, mock_pubsub = self._create_mock_redis()
+
+        notifications = KeyspaceNotifications(redis_client)
+
+        # Subscribe to exact and pattern channels
+        exact_channel = KeyspaceChannel("mykey", db=0)
+        pattern_channel = KeyspaceChannel("user:*", db=0)
+        notifications.subscribe(exact_channel)
+        notifications.subscribe(pattern_channel)
+
+        # Unsubscribe
+        notifications.unsubscribe(exact_channel)
+        notifications.unsubscribe(pattern_channel)
+
+        mock_pubsub.unsubscribe.assert_called_once()
+        mock_pubsub.punsubscribe.assert_called_once()
+
+        notifications.close()
+
+    def test_get_message_returns_notification(self):
+        """Test that get_message returns KeyNotification objects."""
+        redis_client, mock_pubsub = self._create_mock_redis()
+
+        # Setup mock to return a keyspace message
+        mock_pubsub.get_message.return_value = {
+            "type": "message",
+            "channel": b"__keyspace@0__:mykey",
+            "data": b"set",
+            "pattern": None,
+        }
+
+        notifications = KeyspaceNotifications(redis_client)
+        channel = KeyspaceChannel("mykey", db=0)
+        notifications.subscribe(channel)
+
+        notification = notifications.get_message(timeout=1.0)
+
+        assert notification is not None
+        assert notification.key == "mykey"
+        assert notification.event_type == "set"
+        assert notification.database == 0
+
+        notifications.close()
+
+    def test_get_message_with_pattern(self):
+        """Test get_message with pattern subscription."""
+        redis_client, mock_pubsub = self._create_mock_redis()
+
+        # Setup mock to return a pmessage
+        mock_pubsub.get_message.return_value = {
+            "type": "pmessage",
+            "pattern": b"__keyspace@0__:user:*",
+            "channel": b"__keyspace@0__:user:123",
+            "data": b"set",
+        }
+
+        notifications = KeyspaceNotifications(redis_client)
+        notifications.subscribe(KeyspaceChannel("user:*", db=0))
+
+        notification = notifications.get_message(timeout=1.0)
+
+        assert notification is not None
+        assert notification.key == "user:123"
+        assert notification.event_type == "set"
+
+        notifications.close()
+
+    def test_get_message_returns_none_when_closed(self):
+        """Test that get_message returns None when notifications are closed."""
+        redis_client, mock_pubsub = self._create_mock_redis()
+
+        notifications = KeyspaceNotifications(redis_client)
+        notifications.close()
+
+        notification = notifications.get_message(timeout=1.0)
+        assert notification is None
+
+    def test_handler_callback(self):
+        """Test that handlers are called with KeyNotification objects."""
+        redis_client, mock_pubsub = self._create_mock_redis()
+
+        received = []
+
+        def handler(notification):
+            received.append(notification)
+
+        # Setup mock to return a message
+        mock_pubsub.get_message.return_value = {
+            "type": "message",
+            "channel": b"__keyspace@0__:mykey",
+            "data": b"set",
+            "pattern": None,
+        }
+
+        notifications = KeyspaceNotifications(redis_client)
+        channel = KeyspaceChannel("mykey", db=0)
+        notifications.subscribe(channel, handler=handler)
+
+        # get_message should return None because handler consumed it
+        result = notifications.get_message(timeout=1.0)
+        assert result is None
+
+        # But handler should have been called
+        assert len(received) == 1
+        assert received[0].key == "mykey"
+        assert received[0].event_type == "set"
+
+        notifications.close()
+
+    def test_context_manager(self):
+        """Test KeyspaceNotifications as context manager."""
+        redis_client, mock_pubsub = self._create_mock_redis()
+
+        with KeyspaceNotifications(redis_client) as notifications:
+            notifications.subscribe(KeyspaceChannel("mykey"))
+            assert notifications.subscribed
+
+        # Should be closed after exiting context
+        mock_pubsub.close.assert_called_once()
+
+    def test_subscribed_property(self):
+        """Test the subscribed property."""
+        redis_client, mock_pubsub = self._create_mock_redis()
+
+        notifications = KeyspaceNotifications(redis_client)
+        assert not notifications.subscribed
+
+        notifications.subscribe(KeyspaceChannel("mykey"))
+        assert notifications.subscribed
+
+        notifications.unsubscribe(KeyspaceChannel("mykey"))
+        assert not notifications.subscribed
+
+        notifications.close()
+
+    def test_configure_keyspace_notifications(self):
+        """Test that notify_keyspace_events configures the server."""
+        redis_client, mock_pubsub = self._create_mock_redis()
+
+        KeyspaceNotifications(redis_client, notify_keyspace_events="KEA")
+
+        redis_client.config_set.assert_called_once_with("notify-keyspace-events", "KEA")
+
+    def test_key_prefix_filtering(self):
+        """Test that key_prefix filters notifications."""
+        redis_client, mock_pubsub = self._create_mock_redis()
+
+        # Setup mock to return a notification for a key without the prefix
+        mock_pubsub.get_message.return_value = {
+            "type": "message",
+            "channel": b"__keyspace@0__:other:key",
+            "data": b"set",
+            "pattern": None,
+        }
+
+        notifications = KeyspaceNotifications(redis_client, key_prefix="myapp:")
+        notifications.subscribe(KeyspaceChannel("*"))
+
+        # Should be filtered out (returns None)
+        notification = notifications.get_message(timeout=0.1)
+        assert notification is None
 
         notifications.close()
