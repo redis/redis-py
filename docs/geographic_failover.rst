@@ -342,26 +342,17 @@ asyncio event loop, so please ensure that `check_health` method is async:
 
 .. code-block:: python
 
-    from redis.asyncio.multidb.healthcheck import AbstractHealthCheck
-    from redis.asyncio import Connection
+    from redis.asyncio.multidb.healthcheck import AbstractHealthCheck, AsyncRedisClientT
 
-    class PingHealthCheck(AbstractHealthCheck):
-        def __init__(
-            self,
-            health_check_probes: int = 10,
-            health_check_delay: float = 0.1,
-            health_check_timeout: float = 2,
-        ):
-            super().__init__(
-                health_check_probes=health_check_probes,
-                health_check_delay=health_check_delay,
-                health_check_timeout=health_check_timeout,
-            )
+    class EchoHealthCheck(AbstractHealthCheck):
+        """
+        Health check based on ECHO command.
+        """
 
-        async def check_health(self, database, connection: Connection) -> bool:
-            await connection.send_command("PING")
+        async def check_health(self, database, hc_client: AsyncRedisClientT) -> bool:
+            await connection.send_command("ECHO", "healthcheck")
             response = await connection.read_response()
-            return response in (b"PONG", "PONG")
+            return response in (b"healthcheck", "healthcheck")
 
 Failure Detection (Reactive Monitoring)
 -----------------

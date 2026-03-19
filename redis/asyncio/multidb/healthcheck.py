@@ -189,6 +189,10 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
                     client = AsyncRedisCluster(
                         host=first_node.host,
                         port=first_node.port,
+                        dynamic_startup_nodes=database.client.nodes_manager._dynamic_startup_nodes,
+                        address_remap=database.client.nodes_manager.address_remap,
+                        require_full_coverage=database.client.nodes_manager._require_full_coverage,
+                        retry=database.client.retry,
                         **filtered_kwargs,
                     )
                 else:
