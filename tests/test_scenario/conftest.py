@@ -18,7 +18,7 @@ from redis.multidb.config import (
 )
 from redis.multidb.event import ActiveDatabaseChanged
 from redis.multidb.failure_detector import DEFAULT_MIN_NUM_FAILURES
-from redis.multidb.healthcheck import DEFAULT_HEALTH_CHECK_DELAY
+from redis.asyncio.multidb.healthcheck import DEFAULT_HEALTH_CHECK_DELAY
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.client import Redis
 from redis.maint_notifications import EndpointType, MaintNotificationsConfig
@@ -202,7 +202,7 @@ def r_multi_db(
         health_check_probes=3,
         health_check_interval=health_check_interval,
         event_dispatcher=event_dispatcher,
-        health_check_probes_delay=health_check_delay,
+        health_check_delay=health_check_delay,
     )
 
     return MultiDBClient(config), listener, endpoint_config
