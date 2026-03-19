@@ -594,7 +594,7 @@ class TestClusterKeyspaceNotifications:
         notifications.subscribe(KeyspaceChannel("test:*"), handler=handler)
 
         # Start background thread that polls for messages and triggers handlers
-        thread = notifications.run_in_thread(sleep_time=0.1, daemon=True)
+        thread = notifications.run_in_thread(poll_timeout=0.1, daemon=True)
 
         time.sleep(0.1)  # Allow subscription to complete
 
@@ -659,9 +659,9 @@ class TestStandaloneClientKeyspaceNotificationsMocked:
         channel = KeyspaceChannel("mykey", db=0)
         notifications.subscribe(channel)
 
-        # Verify subscribe was called (exact channel, not pattern)
+        # Verify subscribe was called with kwargs (exact channel, not pattern)
         mock_pubsub.subscribe.assert_called_once()
-        assert "__keyspace@0__:mykey" in mock_pubsub.subscribe.call_args.args
+        assert "__keyspace@0__:mykey" in mock_pubsub.subscribe.call_args.kwargs
 
         notifications.close()
 
@@ -673,9 +673,9 @@ class TestStandaloneClientKeyspaceNotificationsMocked:
         channel = KeyspaceChannel("user:*", db=0)
         notifications.subscribe(channel)
 
-        # Verify psubscribe was called (pattern subscription)
+        # Verify psubscribe was called with kwargs (pattern subscription)
         mock_pubsub.psubscribe.assert_called_once()
-        assert "__keyspace@0__:user:*" in mock_pubsub.psubscribe.call_args.args
+        assert "__keyspace@0__:user:*" in mock_pubsub.psubscribe.call_args.kwargs
 
         notifications.close()
 
@@ -688,7 +688,7 @@ class TestStandaloneClientKeyspaceNotificationsMocked:
 
         # KeyeventChannel with "set" is exact, not pattern
         mock_pubsub.subscribe.assert_called_once()
-        assert "__keyevent@0__:set" in mock_pubsub.subscribe.call_args.args
+        assert "__keyevent@0__:set" in mock_pubsub.subscribe.call_args.kwargs
 
         notifications.close()
 
@@ -699,9 +699,9 @@ class TestStandaloneClientKeyspaceNotificationsMocked:
         notifications = KeyspaceNotifications(redis_client)
         notifications.subscribe_keyspace("cache:*", db=0)
 
-        # Pattern should use psubscribe
+        # Pattern should use psubscribe with kwargs
         mock_pubsub.psubscribe.assert_called_once()
-        assert "__keyspace@0__:cache:*" in mock_pubsub.psubscribe.call_args.args
+        assert "__keyspace@0__:cache:*" in mock_pubsub.psubscribe.call_args.kwargs
 
         notifications.close()
 
@@ -793,13 +793,32 @@ class TestStandaloneClientKeyspaceNotificationsMocked:
         def handler(notification):
             received.append(notification)
 
-        # Setup mock to return a message
-        mock_pubsub.get_message.return_value = {
+        # Message to be delivered
+        test_message = {
             "type": "message",
             "channel": b"__keyspace@0__:mykey",
             "data": b"set",
             "pattern": None,
         }
+
+        # Track the wrapped handler that will be registered
+        registered_handlers = {}
+
+        def capture_subscribe(**kwargs):
+            registered_handlers.update(kwargs)
+
+        mock_pubsub.subscribe.side_effect = capture_subscribe
+
+        # When get_message is called, simulate pubsub behavior:
+        # call the handler and return None (like real pubsub does)
+        def mock_get_message(**_kwargs):
+            channel_key = "__keyspace@0__:mykey"
+            if channel_key in registered_handlers and registered_handlers[channel_key]:
+                registered_handlers[channel_key](test_message)
+                return None  # Handler consumed the message
+            return test_message
+
+        mock_pubsub.get_message.side_effect = mock_get_message
 
         notifications = KeyspaceNotifications(redis_client)
         channel = KeyspaceChannel("mykey", db=0)
@@ -809,7 +828,7 @@ class TestStandaloneClientKeyspaceNotificationsMocked:
         result = notifications.get_message(timeout=1.0)
         assert result is None
 
-        # But handler should have been called
+        # Handler should have been called with KeyNotification
         assert len(received) == 1
         assert received[0].key == "mykey"
         assert received[0].event_type == "set"

@@ -19,8 +19,8 @@ from redis.keyspace_notifications import (
     KeyNotification,
     KeyspaceChannel,
     KeyspaceNotifications,
-    NotifyKeyspaceEvents,
-    StandaloneKeyspaceWorkerThread,
+    KeyspaceNotificationsInterface,
+    KeyspaceWorkerThread,
 )
 from redis.exceptions import (
     AuthenticationError,
@@ -87,8 +87,8 @@ __all__ = [
     "KeyNotification",
     "KeyspaceChannel",
     "KeyspaceNotifications",
-    "NotifyKeyspaceEvents",
-    "StandaloneKeyspaceWorkerThread",
+    "KeyspaceNotificationsInterface",
+    "KeyspaceWorkerThread",
     "MaxConnectionsError",
     "OutOfMemoryError",
     "PubSubError",
