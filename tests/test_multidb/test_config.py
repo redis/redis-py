@@ -17,7 +17,7 @@ from redis.multidb.config import (
 )
 from redis.multidb.database import Database
 from redis.multidb.failure_detector import CommandFailureDetector, FailureDetector
-from redis.multidb.healthcheck import PingHealthCheck, HealthCheck
+from redis.asyncio.multidb.healthcheck import PingHealthCheck, HealthCheck
 from redis.multidb.failover import WeightBasedFailoverStrategy, FailoverStrategy
 from redis.retry import Retry
 

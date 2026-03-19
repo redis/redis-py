@@ -45,10 +45,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             if not config.health_checks
             else config.health_checks
         )
-
         self._health_check_interval = config.health_check_interval
-        self._health_check_policy: HealthCheckPolicy = config.health_check_policy.value(
-            config.health_check_probes, config.health_check_delay
+        self._health_check_policy: HealthCheckPolicy = (
+            config.health_check_policy.value()
         )
         self._failure_detectors = (
             config.default_failure_detectors()
@@ -89,13 +88,24 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             await self.initialize()
         return self
 
-    async def __aexit__(self, exc_type, exc_value, traceback):
+    async def aclose(self):
+        # Cancel background tasks
         if self._recurring_hc_task:
             self._recurring_hc_task.cancel()
         if self._half_open_state_task:
             self._half_open_state_task.cancel()
         for hc_task in self._hc_tasks:
             hc_task.cancel()
+
+        # Close health check connection pools
+        await self._health_check_policy.close()
+
+        # Close database client
+        if self.command_executor.active_database:
+            await self.command_executor.active_database.client.aclose()
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        await self.aclose()
 
     async def initialize(self):
         """
@@ -326,23 +336,15 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         Runs health checks as a recurring task.
         Runs health checks against all databases.
         """
-        try:
-            task_to_db: dict[asyncio.Task, Database] = {}
+        task_to_db: dict[asyncio.Task, Database] = {}
 
-            self._hc_tasks = []
-            for database, _ in self._databases:
-                task = asyncio.create_task(self._check_db_health(database))
-                task_to_db[task] = database
-                self._hc_tasks.append(task)
+        self._hc_tasks = []
+        for database, _ in self._databases:
+            task = asyncio.create_task(self._check_db_health(database))
+            task_to_db[task] = database
+            self._hc_tasks.append(task)
 
-            results = await asyncio.wait_for(
-                asyncio.gather(*self._hc_tasks, return_exceptions=True),
-                timeout=self._health_check_interval,
-            )
-        except asyncio.TimeoutError:
-            raise asyncio.TimeoutError(
-                "Health check execution exceeds health_check_interval"
-            )
+        results = await asyncio.gather(*self._hc_tasks, return_exceptions=True)
 
         # Map end results to databases
         db_results = {
@@ -360,8 +362,6 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
                 )
 
                 db_results[unhealthy_db] = False
-            elif isinstance(result, Exception):
-                db_results[database] = False
 
         return db_results
 
@@ -426,10 +426,6 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
 
         if old_state != CBState.CLOSED and new_state == CBState.CLOSED:
             logger.info(f"Database {circuit.database} is reachable again.")
-
-    async def aclose(self):
-        if self.command_executor.active_database:
-            await self.command_executor.active_database.client.aclose()
 
 
 def _half_open_circuit(circuit: CircuitBreaker):
