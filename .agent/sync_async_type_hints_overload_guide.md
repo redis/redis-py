@@ -19,6 +19,7 @@ Work on one batch at a time. Each batch contains methods grouped by command clas
    - Use the same modern annotation style as return types: prefer `X | Y` and `T | None` over `Union[...]` / `Optional[...]`
 4. **Keep the original implementation** unchanged except for signature annotation normalization when needed
    - For implementation return unions, prefer the readable order `SyncType | Awaitable[SyncType]` (for example `(dict | None) | Awaitable[dict | None]`)
+   - When the sync side is itself a union, group it in parentheses before the async branch, for example `(SentinelMastersResponse | bool) | Awaitable[SentinelMastersResponse | bool]` instead of `SentinelMastersResponse | bool | Awaitable[SentinelMastersResponse | bool]`
    - Runtime decorators such as deprecation or experimental markers must stay on the real implementation, not on `@overload` stubs. Put those decorators immediately above the implementation `def` after the overload block.
 5. **Run type checker** to verify no errors
 
@@ -579,7 +580,7 @@ For commands with protocol-specific differences, use the **most permissive union
 | # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
 | 379 | `sentinel` | `Any` | `Awaitable[Any]` | ⚠️ SKIP | Async differs |
-| 380 | `sentinel_get_master_addr_by_name` | `tuple[str, int] \| None` | `Awaitable[tuple[str, int] \| None]` | ✅ | Base: parse_sentinel_get_master |
+| 380 | `sentinel_get_master_addr_by_name` | `tuple[bytes \| str, int] \| None` | `Awaitable[tuple[bytes \| str, int] \| None]` | ✅ | Base: parse_sentinel_get_master; host depends on decode_responses |
 | 381 | `sentinel_master` | `dict` | `Awaitable[dict]` | ✅ | RESP2: parse_sentinel_master / RESP3: parse_sentinel_state_resp3 |
 | 382 | `sentinel_masters` | `list[dict]` | `Awaitable[list[dict]]` | ✅ | RESP2: parse_sentinel_masters / RESP3: parse_sentinel_masters_resp3 |
 | 383 | `sentinel_monitor` | `bool` | `Awaitable[bool]` | ✅ | Base: bool_ok |
@@ -632,34 +633,34 @@ For commands with protocol-specific differences, use the **most permissive union
 ### BATCH 16: JSONCommands (json/commands.py) - Methods 425-452
 | # | Method | Sync Type | Async Type | Status | Notes |
 |---|--------|-----------|------------|--------|-------|
-| 425 | `arrappend` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | Module int array |
-| 426 | `arrindex` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | Module int array |
-| 427 | `arrinsert` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | Module int array |
-| 428 | `arrlen` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | Module int array |
-| 429 | `arrpop` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ | Depends on decode_responses |
-| 430 | `arrtrim` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | Module int array |
-| 431 | `type` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | Depends on decode_responses |
-| 432 | `resp` | `list` | `Awaitable[list]` | ✅ | JSON structure |
-| 433 | `objkeys` | `list[list[bytes \| str] \| None]` | `Awaitable[list[list[bytes \| str] \| None]]` | ✅ | Depends on decode_responses |
-| 434 | `objlen` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | Module int array |
-| 435 | `numincrby` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | Depends on decode_responses |
-| 436 | `nummultby` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ | Depends on decode_responses |
-| 437 | `clear` | `int` | `Awaitable[int]` | ✅ | Integer reply |
-| 438 | `delete` | `int` | `Awaitable[int]` | ✅ | Integer reply |
-| 439 | `get` | `Any` | `Awaitable[Any]` | ✅ | JSON parsed |
-| 440 | `mget` | `list[Any]` | `Awaitable[list[Any]]` | ✅ | JSON parsed |
-| 441 | `set` | `bool \| None` | `Awaitable[bool \| None]` | ✅ | OK or None |
+| 425 | `arrappend` | `int \| list[int \| None] \| None` | `Awaitable[int \| list[int \| None] \| None]` | ✅ | `.` path: scalar / RESP3 wrapper; `$` path: list |
+| 426 | `arrindex` | `int \| list[int \| None] \| None` | `Awaitable[int \| list[int \| None] \| None]` | ✅ | `.` path: scalar / RESP3 wrapper; `$` path: list |
+| 427 | `arrinsert` | `int \| list[int \| None] \| None` | `Awaitable[int \| list[int \| None] \| None]` | ✅ | `.` path: scalar / RESP3 wrapper; `$` path: list |
+| 428 | `arrlen` | `int \| list[int \| None] \| None` | `Awaitable[int \| list[int \| None] \| None]` | ✅ | `.` path: scalar / nil; `$` path: list |
+| 429 | `arrpop` | `JsonType \| str \| list[Any] \| None` | `Awaitable[JsonType \| str \| list[Any] \| None]` | ✅ | `_decode` gives scalar for `.` paths and mixed list for `$` paths |
+| 430 | `arrtrim` | `int \| list[int \| None] \| None` | `Awaitable[int \| list[int \| None] \| None]` | ✅ | `.` path: scalar / RESP3 wrapper; `$` path: list |
+| 431 | `type` | `str \| None \| list[str \| None] \| list[list[str]]` | `Awaitable[...]` | ✅ | `.` path: scalar / RESP3 wrapper; `$` path: list; RESP3 adds nesting |
+| 432 | `resp` | `Any` | `Awaitable[Any]` | ✅ | JSON structure decoded by module callback |
+| 433 | `objkeys` | `list[str] \| list[list[str] \| None] \| None` | `Awaitable[...]` | ✅ | `.` path: flat list or nil; `$` path: nested list(s) |
+| 434 | `objlen` | `int \| list[int \| None] \| None` | `Awaitable[int \| list[int \| None] \| None]` | ✅ | `.` path: scalar / nil; `$` path: list |
+| 435 | `numincrby` | `int \| float \| list[int \| float \| None]` | `Awaitable[...]` | ✅ | `.` path: scalar / RESP3 wrapper; `$` path: list |
+| 436 | `nummultby` | `int \| float \| list[int \| float \| None]` | `Awaitable[...]` | ✅ | `.` path: scalar / RESP3 wrapper; `$` path: list |
+| 437 | `clear` | `int` | `Awaitable[int]` | ✅ | Count reply |
+| 438 | `delete` | `int` | `Awaitable[int]` | ✅ | Count reply |
+| 439 | `get` | `Any \| None` | `Awaitable[Any \| None]` | ✅ | JSON-decoded; shape depends on path form and number of paths |
+| 440 | `mget` | `list[JsonType \| None]` | `Awaitable[list[JsonType \| None]]` | ✅ | JSON-decoded list, one entry per key |
+| 441 | `set` | `bool \| None` | `Awaitable[bool \| None]` | ✅ | `OK` or nil |
 | 442 | `mset` | `bool` | `Awaitable[bool]` | ✅ | Module OK |
 | 443 | `merge` | `bool` | `Awaitable[bool]` | ✅ | Module OK |
-| 444 | `set_file` | `bool \| None` | `Awaitable[bool \| None]` | 📋 | Explicit |
-| 445 | `set_path` | `dict[str, bool]` | `Awaitable[dict[str, bool]]` | 📋 | Explicit |
-| 446 | `strlen` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ | Module int array |
-| 447 | `toggle` | `bool \| list[bool]` | `Awaitable[bool \| list[bool]]` | ✅ | Module bool |
-| 448 | `strappend` | `int \| list[int \| None]` | `Awaitable[int \| list[int \| None]]` | ✅ | Module int |
-| 449 | `debug` | `int \| list[bytes \| str]` | `Awaitable[int \| list[bytes \| str]]` | ✅ | Module mixed |
-| 450 | `jsonget` | `Any` | `Awaitable[Any]` | ✅ | Deprecated alias |
-| 451 | `jsonmget` | `Any` | `Awaitable[Any]` | ✅ | Deprecated alias |
-| 452 | `jsonset` | `Any` | `Awaitable[Any]` | ✅ | Deprecated alias |
+| 444 | `set_file` | `bool \| None` | `Awaitable[bool \| None]` | 📋 | Delegates to `set` |
+| 445 | `set_path` | `dict[str, bool]` | `Awaitable[dict[str, bool]]` | 📋 | Local helper / async override |
+| 446 | `strlen` | `int \| list[int \| None] \| None` | `Awaitable[int \| list[int \| None] \| None]` | ✅ | `.` path: scalar / nil; `$` path: list |
+| 447 | `toggle` | `bool \| list[int \| None] \| None` | `Awaitable[bool \| list[int \| None] \| None]` | ✅ | `.` path: bool; `$` path: list of 0/1/null-like values |
+| 448 | `strappend` | `int \| list[int \| None] \| None` | `Awaitable[int \| list[int \| None] \| None]` | ✅ | `.` path: scalar / RESP3 wrapper; `$` path: list |
+| 449 | `debug` | `int \| list[str]` | `Awaitable[int \| list[str]]` | ✅ | `MEMORY` integer, `HELP` string list |
+| 450 | `jsonget` | `Any \| None` | `Awaitable[Any \| None]` | ✅ | Deprecated alias |
+| 451 | `jsonmget` | `list[JsonType \| None]` | `Awaitable[list[JsonType \| None]]` | ✅ | Deprecated alias |
+| 452 | `jsonset` | `bool \| None` | `Awaitable[bool \| None]` | ✅ | Deprecated alias |
 
 ### BATCH 17: TimeSeriesCommands (timeseries/commands.py) - Methods 453-469
 | # | Method | Sync Type | Async Type | Status | Notes |
@@ -675,10 +676,10 @@ For commands with protocol-specific differences, use the **most permissive union
 | 461 | `deleterule` | `bool` | `Awaitable[bool]` | ✅ | Module OK |
 | 462 | `range` | `list[tuple[int, float]]` | `Awaitable[list[tuple[int, float]]]` | ✅ | Parsed samples |
 | 463 | `revrange` | `list[tuple[int, float]]` | `Awaitable[list[tuple[int, float]]]` | ✅ | Parsed samples |
-| 464 | `mrange` | `list` | `Awaitable[list]` | ✅ | Complex structure |
-| 465 | `mrevrange` | `list` | `Awaitable[list]` | ✅ | Complex structure |
+| 464 | `mrange` | `list[Any] \| dict[str, list[Any]]` | `Awaitable[list[Any] \| dict[str, list[Any]]]` | ✅ | RESP2: parse_m_range list; RESP3: map reply keyed by series/group label |
+| 465 | `mrevrange` | `list[Any] \| dict[str, list[Any]]` | `Awaitable[list[Any] \| dict[str, list[Any]]]` | ✅ | RESP2: parse_m_range list; RESP3: map reply keyed by series/group label |
 | 466 | `get` | `tuple[int, float] \| list` | `Awaitable[tuple[int, float] \| list]` | ✅ | Parsed sample |
-| 467 | `mget` | `list` | `Awaitable[list]` | ✅ | Complex structure |
+| 467 | `mget` | `list[Any] \| dict[str, list[Any]]` | `Awaitable[list[Any] \| dict[str, list[Any]]]` | ✅ | RESP2: parse_m_get list; RESP3: map reply keyed by series name |
 | 468 | `info` | `TSInfo` | `Awaitable[TSInfo]` | 📋 | Explicit type |
 | 469 | `queryindex` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ | Depends on decode_responses |
 

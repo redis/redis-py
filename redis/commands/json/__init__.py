@@ -1,4 +1,6 @@
+import os
 from json import JSONDecodeError, JSONDecoder, JSONEncoder
+from typing import Literal
 
 import redis
 
@@ -7,7 +9,7 @@ from .commands import JSONCommands
 from .decoders import bulk_of_jsons, decode_list
 
 
-class JSON(JSONCommands):
+class _JSONBase(JSONCommands):
     """
     Create a client for talking to json.
 
@@ -145,3 +147,39 @@ class ClusterPipeline(JSONCommands, redis.cluster.ClusterPipeline):
 
 class Pipeline(JSONCommands, redis.client.Pipeline):
     """Pipeline for the module."""
+
+
+class JSON(_JSONBase):
+    _is_async_client: Literal[False] = False
+
+
+class AsyncJSON(_JSONBase):
+    _is_async_client: Literal[True] = True
+
+    async def set_path(
+        self,
+        json_path: str,
+        root_folder: str,
+        nx: bool | None = False,
+        xx: bool | None = False,
+        decode_keys: bool | None = False,
+    ) -> dict[str, bool]:
+        set_files_result = {}
+        for root, dirs, files in os.walk(root_folder):
+            for file in files:
+                file_path = os.path.join(root, file)
+                try:
+                    file_name = file_path.rsplit(".")[0]
+                    await self.set_file(
+                        file_name,
+                        json_path,
+                        file_path,
+                        nx=nx,
+                        xx=xx,
+                        decode_keys=decode_keys,
+                    )
+                    set_files_result[file_path] = True
+                except JSONDecodeError:
+                    set_files_result[file_path] = False
+
+        return set_files_result

@@ -294,8 +294,8 @@ This document catalogs all command methods that need `@overload` signatures for 
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 227 | `zadd` | `ResponseT` | `int \| float \| None` | `Awaitable[int \| float \| None]` | ✅ RESP2: parse_zadd / RESP3: no callback - int or float with INCR | 🔲 TODO |
-| 228 | `zcard` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
+| 227 | `zadd` | `ResponseT` | `int \| float \| None` | `Awaitable[int \| float \| None]` | ✅ RESP2: parse_zadd / RESP3: no callback - int or float with INCR | ✅ DONE |
+| 228 | `zcard` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
 | 229 | `zcount` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
 | 230 | `zdiff` | `ResponseT` | `ZSetRangeResponse` | `Awaitable[ZSetRangeResponse]` | ✅ `WITHSCORES`: RESP2 tuple pairs / RESP3 raw nested lists | ✅ DONE |
 | 231 | `zdiffstore` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
@@ -454,10 +454,10 @@ This document catalogs all command methods that need `@overload` signatures for 
 |---|--------|----------------|--------------|---------------|--------|----------------|
 | 336 | `mget_nonatomic` | `list` | `list` | `Awaitable[list]` | ⚠️ Separate Async impl | ⏭️ N/A |
 | 337 | `mset_nonatomic` | `list[bool]` | `list[bool]` | `Awaitable[list[bool]]` | ⚠️ Separate Async impl | ⏭️ N/A |
-| 338 | `exists` | `int` | `int` | `Awaitable[int]` | 📋 Explicit | 🔲 TODO |
-| 339 | `delete` | `int` | `int` | `Awaitable[int]` | 📋 Explicit | 🔲 TODO |
-| 340 | `touch` | `int` | `int` | `Awaitable[int]` | 📋 Explicit | 🔲 TODO |
-| 341 | `unlink` | `int` | `int` | `Awaitable[int]` | 📋 Explicit | 🔲 TODO |
+| 338 | `exists` | `int` | `int` | `Awaitable[int]` | 📋 Explicit | ✅ DONE |
+| 339 | `delete` | `int` | `int` | `Awaitable[int]` | 📋 Explicit | ✅ DONE |
+| 340 | `touch` | `int` | `int` | `Awaitable[int]` | 📋 Explicit | ✅ DONE |
+| 341 | `unlink` | `int` | `int` | `Awaitable[int]` | 📋 Explicit | ✅ DONE |
 
 ### ClusterManagementCommands
 
@@ -466,32 +466,32 @@ This document catalogs all command methods that need `@overload` signatures for 
 | 342 | `slaveof` | `NoReturn` | `NoReturn` | `NoReturn` | 📋 Explicit (raises) | ⏭️ N/A |
 | 343 | `replicaof` | `NoReturn` | `NoReturn` | `NoReturn` | 📋 Explicit (raises) | ⏭️ N/A |
 | 344 | `swapdb` | `NoReturn` | `NoReturn` | `NoReturn` | 📋 Explicit (raises) | ⏭️ N/A |
-| 345 | `cluster_myid` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 346 | `cluster_addslots` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 347 | `cluster_addslotsrange` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 348 | `cluster_countkeysinslot` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 349 | `cluster_count_failure_report` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
+| 345 | `cluster_myid` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - depends on decode_responses | ✅ DONE |
+| 346 | `cluster_addslots` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 347 | `cluster_addslotsrange` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 348 | `cluster_countkeysinslot` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 349 | `cluster_count_failure_report` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
 | 350 | `cluster_delslots` | `list[bool]` | `list[bool]` | `Awaitable[list[bool]]` | ⚠️ Separate Async impl | ⏭️ N/A |
-| 351 | `cluster_delslotsrange` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 352 | `cluster_failover` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 353 | `cluster_info` | `ResponseT` | `dict[str, str]` | `Awaitable[dict[str, str]]` | ✅ Base: parse_cluster_info - str keys | 🔲 TODO |
-| 354 | `cluster_keyslot` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | 🔲 TODO |
-| 355 | `cluster_meet` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 356 | `cluster_nodes` | `ResponseT` | `str` | `Awaitable[str]` | ✅ Base: parse_cluster_nodes - returns str | 🔲 TODO |
-| 357 | `cluster_replicate` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 358 | `cluster_reset` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 359 | `cluster_save_config` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 360 | `cluster_get_keys_in_slot` | `ResponseT` | `list[str]` (RESP2) / `list[bytes \| str]` (RESP3) | `Awaitable[...]` | ✅ RESP2: lambda (str_if_bytes) / RESP3: no callback | 🔲 TODO |
-| 361 | `cluster_set_config_epoch` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 362 | `cluster_setslot` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 363 | `cluster_setslot_stable` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 364 | `cluster_replicas` | `ResponseT` | `str` | `Awaitable[str]` | ✅ Base: parse_cluster_nodes - returns str | 🔲 TODO |
-| 365 | `cluster_slots` | `ResponseT` | `list` | `Awaitable[list]` | ✅ No callback - complex structure | 🔲 TODO |
-| 366 | `cluster_shards` | `ResponseT` | `list` | `Awaitable[list]` | ✅ No callback - complex structure | 🔲 TODO |
-| 367 | `cluster_myshardid` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
-| 368 | `cluster_links` | `ResponseT` | `list` | `Awaitable[list]` | ✅ No callback - complex structure | 🔲 TODO |
-| 369 | `cluster_flushslots` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Returns OK - no specific callback | 🔲 TODO |
-| 370 | `cluster_bumpepoch` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
+| 351 | `cluster_delslotsrange` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 352 | `cluster_failover` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 353 | `cluster_info` | `ResponseT` | `dict[str, str]` | `Awaitable[dict[str, str]]` | ✅ Base: parse_cluster_info - str keys | ✅ DONE |
+| 354 | `cluster_keyslot` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Integer reply - no callback | ✅ DONE |
+| 355 | `cluster_meet` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 356 | `cluster_nodes` | `ResponseT` | `dict[str, dict[str, str \| bool \| list[list[str]] \| list[dict[str, str]]]]` | `Awaitable[...]` | ✅ Base: parse_cluster_nodes | ✅ DONE |
+| 357 | `cluster_replicate` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 358 | `cluster_reset` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 359 | `cluster_save_config` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 360 | `cluster_get_keys_in_slot` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ RESP2: lambda (str_if_bytes) / RESP3: no callback | ✅ DONE |
+| 361 | `cluster_set_config_epoch` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 362 | `cluster_setslot` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 363 | `cluster_setslot_stable` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 364 | `cluster_replicas` | `ResponseT` | `dict[str, dict[str, str \| bool \| list[list[str]] \| list[dict[str, str]]]]` | `Awaitable[...]` | ✅ Base: parse_cluster_nodes | ✅ DONE |
+| 365 | `cluster_slots` | `ResponseT` | `list[Any]` | `Awaitable[list[Any]]` | ✅ No callback - complex structure | ✅ DONE |
+| 366 | `cluster_shards` | `ResponseT` | `list[Any]` | `Awaitable[list[Any]]` | ✅ No callback - complex structure | ✅ DONE |
+| 367 | `cluster_myshardid` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - depends on decode_responses | ✅ DONE |
+| 368 | `cluster_links` | `ResponseT` | `list[Any]` | `Awaitable[list[Any]]` | ✅ No callback - complex structure | ✅ DONE |
+| 369 | `cluster_flushslots` | `None` | `None` | `None` | ⚠️ Intentionally not implemented in the client | ⏭️ N/A |
+| 370 | `cluster_bumpepoch` | `None` | `None` | `None` | ⚠️ Intentionally not implemented in the client | ⏭️ N/A |
 | 371 | `client_tracking_on` | `Union[Awaitable[bool], bool]` | `bool` | `Awaitable[bool]` | ⚠️ Separate Async impl | ⏭️ N/A |
 | 372 | `client_tracking_off` | `Union[Awaitable[bool], bool]` | `bool` | `Awaitable[bool]` | ⚠️ Separate Async impl | ⏭️ N/A |
 | 373 | `hotkeys_start` | `Union[Awaitable[...], ...]` | `bytes \| str` | `Awaitable[bytes \| str]` | ⚠️ Separate Async impl | ⏭️ N/A |
@@ -503,7 +503,7 @@ This document catalogs all command methods that need `@overload` signatures for 
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 377 | `stralgo` | `ResponseT` | `str \| int \| dict[str, str]` | `Awaitable[...]` | ✅ RESP2: parse_stralgo / RESP3: lambda (str keys/values) | 🔲 TODO |
+| 377 | `stralgo` | `ResponseT` | `str \| int \| dict[str, int \| list[list[int \| tuple[int, int]]]]` | `Awaitable[...]` | ✅ RESP2: parse_stralgo / RESP3: lambda (str keys/values) | ✅ DONE |
 | 378 | `scan_iter` | `Iterator` | `Iterator[bytes \| str]` | `AsyncIterator[bytes \| str]` | 🔄 Iterator - separate impl | ⏭️ N/A |
 
 ---
@@ -515,18 +515,18 @@ This document catalogs all command methods that need `@overload` signatures for 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
 | 379 | `sentinel` | `ResponseT` | `Any` | `Awaitable[Any]` | ⚠️ Separate Async impl | ⏭️ N/A |
-| 380 | `sentinel_get_master_addr_by_name` | `ResponseT` | `tuple[str, int] \| None` | `Awaitable[tuple[str, int] \| None]` | ✅ Base: parse_sentinel_get_master - str + int | 🔲 TODO |
-| 381 | `sentinel_master` | `ResponseT` | `dict[str, Any]` | `Awaitable[dict[str, Any]]` | ✅ RESP2: parse_sentinel_master / RESP3: parse_sentinel_state_resp3 | 🔲 TODO |
-| 382 | `sentinel_masters` | `ResponseT` | `dict[str, dict] \| list[dict]` | `Awaitable[...]` | ✅ RESP2: parse_sentinel_masters / RESP3: parse_sentinel_masters_resp3 | 🔲 TODO |
-| 383 | `sentinel_monitor` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 384 | `sentinel_remove` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 385 | `sentinel_sentinels` | `ResponseT` | `list[dict[str, Any]]` | `Awaitable[list[dict[str, Any]]]` | ✅ RESP2: parse_sentinel_slaves_and_sentinels / RESP3: parse_sentinel_slaves_and_sentinels_resp3 | 🔲 TODO |
-| 386 | `sentinel_set` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 387 | `sentinel_slaves` | `ResponseT` | `list[dict[str, Any]]` | `Awaitable[list[dict[str, Any]]]` | ✅ RESP2: parse_sentinel_slaves_and_sentinels / RESP3: parse_sentinel_slaves_and_sentinels_resp3 | 🔲 TODO |
-| 388 | `sentinel_reset` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 389 | `sentinel_failover` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 390 | `sentinel_ckquorum` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
-| 391 | `sentinel_flushconfig` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | 🔲 TODO |
+| 380 | `sentinel_get_master_addr_by_name` | `ResponseT` | `tuple[bytes \| str, int] \| None` | `Awaitable[tuple[bytes \| str, int] \| None]` | ✅ Redis client uses parse_sentinel_get_master; host depends on decode_responses; Sentinel manager broadens to bool/list | ✅ DONE |
+| 381 | `sentinel_master` | `ResponseT` | `dict[str, Any]` | `Awaitable[dict[str, Any]]` | ✅ Redis client parses sentinel state; Sentinel manager broadens to bool/list | ✅ DONE |
+| 382 | `sentinel_masters` | `ResponseT` | `dict[str, dict[str, Any]] \| list[dict[str, Any]]` | `Awaitable[...]` | ✅ Redis client parses masters; Sentinel manager returns bool | ✅ DONE |
+| 383 | `sentinel_monitor` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 384 | `sentinel_remove` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 385 | `sentinel_sentinels` | `ResponseT` | `list[dict[str, Any]]` | `Awaitable[list[dict[str, Any]]]` | ✅ Redis client parses states; Sentinel manager broadens to bool | ✅ DONE |
+| 386 | `sentinel_set` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 387 | `sentinel_slaves` | `ResponseT` | `list[dict[str, Any]]` | `Awaitable[list[dict[str, Any]]]` | ✅ Redis client parses states; Sentinel manager returns bool | ✅ DONE |
+| 388 | `sentinel_reset` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 389 | `sentinel_failover` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 390 | `sentinel_ckquorum` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
+| 391 | `sentinel_flushconfig` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Base: bool_ok | ✅ DONE |
 
 ---
 
@@ -578,34 +578,34 @@ This document catalogs all command methods that need `@overload` signatures for 
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 425 | `arrappend` | `ResponseT` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ Module command - int array | 🔲 TODO |
-| 426 | `arrindex` | `ResponseT` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ Module command - int array | 🔲 TODO |
-| 427 | `arrinsert` | `ResponseT` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ Module command - int array | 🔲 TODO |
-| 428 | `arrlen` | `ResponseT` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ Module command - int array | 🔲 TODO |
-| 429 | `arrpop` | `ResponseT` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ Module command - depends on decode_responses | 🔲 TODO |
-| 430 | `arrtrim` | `ResponseT` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ Module command - int array | 🔲 TODO |
-| 431 | `type` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ Module command - depends on decode_responses | 🔲 TODO |
-| 432 | `resp` | `ResponseT` | `list` | `Awaitable[list]` | ✅ Module command - JSON structure | 🔲 TODO |
-| 433 | `objkeys` | `ResponseT` | `list[list[bytes \| str] \| None]` | `Awaitable[list[list[bytes \| str] \| None]]` | ✅ Module command - depends on decode_responses | 🔲 TODO |
-| 434 | `objlen` | `ResponseT` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ Module command - int array | 🔲 TODO |
-| 435 | `numincrby` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ Module command - depends on decode_responses | 🔲 TODO |
-| 436 | `nummultby` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ Module command - depends on decode_responses | 🔲 TODO |
-| 437 | `clear` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - int reply | 🔲 TODO |
-| 438 | `delete` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - int reply | 🔲 TODO |
-| 439 | `get` | `ResponseT` | `Any` | `Awaitable[Any]` | ✅ Module command - JSON parsed | 🔲 TODO |
-| 440 | `mget` | `ResponseT` | `list[Any]` | `Awaitable[list[Any]]` | ✅ Module command - JSON parsed | 🔲 TODO |
-| 441 | `set` | `ResponseT` | `bool \| None` | `Awaitable[bool \| None]` | ✅ Module command - OK or None | 🔲 TODO |
-| 442 | `mset` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | 🔲 TODO |
-| 443 | `merge` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | 🔲 TODO |
-| 444 | `set_file` | `Optional[str]` | `bool \| None` | `Awaitable[bool \| None]` | 📋 Explicit | 🔲 TODO |
-| 445 | `set_path` | `dict[str, bool]` | `dict[str, bool]` | `Awaitable[dict[str, bool]]` | 📋 Explicit | 🔲 TODO |
-| 446 | `strlen` | `ResponseT` | `list[int \| None]` | `Awaitable[list[int \| None]]` | ✅ Module command - int array | 🔲 TODO |
-| 447 | `toggle` | `ResponseT` | `bool \| list[bool]` | `Awaitable[bool \| list[bool]]` | ✅ Module command - bool | 🔲 TODO |
-| 448 | `strappend` | `ResponseT` | `int \| list[int \| None]` | `Awaitable[int \| list[int \| None]]` | ✅ Module command - int | 🔲 TODO |
-| 449 | `debug` | `ResponseT` | `int \| list[bytes \| str]` | `Awaitable[int \| list[bytes \| str]]` | ✅ Module command - mixed | 🔲 TODO |
-| 450 | `jsonget` | *(none)* | `Any` | `Awaitable[Any]` | ⚠️ Deprecated alias for get | 🔲 TODO |
-| 451 | `jsonmget` | *(none)* | `Any` | `Awaitable[Any]` | ⚠️ Deprecated alias for mget | 🔲 TODO |
-| 452 | `jsonset` | *(none)* | `Any` | `Awaitable[Any]` | ⚠️ Deprecated alias for set | 🔲 TODO |
+| 425 | `arrappend` | `ResponseT` | `int \| list[int \| None] \| None` | `Awaitable[int \| list[int \| None] \| None]` | ✅ `.` path: scalar / RESP3 wrapper; `$` path: list | ✅ DONE |
+| 426 | `arrindex` | `ResponseT` | `int \| list[int \| None] \| None` | `Awaitable[int \| list[int \| None] \| None]` | ✅ `.` path: scalar / RESP3 wrapper; `$` path: list | ✅ DONE |
+| 427 | `arrinsert` | `ResponseT` | `int \| list[int \| None] \| None` | `Awaitable[int \| list[int \| None] \| None]` | ✅ `.` path: scalar / RESP3 wrapper; `$` path: list | ✅ DONE |
+| 428 | `arrlen` | `ResponseT` | `int \| list[int \| None] \| None` | `Awaitable[int \| list[int \| None] \| None]` | ✅ `.` path: scalar / nil; `$` path: list | ✅ DONE |
+| 429 | `arrpop` | `ResponseT` | `JsonType \| str \| list[Any] \| None` | `Awaitable[JsonType \| str \| list[Any] \| None]` | ✅ `_decode` yields scalar for `.` paths and list-like raw/decoded mix for `$` paths | ✅ DONE |
+| 430 | `arrtrim` | `ResponseT` | `int \| list[int \| None] \| None` | `Awaitable[int \| list[int \| None] \| None]` | ✅ `.` path: scalar / RESP3 wrapper; `$` path: list | ✅ DONE |
+| 431 | `type` | `ResponseT` | `str \| None \| list[str \| None] \| list[list[str]]` | `Awaitable[...]` | ✅ `.` path: scalar / RESP3 wrapper; `$` path: list; RESP3 adds extra nesting | ✅ DONE |
+| 432 | `resp` | `ResponseT` | `Any` | `Awaitable[Any]` | ✅ JSON structure decoded by module callback | ✅ DONE |
+| 433 | `objkeys` | `ResponseT` | `list[str] \| list[list[str] \| None] \| None` | `Awaitable[...]` | ✅ `.` path: flat list or nil; `$` path: nested list(s) / empty list | ✅ DONE |
+| 434 | `objlen` | `ResponseT` | `int \| list[int \| None] \| None` | `Awaitable[int \| list[int \| None] \| None]` | ✅ `.` path: scalar / nil; `$` path: list | ✅ DONE |
+| 435 | `numincrby` | `ResponseT` | `int \| float \| list[int \| float \| None]` | `Awaitable[...]` | ✅ `.` path: scalar / RESP3 wrapper; `$` path: list | ✅ DONE |
+| 436 | `nummultby` | `ResponseT` | `int \| float \| list[int \| float \| None]` | `Awaitable[...]` | ✅ `.` path: scalar / RESP3 wrapper; `$` path: list | ✅ DONE |
+| 437 | `clear` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Count reply | ✅ DONE |
+| 438 | `delete` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Count reply | ✅ DONE |
+| 439 | `get` | `ResponseT` | `Any \| None` | `Awaitable[Any \| None]` | ✅ JSON-decoded; shape depends on path form and number of paths | ✅ DONE |
+| 440 | `mget` | `ResponseT` | `list[JsonType \| None]` | `Awaitable[list[JsonType \| None]]` | ✅ JSON-decoded list, one entry per key | ✅ DONE |
+| 441 | `set` | `ResponseT` | `bool \| None` | `Awaitable[bool \| None]` | ✅ `OK` or nil when condition/path creation fails | ✅ DONE |
+| 442 | `mset` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ `OK` callback | ✅ DONE |
+| 443 | `merge` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ `OK` callback | ✅ DONE |
+| 444 | `set_file` | `str \| None` | `bool \| None` | `Awaitable[bool \| None]` | 📋 Delegates to `set` | ✅ DONE |
+| 445 | `set_path` | `dict[str, bool]` | `dict[str, bool]` | `Awaitable[dict[str, bool]]` | 📋 Local helper / async override | ✅ DONE |
+| 446 | `strlen` | `ResponseT` | `int \| list[int \| None] \| None` | `Awaitable[int \| list[int \| None] \| None]` | ✅ `.` path: scalar / nil; `$` path: list | ✅ DONE |
+| 447 | `toggle` | `ResponseT` | `bool \| list[int \| None] \| None` | `Awaitable[bool \| list[int \| None] \| None]` | ✅ `.` path: bool; `$` path: list of 0/1/null-like entries | ✅ DONE |
+| 448 | `strappend` | `ResponseT` | `int \| list[int \| None] \| None` | `Awaitable[int \| list[int \| None] \| None]` | ✅ `.` path: scalar / RESP3 wrapper; `$` path: list | ✅ DONE |
+| 449 | `debug` | `ResponseT` | `int \| list[str]` | `Awaitable[int \| list[str]]` | ✅ `MEMORY` returns integer, `HELP` returns list of strings | ✅ DONE |
+| 450 | `jsonget` | *(none)* | `Any \| None` | `Awaitable[Any \| None]` | ⚠️ Deprecated alias for `get` | ✅ DONE |
+| 451 | `jsonmget` | *(none)* | `list[JsonType \| None]` | `Awaitable[list[JsonType \| None]]` | ⚠️ Deprecated alias for `mget` | ✅ DONE |
+| 452 | `jsonset` | *(none)* | `bool \| None` | `Awaitable[bool \| None]` | ⚠️ Deprecated alias for `set` | ✅ DONE |
 
 ---
 
@@ -615,23 +615,23 @@ This document catalogs all command methods that need `@overload` signatures for 
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 453 | `create` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | 🔲 TODO |
-| 454 | `alter` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | 🔲 TODO |
-| 455 | `add` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - timestamp | 🔲 TODO |
-| 456 | `madd` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - timestamps | 🔲 TODO |
-| 457 | `incrby` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - timestamp | 🔲 TODO |
-| 458 | `decrby` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - timestamp | 🔲 TODO |
-| 459 | `delete` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - count | 🔲 TODO |
-| 460 | `createrule` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | 🔲 TODO |
-| 461 | `deleterule` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | 🔲 TODO |
-| 462 | `range` | `ResponseT` | `list[tuple[int, float]]` | `Awaitable[list[tuple[int, float]]]` | ✅ Module command - parsed samples | 🔲 TODO |
-| 463 | `revrange` | `ResponseT` | `list[tuple[int, float]]` | `Awaitable[list[tuple[int, float]]]` | ✅ Module command - parsed samples | 🔲 TODO |
-| 464 | `mrange` | `ResponseT` | `list` | `Awaitable[list]` | ✅ Module command - complex structure | 🔲 TODO |
-| 465 | `mrevrange` | `ResponseT` | `list` | `Awaitable[list]` | ✅ Module command - complex structure | 🔲 TODO |
-| 466 | `get` | `ResponseT` | `tuple[int, float] \| list` | `Awaitable[tuple[int, float] \| list]` | ✅ Module command - parsed sample | 🔲 TODO |
-| 467 | `mget` | `ResponseT` | `list` | `Awaitable[list]` | ✅ Module command - complex structure | 🔲 TODO |
-| 468 | `info` | `TSInfo` | `TSInfo` | `Awaitable[TSInfo]` | 📋 Explicit | 🔲 TODO |
-| 469 | `queryindex` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - depends on decode_responses | 🔲 TODO |
+| 453 | `create` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | ✅ DONE |
+| 454 | `alter` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | ✅ DONE |
+| 455 | `add` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - timestamp | ✅ DONE |
+| 456 | `madd` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - timestamps | ✅ DONE |
+| 457 | `incrby` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - timestamp | ✅ DONE |
+| 458 | `decrby` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - timestamp | ✅ DONE |
+| 459 | `delete` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - count | ✅ DONE |
+| 460 | `createrule` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | ✅ DONE |
+| 461 | `deleterule` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | ✅ DONE |
+| 462 | `range` | `ResponseT` | `list[tuple[int, float] \| list[int \| float]]` | `Awaitable[...]` | ✅ RESP2: parse_range / RESP3: raw sample arrays | ✅ DONE |
+| 463 | `revrange` | `ResponseT` | `list[tuple[int, float] \| list[int \| float]]` | `Awaitable[...]` | ✅ RESP2: parse_range / RESP3: raw sample arrays | ✅ DONE |
+| 464 | `mrange` | `ResponseT` | `list[Any] \| dict[str, list[Any]]` | `Awaitable[list[Any] \| dict[str, list[Any]]]` | ✅ RESP2: parse_m_range list; RESP3: map reply keyed by series/group label | ✅ DONE |
+| 465 | `mrevrange` | `ResponseT` | `list[Any] \| dict[str, list[Any]]` | `Awaitable[list[Any] \| dict[str, list[Any]]]` | ✅ RESP2: parse_m_range list; RESP3: map reply keyed by series/group label | ✅ DONE |
+| 466 | `get` | `ResponseT` | `tuple[int, float] \| list[int \| float] \| None` | `Awaitable[...]` | ✅ RESP2: parse_get / RESP3: raw sample array | ✅ DONE |
+| 467 | `mget` | `ResponseT` | `list[Any] \| dict[str, list[Any]]` | `Awaitable[list[Any] \| dict[str, list[Any]]]` | ✅ RESP2: parse_m_get list; RESP3: map reply keyed by series name | ✅ DONE |
+| 468 | `info` | `TSInfo` | `TSInfo \| dict[str, Any]` | `Awaitable[...]` | ✅ RESP2: TSInfo / RESP3: raw dict | ✅ DONE |
+| 469 | `queryindex` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ No callback - depends on decode_responses | ✅ DONE |
 
 ---
 
@@ -641,75 +641,75 @@ This document catalogs all command methods that need `@overload` signatures for 
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 470 | `create` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | 🔲 TODO |
-| 471 | `add` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - 0 or 1 | 🔲 TODO |
-| 472 | `madd` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - 0s and 1s | 🔲 TODO |
-| 473 | `insert` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - 0s and 1s | 🔲 TODO |
-| 474 | `exists` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - 0 or 1 | 🔲 TODO |
-| 475 | `mexists` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - 0s and 1s | 🔲 TODO |
-| 476 | `scandump` | `ResponseT` | `tuple[int, bytes \| None]` | `Awaitable[tuple[int, bytes \| None]]` | ✅ Module command - cursor + data | 🔲 TODO |
-| 477 | `loadchunk` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | 🔲 TODO |
-| 478 | `info` | `ResponseT` | `dict` | `Awaitable[dict]` | ✅ Module command - parsed info | 🔲 TODO |
-| 479 | `card` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - int | 🔲 TODO |
+| 470 | `create` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | ✅ DONE |
+| 471 | `add` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - 0 or 1 | ✅ DONE |
+| 472 | `madd` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - 0s and 1s | ✅ DONE |
+| 473 | `insert` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - 0s and 1s | ✅ DONE |
+| 474 | `exists` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - 0 or 1 | ✅ DONE |
+| 475 | `mexists` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - 0s and 1s | ✅ DONE |
+| 476 | `scandump` | `ResponseT` | `tuple[int, bytes \| None]` | `Awaitable[tuple[int, bytes \| None]]` | ✅ Module command - cursor + data | ✅ DONE |
+| 477 | `loadchunk` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - raw OK reply | ✅ DONE |
+| 478 | `info` | `ResponseT` | `BFInfo \| dict[str, Any]` | `Awaitable[...]` | ✅ RESP2: BFInfo / RESP3: raw dict | ✅ DONE |
+| 479 | `card` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - int | ✅ DONE |
 
 ### CFCommands (Cuckoo Filter)
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 480 | `create` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | 🔲 TODO |
-| 481 | `add` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - 0 or 1 | 🔲 TODO |
-| 482 | `addnx` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - 0 or 1 | 🔲 TODO |
-| 483 | `insert` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - 0s and 1s | 🔲 TODO |
-| 484 | `insertnx` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - 0s and 1s | 🔲 TODO |
-| 485 | `exists` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - 0 or 1 | 🔲 TODO |
-| 486 | `mexists` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - 0s and 1s | 🔲 TODO |
-| 487 | `delete` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - 0 or 1 | 🔲 TODO |
-| 488 | `count` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - int | 🔲 TODO |
-| 489 | `scandump` | `ResponseT` | `tuple[int, bytes \| None]` | `Awaitable[tuple[int, bytes \| None]]` | ✅ Module command - cursor + data | 🔲 TODO |
-| 490 | `loadchunk` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | 🔲 TODO |
-| 491 | `info` | `ResponseT` | `dict` | `Awaitable[dict]` | ✅ Module command - parsed info | 🔲 TODO |
+| 480 | `create` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | ✅ DONE |
+| 481 | `add` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - 0 or 1 | ✅ DONE |
+| 482 | `addnx` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - 0 or 1 | ✅ DONE |
+| 483 | `insert` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - 0s and 1s | ✅ DONE |
+| 484 | `insertnx` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - 0s and 1s | ✅ DONE |
+| 485 | `exists` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - 0 or 1 | ✅ DONE |
+| 486 | `mexists` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - 0s and 1s | ✅ DONE |
+| 487 | `delete` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - 0 or 1 | ✅ DONE |
+| 488 | `count` | `ResponseT` | `int` | `Awaitable[int]` | ✅ Module command - int | ✅ DONE |
+| 489 | `scandump` | `ResponseT` | `tuple[int, bytes \| None]` | `Awaitable[tuple[int, bytes \| None]]` | ✅ Module command - cursor + data | ✅ DONE |
+| 490 | `loadchunk` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - raw OK reply | ✅ DONE |
+| 491 | `info` | `ResponseT` | `CFInfo \| dict[str, Any]` | `Awaitable[...]` | ✅ RESP2: CFInfo / RESP3: raw dict | ✅ DONE |
 
 ### TOPKCommands
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 492 | `reserve` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | 🔲 TODO |
-| 493 | `add` | `ResponseT` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ Module command - depends on decode_responses | 🔲 TODO |
-| 494 | `incrby` | `ResponseT` | `list[bytes \| str \| None]` | `Awaitable[list[bytes \| str \| None]]` | ✅ Module command - depends on decode_responses | 🔲 TODO |
-| 495 | `query` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - 0s and 1s | 🔲 TODO |
-| 496 | `count` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - ints | 🔲 TODO |
-| 497 | `list` | `ResponseT` | `list[bytes \| str]` | `Awaitable[list[bytes \| str]]` | ✅ Module command - depends on decode_responses | 🔲 TODO |
-| 498 | `info` | `ResponseT` | `dict` | `Awaitable[dict]` | ✅ Module command - parsed info | 🔲 TODO |
+| 492 | `reserve` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | ✅ DONE |
+| 493 | `add` | `ResponseT` | `list[int \| float \| str \| None]` | `Awaitable[...]` | ✅ RESP2: parse_to_list / RESP3: raw list | ✅ DONE |
+| 494 | `incrby` | `ResponseT` | `list[int \| float \| str \| None]` | `Awaitable[...]` | ✅ RESP2: parse_to_list / RESP3: raw list | ✅ DONE |
+| 495 | `query` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - 0s and 1s | ✅ DONE |
+| 496 | `count` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - ints | ✅ DONE |
+| 497 | `list` | `ResponseT` | `list[int \| float \| str \| None]` | `Awaitable[...]` | ✅ `WITHCOUNT` returns mixed list | ✅ DONE |
+| 498 | `info` | `ResponseT` | `TopKInfo \| dict[str, Any]` | `Awaitable[...]` | ✅ RESP2: TopKInfo / RESP3: raw dict | ✅ DONE |
 
 ### TDigestCommands
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 499 | `create` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | 🔲 TODO |
-| 500 | `reset` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | 🔲 TODO |
-| 501 | `add` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | 🔲 TODO |
-| 502 | `merge` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | 🔲 TODO |
-| 503 | `min` | `ResponseT` | `float` | `Awaitable[float]` | ✅ Module command - float | 🔲 TODO |
-| 504 | `max` | `ResponseT` | `float` | `Awaitable[float]` | ✅ Module command - float | 🔲 TODO |
-| 505 | `quantile` | `ResponseT` | `list[float]` | `Awaitable[list[float]]` | ✅ Module command - floats | 🔲 TODO |
-| 506 | `cdf` | `ResponseT` | `list[float]` | `Awaitable[list[float]]` | ✅ Module command - floats | 🔲 TODO |
-| 507 | `info` | `ResponseT` | `dict` | `Awaitable[dict]` | ✅ Module command - parsed info | 🔲 TODO |
-| 508 | `trimmed_mean` | `ResponseT` | `float` | `Awaitable[float]` | ✅ Module command - float | 🔲 TODO |
-| 509 | `rank` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - ints | 🔲 TODO |
-| 510 | `revrank` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - ints | 🔲 TODO |
-| 511 | `byrank` | `ResponseT` | `list[float]` | `Awaitable[list[float]]` | ✅ Module command - floats | 🔲 TODO |
-| 512 | `byrevrank` | `ResponseT` | `list[float]` | `Awaitable[list[float]]` | ✅ Module command - floats | 🔲 TODO |
+| 499 | `create` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | ✅ DONE |
+| 500 | `reset` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - raw OK reply | ✅ DONE |
+| 501 | `add` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - raw OK reply | ✅ DONE |
+| 502 | `merge` | `ResponseT` | `bytes \| str` | `Awaitable[bytes \| str]` | ✅ No callback - raw OK reply | ✅ DONE |
+| 503 | `min` | `ResponseT` | `float` | `Awaitable[float]` | ✅ Module command - float | ✅ DONE |
+| 504 | `max` | `ResponseT` | `float` | `Awaitable[float]` | ✅ Module command - float | ✅ DONE |
+| 505 | `quantile` | `ResponseT` | `list[int \| float \| str \| None]` | `Awaitable[...]` | ✅ RESP2: parse_to_list / RESP3: raw list | ✅ DONE |
+| 506 | `cdf` | `ResponseT` | `list[int \| float \| str \| None]` | `Awaitable[...]` | ✅ RESP2: parse_to_list / RESP3: raw list | ✅ DONE |
+| 507 | `info` | `ResponseT` | `TDigestInfo \| dict[str, Any]` | `Awaitable[...]` | ✅ RESP2: TDigestInfo / RESP3: raw dict | ✅ DONE |
+| 508 | `trimmed_mean` | `ResponseT` | `float` | `Awaitable[float]` | ✅ Module command - float | ✅ DONE |
+| 509 | `rank` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ RESP2/RESP3: array of integers | ✅ DONE |
+| 510 | `revrank` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ RESP2/RESP3: array of integers | ✅ DONE |
+| 511 | `byrank` | `ResponseT` | `list[int \| float \| str \| None]` | `Awaitable[...]` | ✅ RESP2: parse_to_list / RESP3: raw list | ✅ DONE |
+| 512 | `byrevrank` | `ResponseT` | `list[int \| float \| str \| None]` | `Awaitable[...]` | ✅ RESP2: parse_to_list / RESP3: raw list | ✅ DONE |
 
 ### CMSCommands (Count-Min Sketch)
 
 | # | Method | Defined Return | Assumed Sync | Assumed Async | Status | Implementation |
 |---|--------|----------------|--------------|---------------|--------|----------------|
-| 513 | `initbydim` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | 🔲 TODO |
-| 514 | `initbyprob` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | 🔲 TODO |
-| 515 | `incrby` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - ints | 🔲 TODO |
-| 516 | `query` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - ints | 🔲 TODO |
-| 517 | `merge` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | 🔲 TODO |
-| 518 | `info` | `ResponseT` | `dict` | `Awaitable[dict]` | ✅ Module command - parsed info | 🔲 TODO |
+| 513 | `initbydim` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | ✅ DONE |
+| 514 | `initbyprob` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | ✅ DONE |
+| 515 | `incrby` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - ints | ✅ DONE |
+| 516 | `query` | `ResponseT` | `list[int]` | `Awaitable[list[int]]` | ✅ Module command - ints | ✅ DONE |
+| 517 | `merge` | `ResponseT` | `bool` | `Awaitable[bool]` | ✅ Module command - OK | ✅ DONE |
+| 518 | `info` | `ResponseT` | `CMSInfo \| dict[str, Any]` | `Awaitable[...]` | ✅ RESP2: CMSInfo / RESP3: raw dict | ✅ DONE |
 
 ---
 

@@ -1,3 +1,5 @@
+from typing import Literal
+
 import redis
 from redis._parsers.helpers import bool_ok
 
@@ -22,7 +24,7 @@ from .info import TSInfo
 from .utils import parse_get, parse_m_get, parse_m_range, parse_range
 
 
-class TimeSeries(TimeSeriesCommands):
+class _TimeSeriesBase(TimeSeriesCommands):
     """
     This class subclasses redis-py's `Redis` and implements RedisTimeSeries's
     commands (prefixed with "ts").
@@ -106,3 +108,11 @@ class ClusterPipeline(TimeSeriesCommands, redis.cluster.ClusterPipeline):
 
 class Pipeline(TimeSeriesCommands, redis.client.Pipeline):
     """Pipeline for the module."""
+
+
+class TimeSeries(_TimeSeriesBase):
+    _is_async_client: Literal[False] = False
+
+
+class AsyncTimeSeries(_TimeSeriesBase):
+    _is_async_client: Literal[True] = True

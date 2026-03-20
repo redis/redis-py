@@ -80,6 +80,13 @@ XClaimResponse = StreamRangeResponse | list[bytes | str]
 XPendingRangeEntry = dict[str, bytes | str | int]
 XPendingRangeResponse = list[XPendingRangeEntry]
 XReadResponse = list[list[Any]] | dict[bytes | str, list[StreamRangeResponse]]
+ClusterNodeDetail = dict[str, str | bool | list[list[str]] | list[dict[str, str]]]
+SentinelMasterAddress = tuple[bytes | str, int] | None
+SentinelMastersResponse = dict[str, dict[str, Any]] | list[dict[str, Any]]
+TimeSeriesSample = tuple[int, float] | list[int | float]
+TimeSeriesRangeResponse = list[TimeSeriesSample]
+BloomScanDumpResponse = tuple[int, bytes | None]
+ModuleListResponse = list[int | float | str | None]
 BlockingZSetPopResponse = (
     tuple[bytes | str, bytes | str, float] | list[bytes | str | float] | None
 )
