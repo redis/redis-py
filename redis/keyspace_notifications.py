@@ -56,13 +56,16 @@ Redis Cluster Example:
     ...     print(f"Key: {notification.key}, Event: {notification.event_type}")
 """
 
+from __future__ import annotations
+
 import re
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, ClassVar, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, ClassVar, Union
 
 from redis.client import Redis
 from redis.cluster import RedisCluster
@@ -73,9 +76,12 @@ from redis.exceptions import (
 )
 from redis.utils import safe_str
 
+if TYPE_CHECKING:
+    from typing import TypeAlias
+
 # Type alias for channel arguments - can be a string, bytes, or Channel object
 # This is defined here and the actual types are added after class definitions
-ChannelT = Union[str, bytes, "KeyspaceChannel", "KeyeventChannel"]
+ChannelT: TypeAlias = Union[str, bytes, "KeyspaceChannel", "KeyeventChannel"]
 
 
 # =============================================================================
@@ -235,9 +241,9 @@ class KeyNotification:
     @classmethod
     def from_message(
         cls,
-        message: Optional[Dict[str, Any]],
-        key_prefix: Optional[Union[str, bytes]] = None,
-    ) -> Optional["KeyNotification"]:
+        message: dict[str, Any] | None,
+        key_prefix: str | bytes | None = None,
+    ) -> KeyNotification | None:
         """
         Parse a pub/sub message into a KeyNotification.
 
@@ -287,10 +293,10 @@ class KeyNotification:
     @classmethod
     def try_parse(
         cls,
-        channel: Union[str, bytes],
-        data: Union[str, bytes],
-        key_prefix: Optional[Union[str, bytes]] = None,
-    ) -> Optional["KeyNotification"]:
+        channel: str | bytes,
+        data: str | bytes,
+        key_prefix: str | bytes | None = None,
+    ) -> KeyNotification | None:
         """
         Try to parse a channel and data into a KeyNotification.
 
@@ -315,8 +321,8 @@ class KeyNotification:
         cls,
         channel: str,
         data: str,
-        key_prefix: Optional[Union[str, bytes]] = None,
-    ) -> Optional["KeyNotification"]:
+        key_prefix: str | bytes | None = None,
+    ) -> KeyNotification | None:
         """Internal parsing logic."""
         # Normalize key_prefix
         key_prefix = safe_str(key_prefix) if key_prefix else None
@@ -365,7 +371,7 @@ class KeyNotification:
 
         return None
 
-    def key_starts_with(self, prefix: Union[str, bytes]) -> bool:
+    def key_starts_with(self, prefix: str | bytes) -> bool:
         """Check if the key starts with the given prefix."""
         prefix = safe_str(prefix)
         return self.key.startswith(prefix)
@@ -556,7 +562,7 @@ class ChannelType(Enum):
     KEYEVENT = "keyevent"
 
 
-def get_channel_type(channel: Union[str, bytes]) -> Optional[ChannelType]:
+def get_channel_type(channel: str | bytes) -> ChannelType | None:
     """
     Determine the type of a Redis keyspace notification channel.
 
@@ -587,7 +593,7 @@ def get_channel_type(channel: Union[str, bytes]) -> Optional[ChannelType]:
 
 
 def _is_pattern(
-    channel: Union[str, bytes, "KeyspaceChannel", "KeyeventChannel"],
+    channel: str | bytes | KeyspaceChannel | KeyeventChannel,
 ) -> bool:
     """
     Check if a channel string contains glob-style pattern characters.
@@ -642,7 +648,7 @@ class KeyspaceNotificationsInterface(ABC):
     def subscribe(
         self,
         *channels: ChannelT,
-        handler: Optional[Callable[[KeyNotification], None]] = None,
+        handler: Callable[[KeyNotification], None] | None = None,
     ):
         """Subscribe to keyspace notification channels."""
         pass
@@ -657,7 +663,7 @@ class KeyspaceNotificationsInterface(ABC):
         self,
         key_or_pattern: str,
         db: int = 0,
-        handler: Optional[Callable[[KeyNotification], None]] = None,
+        handler: Callable[[KeyNotification], None] | None = None,
     ):
         """Subscribe to keyspace notifications for specific keys."""
         pass
@@ -667,7 +673,7 @@ class KeyspaceNotificationsInterface(ABC):
         self,
         event: str,
         db: int = 0,
-        handler: Optional[Callable[[KeyNotification], None]] = None,
+        handler: Callable[[KeyNotification], None] | None = None,
     ):
         """Subscribe to keyevent notifications for specific event types."""
         pass
@@ -675,9 +681,9 @@ class KeyspaceNotificationsInterface(ABC):
     @abstractmethod
     def get_message(
         self,
-        ignore_subscribe_messages: Optional[bool] = None,
+        ignore_subscribe_messages: bool | None = None,
         timeout: float = 0.0,
-    ) -> Optional[KeyNotification]:
+    ) -> KeyNotification | None:
         """Get the next keyspace notification if one is available."""
         pass
 
@@ -710,17 +716,16 @@ class KeyspaceNotificationsInterface(ABC):
         self,
         poll_timeout: float = 0.0,
         daemon: bool = False,
-        exception_handler: Optional[
-            Callable[
-                [
-                    BaseException,
-                    "KeyspaceNotificationsInterface",
-                    "KeyspaceWorkerThread",
-                ],
-                None,
-            ]
-        ] = None,
-    ) -> "KeyspaceWorkerThread":
+        exception_handler: Callable[
+            [
+                BaseException,
+                KeyspaceNotificationsInterface,
+                KeyspaceWorkerThread,
+            ],
+            None,
+        ]
+        | None = None,
+    ) -> KeyspaceWorkerThread:
         """Start a background thread that polls for notifications."""
         pass
 
@@ -740,7 +745,7 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
 
     def __init__(
         self,
-        key_prefix: Optional[Union[str, bytes]] = None,
+        key_prefix: str | bytes | None = None,
         ignore_subscribe_messages: bool = True,
     ):
         """
@@ -753,14 +758,14 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
         """
         self.key_prefix = key_prefix
         self.ignore_subscribe_messages = ignore_subscribe_messages
-        self._subscribed_patterns: Dict[str, Any] = {}  # pattern -> handler
-        self._subscribed_channels: Dict[str, Any] = {}  # channel -> handler
+        self._subscribed_patterns: dict[str, Any] = {}  # pattern -> handler
+        self._subscribed_channels: dict[str, Any] = {}  # channel -> handler
         self._closed = False
 
     def subscribe(
         self,
         *channels: ChannelT,
-        handler: Optional[Callable[[KeyNotification], None]] = None,
+        handler: Callable[[KeyNotification], None] | None = None,
     ):
         """
         Subscribe to keyspace notification channels.
@@ -777,7 +782,7 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
                     instead of being returned by get_message()/listen().
         """
         # Wrap the handler to convert raw messages to KeyNotification objects
-        wrapped_handler: Optional[Callable] = None
+        wrapped_handler: Callable | None = None
         if handler is not None:
             # Capture key_prefix in closure for consistent filtering/stripping
             key_prefix = self.key_prefix
@@ -815,7 +820,7 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
 
     @abstractmethod
     def _execute_subscribe(
-        self, patterns: Dict[str, Any], exact_channels: Dict[str, Any]
+        self, patterns: dict[str, Any], exact_channels: dict[str, Any]
     ) -> None:
         """
         Execute the subscribe operation.
@@ -856,7 +861,7 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
 
     @abstractmethod
     def _execute_unsubscribe(
-        self, patterns: List[str], exact_channels: List[str]
+        self, patterns: list[str], exact_channels: list[str]
     ) -> None:
         """
         Execute the unsubscribe operation.
@@ -871,7 +876,7 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
         self,
         key_or_pattern: str,
         db: int = 0,
-        handler: Optional[Callable[[KeyNotification], None]] = None,
+        handler: Callable[[KeyNotification], None] | None = None,
     ):
         """
         Subscribe to keyspace notifications for specific keys.
@@ -892,7 +897,7 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
         self,
         event: str,
         db: int = 0,
-        handler: Optional[Callable[[KeyNotification], None]] = None,
+        handler: Callable[[KeyNotification], None] | None = None,
     ):
         """
         Subscribe to keyevent notifications for specific event types.
@@ -927,17 +932,16 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
         self,
         poll_timeout: float = 0.0,
         daemon: bool = False,
-        exception_handler: Optional[
-            Callable[
-                [
-                    BaseException,
-                    "KeyspaceNotificationsInterface",
-                    "KeyspaceWorkerThread",
-                ],
-                None,
-            ]
-        ] = None,
-    ) -> "KeyspaceWorkerThread":
+        exception_handler: Callable[
+            [
+                BaseException,
+                KeyspaceNotificationsInterface,
+                KeyspaceWorkerThread,
+            ],
+            None,
+        ]
+        | None = None,
+    ) -> KeyspaceWorkerThread:
         """
         Start a background thread that polls for notifications and triggers handlers.
 
@@ -1009,16 +1013,15 @@ class KeyspaceWorkerThread(threading.Thread):
         notifications: KeyspaceNotificationsInterface,
         poll_timeout: float,
         daemon: bool = False,
-        exception_handler: Optional[
-            Callable[
-                [
-                    BaseException,
-                    KeyspaceNotificationsInterface,
-                    "KeyspaceWorkerThread",
-                ],
-                None,
-            ]
-        ] = None,
+        exception_handler: Callable[
+            [
+                BaseException,
+                KeyspaceNotificationsInterface,
+                KeyspaceWorkerThread,
+            ],
+            None,
+        ]
+        | None = None,
     ):
         super().__init__()
         self.daemon = daemon
@@ -1075,7 +1078,7 @@ class KeyspaceNotifications(AbstractKeyspaceNotifications):
     def __init__(
         self,
         redis_client: Redis,
-        key_prefix: Optional[Union[str, bytes]] = None,
+        key_prefix: str | bytes | None = None,
         ignore_subscribe_messages: bool = True,
     ):
         """
@@ -1099,7 +1102,7 @@ class KeyspaceNotifications(AbstractKeyspaceNotifications):
         self._pubsub = redis_client.pubsub(ignore_subscribe_messages=False)
 
     def _execute_subscribe(
-        self, patterns: Dict[str, Any], exact_channels: Dict[str, Any]
+        self, patterns: dict[str, Any], exact_channels: dict[str, Any]
     ) -> None:
         """Execute subscribe on the single pubsub connection."""
         if patterns:
@@ -1108,7 +1111,7 @@ class KeyspaceNotifications(AbstractKeyspaceNotifications):
             self._pubsub.subscribe(**exact_channels)
 
     def _execute_unsubscribe(
-        self, patterns: List[str], exact_channels: List[str]
+        self, patterns: list[str], exact_channels: list[str]
     ) -> None:
         """Execute unsubscribe on the single pubsub connection."""
         if patterns:
@@ -1118,9 +1121,9 @@ class KeyspaceNotifications(AbstractKeyspaceNotifications):
 
     def get_message(
         self,
-        ignore_subscribe_messages: Optional[bool] = None,
+        ignore_subscribe_messages: bool | None = None,
         timeout: float = 0.0,
-    ) -> Optional[KeyNotification]:
+    ) -> KeyNotification | None:
         """
         Get the next keyspace notification if one is available.
 
@@ -1202,7 +1205,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
     def __init__(
         self,
         redis_cluster: RedisCluster,
-        key_prefix: Optional[Union[str, bytes]] = None,
+        key_prefix: str | bytes | None = None,
         ignore_subscribe_messages: bool = True,
     ):
         """
@@ -1222,7 +1225,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
         self.cluster = redis_cluster
 
         # Track subscriptions per node
-        self._node_pubsubs: Dict[str, Any] = {}
+        self._node_pubsubs: dict[str, Any] = {}
 
         # Generator for round-robin message retrieval
         self._pubsub_iter = None
@@ -1245,7 +1248,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
         return self._node_pubsubs[node.name]
 
     def _execute_subscribe(
-        self, patterns: Dict[str, Any], exact_channels: Dict[str, Any]
+        self, patterns: dict[str, Any], exact_channels: dict[str, Any]
     ) -> None:
         """Execute subscribe on all cluster nodes."""
         if patterns:
@@ -1253,7 +1256,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
         if exact_channels:
             self._subscribe_to_all_nodes(exact_channels, use_psubscribe=False)
 
-    def _subscribe_to_all_nodes(self, channels: Dict[str, Any], use_psubscribe: bool):
+    def _subscribe_to_all_nodes(self, channels: dict[str, Any], use_psubscribe: bool):
         """Subscribe to patterns/channels on all primary nodes."""
         for node in self._get_all_primary_nodes():
             pubsub = self._ensure_node_pubsub(node)
@@ -1263,7 +1266,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
                 pubsub.subscribe(**channels)
 
     def _execute_unsubscribe(
-        self, patterns: List[str], exact_channels: List[str]
+        self, patterns: list[str], exact_channels: list[str]
     ) -> None:
         """Execute unsubscribe on all cluster nodes."""
         if patterns:
@@ -1271,7 +1274,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
         if exact_channels:
             self._unsubscribe_from_all_nodes(exact_channels, use_punsubscribe=False)
 
-    def _unsubscribe_from_all_nodes(self, channels: List[str], use_punsubscribe: bool):
+    def _unsubscribe_from_all_nodes(self, channels: list[str], use_punsubscribe: bool):
         """Unsubscribe from patterns/channels on all nodes."""
         for pubsub in self._node_pubsubs.values():
             if use_punsubscribe:
@@ -1281,9 +1284,9 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
 
     def get_message(
         self,
-        ignore_subscribe_messages: Optional[bool] = None,
+        ignore_subscribe_messages: bool | None = None,
         timeout: float = 0.0,
-    ) -> Optional[KeyNotification]:
+    ) -> KeyNotification | None:
         """
         Get the next keyspace notification if one is available.
 
@@ -1377,7 +1380,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
 
     def _poll_all_nodes_once(
         self, ignore_subscribe_messages: bool
-    ) -> Optional[KeyNotification]:
+    ) -> KeyNotification | None:
         """
         Perform a single non-blocking poll over all node pubsubs.
 
@@ -1469,6 +1472,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
 
         # Subscribe new nodes to existing patterns/channels
         new_nodes = set(current_primaries.keys()) - set(self._node_pubsubs.keys())
+        failed_nodes: list[str] = []
         for node_name in new_nodes:
             node = current_primaries[node_name]
             pubsub = self._ensure_node_pubsub(node)
@@ -1485,7 +1489,13 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
                     pubsub.close()
                 except Exception:
                     pass
-                raise
+                failed_nodes.append(node_name)
+
+        # Raise after attempting all nodes so we don't skip any
+        if failed_nodes:
+            raise ConnectionError(
+                f"Failed to subscribe to cluster nodes: {', '.join(failed_nodes)}"
+            )
 
     def close(self):
         """Close all pubsub connections and clean up resources."""
