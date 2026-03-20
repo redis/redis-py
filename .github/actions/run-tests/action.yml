@@ -84,13 +84,18 @@ runs:
         echo "::group::Starting Redis servers"
         # Check if REDIS_VERSION is in the custom map
         mapped_version=""
+        echo "REDIS_VERSION_CUSTOM_MAP: ${REDIS_VERSION_CUSTOM_MAP:-}"
         if [[ -n "${REDIS_VERSION_CUSTOM_MAP:-}" ]]; then
           for mapping in $REDIS_VERSION_CUSTOM_MAP; do
-            tag="${mapping%%:*}"
-            version="${mapping##*:}"
-            if [[ "$REDIS_VERSION" == "$tag" ]]; then
+            echo "Checking mapping: $mapping"
+            version="${mapping%%:*}"
+            tag="${mapping##*:}"
+            echo "Using tag: $tag, version: $version"
+            if [[ "$REDIS_VERSION" == "$version" ]]; then
               mapped_version="$version"
-              echo "Found custom mapping: $REDIS_VERSION -> $mapped_version"
+              echo "Found custom mapping: $REDIS_VERSION -> $mapped_version -> $tag"
+              echo "Updating CLIENT_LIBS_TEST_IMAGE_TAG to $tag"
+              export CLIENT_LIBS_TEST_IMAGE_TAG=${tag}
               break
             fi
           done
@@ -129,9 +134,11 @@ runs:
         else
           echo "Using redis CE for module tests"
           if [[ -z "${CLIENT_LIBS_TEST_STACK_IMAGE_TAG}" ]]; then
-            export CLIENT_LIBS_TEST_STACK_IMAGE_TAG=$REDIS_VERSION
+            export CLIENT_LIBS_TEST_STACK_IMAGE_TAG=$CLIENT_LIBS_TEST_IMAGE_TAG
           fi
           echo "REDIS_MOD_URL=redis://127.0.0.1:6379" >> $GITHUB_ENV
+          echo "Using CLIENT_LIBS_TEST_STACK_IMAGE_TAG=$CLIENT_LIBS_TEST_STACK_IMAGE_TAG"
+          echo "Using CLIENT_LIBS_TEST_IMAGE_TAG=$CLIENT_LIBS_TEST_IMAGE_TAG"
           invoke devenv --endpoints all
         fi
 
