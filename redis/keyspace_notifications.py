@@ -1394,8 +1394,10 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
                     timeout=0.0,
                 )
             except (ConnectionError, TimeoutError, RedisError):
+                # Refresh may close/remove pubsubs, making the snapshot stale.
+                # Return None and let the caller retry with fresh state.
                 self._refresh_subscriptions_on_error()
-                continue
+                return None
 
             if message is not None:
                 # Note: If a handler was registered, PubSub already invoked it
@@ -1471,10 +1473,19 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
             node = current_primaries[node_name]
             pubsub = self._ensure_node_pubsub(node)
 
-            if self._subscribed_patterns:
-                pubsub.psubscribe(**self._subscribed_patterns)
-            if self._subscribed_channels:
-                pubsub.subscribe(**self._subscribed_channels)
+            try:
+                if self._subscribed_patterns:
+                    pubsub.psubscribe(**self._subscribed_patterns)
+                if self._subscribed_channels:
+                    pubsub.subscribe(**self._subscribed_channels)
+            except Exception:
+                # Subscription failed - remove from dict so retry is possible
+                self._node_pubsubs.pop(node_name, None)
+                try:
+                    pubsub.close()
+                except Exception:
+                    pass
+                raise
 
     def close(self):
         """Close all pubsub connections and clean up resources."""
