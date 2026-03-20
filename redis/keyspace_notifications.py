@@ -67,9 +67,7 @@ from typing import Any, Callable, ClassVar, Dict, List, Optional, Union
 from redis.client import Redis
 from redis.cluster import RedisCluster
 from redis.exceptions import (
-    AskError,
     ConnectionError,
-    MovedError,
     RedisError,
     TimeoutError,
 )
@@ -1229,17 +1227,6 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
         # Generator for round-robin message retrieval
         self._pubsub_iter = None
 
-        # Debounce refresh to avoid excessive topology checks
-        self._last_refresh_time: float = 0.0
-        self._refresh_cooldown_seconds: float = 1.0
-
-        # Track known primary nodes for automatic topology change detection
-        self._known_primary_names: set = set()
-
-        # Periodic topology check interval (in seconds)
-        self._topology_check_interval: float = 1.0
-        self._last_topology_check: float = 0.0
-
     def _get_all_primary_nodes(self):
         """Get all primary nodes in the cluster."""
         return [
@@ -1268,15 +1255,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
 
     def _subscribe_to_all_nodes(self, channels: Dict[str, Any], use_psubscribe: bool):
         """Subscribe to patterns/channels on all primary nodes."""
-        primaries = self._get_all_primary_nodes()
-
-        # Track known primaries for topology change detection
-        self._known_primary_names = {node.name for node in primaries}
-
-        # Initialize topology check timer to avoid immediate re-check
-        self._last_topology_check = time.monotonic()
-
-        for node in primaries:
+        for node in self._get_all_primary_nodes():
             pubsub = self._ensure_node_pubsub(node)
             if use_psubscribe:
                 pubsub.psubscribe(**channels)
@@ -1310,8 +1289,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
 
         This method polls all node pubsubs in round-robin fashion until
         a message is received or the timeout expires.
-        If a connection error or topology change (MOVED/ASK) occurs,
-        subscriptions are automatically refreshed.
+        If a connection error occurs, subscriptions are automatically refreshed.
 
         Args:
             ignore_subscribe_messages: If True, skip subscribe/unsubscribe messages.
@@ -1321,18 +1299,19 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
         Returns:
             A KeyNotification if a notification is available, None otherwise.
         """
-        # Use instance default if not specified
-        if ignore_subscribe_messages is None:
-            ignore_subscribe_messages = self.ignore_subscribe_messages
         if self._closed:
             return None
-
-        if self._pubsub_iter is None:
-            self._pubsub_iter = self._create_pubsub_iterator()
 
         total_nodes = len(self._node_pubsubs)
         if total_nodes == 0:
             return None
+
+        # Use instance default if not specified
+        if ignore_subscribe_messages is None:
+            ignore_subscribe_messages = self.ignore_subscribe_messages
+
+        if self._pubsub_iter is None:
+            self._pubsub_iter = self._create_pubsub_iterator()
 
         # Handle timeout=0 as a single non-blocking poll over all pubsubs
         # This matches the expected semantics of PubSub.get_message(timeout=0)
@@ -1351,11 +1330,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
             if time.monotonic() >= end_time:
                 return None
 
-            # Periodically check for topology changes
-            # This detects slot migrations that don't cause connection errors
-            self._check_topology_changed()
-
-            # Recreate iterator if it was reset (e.g., by topology change or error)
+            # Recreate iterator if it was reset (e.g., after error-based refresh)
             if self._pubsub_iter is None:
                 if not self._node_pubsubs:
                     return None
@@ -1377,27 +1352,18 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
                     ignore_subscribe_messages=ignore_subscribe_messages,
                     timeout=per_node_timeout,
                 )
-            except (MovedError, AskError):
-                # Topology change - refresh subscriptions and continue
-                self._refresh_subscriptions_on_error()
-                continue
             except (ConnectionError, TimeoutError, RedisError):
                 # Connection error - refresh subscriptions and continue
                 self._refresh_subscriptions_on_error()
                 continue
 
             if message is not None:
+                # Note: If a handler was registered, PubSub already invoked it
+                # and returned None, so we only reach here for handler-less subscriptions
                 notification = KeyNotification.from_message(
                     message, key_prefix=self.key_prefix
                 )
                 if notification is not None:
-                    # Call handler if registered
-                    handler = self._subscribed_patterns.get(
-                        message.get("pattern")
-                    ) or self._subscribed_channels.get(message.get("channel"))
-                    if handler:
-                        handler(notification)
-                        return None  # Handler consumed the notification
                     return notification
                 # If not a keyspace notification, continue checking other nodes
 
@@ -1421,35 +1387,23 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
         Returns:
             A KeyNotification if one is available, None otherwise.
         """
-        # Check for topology changes before polling
-        self._check_topology_changed()
-
         for pubsub in list(self._node_pubsubs.values()):
             try:
                 message = pubsub.get_message(
                     ignore_subscribe_messages=ignore_subscribe_messages,
                     timeout=0.0,
                 )
-            except (MovedError, AskError):
-                self._refresh_subscriptions_on_error()
-                continue
             except (ConnectionError, TimeoutError, RedisError):
                 self._refresh_subscriptions_on_error()
                 continue
 
             if message is not None:
+                # Note: If a handler was registered, PubSub already invoked it
+                # and returned None, so we only reach here for handler-less subscriptions
                 notification = KeyNotification.from_message(
                     message, key_prefix=self.key_prefix
                 )
                 if notification is not None:
-                    # Call handler if registered
-                    handler = self._subscribed_patterns.get(
-                        message.get("pattern")
-                    ) or self._subscribed_channels.get(message.get("channel"))
-                    if handler:
-                        handler(notification)
-                        # Continue polling remaining nodes
-                        continue
                     return notification
 
         return None
@@ -1475,57 +1429,18 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
 
     def _refresh_subscriptions_on_error(self):
         """
-        Refresh subscriptions after a connection error, with debouncing.
+        Refresh subscriptions after a connection error.
 
         This is called automatically when a connection error occurs during
-        get_message(). It uses a cooldown to avoid excessive topology checks.
+        get_message(). It checks if nodes changed before refreshing.
         """
-        now = time.monotonic()
-        if now - self._last_refresh_time < self._refresh_cooldown_seconds:
-            return  # Skip refresh if within cooldown period
-
-        self._last_refresh_time = now
-        self._pubsub_iter = None  # Reset iterator after topology change
+        self._pubsub_iter = None  # Reset iterator
 
         try:
             self.refresh_subscriptions()
         except Exception:
             # Ignore errors during refresh - will retry on next error
             pass
-
-    def _check_topology_changed(self) -> bool:
-        """
-        Check if the cluster topology has changed since last check.
-
-        This detects when nodes have been added or removed from the cluster,
-        which can happen during slot migrations or failovers.
-
-        Returns:
-            True if topology changed and subscriptions were refreshed.
-        """
-        now = time.monotonic()
-        if now - self._last_topology_check < self._topology_check_interval:
-            return False  # Skip check if within interval
-
-        self._last_topology_check = now
-
-        # Refresh the cluster's view of the topology
-        try:
-            self.cluster.nodes_manager.initialize()
-        except Exception:
-            return False
-
-        # Get current primary node names
-        current_primaries = {node.name for node in self._get_all_primary_nodes()}
-
-        # Check if topology changed
-        if current_primaries != self._known_primary_names:
-            self._known_primary_names = current_primaries
-            self._pubsub_iter = None  # Reset iterator
-            self.refresh_subscriptions()
-            return True
-
-        return False
 
     def refresh_subscriptions(self):
         """
