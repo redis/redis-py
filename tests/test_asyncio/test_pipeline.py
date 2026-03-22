@@ -486,6 +486,30 @@ class TestPipeline:
         assert "JSON.SET" in r.response_callbacks
         assert "JSON.GET" in r.response_callbacks
 
+    async def test_pipeline_dump_with_decode_responses(self, decoded_r):
+        """DUMP returns binary data that should not be decoded in a pipeline.
+
+        Regression test for https://github.com/redis/redis-py/issues/1884
+        """
+        await decoded_r.set("dumpee", "some_value")
+        async with decoded_r.pipeline(transaction=False) as pipe:
+            pipe.dump("dumpee")
+            result = await pipe.execute()
+            assert len(result) == 1
+            assert isinstance(result[0], bytes)
+
+    async def test_pipeline_transaction_dump_with_decode_responses(self, decoded_r):
+        """DUMP returns binary data that should not be decoded in a transactional pipeline.
+
+        Regression test for https://github.com/redis/redis-py/issues/1884
+        """
+        await decoded_r.set("dumpee", "some_value")
+        async with decoded_r.pipeline(transaction=True) as pipe:
+            pipe.dump("dumpee")
+            result = await pipe.execute()
+            assert len(result) == 1
+            assert isinstance(result[0], bytes)
+
 
 @pytest.mark.asyncio
 class TestAsyncPipelineOperationDurationMetricsRecording:

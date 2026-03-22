@@ -1855,8 +1855,11 @@ class Pipeline(Redis):
                     errors.append((i, e))
 
         # parse the EXEC.
+        # Read with disable_decoding=True so that NEVER_DECODE commands
+        # (e.g. DUMP) preserve their binary data when decode_responses=True.
+        # Individual elements are selectively decoded below.
         try:
-            response = self.parse_response(connection, "_")
+            response = connection.read_response(disable_decoding=True)
         except ExecAbortError:
             if errors:
                 raise errors[0][1]
@@ -1890,6 +1893,13 @@ class Pipeline(Redis):
                 # Remove keys entry, it needs only for cache.
                 options.pop("keys", None)
                 command_name = args[0]
+                # Selectively decode responses: NEVER_DECODE commands (e.g. DUMP)
+                # keep their binary data, all others are decoded normally.
+                if isinstance(r, bytes):
+                    if NEVER_DECODE in options:
+                        options.pop(NEVER_DECODE)
+                    elif connection.encoder.decode_responses:
+                        r = connection.encoder.decode(r)
                 if command_name in self.response_callbacks:
                     r = self.response_callbacks[command_name](r, **options)
             data.append(r)

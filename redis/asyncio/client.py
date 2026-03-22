@@ -1768,8 +1768,11 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
                     errors.append((i, err))
 
         # parse the EXEC.
+        # Read with disable_decoding=True so that NEVER_DECODE commands
+        # (e.g. DUMP) preserve their binary data when decode_responses=True.
+        # Individual elements are selectively decoded below.
         try:
-            response = await self.parse_response(connection, "_")
+            response = await connection.read_response(disable_decoding=True)
         except ExecAbortError as err:
             if errors:
                 raise errors[0][1] from err
@@ -1805,6 +1808,14 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
 
                 # Remove keys entry, it needs only for cache.
                 options.pop("keys", None)
+
+                # Selectively decode responses: NEVER_DECODE commands (e.g. DUMP)
+                # keep their binary data, all others are decoded normally.
+                if isinstance(r, bytes):
+                    if NEVER_DECODE in options:
+                        options.pop(NEVER_DECODE)
+                    elif connection.encoder.decode_responses:
+                        r = connection.encoder.decode(r)
 
                 if command_name in self.response_callbacks:
                     r = self.response_callbacks[command_name](r, **options)

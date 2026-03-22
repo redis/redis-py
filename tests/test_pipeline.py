@@ -460,6 +460,31 @@ class TestPipeline:
             )
 
 
+    def test_pipeline_dump_with_decode_responses(self, decoded_r):
+        """DUMP returns binary data that should not be decoded in a pipeline.
+
+        Regression test for https://github.com/redis/redis-py/issues/1884
+        """
+        decoded_r.set("dumpee", "some_value")
+        with decoded_r.pipeline(transaction=False) as pipe:
+            pipe.dump("dumpee")
+            result = pipe.execute()
+            assert len(result) == 1
+            assert isinstance(result[0], bytes)
+
+    def test_pipeline_transaction_dump_with_decode_responses(self, decoded_r):
+        """DUMP returns binary data that should not be decoded in a transactional pipeline.
+
+        Regression test for https://github.com/redis/redis-py/issues/1884
+        """
+        decoded_r.set("dumpee", "some_value")
+        with decoded_r.pipeline(transaction=True) as pipe:
+            pipe.dump("dumpee")
+            result = pipe.execute()
+            assert len(result) == 1
+            assert isinstance(result[0], bytes)
+
+
 class TestPipelineMetricsRecording:
     """
     Unit tests that verify metrics are properly recorded from Pipeline
