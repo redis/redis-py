@@ -580,7 +580,6 @@ class TOPKCommands:
         """  # noqa
         return self.execute_command(TOPK_QUERY, key, *items)
 
-    @deprecated_function(version="4.4.0", reason="deprecated since redisbloom 2.4.0")
     @overload
     def count(self: SyncClientProtocol, key, *items) -> list[int]: ...
 

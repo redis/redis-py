@@ -24,14 +24,14 @@ class SentinelCommands:
         self: SyncClientProtocol,
         service_name,
         return_responses: bool = False,
-    ) -> SentinelMasterAddress: ...
+    ) -> SentinelMasterAddress | bool: ...
 
     @overload
     def sentinel_get_master_addr_by_name(
         self: AsyncClientProtocol,
         service_name,
         return_responses: bool = False,
-    ) -> Awaitable[SentinelMasterAddress]: ...
+    ) -> Awaitable[SentinelMasterAddress | bool]: ...
 
     def sentinel_get_master_addr_by_name(
         self, service_name, return_responses: bool = False
@@ -54,14 +54,14 @@ class SentinelCommands:
         self: SyncClientProtocol,
         service_name,
         return_responses: bool = False,
-    ) -> dict[str, Any]: ...
+    ) -> dict[str, Any] | bool: ...
 
     @overload
     def sentinel_master(
         self: AsyncClientProtocol,
         service_name,
         return_responses: bool = False,
-    ) -> Awaitable[dict[str, Any]]: ...
+    ) -> Awaitable[dict[str, Any] | bool]: ...
 
     def sentinel_master(self, service_name, return_responses: bool = False) -> (
         dict[str, Any] | list[dict[str, Any]] | bool
@@ -121,14 +121,14 @@ class SentinelCommands:
         self: SyncClientProtocol,
         service_name,
         return_responses: bool = False,
-    ) -> list[dict[str, Any]]: ...
+    ) -> list[dict[str, Any]] | bool: ...
 
     @overload
     def sentinel_sentinels(
         self: AsyncClientProtocol,
         service_name,
         return_responses: bool = False,
-    ) -> Awaitable[list[dict[str, Any]]]: ...
+    ) -> Awaitable[list[dict[str, Any]] | bool]: ...
 
     def sentinel_sentinels(self, service_name, return_responses: bool = False) -> (
         list[dict[str, Any]] | bool
