@@ -546,8 +546,10 @@ class AsyncClusterKeyspaceNotifications(AbstractAsyncKeyspaceNotifications):
             # Create a standalone Redis client for this node using the cluster's
             # connection parameters
             conn_kwargs = node.connection_kwargs.copy()
-            # Remove cluster-specific kwargs
+            # Remove cluster-specific kwargs and host/port (passed explicitly)
             conn_kwargs.pop("response_callbacks", None)
+            conn_kwargs.pop("host", None)
+            conn_kwargs.pop("port", None)
             redis_client = Redis(host=node.host, port=int(node.port), **conn_kwargs)
             self._node_clients[node.name] = redis_client
             # Create PubSub with ignore_subscribe_messages=False
