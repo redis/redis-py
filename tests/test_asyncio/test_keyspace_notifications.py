@@ -521,3 +521,164 @@ class TestAsyncClusterKeyspaceNotificationsMocked:
         assert not notifications.subscribed
 
         await notifications.aclose()
+
+    @pytest.mark.asyncio
+    async def test_ensure_node_pubsub_removes_host_port_from_conn_kwargs(self):
+        """
+        Test that _ensure_node_pubsub properly removes host and port from
+        connection_kwargs before passing them to the Redis constructor.
+
+        This prevents TypeError: __init__() got multiple values for argument 'host'.
+        """
+        node, mock_pubsub = self._create_mock_node("127.0.0.1:7000", "127.0.0.1", 7000)
+
+        # Set up connection_kwargs that include host and port (as ClusterNode does)
+        node.connection_kwargs = {
+            "host": "127.0.0.1",
+            "port": 7000,
+            "password": "secret",
+            "response_callbacks": {"PING": lambda x: x},
+        }
+
+        cluster = Mock()
+        cluster.get_primaries = Mock(return_value=[node])
+        cluster.connection_kwargs = {}
+
+        notifications = AsyncClusterKeyspaceNotifications(cluster)
+
+        # Mock the Redis class to capture what kwargs are passed
+        with pytest.MonkeyPatch.context() as mp:
+            captured_kwargs = {}
+
+            class MockRedis:
+                def __init__(self, host, port, **kwargs):
+                    captured_kwargs["host"] = host
+                    captured_kwargs["port"] = port
+                    captured_kwargs["other"] = kwargs
+
+                def pubsub(self, **kwargs):
+                    return mock_pubsub
+
+            mp.setattr(
+                "redis.asyncio.keyspace_notifications.Redis",
+                MockRedis,
+            )
+
+            await notifications._ensure_node_pubsub(node)
+
+            # Verify host and port were passed explicitly, not in kwargs
+            assert captured_kwargs["host"] == "127.0.0.1"
+            assert captured_kwargs["port"] == 7000
+            # These should NOT be in the "other" kwargs
+            assert "host" not in captured_kwargs["other"]
+            assert "port" not in captured_kwargs["other"]
+            # But password should still be there
+            assert captured_kwargs["other"].get("password") == "secret"
+            # response_callbacks should be removed
+            assert "response_callbacks" not in captured_kwargs["other"]
+
+        await notifications.aclose()
+
+    @pytest.mark.asyncio
+    async def test_refresh_subscriptions_recovers_broken_connections(self):
+        """
+        Test that refresh_subscriptions detects and re-creates broken pubsub connections.
+
+        When an existing primary node's pubsub connection breaks (e.g., transient
+        network issue) but the node remains a primary, the broken pubsub should be
+        re-created during refresh.
+        """
+        node1, pubsub1 = self._create_mock_node("127.0.0.1:7000", "127.0.0.1", 7000)
+        node2, pubsub2 = self._create_mock_node("127.0.0.1:7001", "127.0.0.1", 7001)
+
+        pubsubs_by_node = {node1.name: pubsub1, node2.name: pubsub2}
+        cluster, _ = self._create_mock_cluster([node1, node2], pubsubs_by_node)
+
+        notifications = AsyncClusterKeyspaceNotifications(cluster)
+
+        # Manually inject the mock pubsubs and clients
+        mock_client1 = MagicMock()
+        mock_client1.aclose = AsyncMock()
+        mock_client2 = MagicMock()
+        mock_client2.aclose = AsyncMock()
+
+        notifications._node_pubsubs = pubsubs_by_node.copy()
+        notifications._node_clients = {
+            node1.name: mock_client1,
+            node2.name: mock_client2,
+        }
+
+        # Subscribe first
+        channel = KeyspaceChannel("mykey", db=0)
+        await notifications.subscribe(channel)
+        notifications._subscribed_channels = {"__keyspace@0__:mykey": None}
+
+        # Simulate broken connection on node1 by setting is_connected to False
+        mock_connection = Mock()
+        mock_connection.is_connected = False
+        pubsub1.connection = mock_connection
+
+        # node2 has a working connection
+        mock_connection2 = Mock()
+        mock_connection2.is_connected = True
+        pubsub2.connection = mock_connection2
+
+        # Create a new pubsub for the re-creation
+        new_pubsub1 = MagicMock()
+        new_pubsub1.get_message = AsyncMock(return_value=None)
+        new_pubsub1.subscribe = AsyncMock()
+        new_pubsub1.psubscribe = AsyncMock()
+        new_pubsub1.aclose = AsyncMock()
+
+        # Mock the _ensure_node_pubsub to return new pubsub for node1
+        original_ensure = notifications._ensure_node_pubsub
+
+        async def mock_ensure(node):
+            if node.name == node1.name:
+                notifications._node_pubsubs[node.name] = new_pubsub1
+                return new_pubsub1
+            return await original_ensure(node)
+
+        notifications._ensure_node_pubsub = mock_ensure
+
+        # Call refresh_subscriptions
+        await notifications.refresh_subscriptions()
+
+        # Verify node1's pubsub was replaced
+        assert notifications._node_pubsubs[node1.name] is new_pubsub1
+
+        # Verify the new pubsub was subscribed
+        new_pubsub1.subscribe.assert_called()
+
+        # node2 should remain unchanged (connection was working)
+        assert notifications._node_pubsubs[node2.name] is pubsub2
+
+        await notifications.aclose()
+
+    @pytest.mark.asyncio
+    async def test_is_pubsub_connected_returns_false_for_broken_connection(self):
+        """
+        Test that _is_pubsub_connected correctly detects broken connections.
+        """
+        node1, pubsub1 = self._create_mock_node("127.0.0.1:7000", "127.0.0.1", 7000)
+
+        pubsubs_by_node = {node1.name: pubsub1}
+        cluster, _ = self._create_mock_cluster([node1], pubsubs_by_node)
+
+        notifications = AsyncClusterKeyspaceNotifications(cluster)
+
+        # Test with None connection
+        pubsub1.connection = None
+        assert notifications._is_pubsub_connected(pubsub1) is False
+
+        # Test with connection that is not connected
+        mock_connection = Mock()
+        mock_connection.is_connected = False
+        pubsub1.connection = mock_connection
+        assert notifications._is_pubsub_connected(pubsub1) is False
+
+        # Test with connected connection
+        mock_connection.is_connected = True
+        assert notifications._is_pubsub_connected(pubsub1) is True
+
+        await notifications.aclose()

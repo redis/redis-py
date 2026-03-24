@@ -382,6 +382,9 @@ class TestClusterKeyspaceNotificationsMocked:
 
         cluster = Mock()
         cluster.get_nodes = Mock(return_value=nodes)
+        # Filter to only primary nodes for get_primaries()
+        primary_nodes = [n for n in nodes if n.server_type == "primary"]
+        cluster.get_primaries = Mock(return_value=primary_nodes)
         cluster.get_redis_connection = Mock(
             side_effect=lambda node: node.redis_connection
         )
@@ -542,6 +545,173 @@ class TestClusterKeyspaceNotificationsMocked:
         pubsub2.psubscribe.assert_called_once()
 
         # Cleanup
+        notifications.close()
+
+    def test_uses_get_primaries_api(self):
+        """
+        Test that _get_all_primary_nodes uses the cluster's get_primaries() API
+        rather than manually filtering get_nodes() by server_type.
+
+        This ensures thread-safe access via NodesManager.get_nodes_by_server_type.
+        """
+        # Create mock nodes including a replica
+        node1, pubsub1 = self._create_mock_node(
+            "127.0.0.1:7000", "127.0.0.1", 7000, "primary"
+        )
+        node2, pubsub2 = self._create_mock_node(
+            "127.0.0.1:7001", "127.0.0.1", 7001, "primary"
+        )
+        replica, _ = self._create_mock_node(
+            "127.0.0.1:7002", "127.0.0.1", 7002, "replica"
+        )
+
+        cluster = self._create_mock_cluster([node1, node2, replica])
+        notifications = ClusterKeyspaceNotifications(cluster)
+
+        # Call _get_all_primary_nodes
+        primaries = notifications._get_all_primary_nodes()
+
+        # Verify get_primaries was called (not get_nodes filtered manually)
+        cluster.get_primaries.assert_called_once()
+
+        # Should only return primary nodes
+        assert len(primaries) == 2
+        assert node1 in primaries
+        assert node2 in primaries
+        assert replica not in primaries
+
+        notifications.close()
+
+    def test_refresh_subscriptions_recovers_broken_connections(self):
+        """
+        Test that refresh_subscriptions detects and re-creates broken pubsub connections.
+
+        When an existing primary node's pubsub connection breaks (e.g., transient
+        network issue) but the node remains a primary, the broken pubsub should be
+        re-created during refresh.
+        """
+        # Create mock nodes
+        node1, pubsub1 = self._create_mock_node(
+            "127.0.0.1:7000", "127.0.0.1", 7000, "primary"
+        )
+        node2, pubsub2 = self._create_mock_node(
+            "127.0.0.1:7001", "127.0.0.1", 7001, "primary"
+        )
+
+        cluster = self._create_mock_cluster([node1, node2])
+        notifications = ClusterKeyspaceNotifications(cluster)
+
+        # Subscribe to establish connections
+        channel = KeyspaceChannel("mykey", db=0)
+        notifications.subscribe(channel)
+
+        # Verify both nodes are subscribed
+        assert len(notifications._node_pubsubs) == 2
+        original_pubsub1 = notifications._node_pubsubs[node1.name]
+
+        # Simulate broken connection on node1 by setting connection._sock to None
+        mock_connection = Mock()
+        mock_connection._sock = None  # Broken connection
+        original_pubsub1.connection = mock_connection
+
+        # Create a new pubsub for the re-creation
+        new_pubsub1 = MagicMock()
+        new_pubsub1.get_message = Mock(return_value=None)
+        node1.redis_connection.pubsub.return_value = new_pubsub1
+
+        # Call refresh_subscriptions
+        notifications.refresh_subscriptions()
+
+        # Verify node1's pubsub was replaced (re-created)
+        assert notifications._node_pubsubs[node1.name] is new_pubsub1
+
+        # Verify the new pubsub was subscribed
+        new_pubsub1.subscribe.assert_called()
+
+        notifications.close()
+
+    def test_is_pubsub_connected_returns_false_for_broken_connection(self):
+        """
+        Test that _is_pubsub_connected correctly detects broken connections.
+        """
+        node1, pubsub1 = self._create_mock_node(
+            "127.0.0.1:7000", "127.0.0.1", 7000, "primary"
+        )
+
+        cluster = self._create_mock_cluster([node1])
+        notifications = ClusterKeyspaceNotifications(cluster)
+
+        # Test with None connection
+        pubsub1.connection = None
+        assert notifications._is_pubsub_connected(pubsub1) is False
+
+        # Test with connection but no socket
+        mock_connection = Mock()
+        mock_connection._sock = None
+        pubsub1.connection = mock_connection
+        assert notifications._is_pubsub_connected(pubsub1) is False
+
+        # Test with valid connection
+        mock_connection._sock = Mock()  # Valid socket
+        assert notifications._is_pubsub_connected(pubsub1) is True
+
+        notifications.close()
+
+    def test_refresh_subscriptions_handles_mixed_scenarios(self):
+        """
+        Test refresh_subscriptions handling:
+        - New nodes (added to cluster)
+        - Removed nodes (no longer in cluster)
+        - Existing nodes with broken connections
+        """
+        # Initial nodes
+        node1, pubsub1 = self._create_mock_node(
+            "127.0.0.1:7000", "127.0.0.1", 7000, "primary"
+        )
+        node2, pubsub2 = self._create_mock_node(
+            "127.0.0.1:7001", "127.0.0.1", 7001, "primary"
+        )
+
+        cluster = self._create_mock_cluster([node1, node2])
+        notifications = ClusterKeyspaceNotifications(cluster)
+
+        # Subscribe
+        notifications.subscribe(KeyspaceChannel("mykey"))
+        assert len(notifications._node_pubsubs) == 2
+
+        # Simulate node2 connection broken
+        mock_connection = Mock()
+        mock_connection._sock = None
+        notifications._node_pubsubs[node2.name].connection = mock_connection
+
+        # Add a new node and remove node1 from cluster
+        node3, pubsub3 = self._create_mock_node(
+            "127.0.0.1:7002", "127.0.0.1", 7002, "primary"
+        )
+
+        # Update cluster to return new topology: node2 (broken), node3 (new)
+        # node1 is removed
+        cluster.get_primaries.return_value = [node2, node3]
+
+        # Create new pubsubs for re-creation
+        new_pubsub2 = MagicMock()
+        new_pubsub2.get_message = Mock(return_value=None)
+        node2.redis_connection.pubsub.return_value = new_pubsub2
+
+        # Call refresh
+        notifications.refresh_subscriptions()
+
+        # node1 should be removed
+        assert node1.name not in notifications._node_pubsubs
+
+        # node2 should have new pubsub (was broken)
+        assert notifications._node_pubsubs[node2.name] is new_pubsub2
+        new_pubsub2.subscribe.assert_called()
+
+        # node3 should be added
+        assert node3.name in notifications._node_pubsubs
+        pubsub3.subscribe.assert_called()
+
         notifications.close()
 
 
