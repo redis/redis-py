@@ -2528,7 +2528,7 @@ class ClusterPubSub(PubSub):
 
     IMPORTANT: before using ClusterPubSub, read about the known limitations
     with pubsub in Cluster mode and learn how to workaround them:
-    https://redis-py-cluster.readthedocs.io/en/stable/pubsub.html
+    https://redis.readthedocs.io/en/stable/clustering.html#known-pubsub-limitations
     """
 
     def __init__(

@@ -1356,7 +1356,7 @@ class PubSub:
         self.pending_unsubscribe_channels.update(channels)
         return self.execute_command("UNSUBSCRIBE", *parsed_args)
 
-    def ssubscribe(self, *args, target_node=None, **kwargs) -> Awaitable:
+    async def ssubscribe(self, *args, target_node=None, **kwargs):
         """
         Subscribes the client to the specified shard channels.
         Channels supplied as keyword arguments expect a channel name as the key
@@ -1368,7 +1368,7 @@ class PubSub:
             args = list_or_args(args[0], args[1:])
         new_s_channels = dict.fromkeys(args)
         new_s_channels.update(kwargs)
-        ret_val = self.execute_command("SSUBSCRIBE", *new_s_channels.keys())
+        ret_val = await self.execute_command("SSUBSCRIBE", *new_s_channels.keys())
         # update the s_channels dict AFTER we send the command. we don't want to
         # subscribe twice to these channels, once for the command and again
         # for the reconnection.
@@ -1461,6 +1461,13 @@ class PubSub:
                 direction=PubSubDirection.RECEIVE,
                 channel=channel,
             )
+        elif message_type == "smessage":
+            channel = str_if_bytes(message["channel"])
+            await record_pubsub_message(
+                direction=PubSubDirection.RECEIVE,
+                channel=channel,
+                sharded=True,
+            )
 
         # if this is an unsubscribe message, remove it from memory
         if message_type in self.UNSUBSCRIBE_MESSAGE_TYPES:
@@ -1484,10 +1491,10 @@ class PubSub:
             # if there's a message handler, invoke it
             if message_type == "pmessage":
                 handler = self.patterns.get(message["pattern"], None)
+            elif message_type == "smessage":
+                handler = self.shard_channels.get(message["channel"], None)
             else:
                 handler = self.channels.get(message["channel"], None)
-                if handler is None:
-                    handler = self.shard_channels.get(message["channel"], None)
             if handler:
                 if inspect.iscoroutinefunction(handler):
                     await handler(message)

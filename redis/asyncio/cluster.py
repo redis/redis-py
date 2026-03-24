@@ -34,7 +34,12 @@ from redis._parsers.helpers import (
     _RedisCallbacksRESP3,
 )
 from redis.asyncio.client import PubSub, ResponseCallbackT
-from redis.asyncio.connection import Connection, SSLConnection, parse_url
+from redis.asyncio.connection import (
+    Connection,
+    ConnectionPool,
+    SSLConnection,
+    parse_url,
+)
 from redis.asyncio.lock import Lock
 from redis.asyncio.observability.recorder import (
     record_error_count,
@@ -57,8 +62,8 @@ from redis.cluster import (
     parse_cluster_slots,
 )
 from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
-from redis.commands.policies import AsyncPolicyResolver, AsyncStaticPolicyResolver
 from redis.commands.helpers import list_or_args
+from redis.commands.policies import AsyncPolicyResolver, AsyncStaticPolicyResolver
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.credentials import CredentialProvider
 from redis.driver_info import DriverInfo, resolve_driver_info
@@ -3003,7 +3008,7 @@ class ClusterPubSub(PubSub):
 
     IMPORTANT: before using ClusterPubSub, read about the known limitations
     with pubsub in Cluster mode and learn how to workaround them:
-    https://redis-py-cluster.readthedocs.io/en/stable/pubsub.html
+    https://redis.readthedocs.io/en/stable/clustering.html#known-pubsub-limitations
     """
 
     def __init__(
@@ -3037,8 +3042,6 @@ class ClusterPubSub(PubSub):
 
         # Create connection pool if node is specified
         if self.node is not None:
-            from redis.asyncio.connection import ConnectionPool
-
             connection_pool = ConnectionPool(
                 connection_class=self.node.connection_class,
                 **self.node.connection_kwargs,
@@ -3095,14 +3098,19 @@ class ClusterPubSub(PubSub):
             pubsub_node = None
         self.node = pubsub_node
 
+    def get_pubsub_node(self) -> Optional["ClusterNode"]:
+        """
+        Get the node that is being used as the pubsub connection.
+
+        :return: The ClusterNode being used for pubsub, or None if not yet determined
+        """
+        return self.node
+
     def _get_node_pubsub(self, node: "ClusterNode") -> PubSub:
         """Get or create a PubSub instance for the given node."""
         try:
             return self.node_pubsub_mapping[node.name]
         except KeyError:
-            # Create a simple connection pool-like interface for the node
-            from redis.asyncio.connection import ConnectionPool
-
             # Create a minimal connection pool for this node
             connection_pool = ConnectionPool(
                 connection_class=node.connection_class, **node.connection_kwargs
@@ -3117,21 +3125,26 @@ class ClusterPubSub(PubSub):
             self.node_pubsub_mapping[node.name] = pubsub
             return pubsub
 
-    def _sharded_message_generator(self) -> Optional[Dict[str, Any]]:
+    async def _sharded_message_generator(
+        self, timeout: float = 0.0
+    ) -> Optional[Dict[str, Any]]:
         """Generate messages from shard channels across all nodes."""
         for _ in range(len(self.node_pubsub_mapping)):
             pubsub = next(self._pubsubs_generator)
-            # Check if pubsub has async get_message method
-            if hasattr(pubsub, "get_message") and callable(pubsub.get_message):
-                # This would need to be adapted for async usage
-                # For now, we'll return None to avoid blocking
-                pass
+            # Don't pass ignore_subscribe_messages here - let get_sharded_message
+            # handle the filtering after processing subscription state changes
+            message = await pubsub.get_message(
+                ignore_subscribe_messages=False, timeout=timeout
+            )
+            if message is not None:
+                return message
         return None
 
     def _pubsubs_generator(self) -> Generator[PubSub, None, None]:
         """Generator that yields PubSub instances in round-robin fashion."""
         while True:
-            yield from self.node_pubsub_mapping.values()
+            current_nodes = list(self.node_pubsub_mapping.values())
+            yield from current_nodes
 
     async def get_sharded_message(
         self,
@@ -3150,13 +3163,13 @@ class ClusterPubSub(PubSub):
         if target_node:
             pubsub = self.node_pubsub_mapping.get(target_node.name)
             if pubsub:
-                # Note: This would need proper async implementation
-                # For now returning None as placeholder
-                message = None
+                message = await pubsub.get_message(
+                    ignore_subscribe_messages=ignore_subscribe_messages, timeout=timeout
+                )
             else:
                 message = None
         else:
-            message = self._sharded_message_generator()
+            message = await self._sharded_message_generator(timeout=timeout)
 
         if message is None:
             return None
@@ -3169,10 +3182,6 @@ class ClusterPubSub(PubSub):
                     pubsub = self.node_pubsub_mapping[node.name]
                     if not pubsub.subscribed:
                         self.node_pubsub_mapping.pop(node.name)
-
-        if not self.channels and not self.patterns and not self.shard_channels:
-            # There are no subscriptions anymore
-            pass
 
         if self.ignore_subscribe_messages or ignore_subscribe_messages:
             return None
@@ -3249,15 +3258,24 @@ class ClusterPubSub(PubSub):
         port: Optional[int],
     ) -> None:
         """
-        Raise an exception if the node is invalid.
+        Raise a RedisClusterException if the node is None or doesn't exist in
+        the cluster.
         """
-        if node is None:
-            raise RedisClusterException(f"Node {host}:{port} does not exist in cluster")
+        if node is None or redis_cluster.get_node(node_name=node.name) is None:
+            raise RedisClusterException(
+                f"Node {host}:{port} doesn't exist in the cluster"
+            )
 
     async def execute_command(self, *args: Any, **kwargs: Any) -> Any:
         """
         Execute a command on the appropriate cluster node.
+
+        Taken code from redis-py and tweaked to make it work within a cluster.
         """
+        # NOTE: don't parse the response in this function -- it could pull a
+        # legitimate message off the stack if the connection is already
+        # subscribed to one or more channels
+
         # For shard commands, route to appropriate node
         command = args[0].upper() if args else ""
         if command in ("SSUBSCRIBE", "SUNSUBSCRIBE", "SPUBLISH"):
@@ -3268,13 +3286,30 @@ class ClusterPubSub(PubSub):
                     pubsub = self._get_node_pubsub(node)
                     return await pubsub.execute_command(*args, **kwargs)
 
-        # For other commands, use the set node or default behavior
-        if self.node:
-            pubsub = self._get_node_pubsub(self.node)
-            return await pubsub.execute_command(*args, **kwargs)
-        else:
-            # Use parent's execute_command if no specific node is set
-            return await super().execute_command(*args, **kwargs)
+        # For other commands, use the set node or lazily discover one
+        if self.connection is None:
+            if self.connection_pool is None:
+                if len(args) > 1:
+                    # Hash the first channel and get one of the nodes holding
+                    # this slot
+                    channel = args[1]
+                    slot = self.cluster.keyslot(channel)
+                    node = self.cluster.nodes_manager.get_node_from_slot(
+                        slot,
+                        self.cluster.read_from_replicas,
+                        self.cluster.load_balancing_strategy,
+                    )
+                else:
+                    # Get a random node
+                    node = self.cluster.get_random_node()
+                self.node = node
+                self.connection_pool = ConnectionPool(
+                    connection_class=node.connection_class,
+                    **node.connection_kwargs,
+                )
+
+        # Now we have a connection_pool, use parent's execute_command
+        return await super().execute_command(*args, **kwargs)
 
     def _normalize_keys(self, data: Dict[Any, Any]) -> Dict[bytes, Any]:
         """
