@@ -477,12 +477,12 @@ class TestRedisClusterObj:
             ),
         ):
             startup_nodes = [ClusterNode("127.0.0.1", 16379)]
-            cluster = RedisCluster(
+            async with RedisCluster(
                 startup_nodes=startup_nodes, lib_name="test2", lib_version="1234"
-            )
-            info = await cluster.client_info()
-            assert info["lib-ver"] == "1234"
-            assert info["lib-name"] == "test2"
+            ) as cluster:
+                info = await cluster.client_info()
+                assert info["lib-ver"] == "1234"
+                assert info["lib-name"] == "test2"
 
     async def test_empty_startup_nodes(self) -> None:
         """
