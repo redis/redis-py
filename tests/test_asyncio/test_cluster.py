@@ -4590,6 +4590,7 @@ class TestClusterPubSub:
                     break
 
             # Verify handler received the message
+            assert msg is None
             assert len(received_messages) == 1
             assert received_messages[0]["type"] == "smessage"
             assert received_messages[0]["channel"] == channel.encode()
