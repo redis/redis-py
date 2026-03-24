@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable, List, Optional, Union
+from typing import Any, Awaitable, Callable, List, Literal, Optional, Union
 
 from redis.asyncio.client import PubSubHandler
 from redis.asyncio.multidb.command_executor import DefaultCommandExecutor
@@ -24,6 +24,7 @@ from redis.multidb.exception import (
     NoValidDatabaseException,
     UnhealthyDatabaseException,
 )
+from redis.observability.attributes import GeoFailoverReason
 from redis.typing import ChannelT, EncodableT, KeyT
 from redis.utils import experimental
 
@@ -44,10 +45,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             if not config.health_checks
             else config.health_checks
         )
-
         self._health_check_interval = config.health_check_interval
-        self._health_check_policy: HealthCheckPolicy = config.health_check_policy.value(
-            config.health_check_probes, config.health_check_delay
+        self._health_check_policy: HealthCheckPolicy = (
+            config.health_check_policy.value()
         )
         self._failure_detectors = (
             config.default_failure_detectors()
@@ -88,13 +88,24 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             await self.initialize()
         return self
 
-    async def __aexit__(self, exc_type, exc_value, traceback):
+    async def aclose(self):
+        # Cancel background tasks
         if self._recurring_hc_task:
             self._recurring_hc_task.cancel()
         if self._half_open_state_task:
             self._half_open_state_task.cancel()
         for hc_task in self._hc_tasks:
             hc_task.cancel()
+
+        # Close health check connection pools
+        await self._health_check_policy.close()
+
+        # Close database client
+        if self.command_executor.active_database:
+            await self.command_executor.active_database.client.aclose()
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        await self.aclose()
 
     async def initialize(self):
         """
@@ -120,7 +131,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
 
             # Set states according to a weights and circuit state
             if database.circuit.state == CBState.CLOSED and not is_active_db_found:
-                await self.command_executor.set_active_database(database)
+                # Directly set the active database during initialization
+                # without recording a geo failover metric
+                self.command_executor._active_database = database
                 is_active_db_found = True
 
         if not is_active_db_found:
@@ -154,16 +167,24 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
 
         if database.circuit.state == CBState.CLOSED:
             highest_weighted_db, _ = self._databases.get_top_n(1)[0]
-            await self.command_executor.set_active_database(database)
+            await self.command_executor.set_active_database(
+                database, GeoFailoverReason.MANUAL
+            )
             return
 
         raise NoValidDatabaseException(
             "Cannot set active database, database is unhealthy"
         )
 
-    async def add_database(self, config: DatabaseConfig, skip_unhealthy: bool = True):
+    async def add_database(
+        self, config: DatabaseConfig, skip_initial_health_check: bool = True
+    ):
         """
         Adds a new database to the database list.
+
+        Args:
+            config: DatabaseConfig object that contains the database configuration.
+            skip_initial_health_check: If True, adds the database even if it is unhealthy.
         """
         # The retry object is not used in the lower level clients, so we can safely remove it.
         # We rely on command_retry in terms of global retries.
@@ -197,7 +218,7 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         try:
             await self._check_db_health(database)
         except UnhealthyDatabaseException:
-            if not skip_unhealthy:
+            if not skip_initial_health_check:
                 raise
 
         highest_weighted_db, highest_weight = self._databases.get_top_n(1)[0]
@@ -211,7 +232,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             new_database.weight > highest_weight_database.weight
             and new_database.circuit.state == CBState.CLOSED
         ):
-            await self.command_executor.set_active_database(new_database)
+            await self.command_executor.set_active_database(
+                new_database, GeoFailoverReason.AUTOMATIC
+            )
 
     async def remove_database(self, database: AsyncDatabase):
         """
@@ -224,7 +247,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             highest_weight <= weight
             and highest_weighted_db.circuit.state == CBState.CLOSED
         ):
-            await self.command_executor.set_active_database(highest_weighted_db)
+            await self.command_executor.set_active_database(
+                highest_weighted_db, GeoFailoverReason.MANUAL
+            )
 
     async def update_database_weight(self, database: AsyncDatabase, weight: float):
         """
@@ -311,23 +336,15 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         Runs health checks as a recurring task.
         Runs health checks against all databases.
         """
-        try:
-            task_to_db: dict[asyncio.Task, Database] = {}
+        task_to_db: dict[asyncio.Task, Database] = {}
 
-            self._hc_tasks = []
-            for database, _ in self._databases:
-                task = asyncio.create_task(self._check_db_health(database))
-                task_to_db[task] = database
-                self._hc_tasks.append(task)
+        self._hc_tasks = []
+        for database, _ in self._databases:
+            task = asyncio.create_task(self._check_db_health(database))
+            task_to_db[task] = database
+            self._hc_tasks.append(task)
 
-            results = await asyncio.wait_for(
-                asyncio.gather(*self._hc_tasks, return_exceptions=True),
-                timeout=self._health_check_interval,
-            )
-        except asyncio.TimeoutError:
-            raise asyncio.TimeoutError(
-                "Health check execution exceeds health_check_interval"
-            )
+        results = await asyncio.gather(*self._hc_tasks, return_exceptions=True)
 
         # Map end results to databases
         db_results = {
@@ -345,8 +362,6 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
                 )
 
                 db_results[unhealthy_db] = False
-            elif isinstance(result, Exception):
-                db_results[database] = False
 
         return db_results
 
@@ -357,14 +372,16 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         results = await self._check_databases_health()
         is_healthy = True
 
-        if self._config.initial_health_check_policy == InitialHealthCheck.ALL_HEALTHY:
+        if self._config.initial_health_check_policy == InitialHealthCheck.ALL_AVAILABLE:
             is_healthy = False not in results.values()
         elif (
             self._config.initial_health_check_policy
-            == InitialHealthCheck.MAJORITY_HEALTHY
+            == InitialHealthCheck.MAJORITY_AVAILABLE
         ):
             is_healthy = sum(results.values()) > len(results) / 2
-        elif self._config.initial_health_check_policy == InitialHealthCheck.ANY_HEALTHY:
+        elif (
+            self._config.initial_health_check_policy == InitialHealthCheck.ONE_AVAILABLE
+        ):
             is_healthy = True in results.values()
 
         if not is_healthy:
@@ -410,10 +427,6 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         if old_state != CBState.CLOSED and new_state == CBState.CLOSED:
             logger.info(f"Database {circuit.database} is reachable again.")
 
-    async def aclose(self):
-        if self.command_executor.active_database:
-            await self.command_executor.active_database.client.aclose()
-
 
 def _half_open_circuit(circuit: CircuitBreaker):
     circuit.state = CBState.HALF_OPEN
@@ -423,6 +436,8 @@ class Pipeline(AsyncRedisModuleCommands, AsyncCoreCommands):
     """
     Pipeline implementation for multiple logical Redis databases.
     """
+
+    _is_async_client: Literal[True] = True
 
     def __init__(self, client: MultiDBClient):
         self._command_stack = []

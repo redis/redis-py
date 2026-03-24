@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from .json import JSON
     from .search import AsyncSearch, Search
     from .timeseries import TimeSeries
-    from .vectorset import VectorSet
+    from .vectorset import AsyncVectorSet, VectorSet
 
 
 class RedisModuleCommands:
@@ -99,3 +99,11 @@ class AsyncRedisModuleCommands(RedisModuleCommands):
 
         s = AsyncSearch(client=self, index_name=index_name)
         return s
+
+    def vset(self) -> AsyncVectorSet:
+        """Access the VectorSet commands namespace."""
+
+        from .vectorset import AsyncVectorSet
+
+        vset = AsyncVectorSet(client=self)
+        return vset

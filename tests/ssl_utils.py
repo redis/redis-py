@@ -2,8 +2,11 @@ import enum
 import os
 from collections import namedtuple
 
+CN_USERNAME = "test_user"
 CLIENT_CERT_NAME = "client.crt"
+CLIENT_CN_CERT_NAME = f"{CN_USERNAME}.crt"
 CLIENT_KEY_NAME = "client.key"
+CLIENT_CN_KEY_NAME = f"{CN_USERNAME}.key"
 SERVER_CERT_NAME = "redis.crt"
 SERVER_KEY_NAME = "redis.key"
 CA_CERT_NAME = "ca.crt"
@@ -12,6 +15,7 @@ CA_CERT_NAME = "ca.crt"
 class CertificateType(str, enum.Enum):
     client = "client"
     server = "server"
+    client_cn = "client-cn"
 
 
 TLSFiles = namedtuple("TLSFiles", ["certfile", "keyfile", "ca_certfile"])
@@ -39,5 +43,11 @@ def get_tls_certificates(
         return TLSFiles(
             os.path.join(cert_dir, SERVER_CERT_NAME),
             os.path.join(cert_dir, SERVER_KEY_NAME),
+            os.path.join(cert_dir, CA_CERT_NAME),
+        )
+    elif cert_type == CertificateType.client_cn:
+        return TLSFiles(
+            os.path.join(cert_dir, CLIENT_CN_CERT_NAME),
+            os.path.join(cert_dir, CLIENT_CN_KEY_NAME),
             os.path.join(cert_dir, CA_CERT_NAME),
         )

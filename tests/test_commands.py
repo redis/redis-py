@@ -19,7 +19,7 @@ from redis._parsers.helpers import (
     parse_info,
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
-from redis.commands.core import DataPersistOptions
+from redis.commands.core import DataPersistOptions, HotkeysMetricsTypes
 from redis.commands.json.path import Path
 from redis.commands.search.field import TextField
 from redis.commands.search.query import Query
@@ -1228,6 +1228,314 @@ class TestRedisCommands:
         assert len(t) == 2
         assert isinstance(t[0], int)
         assert isinstance(t[1], int)
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_start_basic(self, r):
+        """Test basic HOTKEYS START command with CPU metric"""
+        # Reset any previous session
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start collection with CPU metric
+        result = r.hotkeys_start(count=10, metrics=[HotkeysMetricsTypes.CPU])
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_start_with_all_metrics(self, r):
+        """Test HOTKEYS START with both CPU and NET metrics"""
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        result = r.hotkeys_start(
+            count=5, metrics=[HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET]
+        )
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_start_with_duration(self, r):
+        """Test HOTKEYS START with duration parameter"""
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        result = r.hotkeys_start(
+            count=10, metrics=[HotkeysMetricsTypes.CPU], duration=60
+        )
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_start_with_sample_ratio(self, r):
+        """Test HOTKEYS START with sample ratio"""
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        result = r.hotkeys_start(
+            count=10, metrics=[HotkeysMetricsTypes.CPU], sample_ratio=10
+        )
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_start_fail__on_noncluster_setup_with_slots(self, r):
+        """Test HOTKEYS START with specific hash slots"""
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # slots is not supported argument for non-cluster setups
+        with pytest.raises(Exception):
+            r.hotkeys_start(
+                count=10, metrics=[HotkeysMetricsTypes.CPU], slots=[0, 100, 200]
+            )
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_start_with_all_parameters(self, r):
+        """Test HOTKEYS START with all optional parameters"""
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        result = r.hotkeys_start(
+            count=5,
+            metrics=[HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET],
+            duration=30,
+            sample_ratio=5,
+        )
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_stop(self, r):
+        """Test HOTKEYS STOP command"""
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a collection session
+        r.hotkeys_start(count=10, metrics=[HotkeysMetricsTypes.CPU])
+
+        # Stop the session
+        result = r.hotkeys_stop()
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_reset(self, r):
+        """Test HOTKEYS RESET command"""
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a session and generate some data
+        r.hotkeys_start(count=10, metrics=[HotkeysMetricsTypes.CPU])
+
+        # Perform some operations to generate hotkeys data
+        for i in range(5):
+            r.set(f"resetkey{i}", f"value{i}")
+            r.get(f"resetkey{i}")
+
+        # Stop the session
+        r.hotkeys_stop()
+
+        # Get results before reset - should have data
+        result_before = r.hotkeys_get()
+        assert isinstance(result_before, list)
+        for res_elem in result_before:
+            assert isinstance(res_elem, dict)
+            assert b"tracking-active" in res_elem
+
+        # Reset the results
+        result = r.hotkeys_reset()
+        assert result == b"OK"
+
+        # Try to get results after reset - should fail or return empty
+        try:
+            result_after = r.hotkeys_get()
+            # If it doesn't fail, verify the data is cleared
+            # The response might indicate no session exists
+            assert result_after != result_before
+        except Exception:
+            # Expected - no session exists after reset
+            pass
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_get_ongoing_session(self, r):
+        """Test HOTKEYS GET during an ongoing collection session"""
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a collection session
+        r.hotkeys_start(
+            count=10, metrics=[HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET]
+        )
+
+        # Perform some operations to generate hotkeys data
+        for i in range(10):
+            r.set(f"key{i}", f"value{i}")
+            r.get(f"key{i}")
+
+        # Get the results
+        result = r.hotkeys_get()
+
+        # Verify the response structure
+        assert isinstance(result, list)
+        for res_elem in result:
+            assert isinstance(res_elem, dict)
+            # Check tracking-active is 1 (ongoing session)
+            assert res_elem[b"tracking-active"] == 1
+
+        # Stop the session
+        r.hotkeys_stop()
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_get_terminated_session(self, r):
+        """Test HOTKEYS GET after stopping a collection session"""
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a collection session
+        r.hotkeys_start(count=10, metrics=[HotkeysMetricsTypes.CPU])
+
+        # Perform some operations
+        for i in range(5):
+            r.set(f"testkey{i}", f"testvalue{i}")
+
+        # Stop the session
+        r.hotkeys_stop()
+
+        # Get the results
+        result = r.hotkeys_get()
+
+        # Verify the response structure
+        assert isinstance(result, list)
+        for res_elem in result:
+            assert isinstance(res_elem, dict)
+
+            # Check tracking-active is 0 (terminated session)
+            assert res_elem[b"tracking-active"] == 0
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_get_all_fields(self, r):
+        """Test HOTKEYS GET returns all documented fields"""
+        try:
+            r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a collection session with all parameters
+        r.hotkeys_start(
+            count=5,
+            metrics=[HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET],
+            sample_ratio=1,
+        )
+
+        # Perform operations to generate data
+        for i in range(20):
+            r.set("anyprefix:{3}:key", f"value{i}")
+            r.get(f"anyprefix:{3}:key")
+            r.set("anyprefix:{1}:key", f"value{i}")
+            r.get(f"anyprefix:{1}:key")
+
+        # Stop the session
+        r.hotkeys_stop()
+
+        # Get the results
+        result = r.hotkeys_get()
+        assert isinstance(result, list)
+
+        # Verify all documented fields are present
+        expected_fields = [
+            b"tracking-active",
+            b"sample-ratio",
+            b"selected-slots",
+            b"net-bytes-all-commands-all-slots",
+            b"collection-start-time-unix-ms",
+            b"collection-duration-ms",
+            b"total-cpu-time-user-ms",
+            b"total-cpu-time-sys-ms",
+            b"total-net-bytes",
+            b"by-cpu-time-us",
+            b"by-net-bytes",
+        ]
+
+        for res_elem in result:
+            for field in expected_fields:
+                assert field in res_elem, (
+                    f"Field '{field}' is missing from HOTKEYS GET response"
+                )
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_get_all_fields_decoded(self, decoded_r: redis.Redis):
+        """Test HOTKEYS GET returns all documented fields"""
+        try:
+            decoded_r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a collection session with all parameters
+        decoded_r.hotkeys_start(
+            count=5,
+            metrics=[HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET],
+            sample_ratio=1,
+        )
+
+        # Perform operations to generate data
+        for i in range(20):
+            decoded_r.set("anyprefix:{3}:key", f"value{i}")
+            decoded_r.get(f"anyprefix:{3}:key")
+            decoded_r.set("anyprefix:{1}:key", f"value{i}")
+            decoded_r.get(f"anyprefix:{1}:key")
+
+        # Stop the session
+        decoded_r.hotkeys_stop()
+
+        # Get the results
+        result = decoded_r.hotkeys_get()
+
+        # Verify all documented fields are present
+        expected_fields = [
+            "tracking-active",
+            "sample-ratio",
+            "selected-slots",
+            "net-bytes-all-commands-all-slots",
+            "collection-start-time-unix-ms",
+            "collection-duration-ms",
+            "total-cpu-time-user-ms",
+            "total-cpu-time-sys-ms",
+            "total-net-bytes",
+            "by-cpu-time-us",
+            "by-net-bytes",
+        ]
+
+        for elem in result:
+            for field in expected_fields:
+                assert field in elem, (
+                    f"Field '{field}' is missing from HOTKEYS GET response"
+                )
 
     @skip_if_redis_enterprise()
     def test_bgsave(self, r):
@@ -5581,6 +5889,58 @@ class TestRedisCommands:
         consumer = info["groups"][0]["consumers"][0]
         assert isinstance(consumer, dict)
 
+    @skip_if_server_version_lt("8.5.0")
+    def test_xinfo_stream_idempotent_fields(self, r):
+        stream = "stream"
+
+        # Create stream with regular entry
+        r.xadd(stream, {"foo": "bar"})
+        info = r.xinfo_stream(stream)
+
+        # Verify new idempotent producer fields are present with default values
+        assert "idmp-duration" in info
+        assert "idmp-maxsize" in info
+        assert "pids-tracked" in info
+        assert "iids-tracked" in info
+        assert "iids-added" in info
+        assert "iids-duplicates" in info
+
+        # Default values (before any idempotent entries)
+        assert info["pids-tracked"] == 0
+        assert info["iids-tracked"] == 0
+        assert info["iids-added"] == 0
+        assert info["iids-duplicates"] == 0
+
+        # Add idempotent entry
+        r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
+        info = r.xinfo_stream(stream)
+
+        # After adding idempotent entry
+        assert info["pids-tracked"] == 1  # One producer tracked
+        assert info["iids-tracked"] == 1  # One iid tracked
+        assert info["iids-added"] == 1  # One idempotent entry added
+        assert info["iids-duplicates"] == 0  # No duplicates yet
+
+        # Add duplicate entry
+        r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
+        info = r.xinfo_stream(stream)
+
+        # After duplicate
+        assert info["pids-tracked"] == 1  # Still one producer
+        assert info["iids-tracked"] == 1  # Still one iid (duplicate doesn't add new)
+        assert info["iids-added"] == 1  # Still one unique entry
+        assert info["iids-duplicates"] == 1  # One duplicate detected
+
+        # Add entry from different producer
+        r.xadd(stream, {"field2": "value2"}, idmpauto="producer2")
+        info = r.xinfo_stream(stream)
+
+        # After second producer
+        assert info["pids-tracked"] == 2  # Two producers tracked
+        assert info["iids-tracked"] == 2  # Two iids tracked
+        assert info["iids-added"] == 2  # Two unique entries
+        assert info["iids-duplicates"] == 1  # Still one duplicate
+
     @skip_if_server_version_lt("5.0.0")
     def test_xlen(self, r):
         stream = "stream"
@@ -6364,6 +6724,165 @@ class TestRedisCommands:
         # Test error case
         with pytest.raises(redis.DataError):
             r.xadd(stream, {"foo": "bar"}, ref_policy="INVALID")
+
+    @skip_if_server_version_lt("8.5.0")
+    def test_xadd_idmpauto(self, r):
+        stream = "stream"
+
+        # XADD with IDMPAUTO - first write
+        message_id1 = r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
+
+        # Test XADD with IDMPAUTO - duplicate write returns same ID
+        message_id2 = r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
+        assert message_id1 == message_id2
+
+        # Test XADD with IDMPAUTO - different content creates new entry
+        message_id3 = r.xadd(stream, {"field1": "value2"}, idmpauto="producer1")
+        assert message_id3 != message_id1
+
+        # Test XADD with IDMPAUTO - different producer creates new entry
+        message_id4 = r.xadd(stream, {"field1": "value1"}, idmpauto="producer2")
+        assert message_id4 != message_id1
+
+        # Verify stream has 3 entries (2 unique from producer1, 1 from producer2)
+        assert r.xlen(stream) == 3
+
+    @skip_if_server_version_lt("8.5.0")
+    def test_xadd_idmp(self, r):
+        stream = "stream"
+
+        # XADD with IDMP - first write
+        message_id1 = r.xadd(stream, {"field1": "value1"}, idmp=("producer1", b"msg1"))
+
+        # Test XADD with IDMP - duplicate write returns same ID
+        message_id2 = r.xadd(stream, {"field1": "value1"}, idmp=("producer1", b"msg1"))
+        assert message_id1 == message_id2
+
+        # Test XADD with IDMP - different iid creates new entry
+        message_id3 = r.xadd(stream, {"field1": "value1"}, idmp=("producer1", b"msg2"))
+        assert message_id3 != message_id1
+
+        # Test XADD with IDMP - different producer creates new entry
+        message_id4 = r.xadd(stream, {"field1": "value1"}, idmp=("producer2", b"msg1"))
+        assert message_id4 != message_id1
+
+        # Test XADD with IDMP - shorter binary iid
+        r.xadd(stream, {"field1": "value1"}, idmp=("producer1", b"\x01"))
+
+        # Verify stream has 4 entries
+        assert r.xlen(stream) == 4
+
+    @skip_if_server_version_lt("8.5.0")
+    def test_xadd_idmp_validation(self, r):
+        stream = "stream"
+
+        # Test error: both idmpauto and idmp specified
+        with pytest.raises(redis.DataError):
+            r.xadd(
+                stream,
+                {"foo": "bar"},
+                idmpauto="producer1",
+                idmp=("producer1", b"msg1"),
+            )
+
+        # Test error: idmpauto with explicit id
+        with pytest.raises(redis.DataError):
+            r.xadd(stream, {"foo": "bar"}, id="1234567890-0", idmpauto="producer1")
+
+        # Test error: idmp with explicit id
+        with pytest.raises(redis.DataError):
+            r.xadd(
+                stream, {"foo": "bar"}, id="1234567890-0", idmp=("producer1", b"msg1")
+            )
+
+        # Test error: idmp not a tuple
+        with pytest.raises(redis.DataError):
+            r.xadd(stream, {"foo": "bar"}, idmp="invalid")
+
+        # Test error: idmp tuple with wrong number of elements
+        with pytest.raises(redis.DataError):
+            r.xadd(stream, {"foo": "bar"}, idmp=("producer1",))
+
+        # Test error: idmp tuple with wrong number of elements
+        with pytest.raises(redis.DataError):
+            r.xadd(stream, {"foo": "bar"}, idmp=("producer1", b"msg1", "extra"))
+
+    @skip_if_server_version_lt("8.5.0")
+    def test_xcfgset_idmp_duration(self, r):
+        stream = "stream"
+
+        # Create stream first
+        r.xadd(stream, {"foo": "bar"})
+
+        # Test XCFGSET with IDMP-DURATION only
+        assert r.xcfgset(stream, idmp_duration=120) == b"OK"
+
+        # Test with minimum value
+        assert r.xcfgset(stream, idmp_duration=1) == b"OK"
+
+        # Test with maximum value
+        assert r.xcfgset(stream, idmp_duration=300) == b"OK"
+
+    @skip_if_server_version_lt("8.5.0")
+    def test_xcfgset_idmp_maxsize(self, r):
+        stream = "stream"
+
+        # Create stream first
+        r.xadd(stream, {"foo": "bar"})
+
+        # Test XCFGSET with IDMP-MAXSIZE only
+        assert r.xcfgset(stream, idmp_maxsize=5000) == b"OK"
+
+        # Test with minimum value
+        assert r.xcfgset(stream, idmp_maxsize=1) == b"OK"
+
+        # Test with maximum value
+        assert r.xcfgset(stream, idmp_maxsize=10000) == b"OK"
+
+    @skip_if_server_version_lt("8.5.0")
+    def test_xcfgset_both_parameters(self, r):
+        stream = "stream"
+
+        # Create stream first
+        r.xadd(stream, {"foo": "bar"})
+
+        # Test XCFGSET with both IDMP-DURATION and IDMP-MAXSIZE
+        assert r.xcfgset(stream, idmp_duration=120, idmp_maxsize=5000) == b"OK"
+
+        # Test with different values
+        assert r.xcfgset(stream, idmp_duration=60, idmp_maxsize=10000) == b"OK"
+
+    @skip_if_server_version_lt("8.5.0")
+    def test_xcfgset_validation(self, r):
+        stream = "stream"
+
+        # Test error: no parameters provided
+        with pytest.raises(redis.DataError):
+            r.xcfgset(stream)
+
+        # Test error: idmp_duration too small
+        with pytest.raises(redis.DataError):
+            r.xcfgset(stream, idmp_duration=0)
+
+        # Test error: idmp_duration too large
+        with pytest.raises(redis.DataError):
+            r.xcfgset(stream, idmp_duration=301)
+
+        # Test error: idmp_duration not an integer
+        with pytest.raises(redis.DataError):
+            r.xcfgset(stream, idmp_duration="invalid")
+
+        # Test error: idmp_maxsize too small
+        with pytest.raises(redis.DataError):
+            r.xcfgset(stream, idmp_maxsize=0)
+
+        # Test error: idmp_maxsize too large
+        with pytest.raises(redis.DataError):
+            r.xcfgset(stream, idmp_maxsize=1000001)
+
+        # Test error: idmp_maxsize not an integer
+        with pytest.raises(redis.DataError):
+            r.xcfgset(stream, idmp_maxsize="invalid")
 
     def test_bitfield_operations(self, r):
         # comments show affected bits

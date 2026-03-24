@@ -64,6 +64,7 @@ class TestPipeline:
                 pipe.get("key1")
 
                 assert pipe.execute() == ["OK1", "value1"]
+                # 3 databases × 3 probes = 9 calls
                 assert len(mock_hc.check_health.call_args_list) == 9
             finally:
                 client.close()
@@ -72,7 +73,7 @@ class TestPipeline:
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
             (
-                {"initial_health_check_policy": InitialHealthCheck.MAJORITY_HEALTHY},
+                {"initial_health_check_policy": InitialHealthCheck.MAJORITY_AVAILABLE},
                 {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.7, "circuit": {"state": CBState.OPEN}},
@@ -95,7 +96,7 @@ class TestPipeline:
             pipe.execute.return_value = ["OK1", "value1"]
             mock_db1.client.pipeline.return_value = pipe
 
-            def mock_check_health(database):
+            async def mock_check_health(database, connection=None):
                 if database == mock_db2:
                     return False
                 else:
@@ -125,7 +126,7 @@ class TestPipeline:
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
             (
-                {"health_check_probes": 1},
+                {},
                 {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
@@ -136,22 +137,23 @@ class TestPipeline:
     def test_execute_pipeline_against_correct_db_on_background_health_check_determine_active_db_unhealthy(
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
-        cb = PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=5))
+        cb = PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=0.1))
         cb.database = mock_db
         mock_db.circuit = cb
 
-        cb1 = PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=5))
+        cb1 = PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=0.1))
         cb1.database = mock_db1
         mock_db1.circuit = cb1
 
-        cb2 = PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=5))
+        cb2 = PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=0.1))
         cb2.database = mock_db2
         mock_db2.circuit = cb2
 
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
-        # Track health check runs across all databases
-        health_check_run = 0
+        # Track health check rounds per database
+        db_rounds = {id(mock_db): 0, id(mock_db1): 0, id(mock_db2): 0}
+        db_probes_in_round = {id(mock_db): 0, id(mock_db1): 0, id(mock_db2): 0}
 
         # Create events for each failover scenario
         db1_became_unhealthy = threading.Event()
@@ -159,53 +161,47 @@ class TestPipeline:
         db_became_unhealthy = threading.Event()
         counter_lock = threading.Lock()
 
-        def mock_check_health(database):
-            nonlocal health_check_run
-
-            # Increment run counter for each health check call
+        async def mock_check_health(database, connection=None):
             with counter_lock:
-                health_check_run += 1
-                current_run = health_check_run
+                db_probes_in_round[id(database)] += 1
+                if db_probes_in_round[id(database)] > 3:
+                    db_rounds[id(database)] += 1
+                    db_probes_in_round[id(database)] = 1
+                current_round = db_rounds[id(database)]
 
-            # Run 1 (health_check_run 1-3): All databases healthy
-            if current_run <= 3:
+            # Round 0 (initial health check): All databases healthy
+            if current_round == 0:
                 return True
 
-            # Run 2 (health_check_run 4-6): mock_db1 unhealthy, others healthy
-            elif current_run <= 6:
+            # Round 1: mock_db1 becomes unhealthy, others healthy
+            if current_round == 1:
                 if database == mock_db1:
-                    if current_run == 6:
-                        db1_became_unhealthy.set()
-                    return False
-
-                # Signal that db1 has become unhealthy after all 3 checks
-                if current_run == 6:
                     db1_became_unhealthy.set()
+                    return False
                 return True
 
-            # Run 3 (health_check_run 7-9): mock_db1 and mock_db2 unhealthy, mock_db healthy
-            elif current_run <= 9:
-                if database == mock_db1 or database == mock_db2:
-                    if current_run == 9:
-                        db2_became_unhealthy.set()
+            # Round 2: mock_db2 also becomes unhealthy, mock_db healthy
+            if current_round == 2:
+                if database == mock_db1:
                     return False
-
-                # Signal that db2 has become unhealthy after all 3 checks
-                if current_run == 9:
+                if database == mock_db2:
                     db2_became_unhealthy.set()
-                return True
-
-            # Run 4 (health_check_run 10-12): mock_db unhealthy, others healthy
-            else:
-                if database == mock_db:
-                    if current_run >= 12:
-                        db_became_unhealthy.set()
                     return False
-
-                # Signal that db has become unhealthy after all 3 checks
-                if current_run >= 12:
-                    db_became_unhealthy.set()
                 return True
+
+            # Round 3: mock_db also becomes unhealthy, but mock_db1 recovers
+            if current_round == 3:
+                if database == mock_db:
+                    db_became_unhealthy.set()
+                    return False
+                if database == mock_db2:
+                    return False
+                return True
+
+            # Round 4+: mock_db1 is healthy, others unhealthy
+            if database == mock_db1:
+                return True
+            return False
 
         mock_hc.check_health.side_effect = mock_check_health
 
@@ -229,7 +225,7 @@ class TestPipeline:
             pipe2.execute.return_value = ["OK2", "value"]
             mock_db2.client.pipeline.return_value = pipe2
 
-            mock_multi_db_config.health_check_interval = 0.1
+            mock_multi_db_config.health_check_interval = 0.05
             mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
 
             client = MultiDBClient(mock_multi_db_config)
@@ -247,7 +243,7 @@ class TestPipeline:
                     )
                     wait_for_condition(
                         lambda: cb1.state == CBState.OPEN,
-                        timeout=0.2,
+                        timeout=0.5,
                         error_message="Timeout waiting for cb1 to open",
                     )
 
@@ -260,7 +256,7 @@ class TestPipeline:
                     )
                     wait_for_condition(
                         lambda: cb2.state == CBState.OPEN,
-                        timeout=0.2,
+                        timeout=0.5,
                         error_message="Timeout waiting for cb2 to open",
                     )
 
@@ -273,8 +269,15 @@ class TestPipeline:
                     )
                     wait_for_condition(
                         lambda: cb.state == CBState.OPEN,
-                        timeout=0.2,
+                        timeout=0.5,
                         error_message="Timeout waiting for cb to open",
+                    )
+
+                    # Wait for mock_db1 to recover (circuit breaker to close)
+                    wait_for_condition(
+                        lambda: cb1.state == CBState.CLOSED,
+                        timeout=1.0,
+                        error_message="Timeout waiting for cb1 to close (mock_db1 to recover)",
                     )
 
                     # Run 4: mock_db unhealthy, others healthy - should use mock_db1 (highest weight)
@@ -323,6 +326,7 @@ class TestTransaction:
                     pipe.get("key1")
 
                 assert client.transaction(callback) == ["OK1", "value1"]
+                # 3 databases × 3 probes = 9 calls minimum
                 assert len(mock_hc.check_health.call_args_list) >= 9
             finally:
                 client.close()
@@ -331,7 +335,7 @@ class TestTransaction:
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
             (
-                {"initial_health_check_policy": InitialHealthCheck.MAJORITY_HEALTHY},
+                {"initial_health_check_policy": InitialHealthCheck.MAJORITY_AVAILABLE},
                 {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.7, "circuit": {"state": CBState.OPEN}},
@@ -352,7 +356,7 @@ class TestTransaction:
         ):
             mock_db1.client.transaction.return_value = ["OK1", "value1"]
 
-            def mock_check_health(database):
+            async def mock_check_health(database, connection=None):
                 if database == mock_db2:
                     return False
                 else:
@@ -371,6 +375,7 @@ class TestTransaction:
                     pipe.get("key1")
 
                 assert client.transaction(callback) == ["OK1", "value1"]
+                # 3 databases × 3 probes = 9 calls minimum (but one db fails, so >= 7)
                 assert len(mock_hc.check_health.call_args_list) >= 7
 
                 assert mock_db.circuit.state == CBState.CLOSED
@@ -383,7 +388,7 @@ class TestTransaction:
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
             (
-                {"health_check_probes": 1},
+                {},
                 {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
@@ -394,22 +399,23 @@ class TestTransaction:
     def test_execute_transaction_against_correct_db_on_background_health_check_determine_active_db_unhealthy(
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
-        cb = PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=5))
+        cb = PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=0.1))
         cb.database = mock_db
         mock_db.circuit = cb
 
-        cb1 = PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=5))
+        cb1 = PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=0.1))
         cb1.database = mock_db1
         mock_db1.circuit = cb1
 
-        cb2 = PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=5))
+        cb2 = PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=0.1))
         cb2.database = mock_db2
         mock_db2.circuit = cb2
 
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
-        # Track health check runs across all databases
-        health_check_run = 0
+        # Track health check rounds per database
+        db_rounds = {id(mock_db): 0, id(mock_db1): 0, id(mock_db2): 0}
+        db_probes_in_round = {id(mock_db): 0, id(mock_db1): 0, id(mock_db2): 0}
 
         # Create events for each failover scenario
         db1_became_unhealthy = threading.Event()
@@ -417,53 +423,47 @@ class TestTransaction:
         db_became_unhealthy = threading.Event()
         counter_lock = threading.Lock()
 
-        def mock_check_health(database):
-            nonlocal health_check_run
-
-            # Increment run counter for each health check call
+        async def mock_check_health(database, connection=None):
             with counter_lock:
-                health_check_run += 1
-                current_run = health_check_run
+                db_probes_in_round[id(database)] += 1
+                if db_probes_in_round[id(database)] > 3:
+                    db_rounds[id(database)] += 1
+                    db_probes_in_round[id(database)] = 1
+                current_round = db_rounds[id(database)]
 
-            # Run 1 (health_check_run 1-3): All databases healthy
-            if current_run <= 3:
+            # Round 0 (initial health check): All databases healthy
+            if current_round == 0:
                 return True
 
-            # Run 2 (health_check_run 4-6): mock_db1 unhealthy, others healthy
-            elif current_run <= 6:
+            # Round 1: mock_db1 becomes unhealthy, others healthy
+            if current_round == 1:
                 if database == mock_db1:
-                    if current_run == 6:
-                        db1_became_unhealthy.set()
-                    return False
-
-                # Signal that db1 has become unhealthy after all 3 checks
-                if current_run == 6:
                     db1_became_unhealthy.set()
+                    return False
                 return True
 
-            # Run 3 (health_check_run 7-9): mock_db1 and mock_db2 unhealthy, mock_db healthy
-            elif current_run <= 9:
-                if database == mock_db1 or database == mock_db2:
-                    if current_run == 9:
-                        db2_became_unhealthy.set()
+            # Round 2: mock_db2 also becomes unhealthy, mock_db healthy
+            if current_round == 2:
+                if database == mock_db1:
                     return False
-
-                # Signal that db2 has become unhealthy after all 3 checks
-                if current_run == 9:
+                if database == mock_db2:
                     db2_became_unhealthy.set()
-                return True
-
-            # Run 4 (health_check_run 10-12): mock_db unhealthy, others healthy
-            else:
-                if database == mock_db:
-                    if current_run >= 12:
-                        db_became_unhealthy.set()
                     return False
-
-                # Signal that db has become unhealthy after all 3 checks
-                if current_run >= 12:
-                    db_became_unhealthy.set()
                 return True
+
+            # Round 3: mock_db also becomes unhealthy, but mock_db1 recovers
+            if current_round == 3:
+                if database == mock_db:
+                    db_became_unhealthy.set()
+                    return False
+                if database == mock_db2:
+                    return False
+                return True
+
+            # Round 4+: mock_db1 is healthy, others unhealthy
+            if database == mock_db1:
+                return True
+            return False
 
         mock_hc.check_health.side_effect = mock_check_health
 
@@ -479,7 +479,7 @@ class TestTransaction:
             mock_db1.client.transaction.return_value = ["OK1", "value"]
             mock_db2.client.transaction.return_value = ["OK2", "value"]
 
-            mock_multi_db_config.health_check_interval = 0.1
+            mock_multi_db_config.health_check_interval = 0.05
             mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
 
             client = MultiDBClient(mock_multi_db_config)
@@ -498,7 +498,7 @@ class TestTransaction:
                 )
                 wait_for_condition(
                     lambda: cb1.state == CBState.OPEN,
-                    timeout=0.2,
+                    timeout=0.5,
                     error_message="Timeout waiting for cb1 to open",
                 )
 
@@ -511,7 +511,7 @@ class TestTransaction:
                 )
                 wait_for_condition(
                     lambda: cb2.state == CBState.OPEN,
-                    timeout=0.2,
+                    timeout=0.5,
                     error_message="Timeout waiting for cb2 to open",
                 )
 
@@ -524,8 +524,15 @@ class TestTransaction:
                 )
                 wait_for_condition(
                     lambda: cb.state == CBState.OPEN,
-                    timeout=0.2,
+                    timeout=0.5,
                     error_message="Timeout waiting for cb to open",
+                )
+
+                # Wait for mock_db1 to recover (circuit breaker to close)
+                wait_for_condition(
+                    lambda: cb1.state == CBState.CLOSED,
+                    timeout=1.0,
+                    error_message="Timeout waiting for cb1 to close (mock_db1 to recover)",
                 )
 
                 # Run 4: mock_db unhealthy, others healthy - should use mock_db1 (highest weight)

@@ -52,6 +52,11 @@ jwt = [
 circuit_breaker = [
     "pybreaker>=1.4.0"
 ]
+otel = [
+    "opentelemetry-api>=1.39.1",
+    "opentelemetry-sdk>=1.39.1",
+    "opentelemetry-exporter-otlp-proto-http>=1.39.1",
+]
 
 [project.urls]
 Changes = "https://github.com/redis/redis-py/releases"
@@ -81,6 +86,7 @@ markers = [
     "replica: replica tests",
     "experimental: run only experimental tests",
     "cp_integration: credential provider integration tests",
+    "no_mock_connections: skip the autouse mock_health_check_connections fixture",
 ]
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"
