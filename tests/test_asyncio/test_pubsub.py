@@ -3,7 +3,7 @@ import functools
 import socket
 import sys
 from typing import Optional
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock, MagicMock
 
 # the functionality is available in 3.11.x but has a major issue before
 # 3.11.3. See https://github.com/redis/redis-py/issues/2633
@@ -17,6 +17,8 @@ from unittest import mock
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
+from redis.asyncio.client import PubSub
+
 from redis.exceptions import ConnectionError
 from redis.typing import EncodableT
 from tests.conftest import get_protocol_version, skip_if_server_version_lt
@@ -159,6 +161,54 @@ class TestPubSubSubscribeUnsubscribe:
     async def test_resubscribe_to_patterns_on_reconnection(self, pubsub):
         kwargs = make_subscribe_test_data(pubsub, "pattern")
         await self._test_resubscribe_on_reconnection(**kwargs)
+
+    async def test_resubscribe_binary_channel_on_reconnection(self, pubsub):
+        """Binary channel names that are not valid UTF-8 must survive
+        reconnection without raising ``UnicodeDecodeError``.
+        See https://github.com/redis/redis-py/issues/3912
+        """
+        # b'\x80\x81\x82' is deliberately invalid UTF-8
+        binary_channel = b"\x80\x81\x82"
+        p = pubsub
+        await p.subscribe(binary_channel)
+        assert await wait_for_message(p) is not None  # consume subscribe ack
+
+        # force reconnect
+        await p.connection.disconnect()
+
+        # get_message triggers on_connect → re-subscribe; must not raise
+        messages = []
+        for _ in range(1):
+            message = await wait_for_message(p)
+            assert message is not None
+            messages.append(message)
+
+        assert len(messages) == 1
+        assert messages[0]["type"] == "subscribe"
+        assert messages[0]["channel"] == binary_channel
+
+    async def test_resubscribe_binary_pattern_on_reconnection(self, pubsub):
+        """Binary pattern names that are not valid UTF-8 must survive
+        reconnection without raising ``UnicodeDecodeError``.
+        See https://github.com/redis/redis-py/issues/3912
+        """
+        binary_pattern = b"\x80\x81*"
+        p = pubsub
+        await p.psubscribe(binary_pattern)
+        assert await wait_for_message(p) is not None  # consume psubscribe ack
+
+        # force reconnect
+        await p.connection.disconnect()
+
+        messages = []
+        for _ in range(1):
+            message = await wait_for_message(p)
+            assert message is not None
+            messages.append(message)
+
+        assert len(messages) == 1
+        assert messages[0]["type"] == "psubscribe"
+        assert messages[0]["channel"] == binary_pattern
 
     async def _test_subscribed_property(
         self, p, sub_type, unsub_type, sub_func, unsub_func, keys
@@ -1121,3 +1171,282 @@ class TestBaseException:
 
         # the timeout on the read should not cause disconnect
         assert pubsub.connection.is_connected
+
+
+@pytest.mark.onlynoncluster
+class TestAsyncPubSubTimeoutPropagation:
+    """
+    Tests for timeout propagation through the entire async pubsub read chain.
+    Ensures that timeouts are properly passed from get_message() through
+    parse_response() to the parser and socket buffer layers.
+    """
+
+    @pytest.mark.asyncio
+    async def test_get_message_timeout_is_respected(self, r):
+        """
+        Test that get_message() with timeout parameter respects the timeout
+        and returns None when no message arrives within the timeout period.
+        """
+        p = r.pubsub()
+        await p.subscribe("foo")
+        # Read subscription message
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+        assert msg["type"] == "subscribe"
+
+        # Call get_message with a short timeout - should return None
+        start = asyncio.get_running_loop().time()
+        msg = await p.get_message(timeout=0.1)
+        elapsed = asyncio.get_running_loop().time() - start
+        assert msg is None
+        # Verify timeout was actually respected (within reasonable bounds)
+        assert elapsed < 0.5
+        await p.aclose()
+
+    @pytest.mark.asyncio
+    async def test_get_message_timeout_with_published_message(self, r):
+        """
+        Test that get_message() with timeout returns a message if one
+        arrives before the timeout expires.
+        """
+        p = r.pubsub()
+        await p.subscribe("foo")
+        # Read subscription message
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        # Publish a message
+        await r.publish("foo", "hello")
+
+        # get_message with timeout should return the message
+        msg = await p.get_message(timeout=1.0)
+        assert msg is not None
+        assert msg["type"] == "message"
+        assert msg["data"] == b"hello"
+        await p.aclose()
+
+    @pytest.mark.asyncio
+    async def test_parse_response_timeout_propagation(self, r):
+        """
+        Test that parse_response() properly propagates timeout to read_response().
+        """
+        p = r.pubsub()
+        await p.subscribe("foo")
+        # Read subscription message
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        # Call parse_response with timeout - should respect it
+        start = asyncio.get_running_loop().time()
+        response = await p.parse_response(block=False, timeout=0.1)
+        elapsed = asyncio.get_running_loop().time() - start
+        assert response is None
+        assert elapsed < 0.5
+        await p.aclose()
+
+    @pytest.mark.asyncio
+    async def test_get_message_timeout_zero_returns_immediately(self, r):
+        """
+        Test that get_message(timeout=0) returns immediately without blocking.
+        """
+        p = r.pubsub()
+        await p.subscribe("foo")
+        # Read subscription message
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        # get_message with timeout=0 should return immediately
+        start = asyncio.get_running_loop().time()
+        msg = await p.get_message(timeout=0)
+        elapsed = asyncio.get_running_loop().time() - start
+        assert msg is None
+        assert elapsed < 0.1
+        await p.aclose()
+
+    @pytest.mark.asyncio
+    async def test_get_message_timeout_none_blocks(self, r):
+        """
+        Test that get_message(timeout=None) blocks indefinitely.
+        We test this by using a task to publish a message after a delay.
+        """
+        p = r.pubsub()
+        await p.subscribe("foo")
+        # Read subscription message
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        # Publish a message after a short delay in a task
+        async def publish_after_delay():
+            await asyncio.sleep(0.2)
+            await r.publish("foo", "delayed_message")
+
+        task = asyncio.create_task(publish_after_delay())
+
+        # get_message with timeout=None should block until message arrives
+        start = asyncio.get_running_loop().time()
+        msg = await p.get_message(timeout=None)
+        elapsed = asyncio.get_running_loop().time() - start
+        assert msg is not None
+        assert msg["type"] == "message"
+        assert msg["data"] == b"delayed_message"
+        # Should have waited at least 0.15 seconds
+        assert elapsed >= 0.15
+        await task
+        await p.aclose()
+
+    @pytest.mark.asyncio
+    async def test_multiple_messages_with_timeout(self, r):
+        """
+        Test that timeout is properly handled when reading multiple messages.
+        """
+        p = r.pubsub()
+        await p.subscribe("foo")
+        # Read subscription message
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        # Publish multiple messages
+        await r.publish("foo", "msg1")
+        await r.publish("foo", "msg2")
+        await r.publish("foo", "msg3")
+
+        # Read all messages with timeout
+        messages = []
+        for _ in range(3):
+            msg = await wait_for_message(p, timeout=1.0)
+            if msg:
+                messages.append(msg)
+
+        assert len(messages) == 3
+        assert messages[0]["data"] == b"msg1"
+        assert messages[1]["data"] == b"msg2"
+        assert messages[2]["data"] == b"msg3"
+        await p.aclose()
+
+    @pytest.mark.asyncio
+    async def test_timeout_with_pattern_subscribe(self, r):
+        """
+        Test that timeout works correctly with pattern subscriptions.
+        """
+        p = r.pubsub()
+        await p.psubscribe("foo*")
+        # Read subscription message
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+        assert msg["type"] == "psubscribe"
+
+        # Publish a message matching the pattern
+        await r.publish("foobar", "hello")
+
+        # get_message with timeout should return the message
+        msg = await p.get_message(timeout=1.0)
+        assert msg is not None
+        assert msg["type"] == "pmessage"
+        assert msg["data"] == b"hello"
+        await p.aclose()
+
+    @pytest.mark.asyncio
+    async def test_timeout_with_no_subscription(self, r):
+        """
+        Test that get_message with timeout returns None when subscribed but no messages.
+        """
+        p = r.pubsub()
+        await p.subscribe("foo")
+        # Read subscription message
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        # get_message with timeout should return None when no messages
+        msg = await p.get_message(timeout=0.1)
+        assert msg is None
+        await p.aclose()
+
+
+@pytest.mark.asyncio
+class TestPubSubHandleMessageMetrics:
+    """Tests for handle_message recording pubsub metrics."""
+
+    @pytest.fixture
+    def mock_pubsub(self):
+        """Create a mock PubSub instance for testing handle_message."""
+        pubsub = MagicMock()
+        pubsub.UNSUBSCRIBE_MESSAGE_TYPES = ("unsubscribe", "punsubscribe")
+        pubsub.PUBLISH_MESSAGE_TYPES = ("message", "pmessage")
+        pubsub.pending_unsubscribe_patterns = set()
+        pubsub.pending_unsubscribe_channels = set()
+        pubsub.patterns = {}
+        pubsub.channels = {}
+        pubsub.ignore_subscribe_messages = False
+        return pubsub
+
+    async def test_handle_message_records_metric_for_message_type(self, mock_pubsub):
+        """Test that handle_message calls record_pubsub_message for 'message' type."""
+
+        response = [b"message", b"test-channel", b"test-data"]
+
+        with patch(
+            "redis.asyncio.client.record_pubsub_message", new_callable=AsyncMock
+        ) as mock_record:
+            # Call the actual handle_message method
+            await PubSub.handle_message(
+                mock_pubsub, response, ignore_subscribe_messages=False
+            )
+
+            # Verify record_pubsub_message was called
+            mock_record.assert_awaited_once()
+            call_kwargs = mock_record.call_args[1]
+            from redis.observability.attributes import PubSubDirection
+
+            assert call_kwargs["direction"] == PubSubDirection.RECEIVE
+            assert call_kwargs["channel"] == "test-channel"
+
+    async def test_handle_message_records_metric_for_pmessage_type(self, mock_pubsub):
+        """Test that handle_message calls record_pubsub_message for 'pmessage' type."""
+
+        response = [b"pmessage", b"test-pattern*", b"test-channel", b"test-data"]
+
+        with patch(
+            "redis.asyncio.client.record_pubsub_message", new_callable=AsyncMock
+        ) as mock_record:
+            await PubSub.handle_message(
+                mock_pubsub, response, ignore_subscribe_messages=False
+            )
+
+            mock_record.assert_awaited_once()
+            call_kwargs = mock_record.call_args[1]
+            from redis.observability.attributes import PubSubDirection
+
+            assert call_kwargs["direction"] == PubSubDirection.RECEIVE
+            assert call_kwargs["channel"] == "test-channel"
+
+    async def test_handle_message_does_not_record_metric_for_subscribe_type(
+        self, mock_pubsub
+    ):
+        """Test that handle_message does NOT call record_pubsub_message for 'subscribe' type."""
+
+        response = [b"subscribe", b"test-channel", 1]
+
+        with patch(
+            "redis.asyncio.client.record_pubsub_message", new_callable=AsyncMock
+        ) as mock_record:
+            await PubSub.handle_message(
+                mock_pubsub, response, ignore_subscribe_messages=False
+            )
+
+            mock_record.assert_not_called()
+
+    async def test_handle_message_does_not_record_metric_for_pong_type(
+        self, mock_pubsub
+    ):
+        """Test that handle_message does NOT call record_pubsub_message for 'pong' type."""
+
+        response = b"PONG"
+
+        with patch(
+            "redis.asyncio.client.record_pubsub_message", new_callable=AsyncMock
+        ) as mock_record:
+            await PubSub.handle_message(
+                mock_pubsub, response, ignore_subscribe_messages=False
+            )
+
+            mock_record.assert_not_called()

@@ -25,7 +25,11 @@ class HybridSearchQuery:
 
         Args:
             query_string: The query string.
-            scorer: The scorer to use. Allowed values are "TFIDF" or "BM25".
+            scorer: Scoring algorithm for text search query.
+                Allowed values are "TFIDF", "TFIDF.DOCNORM", "DISMAX", "DOCSCORE",
+                "BM25", "BM25STD", "BM25STD.TANH", "HAMMING", etc.
+                For more information about supported scoring algorithms, see
+                https://redis.io/docs/latest/develop/ai/search-and-query/advanced-concepts/scoring/
             yield_score_as: The name of the field to yield the score as.
         """
         self._query_string = query_string
@@ -39,9 +43,10 @@ class HybridSearchQuery:
     def scorer(self, scorer: str) -> "HybridSearchQuery":
         """
         Scoring algorithm for text search query.
-        Allowed values are "TFIDF", "DISMAX", "DOCSCORE", "BM25", etc.
+        Allowed values are "TFIDF", "TFIDF.DOCNORM", "DISMAX", "DOCSCORE", "BM25",
+        "BM25STD", "BM25STD.TANH", "HAMMING", etc.
 
-        For more information about supported scroring algorithms,
+        For more information about supported scoring algorithms,
         see https://redis.io/docs/latest/develop/ai/search-and-query/advanced-concepts/scoring/
         """
         self._scorer = scorer

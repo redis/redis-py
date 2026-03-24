@@ -2,12 +2,13 @@ from time import sleep
 
 import pytest
 
-from redis.exceptions import ConnectionError
 from redis.backoff import NoBackoff
 from redis.event import EventDispatcher
+from redis.exceptions import ConnectionError
 from redis.multidb.circuit import State as CBState
 from redis.multidb.command_executor import DefaultCommandExecutor
 from redis.multidb.failure_detector import CommandFailureDetector
+from redis.observability.attributes import GeoFailoverReason
 from redis.retry import Retry
 from tests.test_multidb.conftest import create_weighted_list
 
@@ -40,10 +41,10 @@ class TestDefaultCommandExecutor:
             command_retry=Retry(NoBackoff(), 0),
         )
 
-        executor.active_database = mock_db1
+        executor.active_database = (mock_db1, GeoFailoverReason.MANUAL)
         assert executor.execute_command("SET", "key", "value") == "OK1"
 
-        executor.active_database = mock_db2
+        executor.active_database = (mock_db2, GeoFailoverReason.MANUAL)
         assert executor.execute_command("SET", "key", "value") == "OK2"
         assert mock_ed.register_listeners.call_count == 1
         assert mock_fd.register_command_execution.call_count == 2

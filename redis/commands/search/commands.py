@@ -11,7 +11,7 @@ from redis.commands.search.hybrid_query import (
     HybridQuery,
 )
 from redis.commands.search.hybrid_result import HybridCursorResult, HybridResult
-from redis.utils import deprecated_function
+from redis.utils import deprecated_function, experimental_method
 
 from ..helpers import get_protocol_version
 from ._util import to_string
@@ -560,6 +560,7 @@ class SearchCommands:
             SEARCH_CMD, res, query=query, duration=(time.monotonic() - st) * 1000.0
         )
 
+    @experimental_method()
     def hybrid_search(
         self,
         query: HybridQuery,
@@ -1053,6 +1054,7 @@ class AsyncSearchCommands(SearchCommands):
             SEARCH_CMD, res, query=query, duration=(time.monotonic() - st) * 1000.0
         )
 
+    @experimental_method()
     async def hybrid_search(
         self,
         query: HybridQuery,

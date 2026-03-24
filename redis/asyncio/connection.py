@@ -4,6 +4,7 @@ import enum
 import inspect
 import socket
 import sys
+import time
 import warnings
 import weakref
 from abc import abstractmethod
@@ -26,6 +27,13 @@ from typing import (
 )
 from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
+from ..observability.attributes import (
+    DB_CLIENT_CONNECTION_POOL_NAME,
+    DB_CLIENT_CONNECTION_STATE,
+    AttributeBuilder,
+    ConnectionState,
+    get_pool_name,
+)
 from ..utils import SSL_AVAILABLE
 
 if SSL_AVAILABLE:
@@ -49,6 +57,13 @@ if sys.version_info >= (3, 11, 3):
 else:
     from async_timeout import timeout as async_timeout
 
+from redis.asyncio.observability.recorder import (
+    record_connection_closed,
+    record_connection_count,
+    record_connection_create_time,
+    record_connection_wait_time,
+    record_error_count,
+)
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.connection import DEFAULT_RESP_VERSION
@@ -63,6 +78,7 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
+from redis.observability.metrics import CloseReason
 from redis.typing import EncodableT
 from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
 
@@ -245,10 +261,10 @@ class AbstractConnection:
             p = DEFAULT_RESP_VERSION
         except ValueError:
             raise ConnectionError("protocol must be an integer")
-        finally:
+        else:
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
-            self.protocol = protocol
+        self.protocol = p
 
     def __del__(self, _warnings: Any = warnings):
         # For some reason, the individual streams don't get properly garbage
@@ -325,7 +341,10 @@ class AbstractConnection:
             lambda: self.connect_check_health(
                 check_health=True, retry_socket_connect=False
             ),
-            lambda error: self.disconnect(),
+            lambda error, failure_count: self.disconnect(
+                error=error, failure_count=failure_count
+            ),
+            with_failure_count=True,
         )
 
     async def connect_check_health(
@@ -333,19 +352,49 @@ class AbstractConnection:
     ):
         if self.is_connected:
             return
+        # Track actual retry attempts for error reporting
+        actual_retry_attempts = 0
+
+        def failure_callback(error, failure_count):
+            nonlocal actual_retry_attempts
+            actual_retry_attempts = failure_count
+            return self.disconnect(error=error, failure_count=failure_count)
+
         try:
             if retry_socket_connect:
                 await self.retry.call_with_retry(
-                    lambda: self._connect(), lambda error: self.disconnect()
+                    lambda: self._connect(),
+                    failure_callback,
+                    with_failure_count=True,
                 )
             else:
                 await self._connect()
         except asyncio.CancelledError:
             raise  # in 3.7 and earlier, this is an Exception, not BaseException
         except (socket.timeout, asyncio.TimeoutError):
-            raise TimeoutError("Timeout connecting to server")
+            e = TimeoutError("Timeout connecting to server")
+            await record_error_count(
+                server_address=getattr(self, "host", None),
+                server_port=getattr(self, "port", None),
+                network_peer_address=getattr(self, "host", None),
+                network_peer_port=getattr(self, "port", None),
+                error_type=e,
+                retry_attempts=actual_retry_attempts,
+                is_internal=False,
+            )
+            raise e
         except OSError as e:
-            raise ConnectionError(self._error_message(e))
+            e = ConnectionError(self._error_message(e))
+            await record_error_count(
+                server_address=getattr(self, "host", None),
+                server_port=getattr(self, "port", None),
+                network_peer_address=getattr(self, "host", None),
+                network_peer_port=getattr(self, "port", None),
+                error_type=e,
+                retry_attempts=actual_retry_attempts,
+                is_internal=False,
+            )
+            raise e
         except Exception as exc:
             raise ConnectionError(exc) from exc
 
@@ -380,6 +429,9 @@ class AbstractConnection:
 
     def should_reconnect(self):
         return self._should_reconnect
+
+    def reset_should_reconnect(self):
+        self._should_reconnect = False
 
     @abstractmethod
     async def _connect(self):
@@ -514,11 +566,19 @@ class AbstractConnection:
             if str_if_bytes(await self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
 
-    async def disconnect(self, nowait: bool = False) -> None:
+    async def disconnect(
+        self,
+        nowait: bool = False,
+        error: Optional[Exception] = None,
+        failure_count: Optional[int] = None,
+        health_check_failed: bool = False,
+    ) -> None:
         """Disconnects from the Redis server"""
         try:
             async with async_timeout(self.socket_connect_timeout):
                 self._parser.on_disconnect()
+                # Reset the reconnect flag
+                self.reset_should_reconnect()
                 if not self.is_connected:
                     return
                 try:
@@ -537,15 +597,42 @@ class AbstractConnection:
                 f"Timed out closing connection after {self.socket_connect_timeout}"
             ) from None
 
+        if error:
+            if health_check_failed:
+                close_reason = CloseReason.HEALTHCHECK_FAILED
+            else:
+                close_reason = CloseReason.ERROR
+
+            if failure_count is not None and failure_count > self.retry.get_retries():
+                await record_error_count(
+                    server_address=getattr(self, "host", None),
+                    server_port=getattr(self, "port", None),
+                    network_peer_address=getattr(self, "host", None),
+                    network_peer_port=getattr(self, "port", None),
+                    error_type=error,
+                    retry_attempts=failure_count,
+                )
+
+            await record_connection_closed(
+                close_reason=close_reason,
+                error_type=error,
+            )
+        else:
+            await record_connection_closed(
+                close_reason=CloseReason.APPLICATION_CLOSE,
+            )
+
     async def _send_ping(self):
         """Send PING, expect PONG in return"""
         await self.send_command("PING", check_health=False)
         if str_if_bytes(await self.read_response()) != "PONG":
             raise ConnectionError("Bad response from PING health check")
 
-    async def _ping_failed(self, error):
+    async def _ping_failed(self, error, failure_count):
         """Function to call when PING fails"""
-        await self.disconnect()
+        await self.disconnect(
+            error=error, failure_count=failure_count, health_check_failed=True
+        )
 
     async def check_health(self):
         """Check the health of the connection with a PING/PONG"""
@@ -553,7 +640,9 @@ class AbstractConnection:
             self.health_check_interval
             and asyncio.get_running_loop().time() > self.next_health_check
         ):
-            await self.retry.call_with_retry(self._send_ping, self._ping_failed)
+            await self.retry.call_with_retry(
+                self._send_ping, self._ping_failed, with_failure_count=True
+            )
 
     async def _send_packed_command(self, command: Iterable[bytes]) -> None:
         self._writer.writelines(command)
@@ -1220,8 +1309,23 @@ class ConnectionPool:
         if self._event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
 
+    # Keys that should be redacted in __repr__ to avoid exposing sensitive information
+    SENSITIVE_REPR_KEYS = frozenset(
+        {
+            "password",
+            "username",
+            "ssl_password",
+            "credential_provider",
+        }
+    )
+
     def __repr__(self):
-        conn_kwargs = ",".join([f"{k}={v}" for k, v in self.connection_kwargs.items()])
+        conn_kwargs = ",".join(
+            [
+                f"{k}={'<REDACTED>' if k in self.SENSITIVE_REPR_KEYS else v}"
+                for k, v in self.connection_kwargs.items()
+            ]
+        )
         return (
             f"<{self.__class__.__module__}.{self.__class__.__name__}"
             f"(<{self.connection_class.__module__}.{self.connection_class.__name__}"
@@ -1229,8 +1333,66 @@ class ConnectionPool:
         )
 
     def reset(self):
+        # Record metrics for connections being removed before clearing
+        # (only if attributes exist - they won't during __init__)
+        if hasattr(self, "_available_connections") and hasattr(
+            self, "_in_use_connections"
+        ):
+            idle_count = len(self._available_connections)
+            in_use_count = len(self._in_use_connections)
+            if idle_count > 0 or in_use_count > 0:
+                pool_name = get_pool_name(self)
+                # Note: Using sync version since reset() is sync
+                from redis.observability.recorder import (
+                    record_connection_count as sync_record_connection_count,
+                )
+
+                if idle_count > 0:
+                    sync_record_connection_count(
+                        pool_name=pool_name,
+                        connection_state=ConnectionState.IDLE,
+                        counter=-idle_count,
+                    )
+                if in_use_count > 0:
+                    sync_record_connection_count(
+                        pool_name=pool_name,
+                        connection_state=ConnectionState.USED,
+                        counter=-in_use_count,
+                    )
+
         self._available_connections = []
         self._in_use_connections = weakref.WeakSet()
+
+    def __del__(self) -> None:
+        """Clean up connection pool and record metrics when garbage collected."""
+        try:
+            if not hasattr(self, "_available_connections") or not hasattr(
+                self, "_in_use_connections"
+            ):
+                return
+            idle_count = len(self._available_connections)
+            in_use_count = len(self._in_use_connections)
+            if idle_count > 0 or in_use_count > 0:
+                pool_name = get_pool_name(self)
+                # Note: Using sync version since __del__ is sync
+                from redis.observability.recorder import (
+                    record_connection_count as sync_record_connection_count,
+                )
+
+                if idle_count > 0:
+                    sync_record_connection_count(
+                        pool_name=pool_name,
+                        connection_state=ConnectionState.IDLE,
+                        counter=-idle_count,
+                    )
+                if in_use_count > 0:
+                    sync_record_connection_count(
+                        pool_name=pool_name,
+                        connection_state=ConnectionState.USED,
+                        counter=-in_use_count,
+                    )
+        except Exception:
+            pass
 
     def can_get_connection(self) -> bool:
         """Return True if a connection can be retrieved from the pool."""
@@ -1246,12 +1408,51 @@ class ConnectionPool:
     )
     async def get_connection(self, command_name=None, *keys, **options):
         """Get a connected connection from the pool"""
+        # Track connection count before to detect if a new connection is created
         async with self._lock:
+            connections_before = len(self._available_connections) + len(
+                self._in_use_connections
+            )
+            start_time_created = time.monotonic()
             connection = self.get_available_connection()
+            connections_after = len(self._available_connections) + len(
+                self._in_use_connections
+            )
+            is_created = connections_after > connections_before
+
+        # Record state transition for observability
+        # This ensures counters stay balanced if ensure_connection() fails and release() is called
+        pool_name = get_pool_name(self)
+        if is_created:
+            # New connection created and acquired: just USED +1
+            await record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.USED,
+                counter=1,
+            )
+        else:
+            # Existing connection acquired from pool: IDLE -> USED
+            await record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.IDLE,
+                counter=-1,
+            )
+            await record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.USED,
+                counter=1,
+            )
 
         # We now perform the connection check outside of the lock.
         try:
             await self.ensure_connection(connection)
+
+            if is_created:
+                await record_connection_create_time(
+                    connection_pool=self,
+                    duration_seconds=time.monotonic() - start_time_created,
+                )
+
             return connection
         except BaseException:
             await self.release(connection)
@@ -1279,6 +1480,8 @@ class ConnectionPool:
 
     def make_connection(self):
         """Create a new connection.  Can be overridden by child classes."""
+        # Note: We don't record IDLE here because async uses a sync make_connection
+        # but async record_connection_count. The recording is handled in get_connection.
         return self.connection_class(**self.connection_kwargs)
 
     async def ensure_connection(self, connection: AbstractConnection):
@@ -1302,12 +1505,26 @@ class ConnectionPool:
         # Connections should always be returned to the correct pool,
         # not doing so is an error that will cause an exception here.
         self._in_use_connections.remove(connection)
+
         if connection.should_reconnect():
             await connection.disconnect()
 
         self._available_connections.append(connection)
         await self._event_dispatcher.dispatch_async(
             AsyncAfterConnectionReleasedEvent(connection)
+        )
+
+        # Record state transition: USED -> IDLE
+        pool_name = get_pool_name(self)
+        await record_connection_count(
+            pool_name=pool_name,
+            connection_state=ConnectionState.USED,
+            counter=-1,
+        )
+        await record_connection_count(
+            pool_name=pool_name,
+            connection_state=ConnectionState.IDLE,
+            counter=1,
         )
 
     async def disconnect(self, inuse_connections: bool = True):
@@ -1328,6 +1545,7 @@ class ConnectionPool:
             *(connection.disconnect() for connection in connections),
             return_exceptions=True,
         )
+
         exc = next((r for r in resp if isinstance(r, BaseException)), None)
         if exc:
             raise exc
@@ -1372,6 +1590,27 @@ class ConnectionPool:
         :return:
         """
         pass
+
+    def get_connection_count(self) -> List[tuple[int, dict]]:
+        """
+        Returns a connection count (both idle and in use).
+        """
+        attributes = AttributeBuilder.build_base_attributes()
+        attributes[DB_CLIENT_CONNECTION_POOL_NAME] = get_pool_name(self)
+        free_connections_attributes = attributes.copy()
+        in_use_connections_attributes = attributes.copy()
+
+        free_connections_attributes[DB_CLIENT_CONNECTION_STATE] = (
+            ConnectionState.IDLE.value
+        )
+        in_use_connections_attributes[DB_CLIENT_CONNECTION_STATE] = (
+            ConnectionState.USED.value
+        )
+
+        return [
+            (len(self._available_connections), free_connections_attributes),
+            (len(self._in_use_connections), in_use_connections_attributes),
+        ]
 
 
 class BlockingConnectionPool(ConnectionPool):
@@ -1431,17 +1670,41 @@ class BlockingConnectionPool(ConnectionPool):
     )
     async def get_connection(self, command_name=None, *keys, **options):
         """Gets a connection from the pool, blocking until one is available"""
+        # Start timing for wait time observability
+        start_time_acquired = time.monotonic()
+
         try:
             async with self._condition:
                 async with async_timeout(self.timeout):
                     await self._condition.wait_for(self.can_get_connection)
+                    # Track connection count before to detect if a new connection is created
+                    connections_before = len(self._available_connections) + len(
+                        self._in_use_connections
+                    )
+                    start_time_created = time.monotonic()
                     connection = super().get_available_connection()
+                    connections_after = len(self._available_connections) + len(
+                        self._in_use_connections
+                    )
+                    is_created = connections_after > connections_before
         except asyncio.TimeoutError as err:
             raise ConnectionError("No connection available.") from err
 
         # We now perform the connection check outside of the lock.
         try:
             await self.ensure_connection(connection)
+
+            if is_created:
+                await record_connection_create_time(
+                    connection_pool=self,
+                    duration_seconds=time.monotonic() - start_time_created,
+                )
+
+            await record_connection_wait_time(
+                pool_name=get_pool_name(self),
+                duration_seconds=time.monotonic() - start_time_acquired,
+            )
+
             return connection
         except BaseException:
             await self.release(connection)

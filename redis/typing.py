@@ -6,6 +6,7 @@ from typing import (
     Any,
     Awaitable,
     Iterable,
+    Literal,
     Mapping,
     Protocol,
     Type,
@@ -15,9 +16,32 @@ from typing import (
 
 if TYPE_CHECKING:
     from redis._parsers import Encoder
+    from redis.event import EventDispatcherInterface
 
 
 Number = Union[int, float]
+
+
+class AsyncClientProtocol(Protocol):
+    """Protocol for asynchronous Redis clients (redis.asyncio.client.Redis).
+
+    This protocol uses a Literal marker to identify async clients.
+    Used in @overload to provide correct return types for async clients.
+    """
+
+    _is_async_client: Literal[True]
+
+
+class SyncClientProtocol(Protocol):
+    """Protocol for synchronous Redis clients (redis.client.Redis).
+
+    This protocol uses a Literal marker to identify sync clients.
+    Used in @overload to provide correct return types for sync clients.
+    """
+
+    _is_async_client: Literal[False]
+
+
 EncodedT = Union[bytes, bytearray, memoryview]
 DecodedT = Union[str, int, float]
 EncodableT = Union[EncodedT, DecodedT]
@@ -37,6 +61,39 @@ ConsumerT = _StringLikeT  # Consumer name
 StreamIdT = Union[int, _StringLikeT]
 ScriptTextT = _StringLikeT
 TimeoutSecT = Union[int, float, _StringLikeT]
+ACLGetUserData = (
+    dict[str, bool | list[str] | list[list[str]] | list[dict[str, str]]] | None
+)
+ACLLogEntry = dict[str, str | float | dict[str, str | int]]
+ACLLogData = list[ACLLogEntry]
+CommandGetKeysAndFlagsEntry = list[bytes | str | list[bytes | str]]
+CommandGetKeysAndFlagsResponse = list[CommandGetKeysAndFlagsEntry]
+BlockingListPopResponse = tuple[bytes | str, bytes | str] | list[bytes | str] | None
+HScanPayload = dict[bytes | str, bytes | str] | list[bytes | str]
+HScanResponse = tuple[int, HScanPayload]
+ListMultiPopResponse = list[bytes | str | list[bytes | str]] | None
+ScanResponse = tuple[int, list[bytes | str]]
+SortResponse = list[bytes | str] | list[tuple[bytes | str, ...]] | int
+StreamEntry = tuple[bytes | str | None, dict[bytes | str, bytes | str] | None]
+StreamRangeResponse = list[StreamEntry]
+XClaimResponse = StreamRangeResponse | list[bytes | str]
+XPendingRangeEntry = dict[str, bytes | str | int]
+XPendingRangeResponse = list[XPendingRangeEntry]
+XReadResponse = list[list[Any]] | dict[bytes | str, list[StreamRangeResponse]]
+BlockingZSetPopResponse = (
+    tuple[bytes | str, bytes | str, float] | list[bytes | str | float] | None
+)
+ZMPopResponse = list[bytes | str | list[list[Any]]] | None
+ZRandMemberResponse = (
+    bytes | str | None | list[bytes | str] | list[bytes | str | float] | list[list[Any]]
+)
+ZSetScoredMembers = list[tuple[bytes | str, Any]] | list[list[Any]]
+ZSetRangeResponse = list[bytes | str] | ZSetScoredMembers
+ZScanResponse = tuple[int, list[tuple[bytes | str, float]]]
+LCSMatch = list[int | tuple[int, int]]
+LCSResult = dict[str, int | list[LCSMatch]]
+StralgoResponse = str | int | LCSResult
+
 # Mapping is not covariant in the key type, which prevents
 # Mapping[_StringLikeT, X] from accepting arguments of type Dict[str, X]. Using
 # a TypeVar instead of a Union allows mappings with any of the permitted types
@@ -50,6 +107,8 @@ ExceptionMappingT = Mapping[str, Union[Type[Exception], Mapping[str, Type[Except
 
 
 class CommandsProtocol(Protocol):
+    _event_dispatcher: "EventDispatcherInterface"
+
     def execute_command(self, *args, **options) -> ResponseT: ...
 
 

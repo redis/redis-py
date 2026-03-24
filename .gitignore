@@ -27,3 +27,4 @@ docker/stunnel/keys
 /dockers/replica/
 /dockers/sentinel/
 /dockers/redis-stack/
+/experimenting/
