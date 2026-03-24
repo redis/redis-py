@@ -83,7 +83,8 @@ things get stuck, an `invoke clean` can help.
 
 ## Linting
 
-Call `invoke linters` to run linters without also running tests.
+Call `invoke linters` to run linters without also running tests.  
+Call `invoke linters-fix` to run linters and automatically fix issues.
 
 ## Documentation
 

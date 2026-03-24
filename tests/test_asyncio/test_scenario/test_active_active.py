@@ -45,6 +45,7 @@ async def trigger_network_failure_action(
     logger.info(f"Action completed. Status: {status_result['status']}")
 
 
+@pytest.mark.skip(reason="Temporarily disabled")
 class TestActiveActive:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

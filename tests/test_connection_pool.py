@@ -4,11 +4,17 @@ import time
 from contextlib import closing
 from threading import Thread
 from unittest import mock
+from unittest.mock import MagicMock
 
 import pytest
 import redis
 from redis.cache import CacheConfig
 from redis.connection import CacheProxyConnection, Connection, to_bool
+from redis.event import (
+    AfterConnectionReleasedEvent,
+    EventDispatcher,
+    EventListenerInterface,
+)
 from redis.utils import SSL_AVAILABLE
 
 from .conftest import (
@@ -42,6 +48,9 @@ class DummyConnection:
 
     def should_reconnect(self):
         return False
+
+    def re_auth(self):
+        pass
 
 
 class TestConnectionPool:
@@ -249,6 +258,31 @@ class TestBlockingConnectionPool:
         )
         expected = "path=abc,db=0,client_name=test-client"
         assert expected in repr(pool)
+
+    def test_repr_redacts_sensitive_information(self):
+        """Test that __repr__ redacts sensitive values like password and username."""
+        pool = redis.ConnectionPool(
+            host="localhost",
+            port=6379,
+            password="secret_password_123",
+            username="myuser",
+            ssl_password="ssl_secret_456",
+            db=0,
+        )
+        repr_output = repr(pool)
+
+        # Verify sensitive values are redacted
+        assert "secret_password_123" not in repr_output
+        assert "myuser" not in repr_output
+        assert "ssl_secret_456" not in repr_output
+
+        # Verify the REDACTED placeholder is present
+        assert "<REDACTED>" in repr_output
+
+        # Verify non-sensitive values are still visible
+        assert "host=localhost" in repr_output
+        assert "port=6379" in repr_output
+        assert "db=0" in repr_output
 
     @pytest.mark.onlynoncluster
     @skip_if_resp_version(2)
@@ -960,3 +994,52 @@ class TestHealthCheck:
             assert wait_for_message(p) is None
             m.assert_called_with("PING", p.HEALTH_CHECK_MESSAGE, check_health=False)
             self.assert_interval_advanced(p.connection)
+
+
+class TestConnectionPoolReleasedEventEmission:
+    """Tests for AfterConnectionReleasedEvent emission from ConnectionPool."""
+
+    def test_connection_released_event_emitted_on_release(self):
+        """Test that AfterConnectionReleasedEvent is emitted when releasing a connection."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners(
+            {
+                AfterConnectionReleasedEvent: [listener],
+            }
+        )
+
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            event_dispatcher=event_dispatcher,
+        )
+
+        conn = pool.get_connection()
+        pool.release(conn)
+
+        listener.listen.assert_called_once()
+        event = listener.listen.call_args[0][0]
+        assert isinstance(event, AfterConnectionReleasedEvent)
+
+    def test_connection_released_event_not_emitted_for_foreign_connection(self):
+        """Test that AfterConnectionReleasedEvent is NOT emitted for connections not owned by pool."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners(
+            {
+                AfterConnectionReleasedEvent: [listener],
+            }
+        )
+
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            event_dispatcher=event_dispatcher,
+        )
+
+        # Create a connection that doesn't belong to this pool
+        foreign_conn = DummyConnection()
+
+        pool.release(foreign_conn)
+
+        # Event should NOT be emitted for foreign connection
+        listener.listen.assert_not_called()

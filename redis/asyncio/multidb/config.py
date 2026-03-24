@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import List, Optional, Type, Union
 
 import pybreaker
@@ -20,6 +21,7 @@ from redis.asyncio.multidb.healthcheck import (
     DEFAULT_HEALTH_CHECK_INTERVAL,
     DEFAULT_HEALTH_CHECK_POLICY,
     DEFAULT_HEALTH_CHECK_PROBES,
+    DEFAULT_HEALTH_CHECK_TIMEOUT,
     HealthCheck,
     HealthCheckPolicies,
     PingHealthCheck,
@@ -41,6 +43,12 @@ from redis.multidb.failure_detector import (
 )
 
 DEFAULT_AUTO_FALLBACK_INTERVAL = 120
+
+
+class InitialHealthCheck(Enum):
+    ALL_AVAILABLE = "all_available"
+    MAJORITY_AVAILABLE = "majority_available"
+    ONE_AVAILABLE = "one_available"
 
 
 def default_event_dispatcher() -> EventDispatcherInterface:
@@ -103,11 +111,15 @@ class MultiDbConfig:
         health_check_interval: Time interval for executing health checks.
         health_check_probes: Number of attempts to evaluate the health of a database.
         health_check_delay: Delay between health check attempts.
+        health_check_timeout: Timeout for the full health check operation (including all probes).
+        health_check_policy: Policy for determining database health based on health checks.
         failover_strategy: Optional strategy for handling database failover scenarios.
         failover_attempts: Number of retries allowed for failover operations.
         failover_delay: Delay between failover attempts.
         auto_fallback_interval: Time interval to trigger automatic fallback.
         event_dispatcher: Interface for dispatching events related to database operations.
+        initial_health_check_policy: Defines the policy used to determine whether the databases setup is
+                                     healthy during the initial health check.
 
     Methods:
         databases:
@@ -140,6 +152,7 @@ class MultiDbConfig:
     health_check_interval: float = DEFAULT_HEALTH_CHECK_INTERVAL
     health_check_probes: int = DEFAULT_HEALTH_CHECK_PROBES
     health_check_delay: float = DEFAULT_HEALTH_CHECK_DELAY
+    health_check_timeout: float = DEFAULT_HEALTH_CHECK_TIMEOUT
     health_check_policy: HealthCheckPolicies = DEFAULT_HEALTH_CHECK_POLICY
     failover_strategy: Optional[AsyncFailoverStrategy] = None
     failover_attempts: int = DEFAULT_FAILOVER_ATTEMPTS
@@ -148,6 +161,7 @@ class MultiDbConfig:
     event_dispatcher: EventDispatcherInterface = field(
         default_factory=default_event_dispatcher
     )
+    initial_health_check_policy: InitialHealthCheck = InitialHealthCheck.ALL_AVAILABLE
 
     def databases(self) -> Databases:
         databases = WeightedList()
@@ -203,7 +217,11 @@ class MultiDbConfig:
 
     def default_health_checks(self) -> List[HealthCheck]:
         return [
-            PingHealthCheck(),
+            PingHealthCheck(
+                health_check_probes=self.health_check_probes,
+                health_check_delay=self.health_check_delay,
+                health_check_timeout=self.health_check_timeout,
+            ),
         ]
 
     def default_failover_strategy(self) -> AsyncFailoverStrategy:

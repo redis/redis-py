@@ -17,7 +17,7 @@ from redis.backoff import ExponentialBackoff
 from redis.event import AsyncEventListenerInterface, EventDispatcher
 from redis.multidb.failure_detector import DEFAULT_MIN_NUM_FAILURES
 from tests.test_scenario.conftest import get_endpoints_config, extract_cluster_fqdn
-from tests.test_scenario.fault_injector_client import FaultInjectorClient
+from tests.test_scenario.fault_injector_client import REFaultInjector
 
 
 class CheckActiveDatabaseChangedListener(AsyncEventListenerInterface):
@@ -31,7 +31,7 @@ class CheckActiveDatabaseChangedListener(AsyncEventListenerInterface):
 @pytest.fixture()
 def fault_injector_client():
     url = os.getenv("FAULT_INJECTION_API_URL", "http://127.0.0.1:20324")
-    return FaultInjectorClient(url)
+    return REFaultInjector(url)
 
 
 @pytest_asyncio.fixture()

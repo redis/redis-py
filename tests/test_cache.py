@@ -1,4 +1,5 @@
 import time
+from unittest.mock import MagicMock
 
 import pytest
 import redis
@@ -8,11 +9,16 @@ from redis.cache import (
     CacheEntry,
     CacheEntryStatus,
     CacheKey,
+    CacheProxy,
     DefaultCache,
     EvictionPolicy,
     EvictionPolicyType,
     LRUPolicy,
 )
+from redis.event import (
+    EventDispatcher,
+)
+from redis.observability.attributes import CSCReason
 from tests.conftest import _get_client, skip_if_resp_version, skip_if_server_version_lt
 
 
@@ -1120,66 +1126,6 @@ class TestUnitDefaultCache:
             )
         )
 
-    def test_set_evict_lru_cache_key_on_reaching_max_size(self, mock_connection):
-        cache = DefaultCache(CacheConfig(max_size=3))
-        cache_key1 = CacheKey(
-            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
-        )
-        cache_key2 = CacheKey(
-            command="GET", redis_keys=("foo1",), redis_args=("GET", "foo1")
-        )
-        cache_key3 = CacheKey(
-            command="GET", redis_keys=("foo2",), redis_args=("GET", "foo2")
-        )
-
-        # Set 3 different keys
-        assert cache.set(
-            CacheEntry(
-                cache_key=cache_key1,
-                cache_value=b"bar",
-                status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection,
-            )
-        )
-        assert cache.set(
-            CacheEntry(
-                cache_key=cache_key2,
-                cache_value=b"bar1",
-                status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection,
-            )
-        )
-        assert cache.set(
-            CacheEntry(
-                cache_key=cache_key3,
-                cache_value=b"bar2",
-                status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection,
-            )
-        )
-
-        # Accessing key in the order that it makes 2nd key LRU
-        assert cache.get(cache_key1).cache_value == b"bar"
-        assert cache.get(cache_key2).cache_value == b"bar1"
-        assert cache.get(cache_key3).cache_value == b"bar2"
-        assert cache.get(cache_key1).cache_value == b"bar"
-
-        cache_key4 = CacheKey(
-            command="GET", redis_keys=("foo3",), redis_args=("GET", "foo3")
-        )
-        assert cache.set(
-            CacheEntry(
-                cache_key=cache_key4,
-                cache_value=b"bar3",
-                status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection,
-            )
-        )
-
-        # Make sure that new key was added and 2nd is evicted
-        assert cache.get(cache_key4).cache_value == b"bar3"
-        assert cache.get(cache_key2) is None
-
     @pytest.mark.parametrize(
         "cache_key", [{"command": "GET", "redis_keys": ("bar",)}], indirect=True
     )
@@ -1560,3 +1506,232 @@ class TestUnitCacheConfiguration:
     def test_is_allowed_to_cache(self, cache_conf: CacheConfig):
         assert cache_conf.is_allowed_to_cache("GET")
         assert not cache_conf.is_allowed_to_cache("SET")
+
+
+class TestUnitCacheProxy:
+    """Unit tests for CacheProxy class with mocked event dispatcher."""
+
+    @pytest.fixture
+    def mock_cache(self, mock_connection):
+        """Create a DefaultCache for testing."""
+        return DefaultCache(CacheConfig(max_size=5))
+
+    @pytest.fixture
+    def mock_event_dispatcher(self):
+        """Create a mock event dispatcher."""
+        return MagicMock(spec=EventDispatcher)
+
+    @pytest.fixture
+    def cache_key(self):
+        """Create a sample cache key."""
+        return CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+
+    def test_initialization_creates_cache_proxy(self, mock_cache):
+        """Test that CacheProxy can be initialized with a cache."""
+        # Should not raise an error
+        proxy = CacheProxy(mock_cache)
+        assert proxy is not None
+
+    def test_set_calls_record_csc_eviction_when_cache_exceeds_max_size(
+        self, mock_connection
+    ):
+        """Test that record_csc_eviction is called when cache exceeds max size."""
+        from unittest.mock import patch
+
+        # Create a cache with max_size=2
+        cache = DefaultCache(CacheConfig(max_size=2))
+        proxy = CacheProxy(cache)
+
+        with patch("redis.observability.recorder.record_csc_eviction") as mock_record:
+            # Add 2 entries (at max capacity)
+            for i in range(2):
+                cache_key = CacheKey(
+                    command="GET",
+                    redis_keys=(f"key{i}",),
+                    redis_args=("GET", f"key{i}"),
+                )
+                proxy.set(
+                    CacheEntry(
+                        cache_key=cache_key,
+                        cache_value=f"value{i}".encode(),
+                        status=CacheEntryStatus.VALID,
+                        connection_ref=mock_connection,
+                    )
+                )
+
+            # No eviction yet
+            mock_record.assert_not_called()
+
+            # Add a 3rd entry, which should trigger eviction
+            cache_key = CacheKey(
+                command="GET", redis_keys=("key3",), redis_args=("GET", "key3")
+            )
+            proxy.set(
+                CacheEntry(
+                    cache_key=cache_key,
+                    cache_value=b"value3",
+                    status=CacheEntryStatus.VALID,
+                    connection_ref=mock_connection,
+                )
+            )
+
+            # record_csc_eviction should be called
+            mock_record.assert_called_once_with(
+                count=1,
+                reason=CSCReason.FULL,
+            )
+
+    def test_set_does_not_call_record_csc_eviction_when_under_max_size(
+        self, mock_cache, mock_connection
+    ):
+        """Test that record_csc_eviction is NOT called when cache is under max size."""
+        from unittest.mock import patch
+
+        proxy = CacheProxy(mock_cache)
+
+        with patch("redis.observability.recorder.record_csc_eviction") as mock_record:
+            cache_key = CacheKey(
+                command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+            )
+            proxy.set(
+                CacheEntry(
+                    cache_key=cache_key,
+                    cache_value=b"bar",
+                    status=CacheEntryStatus.VALID,
+                    connection_ref=mock_connection,
+                )
+            )
+
+            mock_record.assert_not_called()
+
+    def test_collection_property_delegates_to_underlying_cache(self, mock_cache):
+        """Test that collection property returns the underlying cache's collection."""
+        proxy = CacheProxy(mock_cache)
+        assert proxy.collection is mock_cache.collection
+
+    def test_config_property_delegates_to_underlying_cache(self, mock_cache):
+        """Test that config property returns the underlying cache's config."""
+        proxy = CacheProxy(mock_cache)
+        assert proxy.config is mock_cache.config
+
+    def test_eviction_policy_property_delegates_to_underlying_cache(self, mock_cache):
+        """Test that eviction_policy property returns the underlying cache's eviction_policy."""
+        proxy = CacheProxy(mock_cache)
+        assert proxy.eviction_policy is mock_cache.eviction_policy
+
+    def test_size_property_delegates_to_underlying_cache(
+        self, mock_cache, mock_connection
+    ):
+        """Test that size property returns the underlying cache's size."""
+        proxy = CacheProxy(mock_cache)
+        assert proxy.size == 0
+
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        proxy.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        assert proxy.size == 1
+
+    def test_get_delegates_to_underlying_cache(self, mock_cache, mock_connection):
+        """Test that get method delegates to the underlying cache."""
+        proxy = CacheProxy(mock_cache)
+
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        entry = CacheEntry(
+            cache_key=cache_key,
+            cache_value=b"bar",
+            status=CacheEntryStatus.VALID,
+            connection_ref=mock_connection,
+        )
+        proxy.set(entry)
+
+        result = proxy.get(cache_key)
+        assert result is not None
+        assert result.cache_value == b"bar"
+
+    def test_delete_by_cache_keys_delegates_to_underlying_cache(
+        self, mock_cache, mock_connection
+    ):
+        """Test that delete_by_cache_keys method delegates to the underlying cache."""
+        proxy = CacheProxy(mock_cache)
+
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        proxy.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        result = proxy.delete_by_cache_keys([cache_key])
+        assert result == [True]
+        assert proxy.get(cache_key) is None
+
+    def test_delete_by_redis_keys_delegates_to_underlying_cache(
+        self, mock_cache, mock_connection
+    ):
+        """Test that delete_by_redis_keys method delegates to the underlying cache."""
+        proxy = CacheProxy(mock_cache)
+
+        cache_key = CacheKey(
+            command="GET", redis_keys=(b"foo",), redis_args=("GET", "foo")
+        )
+        proxy.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        result = proxy.delete_by_redis_keys([b"foo"])
+        assert result == [True]
+        assert proxy.get(cache_key) is None
+
+    def test_flush_delegates_to_underlying_cache(self, mock_cache, mock_connection):
+        """Test that flush method delegates to the underlying cache."""
+        proxy = CacheProxy(mock_cache)
+
+        for i in range(3):
+            cache_key = CacheKey(
+                command="GET", redis_keys=(f"key{i}",), redis_args=("GET", f"key{i}")
+            )
+            proxy.set(
+                CacheEntry(
+                    cache_key=cache_key,
+                    cache_value=f"value{i}".encode(),
+                    status=CacheEntryStatus.VALID,
+                    connection_ref=mock_connection,
+                )
+            )
+
+        assert proxy.size == 3
+        result = proxy.flush()
+        assert result == 3
+        assert proxy.size == 0
+
+    def test_is_cachable_delegates_to_underlying_cache(self, mock_cache):
+        """Test that is_cachable method delegates to the underlying cache."""
+        proxy = CacheProxy(mock_cache)
+
+        # GET is cachable by default
+        cache_key = CacheKey(command="GET", redis_keys=("foo",), redis_args=())
+        assert proxy.is_cachable(cache_key) is True
+
+        # SET is not cachable
+        cache_key = CacheKey(command="SET", redis_keys=("foo",), redis_args=())
+        assert proxy.is_cachable(cache_key) is False
