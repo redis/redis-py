@@ -476,7 +476,7 @@ class TestRedisClusterObj:
                 match="deprecated usage of input argument/s 'lib_version'",
             ),
         ):
-            startup_nodes = [ClusterNode("127.0.0.1", 7000)]
+            startup_nodes = [ClusterNode("127.0.0.1", 16379)]
             cluster = RedisCluster(
                 startup_nodes=startup_nodes, lib_name="test2", lib_version="1234"
             )
