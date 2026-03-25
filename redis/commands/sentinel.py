@@ -35,9 +35,7 @@ class SentinelCommands:
 
     def sentinel_get_master_addr_by_name(
         self, service_name, return_responses: bool = False
-    ) -> (SentinelMasterAddress | list[SentinelMasterAddress] | bool) | Awaitable[
-        SentinelMasterAddress | list[SentinelMasterAddress] | bool
-    ]:
+    ) -> (SentinelMasterAddress | bool) | Awaitable[SentinelMasterAddress | bool]:
         """
         Returns a (host, port) pair for the given ``service_name`` when return_responses is True,
         otherwise returns a boolean value that indicates if the command was successful.
@@ -64,8 +62,8 @@ class SentinelCommands:
     ) -> Awaitable[dict[str, Any] | bool]: ...
 
     def sentinel_master(self, service_name, return_responses: bool = False) -> (
-        dict[str, Any] | list[dict[str, Any]] | bool
-    ) | Awaitable[dict[str, Any] | list[dict[str, Any]] | bool]:
+        dict[str, Any] | bool
+    ) | Awaitable[dict[str, Any] | bool]:
         """
         Returns a dictionary containing the specified masters state, when return_responses is True,
         otherwise returns a boolean value that indicates if the command was successful.
@@ -84,7 +82,7 @@ class SentinelCommands:
 
     def sentinel_masters(
         self,
-    ) -> (SentinelMastersResponse | bool) | Awaitable[SentinelMastersResponse | bool]:
+    ) -> SentinelMastersResponse | Awaitable[SentinelMastersResponse]:
         """
         Returns a list of dictionaries containing each master's state.
 
@@ -166,7 +164,7 @@ class SentinelCommands:
     def sentinel_slaves(
         self,
         service_name,
-    ) -> (list[dict[str, Any]] | bool) | Awaitable[list[dict[str, Any]] | bool]:
+    ) -> list[dict[str, Any]] | Awaitable[list[dict[str, Any]]]:
         """
         Returns a list of slaves for ``service_name``
 
