@@ -1227,6 +1227,9 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
         # Track subscriptions per node
         self._node_pubsubs: dict[str, Any] = {}
 
+        # Lock for topology refresh operations
+        self._refresh_lock = threading.Lock()
+
         # Generator for round-robin message retrieval
         self._pubsub_iter = None
 
@@ -1468,57 +1471,65 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
         2. Removes pubsubs for nodes that are no longer primaries
         3. Re-creates broken pubsub connections for existing nodes
         """
-        current_primaries = {node.name: node for node in self._get_all_primary_nodes()}
+        with self._refresh_lock:
+            current_primaries = {
+                node.name: node for node in self._get_all_primary_nodes()
+            }
 
-        # Remove pubsubs for nodes that are no longer primaries
-        removed_nodes = set(self._node_pubsubs.keys()) - set(current_primaries.keys())
-        for node_name in removed_nodes:
-            pubsub = self._node_pubsubs.pop(node_name, None)
-            if pubsub:
-                try:
-                    pubsub.close()
-                except Exception:
-                    pass
-
-        # Detect broken connections for existing nodes and remove them
-        # so they get re-created below
-        existing_nodes = set(self._node_pubsubs.keys()) & set(current_primaries.keys())
-        for node_name in existing_nodes:
-            pubsub = self._node_pubsubs.get(node_name)
-            if pubsub and not self._is_pubsub_connected(pubsub):
-                # Connection is broken, remove it so it gets re-created
-                self._node_pubsubs.pop(node_name, None)
-                try:
-                    pubsub.close()
-                except Exception:
-                    pass
-
-        # Subscribe new nodes (and nodes with broken connections) to existing patterns/channels
-        new_nodes = set(current_primaries.keys()) - set(self._node_pubsubs.keys())
-        failed_nodes: list[str] = []
-        for node_name in new_nodes:
-            node = current_primaries[node_name]
-            pubsub = self._ensure_node_pubsub(node)
-
-            try:
-                if self._subscribed_patterns:
-                    pubsub.psubscribe(**self._subscribed_patterns)
-                if self._subscribed_channels:
-                    pubsub.subscribe(**self._subscribed_channels)
-            except Exception:
-                # Subscription failed - remove from dict so retry is possible
-                self._node_pubsubs.pop(node_name, None)
-                try:
-                    pubsub.close()
-                except Exception:
-                    pass
-                failed_nodes.append(node_name)
-
-        # Raise after attempting all nodes so we don't skip any
-        if failed_nodes:
-            raise ConnectionError(
-                f"Failed to subscribe to cluster nodes: {', '.join(failed_nodes)}"
+            # Remove pubsubs for nodes that are no longer primaries
+            removed_nodes = set(self._node_pubsubs.keys()) - set(
+                current_primaries.keys()
             )
+            for node_name in removed_nodes:
+                pubsub = self._node_pubsubs.pop(node_name, None)
+                if pubsub:
+                    try:
+                        pubsub.close()
+                    except Exception:
+                        pass
+
+            # Detect broken connections for existing nodes and remove them
+            # so they get re-created below
+            existing_nodes = set(self._node_pubsubs.keys()) & set(
+                current_primaries.keys()
+            )
+            for node_name in existing_nodes:
+                pubsub = self._node_pubsubs.get(node_name)
+                if pubsub and not self._is_pubsub_connected(pubsub):
+                    # Connection is broken, remove it so it gets re-created
+                    self._node_pubsubs.pop(node_name, None)
+                    try:
+                        pubsub.close()
+                    except Exception:
+                        pass
+
+            # Subscribe new nodes (and nodes with broken connections) to existing
+            # patterns/channels
+            new_nodes = set(current_primaries.keys()) - set(self._node_pubsubs.keys())
+            failed_nodes: list[str] = []
+            for node_name in new_nodes:
+                node = current_primaries[node_name]
+                pubsub = self._ensure_node_pubsub(node)
+
+                try:
+                    if self._subscribed_patterns:
+                        pubsub.psubscribe(**self._subscribed_patterns)
+                    if self._subscribed_channels:
+                        pubsub.subscribe(**self._subscribed_channels)
+                except Exception:
+                    # Subscription failed - remove from dict so retry is possible
+                    self._node_pubsubs.pop(node_name, None)
+                    try:
+                        pubsub.close()
+                    except Exception:
+                        pass
+                    failed_nodes.append(node_name)
+
+            # Raise after attempting all nodes so we don't skip any
+            if failed_nodes:
+                raise ConnectionError(
+                    f"Failed to subscribe to cluster nodes: {', '.join(failed_nodes)}"
+                )
 
     def close(self):
         """Close all pubsub connections and clean up resources."""

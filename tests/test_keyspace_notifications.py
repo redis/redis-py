@@ -736,7 +736,6 @@ class TestClusterKeyspaceNotifications:
 
         for i in range(len(commands)):
             msg = notifications.get_message(timeout=1.0)
-            print(f"Message: {msg}")
             assert msg is not None
             assert msg.key.startswith("test:")
             if i == len(commands) - 1:
@@ -752,7 +751,6 @@ class TestClusterKeyspaceNotifications:
         received = []
 
         def handler(msg):
-            print(f"Handling: {msg}")
             received.append(msg)
             assert msg.key.startswith("test:")
             if msg.event_type == "del":
