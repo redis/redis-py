@@ -3312,9 +3312,3 @@ class ClusterPubSub(PubSub):
 
         # Now we have a connection_pool, use parent's execute_command
         return await super().execute_command(*args, **kwargs)
-
-    def _normalize_keys(self, data: Dict[Any, Any]) -> Dict[bytes, Any]:
-        """
-        Normalize keys to bytes for internal storage.
-        """
-        return {self.encoder.encode(key): value for key, value in data.items()}
