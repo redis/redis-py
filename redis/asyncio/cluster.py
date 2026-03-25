@@ -35,6 +35,7 @@ from redis._parsers.helpers import (
 )
 from redis.asyncio.client import PubSub, ResponseCallbackT
 from redis.asyncio.connection import (
+    AbstractConnection,
     Connection,
     ConnectionPool,
     SSLConnection,
@@ -3238,22 +3239,30 @@ class ClusterPubSub(PubSub):
                     pubsub.pending_unsubscribe_shard_channels
                 )
 
-    def get_redis_connection(self) -> Optional[Connection]:
+    def get_redis_connection(self) -> Optional["AbstractConnection"]:
         """
         Get the Redis connection of the pubsub connected node.
+
+        Returns the pubsub's dedicated connection (acquired from its own
+        connection pool), not from the ClusterNode's connection pool.
+        This avoids the connection pool resource leak that would occur
+        if we called node.acquire_connection() without releasing.
         """
-        if self.node is not None:
-            return self.node.acquire_connection()
-        return None
+        # Return the pubsub's own dedicated connection, which is acquired
+        # from self.connection_pool when executing pubsub commands.
+        # This is safe because it's the connection dedicated to this pubsub
+        # instance, not a shared pool connection from the ClusterNode.
+        return self.connection
 
     async def aclose(self) -> None:
         """
         Disconnect the pubsub connection.
         """
-        if self.connection:
-            await self.connection.disconnect()
+        # Close all shard pubsub instances first
         for pubsub in self.node_pubsub_mapping.values():
             await pubsub.aclose()
+        # Let parent handle self.connection disconnect under the lock
+        # (includes disconnect, release to pool, and clearing self.connection)
         await super().aclose()
 
     def _raise_on_invalid_node(
