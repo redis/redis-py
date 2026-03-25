@@ -3144,6 +3144,8 @@ class ClusterPubSub(PubSub):
         """Generator that yields PubSub instances in round-robin fashion."""
         while True:
             current_nodes = list(self.node_pubsub_mapping.values())
+            if not current_nodes:
+                return  # Avoid infinite loop when no subscriptions exist
             yield from current_nodes
 
     async def get_sharded_message(
