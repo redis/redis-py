@@ -3183,8 +3183,10 @@ class ClusterPubSub(PubSub):
                     if not pubsub.subscribed:
                         self.node_pubsub_mapping.pop(node.name)
 
-        if self.ignore_subscribe_messages or ignore_subscribe_messages:
-            return None
+        # Only suppress subscribe/unsubscribe messages, not data messages (smessage)
+        if str_if_bytes(message["type"]) in ("ssubscribe", "sunsubscribe"):
+            if self.ignore_subscribe_messages or ignore_subscribe_messages:
+                return None
         return message
 
     async def ssubscribe(self, *args: Any, **kwargs: Any) -> None:
