@@ -2700,8 +2700,10 @@ class ClusterPubSub(PubSub):
         self, ignore_subscribe_messages=False, timeout=0.0, target_node=None
     ):
         if target_node:
+            # Don't pass ignore_subscribe_messages here - let get_sharded_message
+            # handle the filtering after processing subscription state changes
             message = self.node_pubsub_mapping[target_node.name].get_message(
-                ignore_subscribe_messages=ignore_subscribe_messages, timeout=timeout
+                ignore_subscribe_messages=False, timeout=timeout
             )
         else:
             message = self._sharded_message_generator(timeout=timeout)

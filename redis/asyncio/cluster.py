@@ -3165,8 +3165,10 @@ class ClusterPubSub(PubSub):
         if target_node:
             pubsub = self.node_pubsub_mapping.get(target_node.name)
             if pubsub:
+                # Don't pass ignore_subscribe_messages here - let get_sharded_message
+                # handle the filtering after processing subscription state changes
                 message = await pubsub.get_message(
-                    ignore_subscribe_messages=ignore_subscribe_messages, timeout=timeout
+                    ignore_subscribe_messages=False, timeout=timeout
                 )
             else:
                 message = None
