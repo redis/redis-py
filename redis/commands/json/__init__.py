@@ -1,5 +1,6 @@
+import asyncio
 import os
-from json import JSONDecodeError, JSONDecoder, JSONEncoder
+from json import JSONDecodeError, JSONDecoder, JSONEncoder, loads
 from typing import Literal
 
 import redis
@@ -164,22 +165,47 @@ class AsyncJSON(_JSONBase):
         xx: bool | None = False,
         decode_keys: bool | None = False,
     ) -> dict[str, bool]:
+        """
+        Iterate over ``root_folder`` and set each JSON file to a value
+        under ``json_path`` with the file name as the key.
+
+        This method runs blocking filesystem operations (os.walk and file reads)
+        in a thread pool to avoid blocking the event loop.
+        """
+
+        def _read_file(file_path: str) -> dict:
+            """Read and parse a JSON file (runs in thread pool)."""
+            with open(file_path) as fp:
+                return loads(fp.read())
+
+        def _walk_directory(root_folder: str) -> list[str]:
+            """Walk directory and return list of file paths (runs in thread pool)."""
+            file_paths = []
+            for root, dirs, files in os.walk(root_folder):
+                for file in files:
+                    file_paths.append(os.path.join(root, file))
+            return file_paths
+
         set_files_result = {}
-        for root, dirs, files in os.walk(root_folder):
-            for file in files:
-                file_path = os.path.join(root, file)
-                try:
-                    file_name = file_path.rsplit(".")[0]
-                    await self.set_file(
-                        file_name,
-                        json_path,
-                        file_path,
-                        nx=nx,
-                        xx=xx,
-                        decode_keys=decode_keys,
-                    )
-                    set_files_result[file_path] = True
-                except JSONDecodeError:
-                    set_files_result[file_path] = False
+
+        # Run blocking os.walk in thread pool
+        file_paths = await asyncio.to_thread(_walk_directory, root_folder)
+
+        for file_path in file_paths:
+            try:
+                file_name = file_path.rsplit(".")[0]
+                # Run blocking file read in thread pool
+                file_content = await asyncio.to_thread(_read_file, file_path)
+                await self.set(
+                    file_name,
+                    json_path,
+                    file_content,
+                    nx=nx,
+                    xx=xx,
+                    decode_keys=decode_keys,
+                )
+                set_files_result[file_path] = True
+            except JSONDecodeError:
+                set_files_result[file_path] = False
 
         return set_files_result
