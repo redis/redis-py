@@ -4452,12 +4452,19 @@ class TestClusterPubSub:
     @skip_if_server_version_lt("7.0.0")
     async def test_get_redis_connection(self, r):
         """
-        Test that get_redis_connection() returns a connection from the
-        pubsub node's connection pool.
+        Test that get_redis_connection() returns the pubsub's dedicated
+        connection after subscribing to a channel.
         """
         node = r.get_default_node()
         p = r.pubsub(node=node)
         try:
+            # Before subscribing, connection should be None
+            assert p.get_redis_connection() is None
+
+            # Subscribe to establish the dedicated pubsub connection
+            await p.subscribe("test-channel")
+
+            # Now get_redis_connection() should return the dedicated connection
             connection = p.get_redis_connection()
             assert connection is not None
             # The connection should be from the node
