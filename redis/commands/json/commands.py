@@ -637,7 +637,7 @@ class JSONCommands:
             for file in files:
                 file_path = os.path.join(root, file)
                 try:
-                    file_name = file_path.rsplit(".")[0]
+                    file_name = file_path.rsplit(".", 1)[0]
                     self.set_file(
                         file_name,
                         json_path,

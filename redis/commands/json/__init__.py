@@ -193,7 +193,7 @@ class AsyncJSON(_JSONBase):
 
         for file_path in file_paths:
             try:
-                file_name = file_path.rsplit(".")[0]
+                file_name = file_path.rsplit(".", 1)[0]
                 # Run blocking file read in thread pool
                 file_content = await asyncio.to_thread(_read_file, file_path)
                 await self.set(

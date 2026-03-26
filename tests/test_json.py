@@ -1532,4 +1532,4 @@ def test_set_path(client):
     result = {jsonfile: True, nojsonfile: False}
     assert client.json().set_path(Path.root_path(), root) == result
     res = {"hello": "world"}
-    assert client.json().get(jsonfile.rsplit(".")[0]) == res
+    assert client.json().get(jsonfile.rsplit(".", 1)[0]) == res
