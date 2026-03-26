@@ -954,7 +954,9 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
         Args:
             poll_timeout: Timeout in seconds for get_message() calls. When no message
                          is available, the thread waits up to this long before checking
-                         again. Default 0.0 (non-blocking).
+                         again. Default 0.0 (non-blocking). WARNING: the default
+                         causes a CPU spin-loop. It is preferred to pass a positive
+                         value (e.g. 0.1 or 1.0).
             daemon: If True, the thread will be a daemon thread and will be
                    terminated when the main program exits. Default False.
             exception_handler: Optional callback invoked when an exception occurs
