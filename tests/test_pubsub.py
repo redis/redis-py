@@ -628,8 +628,7 @@ class TestPubSubMessages:
         assert self.message == make_message("smessage", channel, "test message")
 
     @pytest.mark.onlynoncluster
-    # see: https://redis-py-cluster.readthedocs.io/en/stable/pubsub.html
-    # #known-limitations-with-pubsub
+    # see: https://redis.readthedocs.io/en/stable/clustering.html#known-pubsub-limitations
     def test_unicode_pattern_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
         pattern = "uni" + chr(4456) + "*"

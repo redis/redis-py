@@ -1199,6 +1199,7 @@ class AsyncRedisClusterCommands(
     AsyncClusterMultiKeyCommands,
     AsyncClusterManagementCommands,
     AsyncACLCommands,
+    PubSubCommands,
     AsyncClusterDataAccessCommands,
     AsyncScriptCommands,
     AsyncFunctionCommands,

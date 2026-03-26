@@ -33,8 +33,14 @@ from redis._parsers.helpers import (
     _RedisCallbacksRESP2,
     _RedisCallbacksRESP3,
 )
-from redis.asyncio.client import ResponseCallbackT
-from redis.asyncio.connection import Connection, SSLConnection, parse_url
+from redis.asyncio.client import PubSub, ResponseCallbackT
+from redis.asyncio.connection import (
+    AbstractConnection,
+    Connection,
+    ConnectionPool,
+    SSLConnection,
+    parse_url,
+)
 from redis.asyncio.lock import Lock
 from redis.asyncio.observability.recorder import (
     record_error_count,
@@ -57,6 +63,7 @@ from redis.cluster import (
     parse_cluster_slots,
 )
 from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
+from redis.commands.helpers import list_or_args
 from redis.commands.policies import AsyncPolicyResolver, AsyncStaticPolicyResolver
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.credentials import CredentialProvider
@@ -1221,6 +1228,27 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             raise RedisClusterException("shard_hint is deprecated in cluster mode")
 
         return ClusterPipeline(self, transaction)
+
+    def pubsub(
+        self,
+        node: Optional["ClusterNode"] = None,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        **kwargs: Any,
+    ) -> "ClusterPubSub":
+        """
+        Create and return a ClusterPubSub instance.
+
+        Allows passing a ClusterNode, or host&port, to get a pubsub instance
+        connected to the specified node
+
+        :param node: ClusterNode to connect to
+        :param host: Host of the node to connect to
+        :param port: Port of the node to connect to
+        :param kwargs: Additional keyword arguments
+        :return: ClusterPubSub instance
+        """
+        return ClusterPubSub(self, node=node, host=host, port=port, **kwargs)
 
     def lock(
         self,
@@ -2973,3 +3001,327 @@ class TransactionStrategy(AbstractStrategy):
 
     async def unlink(self, *names):
         return self.execute_command("UNLINK", *names)
+
+
+class ClusterPubSub(PubSub):
+    """
+    Async cluster implementation for pub/sub.
+
+    IMPORTANT: before using ClusterPubSub, read about the known limitations
+    with pubsub in Cluster mode and learn how to workaround them:
+    https://redis.readthedocs.io/en/stable/clustering.html#known-pubsub-limitations
+    """
+
+    def __init__(
+        self,
+        redis_cluster: "RedisCluster",
+        node: Optional["ClusterNode"] = None,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        push_handler_func: Optional[Callable] = None,
+        event_dispatcher: Optional[EventDispatcher] = None,
+        **kwargs: Any,
+    ) -> None:
+        """
+        When a pubsub instance is created without specifying a node, a single
+        node will be transparently chosen for the pubsub connection on the
+        first command execution. The node will be determined by:
+         1. Hashing the channel name in the request to find its keyslot
+         2. Selecting a node that handles the keyslot: If read_from_replicas is
+            set to true or load_balancing_strategy is set, a replica can be selected.
+
+        :param redis_cluster: RedisCluster instance
+        :param node: ClusterNode to connect to
+        :param host: Host of the node to connect to
+        :param port: Port of the node to connect to
+        :param push_handler_func: Optional push handler function
+        :param event_dispatcher: Optional event dispatcher
+        :param kwargs: Additional keyword arguments
+        """
+        self.node = None
+        self.set_pubsub_node(redis_cluster, node, host, port)
+
+        # Create connection pool if node is specified
+        if self.node is not None:
+            connection_pool = ConnectionPool(
+                connection_class=self.node.connection_class,
+                **self.node.connection_kwargs,
+            )
+        else:
+            connection_pool = None
+
+        self.cluster = redis_cluster
+        self.node_pubsub_mapping: Dict[str, PubSub] = {}
+        self._pubsubs_generator = self._pubsubs_generator()
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
+        super().__init__(
+            connection_pool=connection_pool,
+            encoder=redis_cluster.encoder,
+            push_handler_func=push_handler_func,
+            event_dispatcher=self._event_dispatcher,
+            **kwargs,
+        )
+
+    def set_pubsub_node(
+        self,
+        cluster: "RedisCluster",
+        node: Optional["ClusterNode"] = None,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+    ) -> None:
+        """
+        The pubsub node will be set according to the passed node, host and port
+        When none of the node, host, or port are specified - the node is set
+        to None and will be determined by the keyslot of the channel in the
+        first command to be executed.
+        RedisClusterException will be thrown if the passed node does not exist
+        in the cluster.
+        If host is passed without port, or vice versa, a DataError will be
+        thrown.
+        """
+        if node is not None:
+            # node is passed by the user
+            self._raise_on_invalid_node(cluster, node, node.host, node.port)
+            pubsub_node = node
+        elif host is not None and port is not None:
+            # host and port passed by the user
+            node = cluster.get_node(host=host, port=port)
+            self._raise_on_invalid_node(cluster, node, host, port)
+            pubsub_node = node
+        elif host is not None or port is not None:
+            # only one of host and port is specified
+            raise DataError("Specify both host and port")
+        else:
+            # nothing specified by the user
+            pubsub_node = None
+        self.node = pubsub_node
+
+    def get_pubsub_node(self) -> Optional["ClusterNode"]:
+        """
+        Get the node that is being used as the pubsub connection.
+
+        :return: The ClusterNode being used for pubsub, or None if not yet determined
+        """
+        return self.node
+
+    def _get_node_pubsub(self, node: "ClusterNode") -> PubSub:
+        """Get or create a PubSub instance for the given node."""
+        try:
+            return self.node_pubsub_mapping[node.name]
+        except KeyError:
+            # Create a minimal connection pool for this node
+            connection_pool = ConnectionPool(
+                connection_class=node.connection_class, **node.connection_kwargs
+            )
+
+            pubsub = PubSub(
+                connection_pool=connection_pool,
+                encoder=self.cluster.encoder,
+                push_handler_func=self.push_handler_func,
+                event_dispatcher=self._event_dispatcher,
+            )
+            self.node_pubsub_mapping[node.name] = pubsub
+            return pubsub
+
+    async def _sharded_message_generator(
+        self, timeout: float = 0.0
+    ) -> Optional[Dict[str, Any]]:
+        """Generate messages from shard channels across all nodes."""
+        for _ in range(len(self.node_pubsub_mapping)):
+            pubsub = next(self._pubsubs_generator)
+            # Don't pass ignore_subscribe_messages here - let get_sharded_message
+            # handle the filtering after processing subscription state changes
+            message = await pubsub.get_message(
+                ignore_subscribe_messages=False, timeout=timeout
+            )
+            if message is not None:
+                return message
+        return None
+
+    def _pubsubs_generator(self) -> Generator[PubSub, None, None]:
+        """Generator that yields PubSub instances in round-robin fashion."""
+        while True:
+            current_nodes = list(self.node_pubsub_mapping.values())
+            if not current_nodes:
+                return  # Avoid infinite loop when no subscriptions exist
+            yield from current_nodes
+
+    async def get_sharded_message(
+        self,
+        ignore_subscribe_messages: bool = False,
+        timeout: float = 0.0,
+        target_node: Optional["ClusterNode"] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get a message from shard channels.
+
+        :param ignore_subscribe_messages: Whether to ignore subscribe messages
+        :param timeout: Timeout for message retrieval
+        :param target_node: Specific node to get message from
+        :return: Message dictionary or None
+        """
+        if target_node:
+            pubsub = self.node_pubsub_mapping.get(target_node.name)
+            if pubsub:
+                # Don't pass ignore_subscribe_messages here - let get_sharded_message
+                # handle the filtering after processing subscription state changes
+                message = await pubsub.get_message(
+                    ignore_subscribe_messages=False, timeout=timeout
+                )
+            else:
+                message = None
+        else:
+            message = await self._sharded_message_generator(timeout=timeout)
+
+        if message is None:
+            return None
+        elif str_if_bytes(message["type"]) == "sunsubscribe":
+            if message["channel"] in self.pending_unsubscribe_shard_channels:
+                self.pending_unsubscribe_shard_channels.remove(message["channel"])
+                self.shard_channels.pop(message["channel"], None)
+                node = self.cluster.get_node_from_key(message["channel"])
+                if node and node.name in self.node_pubsub_mapping:
+                    pubsub = self.node_pubsub_mapping[node.name]
+                    if not pubsub.subscribed:
+                        self.node_pubsub_mapping.pop(node.name)
+
+        # Only suppress subscribe/unsubscribe messages, not data messages (smessage)
+        if str_if_bytes(message["type"]) in ("ssubscribe", "sunsubscribe"):
+            if self.ignore_subscribe_messages or ignore_subscribe_messages:
+                return None
+        return message
+
+    async def ssubscribe(self, *args: Any, **kwargs: Any) -> None:
+        """
+        Subscribe to shard channels.
+
+        :param args: Channel names
+        :param kwargs: Channel names with handlers
+        """
+        if args:
+            args = list_or_args(args[0], args[1:])
+        s_channels = dict.fromkeys(args)
+        s_channels.update(kwargs)
+
+        for s_channel, handler in s_channels.items():
+            node = self.cluster.get_node_from_key(s_channel)
+            if node:
+                pubsub = self._get_node_pubsub(node)
+                if handler:
+                    await pubsub.ssubscribe(**{s_channel: handler})
+                else:
+                    await pubsub.ssubscribe(s_channel)
+                self.shard_channels.update(pubsub.shard_channels)
+                self.pending_unsubscribe_shard_channels.difference_update(
+                    self._normalize_keys({s_channel: None})
+                )
+
+    async def sunsubscribe(self, *args: Any) -> None:
+        """
+        Unsubscribe from shard channels.
+
+        :param args: Channel names to unsubscribe from. If empty, unsubscribe from all.
+        """
+        if args:
+            args = list_or_args(args[0], args[1:])
+        else:
+            args = list(self.shard_channels.keys())
+
+        for s_channel in args:
+            node = self.cluster.get_node_from_key(s_channel)
+            if node and node.name in self.node_pubsub_mapping:
+                pubsub = self.node_pubsub_mapping[node.name]
+                await pubsub.sunsubscribe(s_channel)
+                self.pending_unsubscribe_shard_channels.update(
+                    pubsub.pending_unsubscribe_shard_channels
+                )
+
+    def get_redis_connection(self) -> Optional["AbstractConnection"]:
+        """
+        Get the Redis connection of the pubsub connected node.
+
+        Returns the pubsub's dedicated connection (acquired from its own
+        connection pool), not from the ClusterNode's connection pool.
+        This avoids the connection pool resource leak that would occur
+        if we called node.acquire_connection() without releasing.
+        """
+        # Return the pubsub's own dedicated connection, which is acquired
+        # from self.connection_pool when executing pubsub commands.
+        # This is safe because it's the connection dedicated to this pubsub
+        # instance, not a shared pool connection from the ClusterNode.
+        return self.connection
+
+    async def aclose(self) -> None:
+        """
+        Disconnect the pubsub connection.
+        """
+        # Close all shard pubsub instances first
+        for pubsub in self.node_pubsub_mapping.values():
+            await pubsub.aclose()
+        # Let parent handle self.connection disconnect under the lock
+        # (includes disconnect, release to pool, and clearing self.connection)
+        await super().aclose()
+
+    def _raise_on_invalid_node(
+        self,
+        redis_cluster: "RedisCluster",
+        node: Optional["ClusterNode"],
+        host: Optional[str],
+        port: Optional[int],
+    ) -> None:
+        """
+        Raise a RedisClusterException if the node is None or doesn't exist in
+        the cluster.
+        """
+        if node is None or redis_cluster.get_node(node_name=node.name) is None:
+            raise RedisClusterException(
+                f"Node {host}:{port} doesn't exist in the cluster"
+            )
+
+    async def execute_command(self, *args: Any, **kwargs: Any) -> Any:
+        """
+        Execute a command on the appropriate cluster node.
+
+        Taken code from redis-py and tweaked to make it work within a cluster.
+        """
+        # NOTE: don't parse the response in this function -- it could pull a
+        # legitimate message off the stack if the connection is already
+        # subscribed to one or more channels
+
+        # For shard commands, route to appropriate node
+        command = args[0].upper() if args else ""
+        if command in ("SSUBSCRIBE", "SUNSUBSCRIBE", "SPUBLISH"):
+            if len(args) > 1:
+                channel = args[1]
+                node = self.cluster.get_node_from_key(channel)
+                if node:
+                    pubsub = self._get_node_pubsub(node)
+                    return await pubsub.execute_command(*args, **kwargs)
+
+        # For other commands, use the set node or lazily discover one
+        if self.connection is None:
+            if self.connection_pool is None:
+                if len(args) > 1:
+                    # Hash the first channel and get one of the nodes holding
+                    # this slot
+                    channel = args[1]
+                    slot = self.cluster.keyslot(channel)
+                    node = self.cluster.nodes_manager.get_node_from_slot(
+                        slot,
+                        self.cluster.read_from_replicas,
+                        self.cluster.load_balancing_strategy,
+                    )
+                else:
+                    # Get a random node
+                    node = self.cluster.get_random_node()
+                self.node = node
+                self.connection_pool = ConnectionPool(
+                    connection_class=node.connection_class,
+                    **node.connection_kwargs,
+                )
+
+        # Now we have a connection_pool, use parent's execute_command
+        return await super().execute_command(*args, **kwargs)
