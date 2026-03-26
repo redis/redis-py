@@ -4176,18 +4176,22 @@ class TestClusterPubSub:
             channels = ["shard_test_1", "shard_test_2", "shard_test_3"]
 
             # Subscribe to shard channels
-            for channel in channels:
-                await pubsub.ssubscribe(channel)
+            await pubsub.ssubscribe(*channels)
 
-            # Verify subscription messages (implementation dependent)
-            for channel in channels:
-                # This is a basic test - in practice, subscription messages
-                # may vary depending on the cluster implementation
-                pass
+            # Verify subscription messages - one ssubscribe confirmation per channel
+            received_channels = set()
+            for _ in range(len(channels)):
+                msg = await self.wait_for_message(pubsub, timeout=1.0, sharded=True)
+                assert msg is not None, "Expected subscription confirmation message"
+                assert msg["type"] == "ssubscribe"
+                assert msg["channel"].decode() in channels
+                received_channels.add(msg["channel"].decode())
+
+            # Verify we got confirmations for all channels
+            assert received_channels == set(channels)
 
             # Unsubscribe from shard channels
-            for channel in channels:
-                await pubsub.sunsubscribe(channel)
+            await pubsub.sunsubscribe(*channels)
 
         finally:
             await pubsub.aclose()
