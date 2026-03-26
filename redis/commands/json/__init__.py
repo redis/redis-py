@@ -157,6 +157,32 @@ class JSON(_JSONBase):
 class AsyncJSON(_JSONBase):
     _is_async_client: Literal[True] = True
 
+    async def set_file(
+        self,
+        name: str,
+        path: str,
+        file_name: str,
+        nx: bool | None = False,
+        xx: bool | None = False,
+        decode_keys: bool | None = False,
+    ) -> bool | None:
+        """
+        Set the JSON value at key ``name`` under the ``path`` to the content
+        of the json file ``file_name``.
+
+        This runs the blocking file read in a thread pool to avoid blocking
+        the event loop.
+        """
+
+        def _read_file(fp: str) -> dict:
+            with open(fp) as f:
+                return loads(f.read())
+
+        file_content = await asyncio.to_thread(_read_file, file_name)
+        return await self.set(
+            name, path, file_content, nx=nx, xx=xx, decode_keys=decode_keys
+        )
+
     async def set_path(
         self,
         json_path: str,
@@ -173,15 +199,10 @@ class AsyncJSON(_JSONBase):
         in a thread pool to avoid blocking the event loop.
         """
 
-        def _read_file(file_path: str) -> dict:
-            """Read and parse a JSON file (runs in thread pool)."""
-            with open(file_path) as fp:
-                return loads(fp.read())
-
-        def _walk_directory(root_folder: str) -> list[str]:
+        def _walk_directory(folder: str) -> list[str]:
             """Walk directory and return list of file paths (runs in thread pool)."""
             file_paths = []
-            for root, dirs, files in os.walk(root_folder):
+            for root, dirs, files in os.walk(folder):
                 for file in files:
                     file_paths.append(os.path.join(root, file))
             return file_paths
@@ -194,12 +215,10 @@ class AsyncJSON(_JSONBase):
         for file_path in file_paths:
             try:
                 file_name = file_path.rsplit(".", 1)[0]
-                # Run blocking file read in thread pool
-                file_content = await asyncio.to_thread(_read_file, file_path)
-                await self.set(
+                await self.set_file(
                     file_name,
                     json_path,
-                    file_content,
+                    file_path,
                     nx=nx,
                     xx=xx,
                     decode_keys=decode_keys,
