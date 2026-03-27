@@ -435,7 +435,7 @@ class KeyspaceChannel:
     @property
     def is_pattern(self) -> bool:
         """Check if this channel contains wildcards and should use psubscribe."""
-        return _is_pattern(self._channel_str)
+        return _is_pattern(self.key_or_pattern)
 
     def __str__(self) -> str:
         return self._channel_str
@@ -503,7 +503,7 @@ class KeyeventChannel:
     @property
     def is_pattern(self) -> bool:
         """Check if this channel contains wildcards and should use psubscribe."""
-        return _is_pattern(self._channel_str)
+        return _is_pattern(self.event)
 
     @classmethod
     def all_events(cls, db: int = 0) -> "KeyeventChannel":
@@ -618,8 +618,11 @@ def _is_pattern(
     if hasattr(channel, "_channel_str"):
         channel = channel._channel_str
     channel = safe_str(channel)
-    # Check for unescaped glob pattern characters
-    # We look for *, ?, or [ that are not escaped with backslash
+    # Check for unescaped glob pattern characters.
+    # * and ? are always pattern characters.
+    # [ is only a pattern character when followed by a matching unescaped ],
+    # forming a bracket expression like [abc] or [a-z].  A lone [ (e.g. in
+    # a key named "my[key") is treated as a literal by Redis.
     i = 0
     while i < len(channel):
         char = channel[i]
@@ -627,8 +630,19 @@ def _is_pattern(
             # Skip escaped character
             i += 2
             continue
-        if char in ("*", "?", "["):
+        if char in ("*", "?"):
             return True
+        if char == "[":
+            # Look for a matching unescaped ]
+            j = i + 1
+            while j < len(channel):
+                if channel[j] == "\\":
+                    j += 2
+                    continue
+                if channel[j] == "]":
+                    return True
+                j += 1
+            # No matching ] found — literal [
         i += 1
     return False
 
@@ -1246,8 +1260,8 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
         # Lock for topology refresh operations
         self._refresh_lock = threading.Lock()
 
-        # Generator for round-robin message retrieval
-        self._pubsub_iter = None
+        # Current pubsub index for round-robin polling
+        self._poll_index = 0
 
     def _get_all_primary_nodes(self):
         """Get all primary nodes in the cluster."""
@@ -1398,9 +1412,6 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
         if ignore_subscribe_messages is None:
             ignore_subscribe_messages = self.ignore_subscribe_messages
 
-        if self._pubsub_iter is None:
-            self._pubsub_iter = self._create_pubsub_iterator()
-
         # Handle timeout=0 as a single non-blocking poll over all pubsubs
         # This matches the expected semantics of PubSub.get_message(timeout=0)
         if timeout == 0.0:
@@ -1418,22 +1429,14 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
             if time.monotonic() >= end_time:
                 return None
 
-            # Recreate iterator if it was reset (e.g., after error-based refresh)
-            if self._pubsub_iter is None:
-                if not self._node_pubsubs:
-                    return None
-                self._pubsub_iter = self._create_pubsub_iterator()
+            pubsubs = list(self._node_pubsubs.values())
+            if not pubsubs:
+                return None
 
-            try:
-                pubsub = next(self._pubsub_iter)
-            except StopIteration:
-                # All pubsubs exhausted - recreate iterator
-                # If no pubsubs remain (e.g., all nodes removed), return None
-                # to avoid spinning in a tight loop
-                if not self._node_pubsubs:
-                    return None
-                self._pubsub_iter = self._create_pubsub_iterator()
-                continue
+            # Round-robin polling
+            self._poll_index = self._poll_index % len(pubsubs)
+            pubsub = pubsubs[self._poll_index]
+            self._poll_index += 1
 
             try:
                 message = pubsub.get_message(
@@ -1454,14 +1457,6 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
                 if notification is not None:
                     return notification
                 # If not a keyspace notification, continue checking other nodes
-
-    def _create_pubsub_iterator(self):
-        """Create a round-robin iterator over all node pubsubs."""
-        while True:
-            pubsubs = list(self._node_pubsubs.values())
-            if not pubsubs:
-                return
-            yield from pubsubs
 
     def _poll_all_nodes_once(
         self, ignore_subscribe_messages: bool
@@ -1532,7 +1527,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
         This is called automatically when a connection error occurs during
         get_message(). It checks if nodes changed before refreshing.
         """
-        self._pubsub_iter = None  # Reset iterator
+        self._poll_index = 0  # Reset round-robin index
 
         try:
             self.refresh_subscriptions()
