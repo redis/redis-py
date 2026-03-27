@@ -1022,6 +1022,10 @@ class TestMaintNotificationsConfigEndpointType:
                 self._sock = MockSocket(resolved_ip) if resolved_ip else None
                 self.__class__.__name__ = "SSLConnection" if is_ssl else "Connection"
 
+            @property
+            def is_connected(self):
+                return self._sock is not None
+
             def _get_socket(self):
                 return self._sock
 

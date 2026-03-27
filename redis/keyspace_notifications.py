@@ -1548,8 +1548,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
             conn = pubsub.connection
             if conn is None:
                 return False
-            # Sync connections use _sock attribute
-            return conn._sock is not None
+            return conn.is_connected
         except Exception:
             return False
 

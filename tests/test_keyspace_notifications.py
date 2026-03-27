@@ -610,9 +610,9 @@ class TestClusterKeyspaceNotificationsMocked:
         assert len(notifications._node_pubsubs) == 2
         original_pubsub1 = notifications._node_pubsubs[node1.name]
 
-        # Simulate broken connection on node1 by setting connection._sock to None
+        # Simulate broken connection on node1
         mock_connection = Mock()
-        mock_connection._sock = None  # Broken connection
+        mock_connection.is_connected = False  # Broken connection
         original_pubsub1.connection = mock_connection
 
         # Create a new pubsub for the re-creation
@@ -646,14 +646,14 @@ class TestClusterKeyspaceNotificationsMocked:
         pubsub1.connection = None
         assert notifications._is_pubsub_connected(pubsub1) is False
 
-        # Test with connection but no socket
+        # Test with connection that is not connected
         mock_connection = Mock()
-        mock_connection._sock = None
+        mock_connection.is_connected = False
         pubsub1.connection = mock_connection
         assert notifications._is_pubsub_connected(pubsub1) is False
 
-        # Test with valid connection
-        mock_connection._sock = Mock()  # Valid socket
+        # Test with connected connection
+        mock_connection.is_connected = True
         assert notifications._is_pubsub_connected(pubsub1) is True
 
         notifications.close()
@@ -682,7 +682,7 @@ class TestClusterKeyspaceNotificationsMocked:
 
         # Simulate node2 connection broken
         mock_connection = Mock()
-        mock_connection._sock = None
+        mock_connection.is_connected = False
         notifications._node_pubsubs[node2.name].connection = mock_connection
 
         # Add a new node and remove node1 from cluster
