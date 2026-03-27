@@ -1267,26 +1267,22 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
     def _execute_subscribe(
         self, patterns: dict[str, Any], exact_channels: dict[str, Any]
     ) -> None:
-        """Execute subscribe on all cluster nodes."""
-        if patterns:
-            self._subscribe_to_all_nodes(patterns, use_psubscribe=True)
-        if exact_channels:
-            self._subscribe_to_all_nodes(exact_channels, use_psubscribe=False)
+        """Execute subscribe on all cluster nodes.
 
-    def _subscribe_to_all_nodes(self, channels: dict[str, Any], use_psubscribe: bool):
-        """Subscribe to patterns/channels on all primary nodes.
-
-        Best-effort: tries every node, cleans up failures, and logs errors
-        so that the caller can still update tracking state for channels that
-        succeeded on healthy nodes.  Failed nodes are removed from
-        ``_node_pubsubs`` and will be re-subscribed on the next
-        ``refresh_subscriptions`` cycle.
+        Patterns and exact channels are subscribed in a single pass over
+        nodes so that a mid-batch node failure cannot create a
+        partially-caught-up replacement.  If a node fails during this
+        call it is removed from ``_node_pubsubs`` and will be fully
+        re-subscribed on the next ``refresh_subscriptions`` cycle.
 
         If a newly discovered node is encountered (not yet in
         ``_node_pubsubs``), it is also subscribed to all *previously*
         tracked patterns/channels so it doesn't miss notifications for
         subscriptions that were established before this node joined.
         """
+        if not patterns and not exact_channels:
+            return
+
         failed_nodes: list[str] = []
         for node in self._get_all_primary_nodes():
             is_new_node = node.name not in self._node_pubsubs
@@ -1300,10 +1296,10 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
                     if self._subscribed_channels:
                         pubsub.subscribe(**self._subscribed_channels)
 
-                if use_psubscribe:
-                    pubsub.psubscribe(**channels)
-                else:
-                    pubsub.subscribe(**channels)
+                if patterns:
+                    pubsub.psubscribe(**patterns)
+                if exact_channels:
+                    pubsub.subscribe(**exact_channels)
             except Exception:
                 # Remove the broken pubsub so refresh_subscriptions can
                 # re-create it later.

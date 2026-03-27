@@ -12,6 +12,7 @@ from redis.asyncio.keyspace_notifications import (
     AsyncKeyspaceNotifications,
     _ClusterNodePoolAdapter,
 )
+from redis.exceptions import ConnectionError
 from redis.keyspace_notifications import (
     EventType,
     KeyspaceChannel,
@@ -646,5 +647,60 @@ class TestAsyncClusterKeyspaceNotificationsMocked:
         # Test with connected connection
         mock_connection.is_connected = True
         assert notifications._is_pubsub_connected(pubsub1) is True
+
+        await notifications.aclose()
+
+    @pytest.mark.asyncio
+    async def test_node_failure_during_pattern_subscribe_does_not_lose_patterns(self):
+        """
+        Test that a node which fails during the pattern subscribe call and
+        is re-created during the exact-channel subscribe call still receives
+        both the patterns and the exact channels.
+
+        Regression test for the bug where _execute_subscribe called
+        _subscribe_to_all_nodes twice sequentially.  A node cleaned up
+        during the first (pattern) call would be treated as "new" in the
+        second (exact-channel) call and caught up from
+        _subscribed_patterns — which had not been updated yet, so the
+        patterns were silently lost.
+        """
+        node1, pubsub1 = self._create_mock_node("127.0.0.1:7000", "127.0.0.1", 7000)
+        node2, pubsub2 = self._create_mock_node("127.0.0.1:7001", "127.0.0.1", 7001)
+
+        pubsubs_by_node = {node1.name: pubsub1, node2.name: pubsub2}
+        cluster, _ = self._create_mock_cluster([node1, node2], pubsubs_by_node)
+
+        notifications = AsyncClusterKeyspaceNotifications(cluster)
+
+        # Mock _ensure_node_pubsub to return our mock pubsubs and
+        # populate _node_pubsubs like the real implementation does
+        async def mock_ensure(node):
+            notifications._node_pubsubs[node.name] = pubsubs_by_node[node.name]
+            return pubsubs_by_node[node.name]
+
+        notifications._ensure_node_pubsub = mock_ensure
+
+        # Make node2's pubsub raise on the first psubscribe call
+        # (simulating a transient failure during pattern subscription)
+        pubsub2.psubscribe.side_effect = ConnectionError("connection lost")
+
+        # Subscribe with both a pattern and an exact channel in one call
+        pattern = KeyspaceChannel("user:*")  # pattern → psubscribe
+        exact = KeyspaceChannel("mykey")  # exact   → subscribe
+        await notifications.subscribe(pattern, exact)
+
+        # node1 should have received both psubscribe and subscribe
+        pubsub1.psubscribe.assert_called_once()
+        pubsub1.subscribe.assert_called_once()
+
+        # node2 failed during psubscribe, so it should have been cleaned
+        # up entirely — it must NOT appear in _node_pubsubs with only the
+        # exact channel subscribed.
+        assert node2.name not in notifications._node_pubsubs
+
+        # The tracking state should still record both subscriptions so that
+        # refresh_subscriptions can fully re-subscribe node2 later.
+        assert "__keyspace@0__:user:*" in notifications._subscribed_patterns
+        assert "__keyspace@0__:mykey" in notifications._subscribed_channels
 
         await notifications.aclose()
