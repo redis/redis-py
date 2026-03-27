@@ -809,14 +809,16 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
             else:
                 exact_channels[channel_str] = wrapped_handler
 
+        # Delegate to subclass implementation first — update tracking state
+        # only after the operation succeeds, so that a connection failure
+        # doesn't leave stale entries in _subscribed_patterns/_subscribed_channels.
+        self._execute_subscribe(patterns, exact_channels)
+
         if patterns:
             self._subscribed_patterns.update(patterns)
 
         if exact_channels:
             self._subscribed_channels.update(exact_channels)
-
-        # Delegate to subclass implementation
-        self._execute_subscribe(patterns, exact_channels)
 
     @abstractmethod
     def _execute_subscribe(
@@ -850,14 +852,19 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
             else:
                 channel_str = safe_str(channel)
             if _is_pattern(channel):
-                self._subscribed_patterns.pop(channel_str, None)
                 patterns.append(channel_str)
             else:
-                self._subscribed_channels.pop(channel_str, None)
                 exact_channels.append(channel_str)
 
-        # Delegate to subclass implementation
+        # Execute the unsubscribe operation first — remove tracking state
+        # only after the operation succeeds, so that a failure doesn't leave
+        # subscriptions active at the Redis level but forgotten locally.
         self._execute_unsubscribe(patterns, exact_channels)
+
+        for p in patterns:
+            self._subscribed_patterns.pop(p, None)
+        for c in exact_channels:
+            self._subscribed_channels.pop(c, None)
 
     @abstractmethod
     def _execute_unsubscribe(
