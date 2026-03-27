@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -59,6 +60,8 @@ from redis.keyspace_notifications import (
     _is_pattern,
 )
 from redis.utils import safe_str
+
+logger = logging.getLogger(__name__)
 
 # Type alias for handlers that can be sync or async
 AsyncHandlerT = Callable[[KeyNotification], None | Awaitable[None]]
@@ -215,7 +218,10 @@ class AbstractAsyncKeyspaceNotifications(AsyncKeyspaceNotificationsInterface):
         wildcards like *, ?, [) or an exact channel name and uses the
         appropriate Redis subscribe command internally.
 
-        The handler can be either a sync or async function.
+        The handler can be either a sync or async function.  Note that a
+        **sync** handler will be called directly on the event loop thread,
+        so it must not perform blocking I/O or long-running computation —
+        prefer an ``async`` handler whenever possible.
         """
         # Wrap the handler to convert raw messages to KeyNotification objects
         wrapped_handler: Callable | None = None
@@ -577,13 +583,38 @@ class AsyncClusterKeyspaceNotifications(AbstractAsyncKeyspaceNotifications):
     async def _subscribe_to_all_nodes(
         self, channels: dict[str, Any], use_psubscribe: bool
     ):
-        """Subscribe to patterns/channels on all primary nodes."""
+        """Subscribe to patterns/channels on all primary nodes.
+
+        Best-effort: tries every node, cleans up failures, and logs errors
+        so that the caller can still update tracking state for channels that
+        succeeded on healthy nodes.  Failed nodes are removed from
+        ``_node_pubsubs`` and will be re-subscribed on the next
+        ``refresh_subscriptions`` cycle.
+        """
+        failed_nodes: list[str] = []
         for node in self._get_all_primary_nodes():
             pubsub = await self._ensure_node_pubsub(node)
-            if use_psubscribe:
-                await pubsub.psubscribe(**channels)
-            else:
-                await pubsub.subscribe(**channels)
+            try:
+                if use_psubscribe:
+                    await pubsub.psubscribe(**channels)
+                else:
+                    await pubsub.subscribe(**channels)
+            except Exception:
+                # Remove the broken pubsub so refresh_subscriptions can
+                # re-create it later.
+                self._node_pubsubs.pop(node.name, None)
+                try:
+                    await pubsub.aclose()
+                except Exception:
+                    pass
+                failed_nodes.append(node.name)
+
+        if failed_nodes:
+            logger.warning(
+                "Failed to subscribe on cluster nodes: %s. "
+                "These nodes will be retried on the next refresh cycle.",
+                ", ".join(failed_nodes),
+            )
 
     async def _execute_unsubscribe(
         self, patterns: list[str], exact_channels: list[str]
@@ -684,6 +715,7 @@ class AsyncClusterKeyspaceNotifications(AbstractAsyncKeyspaceNotifications):
         Returns:
             A KeyNotification if one is available, None otherwise.
         """
+        had_error = False
         for pubsub in list(self._node_pubsubs.values()):
             try:
                 message = await pubsub.get_message(
@@ -691,16 +723,25 @@ class AsyncClusterKeyspaceNotifications(AbstractAsyncKeyspaceNotifications):
                     timeout=0.0,
                 )
             except (ConnectionError, TimeoutError, RedisError):
-                await self._refresh_subscriptions_on_error()
-                return None
+                # Record the error but continue polling remaining healthy
+                # nodes so that already-buffered notifications are not lost.
+                had_error = True
+                continue
 
             if message is not None:
                 notification = KeyNotification.from_message(
                     message, key_prefix=self.key_prefix
                 )
                 if notification is not None:
+                    # Refresh before returning if any node had an error,
+                    # so the next poll cycle has fresh state.
+                    if had_error:
+                        await self._refresh_subscriptions_on_error()
                     return notification
 
+        # Refresh after polling all nodes if any had errors
+        if had_error:
+            await self._refresh_subscriptions_on_error()
         return None
 
     async def listen(self) -> AsyncIterator[KeyNotification]:
@@ -733,8 +774,10 @@ class AsyncClusterKeyspaceNotifications(AbstractAsyncKeyspaceNotifications):
         try:
             await self.refresh_subscriptions()
         except Exception:
-            # Ignore errors during refresh - will retry on next error
-            pass
+            logger.warning(
+                "Failed to refresh cluster subscriptions, will retry on next error",
+                exc_info=True,
+            )
 
     def _is_pubsub_connected(self, pubsub) -> bool:
         """Check if a pubsub connection is still alive."""

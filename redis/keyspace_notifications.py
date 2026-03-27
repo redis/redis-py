@@ -58,6 +58,7 @@ Redis Cluster Example:
 
 from __future__ import annotations
 
+import logging
 import re
 import threading
 import time
@@ -75,6 +76,8 @@ from redis.exceptions import (
     TimeoutError,
 )
 from redis.utils import safe_str
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from typing import TypeAlias
@@ -1267,13 +1270,38 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
             self._subscribe_to_all_nodes(exact_channels, use_psubscribe=False)
 
     def _subscribe_to_all_nodes(self, channels: dict[str, Any], use_psubscribe: bool):
-        """Subscribe to patterns/channels on all primary nodes."""
+        """Subscribe to patterns/channels on all primary nodes.
+
+        Best-effort: tries every node, cleans up failures, and logs errors
+        so that the caller can still update tracking state for channels that
+        succeeded on healthy nodes.  Failed nodes are removed from
+        ``_node_pubsubs`` and will be re-subscribed on the next
+        ``refresh_subscriptions`` cycle.
+        """
+        failed_nodes: list[str] = []
         for node in self._get_all_primary_nodes():
             pubsub = self._ensure_node_pubsub(node)
-            if use_psubscribe:
-                pubsub.psubscribe(**channels)
-            else:
-                pubsub.subscribe(**channels)
+            try:
+                if use_psubscribe:
+                    pubsub.psubscribe(**channels)
+                else:
+                    pubsub.subscribe(**channels)
+            except Exception:
+                # Remove the broken pubsub so refresh_subscriptions can
+                # re-create it later.
+                self._node_pubsubs.pop(node.name, None)
+                try:
+                    pubsub.close()
+                except Exception:
+                    pass
+                failed_nodes.append(node.name)
+
+        if failed_nodes:
+            logger.warning(
+                "Failed to subscribe on cluster nodes: %s. "
+                "These nodes will be retried on the next refresh cycle.",
+                ", ".join(failed_nodes),
+            )
 
     def _execute_unsubscribe(
         self, patterns: list[str], exact_channels: list[str]
@@ -1400,6 +1428,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
         Returns:
             A KeyNotification if one is available, None otherwise.
         """
+        had_error = False
         for pubsub in list(self._node_pubsubs.values()):
             try:
                 message = pubsub.get_message(
@@ -1407,10 +1436,10 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
                     timeout=0.0,
                 )
             except (ConnectionError, TimeoutError, RedisError):
-                # Refresh may close/remove pubsubs, making the snapshot stale.
-                # Return None and let the caller retry with fresh state.
-                self._refresh_subscriptions_on_error()
-                return None
+                # Record the error but continue polling remaining healthy
+                # nodes so that already-buffered notifications are not lost.
+                had_error = True
+                continue
 
             if message is not None:
                 # Note: If a handler was registered, PubSub already invoked it
@@ -1419,8 +1448,15 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
                     message, key_prefix=self.key_prefix
                 )
                 if notification is not None:
+                    # Refresh before returning if any node had an error,
+                    # so the next poll cycle has fresh state.
+                    if had_error:
+                        self._refresh_subscriptions_on_error()
                     return notification
 
+        # Refresh after polling all nodes if any had errors
+        if had_error:
+            self._refresh_subscriptions_on_error()
         return None
 
     def listen(self):
@@ -1454,8 +1490,10 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
         try:
             self.refresh_subscriptions()
         except Exception:
-            # Ignore errors during refresh - will retry on next error
-            pass
+            logger.warning(
+                "Failed to refresh cluster subscriptions, will retry on next error",
+                exc_info=True,
+            )
 
     def _is_pubsub_connected(self, pubsub) -> bool:
         """Check if a pubsub connection is still alive."""
