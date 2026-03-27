@@ -1,3 +1,5 @@
+from typing import Literal
+
 from redis._parsers.helpers import bool_ok
 
 from ..helpers import get_protocol_version, parse_to_list
@@ -87,7 +89,7 @@ class AbstractBloom:
             params.extend(["BUCKETSIZE", bucket_size])
 
 
-class CMSBloom(CMSCommands, AbstractBloom):
+class _CMSBloomBase(CMSCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
@@ -117,7 +119,7 @@ class CMSBloom(CMSCommands, AbstractBloom):
             self.client.set_response_callback(k, v)
 
 
-class TOPKBloom(TOPKCommands, AbstractBloom):
+class _TOPKBloomBase(TOPKCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
@@ -148,7 +150,7 @@ class TOPKBloom(TOPKCommands, AbstractBloom):
             self.client.set_response_callback(k, v)
 
 
-class CFBloom(CFCommands, AbstractBloom):
+class _CFBloomBase(CFCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
@@ -183,7 +185,7 @@ class CFBloom(CFCommands, AbstractBloom):
             self.client.set_response_callback(k, v)
 
 
-class TDigestBloom(TDigestCommands, AbstractBloom):
+class _TDigestBloomBase(TDigestCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
@@ -219,7 +221,7 @@ class TDigestBloom(TDigestCommands, AbstractBloom):
             self.client.set_response_callback(k, v)
 
 
-class BFBloom(BFCommands, AbstractBloom):
+class _BFBloomBase(BFCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
@@ -251,3 +253,43 @@ class BFBloom(BFCommands, AbstractBloom):
 
         for k, v in _MODULE_CALLBACKS.items():
             self.client.set_response_callback(k, v)
+
+
+class CMSBloom(_CMSBloomBase):
+    _is_async_client: Literal[False] = False
+
+
+class TOPKBloom(_TOPKBloomBase):
+    _is_async_client: Literal[False] = False
+
+
+class CFBloom(_CFBloomBase):
+    _is_async_client: Literal[False] = False
+
+
+class TDigestBloom(_TDigestBloomBase):
+    _is_async_client: Literal[False] = False
+
+
+class BFBloom(_BFBloomBase):
+    _is_async_client: Literal[False] = False
+
+
+class AsyncCMSBloom(_CMSBloomBase):
+    _is_async_client: Literal[True] = True
+
+
+class AsyncTOPKBloom(_TOPKBloomBase):
+    _is_async_client: Literal[True] = True
+
+
+class AsyncCFBloom(_CFBloomBase):
+    _is_async_client: Literal[True] = True
+
+
+class AsyncTDigestBloom(_TDigestBloomBase):
+    _is_async_client: Literal[True] = True
+
+
+class AsyncBFBloom(_BFBloomBase):
+    _is_async_client: Literal[True] = True

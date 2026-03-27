@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from typing import (
     TYPE_CHECKING,
@@ -11,21 +13,24 @@ from typing import (
     Literal,
     Mapping,
     NoReturn,
-    Optional,
     Sequence,
-    Union,
+    overload,
 )
 
 from redis.crc import key_slot
 from redis.exceptions import RedisClusterException, RedisError
 from redis.typing import (
     AnyKeyT,
+    AsyncClientProtocol,
     ClusterCommandsProtocol,
+    ClusterNodeDetail,
     EncodableT,
     KeysT,
     KeyT,
     PatternT,
     ResponseT,
+    StralgoResponse,
+    SyncClientProtocol,
 )
 from redis.utils import deprecated_function
 
@@ -221,7 +226,7 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
         }
         return [results[key] for key in keys]
 
-    def mget_nonatomic(self, keys: KeysT, *args: KeyT) -> List[Optional[Any]]:
+    def mget_nonatomic(self, keys: KeysT, *args: KeyT) -> List[Any | None]:
         """
         Splits the keys into different slots and then calls MGET
         for the keys of every slot. This operation will not be atomic
@@ -275,7 +280,13 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
         # Sum up the reply from each command
         return sum(self._execute_pipeline_by_slot(command, slots_to_keys))
 
-    def exists(self, *keys: KeyT) -> ResponseT:
+    @overload
+    def exists(self: SyncClientProtocol, *keys: KeyT) -> int: ...
+
+    @overload
+    def exists(self: AsyncClientProtocol, *keys: KeyT) -> Awaitable[int]: ...
+
+    def exists(self, *keys: KeyT) -> int | Awaitable[int]:
         """
         Returns the number of ``names`` that exist in the
         whole cluster. The keys are first split up into slots
@@ -285,7 +296,13 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
         """
         return self._split_command_across_slots("EXISTS", *keys)
 
-    def delete(self, *keys: KeyT) -> ResponseT:
+    @overload
+    def delete(self: SyncClientProtocol, *keys: KeyT) -> int: ...
+
+    @overload
+    def delete(self: AsyncClientProtocol, *keys: KeyT) -> Awaitable[int]: ...
+
+    def delete(self, *keys: KeyT) -> int | Awaitable[int]:
         """
         Deletes the given keys in the cluster.
         The keys are first split up into slots
@@ -298,7 +315,13 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
         """
         return self._split_command_across_slots("DEL", *keys)
 
-    def touch(self, *keys: KeyT) -> ResponseT:
+    @overload
+    def touch(self: SyncClientProtocol, *keys: KeyT) -> int: ...
+
+    @overload
+    def touch(self: AsyncClientProtocol, *keys: KeyT) -> Awaitable[int]: ...
+
+    def touch(self, *keys: KeyT) -> int | Awaitable[int]:
         """
         Updates the last access time of given keys across the
         cluster.
@@ -313,7 +336,13 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
         """
         return self._split_command_across_slots("TOUCH", *keys)
 
-    def unlink(self, *keys: KeyT) -> ResponseT:
+    @overload
+    def unlink(self: SyncClientProtocol, *keys: KeyT) -> int: ...
+
+    @overload
+    def unlink(self: AsyncClientProtocol, *keys: KeyT) -> Awaitable[int]: ...
+
+    def unlink(self, *keys: KeyT) -> int | Awaitable[int]:
         """
         Remove the specified keys in a different thread.
 
@@ -333,7 +362,7 @@ class AsyncClusterMultiKeyCommands(ClusterMultiKeyCommands):
     A class containing commands that handle more than one key
     """
 
-    async def mget_nonatomic(self, keys: KeysT, *args: KeyT) -> List[Optional[Any]]:
+    async def mget_nonatomic(self, keys: KeysT, *args: KeyT) -> List[Any | None]:
         """
         Splits the keys into different slots and then calls MGET
         for the keys of every slot. This operation will not be atomic
@@ -439,7 +468,19 @@ class ClusterManagementCommands(ManagementCommands):
         """
         raise RedisClusterException("SWAPDB is not supported in cluster mode")
 
-    def cluster_myid(self, target_node: "TargetNodesT") -> ResponseT:
+    @overload
+    def cluster_myid(
+        self: SyncClientProtocol, target_node: "TargetNodesT"
+    ) -> bytes | str: ...
+
+    @overload
+    def cluster_myid(
+        self: AsyncClientProtocol, target_node: "TargetNodesT"
+    ) -> Awaitable[bytes | str]: ...
+
+    def cluster_myid(self, target_node: "TargetNodesT") -> (bytes | str) | Awaitable[
+        bytes | str
+    ]:
         """
         Returns the node's id.
 
@@ -450,9 +491,19 @@ class ClusterManagementCommands(ManagementCommands):
         """
         return self.execute_command("CLUSTER MYID", target_nodes=target_node)
 
+    @overload
+    def cluster_addslots(
+        self: SyncClientProtocol, target_node: "TargetNodesT", *slots: EncodableT
+    ) -> bool: ...
+
+    @overload
+    def cluster_addslots(
+        self: AsyncClientProtocol, target_node: "TargetNodesT", *slots: EncodableT
+    ) -> Awaitable[bool]: ...
+
     def cluster_addslots(
         self, target_node: "TargetNodesT", *slots: EncodableT
-    ) -> ResponseT:
+    ) -> bool | Awaitable[bool]:
         """
         Assign new hash slots to receiving node. Sends to specified node.
 
@@ -465,9 +516,19 @@ class ClusterManagementCommands(ManagementCommands):
             "CLUSTER ADDSLOTS", *slots, target_nodes=target_node
         )
 
+    @overload
+    def cluster_addslotsrange(
+        self: SyncClientProtocol, target_node: "TargetNodesT", *slots: EncodableT
+    ) -> bool: ...
+
+    @overload
+    def cluster_addslotsrange(
+        self: AsyncClientProtocol, target_node: "TargetNodesT", *slots: EncodableT
+    ) -> Awaitable[bool]: ...
+
     def cluster_addslotsrange(
         self, target_node: "TargetNodesT", *slots: EncodableT
-    ) -> ResponseT:
+    ) -> bool | Awaitable[bool]:
         """
         Similar to the CLUSTER ADDSLOTS command.
         The difference between the two commands is that ADDSLOTS takes a list of slots
@@ -483,7 +544,15 @@ class ClusterManagementCommands(ManagementCommands):
             "CLUSTER ADDSLOTSRANGE", *slots, target_nodes=target_node
         )
 
-    def cluster_countkeysinslot(self, slot_id: int) -> ResponseT:
+    @overload
+    def cluster_countkeysinslot(self: SyncClientProtocol, slot_id: int) -> int: ...
+
+    @overload
+    def cluster_countkeysinslot(
+        self: AsyncClientProtocol, slot_id: int
+    ) -> Awaitable[int]: ...
+
+    def cluster_countkeysinslot(self, slot_id: int) -> int | Awaitable[int]:
         """
         Return the number of local keys in the specified hash slot
         Send to node based on specified slot_id
@@ -492,7 +561,15 @@ class ClusterManagementCommands(ManagementCommands):
         """
         return self.execute_command("CLUSTER COUNTKEYSINSLOT", slot_id)
 
-    def cluster_count_failure_report(self, node_id: str) -> ResponseT:
+    @overload
+    def cluster_count_failure_report(self: SyncClientProtocol, node_id: str) -> int: ...
+
+    @overload
+    def cluster_count_failure_report(
+        self: AsyncClientProtocol, node_id: str
+    ) -> Awaitable[int]: ...
+
+    def cluster_count_failure_report(self, node_id: str) -> int | Awaitable[int]:
         """
         Return the number of failure reports active for a given node
         Sends to a random node
@@ -512,7 +589,15 @@ class ClusterManagementCommands(ManagementCommands):
         """
         return [self.execute_command("CLUSTER DELSLOTS", slot) for slot in slots]
 
-    def cluster_delslotsrange(self, *slots: EncodableT) -> ResponseT:
+    @overload
+    def cluster_delslotsrange(self: SyncClientProtocol, *slots: EncodableT) -> bool: ...
+
+    @overload
+    def cluster_delslotsrange(
+        self: AsyncClientProtocol, *slots: EncodableT
+    ) -> Awaitable[bool]: ...
+
+    def cluster_delslotsrange(self, *slots: EncodableT) -> bool | Awaitable[bool]:
         """
         Similar to the CLUSTER DELSLOTS command.
         The difference is that CLUSTER DELSLOTS takes a list of hash slots to remove
@@ -523,9 +608,23 @@ class ClusterManagementCommands(ManagementCommands):
         """
         return self.execute_command("CLUSTER DELSLOTSRANGE", *slots)
 
+    @overload
     def cluster_failover(
-        self, target_node: "TargetNodesT", option: Optional[str] = None
-    ) -> ResponseT:
+        self: SyncClientProtocol,
+        target_node: "TargetNodesT",
+        option: str | None = None,
+    ) -> bool: ...
+
+    @overload
+    def cluster_failover(
+        self: AsyncClientProtocol,
+        target_node: "TargetNodesT",
+        option: str | None = None,
+    ) -> Awaitable[bool]: ...
+
+    def cluster_failover(
+        self, target_node: "TargetNodesT", option: str | None = None
+    ) -> bool | Awaitable[bool]:
         """
         Forces a slave to perform a manual failover of its master
         Sends to specified node
@@ -547,7 +646,19 @@ class ClusterManagementCommands(ManagementCommands):
         else:
             return self.execute_command("CLUSTER FAILOVER", target_nodes=target_node)
 
-    def cluster_info(self, target_nodes: Optional["TargetNodesT"] = None) -> ResponseT:
+    @overload
+    def cluster_info(
+        self: SyncClientProtocol, target_nodes: "TargetNodesT" | None = None
+    ) -> dict[str, str]: ...
+
+    @overload
+    def cluster_info(
+        self: AsyncClientProtocol, target_nodes: "TargetNodesT" | None = None
+    ) -> Awaitable[dict[str, str]]: ...
+
+    def cluster_info(
+        self, target_nodes: "TargetNodesT" | None = None
+    ) -> dict[str, str] | Awaitable[dict[str, str]]:
         """
         Provides info about Redis Cluster node state.
         The command will be sent to a random node in the cluster if no target
@@ -557,7 +668,13 @@ class ClusterManagementCommands(ManagementCommands):
         """
         return self.execute_command("CLUSTER INFO", target_nodes=target_nodes)
 
-    def cluster_keyslot(self, key: str) -> ResponseT:
+    @overload
+    def cluster_keyslot(self: SyncClientProtocol, key: str) -> int: ...
+
+    @overload
+    def cluster_keyslot(self: AsyncClientProtocol, key: str) -> Awaitable[int]: ...
+
+    def cluster_keyslot(self, key: str) -> int | Awaitable[int]:
         """
         Returns the hash slot of the specified key
         Sends to random node in the cluster
@@ -566,9 +683,25 @@ class ClusterManagementCommands(ManagementCommands):
         """
         return self.execute_command("CLUSTER KEYSLOT", key)
 
+    @overload
     def cluster_meet(
-        self, host: str, port: int, target_nodes: Optional["TargetNodesT"] = None
-    ) -> ResponseT:
+        self: SyncClientProtocol,
+        host: str,
+        port: int,
+        target_nodes: "TargetNodesT" | None = None,
+    ) -> bool: ...
+
+    @overload
+    def cluster_meet(
+        self: AsyncClientProtocol,
+        host: str,
+        port: int,
+        target_nodes: "TargetNodesT" | None = None,
+    ) -> Awaitable[bool]: ...
+
+    def cluster_meet(
+        self, host: str, port: int, target_nodes: "TargetNodesT" | None = None
+    ) -> bool | Awaitable[bool]:
         """
         Force a node cluster to handshake with another node.
         Sends to specified node.
@@ -579,7 +712,17 @@ class ClusterManagementCommands(ManagementCommands):
             "CLUSTER MEET", host, port, target_nodes=target_nodes
         )
 
-    def cluster_nodes(self) -> ResponseT:
+    @overload
+    def cluster_nodes(self: SyncClientProtocol) -> dict[str, ClusterNodeDetail]: ...
+
+    @overload
+    def cluster_nodes(
+        self: AsyncClientProtocol,
+    ) -> Awaitable[dict[str, ClusterNodeDetail]]: ...
+
+    def cluster_nodes(
+        self,
+    ) -> dict[str, ClusterNodeDetail] | Awaitable[dict[str, ClusterNodeDetail]]:
         """
         Get Cluster config for the node.
         Sends to random node in the cluster
@@ -588,9 +731,19 @@ class ClusterManagementCommands(ManagementCommands):
         """
         return self.execute_command("CLUSTER NODES")
 
+    @overload
+    def cluster_replicate(
+        self: SyncClientProtocol, target_nodes: "TargetNodesT", node_id: str
+    ) -> bool: ...
+
+    @overload
+    def cluster_replicate(
+        self: AsyncClientProtocol, target_nodes: "TargetNodesT", node_id: str
+    ) -> Awaitable[bool]: ...
+
     def cluster_replicate(
         self, target_nodes: "TargetNodesT", node_id: str
-    ) -> ResponseT:
+    ) -> bool | Awaitable[bool]:
         """
         Reconfigure a node as a slave of the specified master node
 
@@ -600,9 +753,23 @@ class ClusterManagementCommands(ManagementCommands):
             "CLUSTER REPLICATE", node_id, target_nodes=target_nodes
         )
 
+    @overload
     def cluster_reset(
-        self, soft: bool = True, target_nodes: Optional["TargetNodesT"] = None
-    ) -> ResponseT:
+        self: SyncClientProtocol,
+        soft: bool = True,
+        target_nodes: "TargetNodesT" | None = None,
+    ) -> bool: ...
+
+    @overload
+    def cluster_reset(
+        self: AsyncClientProtocol,
+        soft: bool = True,
+        target_nodes: "TargetNodesT" | None = None,
+    ) -> Awaitable[bool]: ...
+
+    def cluster_reset(
+        self, soft: bool = True, target_nodes: "TargetNodesT" | None = None
+    ) -> bool | Awaitable[bool]:
         """
         Reset a Redis Cluster node
 
@@ -615,9 +782,19 @@ class ClusterManagementCommands(ManagementCommands):
             "CLUSTER RESET", b"SOFT" if soft else b"HARD", target_nodes=target_nodes
         )
 
+    @overload
     def cluster_save_config(
-        self, target_nodes: Optional["TargetNodesT"] = None
-    ) -> ResponseT:
+        self: SyncClientProtocol, target_nodes: "TargetNodesT" | None = None
+    ) -> bool: ...
+
+    @overload
+    def cluster_save_config(
+        self: AsyncClientProtocol, target_nodes: "TargetNodesT" | None = None
+    ) -> Awaitable[bool]: ...
+
+    def cluster_save_config(
+        self, target_nodes: "TargetNodesT" | None = None
+    ) -> bool | Awaitable[bool]:
         """
         Forces the node to save cluster state on disk
 
@@ -625,7 +802,19 @@ class ClusterManagementCommands(ManagementCommands):
         """
         return self.execute_command("CLUSTER SAVECONFIG", target_nodes=target_nodes)
 
-    def cluster_get_keys_in_slot(self, slot: int, num_keys: int) -> ResponseT:
+    @overload
+    def cluster_get_keys_in_slot(
+        self: SyncClientProtocol, slot: int, num_keys: int
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def cluster_get_keys_in_slot(
+        self: AsyncClientProtocol, slot: int, num_keys: int
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def cluster_get_keys_in_slot(
+        self, slot: int, num_keys: int
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Returns the number of keys in the specified cluster slot
 
@@ -633,9 +822,21 @@ class ClusterManagementCommands(ManagementCommands):
         """
         return self.execute_command("CLUSTER GETKEYSINSLOT", slot, num_keys)
 
+    @overload
     def cluster_set_config_epoch(
-        self, epoch: int, target_nodes: Optional["TargetNodesT"] = None
-    ) -> ResponseT:
+        self: SyncClientProtocol, epoch: int, target_nodes: "TargetNodesT" | None = None
+    ) -> bool: ...
+
+    @overload
+    def cluster_set_config_epoch(
+        self: AsyncClientProtocol,
+        epoch: int,
+        target_nodes: "TargetNodesT" | None = None,
+    ) -> Awaitable[bool]: ...
+
+    def cluster_set_config_epoch(
+        self, epoch: int, target_nodes: "TargetNodesT" | None = None
+    ) -> bool | Awaitable[bool]:
         """
         Set the configuration epoch in a new node
 
@@ -645,9 +846,27 @@ class ClusterManagementCommands(ManagementCommands):
             "CLUSTER SET-CONFIG-EPOCH", epoch, target_nodes=target_nodes
         )
 
+    @overload
+    def cluster_setslot(
+        self: SyncClientProtocol,
+        target_node: "TargetNodesT",
+        node_id: str,
+        slot_id: int,
+        state: str,
+    ) -> bool: ...
+
+    @overload
+    def cluster_setslot(
+        self: AsyncClientProtocol,
+        target_node: "TargetNodesT",
+        node_id: str,
+        slot_id: int,
+        state: str,
+    ) -> Awaitable[bool]: ...
+
     def cluster_setslot(
         self, target_node: "TargetNodesT", node_id: str, slot_id: int, state: str
-    ) -> ResponseT:
+    ) -> bool | Awaitable[bool]:
         """
         Bind an hash slot to a specific node
 
@@ -665,7 +884,15 @@ class ClusterManagementCommands(ManagementCommands):
         else:
             raise RedisError(f"Invalid slot state: {state}")
 
-    def cluster_setslot_stable(self, slot_id: int) -> ResponseT:
+    @overload
+    def cluster_setslot_stable(self: SyncClientProtocol, slot_id: int) -> bool: ...
+
+    @overload
+    def cluster_setslot_stable(
+        self: AsyncClientProtocol, slot_id: int
+    ) -> Awaitable[bool]: ...
+
+    def cluster_setslot_stable(self, slot_id: int) -> bool | Awaitable[bool]:
         """
         Clears migrating / importing state from the slot.
         It determines by it self what node the slot is in and sends it there.
@@ -674,9 +901,23 @@ class ClusterManagementCommands(ManagementCommands):
         """
         return self.execute_command("CLUSTER SETSLOT", slot_id, "STABLE")
 
+    @overload
     def cluster_replicas(
-        self, node_id: str, target_nodes: Optional["TargetNodesT"] = None
-    ) -> ResponseT:
+        self: SyncClientProtocol,
+        node_id: str,
+        target_nodes: "TargetNodesT" | None = None,
+    ) -> dict[str, ClusterNodeDetail]: ...
+
+    @overload
+    def cluster_replicas(
+        self: AsyncClientProtocol,
+        node_id: str,
+        target_nodes: "TargetNodesT" | None = None,
+    ) -> Awaitable[dict[str, ClusterNodeDetail]]: ...
+
+    def cluster_replicas(
+        self, node_id: str, target_nodes: "TargetNodesT" | None = None
+    ) -> dict[str, ClusterNodeDetail] | Awaitable[dict[str, ClusterNodeDetail]]:
         """
         Provides a list of replica nodes replicating from the specified primary
         target node.
@@ -687,7 +928,19 @@ class ClusterManagementCommands(ManagementCommands):
             "CLUSTER REPLICAS", node_id, target_nodes=target_nodes
         )
 
-    def cluster_slots(self, target_nodes: Optional["TargetNodesT"] = None) -> ResponseT:
+    @overload
+    def cluster_slots(
+        self: SyncClientProtocol, target_nodes: "TargetNodesT" | None = None
+    ) -> list[Any]: ...
+
+    @overload
+    def cluster_slots(
+        self: AsyncClientProtocol, target_nodes: "TargetNodesT" | None = None
+    ) -> Awaitable[list[Any]]: ...
+
+    def cluster_slots(
+        self, target_nodes: "TargetNodesT" | None = None
+    ) -> list[Any] | Awaitable[list[Any]]:
         """
         Get array of Cluster slot to node mappings
 
@@ -695,7 +948,19 @@ class ClusterManagementCommands(ManagementCommands):
         """
         return self.execute_command("CLUSTER SLOTS", target_nodes=target_nodes)
 
-    def cluster_shards(self, target_nodes=None):
+    @overload
+    def cluster_shards(
+        self: SyncClientProtocol, target_nodes: "TargetNodesT" | None = None
+    ) -> list[Any]: ...
+
+    @overload
+    def cluster_shards(
+        self: AsyncClientProtocol, target_nodes: "TargetNodesT" | None = None
+    ) -> Awaitable[list[Any]]: ...
+
+    def cluster_shards(
+        self, target_nodes: "TargetNodesT" | None = None
+    ) -> list[Any] | Awaitable[list[Any]]:
         """
         Returns details about the shards of the cluster.
 
@@ -703,7 +968,19 @@ class ClusterManagementCommands(ManagementCommands):
         """
         return self.execute_command("CLUSTER SHARDS", target_nodes=target_nodes)
 
-    def cluster_myshardid(self, target_nodes=None):
+    @overload
+    def cluster_myshardid(
+        self: SyncClientProtocol, target_nodes: "TargetNodesT" | None = None
+    ) -> bytes | str: ...
+
+    @overload
+    def cluster_myshardid(
+        self: AsyncClientProtocol, target_nodes: "TargetNodesT" | None = None
+    ) -> Awaitable[bytes | str]: ...
+
+    def cluster_myshardid(self, target_nodes: "TargetNodesT" | None = None) -> (
+        bytes | str
+    ) | Awaitable[bytes | str]:
         """
         Returns the shard ID of the node.
 
@@ -711,7 +988,19 @@ class ClusterManagementCommands(ManagementCommands):
         """
         return self.execute_command("CLUSTER MYSHARDID", target_nodes=target_nodes)
 
-    def cluster_links(self, target_node: "TargetNodesT") -> ResponseT:
+    @overload
+    def cluster_links(
+        self: SyncClientProtocol, target_node: "TargetNodesT"
+    ) -> list[Any]: ...
+
+    @overload
+    def cluster_links(
+        self: AsyncClientProtocol, target_node: "TargetNodesT"
+    ) -> Awaitable[list[Any]]: ...
+
+    def cluster_links(
+        self, target_node: "TargetNodesT"
+    ) -> list[Any] | Awaitable[list[Any]]:
         """
         Each node in a Redis Cluster maintains a pair of long-lived TCP link with each
         peer in the cluster: One for sending outbound messages towards the peer and one
@@ -723,17 +1012,17 @@ class ClusterManagementCommands(ManagementCommands):
         """
         return self.execute_command("CLUSTER LINKS", target_nodes=target_node)
 
-    def cluster_flushslots(self, target_nodes: Optional["TargetNodesT"] = None) -> None:
+    def cluster_flushslots(self, target_nodes: "TargetNodesT" | None = None) -> None:
         raise NotImplementedError(
             "CLUSTER FLUSHSLOTS is intentionally not implemented in the client."
         )
 
-    def cluster_bumpepoch(self, target_nodes: Optional["TargetNodesT"] = None) -> None:
+    def cluster_bumpepoch(self, target_nodes: "TargetNodesT" | None = None) -> None:
         raise NotImplementedError(
             "CLUSTER BUMPEPOCH is intentionally not implemented in the client."
         )
 
-    def readonly(self, target_nodes: Optional["TargetNodesT"] = None) -> ResponseT:
+    def readonly(self, target_nodes: "TargetNodesT" | None = None) -> ResponseT:
         """
         Enables read queries.
         The command will be sent to the default cluster node if target_nodes is
@@ -747,7 +1036,7 @@ class ClusterManagementCommands(ManagementCommands):
             self.read_from_replicas = True
         return self.execute_command("READONLY", target_nodes=target_nodes)
 
-    def readwrite(self, target_nodes: Optional["TargetNodesT"] = None) -> ResponseT:
+    def readwrite(self, target_nodes: "TargetNodesT" | None = None) -> ResponseT:
         """
         Disables read queries.
         The command will be sent to the default cluster node if target_nodes is
@@ -765,13 +1054,13 @@ class ClusterManagementCommands(ManagementCommands):
     )
     def client_tracking_on(
         self,
-        clientid: Optional[int] = None,
+        clientid: int | None = None,
         prefix: Sequence[KeyT] = [],
         bcast: bool = False,
         optin: bool = False,
         optout: bool = False,
         noloop: bool = False,
-        target_nodes: Optional["TargetNodesT"] = "all",
+        target_nodes: "TargetNodesT" | None = "all",
     ) -> ResponseT:
         """
         Enables the tracking feature of the Redis server, that is used
@@ -800,13 +1089,13 @@ class ClusterManagementCommands(ManagementCommands):
     )
     def client_tracking_off(
         self,
-        clientid: Optional[int] = None,
+        clientid: int | None = None,
         prefix: Sequence[KeyT] = [],
         bcast: bool = False,
         optin: bool = False,
         optout: bool = False,
         noloop: bool = False,
-        target_nodes: Optional["TargetNodesT"] = "all",
+        target_nodes: "TargetNodesT" | None = "all",
     ) -> ResponseT:
         """
         Disables the tracking feature of the Redis server, that is used
@@ -832,12 +1121,12 @@ class ClusterManagementCommands(ManagementCommands):
     def hotkeys_start(
         self,
         metrics: List[HotkeysMetricsTypes],
-        count: Optional[int] = None,
-        duration: Optional[int] = None,
-        sample_ratio: Optional[int] = None,
-        slots: Optional[List[int]] = None,
+        count: int | None = None,
+        duration: int | None = None,
+        sample_ratio: int | None = None,
+        slots: List[int] | None = None,
         **kwargs,
-    ) -> Union[str, bytes]:
+    ) -> str | bytes:
         """
         Cluster client does not support hotkeys command. Please use the non-cluster client.
 
@@ -847,7 +1136,7 @@ class ClusterManagementCommands(ManagementCommands):
             "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
         )
 
-    def hotkeys_stop(self, **kwargs) -> Union[str, bytes]:
+    def hotkeys_stop(self, **kwargs) -> str | bytes:
         """
         Cluster client does not support hotkeys command. Please use the non-cluster client.
 
@@ -857,7 +1146,7 @@ class ClusterManagementCommands(ManagementCommands):
             "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
         )
 
-    def hotkeys_reset(self, **kwargs) -> Union[str, bytes]:
+    def hotkeys_reset(self, **kwargs) -> str | bytes:
         """
         Cluster client does not support hotkeys command. Please use the non-cluster client.
 
@@ -867,7 +1156,7 @@ class ClusterManagementCommands(ManagementCommands):
             "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
         )
 
-    def hotkeys_get(self, **kwargs) -> list[dict[Union[str, bytes], Any]]:
+    def hotkeys_get(self, **kwargs) -> list[dict[str | bytes, Any]]:
         """
         Cluster client does not support hotkeys command. Please use the non-cluster client.
 
@@ -910,13 +1199,13 @@ class AsyncClusterManagementCommands(
     )
     async def client_tracking_on(
         self,
-        clientid: Optional[int] = None,
+        clientid: int | None = None,
         prefix: Sequence[KeyT] = [],
         bcast: bool = False,
         optin: bool = False,
         optout: bool = False,
         noloop: bool = False,
-        target_nodes: Optional["TargetNodesT"] = "all",
+        target_nodes: "TargetNodesT" | None = "all",
     ) -> ResponseT:
         """
         Enables the tracking feature of the Redis server, that is used
@@ -945,13 +1234,13 @@ class AsyncClusterManagementCommands(
     )
     async def client_tracking_off(
         self,
-        clientid: Optional[int] = None,
+        clientid: int | None = None,
         prefix: Sequence[KeyT] = [],
         bcast: bool = False,
         optin: bool = False,
         optout: bool = False,
         noloop: bool = False,
-        target_nodes: Optional["TargetNodesT"] = "all",
+        target_nodes: "TargetNodesT" | None = "all",
     ) -> ResponseT:
         """
         Disables the tracking feature of the Redis server, that is used
@@ -977,12 +1266,12 @@ class AsyncClusterManagementCommands(
     async def hotkeys_start(
         self,
         metrics: List[HotkeysMetricsTypes],
-        count: Optional[int] = None,
-        duration: Optional[int] = None,
-        sample_ratio: Optional[int] = None,
-        slots: Optional[List[int]] = None,
+        count: int | None = None,
+        duration: int | None = None,
+        sample_ratio: int | None = None,
+        slots: List[int] | None = None,
         **kwargs,
-    ) -> Awaitable[Union[str, bytes]]:
+    ) -> Awaitable[str | bytes]:
         """
         Cluster client does not support hotkeys command. Please use the non-cluster client.
 
@@ -992,7 +1281,7 @@ class AsyncClusterManagementCommands(
             "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
         )
 
-    async def hotkeys_stop(self, **kwargs) -> Awaitable[Union[str, bytes]]:
+    async def hotkeys_stop(self, **kwargs) -> Awaitable[str | bytes]:
         """
         Cluster client does not support hotkeys command. Please use the non-cluster client.
 
@@ -1002,7 +1291,7 @@ class AsyncClusterManagementCommands(
             "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
         )
 
-    async def hotkeys_reset(self, **kwargs) -> Awaitable[Union[str, bytes]]:
+    async def hotkeys_reset(self, **kwargs) -> Awaitable[str | bytes]:
         """
         Cluster client does not support hotkeys command. Please use the non-cluster client.
 
@@ -1012,9 +1301,7 @@ class AsyncClusterManagementCommands(
             "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
         )
 
-    async def hotkeys_get(
-        self, **kwargs
-    ) -> Awaitable[list[dict[Union[str, bytes], Any]]]:
+    async def hotkeys_get(self, **kwargs) -> Awaitable[list[dict[str | bytes, Any]]]:
         """
         Cluster client does not support hotkeys command. Please use the non-cluster client.
 
@@ -1033,18 +1320,46 @@ class ClusterDataAccessCommands(DataAccessCommands):
     required adjustments to work with cluster mode
     """
 
+    @overload
+    def stralgo(
+        self: SyncClientProtocol,
+        algo: Literal["LCS"],
+        value1: KeyT,
+        value2: KeyT,
+        specific_argument: Literal["strings"] | Literal["keys"] = "strings",
+        len: bool = False,
+        idx: bool = False,
+        minmatchlen: int | None = None,
+        withmatchlen: bool = False,
+        **kwargs,
+    ) -> StralgoResponse: ...
+
+    @overload
+    def stralgo(
+        self: AsyncClientProtocol,
+        algo: Literal["LCS"],
+        value1: KeyT,
+        value2: KeyT,
+        specific_argument: Literal["strings"] | Literal["keys"] = "strings",
+        len: bool = False,
+        idx: bool = False,
+        minmatchlen: int | None = None,
+        withmatchlen: bool = False,
+        **kwargs,
+    ) -> Awaitable[StralgoResponse]: ...
+
     def stralgo(
         self,
         algo: Literal["LCS"],
         value1: KeyT,
         value2: KeyT,
-        specific_argument: Union[Literal["strings"], Literal["keys"]] = "strings",
+        specific_argument: Literal["strings"] | Literal["keys"] = "strings",
         len: bool = False,
         idx: bool = False,
-        minmatchlen: Optional[int] = None,
+        minmatchlen: int | None = None,
         withmatchlen: bool = False,
         **kwargs,
-    ) -> ResponseT:
+    ) -> StralgoResponse | Awaitable[StralgoResponse]:
         """
         Implements complex algorithms that operate on strings.
         Right now the only algorithm implemented is the LCS algorithm
@@ -1082,9 +1397,9 @@ class ClusterDataAccessCommands(DataAccessCommands):
 
     def scan_iter(
         self,
-        match: Optional[PatternT] = None,
-        count: Optional[int] = None,
-        _type: Optional[str] = None,
+        match: PatternT | None = None,
+        count: int | None = None,
+        _type: str | None = None,
         **kwargs,
     ) -> Iterator:
         # Do the first query with cursor=0 for all nodes
@@ -1128,9 +1443,9 @@ class AsyncClusterDataAccessCommands(
 
     async def scan_iter(
         self,
-        match: Optional[PatternT] = None,
-        count: Optional[int] = None,
-        _type: Optional[str] = None,
+        match: PatternT | None = None,
+        count: int | None = None,
+        _type: str | None = None,
         **kwargs,
     ) -> AsyncIterator:
         # Do the first query with cursor=0 for all nodes

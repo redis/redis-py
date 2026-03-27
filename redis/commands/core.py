@@ -7172,6 +7172,32 @@ class SortedSetCommands(CommandsProtocol):
     see: https://redis.io/topics/data-types-intro#redis-sorted-sets
     """
 
+    @overload
+    def zadd(
+        self: SyncClientProtocol,
+        name: KeyT,
+        mapping: Mapping[AnyKeyT, EncodableT],
+        nx: bool = False,
+        xx: bool = False,
+        ch: bool = False,
+        incr: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> int | float | None: ...
+
+    @overload
+    def zadd(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        mapping: Mapping[AnyKeyT, EncodableT],
+        nx: bool = False,
+        xx: bool = False,
+        ch: bool = False,
+        incr: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> Awaitable[int | float | None]: ...
+
     def zadd(
         self,
         name: KeyT,
@@ -7182,7 +7208,7 @@ class SortedSetCommands(CommandsProtocol):
         incr: bool = False,
         gt: bool = False,
         lt: bool = False,
-    ) -> ResponseT:
+    ) -> (int | float | None) | Awaitable[int | float | None]:
         """
         Set any number of element-name, score pairs to the key ``name``. Pairs
         are specified as a dict of element-names keys to score values.
@@ -7249,7 +7275,13 @@ class SortedSetCommands(CommandsProtocol):
             pieces.append(pair[0])
         return self.execute_command("ZADD", name, *pieces, **options)
 
-    def zcard(self, name: KeyT) -> ResponseT:
+    @overload
+    def zcard(self: SyncClientProtocol, name: KeyT) -> int: ...
+
+    @overload
+    def zcard(self: AsyncClientProtocol, name: KeyT) -> Awaitable[int]: ...
+
+    def zcard(self, name: KeyT) -> int | Awaitable[int]:
         """
         Return the number of elements in the sorted set ``name``
 

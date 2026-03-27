@@ -1,8 +1,9 @@
 import os
 from json import JSONDecodeError, loads
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Awaitable, overload
 
 from redis.exceptions import DataError
+from redis.typing import AsyncClientProtocol, SyncClientProtocol
 from redis.utils import deprecated_function
 
 from ._util import JsonType
@@ -13,9 +14,25 @@ from .path import Path
 class JSONCommands:
     """json commands."""
 
+    @overload
     def arrappend(
-        self, name: str, path: Optional[str] = Path.root_path(), *args: JsonType
-    ) -> List[Optional[int]]:
+        self: SyncClientProtocol,
+        name: str,
+        path: str | None = Path.root_path(),
+        *args: JsonType,
+    ) -> int | list[int | None] | None: ...
+
+    @overload
+    def arrappend(
+        self: AsyncClientProtocol,
+        name: str,
+        path: str | None = Path.root_path(),
+        *args: JsonType,
+    ) -> Awaitable[int | list[int | None] | None]: ...
+
+    def arrappend(
+        self, name: str, path: str | None = Path.root_path(), *args: JsonType
+    ) -> (int | list[int | None] | None) | Awaitable[int | list[int | None] | None]:
         """Append the objects ``args`` to the array under the
         ``path` in key ``name``.
 
@@ -26,14 +43,34 @@ class JSONCommands:
             pieces.append(self._encode(o))
         return self.execute_command("JSON.ARRAPPEND", *pieces)
 
+    @overload
+    def arrindex(
+        self: SyncClientProtocol,
+        name: str,
+        path: str,
+        scalar: int,
+        start: int | None = None,
+        stop: int | None = None,
+    ) -> int | list[int | None] | None: ...
+
+    @overload
+    def arrindex(
+        self: AsyncClientProtocol,
+        name: str,
+        path: str,
+        scalar: int,
+        start: int | None = None,
+        stop: int | None = None,
+    ) -> Awaitable[int | list[int | None] | None]: ...
+
     def arrindex(
         self,
         name: str,
         path: str,
         scalar: int,
-        start: Optional[int] = None,
-        stop: Optional[int] = None,
-    ) -> List[Optional[int]]:
+        start: int | None = None,
+        stop: int | None = None,
+    ) -> (int | list[int | None] | None) | Awaitable[int | list[int | None] | None]:
         """
         Return the index of ``scalar`` in the JSON array under ``path`` at key
         ``name``.
@@ -51,9 +88,23 @@ class JSONCommands:
 
         return self.execute_command("JSON.ARRINDEX", *pieces, keys=[name])
 
+    @overload
     def arrinsert(
-        self, name: str, path: str, index: int, *args: JsonType
-    ) -> List[Optional[int]]:
+        self: SyncClientProtocol, name: str, path: str, index: int, *args: JsonType
+    ) -> int | list[int | None] | None: ...
+
+    @overload
+    def arrinsert(
+        self: AsyncClientProtocol,
+        name: str,
+        path: str,
+        index: int,
+        *args: JsonType,
+    ) -> Awaitable[int | list[int | None] | None]: ...
+
+    def arrinsert(self, name: str, path: str, index: int, *args: JsonType) -> (
+        int | list[int | None] | None
+    ) | Awaitable[int | list[int | None] | None]:
         """Insert the objects ``args`` to the array at index ``index``
         under the ``path` in key ``name``.
 
@@ -64,9 +115,19 @@ class JSONCommands:
             pieces.append(self._encode(o))
         return self.execute_command("JSON.ARRINSERT", *pieces)
 
+    @overload
     def arrlen(
-        self, name: str, path: Optional[str] = Path.root_path()
-    ) -> List[Optional[int]]:
+        self: SyncClientProtocol, name: str, path: str | None = Path.root_path()
+    ) -> int | list[int | None] | None: ...
+
+    @overload
+    def arrlen(
+        self: AsyncClientProtocol, name: str, path: str | None = Path.root_path()
+    ) -> Awaitable[int | list[int | None] | None]: ...
+
+    def arrlen(self, name: str, path: str | None = Path.root_path()) -> (
+        int | list[int | None] | None
+    ) | Awaitable[int | list[int | None] | None]:
         """Return the length of the array JSON value under ``path``
         at key``name``.
 
@@ -74,12 +135,30 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.ARRLEN", name, str(path), keys=[name])
 
+    @overload
+    def arrpop(
+        self: SyncClientProtocol,
+        name: str,
+        path: str | None = Path.root_path(),
+        index: int | None = -1,
+    ) -> JsonType | str | list[Any] | None: ...
+
+    @overload
+    def arrpop(
+        self: AsyncClientProtocol,
+        name: str,
+        path: str | None = Path.root_path(),
+        index: int | None = -1,
+    ) -> Awaitable[JsonType | str | list[Any] | None]: ...
+
     def arrpop(
         self,
         name: str,
-        path: Optional[str] = Path.root_path(),
-        index: Optional[int] = -1,
-    ) -> List[Optional[str]]:
+        path: str | None = Path.root_path(),
+        index: int | None = -1,
+    ) -> (JsonType | str | list[Any] | None) | Awaitable[
+        JsonType | str | list[Any] | None
+    ]:
         """Pop the element at ``index`` in the array JSON value under
         ``path`` at key ``name``.
 
@@ -87,9 +166,19 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.ARRPOP", name, str(path), index)
 
+    @overload
     def arrtrim(
-        self, name: str, path: str, start: int, stop: int
-    ) -> List[Optional[int]]:
+        self: SyncClientProtocol, name: str, path: str, start: int, stop: int
+    ) -> int | list[int | None] | None: ...
+
+    @overload
+    def arrtrim(
+        self: AsyncClientProtocol, name: str, path: str, start: int, stop: int
+    ) -> Awaitable[int | list[int | None] | None]: ...
+
+    def arrtrim(self, name: str, path: str, start: int, stop: int) -> (
+        int | list[int | None] | None
+    ) | Awaitable[int | list[int | None] | None]:
         """Trim the array JSON value under ``path`` at key ``name`` to the
         inclusive range given by ``start`` and ``stop``.
 
@@ -97,23 +186,57 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.ARRTRIM", name, str(path), start, stop)
 
-    def type(self, name: str, path: Optional[str] = Path.root_path()) -> List[str]:
+    @overload
+    def type(
+        self: SyncClientProtocol, name: str, path: str | None = Path.root_path()
+    ) -> str | None | list[str | None] | list[list[str]]: ...
+
+    @overload
+    def type(
+        self: AsyncClientProtocol, name: str, path: str | None = Path.root_path()
+    ) -> Awaitable[str | None | list[str | None] | list[list[str]]]: ...
+
+    def type(self, name: str, path: str | None = Path.root_path()) -> (
+        str | None | list[str | None] | list[list[str]]
+    ) | Awaitable[str | None | list[str | None] | list[list[str]]]:
         """Get the type of the JSON value under ``path`` from key ``name``.
 
         For more information see `JSON.TYPE <https://redis.io/commands/json.type>`_.
         """  # noqa
         return self.execute_command("JSON.TYPE", name, str(path), keys=[name])
 
-    def resp(self, name: str, path: Optional[str] = Path.root_path()) -> List:
+    @overload
+    def resp(
+        self: SyncClientProtocol, name: str, path: str | None = Path.root_path()
+    ) -> Any: ...
+
+    @overload
+    def resp(
+        self: AsyncClientProtocol, name: str, path: str | None = Path.root_path()
+    ) -> Awaitable[Any]: ...
+
+    def resp(
+        self, name: str, path: str | None = Path.root_path()
+    ) -> Any | Awaitable[Any]:
         """Return the JSON value under ``path`` at key ``name``.
 
         For more information see `JSON.RESP <https://redis.io/commands/json.resp>`_.
         """  # noqa
         return self.execute_command("JSON.RESP", name, str(path), keys=[name])
 
+    @overload
     def objkeys(
-        self, name: str, path: Optional[str] = Path.root_path()
-    ) -> List[Optional[List[str]]]:
+        self: SyncClientProtocol, name: str, path: str | None = Path.root_path()
+    ) -> list[str] | list[list[str] | None] | None: ...
+
+    @overload
+    def objkeys(
+        self: AsyncClientProtocol, name: str, path: str | None = Path.root_path()
+    ) -> Awaitable[list[str] | list[list[str] | None] | None]: ...
+
+    def objkeys(self, name: str, path: str | None = Path.root_path()) -> (
+        list[str] | list[list[str] | None] | None
+    ) | Awaitable[list[str] | list[list[str] | None] | None]:
         """Return the key names in the dictionary JSON value under ``path`` at
         key ``name``.
 
@@ -121,9 +244,19 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.OBJKEYS", name, str(path), keys=[name])
 
+    @overload
     def objlen(
-        self, name: str, path: Optional[str] = Path.root_path()
-    ) -> List[Optional[int]]:
+        self: SyncClientProtocol, name: str, path: str | None = Path.root_path()
+    ) -> int | list[int | None] | None: ...
+
+    @overload
+    def objlen(
+        self: AsyncClientProtocol, name: str, path: str | None = Path.root_path()
+    ) -> Awaitable[int | list[int | None] | None]: ...
+
+    def objlen(self, name: str, path: str | None = Path.root_path()) -> (
+        int | list[int | None] | None
+    ) | Awaitable[int | list[int | None] | None]:
         """Return the length of the dictionary JSON value under ``path`` at key
         ``name``.
 
@@ -131,7 +264,19 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.OBJLEN", name, str(path), keys=[name])
 
-    def numincrby(self, name: str, path: str, number: int) -> str:
+    @overload
+    def numincrby(
+        self: SyncClientProtocol, name: str, path: str, number: int
+    ) -> int | float | list[int | float | None]: ...
+
+    @overload
+    def numincrby(
+        self: AsyncClientProtocol, name: str, path: str, number: int
+    ) -> Awaitable[int | float | list[int | float | None]]: ...
+
+    def numincrby(self, name: str, path: str, number: int) -> (
+        int | float | list[int | float | None]
+    ) | Awaitable[int | float | list[int | float | None]]:
         """Increment the numeric (integer or floating point) JSON value under
         ``path`` at key ``name`` by the provided ``number``.
 
@@ -141,8 +286,20 @@ class JSONCommands:
             "JSON.NUMINCRBY", name, str(path), self._encode(number)
         )
 
+    @overload
+    def nummultby(
+        self: SyncClientProtocol, name: str, path: str, number: int
+    ) -> int | float | list[int | float | None]: ...
+
+    @overload
+    def nummultby(
+        self: AsyncClientProtocol, name: str, path: str, number: int
+    ) -> Awaitable[int | float | list[int | float | None]]: ...
+
     @deprecated_function(version="4.0.0", reason="deprecated since redisjson 1.0.0")
-    def nummultby(self, name: str, path: str, number: int) -> str:
+    def nummultby(self, name: str, path: str, number: int) -> (
+        int | float | list[int | float | None]
+    ) | Awaitable[int | float | list[int | float | None]]:
         """Multiply the numeric (integer or floating point) JSON value under
         ``path`` at key ``name`` with the provided ``number``.
 
@@ -152,7 +309,19 @@ class JSONCommands:
             "JSON.NUMMULTBY", name, str(path), self._encode(number)
         )
 
-    def clear(self, name: str, path: Optional[str] = Path.root_path()) -> int:
+    @overload
+    def clear(
+        self: SyncClientProtocol, name: str, path: str | None = Path.root_path()
+    ) -> int: ...
+
+    @overload
+    def clear(
+        self: AsyncClientProtocol, name: str, path: str | None = Path.root_path()
+    ) -> Awaitable[int]: ...
+
+    def clear(
+        self, name: str, path: str | None = Path.root_path()
+    ) -> int | Awaitable[int]:
         """Empty arrays and objects (to have zero slots/keys without deleting the
         array/object).
 
@@ -163,7 +332,19 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.CLEAR", name, str(path))
 
-    def delete(self, key: str, path: Optional[str] = Path.root_path()) -> int:
+    @overload
+    def delete(
+        self: SyncClientProtocol, key: str, path: str | None = Path.root_path()
+    ) -> int: ...
+
+    @overload
+    def delete(
+        self: AsyncClientProtocol, key: str, path: str | None = Path.root_path()
+    ) -> Awaitable[int]: ...
+
+    def delete(
+        self, key: str, path: str | None = Path.root_path()
+    ) -> int | Awaitable[int]:
         """Delete the JSON value stored at key ``key`` under ``path``.
 
         For more information see `JSON.DEL <https://redis.io/commands/json.del>`_.
@@ -173,9 +354,19 @@ class JSONCommands:
     # forget is an alias for delete
     forget = delete
 
+    @overload
     def get(
-        self, name: str, *args, no_escape: Optional[bool] = False
-    ) -> Optional[List[JsonType]]:
+        self: SyncClientProtocol, name: str, *args, no_escape: bool | None = False
+    ) -> Any | None: ...
+
+    @overload
+    def get(
+        self: AsyncClientProtocol, name: str, *args, no_escape: bool | None = False
+    ) -> Awaitable[Any | None]: ...
+
+    def get(self, name: str, *args, no_escape: bool | None = False) -> (
+        Any | None
+    ) | Awaitable[Any | None]:
         """
         Get the object stored as a JSON value at key ``name``.
 
@@ -203,7 +394,19 @@ class JSONCommands:
         except TypeError:
             return None
 
-    def mget(self, keys: List[str], path: str) -> List[JsonType]:
+    @overload
+    def mget(
+        self: SyncClientProtocol, keys: list[str], path: str
+    ) -> list[JsonType | None]: ...
+
+    @overload
+    def mget(
+        self: AsyncClientProtocol, keys: list[str], path: str
+    ) -> Awaitable[list[JsonType | None]]: ...
+
+    def mget(
+        self, keys: list[str], path: str
+    ) -> list[JsonType | None] | Awaitable[list[JsonType | None]]:
         """
         Get the objects stored as a JSON values under ``path``. ``keys``
         is a list of one or more keys.
@@ -215,15 +418,37 @@ class JSONCommands:
         pieces.append(str(path))
         return self.execute_command("JSON.MGET", *pieces, keys=keys)
 
+    @overload
+    def set(
+        self: SyncClientProtocol,
+        name: str,
+        path: str,
+        obj: JsonType,
+        nx: bool | None = False,
+        xx: bool | None = False,
+        decode_keys: bool | None = False,
+    ) -> bool | None: ...
+
+    @overload
+    def set(
+        self: AsyncClientProtocol,
+        name: str,
+        path: str,
+        obj: JsonType,
+        nx: bool | None = False,
+        xx: bool | None = False,
+        decode_keys: bool | None = False,
+    ) -> Awaitable[bool | None]: ...
+
     def set(
         self,
         name: str,
         path: str,
         obj: JsonType,
-        nx: Optional[bool] = False,
-        xx: Optional[bool] = False,
-        decode_keys: Optional[bool] = False,
-    ) -> Optional[str]:
+        nx: bool | None = False,
+        xx: bool | None = False,
+        decode_keys: bool | None = False,
+    ) -> (bool | None) | Awaitable[bool | None]:
         """
         Set the JSON value at key ``name`` under the ``path`` to ``obj``.
 
@@ -254,7 +479,17 @@ class JSONCommands:
             pieces.append("XX")
         return self.execute_command("JSON.SET", *pieces)
 
-    def mset(self, triplets: List[Tuple[str, str, JsonType]]) -> Optional[str]:
+    @overload
+    def mset(
+        self: SyncClientProtocol, triplets: list[tuple[str, str, JsonType]]
+    ) -> bool: ...
+
+    @overload
+    def mset(
+        self: AsyncClientProtocol, triplets: list[tuple[str, str, JsonType]]
+    ) -> Awaitable[bool]: ...
+
+    def mset(self, triplets: list[tuple[str, str, JsonType]]) -> bool | Awaitable[bool]:
         """
         Set the JSON value at key ``name`` under the ``path`` to ``obj``
         for one or more keys.
@@ -271,13 +506,31 @@ class JSONCommands:
             pieces.extend([triplet[0], str(triplet[1]), self._encode(triplet[2])])
         return self.execute_command("JSON.MSET", *pieces)
 
+    @overload
+    def merge(
+        self: SyncClientProtocol,
+        name: str,
+        path: str,
+        obj: JsonType,
+        decode_keys: bool | None = False,
+    ) -> bool: ...
+
+    @overload
+    def merge(
+        self: AsyncClientProtocol,
+        name: str,
+        path: str,
+        obj: JsonType,
+        decode_keys: bool | None = False,
+    ) -> Awaitable[bool]: ...
+
     def merge(
         self,
         name: str,
         path: str,
         obj: JsonType,
-        decode_keys: Optional[bool] = False,
-    ) -> Optional[str]:
+        decode_keys: bool | None = False,
+    ) -> bool | Awaitable[bool]:
         """
         Merges a given JSON value into matching paths. Consequently, JSON values
         at matching paths are updated, deleted, or expanded with new children
@@ -294,15 +547,37 @@ class JSONCommands:
 
         return self.execute_command("JSON.MERGE", *pieces)
 
+    @overload
+    def set_file(
+        self: SyncClientProtocol,
+        name: str,
+        path: str,
+        file_name: str,
+        nx: bool | None = False,
+        xx: bool | None = False,
+        decode_keys: bool | None = False,
+    ) -> bool | None: ...
+
+    @overload
+    def set_file(
+        self: AsyncClientProtocol,
+        name: str,
+        path: str,
+        file_name: str,
+        nx: bool | None = False,
+        xx: bool | None = False,
+        decode_keys: bool | None = False,
+    ) -> Awaitable[bool | None]: ...
+
     def set_file(
         self,
         name: str,
         path: str,
         file_name: str,
-        nx: Optional[bool] = False,
-        xx: Optional[bool] = False,
-        decode_keys: Optional[bool] = False,
-    ) -> Optional[str]:
+        nx: bool | None = False,
+        xx: bool | None = False,
+        decode_keys: bool | None = False,
+    ) -> (bool | None) | Awaitable[bool | None]:
         """
         Set the JSON value at key ``name`` under the ``path`` to the content
         of the json file ``file_name``.
@@ -319,14 +594,34 @@ class JSONCommands:
 
         return self.set(name, path, file_content, nx=nx, xx=xx, decode_keys=decode_keys)
 
+    @overload
+    def set_path(
+        self: SyncClientProtocol,
+        json_path: str,
+        root_folder: str,
+        nx: bool | None = False,
+        xx: bool | None = False,
+        decode_keys: bool | None = False,
+    ) -> dict[str, bool]: ...
+
+    @overload
+    def set_path(
+        self: AsyncClientProtocol,
+        json_path: str,
+        root_folder: str,
+        nx: bool | None = False,
+        xx: bool | None = False,
+        decode_keys: bool | None = False,
+    ) -> Awaitable[dict[str, bool]]: ...
+
     def set_path(
         self,
         json_path: str,
         root_folder: str,
-        nx: Optional[bool] = False,
-        xx: Optional[bool] = False,
-        decode_keys: Optional[bool] = False,
-    ) -> Dict[str, bool]:
+        nx: bool | None = False,
+        xx: bool | None = False,
+        decode_keys: bool | None = False,
+    ) -> dict[str, bool] | Awaitable[dict[str, bool]]:
         """
         Iterate over ``root_folder`` and set each JSON file to a value
         under ``json_path`` with the file name as the key.
@@ -342,6 +637,9 @@ class JSONCommands:
             for file in files:
                 file_path = os.path.join(root, file)
                 try:
+                    # TODO: rsplit(".") splits on all dots, mishandling paths
+                    # with dots in directories (e.g. /data/v1.2/file.json).
+                    # Should be rsplit(".", 1) — fix in a separate PR.
                     file_name = file_path.rsplit(".")[0]
                     self.set_file(
                         file_name,
@@ -357,7 +655,19 @@ class JSONCommands:
 
         return set_files_result
 
-    def strlen(self, name: str, path: Optional[str] = None) -> List[Optional[int]]:
+    @overload
+    def strlen(
+        self: SyncClientProtocol, name: str, path: str | None = None
+    ) -> int | list[int | None] | None: ...
+
+    @overload
+    def strlen(
+        self: AsyncClientProtocol, name: str, path: str | None = None
+    ) -> Awaitable[int | list[int | None] | None]: ...
+
+    def strlen(self, name: str, path: str | None = None) -> (
+        int | list[int | None] | None
+    ) | Awaitable[int | list[int | None] | None]:
         """Return the length of the string JSON value under ``path`` at key
         ``name``.
 
@@ -368,9 +678,19 @@ class JSONCommands:
             pieces.append(str(path))
         return self.execute_command("JSON.STRLEN", *pieces, keys=[name])
 
+    @overload
     def toggle(
-        self, name: str, path: Optional[str] = Path.root_path()
-    ) -> Union[bool, List[Optional[int]]]:
+        self: SyncClientProtocol, name: str, path: str | None = Path.root_path()
+    ) -> bool | list[int | None] | None: ...
+
+    @overload
+    def toggle(
+        self: AsyncClientProtocol, name: str, path: str | None = Path.root_path()
+    ) -> Awaitable[bool | list[int | None] | None]: ...
+
+    def toggle(self, name: str, path: str | None = Path.root_path()) -> (
+        bool | list[int | None] | None
+    ) | Awaitable[bool | list[int | None] | None]:
         """Toggle boolean value under ``path`` at key ``name``.
         returning the new value.
 
@@ -378,9 +698,25 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.TOGGLE", name, str(path))
 
+    @overload
     def strappend(
-        self, name: str, value: str, path: Optional[str] = Path.root_path()
-    ) -> Union[int, List[Optional[int]]]:
+        self: SyncClientProtocol,
+        name: str,
+        value: str,
+        path: str | None = Path.root_path(),
+    ) -> int | list[int | None] | None: ...
+
+    @overload
+    def strappend(
+        self: AsyncClientProtocol,
+        name: str,
+        value: str,
+        path: str | None = Path.root_path(),
+    ) -> Awaitable[int | list[int | None] | None]: ...
+
+    def strappend(self, name: str, value: str, path: str | None = Path.root_path()) -> (
+        int | list[int | None] | None
+    ) | Awaitable[int | list[int | None] | None]:
         """Append to the string JSON value. If two options are specified after
         the key name, the path is determined to be the first. If a single
         option is passed, then the root_path (i.e Path.root_path()) is used.
@@ -390,12 +726,28 @@ class JSONCommands:
         pieces = [name, str(path), self._encode(value)]
         return self.execute_command("JSON.STRAPPEND", *pieces)
 
+    @overload
+    def debug(
+        self: SyncClientProtocol,
+        subcommand: str,
+        key: str | None = None,
+        path: str | None = Path.root_path(),
+    ) -> int | list[str]: ...
+
+    @overload
+    def debug(
+        self: AsyncClientProtocol,
+        subcommand: str,
+        key: str | None = None,
+        path: str | None = Path.root_path(),
+    ) -> Awaitable[int | list[str]]: ...
+
     def debug(
         self,
         subcommand: str,
-        key: Optional[str] = None,
-        path: Optional[str] = Path.root_path(),
-    ) -> Union[int, List[str]]:
+        key: str | None = None,
+        path: str | None = Path.root_path(),
+    ) -> (int | list[str]) | Awaitable[int | list[str]]:
         """Return the memory usage in bytes of a value under ``path`` from
         key ``name``.
 
@@ -412,20 +764,48 @@ class JSONCommands:
             pieces.append(str(path))
         return self.execute_command("JSON.DEBUG", *pieces)
 
+    @overload
+    def jsonget(self: SyncClientProtocol, *args, **kwargs) -> Any | None: ...
+
+    @overload
+    def jsonget(
+        self: AsyncClientProtocol, *args, **kwargs
+    ) -> Awaitable[Any | None]: ...
+
     @deprecated_function(
         version="4.0.0", reason="redisjson-py supported this, call get directly."
     )
-    def jsonget(self, *args, **kwargs):
+    def jsonget(self, *args, **kwargs) -> (Any | None) | Awaitable[Any | None]:
         return self.get(*args, **kwargs)
 
-    @deprecated_function(
-        version="4.0.0", reason="redisjson-py supported this, call get directly."
-    )
-    def jsonmget(self, *args, **kwargs):
-        return self.mget(*args, **kwargs)
+    @overload
+    def jsonmget(
+        self: SyncClientProtocol, *args, **kwargs
+    ) -> list[JsonType | None]: ...
+
+    @overload
+    def jsonmget(
+        self: AsyncClientProtocol, *args, **kwargs
+    ) -> Awaitable[list[JsonType | None]]: ...
 
     @deprecated_function(
         version="4.0.0", reason="redisjson-py supported this, call get directly."
     )
-    def jsonset(self, *args, **kwargs):
+    def jsonmget(
+        self, *args, **kwargs
+    ) -> list[JsonType | None] | Awaitable[list[JsonType | None]]:
+        return self.mget(*args, **kwargs)
+
+    @overload
+    def jsonset(self: SyncClientProtocol, *args, **kwargs) -> bool | None: ...
+
+    @overload
+    def jsonset(
+        self: AsyncClientProtocol, *args, **kwargs
+    ) -> Awaitable[bool | None]: ...
+
+    @deprecated_function(
+        version="4.0.0", reason="redisjson-py supported this, call get directly."
+    )
+    def jsonset(self, *args, **kwargs) -> (bool | None) | Awaitable[bool | None]:
         return self.set(*args, **kwargs)
