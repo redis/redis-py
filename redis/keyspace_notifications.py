@@ -812,9 +812,10 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
             else:
                 exact_channels[channel_str] = wrapped_handler
 
-        # Delegate to subclass implementation first — update tracking state
-        # only after the operation succeeds, so that a connection failure
-        # doesn't leave stale entries in _subscribed_patterns/_subscribed_channels.
+        # Delegate to subclass implementation first.  For standalone Redis
+        # this raises on failure, keeping tracking state clean.  For cluster
+        # implementations the operation is best-effort (partial failures are
+        # logged, not raised) so tracking state is always updated afterwards.
         self._execute_subscribe(patterns, exact_channels)
 
         if patterns:
@@ -859,9 +860,12 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
             else:
                 exact_channels.append(channel_str)
 
-        # Execute the unsubscribe operation first — remove tracking state
-        # only after the operation succeeds, so that a failure doesn't leave
-        # subscriptions active at the Redis level but forgotten locally.
+        # Delegate to subclass implementation first.  For standalone Redis
+        # this raises on failure, keeping tracking state intact.  For cluster
+        # implementations the operation is best-effort (partial failures are
+        # logged, not raised) so tracking state is always removed afterwards
+        # — this is intentional: the user asked to unsubscribe, so
+        # refresh_subscriptions should not re-subscribe these channels.
         self._execute_unsubscribe(patterns, exact_channels)
 
         for p in patterns:
@@ -1277,11 +1281,25 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
         succeeded on healthy nodes.  Failed nodes are removed from
         ``_node_pubsubs`` and will be re-subscribed on the next
         ``refresh_subscriptions`` cycle.
+
+        If a newly discovered node is encountered (not yet in
+        ``_node_pubsubs``), it is also subscribed to all *previously*
+        tracked patterns/channels so it doesn't miss notifications for
+        subscriptions that were established before this node joined.
         """
         failed_nodes: list[str] = []
         for node in self._get_all_primary_nodes():
+            is_new_node = node.name not in self._node_pubsubs
             pubsub = self._ensure_node_pubsub(node)
             try:
+                # If this is a brand-new node, catch it up on existing
+                # subscriptions before adding the new channels.
+                if is_new_node:
+                    if self._subscribed_patterns:
+                        pubsub.psubscribe(**self._subscribed_patterns)
+                    if self._subscribed_channels:
+                        pubsub.subscribe(**self._subscribed_channels)
+
                 if use_psubscribe:
                     pubsub.psubscribe(**channels)
                 else:
@@ -1368,6 +1386,11 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
 
         total_nodes = len(self._node_pubsubs)
         if total_nodes == 0:
+            # Sleep for the requested timeout so callers that loop
+            # (run_in_thread, listen) don't spin the CPU when all node
+            # connections have been cleaned up.
+            if timeout > 0:
+                time.sleep(timeout)
             return None
 
         # Use instance default if not specified
@@ -1496,7 +1519,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
             >>> for notification in ksn.listen():
             ...     print(f"{notification.key}: {notification.event_type}")
         """
-        while not self._closed and self._node_pubsubs:
+        while self.subscribed:
             notification = self.get_message(timeout=1.0)
             if notification is not None:
                 yield notification
