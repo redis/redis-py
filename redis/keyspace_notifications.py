@@ -1188,7 +1188,7 @@ class KeyspaceNotifications(AbstractKeyspaceNotifications):
             >>> for notification in ksn.listen():
             ...     print(f"{notification.key}: {notification.event_type}")
         """
-        while not self._closed:
+        while self.subscribed:
             notification = self.get_message(timeout=1.0)
             if notification is not None:
                 yield notification
