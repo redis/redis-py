@@ -728,20 +728,21 @@ class TestClusterKeyspaceNotifications:
         r = r_with_keyspace_notifications
         notifications = ClusterKeyspaceNotifications(r)
         notifications.subscribe(KeyspaceChannel("test:*"))
-        commands = [
-            r.set("test:key", "value"),
-            r.set("test:key2", "value2"),
-            r.delete("test:key2"),
-        ]
+        r.set("test:key", "value")
+        r.set("test:key2", "value2")
+        r.delete("test:key2")
 
-        for i in range(len(commands)):
+        # In a cluster, keys may live on different nodes and round-robin
+        # polling does not guarantee the order messages are received.
+        # Collect all three and verify by counts instead.
+        messages = []
+        for _ in range(3):
             msg = notifications.get_message(timeout=1.0)
             assert msg is not None
             assert msg.key.startswith("test:")
-            if i == len(commands) - 1:
-                assert msg.event_type == "del"
-            else:
-                assert msg.event_type == "set"
+            messages.append(msg.event_type)
+
+        assert sorted(messages) == ["del", "set", "set"]
 
         notifications.close()
 
