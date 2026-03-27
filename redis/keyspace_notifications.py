@@ -1313,12 +1313,35 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
             self._unsubscribe_from_all_nodes(exact_channels, use_punsubscribe=False)
 
     def _unsubscribe_from_all_nodes(self, channels: list[str], use_punsubscribe: bool):
-        """Unsubscribe from patterns/channels on all nodes."""
-        for pubsub in self._node_pubsubs.values():
-            if use_punsubscribe:
-                pubsub.punsubscribe(*channels)
-            else:
-                pubsub.unsubscribe(*channels)
+        """Unsubscribe from patterns/channels on all nodes.
+
+        Best-effort: tries every node so that a single broken connection
+        does not prevent the remaining nodes from being unsubscribed.
+        Broken pubsubs are cleaned up; the tracking state is still removed
+        by the caller, so ``refresh_subscriptions`` will *not* re-subscribe
+        these channels on replacement nodes.
+        """
+        failed_nodes: list[str] = []
+        for node_name, pubsub in list(self._node_pubsubs.items()):
+            try:
+                if use_punsubscribe:
+                    pubsub.punsubscribe(*channels)
+                else:
+                    pubsub.unsubscribe(*channels)
+            except Exception:
+                self._node_pubsubs.pop(node_name, None)
+                try:
+                    pubsub.close()
+                except Exception:
+                    pass
+                failed_nodes.append(node_name)
+
+        if failed_nodes:
+            logger.warning(
+                "Failed to unsubscribe on cluster nodes: %s. "
+                "These nodes will be re-created on the next refresh cycle.",
+                ", ".join(failed_nodes),
+            )
 
     def get_message(
         self,

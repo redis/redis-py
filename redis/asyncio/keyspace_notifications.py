@@ -677,12 +677,34 @@ class AsyncClusterKeyspaceNotifications(AbstractAsyncKeyspaceNotifications):
     async def _unsubscribe_from_all_nodes(
         self, channels: list[str], use_punsubscribe: bool
     ):
-        """Unsubscribe from patterns/channels on all nodes."""
-        for pubsub in self._node_pubsubs.values():
-            if use_punsubscribe:
-                await pubsub.punsubscribe(*channels)
-            else:
-                await pubsub.unsubscribe(*channels)
+        """Unsubscribe from patterns/channels on all nodes.
+
+        Best-effort: tries every node so that a single broken connection
+        does not prevent the remaining nodes from being unsubscribed.
+        Broken pubsubs are cleaned up; the tracking state is still removed
+        by the caller, so ``refresh_subscriptions`` will *not* re-subscribe
+        these channels on replacement nodes.
+        """
+        failed_nodes: list[str] = []
+        for node_name in list(self._node_pubsubs.keys()):
+            pubsub = self._node_pubsubs.get(node_name)
+            if pubsub is None:
+                continue
+            try:
+                if use_punsubscribe:
+                    await pubsub.punsubscribe(*channels)
+                else:
+                    await pubsub.unsubscribe(*channels)
+            except Exception:
+                await self._cleanup_node(node_name)
+                failed_nodes.append(node_name)
+
+        if failed_nodes:
+            logger.warning(
+                "Failed to unsubscribe on cluster nodes: %s. "
+                "These nodes will be re-created on the next refresh cycle.",
+                ", ".join(failed_nodes),
+            )
 
     async def get_message(
         self,
