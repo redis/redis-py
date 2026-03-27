@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 from redis.asyncio.keyspace_notifications import (
     AsyncClusterKeyspaceNotifications,
     AsyncKeyspaceNotifications,
+    _ClusterNodePoolAdapter,
 )
 from redis.keyspace_notifications import (
     EventType,
@@ -390,7 +391,6 @@ class TestAsyncClusterKeyspaceNotificationsMocked:
 
         # Manually inject the mock pubsubs
         notifications._node_pubsubs = pubsubs_by_node.copy()
-        notifications._node_clients = {node1.name: Mock(), node2.name: Mock()}
 
         channel = KeyspaceChannel("mykey", db=0)
         await notifications.subscribe(channel)
@@ -417,7 +417,6 @@ class TestAsyncClusterKeyspaceNotificationsMocked:
 
         # Manually inject the mock pubsubs
         notifications._node_pubsubs = pubsubs_by_node.copy()
-        notifications._node_clients = {node1.name: Mock(), node2.name: Mock()}
 
         channel = KeyspaceChannel("user:*", db=0)
         await notifications.subscribe(channel)
@@ -439,7 +438,6 @@ class TestAsyncClusterKeyspaceNotificationsMocked:
 
         notifications = AsyncClusterKeyspaceNotifications(cluster)
         notifications._node_pubsubs = pubsubs_by_node.copy()
-        notifications._node_clients = {node1.name: Mock(), node2.name: Mock()}
 
         # Subscribe first
         channel = KeyspaceChannel("mykey", db=0)
@@ -489,10 +487,7 @@ class TestAsyncClusterKeyspaceNotificationsMocked:
 
         async with AsyncClusterKeyspaceNotifications(cluster) as notifications:
             # Manually inject the mock pubsub for testing
-            mock_client = MagicMock()
-            mock_client.aclose = AsyncMock()
             notifications._node_pubsubs = pubsubs_by_node.copy()
-            notifications._node_clients = {node1.name: mock_client}
 
             await notifications.subscribe(KeyspaceChannel("mykey"))
             assert notifications.subscribed
@@ -510,7 +505,6 @@ class TestAsyncClusterKeyspaceNotificationsMocked:
 
         notifications = AsyncClusterKeyspaceNotifications(cluster)
         notifications._node_pubsubs = pubsubs_by_node.copy()
-        notifications._node_clients = {node1.name: Mock()}
 
         assert not notifications.subscribed
 
@@ -523,59 +517,40 @@ class TestAsyncClusterKeyspaceNotificationsMocked:
         await notifications.aclose()
 
     @pytest.mark.asyncio
-    async def test_ensure_node_pubsub_removes_host_port_from_conn_kwargs(self):
+    async def test_ensure_node_pubsub_uses_adapter(self):
         """
-        Test that _ensure_node_pubsub properly removes host and port from
-        connection_kwargs before passing them to the Redis constructor.
-
-        This prevents TypeError: __init__() got multiple values for argument 'host'.
+        Test that _ensure_node_pubsub creates a PubSub backed by a
+        _ClusterNodePoolAdapter wrapping the ClusterNode, instead of
+        creating a standalone Redis client.
         """
-        node, mock_pubsub = self._create_mock_node("127.0.0.1:7000", "127.0.0.1", 7000)
+        node, _ = self._create_mock_node("127.0.0.1:7000", "127.0.0.1", 7000)
 
-        # Set up connection_kwargs that include host and port (as ClusterNode does)
+        # Set up connection_kwargs as ClusterNode does
         node.connection_kwargs = {
             "host": "127.0.0.1",
             "port": 7000,
             "password": "secret",
-            "response_callbacks": {"PING": lambda x: x},
         }
+        node.acquire_connection = Mock(return_value=MagicMock())
+        node.release = Mock()
 
         cluster = Mock()
         cluster.get_primaries = Mock(return_value=[node])
         cluster.connection_kwargs = {}
 
         notifications = AsyncClusterKeyspaceNotifications(cluster)
+        pubsub = await notifications._ensure_node_pubsub(node)
 
-        # Mock the Redis class to capture what kwargs are passed
-        with pytest.MonkeyPatch.context() as mp:
-            captured_kwargs = {}
+        # The PubSub's connection_pool should be a _ClusterNodePoolAdapter
+        assert isinstance(pubsub.connection_pool, _ClusterNodePoolAdapter)
+        # The adapter should wrap the original node
+        assert pubsub.connection_pool._node is node
+        # The adapter should expose the node's connection_kwargs
+        assert pubsub.connection_pool.connection_kwargs is node.connection_kwargs
 
-            class MockRedis:
-                def __init__(self, host, port, **kwargs):
-                    captured_kwargs["host"] = host
-                    captured_kwargs["port"] = port
-                    captured_kwargs["other"] = kwargs
-
-                def pubsub(self, **kwargs):
-                    return mock_pubsub
-
-            mp.setattr(
-                "redis.asyncio.keyspace_notifications.Redis",
-                MockRedis,
-            )
-
-            await notifications._ensure_node_pubsub(node)
-
-            # Verify host and port were passed explicitly, not in kwargs
-            assert captured_kwargs["host"] == "127.0.0.1"
-            assert captured_kwargs["port"] == 7000
-            # These should NOT be in the "other" kwargs
-            assert "host" not in captured_kwargs["other"]
-            assert "port" not in captured_kwargs["other"]
-            # But password should still be there
-            assert captured_kwargs["other"].get("password") == "secret"
-            # response_callbacks should be removed
-            assert "response_callbacks" not in captured_kwargs["other"]
+        # Calling again returns the same PubSub (cached)
+        pubsub2 = await notifications._ensure_node_pubsub(node)
+        assert pubsub2 is pubsub
 
         await notifications.aclose()
 
@@ -596,17 +571,8 @@ class TestAsyncClusterKeyspaceNotificationsMocked:
 
         notifications = AsyncClusterKeyspaceNotifications(cluster)
 
-        # Manually inject the mock pubsubs and clients
-        mock_client1 = MagicMock()
-        mock_client1.aclose = AsyncMock()
-        mock_client2 = MagicMock()
-        mock_client2.aclose = AsyncMock()
-
+        # Manually inject the mock pubsubs
         notifications._node_pubsubs = pubsubs_by_node.copy()
-        notifications._node_clients = {
-            node1.name: mock_client1,
-            node2.name: mock_client2,
-        }
 
         # Subscribe first
         channel = KeyspaceChannel("mykey", db=0)

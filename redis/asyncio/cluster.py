@@ -1496,6 +1496,16 @@ class ClusterNode:
         """
         self._free.append(connection)
 
+    def get_encoder(self) -> Encoder:
+        """Return an :class:`Encoder` derived from this node's connection kwargs."""
+        kwargs = self.connection_kwargs
+        encoder_class = kwargs.get("encoder_class", Encoder)
+        return encoder_class(
+            encoding=kwargs.get("encoding", "utf-8"),
+            encoding_errors=kwargs.get("encoding_errors", "strict"),
+            decode_responses=kwargs.get("decode_responses", False),
+        )
+
     def update_active_connections_for_reconnect(self) -> None:
         """
         Mark all in-use (active) connections for reconnect.

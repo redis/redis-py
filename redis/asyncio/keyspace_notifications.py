@@ -45,6 +45,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
+from redis._parsers.encoders import Encoder
 from redis.asyncio.client import PubSub, Redis
 from redis.asyncio.cluster import ClusterNode, RedisCluster
 from redis.exceptions import (
@@ -62,6 +63,44 @@ from redis.keyspace_notifications import (
 from redis.utils import safe_str
 
 logger = logging.getLogger(__name__)
+
+
+class _ClusterNodePoolAdapter:
+    """Thin adapter exposing the :class:`ConnectionPool` interface that
+    :class:`PubSub` requires, backed by a :class:`ClusterNode`'s own
+    connection pool.
+
+    Connections are acquired from the node via
+    :meth:`ClusterNode.acquire_connection` and returned via
+    :meth:`ClusterNode.release`.  :meth:`PubSub.aclose` already
+    disconnects the connection *before* calling :meth:`release`, so the
+    connection is returned to the node's free-queue in a disconnected
+    state — guaranteeing that a subscribed socket is never silently
+    reused for regular commands.
+    """
+
+    def __init__(self, node: ClusterNode) -> None:
+        self._node = node
+        self.connection_kwargs = node.connection_kwargs
+
+    # -- methods used by PubSub ------------------------------------------------
+
+    def get_encoder(self) -> Encoder:
+        return self._node.get_encoder()
+
+    async def get_connection(
+        self, command_name: str | None = None, *keys: Any, **options: Any
+    ) -> Any:
+        connection = self._node.acquire_connection()
+        await connection.connect()
+        return connection
+
+    async def release(self, connection: Any) -> None:
+        # PubSub.aclose() disconnects the connection before calling
+        # release(), so it is safe to put it back in the node's free
+        # queue – it will reconnect lazily on next use.
+        self._node.release(connection)
+
 
 # Type alias for handlers that can be sync or async
 AsyncHandlerT = Callable[[KeyNotification], None | Awaitable[None]]
@@ -540,8 +579,7 @@ class AsyncClusterKeyspaceNotifications(AbstractAsyncKeyspaceNotifications):
         super().__init__(key_prefix, ignore_subscribe_messages)
         self.cluster = redis_cluster
 
-        # Track subscriptions per node: node_name -> (Redis client, PubSub)
-        self._node_clients: dict[str, Redis] = {}
+        # Track subscriptions per node
         self._node_pubsubs: dict[str, PubSub] = {}
 
         # Lock for topology refresh operations
@@ -555,21 +593,34 @@ class AsyncClusterKeyspaceNotifications(AbstractAsyncKeyspaceNotifications):
         return self.cluster.get_primaries()
 
     async def _ensure_node_pubsub(self, node: ClusterNode) -> PubSub:
-        """Get or create a PubSub instance for a node."""
+        """Get or create a PubSub instance for a node.
+
+        Uses a :class:`_ClusterNodePoolAdapter` to borrow a connection
+        from the node's existing pool.  When the ``PubSub`` is closed
+        the connection is disconnected and returned to the node,
+        ensuring no subscribed socket is left in the free queue.
+        """
         if node.name not in self._node_pubsubs:
-            # Create a standalone Redis client for this node using the cluster's
-            # connection parameters
-            conn_kwargs = node.connection_kwargs.copy()
-            # Remove cluster-specific kwargs and host/port (passed explicitly)
-            conn_kwargs.pop("response_callbacks", None)
-            conn_kwargs.pop("host", None)
-            conn_kwargs.pop("port", None)
-            redis_client = Redis(host=node.host, port=int(node.port), **conn_kwargs)
-            self._node_clients[node.name] = redis_client
-            # Create PubSub with ignore_subscribe_messages=False
-            pubsub = redis_client.pubsub(ignore_subscribe_messages=False)
+            pool_adapter = _ClusterNodePoolAdapter(node)
+            pubsub = PubSub(
+                connection_pool=pool_adapter,  # type: ignore[arg-type]
+                ignore_subscribe_messages=False,
+            )
             self._node_pubsubs[node.name] = pubsub
         return self._node_pubsubs[node.name]
+
+    async def _cleanup_node(self, node_name: str) -> None:
+        """Remove and close a node's PubSub.
+
+        ``PubSub.aclose()`` disconnects the connection and releases it
+        back to the underlying :class:`ClusterNode` via the adapter.
+        """
+        pubsub = self._node_pubsubs.pop(node_name, None)
+        if pubsub:
+            try:
+                await pubsub.aclose()
+            except Exception:
+                pass
 
     async def _execute_subscribe(
         self, patterns: dict[str, Any], exact_channels: dict[str, Any]
@@ -600,13 +651,9 @@ class AsyncClusterKeyspaceNotifications(AbstractAsyncKeyspaceNotifications):
                 else:
                     await pubsub.subscribe(**channels)
             except Exception:
-                # Remove the broken pubsub so refresh_subscriptions can
-                # re-create it later.
-                self._node_pubsubs.pop(node.name, None)
-                try:
-                    await pubsub.aclose()
-                except Exception:
-                    pass
+                # Remove the broken pubsub and its connection pool
+                # so refresh_subscriptions can re-create both later.
+                await self._cleanup_node(node.name)
                 failed_nodes.append(node.name)
 
         if failed_nodes:
@@ -812,18 +859,7 @@ class AsyncClusterKeyspaceNotifications(AbstractAsyncKeyspaceNotifications):
                 current_primaries.keys()
             )
             for node_name in removed_nodes:
-                pubsub = self._node_pubsubs.pop(node_name, None)
-                client = self._node_clients.pop(node_name, None)
-                if pubsub:
-                    try:
-                        await pubsub.aclose()
-                    except Exception:
-                        pass
-                if client:
-                    try:
-                        await client.aclose()
-                    except Exception:
-                        pass
+                await self._cleanup_node(node_name)
 
             # Detect broken connections for existing nodes and remove them
             # so they get re-created below
@@ -834,17 +870,7 @@ class AsyncClusterKeyspaceNotifications(AbstractAsyncKeyspaceNotifications):
                 pubsub = self._node_pubsubs.get(node_name)
                 if pubsub and not self._is_pubsub_connected(pubsub):
                     # Connection is broken, remove it so it gets re-created
-                    self._node_pubsubs.pop(node_name, None)
-                    client = self._node_clients.pop(node_name, None)
-                    try:
-                        await pubsub.aclose()
-                    except Exception:
-                        pass
-                    if client:
-                        try:
-                            await client.aclose()
-                        except Exception:
-                            pass
+                    await self._cleanup_node(node_name)
 
             # Subscribe new nodes (and nodes with broken connections)
             # to existing patterns/channels
@@ -861,17 +887,7 @@ class AsyncClusterKeyspaceNotifications(AbstractAsyncKeyspaceNotifications):
                         await pubsub.subscribe(**self._subscribed_channels)
                 except Exception:
                     # Subscription failed - remove from dict so retry is possible
-                    self._node_pubsubs.pop(node_name, None)
-                    client = self._node_clients.pop(node_name, None)
-                    try:
-                        await pubsub.aclose()
-                    except Exception:
-                        pass
-                    if client:
-                        try:
-                            await client.aclose()
-                        except Exception:
-                            pass
+                    await self._cleanup_node(node_name)
                     failed_nodes.append(node_name)
 
             # Raise after attempting all nodes so we don't skip any
@@ -883,17 +899,7 @@ class AsyncClusterKeyspaceNotifications(AbstractAsyncKeyspaceNotifications):
     async def aclose(self):
         """Close all pubsub connections and clean up resources."""
         self._closed = True
-        for pubsub in self._node_pubsubs.values():
-            try:
-                await pubsub.aclose()
-            except Exception:
-                pass
-        for client in self._node_clients.values():
-            try:
-                await client.aclose()
-            except Exception:
-                pass
-        self._node_pubsubs.clear()
-        self._node_clients.clear()
+        for node_name in list(self._node_pubsubs.keys()):
+            await self._cleanup_node(node_name)
         self._subscribed_patterns.clear()
         self._subscribed_channels.clear()
