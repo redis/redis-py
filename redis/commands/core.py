@@ -1,4 +1,4 @@
-# from __future__ import annotations
+from __future__ import annotations
 
 import datetime
 import hashlib
@@ -28,9 +28,9 @@ from typing import (
     Mapping,
     Optional,
     Sequence,
-    Set,
     Tuple,
     Union,
+    overload,
 )
 
 from redis.asyncio.observability.recorder import (
@@ -39,24 +39,44 @@ from redis.asyncio.observability.recorder import (
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
 from redis.typing import (
     AbsExpiryT,
+    ACLGetUserData,
+    ACLLogData,
     AnyKeyT,
+    AsyncClientProtocol,
     BitfieldOffsetT,
+    BlockingListPopResponse,
+    BlockingZSetPopResponse,
     ChannelT,
+    CommandGetKeysAndFlagsResponse,
     CommandsProtocol,
     ConsumerT,
     EncodableT,
     ExpiryT,
     FieldT,
     GroupT,
+    HScanResponse,
     KeysT,
     KeyT,
+    ListMultiPopResponse,
     Number,
     PatternT,
     ResponseT,
+    ScanResponse,
     ScriptTextT,
+    SortResponse,
+    StralgoResponse,
     StreamIdT,
+    StreamRangeResponse,
+    SyncClientProtocol,
     TimeoutSecT,
+    XClaimResponse,
+    XPendingRangeResponse,
+    XReadResponse,
+    ZMPopResponse,
+    ZRandMemberResponse,
+    ZScanResponse,
     ZScoreBoundT,
+    ZSetRangeResponse,
 )
 from redis.utils import (
     deprecated_function,
@@ -75,7 +95,9 @@ from .helpers import at_most_one_value_set, list_or_args
 
 if TYPE_CHECKING:
     import redis.asyncio.client
+    import redis.asyncio.cluster
     import redis.client
+    import redis.cluster
 
 
 class ACLCommands(CommandsProtocol):
@@ -84,7 +106,19 @@ class ACLCommands(CommandsProtocol):
     see: https://redis.io/topics/acl
     """
 
-    def acl_cat(self, category: Optional[str] = None, **kwargs) -> ResponseT:
+    @overload
+    def acl_cat(
+        self: SyncClientProtocol, category: str | None = None, **kwargs
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def acl_cat(
+        self: AsyncClientProtocol, category: str | None = None, **kwargs
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def acl_cat(
+        self, category: str | None = None, **kwargs
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Returns a list of categories or commands within a category.
 
@@ -97,7 +131,19 @@ class ACLCommands(CommandsProtocol):
         pieces: list[EncodableT] = [category] if category else []
         return self.execute_command("ACL CAT", *pieces, **kwargs)
 
-    def acl_dryrun(self, username, *args, **kwargs):
+    @overload
+    def acl_dryrun(
+        self: SyncClientProtocol, username: str, *args: EncodableT, **kwargs
+    ) -> bytes | str: ...
+
+    @overload
+    def acl_dryrun(
+        self: AsyncClientProtocol, username: str, *args: EncodableT, **kwargs
+    ) -> Awaitable[bytes | str]: ...
+
+    def acl_dryrun(self, username: str, *args: EncodableT, **kwargs) -> (
+        bytes | str
+    ) | Awaitable[bytes | str]:
         """
         Simulate the execution of a given command by a given ``username``.
 
@@ -105,7 +151,15 @@ class ACLCommands(CommandsProtocol):
         """
         return self.execute_command("ACL DRYRUN", username, *args, **kwargs)
 
-    def acl_deluser(self, *username: str, **kwargs) -> ResponseT:
+    @overload
+    def acl_deluser(self: SyncClientProtocol, *username: str, **kwargs) -> int: ...
+
+    @overload
+    def acl_deluser(
+        self: AsyncClientProtocol, *username: str, **kwargs
+    ) -> Awaitable[int]: ...
+
+    def acl_deluser(self, *username: str, **kwargs) -> int | Awaitable[int]:
         """
         Delete the ACL for the specified ``username``\\s
 
@@ -113,7 +167,19 @@ class ACLCommands(CommandsProtocol):
         """
         return self.execute_command("ACL DELUSER", *username, **kwargs)
 
-    def acl_genpass(self, bits: Optional[int] = None, **kwargs) -> ResponseT:
+    @overload
+    def acl_genpass(
+        self: SyncClientProtocol, bits: int | None = None, **kwargs
+    ) -> bytes | str: ...
+
+    @overload
+    def acl_genpass(
+        self: AsyncClientProtocol, bits: int | None = None, **kwargs
+    ) -> Awaitable[bytes | str]: ...
+
+    def acl_genpass(self, bits: int | None = None, **kwargs) -> (
+        bytes | str
+    ) | Awaitable[bytes | str]:
         """Generate a random password value.
         If ``bits`` is supplied then use this number of bits, rounded to
         the next multiple of 4.
@@ -132,7 +198,19 @@ class ACLCommands(CommandsProtocol):
                 )
         return self.execute_command("ACL GENPASS", *pieces, **kwargs)
 
-    def acl_getuser(self, username: str, **kwargs) -> ResponseT:
+    @overload
+    def acl_getuser(
+        self: SyncClientProtocol, username: str, **kwargs
+    ) -> ACLGetUserData: ...
+
+    @overload
+    def acl_getuser(
+        self: AsyncClientProtocol, username: str, **kwargs
+    ) -> Awaitable[ACLGetUserData]: ...
+
+    def acl_getuser(
+        self, username: str, **kwargs
+    ) -> ACLGetUserData | Awaitable[ACLGetUserData]:
         """
         Get the ACL details for the specified ``username``.
 
@@ -142,7 +220,15 @@ class ACLCommands(CommandsProtocol):
         """
         return self.execute_command("ACL GETUSER", username, **kwargs)
 
-    def acl_help(self, **kwargs) -> ResponseT:
+    @overload
+    def acl_help(self: SyncClientProtocol, **kwargs) -> list[bytes | str]: ...
+
+    @overload
+    def acl_help(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def acl_help(self, **kwargs) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """The ACL HELP command returns helpful text describing
         the different subcommands.
 
@@ -150,7 +236,15 @@ class ACLCommands(CommandsProtocol):
         """
         return self.execute_command("ACL HELP", **kwargs)
 
-    def acl_list(self, **kwargs) -> ResponseT:
+    @overload
+    def acl_list(self: SyncClientProtocol, **kwargs) -> list[bytes | str]: ...
+
+    @overload
+    def acl_list(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def acl_list(self, **kwargs) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return a list of all ACLs on the server
 
@@ -158,7 +252,19 @@ class ACLCommands(CommandsProtocol):
         """
         return self.execute_command("ACL LIST", **kwargs)
 
-    def acl_log(self, count: Optional[int] = None, **kwargs) -> ResponseT:
+    @overload
+    def acl_log(
+        self: SyncClientProtocol, count: int | None = None, **kwargs
+    ) -> ACLLogData: ...
+
+    @overload
+    def acl_log(
+        self: AsyncClientProtocol, count: int | None = None, **kwargs
+    ) -> Awaitable[ACLLogData]: ...
+
+    def acl_log(
+        self, count: int | None = None, **kwargs
+    ) -> ACLLogData | Awaitable[ACLLogData]:
         """
         Get ACL logs as a list.
         :param int count: Get logs[0:count].
@@ -174,7 +280,13 @@ class ACLCommands(CommandsProtocol):
 
         return self.execute_command("ACL LOG", *args, **kwargs)
 
-    def acl_log_reset(self, **kwargs) -> ResponseT:
+    @overload
+    def acl_log_reset(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def acl_log_reset(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
+
+    def acl_log_reset(self, **kwargs) -> bool | Awaitable[bool]:
         """
         Reset ACL logs.
         :rtype: Boolean.
@@ -184,7 +296,13 @@ class ACLCommands(CommandsProtocol):
         args = [b"RESET"]
         return self.execute_command("ACL LOG", *args, **kwargs)
 
-    def acl_load(self, **kwargs) -> ResponseT:
+    @overload
+    def acl_load(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def acl_load(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
+
+    def acl_load(self, **kwargs) -> bool | Awaitable[bool]:
         """
         Load ACL rules from the configured ``aclfile``.
 
@@ -195,7 +313,13 @@ class ACLCommands(CommandsProtocol):
         """
         return self.execute_command("ACL LOAD", **kwargs)
 
-    def acl_save(self, **kwargs) -> ResponseT:
+    @overload
+    def acl_save(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def acl_save(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
+
+    def acl_save(self, **kwargs) -> bool | Awaitable[bool]:
         """
         Save ACL rules to the configured ``aclfile``.
 
@@ -206,24 +330,64 @@ class ACLCommands(CommandsProtocol):
         """
         return self.execute_command("ACL SAVE", **kwargs)
 
+    @overload
     def acl_setuser(
-        self,
+        self: SyncClientProtocol,
         username: str,
         enabled: bool = False,
         nopass: bool = False,
-        passwords: Optional[Union[str, Iterable[str]]] = None,
-        hashed_passwords: Optional[Union[str, Iterable[str]]] = None,
-        categories: Optional[Iterable[str]] = None,
-        commands: Optional[Iterable[str]] = None,
-        keys: Optional[Iterable[KeyT]] = None,
-        channels: Optional[Iterable[ChannelT]] = None,
-        selectors: Optional[Iterable[Tuple[str, KeyT]]] = None,
+        passwords: str | Iterable[str] | None = None,
+        hashed_passwords: str | Iterable[str] | None = None,
+        categories: Iterable[str] | None = None,
+        commands: Iterable[str] | None = None,
+        keys: Iterable[KeyT] | None = None,
+        channels: Iterable[ChannelT] | None = None,
+        selectors: Iterable[Tuple[str, KeyT]] | None = None,
         reset: bool = False,
         reset_keys: bool = False,
         reset_channels: bool = False,
         reset_passwords: bool = False,
         **kwargs,
-    ) -> ResponseT:
+    ) -> bool: ...
+
+    @overload
+    def acl_setuser(
+        self: AsyncClientProtocol,
+        username: str,
+        enabled: bool = False,
+        nopass: bool = False,
+        passwords: str | Iterable[str] | None = None,
+        hashed_passwords: str | Iterable[str] | None = None,
+        categories: Iterable[str] | None = None,
+        commands: Iterable[str] | None = None,
+        keys: Iterable[KeyT] | None = None,
+        channels: Iterable[ChannelT] | None = None,
+        selectors: Iterable[Tuple[str, KeyT]] | None = None,
+        reset: bool = False,
+        reset_keys: bool = False,
+        reset_channels: bool = False,
+        reset_passwords: bool = False,
+        **kwargs,
+    ) -> Awaitable[bool]: ...
+
+    def acl_setuser(
+        self,
+        username: str,
+        enabled: bool = False,
+        nopass: bool = False,
+        passwords: str | Iterable[str] | None = None,
+        hashed_passwords: str | Iterable[str] | None = None,
+        categories: Iterable[str] | None = None,
+        commands: Iterable[str] | None = None,
+        keys: Iterable[KeyT] | None = None,
+        channels: Iterable[ChannelT] | None = None,
+        selectors: Iterable[Tuple[str, KeyT]] | None = None,
+        reset: bool = False,
+        reset_keys: bool = False,
+        reset_channels: bool = False,
+        reset_passwords: bool = False,
+        **kwargs,
+    ) -> bool | Awaitable[bool]:
         """
         Create or update an ACL user.
 
@@ -397,14 +561,28 @@ class ACLCommands(CommandsProtocol):
 
         return self.execute_command("ACL SETUSER", *pieces, **kwargs)
 
-    def acl_users(self, **kwargs) -> ResponseT:
+    @overload
+    def acl_users(self: SyncClientProtocol, **kwargs) -> list[bytes | str]: ...
+
+    @overload
+    def acl_users(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def acl_users(self, **kwargs) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """Returns a list of all registered users on the server.
 
         For more information, see https://redis.io/commands/acl-users
         """
         return self.execute_command("ACL USERS", **kwargs)
 
-    def acl_whoami(self, **kwargs) -> ResponseT:
+    @overload
+    def acl_whoami(self: SyncClientProtocol, **kwargs) -> bytes | str: ...
+
+    @overload
+    def acl_whoami(self: AsyncClientProtocol, **kwargs) -> Awaitable[bytes | str]: ...
+
+    def acl_whoami(self, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
         """Get the username for the current connection
 
         For more information, see https://redis.io/commands/acl-whoami
@@ -425,7 +603,25 @@ class ManagementCommands(CommandsProtocol):
     Redis management commands
     """
 
-    def auth(self, password: str, username: Optional[str] = None, **kwargs):
+    @overload
+    def auth(
+        self: SyncClientProtocol,
+        password: str,
+        username: str | None = None,
+        **kwargs,
+    ) -> bool: ...
+
+    @overload
+    def auth(
+        self: AsyncClientProtocol,
+        password: str,
+        username: str | None = None,
+        **kwargs,
+    ) -> Awaitable[bool]: ...
+
+    def auth(
+        self, password: str, username: str | None = None, **kwargs
+    ) -> bool | Awaitable[bool]:
         """
         Authenticates the user. If you do not pass username, Redis will try to
         authenticate for the "default" user. If you do pass username, it will
@@ -438,14 +634,36 @@ class ManagementCommands(CommandsProtocol):
         pieces.append(password)
         return self.execute_command("AUTH", *pieces, **kwargs)
 
-    def bgrewriteaof(self, **kwargs):
+    @overload
+    def bgrewriteaof(self: SyncClientProtocol, **kwargs) -> bool | bytes | str: ...
+
+    @overload
+    def bgrewriteaof(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[bool | bytes | str]: ...
+
+    def bgrewriteaof(self, **kwargs) -> (bool | bytes | str) | Awaitable[
+        bool | bytes | str
+    ]:
         """Tell the Redis server to rewrite the AOF file from data in memory.
 
         For more information, see https://redis.io/commands/bgrewriteaof
         """
         return self.execute_command("BGREWRITEAOF", **kwargs)
 
-    def bgsave(self, schedule: bool = True, **kwargs) -> ResponseT:
+    @overload
+    def bgsave(
+        self: SyncClientProtocol, schedule: bool = True, **kwargs
+    ) -> bool | bytes | str: ...
+
+    @overload
+    def bgsave(
+        self: AsyncClientProtocol, schedule: bool = True, **kwargs
+    ) -> Awaitable[bool | bytes | str]: ...
+
+    def bgsave(self, schedule: bool = True, **kwargs) -> (
+        bool | bytes | str
+    ) | Awaitable[bool | bytes | str]:
         """
         Tell the Redis server to save its data to disk.  Unlike save(),
         this method is asynchronous and returns immediately.
@@ -457,7 +675,13 @@ class ManagementCommands(CommandsProtocol):
             pieces.append("SCHEDULE")
         return self.execute_command("BGSAVE", *pieces, **kwargs)
 
-    def role(self) -> ResponseT:
+    @overload
+    def role(self: SyncClientProtocol) -> list[Any]: ...
+
+    @overload
+    def role(self: AsyncClientProtocol) -> Awaitable[list[Any]]: ...
+
+    def role(self) -> list[Any] | Awaitable[list[Any]]:
         """
         Provide information on the role of a Redis instance in
         the context of replication, by returning if the instance
@@ -467,24 +691,60 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("ROLE")
 
-    def client_kill(self, address: str, **kwargs) -> ResponseT:
+    @overload
+    def client_kill(self: SyncClientProtocol, address: str, **kwargs) -> bool | int: ...
+
+    @overload
+    def client_kill(
+        self: AsyncClientProtocol, address: str, **kwargs
+    ) -> Awaitable[bool | int]: ...
+
+    def client_kill(self, address: str, **kwargs) -> (bool | int) | Awaitable[
+        bool | int
+    ]:
         """Disconnects the client at ``address`` (ip:port)
 
         For more information, see https://redis.io/commands/client-kill
         """
         return self.execute_command("CLIENT KILL", address, **kwargs)
 
+    @overload
+    def client_kill_filter(
+        self: SyncClientProtocol,
+        _id: str | None = None,
+        _type: str | None = None,
+        addr: str | None = None,
+        skipme: bool | None = None,
+        laddr: bool | None = None,
+        user: str | None = None,
+        maxage: int | None = None,
+        **kwargs,
+    ) -> int: ...
+
+    @overload
+    def client_kill_filter(
+        self: AsyncClientProtocol,
+        _id: str | None = None,
+        _type: str | None = None,
+        addr: str | None = None,
+        skipme: bool | None = None,
+        laddr: bool | None = None,
+        user: str | None = None,
+        maxage: int | None = None,
+        **kwargs,
+    ) -> Awaitable[int]: ...
+
     def client_kill_filter(
         self,
-        _id: Optional[str] = None,
-        _type: Optional[str] = None,
-        addr: Optional[str] = None,
-        skipme: Optional[bool] = None,
-        laddr: Optional[bool] = None,
-        user: Optional[str] = None,
-        maxage: Optional[int] = None,
+        _id: str | None = None,
+        _type: str | None = None,
+        addr: str | None = None,
+        skipme: bool | None = None,
+        laddr: bool | None = None,
+        user: str | None = None,
+        maxage: int | None = None,
         **kwargs,
-    ) -> ResponseT:
+    ) -> int | Awaitable[int]:
         """
         Disconnects client(s) using a variety of filter options
         :param _id: Kills a client by its unique ID field
@@ -528,7 +788,17 @@ class ManagementCommands(CommandsProtocol):
             )
         return self.execute_command("CLIENT KILL", *args, **kwargs)
 
-    def client_info(self, **kwargs) -> ResponseT:
+    @overload
+    def client_info(self: SyncClientProtocol, **kwargs) -> dict[str, str | int]: ...
+
+    @overload
+    def client_info(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[dict[str, str | int]]: ...
+
+    def client_info(
+        self, **kwargs
+    ) -> dict[str, str | int] | Awaitable[dict[str, str | int]]:
         """
         Returns information and statistics about the current
         client connection.
@@ -537,9 +807,25 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT INFO", **kwargs)
 
+    @overload
     def client_list(
-        self, _type: Optional[str] = None, client_id: List[EncodableT] = [], **kwargs
-    ) -> ResponseT:
+        self: SyncClientProtocol,
+        _type: str | None = None,
+        client_id: List[EncodableT] = [],
+        **kwargs,
+    ) -> list[dict[str, str]]: ...
+
+    @overload
+    def client_list(
+        self: AsyncClientProtocol,
+        _type: str | None = None,
+        client_id: List[EncodableT] = [],
+        **kwargs,
+    ) -> Awaitable[list[dict[str, str]]]: ...
+
+    def client_list(
+        self, _type: str | None = None, client_id: List[EncodableT] = [], **kwargs
+    ) -> list[dict[str, str]] | Awaitable[list[dict[str, str]]]:
         """
         Returns a list of currently connected clients.
         If type of client specified, only that type will be returned.
@@ -564,7 +850,17 @@ class ManagementCommands(CommandsProtocol):
             args += client_id
         return self.execute_command("CLIENT LIST", *args, **kwargs)
 
-    def client_getname(self, **kwargs) -> ResponseT:
+    @overload
+    def client_getname(self: SyncClientProtocol, **kwargs) -> bytes | str | None: ...
+
+    @overload
+    def client_getname(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[bytes | str | None]: ...
+
+    def client_getname(self, **kwargs) -> (bytes | str | None) | Awaitable[
+        bytes | str | None
+    ]:
         """
         Returns the current connection name
 
@@ -572,7 +868,13 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT GETNAME", **kwargs)
 
-    def client_getredir(self, **kwargs) -> ResponseT:
+    @overload
+    def client_getredir(self: SyncClientProtocol, **kwargs) -> int: ...
+
+    @overload
+    def client_getredir(self: AsyncClientProtocol, **kwargs) -> Awaitable[int]: ...
+
+    def client_getredir(self, **kwargs) -> int | Awaitable[int]:
         """
         Returns the ID (an integer) of the client to whom we are
         redirecting tracking notifications.
@@ -581,9 +883,23 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT GETREDIR", **kwargs)
 
+    @overload
     def client_reply(
-        self, reply: Union[Literal["ON"], Literal["OFF"], Literal["SKIP"]], **kwargs
-    ) -> ResponseT:
+        self: SyncClientProtocol,
+        reply: Literal["ON", "OFF", "SKIP"],
+        **kwargs,
+    ) -> bytes | str: ...
+
+    @overload
+    def client_reply(
+        self: AsyncClientProtocol,
+        reply: Literal["ON", "OFF", "SKIP"],
+        **kwargs,
+    ) -> Awaitable[bytes | str]: ...
+
+    def client_reply(self, reply: Literal["ON", "OFF", "SKIP"], **kwargs) -> (
+        bytes | str
+    ) | Awaitable[bytes | str]:
         """
         Enable and disable redis server replies.
 
@@ -605,7 +921,13 @@ class ManagementCommands(CommandsProtocol):
             raise DataError(f"CLIENT REPLY must be one of {replies!r}")
         return self.execute_command("CLIENT REPLY", reply, **kwargs)
 
-    def client_id(self, **kwargs) -> ResponseT:
+    @overload
+    def client_id(self: SyncClientProtocol, **kwargs) -> int: ...
+
+    @overload
+    def client_id(self: AsyncClientProtocol, **kwargs) -> Awaitable[int]: ...
+
+    def client_id(self, **kwargs) -> int | Awaitable[int]:
         """
         Returns the current connection id
 
@@ -613,15 +935,37 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT ID", **kwargs)
 
+    @overload
     def client_tracking_on(
-        self,
-        clientid: Optional[int] = None,
+        self: SyncClientProtocol,
+        clientid: int | None = None,
         prefix: Sequence[KeyT] = [],
         bcast: bool = False,
         optin: bool = False,
         optout: bool = False,
         noloop: bool = False,
-    ) -> ResponseT:
+    ) -> bytes | str: ...
+
+    @overload
+    def client_tracking_on(
+        self: AsyncClientProtocol,
+        clientid: int | None = None,
+        prefix: Sequence[KeyT] = [],
+        bcast: bool = False,
+        optin: bool = False,
+        optout: bool = False,
+        noloop: bool = False,
+    ) -> Awaitable[bytes | str]: ...
+
+    def client_tracking_on(
+        self,
+        clientid: int | None = None,
+        prefix: Sequence[KeyT] = [],
+        bcast: bool = False,
+        optin: bool = False,
+        optout: bool = False,
+        noloop: bool = False,
+    ) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Turn on the tracking mode.
         For more information, about the options look at client_tracking func.
@@ -632,15 +976,37 @@ class ManagementCommands(CommandsProtocol):
             True, clientid, prefix, bcast, optin, optout, noloop
         )
 
+    @overload
     def client_tracking_off(
-        self,
-        clientid: Optional[int] = None,
+        self: SyncClientProtocol,
+        clientid: int | None = None,
         prefix: Sequence[KeyT] = [],
         bcast: bool = False,
         optin: bool = False,
         optout: bool = False,
         noloop: bool = False,
-    ) -> ResponseT:
+    ) -> bytes | str: ...
+
+    @overload
+    def client_tracking_off(
+        self: AsyncClientProtocol,
+        clientid: int | None = None,
+        prefix: Sequence[KeyT] = [],
+        bcast: bool = False,
+        optin: bool = False,
+        optout: bool = False,
+        noloop: bool = False,
+    ) -> Awaitable[bytes | str]: ...
+
+    def client_tracking_off(
+        self,
+        clientid: int | None = None,
+        prefix: Sequence[KeyT] = [],
+        bcast: bool = False,
+        optin: bool = False,
+        optout: bool = False,
+        noloop: bool = False,
+    ) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Turn off the tracking mode.
         For more information, about the options look at client_tracking func.
@@ -651,17 +1017,43 @@ class ManagementCommands(CommandsProtocol):
             False, clientid, prefix, bcast, optin, optout, noloop
         )
 
+    @overload
     def client_tracking(
-        self,
+        self: SyncClientProtocol,
         on: bool = True,
-        clientid: Optional[int] = None,
+        clientid: int | None = None,
         prefix: Sequence[KeyT] = [],
         bcast: bool = False,
         optin: bool = False,
         optout: bool = False,
         noloop: bool = False,
         **kwargs,
-    ) -> ResponseT:
+    ) -> bytes | str: ...
+
+    @overload
+    def client_tracking(
+        self: AsyncClientProtocol,
+        on: bool = True,
+        clientid: int | None = None,
+        prefix: Sequence[KeyT] = [],
+        bcast: bool = False,
+        optin: bool = False,
+        optout: bool = False,
+        noloop: bool = False,
+        **kwargs,
+    ) -> Awaitable[bytes | str]: ...
+
+    def client_tracking(
+        self,
+        on: bool = True,
+        clientid: int | None = None,
+        prefix: Sequence[KeyT] = [],
+        bcast: bool = False,
+        optin: bool = False,
+        optout: bool = False,
+        noloop: bool = False,
+        **kwargs,
+    ) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Enables the tracking feature of the Redis server, that is used
         for server assisted client side caching.
@@ -711,7 +1103,19 @@ class ManagementCommands(CommandsProtocol):
 
         return self.execute_command("CLIENT TRACKING", *pieces, **kwargs)
 
-    def client_trackinginfo(self, **kwargs) -> ResponseT:
+    @overload
+    def client_trackinginfo(
+        self: SyncClientProtocol, **kwargs
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def client_trackinginfo(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def client_trackinginfo(
+        self, **kwargs
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Returns the information about the current client connection's
         use of the server assisted client side cache.
@@ -720,7 +1124,15 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT TRACKINGINFO", **kwargs)
 
-    def client_setname(self, name: str, **kwargs) -> ResponseT:
+    @overload
+    def client_setname(self: SyncClientProtocol, name: str, **kwargs) -> bool: ...
+
+    @overload
+    def client_setname(
+        self: AsyncClientProtocol, name: str, **kwargs
+    ) -> Awaitable[bool]: ...
+
+    def client_setname(self, name: str, **kwargs) -> bool | Awaitable[bool]:
         """
         Sets the current connection name
 
@@ -734,16 +1146,36 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT SETNAME", name, **kwargs)
 
-    def client_setinfo(self, attr: str, value: str, **kwargs) -> ResponseT:
+    @overload
+    def client_setinfo(
+        self: SyncClientProtocol, attr: str, value: str, **kwargs
+    ) -> bool: ...
+
+    @overload
+    def client_setinfo(
+        self: AsyncClientProtocol, attr: str, value: str, **kwargs
+    ) -> Awaitable[bool]: ...
+
+    def client_setinfo(self, attr: str, value: str, **kwargs) -> bool | Awaitable[bool]:
         """
         Sets the current connection library name or version
         For mor information see https://redis.io/commands/client-setinfo
         """
         return self.execute_command("CLIENT SETINFO", attr, value, **kwargs)
 
+    @overload
+    def client_unblock(
+        self: SyncClientProtocol, client_id: int, error: bool = False, **kwargs
+    ) -> bool: ...
+
+    @overload
+    def client_unblock(
+        self: AsyncClientProtocol, client_id: int, error: bool = False, **kwargs
+    ) -> Awaitable[bool]: ...
+
     def client_unblock(
         self, client_id: int, error: bool = False, **kwargs
-    ) -> ResponseT:
+    ) -> bool | Awaitable[bool]:
         """
         Unblocks a connection by its client id.
         If ``error`` is True, unblocks the client with a special error message.
@@ -757,7 +1189,19 @@ class ManagementCommands(CommandsProtocol):
             args.append(b"ERROR")
         return self.execute_command(*args, **kwargs)
 
-    def client_pause(self, timeout: int, all: bool = True, **kwargs) -> ResponseT:
+    @overload
+    def client_pause(
+        self: SyncClientProtocol, timeout: int, all: bool = True, **kwargs
+    ) -> bool: ...
+
+    @overload
+    def client_pause(
+        self: AsyncClientProtocol, timeout: int, all: bool = True, **kwargs
+    ) -> Awaitable[bool]: ...
+
+    def client_pause(
+        self, timeout: int, all: bool = True, **kwargs
+    ) -> bool | Awaitable[bool]:
         """
         Suspend all the Redis clients for the specified amount of time.
 
@@ -785,7 +1229,15 @@ class ManagementCommands(CommandsProtocol):
             args.append("WRITE")
         return self.execute_command(*args, **kwargs)
 
-    def client_unpause(self, **kwargs) -> ResponseT:
+    @overload
+    def client_unpause(self: SyncClientProtocol, **kwargs) -> bytes | str: ...
+
+    @overload
+    def client_unpause(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[bytes | str]: ...
+
+    def client_unpause(self, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Unpause all redis clients
 
@@ -793,7 +1245,15 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT UNPAUSE", **kwargs)
 
-    def client_no_evict(self, mode: str) -> Union[Awaitable[str], str]:
+    @overload
+    def client_no_evict(self: SyncClientProtocol, mode: str) -> bytes | str: ...
+
+    @overload
+    def client_no_evict(
+        self: AsyncClientProtocol, mode: str
+    ) -> Awaitable[bytes | str]: ...
+
+    def client_no_evict(self, mode: str) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Sets the client eviction mode for the current connection.
 
@@ -801,7 +1261,15 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT NO-EVICT", mode)
 
-    def client_no_touch(self, mode: str) -> Union[Awaitable[str], str]:
+    @overload
+    def client_no_touch(self: SyncClientProtocol, mode: str) -> bytes | str: ...
+
+    @overload
+    def client_no_touch(
+        self: AsyncClientProtocol, mode: str
+    ) -> Awaitable[bytes | str]: ...
+
+    def client_no_touch(self, mode: str) -> (bytes | str) | Awaitable[bytes | str]:
         """
         # The command controls whether commands sent by the client will alter
         # the LRU/LFU of the keys they access.
@@ -812,7 +1280,17 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CLIENT NO-TOUCH", mode)
 
-    def command(self, **kwargs):
+    @overload
+    def command(self: SyncClientProtocol, **kwargs) -> dict[str, dict[str, Any]]: ...
+
+    @overload
+    def command(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[dict[str, dict[str, Any]]]: ...
+
+    def command(
+        self, **kwargs
+    ) -> dict[str, dict[str, Any]] | Awaitable[dict[str, dict[str, Any]]]:
         """
         Returns dict reply of details about all Redis commands.
 
@@ -825,15 +1303,37 @@ class ManagementCommands(CommandsProtocol):
             "COMMAND INFO is intentionally not implemented in the client."
         )
 
-    def command_count(self, **kwargs) -> ResponseT:
+    @overload
+    def command_count(self: SyncClientProtocol, **kwargs) -> int: ...
+
+    @overload
+    def command_count(self: AsyncClientProtocol, **kwargs) -> Awaitable[int]: ...
+
+    def command_count(self, **kwargs) -> int | Awaitable[int]:
         return self.execute_command("COMMAND COUNT", **kwargs)
+
+    @overload
+    def command_list(
+        self: SyncClientProtocol,
+        module: str | None = None,
+        category: str | None = None,
+        pattern: str | None = None,
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def command_list(
+        self: AsyncClientProtocol,
+        module: str | None = None,
+        category: str | None = None,
+        pattern: str | None = None,
+    ) -> Awaitable[list[bytes | str]]: ...
 
     def command_list(
         self,
-        module: Optional[str] = None,
-        category: Optional[str] = None,
-        pattern: Optional[str] = None,
-    ) -> ResponseT:
+        module: str | None = None,
+        category: str | None = None,
+        pattern: str | None = None,
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return an array of the server's command names.
         You can use one of the following filters:
@@ -856,7 +1356,19 @@ class ManagementCommands(CommandsProtocol):
 
         return self.execute_command("COMMAND LIST", *pieces)
 
-    def command_getkeysandflags(self, *args: str) -> List[Union[str, List[str]]]:
+    @overload
+    def command_getkeysandflags(
+        self: SyncClientProtocol, *args: str
+    ) -> CommandGetKeysAndFlagsResponse: ...
+
+    @overload
+    def command_getkeysandflags(
+        self: AsyncClientProtocol, *args: str
+    ) -> Awaitable[CommandGetKeysAndFlagsResponse]: ...
+
+    def command_getkeysandflags(
+        self, *args: str
+    ) -> CommandGetKeysAndFlagsResponse | Awaitable[CommandGetKeysAndFlagsResponse]:
         """
         Returns array of keys from a full Redis command and their usage flags.
 
@@ -873,9 +1385,19 @@ class ManagementCommands(CommandsProtocol):
             "COMMAND DOCS is intentionally not implemented in the client."
         )
 
+    @overload
+    def config_get(
+        self: SyncClientProtocol, pattern: PatternT = "*", *args: PatternT, **kwargs
+    ) -> dict[str | None, str | None]: ...
+
+    @overload
+    def config_get(
+        self: AsyncClientProtocol, pattern: PatternT = "*", *args: PatternT, **kwargs
+    ) -> Awaitable[dict[str | None, str | None]]: ...
+
     def config_get(
         self, pattern: PatternT = "*", *args: PatternT, **kwargs
-    ) -> ResponseT:
+    ) -> dict[str | None, str | None] | Awaitable[dict[str | None, str | None]]:
         """
         Return a dictionary of configuration based on the ``pattern``
 
@@ -883,20 +1405,44 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CONFIG GET", pattern, *args, **kwargs)
 
+    @overload
+    def config_set(
+        self: SyncClientProtocol,
+        name: KeyT,
+        value: EncodableT,
+        *args: Union[KeyT, EncodableT],
+        **kwargs,
+    ) -> bool: ...
+
+    @overload
+    def config_set(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        value: EncodableT,
+        *args: Union[KeyT, EncodableT],
+        **kwargs,
+    ) -> Awaitable[bool]: ...
+
     def config_set(
         self,
         name: KeyT,
         value: EncodableT,
         *args: Union[KeyT, EncodableT],
         **kwargs,
-    ) -> ResponseT:
+    ) -> bool | Awaitable[bool]:
         """Set config item ``name`` with ``value``
 
         For more information, see https://redis.io/commands/config-set
         """
         return self.execute_command("CONFIG SET", name, value, *args, **kwargs)
 
-    def config_resetstat(self, **kwargs) -> ResponseT:
+    @overload
+    def config_resetstat(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def config_resetstat(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
+
+    def config_resetstat(self, **kwargs) -> bool | Awaitable[bool]:
         """
         Reset runtime statistics
 
@@ -904,7 +1450,15 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CONFIG RESETSTAT", **kwargs)
 
-    def config_rewrite(self, **kwargs) -> ResponseT:
+    @overload
+    def config_rewrite(self: SyncClientProtocol, **kwargs) -> bytes | str: ...
+
+    @overload
+    def config_rewrite(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[bytes | str]: ...
+
+    def config_rewrite(self, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Rewrite config file with the minimal change to reflect running config.
 
@@ -912,7 +1466,13 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("CONFIG REWRITE", **kwargs)
 
-    def dbsize(self, **kwargs) -> ResponseT:
+    @overload
+    def dbsize(self: SyncClientProtocol, **kwargs) -> int: ...
+
+    @overload
+    def dbsize(self: AsyncClientProtocol, **kwargs) -> Awaitable[int]: ...
+
+    def dbsize(self, **kwargs) -> int | Awaitable[int]:
         """
         Returns the number of keys in the current database
 
@@ -920,7 +1480,19 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("DBSIZE", **kwargs)
 
-    def debug_object(self, key: KeyT, **kwargs) -> ResponseT:
+    @overload
+    def debug_object(
+        self: SyncClientProtocol, key: KeyT, **kwargs
+    ) -> dict[str, str | int] | bytes | str: ...
+
+    @overload
+    def debug_object(
+        self: AsyncClientProtocol, key: KeyT, **kwargs
+    ) -> Awaitable[dict[str, str | int] | bytes | str]: ...
+
+    def debug_object(self, key: KeyT, **kwargs) -> (
+        dict[str, str | int] | bytes | str
+    ) | Awaitable[dict[str, str | int] | bytes | str]:
         """
         Returns version specific meta information about a given key
 
@@ -937,7 +1509,17 @@ class ManagementCommands(CommandsProtocol):
             """
         )
 
-    def echo(self, value: EncodableT, **kwargs) -> ResponseT:
+    @overload
+    def echo(self: SyncClientProtocol, value: EncodableT, **kwargs) -> bytes | str: ...
+
+    @overload
+    def echo(
+        self: AsyncClientProtocol, value: EncodableT, **kwargs
+    ) -> Awaitable[bytes | str]: ...
+
+    def echo(self, value: EncodableT, **kwargs) -> (bytes | str) | Awaitable[
+        bytes | str
+    ]:
         """
         Echo the string back from the server
 
@@ -945,7 +1527,17 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("ECHO", value, **kwargs)
 
-    def flushall(self, asynchronous: bool = False, **kwargs) -> ResponseT:
+    @overload
+    def flushall(
+        self: SyncClientProtocol, asynchronous: bool = False, **kwargs
+    ) -> bool: ...
+
+    @overload
+    def flushall(
+        self: AsyncClientProtocol, asynchronous: bool = False, **kwargs
+    ) -> Awaitable[bool]: ...
+
+    def flushall(self, asynchronous: bool = False, **kwargs) -> bool | Awaitable[bool]:
         """
         Delete all keys in all databases on the current host.
 
@@ -959,7 +1551,17 @@ class ManagementCommands(CommandsProtocol):
             args.append(b"ASYNC")
         return self.execute_command("FLUSHALL", *args, **kwargs)
 
-    def flushdb(self, asynchronous: bool = False, **kwargs) -> ResponseT:
+    @overload
+    def flushdb(
+        self: SyncClientProtocol, asynchronous: bool = False, **kwargs
+    ) -> bool: ...
+
+    @overload
+    def flushdb(
+        self: AsyncClientProtocol, asynchronous: bool = False, **kwargs
+    ) -> Awaitable[bool]: ...
+
+    def flushdb(self, asynchronous: bool = False, **kwargs) -> bool | Awaitable[bool]:
         """
         Delete all keys in the current database.
 
@@ -973,7 +1575,13 @@ class ManagementCommands(CommandsProtocol):
             args.append(b"ASYNC")
         return self.execute_command("FLUSHDB", *args, **kwargs)
 
-    def sync(self) -> ResponseT:
+    @overload
+    def sync(self: SyncClientProtocol) -> bytes: ...
+
+    @overload
+    def sync(self: AsyncClientProtocol) -> Awaitable[bytes]: ...
+
+    def sync(self) -> bytes | Awaitable[bytes]:
         """
         Initiates a replication stream from the master.
 
@@ -985,7 +1593,15 @@ class ManagementCommands(CommandsProtocol):
         options[NEVER_DECODE] = []
         return self.execute_command("SYNC", **options)
 
-    def psync(self, replicationid: str, offset: int):
+    @overload
+    def psync(self: SyncClientProtocol, replicationid: str, offset: int) -> bytes: ...
+
+    @overload
+    def psync(
+        self: AsyncClientProtocol, replicationid: str, offset: int
+    ) -> Awaitable[bytes]: ...
+
+    def psync(self, replicationid: str, offset: int) -> bytes | Awaitable[bytes]:
         """
         Initiates a replication stream from the master.
         Newer version for `sync`.
@@ -998,7 +1614,15 @@ class ManagementCommands(CommandsProtocol):
         options[NEVER_DECODE] = []
         return self.execute_command("PSYNC", replicationid, offset, **options)
 
-    def swapdb(self, first: int, second: int, **kwargs) -> ResponseT:
+    @overload
+    def swapdb(self: SyncClientProtocol, first: int, second: int, **kwargs) -> bool: ...
+
+    @overload
+    def swapdb(
+        self: AsyncClientProtocol, first: int, second: int, **kwargs
+    ) -> Awaitable[bool]: ...
+
+    def swapdb(self, first: int, second: int, **kwargs) -> bool | Awaitable[bool]:
         """
         Swap two databases
 
@@ -1006,14 +1630,38 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("SWAPDB", first, second, **kwargs)
 
-    def select(self, index: int, **kwargs) -> ResponseT:
+    @overload
+    def select(self: SyncClientProtocol, index: int, **kwargs) -> bool: ...
+
+    @overload
+    def select(self: AsyncClientProtocol, index: int, **kwargs) -> Awaitable[bool]: ...
+
+    def select(self, index: int, **kwargs) -> bool | Awaitable[bool]:
         """Select the Redis logical database at index.
 
         See: https://redis.io/commands/select
         """
         return self.execute_command("SELECT", index, **kwargs)
 
-    def info(self, section: Optional[str] = None, *args: str, **kwargs) -> ResponseT:
+    @overload
+    def info(
+        self: SyncClientProtocol,
+        section: Optional[str] = None,
+        *args: str,
+        **kwargs,
+    ) -> dict[str, Any]: ...
+
+    @overload
+    def info(
+        self: AsyncClientProtocol,
+        section: Optional[str] = None,
+        *args: str,
+        **kwargs,
+    ) -> Awaitable[dict[str, Any]]: ...
+
+    def info(
+        self, section: Optional[str] = None, *args: str, **kwargs
+    ) -> dict[str, Any] | Awaitable[dict[str, Any]]:
         """
         Returns a dictionary containing information about the Redis server
 
@@ -1030,7 +1678,15 @@ class ManagementCommands(CommandsProtocol):
         else:
             return self.execute_command("INFO", section, *args, **kwargs)
 
-    def lastsave(self, **kwargs) -> ResponseT:
+    @overload
+    def lastsave(self: SyncClientProtocol, **kwargs) -> datetime.datetime: ...
+
+    @overload
+    def lastsave(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[datetime.datetime]: ...
+
+    def lastsave(self, **kwargs) -> datetime.datetime | Awaitable[datetime.datetime]:
         """
         Return a Python datetime object representing the last time the
         Redis database was saved to disk
@@ -1067,7 +1723,19 @@ class ManagementCommands(CommandsProtocol):
             """
         )
 
-    def lolwut(self, *version_numbers: Union[str, float], **kwargs) -> ResponseT:
+    @overload
+    def lolwut(
+        self: SyncClientProtocol, *version_numbers: Union[str, float], **kwargs
+    ) -> bytes | str: ...
+
+    @overload
+    def lolwut(
+        self: AsyncClientProtocol, *version_numbers: Union[str, float], **kwargs
+    ) -> Awaitable[bytes | str]: ...
+
+    def lolwut(self, *version_numbers: Union[str, float], **kwargs) -> (
+        bytes | str
+    ) | Awaitable[bytes | str]:
         """
         Get the Redis version and a piece of generative computer art
 
@@ -1078,12 +1746,46 @@ class ManagementCommands(CommandsProtocol):
         else:
             return self.execute_command("LOLWUT", **kwargs)
 
-    def reset(self) -> ResponseT:
+    @overload
+    def reset(self: SyncClientProtocol) -> bytes | str: ...
+
+    @overload
+    def reset(self: AsyncClientProtocol) -> Awaitable[bytes | str]: ...
+
+    def reset(self) -> (bytes | str) | Awaitable[bytes | str]:
         """Perform a full reset on the connection's server-side context.
 
         See: https://redis.io/commands/reset
         """
         return self.execute_command("RESET")
+
+    @overload
+    def migrate(
+        self: SyncClientProtocol,
+        host: str,
+        port: int,
+        keys: KeysT,
+        destination_db: int,
+        timeout: int,
+        copy: bool = False,
+        replace: bool = False,
+        auth: str | None = None,
+        **kwargs,
+    ) -> bytes | str: ...
+
+    @overload
+    def migrate(
+        self: AsyncClientProtocol,
+        host: str,
+        port: int,
+        keys: KeysT,
+        destination_db: int,
+        timeout: int,
+        copy: bool = False,
+        replace: bool = False,
+        auth: str | None = None,
+        **kwargs,
+    ) -> Awaitable[bytes | str]: ...
 
     def migrate(
         self,
@@ -1094,9 +1796,9 @@ class ManagementCommands(CommandsProtocol):
         timeout: int,
         copy: bool = False,
         replace: bool = False,
-        auth: Optional[str] = None,
+        auth: str | None = None,
         **kwargs,
-    ) -> ResponseT:
+    ) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Migrate 1 or more keys from the current Redis server to a different
         server specified by the ``host``, ``port`` and ``destination_db``.
@@ -1133,7 +1835,15 @@ class ManagementCommands(CommandsProtocol):
             "MIGRATE", host, port, "", destination_db, timeout, *pieces, **kwargs
         )
 
-    def object(self, infotype: str, key: KeyT, **kwargs) -> ResponseT:
+    @overload
+    def object(self: SyncClientProtocol, infotype: str, key: KeyT, **kwargs) -> Any: ...
+
+    @overload
+    def object(
+        self: AsyncClientProtocol, infotype: str, key: KeyT, **kwargs
+    ) -> Awaitable[Any]: ...
+
+    def object(self, infotype: str, key: KeyT, **kwargs) -> Any | Awaitable[Any]:
         """
         Return the encoding, idletime, or refcount about the key
         """
@@ -1159,7 +1869,15 @@ class ManagementCommands(CommandsProtocol):
             """
         )
 
-    def memory_stats(self, **kwargs) -> ResponseT:
+    @overload
+    def memory_stats(self: SyncClientProtocol, **kwargs) -> dict[str, Any]: ...
+
+    @overload
+    def memory_stats(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[dict[str, Any]]: ...
+
+    def memory_stats(self, **kwargs) -> dict[str, Any] | Awaitable[dict[str, Any]]:
         """
         Return a dictionary of memory stats
 
@@ -1167,7 +1885,15 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("MEMORY STATS", **kwargs)
 
-    def memory_malloc_stats(self, **kwargs) -> ResponseT:
+    @overload
+    def memory_malloc_stats(self: SyncClientProtocol, **kwargs) -> bytes | str: ...
+
+    @overload
+    def memory_malloc_stats(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[bytes | str]: ...
+
+    def memory_malloc_stats(self, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Return an internal statistics report from the memory allocator.
 
@@ -1175,9 +1901,19 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("MEMORY MALLOC-STATS", **kwargs)
 
+    @overload
     def memory_usage(
-        self, key: KeyT, samples: Optional[int] = None, **kwargs
-    ) -> ResponseT:
+        self: SyncClientProtocol, key: KeyT, samples: int | None = None, **kwargs
+    ) -> int | None: ...
+
+    @overload
+    def memory_usage(
+        self: AsyncClientProtocol, key: KeyT, samples: int | None = None, **kwargs
+    ) -> Awaitable[int | None]: ...
+
+    def memory_usage(self, key: KeyT, samples: int | None = None, **kwargs) -> (
+        int | None
+    ) | Awaitable[int | None]:
         """
         Return the total memory usage for key, its value and associated
         administrative overheads.
@@ -1193,7 +1929,13 @@ class ManagementCommands(CommandsProtocol):
             args.extend([b"SAMPLES", samples])
         return self.execute_command("MEMORY USAGE", key, *args, **kwargs)
 
-    def memory_purge(self, **kwargs) -> ResponseT:
+    @overload
+    def memory_purge(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def memory_purge(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
+
+    def memory_purge(self, **kwargs) -> bool | Awaitable[bool]:
         """
         Attempts to purge dirty pages for reclamation by allocator
 
@@ -1210,7 +1952,17 @@ class ManagementCommands(CommandsProtocol):
             "LATENCY HISTOGRAM is intentionally not implemented in the client."
         )
 
-    def latency_history(self, event: str) -> ResponseT:
+    @overload
+    def latency_history(self: SyncClientProtocol, event: str) -> list[list[int]]: ...
+
+    @overload
+    def latency_history(
+        self: AsyncClientProtocol, event: str
+    ) -> Awaitable[list[list[int]]]: ...
+
+    def latency_history(
+        self, event: str
+    ) -> list[list[int]] | Awaitable[list[list[int]]]:
         """
         Returns the raw data of the ``event``'s latency spikes time series.
 
@@ -1218,7 +1970,17 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("LATENCY HISTORY", event)
 
-    def latency_latest(self) -> ResponseT:
+    @overload
+    def latency_latest(self: SyncClientProtocol) -> list[list[bytes | str | int]]: ...
+
+    @overload
+    def latency_latest(
+        self: AsyncClientProtocol,
+    ) -> Awaitable[list[list[bytes | str | int]]]: ...
+
+    def latency_latest(
+        self,
+    ) -> list[list[bytes | str | int]] | Awaitable[list[list[bytes | str | int]]]:
         """
         Reports the latest latency events logged.
 
@@ -1226,13 +1988,25 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("LATENCY LATEST")
 
-    def latency_reset(self, *events: str) -> ResponseT:
+    @overload
+    def latency_reset(self: SyncClientProtocol, *events: str) -> int: ...
+
+    @overload
+    def latency_reset(self: AsyncClientProtocol, *events: str) -> Awaitable[int]: ...
+
+    def latency_reset(self, *events: str) -> int | Awaitable[int]:
         """
         Resets the latency spikes time series of all, or only some, events.
 
         For more information, see https://redis.io/commands/latency-reset
         """
         return self.execute_command("LATENCY RESET", *events)
+
+    @overload
+    def ping(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def ping(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
 
     def ping(self, **kwargs) -> Union[Awaitable[bool], bool]:
         """
@@ -1249,7 +2023,13 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("PING", **kwargs)
 
-    def quit(self, **kwargs) -> ResponseT:
+    @overload
+    def quit(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def quit(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
+
+    def quit(self, **kwargs) -> bool | Awaitable[bool]:
         """
         Ask the server to close the connection.
 
@@ -1257,7 +2037,15 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("QUIT", **kwargs)
 
-    def replicaof(self, *args, **kwargs) -> ResponseT:
+    @overload
+    def replicaof(self: SyncClientProtocol, *args, **kwargs) -> bytes | str: ...
+
+    @overload
+    def replicaof(
+        self: AsyncClientProtocol, *args, **kwargs
+    ) -> Awaitable[bytes | str]: ...
+
+    def replicaof(self, *args, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Update the replication settings of a redis replica, on the fly.
 
@@ -1270,7 +2058,13 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("REPLICAOF", *args, **kwargs)
 
-    def save(self, **kwargs) -> ResponseT:
+    @overload
+    def save(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def save(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
+
+    def save(self, **kwargs) -> bool | Awaitable[bool]:
         """
         Tell the Redis server to save its data to disk,
         blocking until the save is complete
@@ -1321,9 +2115,25 @@ class ManagementCommands(CommandsProtocol):
             return
         raise RedisError("SHUTDOWN seems to have failed.")
 
+    @overload
     def slaveof(
-        self, host: Optional[str] = None, port: Optional[int] = None, **kwargs
-    ) -> ResponseT:
+        self: SyncClientProtocol,
+        host: str | None = None,
+        port: int | None = None,
+        **kwargs,
+    ) -> bool: ...
+
+    @overload
+    def slaveof(
+        self: AsyncClientProtocol,
+        host: str | None = None,
+        port: int | None = None,
+        **kwargs,
+    ) -> Awaitable[bool]: ...
+
+    def slaveof(
+        self, host: str | None = None, port: int | None = None, **kwargs
+    ) -> bool | Awaitable[bool]:
         """
         Set the server to be a replicated slave of the instance identified
         by the ``host`` and ``port``. If called without arguments, the
@@ -1335,7 +2145,19 @@ class ManagementCommands(CommandsProtocol):
             return self.execute_command("SLAVEOF", b"NO", b"ONE", **kwargs)
         return self.execute_command("SLAVEOF", host, port, **kwargs)
 
-    def slowlog_get(self, num: Optional[int] = None, **kwargs) -> ResponseT:
+    @overload
+    def slowlog_get(
+        self: SyncClientProtocol, num: int | None = None, **kwargs
+    ) -> list[dict[str, Any]]: ...
+
+    @overload
+    def slowlog_get(
+        self: AsyncClientProtocol, num: int | None = None, **kwargs
+    ) -> Awaitable[list[dict[str, Any]]]: ...
+
+    def slowlog_get(
+        self, num: int | None = None, **kwargs
+    ) -> list[dict[str, Any]] | Awaitable[list[dict[str, Any]]]:
         """
         Get the entries from the slowlog. If ``num`` is specified, get the
         most recent ``num`` items.
@@ -1352,7 +2174,13 @@ class ManagementCommands(CommandsProtocol):
             kwargs[NEVER_DECODE] = []
         return self.execute_command(*args, **kwargs)
 
-    def slowlog_len(self, **kwargs) -> ResponseT:
+    @overload
+    def slowlog_len(self: SyncClientProtocol, **kwargs) -> int: ...
+
+    @overload
+    def slowlog_len(self: AsyncClientProtocol, **kwargs) -> Awaitable[int]: ...
+
+    def slowlog_len(self, **kwargs) -> int | Awaitable[int]:
         """
         Get the number of items in the slowlog
 
@@ -1360,7 +2188,13 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("SLOWLOG LEN", **kwargs)
 
-    def slowlog_reset(self, **kwargs) -> ResponseT:
+    @overload
+    def slowlog_reset(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def slowlog_reset(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
+
+    def slowlog_reset(self, **kwargs) -> bool | Awaitable[bool]:
         """
         Remove all items in the slowlog
 
@@ -1368,7 +2202,13 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("SLOWLOG RESET", **kwargs)
 
-    def time(self, **kwargs) -> ResponseT:
+    @overload
+    def time(self: SyncClientProtocol, **kwargs) -> tuple[int, int]: ...
+
+    @overload
+    def time(self: AsyncClientProtocol, **kwargs) -> Awaitable[tuple[int, int]]: ...
+
+    def time(self, **kwargs) -> tuple[int, int] | Awaitable[tuple[int, int]]:
         """
         Returns the server time as a 2-item tuple of ints:
         (seconds since epoch, microseconds into this second).
@@ -1377,7 +2217,17 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("TIME", **kwargs)
 
-    def wait(self, num_replicas: int, timeout: int, **kwargs) -> ResponseT:
+    @overload
+    def wait(
+        self: SyncClientProtocol, num_replicas: int, timeout: int, **kwargs
+    ) -> int: ...
+
+    @overload
+    def wait(
+        self: AsyncClientProtocol, num_replicas: int, timeout: int, **kwargs
+    ) -> Awaitable[int]: ...
+
+    def wait(self, num_replicas: int, timeout: int, **kwargs) -> int | Awaitable[int]:
         """
         Redis synchronous replication
         That returns the number of replicas that processed the query when
@@ -1388,9 +2238,27 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("WAIT", num_replicas, timeout, **kwargs)
 
+    @overload
+    def waitaof(
+        self: SyncClientProtocol,
+        num_local: int,
+        num_replicas: int,
+        timeout: int,
+        **kwargs,
+    ) -> list[int]: ...
+
+    @overload
+    def waitaof(
+        self: AsyncClientProtocol,
+        num_local: int,
+        num_replicas: int,
+        timeout: int,
+        **kwargs,
+    ) -> Awaitable[list[int]]: ...
+
     def waitaof(
         self, num_local: int, num_replicas: int, timeout: int, **kwargs
-    ) -> ResponseT:
+    ) -> list[int] | Awaitable[list[int]]:
         """
         This command blocks the current client until all previous write
         commands by that client are acknowledged as having been fsynced
@@ -1421,15 +2289,37 @@ class ManagementCommands(CommandsProtocol):
             "FAILOVER is intentionally not implemented in the client."
         )
 
+    @overload
+    def hotkeys_start(
+        self: SyncClientProtocol,
+        metrics: List[HotkeysMetricsTypes],
+        count: int | None = None,
+        duration: int | None = None,
+        sample_ratio: int | None = None,
+        slots: List[int] | None = None,
+        **kwargs,
+    ) -> bytes | str: ...
+
+    @overload
+    def hotkeys_start(
+        self: AsyncClientProtocol,
+        metrics: List[HotkeysMetricsTypes],
+        count: int | None = None,
+        duration: int | None = None,
+        sample_ratio: int | None = None,
+        slots: List[int] | None = None,
+        **kwargs,
+    ) -> Awaitable[bytes | str]: ...
+
     def hotkeys_start(
         self,
         metrics: List[HotkeysMetricsTypes],
-        count: Optional[int] = None,
-        duration: Optional[int] = None,
-        sample_ratio: Optional[int] = None,
-        slots: Optional[List[int]] = None,
+        count: int | None = None,
+        duration: int | None = None,
+        sample_ratio: int | None = None,
+        slots: List[int] | None = None,
         **kwargs,
-    ) -> Union[Awaitable[Union[str, bytes]], Union[str, bytes]]:
+    ) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Start collecting hotkeys data.
         Returns an error if there is an ongoing collection session.
@@ -1469,9 +2359,13 @@ class ManagementCommands(CommandsProtocol):
 
         return self.execute_command(*args, **kwargs)
 
-    def hotkeys_stop(
-        self, **kwargs
-    ) -> Union[Awaitable[Union[str, bytes]], Union[str, bytes]]:
+    @overload
+    def hotkeys_stop(self: SyncClientProtocol, **kwargs) -> bytes | str: ...
+
+    @overload
+    def hotkeys_stop(self: AsyncClientProtocol, **kwargs) -> Awaitable[bytes | str]: ...
+
+    def hotkeys_stop(self, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Stop the ongoing hotkeys collection session (if any).
         The results of the last collection session are kept for consumption with HOTKEYS GET.
@@ -1480,9 +2374,15 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("HOTKEYS STOP", **kwargs)
 
+    @overload
+    def hotkeys_reset(self: SyncClientProtocol, **kwargs) -> bytes | str: ...
+
+    @overload
     def hotkeys_reset(
-        self, **kwargs
-    ) -> Union[Awaitable[Union[str, bytes]], Union[str, bytes]]:
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[bytes | str]: ...
+
+    def hotkeys_reset(self, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Discard the last hotkeys collection session results (in order to save memory).
         Error if there is an ongoing collection session.
@@ -1491,11 +2391,21 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("HOTKEYS RESET", **kwargs)
 
+    @overload
+    def hotkeys_get(
+        self: SyncClientProtocol, **kwargs
+    ) -> list[dict[str | bytes, Any]]: ...
+
+    @overload
+    def hotkeys_get(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[list[dict[str | bytes, Any]]]: ...
+
     def hotkeys_get(
         self, **kwargs
     ) -> Union[
-        Awaitable[list[dict[Union[str, bytes], Any]]],
-        list[dict[Union[str, bytes], Any]],
+        Awaitable[list[dict[str | bytes, Any]]],
+        list[dict[str | bytes, Any]],
     ]:
         """
         Retrieve the result of the ongoing collection session (if any),
@@ -1688,7 +2598,15 @@ class BasicKeyCommands(CommandsProtocol):
     Redis basic key-based commands
     """
 
-    def append(self, key: KeyT, value: EncodableT) -> ResponseT:
+    @overload
+    def append(self: SyncClientProtocol, key: KeyT, value: EncodableT) -> int: ...
+
+    @overload
+    def append(
+        self: AsyncClientProtocol, key: KeyT, value: EncodableT
+    ) -> Awaitable[int]: ...
+
+    def append(self, key: KeyT, value: EncodableT) -> int | Awaitable[int]:
         """
         Appends the string ``value`` to the value at ``key``. If ``key``
         doesn't already exist, create it with a value of ``value``.
@@ -1698,13 +2616,31 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("APPEND", key, value)
 
+    @overload
+    def bitcount(
+        self: SyncClientProtocol,
+        key: KeyT,
+        start: int | None = None,
+        end: int | None = None,
+        mode: str | None = None,
+    ) -> int: ...
+
+    @overload
+    def bitcount(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        start: int | None = None,
+        end: int | None = None,
+        mode: str | None = None,
+    ) -> Awaitable[int]: ...
+
     def bitcount(
         self,
         key: KeyT,
-        start: Optional[int] = None,
-        end: Optional[int] = None,
-        mode: Optional[str] = None,
-    ) -> ResponseT:
+        start: int | None = None,
+        end: int | None = None,
+        mode: str | None = None,
+    ) -> int | Awaitable[int]:
         """
         Returns the count of set bits in the value of ``key``.  Optional
         ``start`` and ``end`` parameters indicate which bytes to consider
@@ -1724,7 +2660,7 @@ class BasicKeyCommands(CommandsProtocol):
     def bitfield(
         self: Union["redis.client.Redis", "redis.asyncio.client.Redis"],
         key: KeyT,
-        default_overflow: Optional[str] = None,
+        default_overflow: str | None = None,
     ) -> BitFieldOperation:
         """
         Return a BitFieldOperation instance to conveniently construct one or
@@ -1734,13 +2670,31 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return BitFieldOperation(self, key, default_overflow=default_overflow)
 
+    @overload
+    def bitfield_ro(
+        self: SyncClientProtocol,
+        key: KeyT,
+        encoding: str,
+        offset: BitfieldOffsetT,
+        items: list[tuple[str, BitfieldOffsetT]] | None = None,
+    ) -> list[int]: ...
+
+    @overload
+    def bitfield_ro(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        encoding: str,
+        offset: BitfieldOffsetT,
+        items: list[tuple[str, BitfieldOffsetT]] | None = None,
+    ) -> Awaitable[list[int]]: ...
+
     def bitfield_ro(
         self: Union["redis.client.Redis", "redis.asyncio.client.Redis"],
         key: KeyT,
         encoding: str,
         offset: BitfieldOffsetT,
-        items: Optional[list] = None,
-    ) -> ResponseT:
+        items: list[tuple[str, BitfieldOffsetT]] | None = None,
+    ) -> list[int] | Awaitable[list[int]]:
         """
         Return an array of the specified bitfield values
         where the first value is found using ``encoding`` and ``offset``
@@ -1757,7 +2711,17 @@ class BasicKeyCommands(CommandsProtocol):
             params.extend(["GET", encoding, offset])
         return self.execute_command("BITFIELD_RO", *params, keys=[key])
 
-    def bitop(self, operation: str, dest: KeyT, *keys: KeyT) -> ResponseT:
+    @overload
+    def bitop(
+        self: SyncClientProtocol, operation: str, dest: KeyT, *keys: KeyT
+    ) -> int: ...
+
+    @overload
+    def bitop(
+        self: AsyncClientProtocol, operation: str, dest: KeyT, *keys: KeyT
+    ) -> Awaitable[int]: ...
+
+    def bitop(self, operation: str, dest: KeyT, *keys: KeyT) -> int | Awaitable[int]:
         """
         Perform a bitwise operation using ``operation`` between ``keys`` and
         store the result in ``dest``.
@@ -1766,14 +2730,34 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("BITOP", operation, dest, *keys)
 
+    @overload
+    def bitpos(
+        self: SyncClientProtocol,
+        key: KeyT,
+        bit: int,
+        start: int | None = None,
+        end: int | None = None,
+        mode: str | None = None,
+    ) -> int: ...
+
+    @overload
+    def bitpos(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        bit: int,
+        start: int | None = None,
+        end: int | None = None,
+        mode: str | None = None,
+    ) -> Awaitable[int]: ...
+
     def bitpos(
         self,
         key: KeyT,
         bit: int,
-        start: Optional[int] = None,
-        end: Optional[int] = None,
-        mode: Optional[str] = None,
-    ) -> ResponseT:
+        start: int | None = None,
+        end: int | None = None,
+        mode: str | None = None,
+    ) -> int | Awaitable[int]:
         """
         Return the position of the first bit set to 1 or 0 in a string.
         ``start`` and ``end`` defines search range. The range is interpreted
@@ -1797,13 +2781,31 @@ class BasicKeyCommands(CommandsProtocol):
             params.append(mode)
         return self.execute_command("BITPOS", *params, keys=[key])
 
+    @overload
+    def copy(
+        self: SyncClientProtocol,
+        source: str,
+        destination: str,
+        destination_db: str | None = None,
+        replace: bool = False,
+    ) -> bool: ...
+
+    @overload
+    def copy(
+        self: AsyncClientProtocol,
+        source: str,
+        destination: str,
+        destination_db: str | None = None,
+        replace: bool = False,
+    ) -> Awaitable[bool]: ...
+
     def copy(
         self,
         source: str,
         destination: str,
-        destination_db: Optional[str] = None,
+        destination_db: str | None = None,
         replace: bool = False,
-    ) -> ResponseT:
+    ) -> bool | Awaitable[bool]:
         """
         Copy the value stored in the ``source`` key to the ``destination`` key.
 
@@ -1823,7 +2825,15 @@ class BasicKeyCommands(CommandsProtocol):
             params.append("REPLACE")
         return self.execute_command("COPY", *params)
 
-    def decrby(self, name: KeyT, amount: int = 1) -> ResponseT:
+    @overload
+    def decrby(self: SyncClientProtocol, name: KeyT, amount: int = 1) -> int: ...
+
+    @overload
+    def decrby(
+        self: AsyncClientProtocol, name: KeyT, amount: int = 1
+    ) -> Awaitable[int]: ...
+
+    def decrby(self, name: KeyT, amount: int = 1) -> int | Awaitable[int]:
         """
         Decrements the value of ``key`` by ``amount``.  If no key exists,
         the value will be initialized as 0 - ``amount``
@@ -1834,7 +2844,13 @@ class BasicKeyCommands(CommandsProtocol):
 
     decr = decrby
 
-    def delete(self, *names: KeyT) -> ResponseT:
+    @overload
+    def delete(self: SyncClientProtocol, *names: KeyT) -> int: ...
+
+    @overload
+    def delete(self: AsyncClientProtocol, *names: KeyT) -> Awaitable[int]: ...
+
+    def delete(self, *names: KeyT) -> int | Awaitable[int]:
         """
         Delete one or more keys specified by ``names``
         """
@@ -1843,15 +2859,35 @@ class BasicKeyCommands(CommandsProtocol):
     def __delitem__(self, name: KeyT):
         self.delete(name)
 
+    @overload
+    def delex(
+        self: SyncClientProtocol,
+        name: KeyT,
+        ifeq: bytes | str | None = None,
+        ifne: bytes | str | None = None,
+        ifdeq: str | None = None,
+        ifdne: str | None = None,
+    ) -> int: ...
+
+    @overload
+    def delex(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        ifeq: bytes | str | None = None,
+        ifne: bytes | str | None = None,
+        ifdeq: str | None = None,
+        ifdne: str | None = None,
+    ) -> Awaitable[int]: ...
+
     @experimental_method()
     def delex(
         self,
         name: KeyT,
-        ifeq: Optional[Union[bytes, str]] = None,
-        ifne: Optional[Union[bytes, str]] = None,
-        ifdeq: Optional[str] = None,  # hex digest
-        ifdne: Optional[str] = None,  # hex digest
-    ) -> int:
+        ifeq: bytes | str | None = None,
+        ifne: bytes | str | None = None,
+        ifdeq: str | None = None,  # hex digest
+        ifdne: str | None = None,  # hex digest
+    ) -> int | Awaitable[int]:
         """
         Conditionally removes the specified key.
 
@@ -1894,7 +2930,13 @@ class BasicKeyCommands(CommandsProtocol):
 
         return self.execute_command(*pieces)
 
-    def dump(self, name: KeyT) -> ResponseT:
+    @overload
+    def dump(self: SyncClientProtocol, name: KeyT) -> bytes | None: ...
+
+    @overload
+    def dump(self: AsyncClientProtocol, name: KeyT) -> Awaitable[bytes | None]: ...
+
+    def dump(self, name: KeyT) -> (bytes | None) | Awaitable[bytes | None]:
         """
         Return a serialized version of the value stored at the specified key.
         If key does not exist a nil bulk reply is returned.
@@ -1907,7 +2949,13 @@ class BasicKeyCommands(CommandsProtocol):
         options[NEVER_DECODE] = []
         return self.execute_command("DUMP", name, **options)
 
-    def exists(self, *names: KeyT) -> ResponseT:
+    @overload
+    def exists(self: SyncClientProtocol, *names: KeyT) -> int: ...
+
+    @overload
+    def exists(self: AsyncClientProtocol, *names: KeyT) -> Awaitable[int]: ...
+
+    def exists(self, *names: KeyT) -> int | Awaitable[int]:
         """
         Returns the number of ``names`` that exist
 
@@ -1917,6 +2965,28 @@ class BasicKeyCommands(CommandsProtocol):
 
     __contains__ = exists
 
+    @overload
+    def expire(
+        self: SyncClientProtocol,
+        name: KeyT,
+        time: ExpiryT,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> bool: ...
+
+    @overload
+    def expire(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        time: ExpiryT,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> Awaitable[bool]: ...
+
     def expire(
         self,
         name: KeyT,
@@ -1925,7 +2995,7 @@ class BasicKeyCommands(CommandsProtocol):
         xx: bool = False,
         gt: bool = False,
         lt: bool = False,
-    ) -> ResponseT:
+    ) -> bool | Awaitable[bool]:
         """
         Set an expire flag on key ``name`` for ``time`` seconds with given
         ``option``. ``time`` can be represented by an integer or a Python timedelta
@@ -1954,6 +3024,28 @@ class BasicKeyCommands(CommandsProtocol):
 
         return self.execute_command("EXPIRE", name, time, *exp_option)
 
+    @overload
+    def expireat(
+        self: SyncClientProtocol,
+        name: KeyT,
+        when: AbsExpiryT,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> bool: ...
+
+    @overload
+    def expireat(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        when: AbsExpiryT,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> Awaitable[bool]: ...
+
     def expireat(
         self,
         name: KeyT,
@@ -1962,7 +3054,7 @@ class BasicKeyCommands(CommandsProtocol):
         xx: bool = False,
         gt: bool = False,
         lt: bool = False,
-    ) -> ResponseT:
+    ) -> bool | Awaitable[bool]:
         """
         Set an expire flag on key ``name`` with given ``option``. ``when``
         can be represented as an integer indicating unix time or a Python
@@ -1991,7 +3083,13 @@ class BasicKeyCommands(CommandsProtocol):
 
         return self.execute_command("EXPIREAT", name, when, *exp_option)
 
-    def expiretime(self, key: str) -> int:
+    @overload
+    def expiretime(self: SyncClientProtocol, key: str) -> int: ...
+
+    @overload
+    def expiretime(self: AsyncClientProtocol, key: str) -> Awaitable[int]: ...
+
+    def expiretime(self, key: str) -> int | Awaitable[int]:
         """
         Returns the absolute Unix timestamp (since January 1, 1970) in seconds
         at which the given key will expire.
@@ -2001,7 +3099,7 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("EXPIRETIME", key)
 
     @experimental_method()
-    def digest_local(self, value: Union[bytes, str]) -> Union[bytes, str]:
+    def digest_local(self, value: bytes | str) -> bytes | str:
         """
         Compute the hexadecimal digest of the value locally, without sending it to the server.
 
@@ -2038,8 +3136,18 @@ class BasicKeyCommands(CommandsProtocol):
 
         return local_digest
 
+    @overload
+    def digest(self: SyncClientProtocol, name: KeyT) -> str | bytes | None: ...
+
+    @overload
+    def digest(
+        self: AsyncClientProtocol, name: KeyT
+    ) -> Awaitable[str | bytes | None]: ...
+
     @experimental_method()
-    def digest(self, name: KeyT) -> Union[str, bytes, None]:
+    def digest(self, name: KeyT) -> (str | bytes | None) | Awaitable[
+        str | bytes | None
+    ]:
         """
         Return the digest of the value stored at the specified key.
 
@@ -2064,7 +3172,13 @@ class BasicKeyCommands(CommandsProtocol):
         # Bulk string response is already handled (bytes/str based on decode_responses)
         return self.execute_command("DIGEST", name)
 
-    def get(self, name: KeyT) -> ResponseT:
+    @overload
+    def get(self: SyncClientProtocol, name: KeyT) -> bytes | str | None: ...
+
+    @overload
+    def get(self: AsyncClientProtocol, name: KeyT) -> Awaitable[bytes | str | None]: ...
+
+    def get(self, name: KeyT) -> (bytes | str | None) | Awaitable[bytes | str | None]:
         """
         Return the value at key ``name``, or None if the key doesn't exist
 
@@ -2072,7 +3186,17 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("GET", name, keys=[name])
 
-    def getdel(self, name: KeyT) -> ResponseT:
+    @overload
+    def getdel(self: SyncClientProtocol, name: KeyT) -> bytes | str | None: ...
+
+    @overload
+    def getdel(
+        self: AsyncClientProtocol, name: KeyT
+    ) -> Awaitable[bytes | str | None]: ...
+
+    def getdel(self, name: KeyT) -> (bytes | str | None) | Awaitable[
+        bytes | str | None
+    ]:
         """
         Get the value at key ``name`` and delete the key. This command
         is similar to GET, except for the fact that it also deletes
@@ -2083,15 +3207,37 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("GETDEL", name)
 
+    @overload
+    def getex(
+        self: SyncClientProtocol,
+        name: KeyT,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        persist: bool = False,
+    ) -> bytes | str | None: ...
+
+    @overload
+    def getex(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        persist: bool = False,
+    ) -> Awaitable[bytes | str | None]: ...
+
     def getex(
         self,
         name: KeyT,
-        ex: Optional[ExpiryT] = None,
-        px: Optional[ExpiryT] = None,
-        exat: Optional[AbsExpiryT] = None,
-        pxat: Optional[AbsExpiryT] = None,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
         persist: bool = False,
-    ) -> ResponseT:
+    ) -> (bytes | str | None) | Awaitable[bytes | str | None]:
         """
         Get the value of key and optionally set its expiration.
         GETEX is similar to GET, but is a write command with
@@ -2135,7 +3281,15 @@ class BasicKeyCommands(CommandsProtocol):
             return value
         raise KeyError(name)
 
-    def getbit(self, name: KeyT, offset: int) -> ResponseT:
+    @overload
+    def getbit(self: SyncClientProtocol, name: KeyT, offset: int) -> int: ...
+
+    @overload
+    def getbit(
+        self: AsyncClientProtocol, name: KeyT, offset: int
+    ) -> Awaitable[int]: ...
+
+    def getbit(self, name: KeyT, offset: int) -> int | Awaitable[int]:
         """
         Returns an integer indicating the value of ``offset`` in ``name``
 
@@ -2143,7 +3297,19 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("GETBIT", name, offset, keys=[name])
 
-    def getrange(self, key: KeyT, start: int, end: int) -> ResponseT:
+    @overload
+    def getrange(
+        self: SyncClientProtocol, key: KeyT, start: int, end: int
+    ) -> bytes | str: ...
+
+    @overload
+    def getrange(
+        self: AsyncClientProtocol, key: KeyT, start: int, end: int
+    ) -> Awaitable[bytes | str]: ...
+
+    def getrange(self, key: KeyT, start: int, end: int) -> (bytes | str) | Awaitable[
+        bytes | str
+    ]:
         """
         Returns the substring of the string value stored at ``key``,
         determined by the offsets ``start`` and ``end`` (both are inclusive)
@@ -2152,7 +3318,19 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("GETRANGE", key, start, end, keys=[key])
 
-    def getset(self, name: KeyT, value: EncodableT) -> ResponseT:
+    @overload
+    def getset(
+        self: SyncClientProtocol, name: KeyT, value: EncodableT
+    ) -> bytes | str | None: ...
+
+    @overload
+    def getset(
+        self: AsyncClientProtocol, name: KeyT, value: EncodableT
+    ) -> Awaitable[bytes | str | None]: ...
+
+    def getset(self, name: KeyT, value: EncodableT) -> (bytes | str | None) | Awaitable[
+        bytes | str | None
+    ]:
         """
         Sets the value at key ``name`` to ``value``
         and returns the old value at key ``name`` atomically.
@@ -2164,7 +3342,15 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("GETSET", name, value)
 
-    def incrby(self, name: KeyT, amount: int = 1) -> ResponseT:
+    @overload
+    def incrby(self: SyncClientProtocol, name: KeyT, amount: int = 1) -> int: ...
+
+    @overload
+    def incrby(
+        self: AsyncClientProtocol, name: KeyT, amount: int = 1
+    ) -> Awaitable[int]: ...
+
+    def incrby(self, name: KeyT, amount: int = 1) -> int | Awaitable[int]:
         """
         Increments the value of ``key`` by ``amount``.  If no key exists,
         the value will be initialized as ``amount``
@@ -2175,7 +3361,17 @@ class BasicKeyCommands(CommandsProtocol):
 
     incr = incrby
 
-    def incrbyfloat(self, name: KeyT, amount: float = 1.0) -> ResponseT:
+    @overload
+    def incrbyfloat(
+        self: SyncClientProtocol, name: KeyT, amount: float = 1.0
+    ) -> float: ...
+
+    @overload
+    def incrbyfloat(
+        self: AsyncClientProtocol, name: KeyT, amount: float = 1.0
+    ) -> Awaitable[float]: ...
+
+    def incrbyfloat(self, name: KeyT, amount: float = 1.0) -> float | Awaitable[float]:
         """
         Increments the value at key ``name`` by floating ``amount``.
         If no key exists, the value will be initialized as ``amount``
@@ -2184,7 +3380,19 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("INCRBYFLOAT", name, amount)
 
-    def keys(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
+    @overload
+    def keys(
+        self: SyncClientProtocol, pattern: PatternT = "*", **kwargs
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def keys(
+        self: AsyncClientProtocol, pattern: PatternT = "*", **kwargs
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def keys(
+        self, pattern: PatternT = "*", **kwargs
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Returns a list of keys matching ``pattern``
 
@@ -2192,9 +3400,27 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("KEYS", pattern, **kwargs)
 
+    @overload
+    def lmove(
+        self: SyncClientProtocol,
+        first_list: str,
+        second_list: str,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+    ) -> bytes | str | None: ...
+
+    @overload
+    def lmove(
+        self: AsyncClientProtocol,
+        first_list: str,
+        second_list: str,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+    ) -> Awaitable[bytes | str | None]: ...
+
     def lmove(
         self, first_list: str, second_list: str, src: str = "LEFT", dest: str = "RIGHT"
-    ) -> ResponseT:
+    ) -> (bytes | str | None) | Awaitable[bytes | str | None]:
         """
         Atomically returns and removes the first/last element of a list,
         pushing it as the first/last element on the destination list.
@@ -2205,6 +3431,26 @@ class BasicKeyCommands(CommandsProtocol):
         params = [first_list, second_list, src, dest]
         return self.execute_command("LMOVE", *params)
 
+    @overload
+    def blmove(
+        self: SyncClientProtocol,
+        first_list: str,
+        second_list: str,
+        timeout: int,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+    ) -> bytes | str | None: ...
+
+    @overload
+    def blmove(
+        self: AsyncClientProtocol,
+        first_list: str,
+        second_list: str,
+        timeout: int,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+    ) -> Awaitable[bytes | str | None]: ...
+
     def blmove(
         self,
         first_list: str,
@@ -2212,7 +3458,7 @@ class BasicKeyCommands(CommandsProtocol):
         timeout: int,
         src: str = "LEFT",
         dest: str = "RIGHT",
-    ) -> ResponseT:
+    ) -> (bytes | str | None) | Awaitable[bytes | str | None]:
         """
         Blocking version of lmove.
 
@@ -2221,7 +3467,19 @@ class BasicKeyCommands(CommandsProtocol):
         params = [first_list, second_list, src, dest, timeout]
         return self.execute_command("BLMOVE", *params)
 
-    def mget(self, keys: KeysT, *args: EncodableT) -> ResponseT:
+    @overload
+    def mget(
+        self: SyncClientProtocol, keys: KeysT, *args: EncodableT
+    ) -> list[bytes | str | None]: ...
+
+    @overload
+    def mget(
+        self: AsyncClientProtocol, keys: KeysT, *args: EncodableT
+    ) -> Awaitable[list[bytes | str | None]]: ...
+
+    def mget(
+        self, keys: KeysT, *args: EncodableT
+    ) -> list[bytes | str | None] | Awaitable[list[bytes | str | None]]:
         """
         Returns a list of values ordered identically to ``keys``
 
@@ -2240,7 +3498,17 @@ class BasicKeyCommands(CommandsProtocol):
         options["keys"] = args
         return self.execute_command("MGET", *args, **options)
 
-    def mset(self, mapping: Mapping[AnyKeyT, EncodableT]) -> ResponseT:
+    @overload
+    def mset(
+        self: SyncClientProtocol, mapping: Mapping[AnyKeyT, EncodableT]
+    ) -> bool: ...
+
+    @overload
+    def mset(
+        self: AsyncClientProtocol, mapping: Mapping[AnyKeyT, EncodableT]
+    ) -> Awaitable[bool]: ...
+
+    def mset(self, mapping: Mapping[AnyKeyT, EncodableT]) -> bool | Awaitable[bool]:
         """
         Sets key/values based on a mapping. Mapping is a dictionary of
         key/value pairs. Both keys and values should be strings or types that
@@ -2257,16 +3525,40 @@ class BasicKeyCommands(CommandsProtocol):
             items.extend(pair)
         return self.execute_command("MSET", *items)
 
+    @overload
+    def msetex(
+        self: SyncClientProtocol,
+        mapping: Mapping[AnyKeyT, EncodableT],
+        data_persist_option: DataPersistOptions | None = None,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        keepttl: bool = False,
+    ) -> int: ...
+
+    @overload
+    def msetex(
+        self: AsyncClientProtocol,
+        mapping: Mapping[AnyKeyT, EncodableT],
+        data_persist_option: DataPersistOptions | None = None,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        keepttl: bool = False,
+    ) -> Awaitable[int]: ...
+
     def msetex(
         self,
         mapping: Mapping[AnyKeyT, EncodableT],
-        data_persist_option: Optional[DataPersistOptions] = None,
-        ex: Optional[ExpiryT] = None,
-        px: Optional[ExpiryT] = None,
-        exat: Optional[AbsExpiryT] = None,
-        pxat: Optional[AbsExpiryT] = None,
+        data_persist_option: DataPersistOptions | None = None,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
         keepttl: bool = False,
-    ) -> Union[Awaitable[int], int]:
+    ) -> int | Awaitable[int]:
         """
         Sets key/values based on the provided ``mapping`` items.
 
@@ -2322,7 +3614,17 @@ class BasicKeyCommands(CommandsProtocol):
 
         return self.execute_command(*pieces, *exp_options)
 
-    def msetnx(self, mapping: Mapping[AnyKeyT, EncodableT]) -> ResponseT:
+    @overload
+    def msetnx(
+        self: SyncClientProtocol, mapping: Mapping[AnyKeyT, EncodableT]
+    ) -> bool: ...
+
+    @overload
+    def msetnx(
+        self: AsyncClientProtocol, mapping: Mapping[AnyKeyT, EncodableT]
+    ) -> Awaitable[bool]: ...
+
+    def msetnx(self, mapping: Mapping[AnyKeyT, EncodableT]) -> bool | Awaitable[bool]:
         """
         Sets key/values based on a mapping if none of the keys are already set.
         Mapping is a dictionary of key/value pairs. Both keys and values
@@ -2340,7 +3642,13 @@ class BasicKeyCommands(CommandsProtocol):
             items.extend(pair)
         return self.execute_command("MSETNX", *items)
 
-    def move(self, name: KeyT, db: int) -> ResponseT:
+    @overload
+    def move(self: SyncClientProtocol, name: KeyT, db: int) -> bool: ...
+
+    @overload
+    def move(self: AsyncClientProtocol, name: KeyT, db: int) -> Awaitable[bool]: ...
+
+    def move(self, name: KeyT, db: int) -> bool | Awaitable[bool]:
         """
         Moves the key ``name`` to a different Redis database ``db``
 
@@ -2348,13 +3656,41 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("MOVE", name, db)
 
-    def persist(self, name: KeyT) -> ResponseT:
+    @overload
+    def persist(self: SyncClientProtocol, name: KeyT) -> bool: ...
+
+    @overload
+    def persist(self: AsyncClientProtocol, name: KeyT) -> Awaitable[bool]: ...
+
+    def persist(self, name: KeyT) -> bool | Awaitable[bool]:
         """
         Removes an expiration on ``name``
 
         For more information, see https://redis.io/commands/persist
         """
         return self.execute_command("PERSIST", name)
+
+    @overload
+    def pexpire(
+        self: SyncClientProtocol,
+        name: KeyT,
+        time: ExpiryT,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> bool: ...
+
+    @overload
+    def pexpire(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        time: ExpiryT,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> Awaitable[bool]: ...
 
     def pexpire(
         self,
@@ -2364,7 +3700,7 @@ class BasicKeyCommands(CommandsProtocol):
         xx: bool = False,
         gt: bool = False,
         lt: bool = False,
-    ) -> ResponseT:
+    ) -> bool | Awaitable[bool]:
         """
         Set an expire flag on key ``name`` for ``time`` milliseconds
         with given ``option``. ``time`` can be represented by an
@@ -2392,6 +3728,28 @@ class BasicKeyCommands(CommandsProtocol):
             exp_option.append("LT")
         return self.execute_command("PEXPIRE", name, time, *exp_option)
 
+    @overload
+    def pexpireat(
+        self: SyncClientProtocol,
+        name: KeyT,
+        when: AbsExpiryT,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> bool: ...
+
+    @overload
+    def pexpireat(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        when: AbsExpiryT,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> Awaitable[bool]: ...
+
     def pexpireat(
         self,
         name: KeyT,
@@ -2400,7 +3758,7 @@ class BasicKeyCommands(CommandsProtocol):
         xx: bool = False,
         gt: bool = False,
         lt: bool = False,
-    ) -> ResponseT:
+    ) -> bool | Awaitable[bool]:
         """
         Set an expire flag on key ``name`` with given ``option``. ``when``
         can be represented as an integer representing unix time in
@@ -2427,7 +3785,13 @@ class BasicKeyCommands(CommandsProtocol):
             exp_option.append("LT")
         return self.execute_command("PEXPIREAT", name, when, *exp_option)
 
-    def pexpiretime(self, key: str) -> int:
+    @overload
+    def pexpiretime(self: SyncClientProtocol, key: str) -> int: ...
+
+    @overload
+    def pexpiretime(self: AsyncClientProtocol, key: str) -> Awaitable[int]: ...
+
+    def pexpiretime(self, key: str) -> int | Awaitable[int]:
         """
         Returns the absolute Unix timestamp (since January 1, 1970) in milliseconds
         at which the given key will expire.
@@ -2436,7 +3800,19 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("PEXPIRETIME", key)
 
-    def psetex(self, name: KeyT, time_ms: ExpiryT, value: EncodableT):
+    @overload
+    def psetex(
+        self: SyncClientProtocol, name: KeyT, time_ms: ExpiryT, value: EncodableT
+    ) -> bool: ...
+
+    @overload
+    def psetex(
+        self: AsyncClientProtocol, name: KeyT, time_ms: ExpiryT, value: EncodableT
+    ) -> Awaitable[bool]: ...
+
+    def psetex(
+        self, name: KeyT, time_ms: ExpiryT, value: EncodableT
+    ) -> bool | Awaitable[bool]:
         """
         Set the value of key ``name`` to ``value`` that expires in ``time_ms``
         milliseconds. ``time_ms`` can be represented by an integer or a Python
@@ -2448,7 +3824,13 @@ class BasicKeyCommands(CommandsProtocol):
             time_ms = int(time_ms.total_seconds() * 1000)
         return self.execute_command("PSETEX", name, time_ms, value)
 
-    def pttl(self, name: KeyT) -> ResponseT:
+    @overload
+    def pttl(self: SyncClientProtocol, name: KeyT) -> int: ...
+
+    @overload
+    def pttl(self: AsyncClientProtocol, name: KeyT) -> Awaitable[int]: ...
+
+    def pttl(self, name: KeyT) -> int | Awaitable[int]:
         """
         Returns the number of milliseconds until the key ``name`` will expire
 
@@ -2456,9 +3838,27 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("PTTL", name)
 
+    @overload
     def hrandfield(
-        self, key: str, count: Optional[int] = None, withvalues: bool = False
-    ) -> ResponseT:
+        self: SyncClientProtocol,
+        key: str,
+        count: int | None = None,
+        withvalues: bool = False,
+    ) -> bytes | str | list[bytes | str] | None: ...
+
+    @overload
+    def hrandfield(
+        self: AsyncClientProtocol,
+        key: str,
+        count: int | None = None,
+        withvalues: bool = False,
+    ) -> Awaitable[bytes | str | list[bytes | str] | None]: ...
+
+    def hrandfield(
+        self, key: str, count: int | None = None, withvalues: bool = False
+    ) -> (bytes | str | list[bytes | str] | None) | Awaitable[
+        bytes | str | list[bytes | str] | None
+    ]:
         """
         Return a random field from the hash value stored at key.
 
@@ -2480,7 +3880,17 @@ class BasicKeyCommands(CommandsProtocol):
 
         return self.execute_command("HRANDFIELD", key, *params)
 
-    def randomkey(self, **kwargs) -> ResponseT:
+    @overload
+    def randomkey(self: SyncClientProtocol, **kwargs) -> bytes | str | None: ...
+
+    @overload
+    def randomkey(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[bytes | str | None]: ...
+
+    def randomkey(self, **kwargs) -> (bytes | str | None) | Awaitable[
+        bytes | str | None
+    ]:
         """
         Returns the name of a random key
 
@@ -2488,7 +3898,13 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("RANDOMKEY", **kwargs)
 
-    def rename(self, src: KeyT, dst: KeyT) -> ResponseT:
+    @overload
+    def rename(self: SyncClientProtocol, src: KeyT, dst: KeyT) -> bool: ...
+
+    @overload
+    def rename(self: AsyncClientProtocol, src: KeyT, dst: KeyT) -> Awaitable[bool]: ...
+
+    def rename(self, src: KeyT, dst: KeyT) -> bool | Awaitable[bool]:
         """
         Rename key ``src`` to ``dst``
 
@@ -2496,13 +3912,45 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("RENAME", src, dst)
 
-    def renamenx(self, src: KeyT, dst: KeyT):
+    @overload
+    def renamenx(self: SyncClientProtocol, src: KeyT, dst: KeyT) -> bool: ...
+
+    @overload
+    def renamenx(
+        self: AsyncClientProtocol, src: KeyT, dst: KeyT
+    ) -> Awaitable[bool]: ...
+
+    def renamenx(self, src: KeyT, dst: KeyT) -> bool | Awaitable[bool]:
         """
         Rename key ``src`` to ``dst`` if ``dst`` doesn't already exist
 
         For more information, see https://redis.io/commands/renamenx
         """
         return self.execute_command("RENAMENX", src, dst)
+
+    @overload
+    def restore(
+        self: SyncClientProtocol,
+        name: KeyT,
+        ttl: float,
+        value: EncodableT,
+        replace: bool = False,
+        absttl: bool = False,
+        idletime: int | None = None,
+        frequency: int | None = None,
+    ) -> bytes | str: ...
+
+    @overload
+    def restore(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        ttl: float,
+        value: EncodableT,
+        replace: bool = False,
+        absttl: bool = False,
+        idletime: int | None = None,
+        frequency: int | None = None,
+    ) -> Awaitable[bytes | str]: ...
 
     def restore(
         self,
@@ -2511,9 +3959,9 @@ class BasicKeyCommands(CommandsProtocol):
         value: EncodableT,
         replace: bool = False,
         absttl: bool = False,
-        idletime: Optional[int] = None,
-        frequency: Optional[int] = None,
-    ) -> ResponseT:
+        idletime: int | None = None,
+        frequency: int | None = None,
+    ) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Create a key using the provided serialized value, previously obtained
         using DUMP.
@@ -2554,24 +4002,62 @@ class BasicKeyCommands(CommandsProtocol):
 
         return self.execute_command("RESTORE", *params)
 
+    @overload
+    def set(
+        self: SyncClientProtocol,
+        name: KeyT,
+        value: EncodableT,
+        ex: ExpiryT | None = ...,
+        px: ExpiryT | None = ...,
+        nx: bool = ...,
+        xx: bool = ...,
+        keepttl: bool = ...,
+        get: bool = ...,
+        exat: AbsExpiryT | None = ...,
+        pxat: AbsExpiryT | None = ...,
+        ifeq: bytes | str | None = ...,
+        ifne: bytes | str | None = ...,
+        ifdeq: str | None = ...,
+        ifdne: str | None = ...,
+    ) -> bool | str | bytes | None: ...
+
+    @overload
+    def set(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        value: EncodableT,
+        ex: ExpiryT | None = ...,
+        px: ExpiryT | None = ...,
+        nx: bool = ...,
+        xx: bool = ...,
+        keepttl: bool = ...,
+        get: bool = ...,
+        exat: AbsExpiryT | None = ...,
+        pxat: AbsExpiryT | None = ...,
+        ifeq: bytes | str | None = ...,
+        ifne: bytes | str | None = ...,
+        ifdeq: str | None = ...,
+        ifdne: str | None = ...,
+    ) -> Awaitable[bool | str | bytes | None]: ...
+
     @experimental_args(["ifeq", "ifne", "ifdeq", "ifdne"])
     def set(
         self,
         name: KeyT,
         value: EncodableT,
-        ex: Optional[ExpiryT] = None,
-        px: Optional[ExpiryT] = None,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
         nx: bool = False,
         xx: bool = False,
         keepttl: bool = False,
         get: bool = False,
-        exat: Optional[AbsExpiryT] = None,
-        pxat: Optional[AbsExpiryT] = None,
-        ifeq: Optional[Union[bytes, str]] = None,
-        ifne: Optional[Union[bytes, str]] = None,
-        ifdeq: Optional[str] = None,  # hex digest of current value
-        ifdne: Optional[str] = None,  # hex digest of current value
-    ) -> ResponseT:
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        ifeq: bytes | str | None = None,
+        ifne: bytes | str | None = None,
+        ifdeq: str | None = None,  # hex digest of current value
+        ifdne: str | None = None,  # hex digest of current value
+    ) -> (bool | str | bytes | None) | Awaitable[bool | str | bytes | None]:
         """
         Set the value at key ``name`` to ``value``
 
@@ -2670,7 +4156,17 @@ class BasicKeyCommands(CommandsProtocol):
     def __setitem__(self, name: KeyT, value: EncodableT):
         self.set(name, value)
 
-    def setbit(self, name: KeyT, offset: int, value: int) -> ResponseT:
+    @overload
+    def setbit(
+        self: SyncClientProtocol, name: KeyT, offset: int, value: int
+    ) -> int: ...
+
+    @overload
+    def setbit(
+        self: AsyncClientProtocol, name: KeyT, offset: int, value: int
+    ) -> Awaitable[int]: ...
+
+    def setbit(self, name: KeyT, offset: int, value: int) -> int | Awaitable[int]:
         """
         Flag the ``offset`` in ``name`` as ``value``. Returns an integer
         indicating the previous value of ``offset``.
@@ -2680,7 +4176,19 @@ class BasicKeyCommands(CommandsProtocol):
         value = value and 1 or 0
         return self.execute_command("SETBIT", name, offset, value)
 
-    def setex(self, name: KeyT, time: ExpiryT, value: EncodableT) -> ResponseT:
+    @overload
+    def setex(
+        self: SyncClientProtocol, name: KeyT, time: ExpiryT, value: EncodableT
+    ) -> bool: ...
+
+    @overload
+    def setex(
+        self: AsyncClientProtocol, name: KeyT, time: ExpiryT, value: EncodableT
+    ) -> Awaitable[bool]: ...
+
+    def setex(
+        self, name: KeyT, time: ExpiryT, value: EncodableT
+    ) -> bool | Awaitable[bool]:
         """
         Set the value of key ``name`` to ``value`` that expires in ``time``
         seconds. ``time`` can be represented by an integer or a Python
@@ -2692,7 +4200,15 @@ class BasicKeyCommands(CommandsProtocol):
             time = int(time.total_seconds())
         return self.execute_command("SETEX", name, time, value)
 
-    def setnx(self, name: KeyT, value: EncodableT) -> ResponseT:
+    @overload
+    def setnx(self: SyncClientProtocol, name: KeyT, value: EncodableT) -> bool: ...
+
+    @overload
+    def setnx(
+        self: AsyncClientProtocol, name: KeyT, value: EncodableT
+    ) -> Awaitable[bool]: ...
+
+    def setnx(self, name: KeyT, value: EncodableT) -> bool | Awaitable[bool]:
         """
         Set the value of key ``name`` to ``value`` if key doesn't exist
 
@@ -2700,7 +4216,19 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("SETNX", name, value)
 
-    def setrange(self, name: KeyT, offset: int, value: EncodableT) -> ResponseT:
+    @overload
+    def setrange(
+        self: SyncClientProtocol, name: KeyT, offset: int, value: EncodableT
+    ) -> int: ...
+
+    @overload
+    def setrange(
+        self: AsyncClientProtocol, name: KeyT, offset: int, value: EncodableT
+    ) -> Awaitable[int]: ...
+
+    def setrange(
+        self, name: KeyT, offset: int, value: EncodableT
+    ) -> int | Awaitable[int]:
         """
         Overwrite bytes in the value of ``name`` starting at ``offset`` with
         ``value``. If ``offset`` plus the length of ``value`` exceeds the
@@ -2715,18 +4243,46 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("SETRANGE", name, offset, value)
 
+    @overload
+    def stralgo(
+        self: SyncClientProtocol,
+        algo: Literal["LCS"],
+        value1: KeyT,
+        value2: KeyT,
+        specific_argument: Literal["strings"] | Literal["keys"] = "strings",
+        len: bool = False,
+        idx: bool = False,
+        minmatchlen: int | None = None,
+        withmatchlen: bool = False,
+        **kwargs,
+    ) -> StralgoResponse: ...
+
+    @overload
+    def stralgo(
+        self: AsyncClientProtocol,
+        algo: Literal["LCS"],
+        value1: KeyT,
+        value2: KeyT,
+        specific_argument: Literal["strings"] | Literal["keys"] = "strings",
+        len: bool = False,
+        idx: bool = False,
+        minmatchlen: int | None = None,
+        withmatchlen: bool = False,
+        **kwargs,
+    ) -> Awaitable[StralgoResponse]: ...
+
     def stralgo(
         self,
         algo: Literal["LCS"],
         value1: KeyT,
         value2: KeyT,
-        specific_argument: Union[Literal["strings"], Literal["keys"]] = "strings",
+        specific_argument: Literal["strings"] | Literal["keys"] = "strings",
         len: bool = False,
         idx: bool = False,
-        minmatchlen: Optional[int] = None,
+        minmatchlen: int | None = None,
         withmatchlen: bool = False,
         **kwargs,
-    ) -> ResponseT:
+    ) -> StralgoResponse | Awaitable[StralgoResponse]:
         """
         Implements complex algorithms that operate on strings.
         Right now the only algorithm implemented is the LCS algorithm
@@ -2779,7 +4335,13 @@ class BasicKeyCommands(CommandsProtocol):
             **kwargs,
         )
 
-    def strlen(self, name: KeyT) -> ResponseT:
+    @overload
+    def strlen(self: SyncClientProtocol, name: KeyT) -> int: ...
+
+    @overload
+    def strlen(self: AsyncClientProtocol, name: KeyT) -> Awaitable[int]: ...
+
+    def strlen(self, name: KeyT) -> int | Awaitable[int]:
         """
         Return the number of bytes stored in the value of ``name``
 
@@ -2787,14 +4349,32 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("STRLEN", name, keys=[name])
 
-    def substr(self, name: KeyT, start: int, end: int = -1) -> ResponseT:
+    @overload
+    def substr(
+        self: SyncClientProtocol, name: KeyT, start: int, end: int = -1
+    ) -> bytes | str: ...
+
+    @overload
+    def substr(
+        self: AsyncClientProtocol, name: KeyT, start: int, end: int = -1
+    ) -> Awaitable[bytes | str]: ...
+
+    def substr(self, name: KeyT, start: int, end: int = -1) -> (
+        bytes | str
+    ) | Awaitable[bytes | str]:
         """
         Return a substring of the string at key ``name``. ``start`` and ``end``
         are 0-based integers specifying the portion of the string to return.
         """
         return self.execute_command("SUBSTR", name, start, end, keys=[name])
 
-    def touch(self, *args: KeyT) -> ResponseT:
+    @overload
+    def touch(self: SyncClientProtocol, *args: KeyT) -> int: ...
+
+    @overload
+    def touch(self: AsyncClientProtocol, *args: KeyT) -> Awaitable[int]: ...
+
+    def touch(self, *args: KeyT) -> int | Awaitable[int]:
         """
         Alters the last access time of a key(s) ``*args``. A key is ignored
         if it does not exist.
@@ -2803,7 +4383,13 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("TOUCH", *args)
 
-    def ttl(self, name: KeyT) -> ResponseT:
+    @overload
+    def ttl(self: SyncClientProtocol, name: KeyT) -> int: ...
+
+    @overload
+    def ttl(self: AsyncClientProtocol, name: KeyT) -> Awaitable[int]: ...
+
+    def ttl(self, name: KeyT) -> int | Awaitable[int]:
         """
         Returns the number of seconds until the key ``name`` will expire
 
@@ -2811,7 +4397,13 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("TTL", name)
 
-    def type(self, name: KeyT) -> ResponseT:
+    @overload
+    def type(self: SyncClientProtocol, name: KeyT) -> bytes | str: ...
+
+    @overload
+    def type(self: AsyncClientProtocol, name: KeyT) -> Awaitable[bytes | str]: ...
+
+    def type(self, name: KeyT) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Returns the type of key ``name``
 
@@ -2835,7 +4427,13 @@ class BasicKeyCommands(CommandsProtocol):
         """
         warnings.warn(DeprecationWarning("Call UNWATCH from a Pipeline object"))
 
-    def unlink(self, *names: KeyT) -> ResponseT:
+    @overload
+    def unlink(self: SyncClientProtocol, *names: KeyT) -> int: ...
+
+    @overload
+    def unlink(self: AsyncClientProtocol, *names: KeyT) -> Awaitable[int]: ...
+
+    def unlink(self, *names: KeyT) -> int | Awaitable[int]:
         """
         Unlink one or more keys specified by ``names``
 
@@ -2843,30 +4441,54 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("UNLINK", *names)
 
+    @overload
+    def lcs(
+        self: SyncClientProtocol,
+        key1: str,
+        key2: str,
+        len: bool | None = False,
+        idx: bool | None = False,
+        minmatchlen: int | None = 0,
+        withmatchlen: bool | None = False,
+    ) -> bytes | str | int | list[Any] | dict[Any, Any]: ...
+
+    @overload
+    def lcs(
+        self: AsyncClientProtocol,
+        key1: str,
+        key2: str,
+        len: bool | None = False,
+        idx: bool | None = False,
+        minmatchlen: int | None = 0,
+        withmatchlen: bool | None = False,
+    ) -> Awaitable[bytes | str | int | list[Any] | dict[Any, Any]]: ...
+
     def lcs(
         self,
         key1: str,
         key2: str,
-        len: Optional[bool] = False,
-        idx: Optional[bool] = False,
-        minmatchlen: Optional[int] = 0,
-        withmatchlen: Optional[bool] = False,
-    ) -> Union[str, int, list]:
+        len: bool | None = False,
+        idx: bool | None = False,
+        minmatchlen: int | None = 0,
+        withmatchlen: bool | None = False,
+    ) -> (bytes | str | int | list[Any] | dict[Any, Any]) | Awaitable[
+        bytes | str | int | list[Any] | dict[Any, Any]
+    ]:
         """
         Find the longest common subsequence between ``key1`` and ``key2``.
-        If ``len`` is true the length of the match will will be returned.
+        If ``len`` is true the length of the match will be returned.
         If ``idx`` is true the match position in each strings will be returned.
         ``minmatchlen`` restrict the list of matches to the ones of
         the given ``minmatchlen``.
         If ``withmatchlen`` the length of the match also will be returned.
         For more information, see https://redis.io/commands/lcs
         """
-        pieces = [key1, key2]
+        pieces: list[str | int] = [key1, key2]
         if len:
             pieces.append("LEN")
         if idx:
             pieces.append("IDX")
-        if minmatchlen != 0:
+        if minmatchlen is not None and minmatchlen != 0:
             pieces.extend(["MINMATCHLEN", minmatchlen])
         if withmatchlen:
             pieces.append("WITHMATCHLEN")
@@ -2899,9 +4521,19 @@ class ListCommands(CommandsProtocol):
     see: https://redis.io/topics/data-types#lists
     """
 
+    @overload
     def blpop(
-        self, keys: KeysT, timeout: Optional[Number] = 0
-    ) -> Union[Awaitable[list], list]:
+        self: SyncClientProtocol, keys: KeysT, timeout: Number | None = 0
+    ) -> BlockingListPopResponse: ...
+
+    @overload
+    def blpop(
+        self: AsyncClientProtocol, keys: KeysT, timeout: Number | None = 0
+    ) -> Awaitable[BlockingListPopResponse]: ...
+
+    def blpop(
+        self, keys: KeysT, timeout: Number | None = 0
+    ) -> BlockingListPopResponse | Awaitable[BlockingListPopResponse]:
         """
         LPOP a value off of the first non-empty list
         named in ``keys``.
@@ -2920,9 +4552,19 @@ class ListCommands(CommandsProtocol):
         keys.append(timeout)
         return self.execute_command("BLPOP", *keys)
 
+    @overload
     def brpop(
-        self, keys: KeysT, timeout: Optional[Number] = 0
-    ) -> Union[Awaitable[list], list]:
+        self: SyncClientProtocol, keys: KeysT, timeout: Number | None = 0
+    ) -> BlockingListPopResponse: ...
+
+    @overload
+    def brpop(
+        self: AsyncClientProtocol, keys: KeysT, timeout: Number | None = 0
+    ) -> Awaitable[BlockingListPopResponse]: ...
+
+    def brpop(
+        self, keys: KeysT, timeout: Number | None = 0
+    ) -> BlockingListPopResponse | Awaitable[BlockingListPopResponse]:
         """
         RPOP a value off of the first non-empty list
         named in ``keys``.
@@ -2941,9 +4583,19 @@ class ListCommands(CommandsProtocol):
         keys.append(timeout)
         return self.execute_command("BRPOP", *keys)
 
+    @overload
     def brpoplpush(
-        self, src: KeyT, dst: KeyT, timeout: Optional[Number] = 0
-    ) -> Union[Awaitable[Optional[str]], Optional[str]]:
+        self: SyncClientProtocol, src: KeyT, dst: KeyT, timeout: Number | None = 0
+    ) -> bytes | str | None: ...
+
+    @overload
+    def brpoplpush(
+        self: AsyncClientProtocol, src: KeyT, dst: KeyT, timeout: Number | None = 0
+    ) -> Awaitable[bytes | str | None]: ...
+
+    def brpoplpush(self, src: KeyT, dst: KeyT, timeout: Number | None = 0) -> (
+        bytes | str | None
+    ) | Awaitable[bytes | str | None]:
         """
         Pop a value off the tail of ``src``, push it on the head of ``dst``
         and then return it.
@@ -2958,14 +4610,34 @@ class ListCommands(CommandsProtocol):
             timeout = 0
         return self.execute_command("BRPOPLPUSH", src, dst, timeout)
 
+    @overload
+    def blmpop(
+        self: SyncClientProtocol,
+        timeout: float,
+        numkeys: int,
+        *args: str,
+        direction: str,
+        count: int | None = 1,
+    ) -> ListMultiPopResponse: ...
+
+    @overload
+    def blmpop(
+        self: AsyncClientProtocol,
+        timeout: float,
+        numkeys: int,
+        *args: str,
+        direction: str,
+        count: int | None = 1,
+    ) -> Awaitable[ListMultiPopResponse]: ...
+
     def blmpop(
         self,
         timeout: float,
         numkeys: int,
         *args: str,
         direction: str,
-        count: Optional[int] = 1,
-    ) -> Optional[list]:
+        count: int | None = 1,
+    ) -> ListMultiPopResponse | Awaitable[ListMultiPopResponse]:
         """
         Pop ``count`` values (default 1) from first non-empty in the list
         of provided key names.
@@ -2979,13 +4651,31 @@ class ListCommands(CommandsProtocol):
 
         return self.execute_command("BLMPOP", *cmd_args)
 
+    @overload
+    def lmpop(
+        self: SyncClientProtocol,
+        num_keys: int,
+        *args: str,
+        direction: str,
+        count: int | None = 1,
+    ) -> ListMultiPopResponse: ...
+
+    @overload
+    def lmpop(
+        self: AsyncClientProtocol,
+        num_keys: int,
+        *args: str,
+        direction: str,
+        count: int | None = 1,
+    ) -> Awaitable[ListMultiPopResponse]: ...
+
     def lmpop(
         self,
         num_keys: int,
         *args: str,
         direction: str,
-        count: Optional[int] = 1,
-    ) -> Union[Awaitable[list], list]:
+        count: int | None = 1,
+    ) -> ListMultiPopResponse | Awaitable[ListMultiPopResponse]:
         """
         Pop ``count`` values (default 1) first non-empty list key from the list
         of args provided key names.
@@ -2998,9 +4688,19 @@ class ListCommands(CommandsProtocol):
 
         return self.execute_command("LMPOP", *cmd_args)
 
+    @overload
     def lindex(
-        self, name: KeyT, index: int
-    ) -> Union[Awaitable[Optional[str]], Optional[str]]:
+        self: SyncClientProtocol, name: KeyT, index: int
+    ) -> bytes | str | None: ...
+
+    @overload
+    def lindex(
+        self: AsyncClientProtocol, name: KeyT, index: int
+    ) -> Awaitable[bytes | str | None]: ...
+
+    def lindex(self, name: KeyT, index: int) -> (bytes | str | None) | Awaitable[
+        bytes | str | None
+    ]:
         """
         Return the item from list ``name`` at position ``index``
 
@@ -3011,9 +4711,19 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LINDEX", name, index, keys=[name])
 
+    @overload
+    def linsert(
+        self: SyncClientProtocol, name: KeyT, where: str, refvalue: str, value: str
+    ) -> int: ...
+
+    @overload
+    def linsert(
+        self: AsyncClientProtocol, name: KeyT, where: str, refvalue: str, value: str
+    ) -> Awaitable[int]: ...
+
     def linsert(
         self, name: KeyT, where: str, refvalue: str, value: str
-    ) -> Union[Awaitable[int], int]:
+    ) -> int | Awaitable[int]:
         """
         Insert ``value`` in list ``name`` either immediately before or after
         [``where``] ``refvalue``
@@ -3025,7 +4735,13 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LINSERT", name, where, refvalue, value)
 
-    def llen(self, name: KeyT) -> Union[Awaitable[int], int]:
+    @overload
+    def llen(self: SyncClientProtocol, name: KeyT) -> int: ...
+
+    @overload
+    def llen(self: AsyncClientProtocol, name: KeyT) -> Awaitable[int]: ...
+
+    def llen(self, name: KeyT) -> int | Awaitable[int]:
         """
         Return the length of the list ``name``
 
@@ -3033,11 +4749,27 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LLEN", name, keys=[name])
 
+    @overload
+    def lpop(
+        self: SyncClientProtocol,
+        name: KeyT,
+        count: int | None = None,
+    ) -> bytes | str | list[bytes | str] | None: ...
+
+    @overload
+    def lpop(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        count: int | None = None,
+    ) -> Awaitable[bytes | str | list[bytes | str] | None]: ...
+
     def lpop(
         self,
         name: KeyT,
-        count: Optional[int] = None,
-    ) -> Union[Awaitable[Union[str, List, None]], Union[str, List, None]]:
+        count: int | None = None,
+    ) -> (bytes | str | list[bytes | str] | None) | Awaitable[
+        bytes | str | list[bytes | str] | None
+    ]:
         """
         Removes and returns the first elements of the list ``name``.
 
@@ -3052,7 +4784,15 @@ class ListCommands(CommandsProtocol):
         else:
             return self.execute_command("LPOP", name)
 
-    def lpush(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
+    @overload
+    def lpush(self: SyncClientProtocol, name: KeyT, *values: FieldT) -> int: ...
+
+    @overload
+    def lpush(
+        self: AsyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> Awaitable[int]: ...
+
+    def lpush(self, name: KeyT, *values: FieldT) -> int | Awaitable[int]:
         """
         Push ``values`` onto the head of the list ``name``
 
@@ -3060,7 +4800,15 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LPUSH", name, *values)
 
-    def lpushx(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
+    @overload
+    def lpushx(self: SyncClientProtocol, name: KeyT, *values: FieldT) -> int: ...
+
+    @overload
+    def lpushx(
+        self: AsyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> Awaitable[int]: ...
+
+    def lpushx(self, name: KeyT, *values: FieldT) -> int | Awaitable[int]:
         """
         Push ``value`` onto the head of the list ``name`` if ``name`` exists
 
@@ -3068,7 +4816,19 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LPUSHX", name, *values)
 
-    def lrange(self, name: KeyT, start: int, end: int) -> Union[Awaitable[list], list]:
+    @overload
+    def lrange(
+        self: SyncClientProtocol, name: KeyT, start: int, end: int
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def lrange(
+        self: AsyncClientProtocol, name: KeyT, start: int, end: int
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def lrange(
+        self, name: KeyT, start: int, end: int
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return a slice of the list ``name`` between
         position ``start`` and ``end``
@@ -3080,7 +4840,15 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LRANGE", name, start, end, keys=[name])
 
-    def lrem(self, name: KeyT, count: int, value: str) -> Union[Awaitable[int], int]:
+    @overload
+    def lrem(self: SyncClientProtocol, name: KeyT, count: int, value: str) -> int: ...
+
+    @overload
+    def lrem(
+        self: AsyncClientProtocol, name: KeyT, count: int, value: str
+    ) -> Awaitable[int]: ...
+
+    def lrem(self, name: KeyT, count: int, value: str) -> int | Awaitable[int]:
         """
         Remove the first ``count`` occurrences of elements equal to ``value``
         from the list stored at ``name``.
@@ -3094,7 +4862,15 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LREM", name, count, value)
 
-    def lset(self, name: KeyT, index: int, value: str) -> Union[Awaitable[str], str]:
+    @overload
+    def lset(self: SyncClientProtocol, name: KeyT, index: int, value: str) -> bool: ...
+
+    @overload
+    def lset(
+        self: AsyncClientProtocol, name: KeyT, index: int, value: str
+    ) -> Awaitable[bool]: ...
+
+    def lset(self, name: KeyT, index: int, value: str) -> bool | Awaitable[bool]:
         """
         Set element at ``index`` of list ``name`` to ``value``
 
@@ -3102,7 +4878,15 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LSET", name, index, value)
 
-    def ltrim(self, name: KeyT, start: int, end: int) -> Union[Awaitable[str], str]:
+    @overload
+    def ltrim(self: SyncClientProtocol, name: KeyT, start: int, end: int) -> bool: ...
+
+    @overload
+    def ltrim(
+        self: AsyncClientProtocol, name: KeyT, start: int, end: int
+    ) -> Awaitable[bool]: ...
+
+    def ltrim(self, name: KeyT, start: int, end: int) -> bool | Awaitable[bool]:
         """
         Trim the list ``name``, removing all values not within the slice
         between ``start`` and ``end``
@@ -3114,11 +4898,27 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LTRIM", name, start, end)
 
+    @overload
+    def rpop(
+        self: SyncClientProtocol,
+        name: KeyT,
+        count: int | None = None,
+    ) -> bytes | str | list[bytes | str] | None: ...
+
+    @overload
+    def rpop(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        count: int | None = None,
+    ) -> Awaitable[bytes | str | list[bytes | str] | None]: ...
+
     def rpop(
         self,
         name: KeyT,
-        count: Optional[int] = None,
-    ) -> Union[Awaitable[Union[str, List, None]], Union[str, List, None]]:
+        count: int | None = None,
+    ) -> (bytes | str | list[bytes | str] | None) | Awaitable[
+        bytes | str | list[bytes | str] | None
+    ]:
         """
         Removes and returns the last elements of the list ``name``.
 
@@ -3133,7 +4933,19 @@ class ListCommands(CommandsProtocol):
         else:
             return self.execute_command("RPOP", name)
 
-    def rpoplpush(self, src: KeyT, dst: KeyT) -> Union[Awaitable[str], str]:
+    @overload
+    def rpoplpush(
+        self: SyncClientProtocol, src: KeyT, dst: KeyT
+    ) -> bytes | str | None: ...
+
+    @overload
+    def rpoplpush(
+        self: AsyncClientProtocol, src: KeyT, dst: KeyT
+    ) -> Awaitable[bytes | str | None]: ...
+
+    def rpoplpush(self, src: KeyT, dst: KeyT) -> (bytes | str | None) | Awaitable[
+        bytes | str | None
+    ]:
         """
         RPOP a value off of the ``src`` list and atomically LPUSH it
         on to the ``dst`` list.  Returns the value.
@@ -3142,7 +4954,15 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("RPOPLPUSH", src, dst)
 
-    def rpush(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
+    @overload
+    def rpush(self: SyncClientProtocol, name: KeyT, *values: FieldT) -> int: ...
+
+    @overload
+    def rpush(
+        self: AsyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> Awaitable[int]: ...
+
+    def rpush(self, name: KeyT, *values: FieldT) -> int | Awaitable[int]:
         """
         Push ``values`` onto the tail of the list ``name``
 
@@ -3150,7 +4970,15 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("RPUSH", name, *values)
 
-    def rpushx(self, name: KeyT, *values: str) -> Union[Awaitable[int], int]:
+    @overload
+    def rpushx(self: SyncClientProtocol, name: KeyT, *values: str) -> int: ...
+
+    @overload
+    def rpushx(
+        self: AsyncClientProtocol, name: KeyT, *values: str
+    ) -> Awaitable[int]: ...
+
+    def rpushx(self, name: KeyT, *values: str) -> int | Awaitable[int]:
         """
         Push ``value`` onto the tail of the list ``name`` if ``name`` exists
 
@@ -3158,14 +4986,34 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("RPUSHX", name, *values)
 
+    @overload
+    def lpos(
+        self: SyncClientProtocol,
+        name: KeyT,
+        value: str,
+        rank: int | None = None,
+        count: int | None = None,
+        maxlen: int | None = None,
+    ) -> int | list[int] | None: ...
+
+    @overload
+    def lpos(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        value: str,
+        rank: int | None = None,
+        count: int | None = None,
+        maxlen: int | None = None,
+    ) -> Awaitable[int | list[int] | None]: ...
+
     def lpos(
         self,
         name: KeyT,
         value: str,
-        rank: Optional[int] = None,
-        count: Optional[int] = None,
-        maxlen: Optional[int] = None,
-    ) -> Union[str, List, None]:
+        rank: int | None = None,
+        count: int | None = None,
+        maxlen: int | None = None,
+    ) -> (int | list[int] | None) | Awaitable[int | list[int] | None]:
         """
         Get position of ``value`` within the list ``name``
 
@@ -3203,18 +5051,46 @@ class ListCommands(CommandsProtocol):
 
         return self.execute_command("LPOS", *pieces, keys=[name])
 
+    @overload
+    def sort(
+        self: SyncClientProtocol,
+        name: KeyT,
+        start: int | None = None,
+        num: int | None = None,
+        by: str | None = None,
+        get: list[str] | None = None,
+        desc: bool = False,
+        alpha: bool = False,
+        store: str | None = None,
+        groups: bool | None = False,
+    ) -> SortResponse: ...
+
+    @overload
+    def sort(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        start: int | None = None,
+        num: int | None = None,
+        by: str | None = None,
+        get: list[str] | None = None,
+        desc: bool = False,
+        alpha: bool = False,
+        store: str | None = None,
+        groups: bool | None = False,
+    ) -> Awaitable[SortResponse]: ...
+
     def sort(
         self,
         name: KeyT,
-        start: Optional[int] = None,
-        num: Optional[int] = None,
-        by: Optional[str] = None,
-        get: Optional[List[str]] = None,
+        start: int | None = None,
+        num: int | None = None,
+        by: str | None = None,
+        get: list[str] | None = None,
         desc: bool = False,
         alpha: bool = False,
-        store: Optional[str] = None,
-        groups: Optional[bool] = False,
-    ) -> Union[List, int]:
+        store: str | None = None,
+        groups: bool | None = False,
+    ) -> SortResponse | Awaitable[SortResponse]:
         """
         Sort and return the list, set or sorted set at ``name``.
 
@@ -3276,16 +5152,40 @@ class ListCommands(CommandsProtocol):
         options["keys"] = [name]
         return self.execute_command("SORT", *pieces, **options)
 
+    @overload
+    def sort_ro(
+        self: SyncClientProtocol,
+        key: str,
+        start: int | None = None,
+        num: int | None = None,
+        by: str | None = None,
+        get: list[str] | None = None,
+        desc: bool = False,
+        alpha: bool = False,
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def sort_ro(
+        self: AsyncClientProtocol,
+        key: str,
+        start: int | None = None,
+        num: int | None = None,
+        by: str | None = None,
+        get: list[str] | None = None,
+        desc: bool = False,
+        alpha: bool = False,
+    ) -> Awaitable[list[bytes | str]]: ...
+
     def sort_ro(
         self,
         key: str,
-        start: Optional[int] = None,
-        num: Optional[int] = None,
-        by: Optional[str] = None,
-        get: Optional[List[str]] = None,
+        start: int | None = None,
+        num: int | None = None,
+        by: str | None = None,
+        get: list[str] | None = None,
         desc: bool = False,
         alpha: bool = False,
-    ) -> list:
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Returns the elements contained in the list, set or sorted set at key.
         (read-only variant of the SORT command)
@@ -3319,14 +5219,34 @@ class ScanCommands(CommandsProtocol):
     see: https://redis.io/commands/scan
     """
 
+    @overload
+    def scan(
+        self: SyncClientProtocol,
+        cursor: int = 0,
+        match: PatternT | None = None,
+        count: int | None = None,
+        _type: str | None = None,
+        **kwargs,
+    ) -> ScanResponse: ...
+
+    @overload
+    def scan(
+        self: AsyncClientProtocol,
+        cursor: int = 0,
+        match: PatternT | None = None,
+        count: int | None = None,
+        _type: str | None = None,
+        **kwargs,
+    ) -> Awaitable[ScanResponse]: ...
+
     def scan(
         self,
         cursor: int = 0,
-        match: Union[PatternT, None] = None,
-        count: Optional[int] = None,
-        _type: Optional[str] = None,
+        match: PatternT | None = None,
+        count: int | None = None,
+        _type: str | None = None,
         **kwargs,
-    ) -> ResponseT:
+    ) -> ScanResponse | Awaitable[ScanResponse]:
         """
         Incrementally return lists of key names. Also return a cursor
         indicating the scan position.
@@ -3380,13 +5300,31 @@ class ScanCommands(CommandsProtocol):
             )
             yield from data
 
+    @overload
+    def sscan(
+        self: SyncClientProtocol,
+        name: KeyT,
+        cursor: int = 0,
+        match: PatternT | None = None,
+        count: int | None = None,
+    ) -> ScanResponse: ...
+
+    @overload
+    def sscan(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        cursor: int = 0,
+        match: PatternT | None = None,
+        count: int | None = None,
+    ) -> Awaitable[ScanResponse]: ...
+
     def sscan(
         self,
         name: KeyT,
         cursor: int = 0,
-        match: Union[PatternT, None] = None,
-        count: Optional[int] = None,
-    ) -> ResponseT:
+        match: PatternT | None = None,
+        count: int | None = None,
+    ) -> ScanResponse | Awaitable[ScanResponse]:
         """
         Incrementally return lists of elements in a set. Also return a cursor
         indicating the scan position.
@@ -3423,14 +5361,34 @@ class ScanCommands(CommandsProtocol):
             cursor, data = self.sscan(name, cursor=cursor, match=match, count=count)
             yield from data
 
+    @overload
+    def hscan(
+        self: SyncClientProtocol,
+        name: KeyT,
+        cursor: int = 0,
+        match: PatternT | None = None,
+        count: int | None = None,
+        no_values: bool | None = None,
+    ) -> HScanResponse: ...
+
+    @overload
+    def hscan(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        cursor: int = 0,
+        match: PatternT | None = None,
+        count: int | None = None,
+        no_values: bool | None = None,
+    ) -> Awaitable[HScanResponse]: ...
+
     def hscan(
         self,
         name: KeyT,
         cursor: int = 0,
-        match: Union[PatternT, None] = None,
-        count: Optional[int] = None,
-        no_values: Union[bool, None] = None,
-    ) -> ResponseT:
+        match: PatternT | None = None,
+        count: int | None = None,
+        no_values: bool | None = None,
+    ) -> HScanResponse | Awaitable[HScanResponse]:
         """
         Incrementally return key/value slices in a hash. Also return a cursor
         indicating the scan position.
@@ -3479,14 +5437,34 @@ class ScanCommands(CommandsProtocol):
             else:
                 yield from data.items()
 
+    @overload
+    def zscan(
+        self: SyncClientProtocol,
+        name: KeyT,
+        cursor: int = 0,
+        match: PatternT | None = None,
+        count: int | None = None,
+        score_cast_func: type | Callable = float,
+    ) -> ZScanResponse: ...
+
+    @overload
+    def zscan(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        cursor: int = 0,
+        match: PatternT | None = None,
+        count: int | None = None,
+        score_cast_func: type | Callable = float,
+    ) -> Awaitable[ZScanResponse]: ...
+
     def zscan(
         self,
         name: KeyT,
         cursor: int = 0,
-        match: Union[PatternT, None] = None,
-        count: Optional[int] = None,
-        score_cast_func: Union[type, Callable] = float,
-    ) -> ResponseT:
+        match: PatternT | None = None,
+        count: int | None = None,
+        score_cast_func: type | Callable = float,
+    ) -> ZScanResponse | Awaitable[ZScanResponse]:
         """
         Incrementally return lists of elements in a sorted set. Also return a
         cursor indicating the scan position.
@@ -3653,7 +5631,15 @@ class SetCommands(CommandsProtocol):
     see: https://redis.io/topics/data-types#sets
     """
 
-    def sadd(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
+    @overload
+    def sadd(self: SyncClientProtocol, name: KeyT, *values: FieldT) -> int: ...
+
+    @overload
+    def sadd(
+        self: AsyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> Awaitable[int]: ...
+
+    def sadd(self, name: KeyT, *values: FieldT) -> int | Awaitable[int]:
         """
         Add ``value(s)`` to set ``name``
 
@@ -3661,7 +5647,13 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SADD", name, *values)
 
-    def scard(self, name: KeyT) -> Union[Awaitable[int], int]:
+    @overload
+    def scard(self: SyncClientProtocol, name: KeyT) -> int: ...
+
+    @overload
+    def scard(self: AsyncClientProtocol, name: KeyT) -> Awaitable[int]: ...
+
+    def scard(self, name: KeyT) -> int | Awaitable[int]:
         """
         Return the number of elements in set ``name``
 
@@ -3669,7 +5661,19 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SCARD", name, keys=[name])
 
-    def sdiff(self, keys: List, *args: List) -> Union[Awaitable[list], list]:
+    @overload
+    def sdiff(
+        self: SyncClientProtocol, keys: List, *args: List
+    ) -> set[bytes | str]: ...
+
+    @overload
+    def sdiff(
+        self: AsyncClientProtocol, keys: List, *args: List
+    ) -> Awaitable[set[bytes | str]]: ...
+
+    def sdiff(
+        self, keys: List, *args: List
+    ) -> set[bytes | str] | Awaitable[set[bytes | str]]:
         """
         Return the difference of sets specified by ``keys``
 
@@ -3678,9 +5682,17 @@ class SetCommands(CommandsProtocol):
         args = list_or_args(keys, args)
         return self.execute_command("SDIFF", *args, keys=args)
 
+    @overload
     def sdiffstore(
-        self, dest: str, keys: List, *args: List
-    ) -> Union[Awaitable[int], int]:
+        self: SyncClientProtocol, dest: str, keys: List, *args: List
+    ) -> int: ...
+
+    @overload
+    def sdiffstore(
+        self: AsyncClientProtocol, dest: str, keys: List, *args: List
+    ) -> Awaitable[int]: ...
+
+    def sdiffstore(self, dest: str, keys: List, *args: List) -> int | Awaitable[int]:
         """
         Store the difference of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
@@ -3690,7 +5702,19 @@ class SetCommands(CommandsProtocol):
         args = list_or_args(keys, args)
         return self.execute_command("SDIFFSTORE", dest, *args)
 
-    def sinter(self, keys: List, *args: List) -> Union[Awaitable[list], list]:
+    @overload
+    def sinter(
+        self: SyncClientProtocol, keys: List, *args: List
+    ) -> set[bytes | str]: ...
+
+    @overload
+    def sinter(
+        self: AsyncClientProtocol, keys: List, *args: List
+    ) -> Awaitable[set[bytes | str]]: ...
+
+    def sinter(
+        self, keys: List, *args: List
+    ) -> set[bytes | str] | Awaitable[set[bytes | str]]:
         """
         Return the intersection of sets specified by ``keys``
 
@@ -3699,9 +5723,19 @@ class SetCommands(CommandsProtocol):
         args = list_or_args(keys, args)
         return self.execute_command("SINTER", *args, keys=args)
 
+    @overload
+    def sintercard(
+        self: SyncClientProtocol, numkeys: int, keys: List[KeyT], limit: int = 0
+    ) -> int: ...
+
+    @overload
+    def sintercard(
+        self: AsyncClientProtocol, numkeys: int, keys: List[KeyT], limit: int = 0
+    ) -> Awaitable[int]: ...
+
     def sintercard(
         self, numkeys: int, keys: List[KeyT], limit: int = 0
-    ) -> Union[Awaitable[int], int]:
+    ) -> int | Awaitable[int]:
         """
         Return the cardinality of the intersect of multiple sets specified by ``keys``.
 
@@ -3714,9 +5748,17 @@ class SetCommands(CommandsProtocol):
         args = [numkeys, *keys, "LIMIT", limit]
         return self.execute_command("SINTERCARD", *args, keys=keys)
 
+    @overload
     def sinterstore(
-        self, dest: KeyT, keys: List, *args: List
-    ) -> Union[Awaitable[int], int]:
+        self: SyncClientProtocol, dest: KeyT, keys: List, *args: List
+    ) -> int: ...
+
+    @overload
+    def sinterstore(
+        self: AsyncClientProtocol, dest: KeyT, keys: List, *args: List
+    ) -> Awaitable[int]: ...
+
+    def sinterstore(self, dest: KeyT, keys: List, *args: List) -> int | Awaitable[int]:
         """
         Store the intersection of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
@@ -3726,9 +5768,19 @@ class SetCommands(CommandsProtocol):
         args = list_or_args(keys, args)
         return self.execute_command("SINTERSTORE", dest, *args)
 
+    @overload
     def sismember(
-        self, name: KeyT, value: str
-    ) -> Union[Awaitable[Union[Literal[0], Literal[1]]], Union[Literal[0], Literal[1]]]:
+        self: SyncClientProtocol, name: KeyT, value: str
+    ) -> Literal[0] | Literal[1]: ...
+
+    @overload
+    def sismember(
+        self: AsyncClientProtocol, name: KeyT, value: str
+    ) -> Awaitable[Literal[0] | Literal[1]]: ...
+
+    def sismember(self, name: KeyT, value: str) -> (
+        Literal[0] | Literal[1]
+    ) | Awaitable[Literal[0] | Literal[1]]:
         """
         Return whether ``value`` is a member of set ``name``:
         - 1 if the value is a member of the set.
@@ -3738,7 +5790,15 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SISMEMBER", name, value, keys=[name])
 
-    def smembers(self, name: KeyT) -> Union[Awaitable[Set], Set]:
+    @overload
+    def smembers(self: SyncClientProtocol, name: KeyT) -> set[bytes | str]: ...
+
+    @overload
+    def smembers(
+        self: AsyncClientProtocol, name: KeyT
+    ) -> Awaitable[set[bytes | str]]: ...
+
+    def smembers(self, name: KeyT) -> set[bytes | str] | Awaitable[set[bytes | str]]:
         """
         Return all members of the set ``name``
 
@@ -3746,12 +5806,19 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SMEMBERS", name, keys=[name])
 
+    @overload
+    def smismember(
+        self: SyncClientProtocol, name: KeyT, values: List, *args: List
+    ) -> list[Literal[0] | Literal[1]]: ...
+
+    @overload
+    def smismember(
+        self: AsyncClientProtocol, name: KeyT, values: List, *args: List
+    ) -> Awaitable[list[Literal[0] | Literal[1]]]: ...
+
     def smismember(
         self, name: KeyT, values: List, *args: List
-    ) -> Union[
-        Awaitable[List[Union[Literal[0], Literal[1]]]],
-        List[Union[Literal[0], Literal[1]]],
-    ]:
+    ) -> list[Literal[0] | Literal[1]] | Awaitable[list[Literal[0] | Literal[1]]]:
         """
         Return whether each value in ``values`` is a member of the set ``name``
         as a list of ``int`` in the order of ``values``:
@@ -3763,7 +5830,15 @@ class SetCommands(CommandsProtocol):
         args = list_or_args(values, args)
         return self.execute_command("SMISMEMBER", name, *args, keys=[name])
 
-    def smove(self, src: KeyT, dst: KeyT, value: str) -> Union[Awaitable[bool], bool]:
+    @overload
+    def smove(self: SyncClientProtocol, src: KeyT, dst: KeyT, value: str) -> bool: ...
+
+    @overload
+    def smove(
+        self: AsyncClientProtocol, src: KeyT, dst: KeyT, value: str
+    ) -> Awaitable[bool]: ...
+
+    def smove(self, src: KeyT, dst: KeyT, value: str) -> bool | Awaitable[bool]:
         """
         Move ``value`` from set ``src`` to set ``dst`` atomically
 
@@ -3771,9 +5846,19 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SMOVE", src, dst, value)
 
+    @overload
     def spop(
-        self, name: KeyT, count: Optional[int] = None
-    ) -> Union[Awaitable[Union[str, List, None]], str, List, None]:
+        self: SyncClientProtocol, name: KeyT, count: int | None = None
+    ) -> bytes | str | set[bytes | str] | None: ...
+
+    @overload
+    def spop(
+        self: AsyncClientProtocol, name: KeyT, count: int | None = None
+    ) -> Awaitable[bytes | str | set[bytes | str] | None]: ...
+
+    def spop(self, name: KeyT, count: int | None = None) -> (
+        bytes | str | set[bytes | str] | None
+    ) | Awaitable[bytes | str | set[bytes | str] | None]:
         """
         Remove and return a random member of set ``name``
 
@@ -3782,9 +5867,19 @@ class SetCommands(CommandsProtocol):
         args = (count is not None) and [count] or []
         return self.execute_command("SPOP", name, *args)
 
+    @overload
     def srandmember(
-        self, name: KeyT, number: Optional[int] = None
-    ) -> Union[Awaitable[Union[str, List, None]], str, List, None]:
+        self: SyncClientProtocol, name: KeyT, number: int | None = None
+    ) -> bytes | str | list[bytes | str] | None: ...
+
+    @overload
+    def srandmember(
+        self: AsyncClientProtocol, name: KeyT, number: int | None = None
+    ) -> Awaitable[bytes | str | list[bytes | str] | None]: ...
+
+    def srandmember(self, name: KeyT, number: int | None = None) -> (
+        bytes | str | list[bytes | str] | None
+    ) | Awaitable[bytes | str | list[bytes | str] | None]:
         """
         If ``number`` is None, returns a random member of set ``name``.
 
@@ -3797,7 +5892,15 @@ class SetCommands(CommandsProtocol):
         args = (number is not None) and [number] or []
         return self.execute_command("SRANDMEMBER", name, *args)
 
-    def srem(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
+    @overload
+    def srem(self: SyncClientProtocol, name: KeyT, *values: FieldT) -> int: ...
+
+    @overload
+    def srem(
+        self: AsyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> Awaitable[int]: ...
+
+    def srem(self, name: KeyT, *values: FieldT) -> int | Awaitable[int]:
         """
         Remove ``values`` from set ``name``
 
@@ -3805,7 +5908,19 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SREM", name, *values)
 
-    def sunion(self, keys: List, *args: List) -> Union[Awaitable[List], List]:
+    @overload
+    def sunion(
+        self: SyncClientProtocol, keys: List, *args: List
+    ) -> set[bytes | str]: ...
+
+    @overload
+    def sunion(
+        self: AsyncClientProtocol, keys: List, *args: List
+    ) -> Awaitable[set[bytes | str]]: ...
+
+    def sunion(
+        self, keys: List, *args: List
+    ) -> set[bytes | str] | Awaitable[set[bytes | str]]:
         """
         Return the union of sets specified by ``keys``
 
@@ -3814,9 +5929,17 @@ class SetCommands(CommandsProtocol):
         args = list_or_args(keys, args)
         return self.execute_command("SUNION", *args, keys=args)
 
+    @overload
     def sunionstore(
-        self, dest: KeyT, keys: List, *args: List
-    ) -> Union[Awaitable[int], int]:
+        self: SyncClientProtocol, dest: KeyT, keys: List, *args: List
+    ) -> int: ...
+
+    @overload
+    def sunionstore(
+        self: AsyncClientProtocol, dest: KeyT, keys: List, *args: List
+    ) -> Awaitable[int]: ...
+
+    def sunionstore(self, dest: KeyT, keys: List, *args: List) -> int | Awaitable[int]:
         """
         Store the union of sets specified by ``keys`` into a new
         set named ``dest``.  Returns the number of keys in the new set.
@@ -3836,7 +5959,19 @@ class StreamCommands(CommandsProtocol):
     see: https://redis.io/topics/streams-intro
     """
 
-    def xack(self, name: KeyT, groupname: GroupT, *ids: StreamIdT) -> ResponseT:
+    @overload
+    def xack(
+        self: SyncClientProtocol, name: KeyT, groupname: GroupT, *ids: StreamIdT
+    ) -> int: ...
+
+    @overload
+    def xack(
+        self: AsyncClientProtocol, name: KeyT, groupname: GroupT, *ids: StreamIdT
+    ) -> Awaitable[int]: ...
+
+    def xack(
+        self, name: KeyT, groupname: GroupT, *ids: StreamIdT
+    ) -> int | Awaitable[int]:
         """
         Acknowledges the successful processing of one or more messages.
 
@@ -3849,13 +5984,31 @@ class StreamCommands(CommandsProtocol):
         """
         return self.execute_command("XACK", name, groupname, *ids)
 
+    @overload
+    def xackdel(
+        self: SyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        *ids: StreamIdT,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] = "KEEPREF",
+    ) -> int: ...
+
+    @overload
+    def xackdel(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        *ids: StreamIdT,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] = "KEEPREF",
+    ) -> Awaitable[int]: ...
+
     def xackdel(
         self,
         name: KeyT,
         groupname: GroupT,
         *ids: StreamIdT,
         ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] = "KEEPREF",
-    ) -> ResponseT:
+    ) -> int | Awaitable[int]:
         """
         Combines the functionality of XACK and XDEL. Acknowledges the specified
         message IDs in the given consumer group and simultaneously attempts to
@@ -3871,6 +6024,38 @@ class StreamCommands(CommandsProtocol):
         pieces.extend(ids)
         return self.execute_command("XACKDEL", *pieces)
 
+    @overload
+    def xadd(
+        self: SyncClientProtocol,
+        name: KeyT,
+        fields: Dict[FieldT, EncodableT],
+        id: StreamIdT = "*",
+        maxlen: int | None = None,
+        approximate: bool = True,
+        nomkstream: bool = False,
+        minid: StreamIdT | None = None,
+        limit: int | None = None,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] | None = None,
+        idmpauto: str | None = None,
+        idmp: tuple[str, bytes] | None = None,
+    ) -> bytes | str: ...
+
+    @overload
+    def xadd(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        fields: Dict[FieldT, EncodableT],
+        id: StreamIdT = "*",
+        maxlen: int | None = None,
+        approximate: bool = True,
+        nomkstream: bool = False,
+        minid: StreamIdT | None = None,
+        limit: int | None = None,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] | None = None,
+        idmpauto: str | None = None,
+        idmp: tuple[str, bytes] | None = None,
+    ) -> Awaitable[bytes | str]: ...
+
     def xadd(
         self,
         name: KeyT,
@@ -3880,11 +6065,11 @@ class StreamCommands(CommandsProtocol):
         approximate: bool = True,
         nomkstream: bool = False,
         minid: Union[StreamIdT, None] = None,
-        limit: Optional[int] = None,
-        ref_policy: Optional[Literal["KEEPREF", "DELREF", "ACKED"]] = None,
-        idmpauto: Optional[str] = None,
-        idmp: Optional[tuple[str, bytes]] = None,
-    ) -> ResponseT:
+        limit: int | None = None,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] | None = None,
+        idmpauto: str | None = None,
+        idmp: tuple[str, bytes] | None = None,
+    ) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Add to a stream.
         name: name of the stream
@@ -3961,12 +6146,28 @@ class StreamCommands(CommandsProtocol):
             pieces.extend(pair)
         return self.execute_command("XADD", name, *pieces)
 
+    @overload
+    def xcfgset(
+        self: SyncClientProtocol,
+        name: KeyT,
+        idmp_duration: int | None = None,
+        idmp_maxsize: int | None = None,
+    ) -> bytes | str: ...
+
+    @overload
+    def xcfgset(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        idmp_duration: int | None = None,
+        idmp_maxsize: int | None = None,
+    ) -> Awaitable[bytes | str]: ...
+
     def xcfgset(
         self,
         name: KeyT,
-        idmp_duration: Optional[int] = None,
-        idmp_maxsize: Optional[int] = None,
-    ) -> ResponseT:
+        idmp_duration: int | None = None,
+        idmp_maxsize: int | None = None,
+    ) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Configure the idempotency parameters for a stream's IDMP map.
 
@@ -4025,6 +6226,30 @@ class StreamCommands(CommandsProtocol):
 
         return self.execute_command("XCFGSET", name, *pieces)
 
+    @overload
+    def xautoclaim(
+        self: SyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        consumername: ConsumerT,
+        min_idle_time: int,
+        start_id: StreamIdT = "0-0",
+        count: int | None = None,
+        justid: bool = False,
+    ) -> list[Any]: ...
+
+    @overload
+    def xautoclaim(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        consumername: ConsumerT,
+        min_idle_time: int,
+        start_id: StreamIdT = "0-0",
+        count: int | None = None,
+        justid: bool = False,
+    ) -> Awaitable[list[Any]]: ...
+
     def xautoclaim(
         self,
         name: KeyT,
@@ -4032,9 +6257,9 @@ class StreamCommands(CommandsProtocol):
         consumername: ConsumerT,
         min_idle_time: int,
         start_id: StreamIdT = "0-0",
-        count: Optional[int] = None,
+        count: int | None = None,
         justid: bool = False,
-    ) -> ResponseT:
+    ) -> list[Any] | Awaitable[list[Any]]:
         """
         Transfers ownership of pending stream entries that match the specified
         criteria. Conceptually, equivalent to calling XPENDING and then XCLAIM,
@@ -4076,6 +6301,36 @@ class StreamCommands(CommandsProtocol):
 
         return self.execute_command("XAUTOCLAIM", *pieces, **kwargs)
 
+    @overload
+    def xclaim(
+        self: SyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        consumername: ConsumerT,
+        min_idle_time: int,
+        message_ids: Union[List[StreamIdT], Tuple[StreamIdT]],
+        idle: int | None = None,
+        time: int | None = None,
+        retrycount: int | None = None,
+        force: bool = False,
+        justid: bool = False,
+    ) -> XClaimResponse: ...
+
+    @overload
+    def xclaim(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        consumername: ConsumerT,
+        min_idle_time: int,
+        message_ids: Union[List[StreamIdT], Tuple[StreamIdT]],
+        idle: int | None = None,
+        time: int | None = None,
+        retrycount: int | None = None,
+        force: bool = False,
+        justid: bool = False,
+    ) -> Awaitable[XClaimResponse]: ...
+
     def xclaim(
         self,
         name: KeyT,
@@ -4083,12 +6338,12 @@ class StreamCommands(CommandsProtocol):
         consumername: ConsumerT,
         min_idle_time: int,
         message_ids: Union[List[StreamIdT], Tuple[StreamIdT]],
-        idle: Optional[int] = None,
-        time: Optional[int] = None,
-        retrycount: Optional[int] = None,
+        idle: int | None = None,
+        time: int | None = None,
+        retrycount: int | None = None,
         force: bool = False,
         justid: bool = False,
-    ) -> ResponseT:
+    ) -> XClaimResponse | Awaitable[XClaimResponse]:
         """
         Changes the ownership of a pending message.
 
@@ -4159,7 +6414,15 @@ class StreamCommands(CommandsProtocol):
             kwargs["parse_justid"] = True
         return self.execute_command("XCLAIM", *pieces, **kwargs)
 
-    def xdel(self, name: KeyT, *ids: StreamIdT) -> ResponseT:
+    @overload
+    def xdel(self: SyncClientProtocol, name: KeyT, *ids: StreamIdT) -> int: ...
+
+    @overload
+    def xdel(
+        self: AsyncClientProtocol, name: KeyT, *ids: StreamIdT
+    ) -> Awaitable[int]: ...
+
+    def xdel(self, name: KeyT, *ids: StreamIdT) -> int | Awaitable[int]:
         """
         Deletes one or more messages from a stream.
 
@@ -4171,12 +6434,28 @@ class StreamCommands(CommandsProtocol):
         """
         return self.execute_command("XDEL", name, *ids)
 
+    @overload
+    def xdelex(
+        self: SyncClientProtocol,
+        name: KeyT,
+        *ids: StreamIdT,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] = "KEEPREF",
+    ) -> int: ...
+
+    @overload
+    def xdelex(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        *ids: StreamIdT,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] = "KEEPREF",
+    ) -> Awaitable[int]: ...
+
     def xdelex(
         self,
         name: KeyT,
         *ids: StreamIdT,
         ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] = "KEEPREF",
-    ) -> ResponseT:
+    ) -> int | Awaitable[int]:
         """
         Extended version of XDEL that provides more control over how message entries
         are deleted concerning consumer groups.
@@ -4191,14 +6470,34 @@ class StreamCommands(CommandsProtocol):
         pieces.extend(ids)
         return self.execute_command("XDELEX", *pieces)
 
+    @overload
+    def xgroup_create(
+        self: SyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        id: StreamIdT = "$",
+        mkstream: bool = False,
+        entries_read: int | None = None,
+    ) -> bool: ...
+
+    @overload
+    def xgroup_create(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        id: StreamIdT = "$",
+        mkstream: bool = False,
+        entries_read: int | None = None,
+    ) -> Awaitable[bool]: ...
+
     def xgroup_create(
         self,
         name: KeyT,
         groupname: GroupT,
         id: StreamIdT = "$",
         mkstream: bool = False,
-        entries_read: Optional[int] = None,
-    ) -> ResponseT:
+        entries_read: int | None = None,
+    ) -> bool | Awaitable[bool]:
         """
         Create a new consumer group associated with a stream.
         name: name of the stream.
@@ -4215,9 +6514,22 @@ class StreamCommands(CommandsProtocol):
 
         return self.execute_command(*pieces)
 
+    @overload
+    def xgroup_delconsumer(
+        self: SyncClientProtocol, name: KeyT, groupname: GroupT, consumername: ConsumerT
+    ) -> int: ...
+
+    @overload
+    def xgroup_delconsumer(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        consumername: ConsumerT,
+    ) -> Awaitable[int]: ...
+
     def xgroup_delconsumer(
         self, name: KeyT, groupname: GroupT, consumername: ConsumerT
-    ) -> ResponseT:
+    ) -> int | Awaitable[int]:
         """
         Remove a specific consumer from a consumer group.
         Returns the number of pending messages that the consumer had before it
@@ -4230,7 +6542,17 @@ class StreamCommands(CommandsProtocol):
         """
         return self.execute_command("XGROUP DELCONSUMER", name, groupname, consumername)
 
-    def xgroup_destroy(self, name: KeyT, groupname: GroupT) -> ResponseT:
+    @overload
+    def xgroup_destroy(
+        self: SyncClientProtocol, name: KeyT, groupname: GroupT
+    ) -> bool: ...
+
+    @overload
+    def xgroup_destroy(
+        self: AsyncClientProtocol, name: KeyT, groupname: GroupT
+    ) -> Awaitable[bool]: ...
+
+    def xgroup_destroy(self, name: KeyT, groupname: GroupT) -> bool | Awaitable[bool]:
         """
         Destroy a consumer group.
         name: name of the stream.
@@ -4240,9 +6562,22 @@ class StreamCommands(CommandsProtocol):
         """
         return self.execute_command("XGROUP DESTROY", name, groupname)
 
+    @overload
+    def xgroup_createconsumer(
+        self: SyncClientProtocol, name: KeyT, groupname: GroupT, consumername: ConsumerT
+    ) -> int: ...
+
+    @overload
+    def xgroup_createconsumer(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        consumername: ConsumerT,
+    ) -> Awaitable[int]: ...
+
     def xgroup_createconsumer(
         self, name: KeyT, groupname: GroupT, consumername: ConsumerT
-    ) -> ResponseT:
+    ) -> int | Awaitable[int]:
         """
         Consumers in a consumer group are auto-created every time a new
         consumer name is mentioned by some command.
@@ -4257,13 +6592,31 @@ class StreamCommands(CommandsProtocol):
             "XGROUP CREATECONSUMER", name, groupname, consumername
         )
 
+    @overload
+    def xgroup_setid(
+        self: SyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        id: StreamIdT,
+        entries_read: int | None = None,
+    ) -> bool: ...
+
+    @overload
+    def xgroup_setid(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        id: StreamIdT,
+        entries_read: int | None = None,
+    ) -> Awaitable[bool]: ...
+
     def xgroup_setid(
         self,
         name: KeyT,
         groupname: GroupT,
         id: StreamIdT,
-        entries_read: Optional[int] = None,
-    ) -> ResponseT:
+        entries_read: int | None = None,
+    ) -> bool | Awaitable[bool]:
         """
         Set the consumer group last delivered ID to something else.
         name: name of the stream.
@@ -4277,7 +6630,19 @@ class StreamCommands(CommandsProtocol):
             pieces.extend(["ENTRIESREAD", entries_read])
         return self.execute_command("XGROUP SETID", *pieces)
 
-    def xinfo_consumers(self, name: KeyT, groupname: GroupT) -> ResponseT:
+    @overload
+    def xinfo_consumers(
+        self: SyncClientProtocol, name: KeyT, groupname: GroupT
+    ) -> list[dict[str, Any]]: ...
+
+    @overload
+    def xinfo_consumers(
+        self: AsyncClientProtocol, name: KeyT, groupname: GroupT
+    ) -> Awaitable[list[dict[str, Any]]]: ...
+
+    def xinfo_consumers(
+        self, name: KeyT, groupname: GroupT
+    ) -> list[dict[str, Any]] | Awaitable[list[dict[str, Any]]]:
         """
         Returns general information about the consumers in the group.
         name: name of the stream.
@@ -4287,7 +6652,17 @@ class StreamCommands(CommandsProtocol):
         """
         return self.execute_command("XINFO CONSUMERS", name, groupname)
 
-    def xinfo_groups(self, name: KeyT) -> ResponseT:
+    @overload
+    def xinfo_groups(self: SyncClientProtocol, name: KeyT) -> list[dict[str, Any]]: ...
+
+    @overload
+    def xinfo_groups(
+        self: AsyncClientProtocol, name: KeyT
+    ) -> Awaitable[list[dict[str, Any]]]: ...
+
+    def xinfo_groups(
+        self, name: KeyT
+    ) -> list[dict[str, Any]] | Awaitable[list[dict[str, Any]]]:
         """
         Returns general information about the consumer groups of the stream.
         name: name of the stream.
@@ -4296,7 +6671,19 @@ class StreamCommands(CommandsProtocol):
         """
         return self.execute_command("XINFO GROUPS", name)
 
-    def xinfo_stream(self, name: KeyT, full: bool = False) -> ResponseT:
+    @overload
+    def xinfo_stream(
+        self: SyncClientProtocol, name: KeyT, full: bool = False
+    ) -> dict[str, Any]: ...
+
+    @overload
+    def xinfo_stream(
+        self: AsyncClientProtocol, name: KeyT, full: bool = False
+    ) -> Awaitable[dict[str, Any]]: ...
+
+    def xinfo_stream(
+        self, name: KeyT, full: bool = False
+    ) -> dict[str, Any] | Awaitable[dict[str, Any]]:
         """
         Returns general information about the stream.
         name: name of the stream.
@@ -4311,7 +6698,13 @@ class StreamCommands(CommandsProtocol):
             options = {"full": full}
         return self.execute_command("XINFO STREAM", *pieces, **options)
 
-    def xlen(self, name: KeyT) -> ResponseT:
+    @overload
+    def xlen(self: SyncClientProtocol, name: KeyT) -> int: ...
+
+    @overload
+    def xlen(self: AsyncClientProtocol, name: KeyT) -> Awaitable[int]: ...
+
+    def xlen(self, name: KeyT) -> int | Awaitable[int]:
         """
         Returns the number of elements in a given stream.
 
@@ -4319,7 +6712,19 @@ class StreamCommands(CommandsProtocol):
         """
         return self.execute_command("XLEN", name, keys=[name])
 
-    def xpending(self, name: KeyT, groupname: GroupT) -> ResponseT:
+    @overload
+    def xpending(
+        self: SyncClientProtocol, name: KeyT, groupname: GroupT
+    ) -> dict[str, Any]: ...
+
+    @overload
+    def xpending(
+        self: AsyncClientProtocol, name: KeyT, groupname: GroupT
+    ) -> Awaitable[dict[str, Any]]: ...
+
+    def xpending(
+        self, name: KeyT, groupname: GroupT
+    ) -> dict[str, Any] | Awaitable[dict[str, Any]]:
         """
         Returns information about pending messages of a group.
         name: name of the stream.
@@ -4329,6 +6734,30 @@ class StreamCommands(CommandsProtocol):
         """
         return self.execute_command("XPENDING", name, groupname, keys=[name])
 
+    @overload
+    def xpending_range(
+        self: SyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        min: StreamIdT,
+        max: StreamIdT,
+        count: int,
+        consumername: ConsumerT | None = None,
+        idle: int | None = None,
+    ) -> XPendingRangeResponse: ...
+
+    @overload
+    def xpending_range(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        min: StreamIdT,
+        max: StreamIdT,
+        count: int,
+        consumername: ConsumerT | None = None,
+        idle: int | None = None,
+    ) -> Awaitable[XPendingRangeResponse]: ...
+
     def xpending_range(
         self,
         name: KeyT,
@@ -4336,9 +6765,9 @@ class StreamCommands(CommandsProtocol):
         min: StreamIdT,
         max: StreamIdT,
         count: int,
-        consumername: Union[ConsumerT, None] = None,
-        idle: Optional[int] = None,
-    ) -> ResponseT:
+        consumername: ConsumerT | None = None,
+        idle: int | None = None,
+    ) -> XPendingRangeResponse | Awaitable[XPendingRangeResponse]:
         """
         Returns information about pending messages, in a range.
 
@@ -4386,13 +6815,31 @@ class StreamCommands(CommandsProtocol):
 
         return self.execute_command("XPENDING", *pieces, parse_detail=True)
 
+    @overload
+    def xrange(
+        self: SyncClientProtocol,
+        name: KeyT,
+        min: StreamIdT = "-",
+        max: StreamIdT = "+",
+        count: int | None = None,
+    ) -> StreamRangeResponse | None: ...
+
+    @overload
+    def xrange(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        min: StreamIdT = "-",
+        max: StreamIdT = "+",
+        count: int | None = None,
+    ) -> Awaitable[StreamRangeResponse | None]: ...
+
     def xrange(
         self,
         name: KeyT,
         min: StreamIdT = "-",
         max: StreamIdT = "+",
-        count: Optional[int] = None,
-    ) -> ResponseT:
+        count: int | None = None,
+    ) -> (StreamRangeResponse | None) | Awaitable[StreamRangeResponse | None]:
         """
         Read stream values within an interval.
 
@@ -4418,12 +6865,28 @@ class StreamCommands(CommandsProtocol):
 
         return self.execute_command("XRANGE", name, *pieces, keys=[name])
 
+    @overload
+    def xread(
+        self: SyncClientProtocol,
+        streams: Dict[KeyT, StreamIdT],
+        count: int | None = None,
+        block: int | None = None,
+    ) -> XReadResponse: ...
+
+    @overload
+    def xread(
+        self: AsyncClientProtocol,
+        streams: Dict[KeyT, StreamIdT],
+        count: int | None = None,
+        block: int | None = None,
+    ) -> Awaitable[XReadResponse]: ...
+
     def xread(
         self,
         streams: Dict[KeyT, StreamIdT],
-        count: Optional[int] = None,
-        block: Optional[int] = None,
-    ) -> ResponseT:
+        count: int | None = None,
+        block: int | None = None,
+    ) -> XReadResponse | Awaitable[XReadResponse]:
         """
         Block and monitor multiple streams for new data.
 
@@ -4470,16 +6933,40 @@ class StreamCommands(CommandsProtocol):
             record_streaming_lag_from_response(response=response)
             return response
 
+    @overload
+    def xreadgroup(
+        self: SyncClientProtocol,
+        groupname: str,
+        consumername: str,
+        streams: Dict[KeyT, StreamIdT],
+        count: int | None = None,
+        block: int | None = None,
+        noack: bool = False,
+        claim_min_idle_time: int | None = None,
+    ) -> XReadResponse: ...
+
+    @overload
+    def xreadgroup(
+        self: AsyncClientProtocol,
+        groupname: str,
+        consumername: str,
+        streams: Dict[KeyT, StreamIdT],
+        count: int | None = None,
+        block: int | None = None,
+        noack: bool = False,
+        claim_min_idle_time: int | None = None,
+    ) -> Awaitable[XReadResponse]: ...
+
     def xreadgroup(
         self,
         groupname: str,
         consumername: str,
         streams: Dict[KeyT, StreamIdT],
-        count: Optional[int] = None,
-        block: Optional[int] = None,
+        count: int | None = None,
+        block: int | None = None,
         noack: bool = False,
-        claim_min_idle_time: Optional[int] = None,
-    ) -> ResponseT:
+        claim_min_idle_time: int | None = None,
+    ) -> XReadResponse | Awaitable[XReadResponse]:
         """
         Read from a stream via a consumer group.
 
@@ -4550,13 +7037,31 @@ class StreamCommands(CommandsProtocol):
             )
             return response
 
+    @overload
+    def xrevrange(
+        self: SyncClientProtocol,
+        name: KeyT,
+        max: StreamIdT = "+",
+        min: StreamIdT = "-",
+        count: int | None = None,
+    ) -> StreamRangeResponse | None: ...
+
+    @overload
+    def xrevrange(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        max: StreamIdT = "+",
+        min: StreamIdT = "-",
+        count: int | None = None,
+    ) -> Awaitable[StreamRangeResponse | None]: ...
+
     def xrevrange(
         self,
         name: KeyT,
         max: StreamIdT = "+",
         min: StreamIdT = "-",
-        count: Optional[int] = None,
-    ) -> ResponseT:
+        count: int | None = None,
+    ) -> (StreamRangeResponse | None) | Awaitable[StreamRangeResponse | None]:
         """
         Read stream values within an interval, in reverse order.
 
@@ -4582,15 +7087,37 @@ class StreamCommands(CommandsProtocol):
 
         return self.execute_command("XREVRANGE", name, *pieces, keys=[name])
 
+    @overload
+    def xtrim(
+        self: SyncClientProtocol,
+        name: KeyT,
+        maxlen: int | None = None,
+        approximate: bool = True,
+        minid: StreamIdT | None = None,
+        limit: int | None = None,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] | None = None,
+    ) -> int: ...
+
+    @overload
+    def xtrim(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        maxlen: int | None = None,
+        approximate: bool = True,
+        minid: StreamIdT | None = None,
+        limit: int | None = None,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] | None = None,
+    ) -> Awaitable[int]: ...
+
     def xtrim(
         self,
         name: KeyT,
-        maxlen: Optional[int] = None,
+        maxlen: int | None = None,
         approximate: bool = True,
-        minid: Union[StreamIdT, None] = None,
-        limit: Optional[int] = None,
-        ref_policy: Optional[Literal["KEEPREF", "DELREF", "ACKED"]] = None,
-    ) -> ResponseT:
+        minid: StreamIdT | None = None,
+        limit: int | None = None,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] | None = None,
+    ) -> int | Awaitable[int]:
         """
         Trims old messages from a stream.
         name: name of the stream.
@@ -4645,6 +7172,32 @@ class SortedSetCommands(CommandsProtocol):
     see: https://redis.io/topics/data-types-intro#redis-sorted-sets
     """
 
+    @overload
+    def zadd(
+        self: SyncClientProtocol,
+        name: KeyT,
+        mapping: Mapping[AnyKeyT, EncodableT],
+        nx: bool = False,
+        xx: bool = False,
+        ch: bool = False,
+        incr: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> int | float | None: ...
+
+    @overload
+    def zadd(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        mapping: Mapping[AnyKeyT, EncodableT],
+        nx: bool = False,
+        xx: bool = False,
+        ch: bool = False,
+        incr: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> Awaitable[int | float | None]: ...
+
     def zadd(
         self,
         name: KeyT,
@@ -4655,7 +7208,7 @@ class SortedSetCommands(CommandsProtocol):
         incr: bool = False,
         gt: bool = False,
         lt: bool = False,
-    ) -> ResponseT:
+    ) -> (int | float | None) | Awaitable[int | float | None]:
         """
         Set any number of element-name, score pairs to the key ``name``. Pairs
         are specified as a dict of element-names keys to score values.
@@ -4722,7 +7275,13 @@ class SortedSetCommands(CommandsProtocol):
             pieces.append(pair[0])
         return self.execute_command("ZADD", name, *pieces, **options)
 
-    def zcard(self, name: KeyT) -> ResponseT:
+    @overload
+    def zcard(self: SyncClientProtocol, name: KeyT) -> int: ...
+
+    @overload
+    def zcard(self: AsyncClientProtocol, name: KeyT) -> Awaitable[int]: ...
+
+    def zcard(self, name: KeyT) -> int | Awaitable[int]:
         """
         Return the number of elements in the sorted set ``name``
 
@@ -4730,7 +7289,19 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZCARD", name, keys=[name])
 
-    def zcount(self, name: KeyT, min: ZScoreBoundT, max: ZScoreBoundT) -> ResponseT:
+    @overload
+    def zcount(
+        self: SyncClientProtocol, name: KeyT, min: ZScoreBoundT, max: ZScoreBoundT
+    ) -> int: ...
+
+    @overload
+    def zcount(
+        self: AsyncClientProtocol, name: KeyT, min: ZScoreBoundT, max: ZScoreBoundT
+    ) -> Awaitable[int]: ...
+
+    def zcount(
+        self, name: KeyT, min: ZScoreBoundT, max: ZScoreBoundT
+    ) -> int | Awaitable[int]:
         """
         Returns the number of elements in the sorted set at key ``name`` with
         a score between ``min`` and ``max``.
@@ -4739,7 +7310,19 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZCOUNT", name, min, max, keys=[name])
 
-    def zdiff(self, keys: KeysT, withscores: bool = False) -> ResponseT:
+    @overload
+    def zdiff(
+        self: SyncClientProtocol, keys: KeysT, withscores: bool = False
+    ) -> ZSetRangeResponse: ...
+
+    @overload
+    def zdiff(
+        self: AsyncClientProtocol, keys: KeysT, withscores: bool = False
+    ) -> Awaitable[ZSetRangeResponse]: ...
+
+    def zdiff(
+        self, keys: KeysT, withscores: bool = False
+    ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Returns the difference between the first and all successive input
         sorted sets provided in ``keys``.
@@ -4751,7 +7334,15 @@ class SortedSetCommands(CommandsProtocol):
             pieces.append("WITHSCORES")
         return self.execute_command("ZDIFF", *pieces, keys=keys)
 
-    def zdiffstore(self, dest: KeyT, keys: KeysT) -> ResponseT:
+    @overload
+    def zdiffstore(self: SyncClientProtocol, dest: KeyT, keys: KeysT) -> int: ...
+
+    @overload
+    def zdiffstore(
+        self: AsyncClientProtocol, dest: KeyT, keys: KeysT
+    ) -> Awaitable[int]: ...
+
+    def zdiffstore(self, dest: KeyT, keys: KeysT) -> int | Awaitable[int]:
         """
         Computes the difference between the first and all successive input
         sorted sets provided in ``keys`` and stores the result in ``dest``.
@@ -4761,7 +7352,19 @@ class SortedSetCommands(CommandsProtocol):
         pieces = [len(keys), *keys]
         return self.execute_command("ZDIFFSTORE", dest, *pieces)
 
-    def zincrby(self, name: KeyT, amount: float, value: EncodableT) -> ResponseT:
+    @overload
+    def zincrby(
+        self: SyncClientProtocol, name: KeyT, amount: float, value: EncodableT
+    ) -> float | None: ...
+
+    @overload
+    def zincrby(
+        self: AsyncClientProtocol, name: KeyT, amount: float, value: EncodableT
+    ) -> Awaitable[float | None]: ...
+
+    def zincrby(self, name: KeyT, amount: float, value: EncodableT) -> (
+        float | None
+    ) | Awaitable[float | None]:
         """
         Increment the score of ``value`` in sorted set ``name`` by ``amount``
 
@@ -4769,9 +7372,25 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZINCRBY", name, amount, value)
 
+    @overload
     def zinter(
-        self, keys: KeysT, aggregate: Optional[str] = None, withscores: bool = False
-    ) -> ResponseT:
+        self: SyncClientProtocol,
+        keys: KeysT,
+        aggregate: str | None = None,
+        withscores: bool = False,
+    ) -> ZSetRangeResponse: ...
+
+    @overload
+    def zinter(
+        self: AsyncClientProtocol,
+        keys: KeysT,
+        aggregate: str | None = None,
+        withscores: bool = False,
+    ) -> Awaitable[ZSetRangeResponse]: ...
+
+    def zinter(
+        self, keys: KeysT, aggregate: str | None = None, withscores: bool = False
+    ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Return the intersect of multiple sorted sets specified by ``keys``.
         With the ``aggregate`` option, it is possible to specify how the
@@ -4785,12 +7404,28 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self._zaggregate("ZINTER", None, keys, aggregate, withscores=withscores)
 
+    @overload
     def zinterstore(
         self,
         dest: KeyT,
-        keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
-        aggregate: Optional[str] = None,
-    ) -> ResponseT:
+        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
+        aggregate: str | None = None,
+    ) -> int: ...
+
+    @overload
+    def zinterstore(
+        self: AsyncClientProtocol,
+        dest: KeyT,
+        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
+        aggregate: str | None = None,
+    ) -> Awaitable[int]: ...
+
+    def zinterstore(
+        self,
+        dest: KeyT,
+        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
+        aggregate: str | None = None,
+    ) -> int | Awaitable[int]:
         """
         Intersect multiple sorted sets specified by ``keys`` into a new
         sorted set, ``dest``. Scores in the destination will be aggregated
@@ -4804,9 +7439,19 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self._zaggregate("ZINTERSTORE", dest, keys, aggregate)
 
+    @overload
+    def zintercard(
+        self: SyncClientProtocol, numkeys: int, keys: List[str], limit: int = 0
+    ) -> int: ...
+
+    @overload
+    def zintercard(
+        self: AsyncClientProtocol, numkeys: int, keys: List[str], limit: int = 0
+    ) -> Awaitable[int]: ...
+
     def zintercard(
         self, numkeys: int, keys: List[str], limit: int = 0
-    ) -> Union[Awaitable[int], int]:
+    ) -> int | Awaitable[int]:
         """
         Return the cardinality of the intersect of multiple sorted sets
         specified by ``keys``.
@@ -4819,7 +7464,19 @@ class SortedSetCommands(CommandsProtocol):
         args = [numkeys, *keys, "LIMIT", limit]
         return self.execute_command("ZINTERCARD", *args, keys=keys)
 
-    def zlexcount(self, name, min, max):
+    @overload
+    def zlexcount(
+        self: SyncClientProtocol, name: KeyT, min: EncodableT, max: EncodableT
+    ) -> int: ...
+
+    @overload
+    def zlexcount(
+        self: AsyncClientProtocol, name: KeyT, min: EncodableT, max: EncodableT
+    ) -> Awaitable[int]: ...
+
+    def zlexcount(
+        self, name: KeyT, min: EncodableT, max: EncodableT
+    ) -> int | Awaitable[int]:
         """
         Return the number of items in the sorted set ``name`` between the
         lexicographical range ``min`` and ``max``.
@@ -4828,7 +7485,19 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZLEXCOUNT", name, min, max, keys=[name])
 
-    def zpopmax(self, name: KeyT, count: Optional[int] = None) -> ResponseT:
+    @overload
+    def zpopmax(
+        self: SyncClientProtocol, name: KeyT, count: int | None = None
+    ) -> ZSetRangeResponse: ...
+
+    @overload
+    def zpopmax(
+        self: AsyncClientProtocol, name: KeyT, count: int | None = None
+    ) -> Awaitable[ZSetRangeResponse]: ...
+
+    def zpopmax(
+        self, name: KeyT, count: int | None = None
+    ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Remove and return up to ``count`` members with the highest scores
         from the sorted set ``name``.
@@ -4839,7 +7508,19 @@ class SortedSetCommands(CommandsProtocol):
         options = {"withscores": True}
         return self.execute_command("ZPOPMAX", name, *args, **options)
 
-    def zpopmin(self, name: KeyT, count: Optional[int] = None) -> ResponseT:
+    @overload
+    def zpopmin(
+        self: SyncClientProtocol, name: KeyT, count: int | None = None
+    ) -> ZSetRangeResponse: ...
+
+    @overload
+    def zpopmin(
+        self: AsyncClientProtocol, name: KeyT, count: int | None = None
+    ) -> Awaitable[ZSetRangeResponse]: ...
+
+    def zpopmin(
+        self, name: KeyT, count: int | None = None
+    ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Remove and return up to ``count`` members with the lowest scores
         from the sorted set ``name``.
@@ -4850,9 +7531,25 @@ class SortedSetCommands(CommandsProtocol):
         options = {"withscores": True}
         return self.execute_command("ZPOPMIN", name, *args, **options)
 
+    @overload
     def zrandmember(
-        self, key: KeyT, count: Optional[int] = None, withscores: bool = False
-    ) -> ResponseT:
+        self: SyncClientProtocol,
+        key: KeyT,
+        count: int | None = None,
+        withscores: bool = False,
+    ) -> ZRandMemberResponse: ...
+
+    @overload
+    def zrandmember(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        count: int | None = None,
+        withscores: bool = False,
+    ) -> Awaitable[ZRandMemberResponse]: ...
+
+    def zrandmember(
+        self, key: KeyT, count: int | None = None, withscores: bool = False
+    ) -> ZRandMemberResponse | Awaitable[ZRandMemberResponse]:
         """
         Return a random element from the sorted set value stored at key.
 
@@ -4876,7 +7573,19 @@ class SortedSetCommands(CommandsProtocol):
 
         return self.execute_command("ZRANDMEMBER", key, *params)
 
-    def bzpopmax(self, keys: KeysT, timeout: TimeoutSecT = 0) -> ResponseT:
+    @overload
+    def bzpopmax(
+        self: SyncClientProtocol, keys: KeysT, timeout: TimeoutSecT = 0
+    ) -> BlockingZSetPopResponse: ...
+
+    @overload
+    def bzpopmax(
+        self: AsyncClientProtocol, keys: KeysT, timeout: TimeoutSecT = 0
+    ) -> Awaitable[BlockingZSetPopResponse]: ...
+
+    def bzpopmax(
+        self, keys: KeysT, timeout: TimeoutSecT = 0
+    ) -> BlockingZSetPopResponse | Awaitable[BlockingZSetPopResponse]:
         """
         ZPOPMAX a value off of the first non-empty sorted set
         named in the ``keys`` list.
@@ -4895,7 +7604,19 @@ class SortedSetCommands(CommandsProtocol):
         keys.append(timeout)
         return self.execute_command("BZPOPMAX", *keys)
 
-    def bzpopmin(self, keys: KeysT, timeout: TimeoutSecT = 0) -> ResponseT:
+    @overload
+    def bzpopmin(
+        self: SyncClientProtocol, keys: KeysT, timeout: TimeoutSecT = 0
+    ) -> BlockingZSetPopResponse: ...
+
+    @overload
+    def bzpopmin(
+        self: AsyncClientProtocol, keys: KeysT, timeout: TimeoutSecT = 0
+    ) -> Awaitable[BlockingZSetPopResponse]: ...
+
+    def bzpopmin(
+        self, keys: KeysT, timeout: TimeoutSecT = 0
+    ) -> BlockingZSetPopResponse | Awaitable[BlockingZSetPopResponse]:
         """
         ZPOPMIN a value off of the first non-empty sorted set
         named in the ``keys`` list.
@@ -4914,14 +7635,34 @@ class SortedSetCommands(CommandsProtocol):
         keys.append(timeout)
         return self.execute_command("BZPOPMIN", *keys)
 
+    @overload
+    def zmpop(
+        self: SyncClientProtocol,
+        num_keys: int,
+        keys: List[str],
+        min: bool | None = False,
+        max: bool | None = False,
+        count: int | None = 1,
+    ) -> ZMPopResponse: ...
+
+    @overload
+    def zmpop(
+        self: AsyncClientProtocol,
+        num_keys: int,
+        keys: List[str],
+        min: bool | None = False,
+        max: bool | None = False,
+        count: int | None = 1,
+    ) -> Awaitable[ZMPopResponse]: ...
+
     def zmpop(
         self,
         num_keys: int,
         keys: List[str],
-        min: Optional[bool] = False,
-        max: Optional[bool] = False,
-        count: Optional[int] = 1,
-    ) -> Union[Awaitable[list], list]:
+        min: bool | None = False,
+        max: bool | None = False,
+        count: int | None = 1,
+    ) -> ZMPopResponse | Awaitable[ZMPopResponse]:
         """
         Pop ``count`` values (default 1) off of the first non-empty sorted set
         named in the ``keys`` list.
@@ -4939,15 +7680,37 @@ class SortedSetCommands(CommandsProtocol):
 
         return self.execute_command("ZMPOP", *args)
 
+    @overload
+    def bzmpop(
+        self: SyncClientProtocol,
+        timeout: float,
+        numkeys: int,
+        keys: List[str],
+        min: bool | None = False,
+        max: bool | None = False,
+        count: int | None = 1,
+    ) -> ZMPopResponse: ...
+
+    @overload
+    def bzmpop(
+        self: AsyncClientProtocol,
+        timeout: float,
+        numkeys: int,
+        keys: List[str],
+        min: bool | None = False,
+        max: bool | None = False,
+        count: int | None = 1,
+    ) -> Awaitable[ZMPopResponse]: ...
+
     def bzmpop(
         self,
         timeout: float,
         numkeys: int,
         keys: List[str],
-        min: Optional[bool] = False,
-        max: Optional[bool] = False,
-        count: Optional[int] = 1,
-    ) -> Optional[list]:
+        min: bool | None = False,
+        max: bool | None = False,
+        count: int | None = 1,
+    ) -> ZMPopResponse | Awaitable[ZMPopResponse]:
         """
         Pop ``count`` values (default 1) off of the first non-empty sorted set
         named in the ``keys`` list.
@@ -5012,6 +7775,36 @@ class SortedSetCommands(CommandsProtocol):
         options["keys"] = [name]
         return self.execute_command(*pieces, **options)
 
+    @overload
+    def zrange(
+        self: SyncClientProtocol,
+        name: KeyT,
+        start: EncodableT,
+        end: EncodableT,
+        desc: bool = False,
+        withscores: bool = False,
+        score_cast_func: type | Callable = float,
+        byscore: bool = False,
+        bylex: bool = False,
+        offset: int | None = None,
+        num: int | None = None,
+    ) -> ZSetRangeResponse: ...
+
+    @overload
+    def zrange(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        start: EncodableT,
+        end: EncodableT,
+        desc: bool = False,
+        withscores: bool = False,
+        score_cast_func: type | Callable = float,
+        byscore: bool = False,
+        bylex: bool = False,
+        offset: int | None = None,
+        num: int | None = None,
+    ) -> Awaitable[ZSetRangeResponse]: ...
+
     def zrange(
         self,
         name: KeyT,
@@ -5019,12 +7812,12 @@ class SortedSetCommands(CommandsProtocol):
         end: EncodableT,
         desc: bool = False,
         withscores: bool = False,
-        score_cast_func: Union[type, Callable] = float,
+        score_cast_func: type | Callable = float,
         byscore: bool = False,
         bylex: bool = False,
-        offset: Optional[int] = None,
-        num: Optional[int] = None,
-    ) -> ResponseT:
+        offset: int | None = None,
+        num: int | None = None,
+    ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Return a range of values from sorted set ``name`` between
         ``start`` and ``end`` sorted in ascending order.
@@ -5073,14 +7866,34 @@ class SortedSetCommands(CommandsProtocol):
             num,
         )
 
+    @overload
+    def zrevrange(
+        self: SyncClientProtocol,
+        name: KeyT,
+        start: int,
+        end: int,
+        withscores: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> ZSetRangeResponse: ...
+
+    @overload
+    def zrevrange(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        start: int,
+        end: int,
+        withscores: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> Awaitable[ZSetRangeResponse]: ...
+
     def zrevrange(
         self,
         name: KeyT,
         start: int,
         end: int,
         withscores: bool = False,
-        score_cast_func: Union[type, Callable] = float,
-    ) -> ResponseT:
+        score_cast_func: type | Callable = float,
+    ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Return a range of values from sorted set ``name`` between
         ``start`` and ``end`` sorted in descending order.
@@ -5101,6 +7914,34 @@ class SortedSetCommands(CommandsProtocol):
         options["keys"] = name
         return self.execute_command(*pieces, **options)
 
+    @overload
+    def zrangestore(
+        self: SyncClientProtocol,
+        dest: KeyT,
+        name: KeyT,
+        start: EncodableT,
+        end: EncodableT,
+        byscore: bool = False,
+        bylex: bool = False,
+        desc: bool = False,
+        offset: int | None = None,
+        num: int | None = None,
+    ) -> int: ...
+
+    @overload
+    def zrangestore(
+        self: AsyncClientProtocol,
+        dest: KeyT,
+        name: KeyT,
+        start: EncodableT,
+        end: EncodableT,
+        byscore: bool = False,
+        bylex: bool = False,
+        desc: bool = False,
+        offset: int | None = None,
+        num: int | None = None,
+    ) -> Awaitable[int]: ...
+
     def zrangestore(
         self,
         dest: KeyT,
@@ -5110,9 +7951,9 @@ class SortedSetCommands(CommandsProtocol):
         byscore: bool = False,
         bylex: bool = False,
         desc: bool = False,
-        offset: Optional[int] = None,
-        num: Optional[int] = None,
-    ) -> ResponseT:
+        offset: int | None = None,
+        num: int | None = None,
+    ) -> int | Awaitable[int]:
         """
         Stores in ``dest`` the result of a range of values from sorted set
         ``name`` between ``start`` and ``end`` sorted in ascending order.
@@ -5151,14 +7992,34 @@ class SortedSetCommands(CommandsProtocol):
             num,
         )
 
+    @overload
+    def zrangebylex(
+        self: SyncClientProtocol,
+        name: KeyT,
+        min: EncodableT,
+        max: EncodableT,
+        start: int | None = None,
+        num: int | None = None,
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def zrangebylex(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        min: EncodableT,
+        max: EncodableT,
+        start: int | None = None,
+        num: int | None = None,
+    ) -> Awaitable[list[bytes | str]]: ...
+
     def zrangebylex(
         self,
         name: KeyT,
         min: EncodableT,
         max: EncodableT,
-        start: Optional[int] = None,
-        num: Optional[int] = None,
-    ) -> ResponseT:
+        start: int | None = None,
+        num: int | None = None,
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return the lexicographical range of values from sorted set ``name``
         between ``min`` and ``max``.
@@ -5175,14 +8036,34 @@ class SortedSetCommands(CommandsProtocol):
             pieces.extend([b"LIMIT", start, num])
         return self.execute_command(*pieces, keys=[name])
 
+    @overload
+    def zrevrangebylex(
+        self: SyncClientProtocol,
+        name: KeyT,
+        max: EncodableT,
+        min: EncodableT,
+        start: int | None = None,
+        num: int | None = None,
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def zrevrangebylex(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        max: EncodableT,
+        min: EncodableT,
+        start: int | None = None,
+        num: int | None = None,
+    ) -> Awaitable[list[bytes | str]]: ...
+
     def zrevrangebylex(
         self,
         name: KeyT,
         max: EncodableT,
         min: EncodableT,
-        start: Optional[int] = None,
-        num: Optional[int] = None,
-    ) -> ResponseT:
+        start: int | None = None,
+        num: int | None = None,
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return the reversed lexicographical range of values from sorted set
         ``name`` between ``max`` and ``min``.
@@ -5199,16 +8080,40 @@ class SortedSetCommands(CommandsProtocol):
             pieces.extend(["LIMIT", start, num])
         return self.execute_command(*pieces, keys=[name])
 
+    @overload
+    def zrangebyscore(
+        self: SyncClientProtocol,
+        name: KeyT,
+        min: ZScoreBoundT,
+        max: ZScoreBoundT,
+        start: int | None = None,
+        num: int | None = None,
+        withscores: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> ZSetRangeResponse: ...
+
+    @overload
+    def zrangebyscore(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        min: ZScoreBoundT,
+        max: ZScoreBoundT,
+        start: int | None = None,
+        num: int | None = None,
+        withscores: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> Awaitable[ZSetRangeResponse]: ...
+
     def zrangebyscore(
         self,
         name: KeyT,
         min: ZScoreBoundT,
         max: ZScoreBoundT,
-        start: Optional[int] = None,
-        num: Optional[int] = None,
+        start: int | None = None,
+        num: int | None = None,
         withscores: bool = False,
-        score_cast_func: Union[type, Callable] = float,
-    ) -> ResponseT:
+        score_cast_func: type | Callable = float,
+    ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Return a range of values from the sorted set ``name`` with scores
         between ``min`` and ``max``.
@@ -5234,16 +8139,40 @@ class SortedSetCommands(CommandsProtocol):
         options["keys"] = [name]
         return self.execute_command(*pieces, **options)
 
+    @overload
+    def zrevrangebyscore(
+        self: SyncClientProtocol,
+        name: KeyT,
+        max: ZScoreBoundT,
+        min: ZScoreBoundT,
+        start: int | None = None,
+        num: int | None = None,
+        withscores: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> ZSetRangeResponse: ...
+
+    @overload
+    def zrevrangebyscore(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        max: ZScoreBoundT,
+        min: ZScoreBoundT,
+        start: int | None = None,
+        num: int | None = None,
+        withscores: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> Awaitable[ZSetRangeResponse]: ...
+
     def zrevrangebyscore(
         self,
         name: KeyT,
         max: ZScoreBoundT,
         min: ZScoreBoundT,
-        start: Optional[int] = None,
-        num: Optional[int] = None,
+        start: int | None = None,
+        num: int | None = None,
         withscores: bool = False,
-        score_cast_func: Union[type, Callable] = float,
-    ):
+        score_cast_func: type | Callable = float,
+    ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Return a range of values from the sorted set ``name`` with scores
         between ``min`` and ``max`` in descending order.
@@ -5269,13 +8198,31 @@ class SortedSetCommands(CommandsProtocol):
         options["keys"] = [name]
         return self.execute_command(*pieces, **options)
 
+    @overload
+    def zrank(
+        self: SyncClientProtocol,
+        name: KeyT,
+        value: EncodableT,
+        withscore: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> int | list[Any] | None: ...
+
+    @overload
+    def zrank(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        value: EncodableT,
+        withscore: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> Awaitable[int | list[Any] | None]: ...
+
     def zrank(
         self,
         name: KeyT,
         value: EncodableT,
         withscore: bool = False,
-        score_cast_func: Union[type, Callable] = float,
-    ) -> ResponseT:
+        score_cast_func: type | Callable = float,
+    ) -> (int | list[Any] | None) | Awaitable[int | list[Any] | None]:
         """
         Returns a 0-based value indicating the rank of ``value`` in sorted set
         ``name``.
@@ -5294,7 +8241,15 @@ class SortedSetCommands(CommandsProtocol):
 
         return self.execute_command(*pieces, **options)
 
-    def zrem(self, name: KeyT, *values: FieldT) -> ResponseT:
+    @overload
+    def zrem(self: SyncClientProtocol, name: KeyT, *values: FieldT) -> int: ...
+
+    @overload
+    def zrem(
+        self: AsyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> Awaitable[int]: ...
+
+    def zrem(self, name: KeyT, *values: FieldT) -> int | Awaitable[int]:
         """
         Remove member ``values`` from sorted set ``name``
 
@@ -5302,7 +8257,19 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZREM", name, *values)
 
-    def zremrangebylex(self, name: KeyT, min: EncodableT, max: EncodableT) -> ResponseT:
+    @overload
+    def zremrangebylex(
+        self: SyncClientProtocol, name: KeyT, min: EncodableT, max: EncodableT
+    ) -> int: ...
+
+    @overload
+    def zremrangebylex(
+        self: AsyncClientProtocol, name: KeyT, min: EncodableT, max: EncodableT
+    ) -> Awaitable[int]: ...
+
+    def zremrangebylex(
+        self, name: KeyT, min: EncodableT, max: EncodableT
+    ) -> int | Awaitable[int]:
         """
         Remove all elements in the sorted set ``name`` between the
         lexicographical range specified by ``min`` and ``max``.
@@ -5313,7 +8280,17 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZREMRANGEBYLEX", name, min, max)
 
-    def zremrangebyrank(self, name: KeyT, min: int, max: int) -> ResponseT:
+    @overload
+    def zremrangebyrank(
+        self: SyncClientProtocol, name: KeyT, min: int, max: int
+    ) -> int: ...
+
+    @overload
+    def zremrangebyrank(
+        self: AsyncClientProtocol, name: KeyT, min: int, max: int
+    ) -> Awaitable[int]: ...
+
+    def zremrangebyrank(self, name: KeyT, min: int, max: int) -> int | Awaitable[int]:
         """
         Remove all elements in the sorted set ``name`` with ranks between
         ``min`` and ``max``. Values are 0-based, ordered from smallest score
@@ -5324,9 +8301,19 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZREMRANGEBYRANK", name, min, max)
 
+    @overload
+    def zremrangebyscore(
+        self: SyncClientProtocol, name: KeyT, min: ZScoreBoundT, max: ZScoreBoundT
+    ) -> int: ...
+
+    @overload
+    def zremrangebyscore(
+        self: AsyncClientProtocol, name: KeyT, min: ZScoreBoundT, max: ZScoreBoundT
+    ) -> Awaitable[int]: ...
+
     def zremrangebyscore(
         self, name: KeyT, min: ZScoreBoundT, max: ZScoreBoundT
-    ) -> ResponseT:
+    ) -> int | Awaitable[int]:
         """
         Remove all elements in the sorted set ``name`` with scores
         between ``min`` and ``max``. Returns the number of elements removed.
@@ -5335,13 +8322,31 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZREMRANGEBYSCORE", name, min, max)
 
+    @overload
+    def zrevrank(
+        self: SyncClientProtocol,
+        name: KeyT,
+        value: EncodableT,
+        withscore: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> int | list[Any] | None: ...
+
+    @overload
+    def zrevrank(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        value: EncodableT,
+        withscore: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> Awaitable[int | list[Any] | None]: ...
+
     def zrevrank(
         self,
         name: KeyT,
         value: EncodableT,
         withscore: bool = False,
-        score_cast_func: Union[type, Callable] = float,
-    ) -> ResponseT:
+        score_cast_func: type | Callable = float,
+    ) -> (int | list[Any] | None) | Awaitable[int | list[Any] | None]:
         """
         Returns a 0-based value indicating the descending rank of
         ``value`` in sorted set ``name``.
@@ -5360,7 +8365,19 @@ class SortedSetCommands(CommandsProtocol):
 
         return self.execute_command(*pieces, **options)
 
-    def zscore(self, name: KeyT, value: EncodableT) -> ResponseT:
+    @overload
+    def zscore(
+        self: SyncClientProtocol, name: KeyT, value: EncodableT
+    ) -> float | None: ...
+
+    @overload
+    def zscore(
+        self: AsyncClientProtocol, name: KeyT, value: EncodableT
+    ) -> Awaitable[float | None]: ...
+
+    def zscore(self, name: KeyT, value: EncodableT) -> (float | None) | Awaitable[
+        float | None
+    ]:
         """
         Return the score of element ``value`` in sorted set ``name``
 
@@ -5368,13 +8385,31 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZSCORE", name, value, keys=[name])
 
+    @overload
+    def zunion(
+        self: SyncClientProtocol,
+        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
+        aggregate: str | None = None,
+        withscores: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> ZSetRangeResponse: ...
+
+    @overload
+    def zunion(
+        self: AsyncClientProtocol,
+        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
+        aggregate: str | None = None,
+        withscores: bool = False,
+        score_cast_func: type | Callable = float,
+    ) -> Awaitable[ZSetRangeResponse]: ...
+
     def zunion(
         self,
-        keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
-        aggregate: Optional[str] = None,
+        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
+        aggregate: str | None = None,
         withscores: bool = False,
-        score_cast_func: Union[type, Callable] = float,
-    ) -> ResponseT:
+        score_cast_func: type | Callable = float,
+    ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Return the union of multiple sorted sets specified by ``keys``.
         ``keys`` can be provided as dictionary of keys and their weights.
@@ -5394,12 +8429,28 @@ class SortedSetCommands(CommandsProtocol):
             score_cast_func=score_cast_func,
         )
 
+    @overload
+    def zunionstore(
+        self: SyncClientProtocol,
+        dest: KeyT,
+        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
+        aggregate: str | None = None,
+    ) -> int: ...
+
+    @overload
+    def zunionstore(
+        self: AsyncClientProtocol,
+        dest: KeyT,
+        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
+        aggregate: str | None = None,
+    ) -> Awaitable[int]: ...
+
     def zunionstore(
         self,
         dest: KeyT,
-        keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
-        aggregate: Optional[str] = None,
-    ) -> ResponseT:
+        keys: Sequence[KeyT] | Mapping[AnyKeyT, float],
+        aggregate: str | None = None,
+    ) -> int | Awaitable[int]:
         """
         Union multiple sorted sets specified by ``keys`` into
         a new sorted set, ``dest``. Scores in the destination will be
@@ -5409,7 +8460,19 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self._zaggregate("ZUNIONSTORE", dest, keys, aggregate)
 
-    def zmscore(self, key: KeyT, members: List[str]) -> ResponseT:
+    @overload
+    def zmscore(
+        self: SyncClientProtocol, key: KeyT, members: List[str]
+    ) -> list[float | None]: ...
+
+    @overload
+    def zmscore(
+        self: AsyncClientProtocol, key: KeyT, members: List[str]
+    ) -> Awaitable[list[float | None]]: ...
+
+    def zmscore(
+        self, key: KeyT, members: List[str]
+    ) -> list[float | None] | Awaitable[list[float | None]]:
         """
         Returns the scores associated with the specified members
         in the sorted set stored at key.
@@ -5466,7 +8529,15 @@ class HyperlogCommands(CommandsProtocol):
     see: https://redis.io/topics/data-types-intro#hyperloglogs
     """
 
-    def pfadd(self, name: KeyT, *values: FieldT) -> ResponseT:
+    @overload
+    def pfadd(self: SyncClientProtocol, name: KeyT, *values: FieldT) -> int: ...
+
+    @overload
+    def pfadd(
+        self: AsyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> Awaitable[int]: ...
+
+    def pfadd(self, name: KeyT, *values: FieldT) -> int | Awaitable[int]:
         """
         Adds the specified elements to the specified HyperLogLog.
 
@@ -5474,7 +8545,13 @@ class HyperlogCommands(CommandsProtocol):
         """
         return self.execute_command("PFADD", name, *values)
 
-    def pfcount(self, *sources: KeyT) -> ResponseT:
+    @overload
+    def pfcount(self: SyncClientProtocol, *sources: KeyT) -> int: ...
+
+    @overload
+    def pfcount(self: AsyncClientProtocol, *sources: KeyT) -> Awaitable[int]: ...
+
+    def pfcount(self, *sources: KeyT) -> int | Awaitable[int]:
         """
         Return the approximated cardinality of
         the set observed by the HyperLogLog at key(s).
@@ -5483,7 +8560,15 @@ class HyperlogCommands(CommandsProtocol):
         """
         return self.execute_command("PFCOUNT", *sources)
 
-    def pfmerge(self, dest: KeyT, *sources: KeyT) -> ResponseT:
+    @overload
+    def pfmerge(self: SyncClientProtocol, dest: KeyT, *sources: KeyT) -> bool: ...
+
+    @overload
+    def pfmerge(
+        self: AsyncClientProtocol, dest: KeyT, *sources: KeyT
+    ) -> Awaitable[bool]: ...
+
+    def pfmerge(self, dest: KeyT, *sources: KeyT) -> bool | Awaitable[bool]:
         """
         Merge N different HyperLogLogs into a single one.
 
@@ -5511,7 +8596,13 @@ class HashCommands(CommandsProtocol):
     see: https://redis.io/topics/data-types-intro#redis-hashes
     """
 
-    def hdel(self, name: str, *keys: str) -> Union[Awaitable[int], int]:
+    @overload
+    def hdel(self: SyncClientProtocol, name: str, *keys: str) -> int: ...
+
+    @overload
+    def hdel(self: AsyncClientProtocol, name: str, *keys: str) -> Awaitable[int]: ...
+
+    def hdel(self, name: str, *keys: str) -> int | Awaitable[int]:
         """
         Delete ``keys`` from hash ``name``
 
@@ -5519,7 +8610,13 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HDEL", name, *keys)
 
-    def hexists(self, name: str, key: str) -> Union[Awaitable[bool], bool]:
+    @overload
+    def hexists(self: SyncClientProtocol, name: str, key: str) -> bool: ...
+
+    @overload
+    def hexists(self: AsyncClientProtocol, name: str, key: str) -> Awaitable[bool]: ...
+
+    def hexists(self, name: str, key: str) -> bool | Awaitable[bool]:
         """
         Returns a boolean indicating if ``key`` exists within hash ``name``
 
@@ -5527,9 +8624,17 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HEXISTS", name, key, keys=[name])
 
+    @overload
+    def hget(self: SyncClientProtocol, name: str, key: str) -> bytes | str | None: ...
+
+    @overload
     def hget(
-        self, name: str, key: str
-    ) -> Union[Awaitable[Optional[str]], Optional[str]]:
+        self: AsyncClientProtocol, name: str, key: str
+    ) -> Awaitable[bytes | str | None]: ...
+
+    def hget(self, name: str, key: str) -> (bytes | str | None) | Awaitable[
+        bytes | str | None
+    ]:
         """
         Return the value of ``key`` within the hash ``name``
 
@@ -5537,7 +8642,19 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HGET", name, key, keys=[name])
 
-    def hgetall(self, name: str) -> Union[Awaitable[dict], dict]:
+    @overload
+    def hgetall(
+        self: SyncClientProtocol, name: str
+    ) -> dict[bytes | str, bytes | str]: ...
+
+    @overload
+    def hgetall(
+        self: AsyncClientProtocol, name: str
+    ) -> Awaitable[dict[bytes | str, bytes | str]]: ...
+
+    def hgetall(
+        self, name: str
+    ) -> dict[bytes | str, bytes | str] | Awaitable[dict[bytes | str, bytes | str]]:
         """
         Return a Python dict of the hash's name/value pairs
 
@@ -5545,11 +8662,19 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HGETALL", name, keys=[name])
 
+    @overload
+    def hgetdel(
+        self: SyncClientProtocol, name: str, *keys: str
+    ) -> list[bytes | str | None]: ...
+
+    @overload
+    def hgetdel(
+        self: AsyncClientProtocol, name: str, *keys: str
+    ) -> Awaitable[list[bytes | str | None]]: ...
+
     def hgetdel(
         self, name: str, *keys: str
-    ) -> Union[
-        Awaitable[Optional[List[Union[str, bytes]]]], Optional[List[Union[str, bytes]]]
-    ]:
+    ) -> list[bytes | str | None] | Awaitable[list[bytes | str | None]]:
         """
         Return the value of ``key`` within the hash ``name`` and
         delete the field in the hash.
@@ -5564,18 +8689,40 @@ class HashCommands(CommandsProtocol):
 
         return self.execute_command("HGETDEL", name, "FIELDS", len(keys), *keys)
 
+    @overload
+    def hgetex(
+        self: SyncClientProtocol,
+        name: KeyT,
+        *keys: str,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        persist: bool = False,
+    ) -> list[bytes | str | None]: ...
+
+    @overload
+    def hgetex(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        *keys: str,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        persist: bool = False,
+    ) -> Awaitable[list[bytes | str | None]]: ...
+
     def hgetex(
         self,
         name: KeyT,
         *keys: str,
-        ex: Optional[ExpiryT] = None,
-        px: Optional[ExpiryT] = None,
-        exat: Optional[AbsExpiryT] = None,
-        pxat: Optional[AbsExpiryT] = None,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
         persist: bool = False,
-    ) -> Union[
-        Awaitable[Optional[List[Union[str, bytes]]]], Optional[List[Union[str, bytes]]]
-    ]:
+    ) -> list[bytes | str | None] | Awaitable[list[bytes | str | None]]:
         """
         Return the values of ``key`` and ``keys`` within the hash ``name``
         and optionally set their expiration.
@@ -5618,9 +8765,17 @@ class HashCommands(CommandsProtocol):
             *keys,
         )
 
+    @overload
     def hincrby(
-        self, name: str, key: str, amount: int = 1
-    ) -> Union[Awaitable[int], int]:
+        self: SyncClientProtocol, name: str, key: str, amount: int = 1
+    ) -> int: ...
+
+    @overload
+    def hincrby(
+        self: AsyncClientProtocol, name: str, key: str, amount: int = 1
+    ) -> Awaitable[int]: ...
+
+    def hincrby(self, name: str, key: str, amount: int = 1) -> int | Awaitable[int]:
         """
         Increment the value of ``key`` in hash ``name`` by ``amount``
 
@@ -5628,9 +8783,19 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HINCRBY", name, key, amount)
 
+    @overload
+    def hincrbyfloat(
+        self: SyncClientProtocol, name: str, key: str, amount: float = 1.0
+    ) -> float: ...
+
+    @overload
+    def hincrbyfloat(
+        self: AsyncClientProtocol, name: str, key: str, amount: float = 1.0
+    ) -> Awaitable[float]: ...
+
     def hincrbyfloat(
         self, name: str, key: str, amount: float = 1.0
-    ) -> Union[Awaitable[float], float]:
+    ) -> float | Awaitable[float]:
         """
         Increment the value of ``key`` in hash ``name`` by floating ``amount``
 
@@ -5638,7 +8803,13 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HINCRBYFLOAT", name, key, amount)
 
-    def hkeys(self, name: str) -> Union[Awaitable[List], List]:
+    @overload
+    def hkeys(self: SyncClientProtocol, name: str) -> list[bytes | str]: ...
+
+    @overload
+    def hkeys(self: AsyncClientProtocol, name: str) -> Awaitable[list[bytes | str]]: ...
+
+    def hkeys(self, name: str) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return the list of keys within hash ``name``
 
@@ -5646,7 +8817,13 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HKEYS", name, keys=[name])
 
-    def hlen(self, name: str) -> Union[Awaitable[int], int]:
+    @overload
+    def hlen(self: SyncClientProtocol, name: str) -> int: ...
+
+    @overload
+    def hlen(self: AsyncClientProtocol, name: str) -> Awaitable[int]: ...
+
+    def hlen(self, name: str) -> int | Awaitable[int]:
         """
         Return the number of elements in hash ``name``
 
@@ -5654,14 +8831,34 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HLEN", name, keys=[name])
 
+    @overload
+    def hset(
+        self: SyncClientProtocol,
+        name: str,
+        key: str | None = None,
+        value: str | None = None,
+        mapping: dict | None = None,
+        items: list | None = None,
+    ) -> int: ...
+
+    @overload
+    def hset(
+        self: AsyncClientProtocol,
+        name: str,
+        key: str | None = None,
+        value: str | None = None,
+        mapping: dict | None = None,
+        items: list | None = None,
+    ) -> Awaitable[int]: ...
+
     def hset(
         self,
         name: str,
-        key: Optional[str] = None,
-        value: Optional[str] = None,
-        mapping: Optional[dict] = None,
-        items: Optional[list] = None,
-    ) -> Union[Awaitable[int], int]:
+        key: str | None = None,
+        value: str | None = None,
+        mapping: dict | None = None,
+        items: list | None = None,
+    ) -> int | Awaitable[int]:
         """
         Set ``key`` to ``value`` within hash ``name``,
         ``mapping`` accepts a dict of key/value pairs that will be
@@ -5687,20 +8884,52 @@ class HashCommands(CommandsProtocol):
 
         return self.execute_command("HSET", name, *pieces)
 
+    @overload
+    def hsetex(
+        self: SyncClientProtocol,
+        name: str,
+        key: str | None = None,
+        value: str | None = None,
+        mapping: dict | None = None,
+        items: list | None = None,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        data_persist_option: HashDataPersistOptions | None = None,
+        keepttl: bool = False,
+    ) -> int: ...
+
+    @overload
+    def hsetex(
+        self: AsyncClientProtocol,
+        name: str,
+        key: str | None = None,
+        value: str | None = None,
+        mapping: dict | None = None,
+        items: list | None = None,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        data_persist_option: HashDataPersistOptions | None = None,
+        keepttl: bool = False,
+    ) -> Awaitable[int]: ...
+
     def hsetex(
         self,
         name: str,
-        key: Optional[str] = None,
-        value: Optional[str] = None,
-        mapping: Optional[dict] = None,
-        items: Optional[list] = None,
-        ex: Optional[ExpiryT] = None,
-        px: Optional[ExpiryT] = None,
-        exat: Optional[AbsExpiryT] = None,
-        pxat: Optional[AbsExpiryT] = None,
-        data_persist_option: Optional[HashDataPersistOptions] = None,
+        key: str | None = None,
+        value: str | None = None,
+        mapping: dict | None = None,
+        items: list | None = None,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        data_persist_option: HashDataPersistOptions | None = None,
         keepttl: bool = False,
-    ) -> Union[Awaitable[int], int]:
+    ) -> int | Awaitable[int]:
         """
         Set ``key`` to ``value`` within hash ``name``
 
@@ -5769,7 +8998,15 @@ class HashCommands(CommandsProtocol):
             "HSETEX", name, *exp_options, "FIELDS", int(len(pieces) / 2), *pieces
         )
 
-    def hsetnx(self, name: str, key: str, value: str) -> Union[Awaitable[bool], bool]:
+    @overload
+    def hsetnx(self: SyncClientProtocol, name: str, key: str, value: str) -> int: ...
+
+    @overload
+    def hsetnx(
+        self: AsyncClientProtocol, name: str, key: str, value: str
+    ) -> Awaitable[int]: ...
+
+    def hsetnx(self, name: str, key: str, value: str) -> int | Awaitable[int]:
         """
         Set ``key`` to ``value`` within hash ``name`` if ``key`` does not
         exist.  Returns 1 if HSETNX created a field, otherwise 0.
@@ -5778,12 +9015,20 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HSETNX", name, key, value)
 
+    @overload
+    def hmset(self: SyncClientProtocol, name: str, mapping: dict) -> bool: ...
+
+    @overload
+    def hmset(
+        self: AsyncClientProtocol, name: str, mapping: dict
+    ) -> Awaitable[bool]: ...
+
     @deprecated_function(
         version="4.0.0",
         reason="Use 'hset' instead.",
         name="hmset",
     )
-    def hmset(self, name: str, mapping: dict) -> Union[Awaitable[str], str]:
+    def hmset(self, name: str, mapping: dict) -> bool | Awaitable[bool]:
         """
         Set key to value within hash ``name`` for each corresponding
         key and value from the ``mapping`` dict.
@@ -5797,7 +9042,19 @@ class HashCommands(CommandsProtocol):
             items.extend(pair)
         return self.execute_command("HMSET", name, *items)
 
-    def hmget(self, name: str, keys: List, *args: List) -> Union[Awaitable[List], List]:
+    @overload
+    def hmget(
+        self: SyncClientProtocol, name: str, keys: List, *args: List
+    ) -> list[bytes | str | None]: ...
+
+    @overload
+    def hmget(
+        self: AsyncClientProtocol, name: str, keys: List, *args: List
+    ) -> Awaitable[list[bytes | str | None]]: ...
+
+    def hmget(
+        self, name: str, keys: List, *args: List
+    ) -> list[bytes | str | None] | Awaitable[list[bytes | str | None]]:
         """
         Returns a list of values ordered identically to ``keys``
 
@@ -5806,7 +9063,13 @@ class HashCommands(CommandsProtocol):
         args = list_or_args(keys, args)
         return self.execute_command("HMGET", name, *args, keys=[name])
 
-    def hvals(self, name: str) -> Union[Awaitable[List], List]:
+    @overload
+    def hvals(self: SyncClientProtocol, name: str) -> list[bytes | str]: ...
+
+    @overload
+    def hvals(self: AsyncClientProtocol, name: str) -> Awaitable[list[bytes | str]]: ...
+
+    def hvals(self, name: str) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return the list of values within hash ``name``
 
@@ -5814,7 +9077,13 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HVALS", name, keys=[name])
 
-    def hstrlen(self, name: str, key: str) -> Union[Awaitable[int], int]:
+    @overload
+    def hstrlen(self: SyncClientProtocol, name: str, key: str) -> int: ...
+
+    @overload
+    def hstrlen(self: AsyncClientProtocol, name: str, key: str) -> Awaitable[int]: ...
+
+    def hstrlen(self, name: str, key: str) -> int | Awaitable[int]:
         """
         Return the number of bytes stored in the value of ``key``
         within hash ``name``
@@ -5822,6 +9091,30 @@ class HashCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/hstrlen
         """
         return self.execute_command("HSTRLEN", name, key, keys=[name])
+
+    @overload
+    def hexpire(
+        self: SyncClientProtocol,
+        name: KeyT,
+        seconds: ExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> list[int]: ...
+
+    @overload
+    def hexpire(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        seconds: ExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> Awaitable[list[int]]: ...
 
     def hexpire(
         self,
@@ -5832,7 +9125,7 @@ class HashCommands(CommandsProtocol):
         xx: bool = False,
         gt: bool = False,
         lt: bool = False,
-    ) -> ResponseT:
+    ) -> list[int] | Awaitable[list[int]]:
         """
         Sets or updates the expiration time for fields within a hash key, using relative
         time in seconds.
@@ -5883,6 +9176,30 @@ class HashCommands(CommandsProtocol):
             "HEXPIRE", name, seconds, *options, "FIELDS", len(fields), *fields
         )
 
+    @overload
+    def hpexpire(
+        self: SyncClientProtocol,
+        name: KeyT,
+        milliseconds: ExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> list[int]: ...
+
+    @overload
+    def hpexpire(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        milliseconds: ExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> Awaitable[list[int]]: ...
+
     def hpexpire(
         self,
         name: KeyT,
@@ -5892,7 +9209,7 @@ class HashCommands(CommandsProtocol):
         xx: bool = False,
         gt: bool = False,
         lt: bool = False,
-    ) -> ResponseT:
+    ) -> list[int] | Awaitable[list[int]]:
         """
         Sets or updates the expiration time for fields within a hash key, using relative
         time in milliseconds.
@@ -5943,6 +9260,30 @@ class HashCommands(CommandsProtocol):
             "HPEXPIRE", name, milliseconds, *options, "FIELDS", len(fields), *fields
         )
 
+    @overload
+    def hexpireat(
+        self: SyncClientProtocol,
+        name: KeyT,
+        unix_time_seconds: AbsExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> list[int]: ...
+
+    @overload
+    def hexpireat(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        unix_time_seconds: AbsExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> Awaitable[list[int]]: ...
+
     def hexpireat(
         self,
         name: KeyT,
@@ -5952,7 +9293,7 @@ class HashCommands(CommandsProtocol):
         xx: bool = False,
         gt: bool = False,
         lt: bool = False,
-    ) -> ResponseT:
+    ) -> list[int] | Awaitable[list[int]]:
         """
         Sets or updates the expiration time for fields within a hash key, using an
         absolute Unix timestamp in seconds.
@@ -6009,6 +9350,30 @@ class HashCommands(CommandsProtocol):
             *fields,
         )
 
+    @overload
+    def hpexpireat(
+        self: SyncClientProtocol,
+        name: KeyT,
+        unix_time_milliseconds: AbsExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> list[int]: ...
+
+    @overload
+    def hpexpireat(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        unix_time_milliseconds: AbsExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> Awaitable[list[int]]: ...
+
     def hpexpireat(
         self,
         name: KeyT,
@@ -6018,7 +9383,7 @@ class HashCommands(CommandsProtocol):
         xx: bool = False,
         gt: bool = False,
         lt: bool = False,
-    ) -> ResponseT:
+    ) -> list[int] | Awaitable[list[int]]:
         """
         Sets or updates the expiration time for fields within a hash key, using an
         absolute Unix timestamp in milliseconds.
@@ -6075,7 +9440,15 @@ class HashCommands(CommandsProtocol):
             *fields,
         )
 
-    def hpersist(self, name: KeyT, *fields: str) -> ResponseT:
+    @overload
+    def hpersist(self: SyncClientProtocol, name: KeyT, *fields: str) -> list[int]: ...
+
+    @overload
+    def hpersist(
+        self: AsyncClientProtocol, name: KeyT, *fields: str
+    ) -> Awaitable[list[int]]: ...
+
+    def hpersist(self, name: KeyT, *fields: str) -> list[int] | Awaitable[list[int]]:
         """
         Removes the expiration time for each specified field in a hash.
 
@@ -6094,7 +9467,15 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HPERSIST", name, "FIELDS", len(fields), *fields)
 
-    def hexpiretime(self, key: KeyT, *fields: str) -> ResponseT:
+    @overload
+    def hexpiretime(self: SyncClientProtocol, key: KeyT, *fields: str) -> list[int]: ...
+
+    @overload
+    def hexpiretime(
+        self: AsyncClientProtocol, key: KeyT, *fields: str
+    ) -> Awaitable[list[int]]: ...
+
+    def hexpiretime(self, key: KeyT, *fields: str) -> list[int] | Awaitable[list[int]]:
         """
         Returns the expiration times of hash fields as Unix timestamps in seconds.
 
@@ -6116,7 +9497,17 @@ class HashCommands(CommandsProtocol):
             "HEXPIRETIME", key, "FIELDS", len(fields), *fields, keys=[key]
         )
 
-    def hpexpiretime(self, key: KeyT, *fields: str) -> ResponseT:
+    @overload
+    def hpexpiretime(
+        self: SyncClientProtocol, key: KeyT, *fields: str
+    ) -> list[int]: ...
+
+    @overload
+    def hpexpiretime(
+        self: AsyncClientProtocol, key: KeyT, *fields: str
+    ) -> Awaitable[list[int]]: ...
+
+    def hpexpiretime(self, key: KeyT, *fields: str) -> list[int] | Awaitable[list[int]]:
         """
         Returns the expiration times of hash fields as Unix timestamps in milliseconds.
 
@@ -6138,7 +9529,15 @@ class HashCommands(CommandsProtocol):
             "HPEXPIRETIME", key, "FIELDS", len(fields), *fields, keys=[key]
         )
 
-    def httl(self, key: KeyT, *fields: str) -> ResponseT:
+    @overload
+    def httl(self: SyncClientProtocol, key: KeyT, *fields: str) -> list[int]: ...
+
+    @overload
+    def httl(
+        self: AsyncClientProtocol, key: KeyT, *fields: str
+    ) -> Awaitable[list[int]]: ...
+
+    def httl(self, key: KeyT, *fields: str) -> list[int] | Awaitable[list[int]]:
         """
         Returns the TTL (Time To Live) in seconds for each specified field within a hash
         key.
@@ -6160,7 +9559,15 @@ class HashCommands(CommandsProtocol):
             "HTTL", key, "FIELDS", len(fields), *fields, keys=[key]
         )
 
-    def hpttl(self, key: KeyT, *fields: str) -> ResponseT:
+    @overload
+    def hpttl(self: SyncClientProtocol, key: KeyT, *fields: str) -> list[int]: ...
+
+    @overload
+    def hpttl(
+        self: AsyncClientProtocol, key: KeyT, *fields: str
+    ) -> Awaitable[list[int]]: ...
+
+    def hpttl(self, key: KeyT, *fields: str) -> list[int] | Awaitable[list[int]]:
         """
         Returns the TTL (Time To Live) in milliseconds for each specified field within a
         hash key.
@@ -6191,7 +9598,11 @@ class Script:
     An executable Lua script object returned by ``register_script``
     """
 
-    def __init__(self, registered_client: "redis.client.Redis", script: ScriptTextT):
+    def __init__(
+        self,
+        registered_client: Union["redis.client.Redis", "redis.cluster.RedisCluster"],
+        script: ScriptTextT,
+    ):
         self.registered_client = registered_client
         self.script = script
         # Precalculate and store the SHA1 hex digest of the script.
@@ -6207,7 +9618,7 @@ class Script:
         self,
         keys: Union[Sequence[KeyT], None] = None,
         args: Union[Iterable[EncodableT], None] = None,
-        client: Union["redis.client.Redis", None] = None,
+        client: Union["redis.client.Redis", "redis.cluster.RedisCluster", None] = None,
     ):
         """Execute the script, passing any required ``args``"""
         keys = keys or []
@@ -6256,7 +9667,9 @@ class AsyncScript:
 
     def __init__(
         self,
-        registered_client: "redis.asyncio.client.Redis",
+        registered_client: Union[
+            "redis.asyncio.client.Redis", "redis.asyncio.cluster.RedisCluster"
+        ],
         script: ScriptTextT,
     ):
         self.registered_client = registered_client
@@ -6278,7 +9691,9 @@ class AsyncScript:
         self,
         keys: Union[Sequence[KeyT], None] = None,
         args: Union[Iterable[EncodableT], None] = None,
-        client: Union["redis.asyncio.client.Redis", None] = None,
+        client: Union[
+            "redis.asyncio.client.Redis", "redis.asyncio.cluster.RedisCluster", None
+        ] = None,
     ):
         """Execute the script, passing any required ``args``"""
         keys = keys or []
@@ -6308,7 +9723,19 @@ class PubSubCommands(CommandsProtocol):
     see https://redis.io/topics/pubsub
     """
 
-    def publish(self, channel: ChannelT, message: EncodableT, **kwargs) -> ResponseT:
+    @overload
+    def publish(
+        self: SyncClientProtocol, channel: ChannelT, message: EncodableT, **kwargs
+    ) -> int: ...
+
+    @overload
+    def publish(
+        self: AsyncClientProtocol, channel: ChannelT, message: EncodableT, **kwargs
+    ) -> Awaitable[int]: ...
+
+    def publish(
+        self, channel: ChannelT, message: EncodableT, **kwargs
+    ) -> int | Awaitable[int]:
         """
         Publish ``message`` on ``channel``.
         Returns the number of subscribers the message was delivered to.
@@ -6322,7 +9749,19 @@ class PubSubCommands(CommandsProtocol):
         )
         return response
 
-    def spublish(self, shard_channel: ChannelT, message: EncodableT) -> ResponseT:
+    @overload
+    def spublish(
+        self: SyncClientProtocol, shard_channel: ChannelT, message: EncodableT
+    ) -> int: ...
+
+    @overload
+    def spublish(
+        self: AsyncClientProtocol, shard_channel: ChannelT, message: EncodableT
+    ) -> Awaitable[int]: ...
+
+    def spublish(
+        self, shard_channel: ChannelT, message: EncodableT
+    ) -> int | Awaitable[int]:
         """
         Posts a message to the given shard channel.
         Returns the number of clients that received the message
@@ -6337,7 +9776,19 @@ class PubSubCommands(CommandsProtocol):
         )
         return response
 
-    def pubsub_channels(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
+    @overload
+    def pubsub_channels(
+        self: SyncClientProtocol, pattern: PatternT = "*", **kwargs
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def pubsub_channels(
+        self: AsyncClientProtocol, pattern: PatternT = "*", **kwargs
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def pubsub_channels(
+        self, pattern: PatternT = "*", **kwargs
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return a list of channels that have at least one subscriber
 
@@ -6345,7 +9796,19 @@ class PubSubCommands(CommandsProtocol):
         """
         return self.execute_command("PUBSUB CHANNELS", pattern, **kwargs)
 
-    def pubsub_shardchannels(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
+    @overload
+    def pubsub_shardchannels(
+        self: SyncClientProtocol, pattern: PatternT = "*", **kwargs
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def pubsub_shardchannels(
+        self: AsyncClientProtocol, pattern: PatternT = "*", **kwargs
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def pubsub_shardchannels(
+        self, pattern: PatternT = "*", **kwargs
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return a list of shard_channels that have at least one subscriber
 
@@ -6353,7 +9816,13 @@ class PubSubCommands(CommandsProtocol):
         """
         return self.execute_command("PUBSUB SHARDCHANNELS", pattern, **kwargs)
 
-    def pubsub_numpat(self, **kwargs) -> ResponseT:
+    @overload
+    def pubsub_numpat(self: SyncClientProtocol, **kwargs) -> int: ...
+
+    @overload
+    def pubsub_numpat(self: AsyncClientProtocol, **kwargs) -> Awaitable[int]: ...
+
+    def pubsub_numpat(self, **kwargs) -> int | Awaitable[int]:
         """
         Returns the number of subscriptions to patterns
 
@@ -6361,7 +9830,19 @@ class PubSubCommands(CommandsProtocol):
         """
         return self.execute_command("PUBSUB NUMPAT", **kwargs)
 
-    def pubsub_numsub(self, *args: ChannelT, **kwargs) -> ResponseT:
+    @overload
+    def pubsub_numsub(
+        self: SyncClientProtocol, *args: ChannelT, **kwargs
+    ) -> list[tuple[bytes | str, int]]: ...
+
+    @overload
+    def pubsub_numsub(
+        self: AsyncClientProtocol, *args: ChannelT, **kwargs
+    ) -> Awaitable[list[tuple[bytes | str, int]]]: ...
+
+    def pubsub_numsub(
+        self, *args: ChannelT, **kwargs
+    ) -> list[tuple[bytes | str, int]] | Awaitable[list[tuple[bytes | str, int]]]:
         """
         Return a list of (channel, number of subscribers) tuples
         for each channel given in ``*args``
@@ -6370,7 +9851,19 @@ class PubSubCommands(CommandsProtocol):
         """
         return self.execute_command("PUBSUB NUMSUB", *args, **kwargs)
 
-    def pubsub_shardnumsub(self, *args: ChannelT, **kwargs) -> ResponseT:
+    @overload
+    def pubsub_shardnumsub(
+        self: SyncClientProtocol, *args: ChannelT, **kwargs
+    ) -> list[tuple[bytes | str, int]]: ...
+
+    @overload
+    def pubsub_shardnumsub(
+        self: AsyncClientProtocol, *args: ChannelT, **kwargs
+    ) -> Awaitable[list[tuple[bytes | str, int]]]: ...
+
+    def pubsub_shardnumsub(
+        self, *args: ChannelT, **kwargs
+    ) -> list[tuple[bytes | str, int]] | Awaitable[list[tuple[bytes | str, int]]]:
         """
         Return a list of (shard_channel, number of subscribers) tuples
         for each channel given in ``*args``
@@ -6395,12 +9888,28 @@ class ScriptCommands(CommandsProtocol):
         script: str,
         numkeys: int,
         *keys_and_args: Union[KeyT, EncodableT],
-    ) -> Union[Awaitable[str], str]:
+    ) -> Any:
         return self.execute_command(command, script, numkeys, *keys_and_args)
 
+    @overload
     def eval(
-        self, script: str, numkeys: int, *keys_and_args: Union[KeyT, EncodableT]
-    ) -> Union[Awaitable[str], str]:
+        self: SyncClientProtocol,
+        script: str,
+        numkeys: int,
+        *keys_and_args: KeyT | EncodableT,
+    ) -> Any: ...
+
+    @overload
+    def eval(
+        self: AsyncClientProtocol,
+        script: str,
+        numkeys: int,
+        *keys_and_args: KeyT | EncodableT,
+    ) -> Awaitable[Any]: ...
+
+    def eval(
+        self, script: str, numkeys: int, *keys_and_args: KeyT | EncodableT
+    ) -> Any | Awaitable[Any]:
         """
         Execute the Lua ``script``, specifying the ``numkeys`` the script
         will touch and the key names and argument values in ``keys_and_args``.
@@ -6413,9 +9922,25 @@ class ScriptCommands(CommandsProtocol):
         """
         return self._eval("EVAL", script, numkeys, *keys_and_args)
 
+    @overload
     def eval_ro(
-        self, script: str, numkeys: int, *keys_and_args: Union[KeyT, EncodableT]
-    ) -> Union[Awaitable[str], str]:
+        self: SyncClientProtocol,
+        script: str,
+        numkeys: int,
+        *keys_and_args: KeyT | EncodableT,
+    ) -> Any: ...
+
+    @overload
+    def eval_ro(
+        self: AsyncClientProtocol,
+        script: str,
+        numkeys: int,
+        *keys_and_args: KeyT | EncodableT,
+    ) -> Awaitable[Any]: ...
+
+    def eval_ro(
+        self, script: str, numkeys: int, *keys_and_args: KeyT | EncodableT
+    ) -> Any | Awaitable[Any]:
         """
         The read-only variant of the EVAL command
 
@@ -6433,12 +9958,28 @@ class ScriptCommands(CommandsProtocol):
         sha: str,
         numkeys: int,
         *keys_and_args: Union[KeyT, EncodableT],
-    ) -> Union[Awaitable[str], str]:
+    ) -> Any:
         return self.execute_command(command, sha, numkeys, *keys_and_args)
 
+    @overload
     def evalsha(
-        self, sha: str, numkeys: int, *keys_and_args: Union[KeyT, EncodableT]
-    ) -> Union[Awaitable[str], str]:
+        self: SyncClientProtocol,
+        sha: str,
+        numkeys: int,
+        *keys_and_args: KeyT | EncodableT,
+    ) -> Any: ...
+
+    @overload
+    def evalsha(
+        self: AsyncClientProtocol,
+        sha: str,
+        numkeys: int,
+        *keys_and_args: KeyT | EncodableT,
+    ) -> Awaitable[Any]: ...
+
+    def evalsha(
+        self, sha: str, numkeys: int, *keys_and_args: KeyT | EncodableT
+    ) -> Any | Awaitable[Any]:
         """
         Use the ``sha`` to execute a Lua script already registered via EVAL
         or SCRIPT LOAD. Specify the ``numkeys`` the script will touch and the
@@ -6452,9 +9993,25 @@ class ScriptCommands(CommandsProtocol):
         """
         return self._evalsha("EVALSHA", sha, numkeys, *keys_and_args)
 
+    @overload
     def evalsha_ro(
-        self, sha: str, numkeys: int, *keys_and_args: Union[KeyT, EncodableT]
-    ) -> Union[Awaitable[str], str]:
+        self: SyncClientProtocol,
+        sha: str,
+        numkeys: int,
+        *keys_and_args: KeyT | EncodableT,
+    ) -> Any: ...
+
+    @overload
+    def evalsha_ro(
+        self: AsyncClientProtocol,
+        sha: str,
+        numkeys: int,
+        *keys_and_args: KeyT | EncodableT,
+    ) -> Awaitable[Any]: ...
+
+    def evalsha_ro(
+        self, sha: str, numkeys: int, *keys_and_args: KeyT | EncodableT
+    ) -> Any | Awaitable[Any]:
         """
         The read-only variant of the EVALSHA command
 
@@ -6467,7 +10024,15 @@ class ScriptCommands(CommandsProtocol):
         """
         return self._evalsha("EVALSHA_RO", sha, numkeys, *keys_and_args)
 
-    def script_exists(self, *args: str) -> ResponseT:
+    @overload
+    def script_exists(self: SyncClientProtocol, *args: str) -> list[bool]: ...
+
+    @overload
+    def script_exists(
+        self: AsyncClientProtocol, *args: str
+    ) -> Awaitable[list[bool]]: ...
+
+    def script_exists(self, *args: str) -> list[bool] | Awaitable[list[bool]]:
         """
         Check if a script exists in the script cache by specifying the SHAs of
         each script as ``args``. Returns a list of boolean values indicating if
@@ -6482,9 +10047,21 @@ class ScriptCommands(CommandsProtocol):
             "SCRIPT DEBUG is intentionally not implemented in the client."
         )
 
+    @overload
     def script_flush(
-        self, sync_type: Union[Literal["SYNC"], Literal["ASYNC"]] = None
-    ) -> ResponseT:
+        self: SyncClientProtocol,
+        sync_type: Literal["SYNC"] | Literal["ASYNC"] | None = None,
+    ) -> bool: ...
+
+    @overload
+    def script_flush(
+        self: AsyncClientProtocol,
+        sync_type: Literal["SYNC"] | Literal["ASYNC"] | None = None,
+    ) -> Awaitable[bool]: ...
+
+    def script_flush(
+        self, sync_type: Literal["SYNC"] | Literal["ASYNC"] | None = None
+    ) -> bool | Awaitable[bool]:
         """Flush all scripts from the script cache_data.
 
         ``sync_type`` is by default SYNC (synchronous) but it can also be
@@ -6506,7 +10083,13 @@ class ScriptCommands(CommandsProtocol):
             pieces = [sync_type]
         return self.execute_command("SCRIPT FLUSH", *pieces)
 
-    def script_kill(self) -> ResponseT:
+    @overload
+    def script_kill(self: SyncClientProtocol) -> bool: ...
+
+    @overload
+    def script_kill(self: AsyncClientProtocol) -> Awaitable[bool]: ...
+
+    def script_kill(self) -> bool | Awaitable[bool]:
         """
         Kill the currently executing Lua script
 
@@ -6514,7 +10097,15 @@ class ScriptCommands(CommandsProtocol):
         """
         return self.execute_command("SCRIPT KILL")
 
-    def script_load(self, script: ScriptTextT) -> ResponseT:
+    @overload
+    def script_load(self: SyncClientProtocol, script: ScriptTextT) -> str: ...
+
+    @overload
+    def script_load(
+        self: AsyncClientProtocol, script: ScriptTextT
+    ) -> Awaitable[str]: ...
+
+    def script_load(self, script: ScriptTextT) -> str | Awaitable[str]:
         """
         Load a Lua ``script`` into the script cache_data. Returns the SHA.
 
@@ -6522,7 +10113,10 @@ class ScriptCommands(CommandsProtocol):
         """
         return self.execute_command("SCRIPT LOAD", script)
 
-    def register_script(self: "redis.client.Redis", script: ScriptTextT) -> Script:
+    def register_script(
+        self: Union["redis.client.Redis", "redis.cluster.RedisCluster"],
+        script: ScriptTextT,
+    ) -> Script:
         """
         Register a Lua ``script`` specifying the ``keys`` it will touch.
         Returns a Script object that is callable and hides the complexity of
@@ -6537,7 +10131,7 @@ class AsyncScriptCommands(ScriptCommands):
         return super().script_debug()
 
     def register_script(
-        self: "redis.asyncio.client.Redis",
+        self: Union["redis.asyncio.client.Redis", "redis.asyncio.cluster.RedisCluster"],
         script: ScriptTextT,
     ) -> AsyncScript:
         """
@@ -6555,6 +10149,26 @@ class GeoCommands(CommandsProtocol):
     see: https://redis.com/redis-best-practices/indexing-patterns/geospatial/
     """
 
+    @overload
+    def geoadd(
+        self: SyncClientProtocol,
+        name: KeyT,
+        values: Sequence[EncodableT],
+        nx: bool = False,
+        xx: bool = False,
+        ch: bool = False,
+    ) -> int: ...
+
+    @overload
+    def geoadd(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        values: Sequence[EncodableT],
+        nx: bool = False,
+        xx: bool = False,
+        ch: bool = False,
+    ) -> Awaitable[int]: ...
+
     def geoadd(
         self,
         name: KeyT,
@@ -6562,7 +10176,7 @@ class GeoCommands(CommandsProtocol):
         nx: bool = False,
         xx: bool = False,
         ch: bool = False,
-    ) -> ResponseT:
+    ) -> int | Awaitable[int]:
         """
         Add the specified geospatial items to the specified key identified
         by the ``name`` argument. The Geospatial items are given as ordered
@@ -6597,9 +10211,27 @@ class GeoCommands(CommandsProtocol):
         pieces.extend(values)
         return self.execute_command("GEOADD", *pieces)
 
+    @overload
     def geodist(
-        self, name: KeyT, place1: FieldT, place2: FieldT, unit: Optional[str] = None
-    ) -> ResponseT:
+        self: SyncClientProtocol,
+        name: KeyT,
+        place1: FieldT,
+        place2: FieldT,
+        unit: str | None = None,
+    ) -> float | None: ...
+
+    @overload
+    def geodist(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        place1: FieldT,
+        place2: FieldT,
+        unit: str | None = None,
+    ) -> Awaitable[float | None]: ...
+
+    def geodist(
+        self, name: KeyT, place1: FieldT, place2: FieldT, unit: str | None = None
+    ) -> (float | None) | Awaitable[float | None]:
         """
         Return the distance between ``place1`` and ``place2`` members of the
         ``name`` key.
@@ -6615,7 +10247,19 @@ class GeoCommands(CommandsProtocol):
             pieces.append(unit)
         return self.execute_command("GEODIST", *pieces, keys=[name])
 
-    def geohash(self, name: KeyT, *values: FieldT) -> ResponseT:
+    @overload
+    def geohash(
+        self: SyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> list[bytes | str | None]: ...
+
+    @overload
+    def geohash(
+        self: AsyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> Awaitable[list[bytes | str | None]]: ...
+
+    def geohash(
+        self, name: KeyT, *values: FieldT
+    ) -> list[bytes | str | None] | Awaitable[list[bytes | str | None]]:
         """
         Return the geo hash string for each item of ``values`` members of
         the specified key identified by the ``name`` argument.
@@ -6624,7 +10268,19 @@ class GeoCommands(CommandsProtocol):
         """
         return self.execute_command("GEOHASH", name, *values, keys=[name])
 
-    def geopos(self, name: KeyT, *values: FieldT) -> ResponseT:
+    @overload
+    def geopos(
+        self: SyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> list[tuple[float, float] | None]: ...
+
+    @overload
+    def geopos(
+        self: AsyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> Awaitable[list[tuple[float, float] | None]]: ...
+
+    def geopos(
+        self, name: KeyT, *values: FieldT
+    ) -> list[tuple[float, float] | None] | Awaitable[list[tuple[float, float] | None]]:
         """
         Return the positions of each item of ``values`` as members of
         the specified key identified by the ``name`` argument. Each position
@@ -6634,22 +10290,58 @@ class GeoCommands(CommandsProtocol):
         """
         return self.execute_command("GEOPOS", name, *values, keys=[name])
 
+    @overload
+    def georadius(
+        self: SyncClientProtocol,
+        name: KeyT,
+        longitude: float,
+        latitude: float,
+        radius: float,
+        unit: str | None = None,
+        withdist: bool = False,
+        withcoord: bool = False,
+        withhash: bool = False,
+        count: int | None = None,
+        sort: str | None = None,
+        store: KeyT | None = None,
+        store_dist: KeyT | None = None,
+        any: bool = False,
+    ) -> list[Any] | int: ...
+
+    @overload
+    def georadius(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        longitude: float,
+        latitude: float,
+        radius: float,
+        unit: str | None = None,
+        withdist: bool = False,
+        withcoord: bool = False,
+        withhash: bool = False,
+        count: int | None = None,
+        sort: str | None = None,
+        store: KeyT | None = None,
+        store_dist: KeyT | None = None,
+        any: bool = False,
+    ) -> Awaitable[list[Any] | int]: ...
+
     def georadius(
         self,
         name: KeyT,
         longitude: float,
         latitude: float,
         radius: float,
-        unit: Optional[str] = None,
+        unit: str | None = None,
         withdist: bool = False,
         withcoord: bool = False,
         withhash: bool = False,
-        count: Optional[int] = None,
-        sort: Optional[str] = None,
-        store: Optional[KeyT] = None,
-        store_dist: Optional[KeyT] = None,
+        count: int | None = None,
+        sort: str | None = None,
+        store: KeyT | None = None,
+        store_dist: KeyT | None = None,
         any: bool = False,
-    ) -> ResponseT:
+    ) -> (list[Any] | int) | Awaitable[list[Any] | int]:
         """
         Return the members of the specified key identified by the
         ``name`` argument which are within the borders of the area specified
@@ -6697,21 +10389,55 @@ class GeoCommands(CommandsProtocol):
             any=any,
         )
 
+    @overload
+    def georadiusbymember(
+        self: SyncClientProtocol,
+        name: KeyT,
+        member: FieldT,
+        radius: float,
+        unit: str | None = None,
+        withdist: bool = False,
+        withcoord: bool = False,
+        withhash: bool = False,
+        count: int | None = None,
+        sort: str | None = None,
+        store: KeyT | None = None,
+        store_dist: KeyT | None = None,
+        any: bool = False,
+    ) -> list[Any] | int: ...
+
+    @overload
+    def georadiusbymember(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        member: FieldT,
+        radius: float,
+        unit: str | None = None,
+        withdist: bool = False,
+        withcoord: bool = False,
+        withhash: bool = False,
+        count: int | None = None,
+        sort: str | None = None,
+        store: KeyT | None = None,
+        store_dist: KeyT | None = None,
+        any: bool = False,
+    ) -> Awaitable[list[Any] | int]: ...
+
     def georadiusbymember(
         self,
         name: KeyT,
         member: FieldT,
         radius: float,
-        unit: Optional[str] = None,
+        unit: str | None = None,
         withdist: bool = False,
         withcoord: bool = False,
         withhash: bool = False,
-        count: Optional[int] = None,
-        sort: Optional[str] = None,
+        count: int | None = None,
+        sort: str | None = None,
         store: Union[KeyT, None] = None,
         store_dist: Union[KeyT, None] = None,
         any: bool = False,
-    ) -> ResponseT:
+    ) -> (list[Any] | int) | Awaitable[list[Any] | int]:
         """
         This command is exactly like ``georadius`` with the sole difference
         that instead of taking, as the center of the area to query, a longitude
@@ -6782,23 +10508,61 @@ class GeoCommands(CommandsProtocol):
 
         return self.execute_command(command, *pieces, **kwargs)
 
+    @overload
     def geosearch(
-        self,
+        self: SyncClientProtocol,
         name: KeyT,
-        member: Union[FieldT, None] = None,
-        longitude: Union[float, None] = None,
-        latitude: Union[float, None] = None,
+        member: FieldT | None = None,
+        longitude: float | None = None,
+        latitude: float | None = None,
         unit: str = "m",
-        radius: Union[float, None] = None,
-        width: Union[float, None] = None,
-        height: Union[float, None] = None,
-        sort: Optional[str] = None,
-        count: Optional[int] = None,
+        radius: float | None = None,
+        width: float | None = None,
+        height: float | None = None,
+        sort: str | None = None,
+        count: int | None = None,
         any: bool = False,
         withcoord: bool = False,
         withdist: bool = False,
         withhash: bool = False,
-    ) -> ResponseT:
+    ) -> list[Any]: ...
+
+    @overload
+    def geosearch(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        member: FieldT | None = None,
+        longitude: float | None = None,
+        latitude: float | None = None,
+        unit: str = "m",
+        radius: float | None = None,
+        width: float | None = None,
+        height: float | None = None,
+        sort: str | None = None,
+        count: int | None = None,
+        any: bool = False,
+        withcoord: bool = False,
+        withdist: bool = False,
+        withhash: bool = False,
+    ) -> Awaitable[list[Any]]: ...
+
+    def geosearch(
+        self,
+        name: KeyT,
+        member: FieldT | None = None,
+        longitude: float | None = None,
+        latitude: float | None = None,
+        unit: str = "m",
+        radius: float | None = None,
+        width: float | None = None,
+        height: float | None = None,
+        sort: str | None = None,
+        count: int | None = None,
+        any: bool = False,
+        withcoord: bool = False,
+        withdist: bool = False,
+        withhash: bool = False,
+    ) -> list[Any] | Awaitable[list[Any]]:
         """
         Return the members of specified key identified by the
         ``name`` argument, which are within the borders of the
@@ -6863,22 +10627,58 @@ class GeoCommands(CommandsProtocol):
             store_dist=None,
         )
 
+    @overload
+    def geosearchstore(
+        self: SyncClientProtocol,
+        dest: KeyT,
+        name: KeyT,
+        member: FieldT | None = None,
+        longitude: float | None = None,
+        latitude: float | None = None,
+        unit: str = "m",
+        radius: float | None = None,
+        width: float | None = None,
+        height: float | None = None,
+        sort: str | None = None,
+        count: int | None = None,
+        any: bool = False,
+        storedist: bool = False,
+    ) -> int: ...
+
+    @overload
+    def geosearchstore(
+        self: AsyncClientProtocol,
+        dest: KeyT,
+        name: KeyT,
+        member: FieldT | None = None,
+        longitude: float | None = None,
+        latitude: float | None = None,
+        unit: str = "m",
+        radius: float | None = None,
+        width: float | None = None,
+        height: float | None = None,
+        sort: str | None = None,
+        count: int | None = None,
+        any: bool = False,
+        storedist: bool = False,
+    ) -> Awaitable[int]: ...
+
     def geosearchstore(
         self,
         dest: KeyT,
         name: KeyT,
-        member: Optional[FieldT] = None,
-        longitude: Optional[float] = None,
-        latitude: Optional[float] = None,
+        member: FieldT | None = None,
+        longitude: float | None = None,
+        latitude: float | None = None,
         unit: str = "m",
-        radius: Optional[float] = None,
-        width: Optional[float] = None,
-        height: Optional[float] = None,
-        sort: Optional[str] = None,
-        count: Optional[int] = None,
+        radius: float | None = None,
+        width: float | None = None,
+        height: float | None = None,
+        sort: str | None = None,
+        count: int | None = None,
         any: bool = False,
         storedist: bool = False,
-    ) -> ResponseT:
+    ) -> int | Awaitable[int]:
         """
         This command is like GEOSEARCH, but stores the result in
         ``dest``. By default, it stores the results in the destination
@@ -6986,7 +10786,13 @@ class ModuleCommands(CommandsProtocol):
     see: https://redis.io/topics/modules-intro
     """
 
-    def module_load(self, path, *args) -> ResponseT:
+    @overload
+    def module_load(self: SyncClientProtocol, path, *args) -> bool: ...
+
+    @overload
+    def module_load(self: AsyncClientProtocol, path, *args) -> Awaitable[bool]: ...
+
+    def module_load(self, path, *args) -> bool | Awaitable[bool]:
         """
         Loads the module from ``path``.
         Passes all ``*args`` to the module, during loading.
@@ -6996,12 +10802,28 @@ class ModuleCommands(CommandsProtocol):
         """
         return self.execute_command("MODULE LOAD", path, *args)
 
+    @overload
+    def module_loadex(
+        self: SyncClientProtocol,
+        path: str,
+        options: List[str] | None = None,
+        args: List[str] | None = None,
+    ) -> bytes | str: ...
+
+    @overload
+    def module_loadex(
+        self: AsyncClientProtocol,
+        path: str,
+        options: List[str] | None = None,
+        args: List[str] | None = None,
+    ) -> Awaitable[bytes | str]: ...
+
     def module_loadex(
         self,
         path: str,
-        options: Optional[List[str]] = None,
-        args: Optional[List[str]] = None,
-    ) -> ResponseT:
+        options: List[str] | None = None,
+        args: List[str] | None = None,
+    ) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Loads a module from a dynamic library at runtime with configuration directives.
 
@@ -7017,7 +10839,13 @@ class ModuleCommands(CommandsProtocol):
 
         return self.execute_command("MODULE LOADEX", path, *pieces)
 
-    def module_unload(self, name) -> ResponseT:
+    @overload
+    def module_unload(self: SyncClientProtocol, name) -> bool: ...
+
+    @overload
+    def module_unload(self: AsyncClientProtocol, name) -> Awaitable[bool]: ...
+
+    def module_unload(self, name) -> bool | Awaitable[bool]:
         """
         Unloads the module ``name``.
         Raises ``ModuleError`` if ``name`` is not in loaded modules.
@@ -7026,7 +10854,13 @@ class ModuleCommands(CommandsProtocol):
         """
         return self.execute_command("MODULE UNLOAD", name)
 
-    def module_list(self) -> ResponseT:
+    @overload
+    def module_list(self: SyncClientProtocol) -> list[dict[Any, Any]]: ...
+
+    @overload
+    def module_list(self: AsyncClientProtocol) -> Awaitable[list[dict[Any, Any]]]: ...
+
+    def module_list(self) -> list[dict[Any, Any]] | Awaitable[list[dict[Any, Any]]]:
         """
         Returns a list of dictionaries containing the name and version of
         all loaded modules.
@@ -7040,13 +10874,39 @@ class ModuleCommands(CommandsProtocol):
             "COMMAND INFO is intentionally not implemented in the client."
         )
 
-    def command_count(self) -> ResponseT:
+    @overload
+    def command_count(self: SyncClientProtocol) -> int: ...
+
+    @overload
+    def command_count(self: AsyncClientProtocol) -> Awaitable[int]: ...
+
+    def command_count(self) -> int | Awaitable[int]:
         return self.execute_command("COMMAND COUNT")
 
-    def command_getkeys(self, *args) -> ResponseT:
+    @overload
+    def command_getkeys(self: SyncClientProtocol, *args) -> list[bytes | str]: ...
+
+    @overload
+    def command_getkeys(
+        self: AsyncClientProtocol, *args
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def command_getkeys(
+        self, *args
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         return self.execute_command("COMMAND GETKEYS", *args)
 
-    def command(self) -> ResponseT:
+    @overload
+    def command(self: SyncClientProtocol) -> dict[str, dict[str, Any]]: ...
+
+    @overload
+    def command(
+        self: AsyncClientProtocol,
+    ) -> Awaitable[dict[str, dict[str, Any]]]: ...
+
+    def command(
+        self,
+    ) -> dict[str, dict[str, Any]] | Awaitable[dict[str, dict[str, Any]]]:
         return self.execute_command("COMMAND")
 
 
@@ -7060,10 +10920,24 @@ class ClusterCommands(CommandsProtocol):
     Class for Redis Cluster commands
     """
 
-    def cluster(self, cluster_arg, *args, **kwargs) -> ResponseT:
+    @overload
+    def cluster(self: SyncClientProtocol, cluster_arg, *args, **kwargs) -> Any: ...
+
+    @overload
+    def cluster(
+        self: AsyncClientProtocol, cluster_arg, *args, **kwargs
+    ) -> Awaitable[Any]: ...
+
+    def cluster(self, cluster_arg, *args, **kwargs) -> Any | Awaitable[Any]:
         return self.execute_command(f"CLUSTER {cluster_arg.upper()}", *args, **kwargs)
 
-    def readwrite(self, **kwargs) -> ResponseT:
+    @overload
+    def readwrite(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def readwrite(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
+
+    def readwrite(self, **kwargs) -> bool | Awaitable[bool]:
         """
         Disables read queries for a connection to a Redis Cluster slave node.
 
@@ -7071,7 +10945,13 @@ class ClusterCommands(CommandsProtocol):
         """
         return self.execute_command("READWRITE", **kwargs)
 
-    def readonly(self, **kwargs) -> ResponseT:
+    @overload
+    def readonly(self: SyncClientProtocol, **kwargs) -> bool: ...
+
+    @overload
+    def readonly(self: AsyncClientProtocol, **kwargs) -> Awaitable[bool]: ...
+
+    def readonly(self, **kwargs) -> bool | Awaitable[bool]:
         """
         Enables read queries for a connection to a Redis Cluster replica node.
 
@@ -7088,9 +10968,19 @@ class FunctionCommands:
     Redis Function commands
     """
 
+    @overload
     def function_load(
-        self, code: str, replace: Optional[bool] = False
-    ) -> Union[Awaitable[str], str]:
+        self: SyncClientProtocol, code: str, replace: bool | None = False
+    ) -> bytes | str: ...
+
+    @overload
+    def function_load(
+        self: AsyncClientProtocol, code: str, replace: bool | None = False
+    ) -> Awaitable[bytes | str]: ...
+
+    def function_load(self, code: str, replace: bool | None = False) -> (
+        bytes | str
+    ) | Awaitable[bytes | str]:
         """
         Load a library to Redis.
         :param code: the source code (must start with
@@ -7105,7 +10995,13 @@ class FunctionCommands:
         pieces.append(code)
         return self.execute_command("FUNCTION LOAD", *pieces)
 
-    def function_delete(self, library: str) -> Union[Awaitable[str], str]:
+    @overload
+    def function_delete(self: SyncClientProtocol, library: str) -> bool: ...
+
+    @overload
+    def function_delete(self: AsyncClientProtocol, library: str) -> Awaitable[bool]: ...
+
+    def function_delete(self, library: str) -> bool | Awaitable[bool]:
         """
         Delete the library called ``library`` and all its functions.
 
@@ -7113,7 +11009,15 @@ class FunctionCommands:
         """
         return self.execute_command("FUNCTION DELETE", library)
 
-    def function_flush(self, mode: str = "SYNC") -> Union[Awaitable[str], str]:
+    @overload
+    def function_flush(self: SyncClientProtocol, mode: str = "SYNC") -> bool: ...
+
+    @overload
+    def function_flush(
+        self: AsyncClientProtocol, mode: str = "SYNC"
+    ) -> Awaitable[bool]: ...
+
+    def function_flush(self, mode: str = "SYNC") -> bool | Awaitable[bool]:
         """
         Deletes all the libraries.
 
@@ -7121,9 +11025,23 @@ class FunctionCommands:
         """
         return self.execute_command("FUNCTION FLUSH", mode)
 
+    @overload
     def function_list(
-        self, library: Optional[str] = "*", withcode: Optional[bool] = False
-    ) -> Union[Awaitable[List], List]:
+        self: SyncClientProtocol,
+        library: str | None = "*",
+        withcode: bool | None = False,
+    ) -> list[Any]: ...
+
+    @overload
+    def function_list(
+        self: AsyncClientProtocol,
+        library: str | None = "*",
+        withcode: bool | None = False,
+    ) -> Awaitable[list[Any]]: ...
+
+    def function_list(
+        self, library: str | None = "*", withcode: bool | None = False
+    ) -> list[Any] | Awaitable[list[Any]]:
         """
         Return information about the functions and libraries.
 
@@ -7138,14 +11056,22 @@ class FunctionCommands:
             args.append("WITHCODE")
         return self.execute_command("FUNCTION LIST", *args)
 
-    def _fcall(
-        self, command: str, function, numkeys: int, *keys_and_args: Any
-    ) -> Union[Awaitable[str], str]:
+    def _fcall(self, command: str, function, numkeys: int, *keys_and_args: Any) -> Any:
         return self.execute_command(command, function, numkeys, *keys_and_args)
+
+    @overload
+    def fcall(
+        self: SyncClientProtocol, function, numkeys: int, *keys_and_args: Any
+    ) -> Any: ...
+
+    @overload
+    def fcall(
+        self: AsyncClientProtocol, function, numkeys: int, *keys_and_args: Any
+    ) -> Awaitable[Any]: ...
 
     def fcall(
         self, function, numkeys: int, *keys_and_args: Any
-    ) -> Union[Awaitable[str], str]:
+    ) -> Any | Awaitable[Any]:
         """
         Invoke a function.
 
@@ -7153,9 +11079,19 @@ class FunctionCommands:
         """
         return self._fcall("FCALL", function, numkeys, *keys_and_args)
 
+    @overload
+    def fcall_ro(
+        self: SyncClientProtocol, function, numkeys: int, *keys_and_args: Any
+    ) -> Any: ...
+
+    @overload
+    def fcall_ro(
+        self: AsyncClientProtocol, function, numkeys: int, *keys_and_args: Any
+    ) -> Awaitable[Any]: ...
+
     def fcall_ro(
         self, function, numkeys: int, *keys_and_args: Any
-    ) -> Union[Awaitable[str], str]:
+    ) -> Any | Awaitable[Any]:
         """
         This is a read-only variant of the FCALL command that cannot
         execute commands that modify data.
@@ -7164,7 +11100,13 @@ class FunctionCommands:
         """
         return self._fcall("FCALL_RO", function, numkeys, *keys_and_args)
 
-    def function_dump(self) -> Union[Awaitable[str], str]:
+    @overload
+    def function_dump(self: SyncClientProtocol) -> bytes: ...
+
+    @overload
+    def function_dump(self: AsyncClientProtocol) -> Awaitable[bytes]: ...
+
+    def function_dump(self) -> bytes | Awaitable[bytes]:
         """
         Return the serialized payload of loaded libraries.
 
@@ -7177,9 +11119,19 @@ class FunctionCommands:
 
         return self.execute_command("FUNCTION DUMP", **options)
 
+    @overload
     def function_restore(
-        self, payload: str, policy: Optional[str] = "APPEND"
-    ) -> Union[Awaitable[str], str]:
+        self: SyncClientProtocol, payload: str, policy: str | None = "APPEND"
+    ) -> bool: ...
+
+    @overload
+    def function_restore(
+        self: AsyncClientProtocol, payload: str, policy: str | None = "APPEND"
+    ) -> Awaitable[bool]: ...
+
+    def function_restore(
+        self, payload: str, policy: str | None = "APPEND"
+    ) -> bool | Awaitable[bool]:
         """
         Restore libraries from the serialized ``payload``.
         You can use the optional policy argument to provide a policy
@@ -7189,7 +11141,13 @@ class FunctionCommands:
         """
         return self.execute_command("FUNCTION RESTORE", payload, policy)
 
-    def function_kill(self) -> Union[Awaitable[str], str]:
+    @overload
+    def function_kill(self: SyncClientProtocol) -> bytes | str: ...
+
+    @overload
+    def function_kill(self: AsyncClientProtocol) -> Awaitable[bytes | str]: ...
+
+    def function_kill(self) -> (bytes | str) | Awaitable[bytes | str]:
         """
         Kill a function that is currently executing.
 
@@ -7197,7 +11155,13 @@ class FunctionCommands:
         """
         return self.execute_command("FUNCTION KILL")
 
-    def function_stats(self) -> Union[Awaitable[List], List]:
+    @overload
+    def function_stats(self: SyncClientProtocol) -> Any: ...
+
+    @overload
+    def function_stats(self: AsyncClientProtocol) -> Awaitable[Any]: ...
+
+    def function_stats(self) -> Any | Awaitable[Any]:
         """
         Return information about the function that's currently running
         and information about the available execution engines.

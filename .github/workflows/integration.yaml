@@ -29,9 +29,9 @@ env:
   COVERAGE_CORE: sysmon
   # patch releases get included in the base version image when they are published
   # for example after 8.2.1 is published, 8.2 image contains 8.2.1 content
-  CURRENT_CLIENT_LIBS_TEST_STACK_IMAGE_TAG: '8.4.0'
-  CURRENT_REDIS_VERSION: '8.4.0'
-  REDIS_VERSION_CUSTOM_MAP: 'custom-21860421418-debian-amd64:8.6'
+  CURRENT_REDIS_VERSION: '8.6.1'
+  REDIS_VERSION_CUSTOM_MAP: >-
+    8.8:unstable-23321515778-debian
 
 jobs:
   dependency-audit:
@@ -45,6 +45,8 @@ jobs:
           ignore-vulns: |
             GHSA-w596-4wvx-j9j6  # subversion related git pull, dependency for pytest. There is no impact here.
             CVE-2026-26007 # dependency for entraid tests
+            CVE-2026-32597 # PyJWT does not validate the crit (Critical) Header Parameter defined in RFC 7515, this will be fixed in the next release
+            CVE-2026-4539  # pygments ReDoS in AdlLexer, local access only, no fix available yet
 
   lint:
     name: Code linters
@@ -78,7 +80,7 @@ jobs:
       max-parallel: 30
       fail-fast: false
       matrix:
-        redis-version: ['custom-21860421418-debian-amd64', '${{ needs.redis_version.outputs.CURRENT }}', '8.2', '8.0.2' ,'7.4.4', '7.2.9']
+        redis-version: ['8.8', '${{ needs.redis_version.outputs.CURRENT }}', '8.4.2', '8.2.5', '8.0.2' ,'7.4.4', '7.2.9']
         python-version: ['3.10', '3.14']
         parser-backend: ['plain']
         event-loop: ['asyncio']

@@ -465,6 +465,25 @@ class TestRedisClusterObj:
         ) as rc_no_retries:
             assert rc_no_retries.retry.get_retries() == 0
 
+    async def test_deprecated_lib_name_lib_version(self) -> None:
+        with (
+            pytest.warns(
+                DeprecationWarning,
+                match="deprecated usage of input argument/s 'lib_name'",
+            ),
+            pytest.warns(
+                DeprecationWarning,
+                match="deprecated usage of input argument/s 'lib_version'",
+            ),
+        ):
+            startup_nodes = [ClusterNode("127.0.0.1", 16379)]
+            async with RedisCluster(
+                startup_nodes=startup_nodes, lib_name="test2", lib_version="1234"
+            ) as cluster:
+                info = await cluster.client_info()
+                assert info["lib-ver"] == "1234"
+                assert info["lib-name"] == "test2"
+
     async def test_empty_startup_nodes(self) -> None:
         """
         Test that exception is raised when empty providing empty startup_nodes
@@ -4064,3 +4083,528 @@ class TestAsyncClusterPipelineMetricsRecording:
 
         # Should have at least 2 pipeline events
         assert len(pipeline_calls) >= 2
+
+
+@pytest.mark.onlycluster
+@pytest.mark.skipif(
+    'not config.REDIS_INFO.get("cluster_enabled", False)',
+    reason="Requires Redis Cluster",
+)
+class TestClusterPubSub:
+    """
+    Test ClusterPubSub with shard channels functionality
+    """
+
+    async def wait_for_message(
+        self, pubsub, timeout=0.2, ignore_subscribe_messages=False, sharded=False
+    ):
+        """Helper method to wait for a message with timeout.
+
+        Args:
+            pubsub: The PubSub instance
+            timeout: Timeout in seconds
+            ignore_subscribe_messages: Whether to ignore subscribe messages
+            sharded: If True, use get_sharded_message() instead of get_message()
+        """
+        import asyncio
+
+        now = asyncio.get_running_loop().time()
+        end_time = now + timeout
+        while now < end_time:
+            if sharded:
+                message = await pubsub.get_sharded_message(
+                    ignore_subscribe_messages=ignore_subscribe_messages,
+                    timeout=0.01,
+                )
+            else:
+                message = await pubsub.get_message(
+                    ignore_subscribe_messages=ignore_subscribe_messages
+                )
+            if message is not None:
+                return message
+            await asyncio.sleep(0.01)
+            now = asyncio.get_running_loop().time()
+        return None
+
+    def make_message(self, type, channel, data, pattern=None):
+        """Helper method to create expected message format"""
+        return {
+            "type": type,
+            "pattern": pattern and pattern.encode("utf-8") or None,
+            "channel": channel and channel.encode("utf-8") or None,
+            "data": data.encode("utf-8") if isinstance(data, str) else data,
+        }
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_cluster_pubsub_creation(self, r):
+        """Test basic ClusterPubSub creation"""
+        pubsub = r.pubsub()
+        assert pubsub is not None
+        assert hasattr(pubsub, "ssubscribe")
+        assert hasattr(pubsub, "sunsubscribe")
+        assert hasattr(pubsub, "get_sharded_message")
+        await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_cluster_pubsub_with_node(self, r):
+        """Test ClusterPubSub creation with specific node"""
+        nodes = r.get_nodes()
+        if nodes:
+            node = nodes[0]
+            pubsub = r.pubsub(node=node)
+            assert pubsub.node == node
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_cluster_pubsub_with_host_port(self, r):
+        """Test ClusterPubSub creation with host and port"""
+        nodes = r.get_nodes()
+        if nodes:
+            node = nodes[0]
+            pubsub = r.pubsub(host=node.host, port=node.port)
+            assert pubsub.node.host == node.host
+            assert pubsub.node.port == node.port
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_shard_channel_subscribe_unsubscribe(self, r):
+        """Test shard channel subscribe and unsubscribe"""
+        pubsub = r.pubsub()
+
+        try:
+            # Test channels that map to different nodes
+            channels = ["shard_test_1", "shard_test_2", "shard_test_3"]
+
+            # Subscribe to shard channels
+            await pubsub.ssubscribe(*channels)
+
+            # Verify subscription messages - one ssubscribe confirmation per channel
+            received_channels = set()
+            for _ in range(len(channels)):
+                msg = await self.wait_for_message(pubsub, timeout=1.0, sharded=True)
+                assert msg is not None, "Expected subscription confirmation message"
+                assert msg["type"] == "ssubscribe"
+                assert msg["channel"].decode() in channels
+                received_channels.add(msg["channel"].decode())
+
+            # Verify we got confirmations for all channels
+            assert received_channels == set(channels)
+
+            # Unsubscribe from shard channels
+            await pubsub.sunsubscribe(*channels)
+
+        finally:
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_shard_channel_attributes(self, r):
+        """Test shard channel attributes"""
+        pubsub = r.pubsub()
+
+        try:
+            # Initially no shard channels
+            assert not pubsub.shard_channels
+            assert not pubsub.pending_unsubscribe_shard_channels
+
+            # Subscribe to a shard channel
+            await pubsub.ssubscribe("test_shard_attr")
+
+            # Should have shard channel information
+            # Note: The exact behavior may depend on implementation details
+
+        finally:
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_shard_channel_with_handler(self, r):
+        """Test shard channel subscription with message handler"""
+        pubsub = r.pubsub()
+
+        try:
+            received_messages = []
+
+            def message_handler(message):
+                received_messages.append(message)
+
+            # Subscribe with handler
+            await pubsub.ssubscribe(test_handler_channel=message_handler)
+
+            # This test verifies that the handler mechanism is properly set up
+            # Actual message delivery testing would require a live Redis cluster
+
+        finally:
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_invalid_node_raises_exception(self, r):
+        """Test that invalid node raises appropriate exception"""
+        with pytest.raises(RedisClusterException):
+            r.pubsub(host="invalid_host", port=9999)
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_partial_host_port_raises_exception(self, r):
+        """Test that providing only host or port raises DataError"""
+        with pytest.raises(DataError):
+            r.pubsub(host="localhost")  # Missing port
+
+        with pytest.raises(DataError):
+            r.pubsub(port=7000)  # Missing host
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_pubsub_without_specifying_node(self, r):
+        """
+        Test creation of pubsub instance without specifying a node. The node
+        should be determined based on the keyslot of the first command
+        execution.
+        """
+        channel_name = "foo"
+        node = r.get_node_from_key(channel_name)
+        p = r.pubsub()
+        try:
+            assert p.get_pubsub_node() is None
+            await p.subscribe(channel_name)
+            assert p.get_pubsub_node() == node
+        finally:
+            await p.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_get_pubsub_node(self, r):
+        """Test get_pubsub_node returns the correct node"""
+        nodes = r.get_nodes()
+        if nodes:
+            node = nodes[0]
+            p = r.pubsub(node=node)
+            try:
+                assert p.get_pubsub_node() == node
+            finally:
+                await p.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_get_sharded_message_with_publish(self, r):
+        """
+        Test get_sharded_message returns published messages correctly.
+        Validates that sharded message retrieval works end-to-end.
+        """
+        pubsub = r.pubsub()
+        channel = "test-channel:{0}"
+
+        try:
+            # Subscribe to the shard channel
+            await pubsub.ssubscribe(channel)
+
+            # Read subscription confirmation using sharded message retrieval
+            msg = await self.wait_for_message(pubsub, timeout=1.0, sharded=True)
+            assert msg is not None
+            assert msg["type"] == "ssubscribe"
+
+            # Publish a message using execute_command directly (spublish not on RedisCluster)
+            await r.execute_command("SPUBLISH", channel, "test message")
+
+            # Read the published message using get_sharded_message
+            msg = await pubsub.get_sharded_message(timeout=1.0)
+            # May need to retry a few times
+            for _ in range(10):
+                if msg is not None and msg.get("type") == "smessage":
+                    break
+                await asyncio.sleep(0.1)
+                msg = await pubsub.get_sharded_message(timeout=0.1)
+
+            assert msg is not None
+            assert msg["type"] == "smessage"
+            assert msg["channel"] == channel.encode()
+            assert msg["data"] == b"test message"
+        finally:
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_get_sharded_message_multiple_channels(self, r):
+        """
+        Test get_sharded_message with multiple channels on potentially different nodes.
+        Validates round-robin message retrieval across nodes.
+        """
+        pubsub = r.pubsub()
+        channel1 = "test-channel:{0}"
+        channel2 = "test-channel:{6}"
+
+        try:
+            # Subscribe to both channels
+            await pubsub.ssubscribe(channel1, channel2)
+
+            # Read subscription confirmations using sharded retrieval
+            for _ in range(2):
+                msg = await self.wait_for_message(pubsub, timeout=1.0, sharded=True)
+                assert msg is not None
+
+            # Publish messages to both channels using execute_command
+            await r.execute_command("SPUBLISH", channel1, "msg1")
+            await r.execute_command("SPUBLISH", channel2, "msg2")
+
+            # Read messages using get_sharded_message
+            messages = []
+            for _ in range(10):
+                msg = await pubsub.get_sharded_message(timeout=0.2)
+                if msg and msg.get("type") == "smessage":
+                    messages.append(msg)
+                if len(messages) >= 2:
+                    break
+
+            assert len(messages) == 2
+            channels_received = {msg["channel"] for msg in messages}
+            assert channel1.encode() in channels_received
+            assert channel2.encode() in channels_received
+        finally:
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_get_sharded_message_timeout_returns_none(self, r):
+        """
+        Test that get_sharded_message with timeout returns None when no message
+        arrives within the timeout period.
+        """
+        pubsub = r.pubsub()
+        channel = "test-channel:{0}"
+
+        try:
+            await pubsub.ssubscribe(channel)
+            # Read subscription confirmation using sharded retrieval
+            msg = await self.wait_for_message(pubsub, timeout=1.0, sharded=True)
+            assert msg is not None
+
+            # Call get_sharded_message with a short timeout - should return None
+            import time
+
+            start = time.monotonic()
+            msg = await pubsub.get_sharded_message(timeout=0.1)
+            elapsed = time.monotonic() - start
+
+            assert msg is None
+            # Verify timeout was approximately respected (allow some slack)
+            assert elapsed < 0.5
+        finally:
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_get_sharded_message_timeout_zero_returns_immediately(self, r):
+        """
+        Test that get_sharded_message(timeout=0) returns immediately without blocking.
+        """
+        pubsub = r.pubsub()
+        channel = "test-channel:{0}"
+
+        try:
+            await pubsub.ssubscribe(channel)
+            # Read subscription confirmation using sharded retrieval
+            msg = await self.wait_for_message(pubsub, timeout=1.0, sharded=True)
+            assert msg is not None
+
+            # get_sharded_message with timeout=0 should return immediately
+            import time
+
+            start = time.monotonic()
+            msg = await pubsub.get_sharded_message(timeout=0)
+            elapsed = time.monotonic() - start
+
+            assert msg is None
+            assert elapsed < 0.1
+        finally:
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_generator_handles_concurrent_mapping_changes(self, r):
+        """
+        Test that the generator properly handles mapping changes during iteration.
+        This validates the fix for RuntimeError: dictionary changed size during iteration.
+        """
+        pubsub = r.pubsub()
+        channel1 = "test-channel:{0}"
+        channel2 = "test-channel:{6}"
+
+        try:
+            # Subscribe to first channel
+            await pubsub.ssubscribe(channel1)
+            msg = await self.wait_for_message(pubsub, timeout=1.0, sharded=True)
+            assert msg is not None
+
+            # Get initial mapping size (cluster pubsub only)
+            assert hasattr(pubsub, "node_pubsub_mapping"), "Test requires ClusterPubSub"
+            initial_size = len(pubsub.node_pubsub_mapping)
+
+            # Subscribe to second channel (modifies mapping during potential iteration)
+            await pubsub.ssubscribe(channel2)
+            msg = await self.wait_for_message(pubsub, timeout=1.0, sharded=True)
+            assert msg is not None
+
+            # Verify mapping was updated
+            assert len(pubsub.node_pubsub_mapping) >= initial_size
+
+            # Publish and read messages - should not raise RuntimeError
+            await r.execute_command("SPUBLISH", channel1, "msg1")
+            await r.execute_command("SPUBLISH", channel2, "msg2")
+
+            messages_received = 0
+            for _ in range(10):
+                msg = await pubsub.get_sharded_message(timeout=0.2)
+                if msg and msg.get("type") == "smessage":
+                    messages_received += 1
+                if messages_received >= 2:
+                    break
+
+            assert messages_received == 2
+        finally:
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_get_redis_connection(self, r):
+        """
+        Test that get_redis_connection() returns the pubsub's dedicated
+        connection after subscribing to a channel.
+        """
+        node = r.get_default_node()
+        p = r.pubsub(node=node)
+        try:
+            # Before subscribing, connection should be None
+            assert p.get_redis_connection() is None
+
+            # Subscribe to establish the dedicated pubsub connection
+            await p.subscribe("test-channel")
+
+            # Now get_redis_connection() should return the dedicated connection
+            connection = p.get_redis_connection()
+            assert connection is not None
+            # The connection should be from the node
+            assert connection.host == node.host
+            assert connection.port == node.port
+        finally:
+            await p.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_init_pubsub_with_non_existent_node(self, r):
+        """
+        Test creation of pubsub instance with node that doesn't exist in the
+        cluster. RedisClusterException should be raised.
+        """
+        from redis.cluster import ClusterNode
+
+        node = ClusterNode("1.1.1.1", 1111)
+        with pytest.raises(RedisClusterException):
+            r.pubsub(node=node)
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_pubsub_channels_merge_results(self, r):
+        """
+        Test that pubsub_channels merges results from all nodes.
+        """
+        nodes = r.get_nodes()
+        channels = []
+        pubsub_nodes = []
+        i = 0
+        try:
+            for node in nodes:
+                channel = f"foo{i}"
+                # Create pubsub clients connected to different nodes
+                p = r.pubsub(node=node)
+                pubsub_nodes.append(p)
+                await p.subscribe(channel)
+                b_channel = channel.encode("utf-8")
+                channels.append(b_channel)
+                # Read subscription confirmation
+                await self.wait_for_message(p, timeout=1.0)
+                i += 1
+
+            # Assert that the cluster's pubsub_channels function returns ALL channels
+            await asyncio.sleep(0.3)  # Allow time for subscriptions to propagate
+            result = await r.pubsub_channels(target_nodes="all")
+            result.sort()
+            channels.sort()
+            assert result == channels
+        finally:
+            for p in pubsub_nodes:
+                await p.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_pubsub_numsub_merge_results(self, r):
+        """
+        Test that pubsub_numsub merges subscription counts from all nodes.
+        """
+        nodes = r.get_nodes()
+        pubsub_nodes = []
+        channel = "foo"
+        b_channel = channel.encode("utf-8")
+        try:
+            for node in nodes:
+                # Create pubsub clients connected to different nodes
+                p = r.pubsub(node=node)
+                pubsub_nodes.append(p)
+                await p.subscribe(channel)
+                # Read subscription confirmation
+                await self.wait_for_message(p, timeout=1.0)
+
+            # Assert cluster's pubsub_numsub returns ALL clients
+            await asyncio.sleep(0.3)  # Allow time for subscriptions to propagate
+            result = await r.pubsub_numsub(channel, target_nodes="all")
+            assert result == [(b_channel, len(nodes))]
+        finally:
+            for p in pubsub_nodes:
+                await p.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_pubsub_numpat_merge_results(self, r):
+        """
+        Test that pubsub_numpat merges pattern subscription counts from all nodes.
+        """
+        nodes = r.get_nodes()
+        pubsub_nodes = []
+        pattern = "foo*"
+        try:
+            for node in nodes:
+                # Create pubsub clients connected to different nodes
+                p = r.pubsub(node=node)
+                pubsub_nodes.append(p)
+                await p.psubscribe(pattern)
+                # Read subscription confirmation
+                await self.wait_for_message(p, timeout=1.0)
+
+            # Assert cluster's pubsub_numpat returns ALL pattern subscriptions
+            await asyncio.sleep(0.3)  # Allow time for subscriptions to propagate
+            result = await r.pubsub_numpat(target_nodes="all")
+            assert result == len(nodes)
+        finally:
+            for p in pubsub_nodes:
+                await p.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_shard_channel_message_handler_with_message(self, r):
+        """
+        Test shard channel subscription with message handler receives actual messages.
+        This verifies the handler callback is executed when messages arrive.
+        """
+        pubsub = r.pubsub(ignore_subscribe_messages=True)
+        channel = "test-handler-channel:{0}"
+        received_messages = []
+
+        def message_handler(message):
+            received_messages.append(message)
+
+        try:
+            # Subscribe with handler
+            await pubsub.ssubscribe(**{channel: message_handler})
+
+            # Publish a message
+            await r.spublish(channel, "test message")
+
+            # Read message using get_sharded_message - handler should be called
+            for _ in range(10):
+                msg = await pubsub.get_sharded_message(timeout=0.2)
+                # When handler is set, get_sharded_message returns None
+                # but the handler receives the message
+                if received_messages:
+                    break
+
+            # Verify handler received the message
+            assert msg is None
+            assert len(received_messages) == 1
+            assert received_messages[0]["type"] == "smessage"
+            assert received_messages[0]["channel"] == channel.encode()
+            assert received_messages[0]["data"] == b"test message"
+        finally:
+            await pubsub.aclose()

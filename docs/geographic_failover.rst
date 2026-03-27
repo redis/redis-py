@@ -193,6 +193,7 @@ MultiDbConfig
         health_check_interval: float = DEFAULT_HEALTH_CHECK_INTERVAL # seconds
         health_check_probes: int = DEFAULT_HEALTH_CHECK_PROBES
         health_check_delay: float = DEFAULT_HEALTH_CHECK_DELAY # seconds
+        health_check_timeout: float = DEFAULT_HEALTH_CHECK_TIMEOUT # seconds
         health_check_policy: HealthCheckPolicies = DEFAULT_HEALTH_CHECK_POLICY,
 
         # Failure detector
@@ -336,26 +337,22 @@ reverse proxy behind an actual REST API endpoint.
 
 **Custom Health Checks**
 ~~~~~~~~~~~~~~~~~~~~~
-You can add custom health checks for specific requirements:
+You can add custom health checks for specific requirements. Please notice that all health checks are executed within
+asyncio event loop, so please ensure that `check_health` method is async:
 
 .. code-block:: python
 
-    from redis.multidb.healthcheck import AbstractHealthCheck
-    from redis.retry import Retry
-    from redis.utils import dummy_fail
-    class PingHealthCheck(AbstractHealthCheck):
-        def __init__(self, retry: Retry):
-            super().__init__(retry=retry)
-        def check_health(self, database) -> bool:
-            return self._retry.call_with_retry(
-                lambda: self._returns_pong(database),
-                lambda _: dummy_fail()
-            )
-        def _returns_pong(self, database) -> bool:
-            expected_message = ["PONG", b"PONG"]
-            actual_message = database.client.execute_command("PING")
-            return actual_message in expected_message
+    from redis.asyncio.multidb.healthcheck import AbstractHealthCheck, AsyncRedisClientT
 
+    class EchoHealthCheck(AbstractHealthCheck):
+        """
+        Health check based on ECHO command.
+        """
+
+        async def check_health(self, database, hc_client: AsyncRedisClientT) -> bool:
+            await connection.send_command("ECHO", "healthcheck")
+            response = await connection.read_response()
+            return response in (b"healthcheck", "healthcheck")
 
 Failure Detection (Reactive Monitoring)
 -----------------

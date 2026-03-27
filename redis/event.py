@@ -10,7 +10,7 @@ from redis.observability.recorder import (
     init_connection_count,
     register_pools_connection_count,
 )
-from redis.utils import check_protocol_version
+from redis.utils import check_protocol_version, deprecated_function
 
 
 class EventListenerInterface(ABC):
@@ -89,7 +89,6 @@ class EventDispatcher(EventDispatcherInterface):
             ],
             AfterPooledConnectionsInstantiationEvent: [
                 RegisterReAuthForPooledConnections(),
-                InitializeConnectionCountObservability(),
             ],
             AfterSingleConnectionInstantiationEvent: [
                 RegisterReAuthForSingleConnection()
@@ -479,8 +478,15 @@ class InitializeConnectionCountObservability(EventListenerInterface):
     Listener that initializes connection count observability.
     """
 
+    @deprecated_function(
+        reason="Connection count is now tracked via record_connection_count(). "
+        "This functionality will be removed in the next major version",
+        version="7.4.0",
+    )
     def listen(self, event: AfterPooledConnectionsInstantiationEvent):
         # Initialize gauge only once, subsequent calls won't have an affect.
+        # Note: init_connection_count() and register_pools_connection_count()
+        # are deprecated and will emit their own warnings.
         init_connection_count()
 
         # Register pools for connection count observability.

@@ -554,6 +554,9 @@ class AbstractRedisCluster:
 class RedisCluster(
     AbstractRedisCluster, MaintNotificationsAbstractRedisCluster, RedisClusterCommands
 ):
+    # Type discrimination marker for @overload self-type pattern
+    _is_async_client: Literal[False] = False
+
     @classmethod
     def from_url(cls, url: str, **kwargs: Any) -> "RedisCluster":
         """
@@ -1560,7 +1563,7 @@ class RedisCluster(
                 self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
-                    connection=connection,
+                    connection=e.connection,
                     error=e,
                 )
                 raise
@@ -1576,7 +1579,7 @@ class RedisCluster(
                 self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
-                    connection=connection,
+                    connection=e.connection,
                     error=e,
                 )
                 raise
@@ -1615,11 +1618,10 @@ class RedisCluster(
 
                 # DON'T set redis_connection = None - keep the pool for reuse
                 self.nodes_manager.initialize()
-                e.connection = connection
                 self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
-                    connection=connection,
+                    connection=e.connection,
                     error=e,
                 )
                 raise e
@@ -1723,17 +1725,19 @@ class RedisCluster(
                 self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
-                    connection=connection,
+                    connection=e.connection,
                     error=e,
                 )
                 raise
             except ResponseError as e:
                 # this is used to report the metrics based on host and port info
-                e.connection = connection
+                # ResponseError typically happens after get_connection() succeeds,
+                # so connection should be available
+                e.connection = connection if connection else target_node
                 self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
-                    connection=connection,
+                    connection=e.connection,
                     error=e,
                 )
                 raise
@@ -1748,7 +1752,7 @@ class RedisCluster(
                 self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
-                    connection=connection,
+                    connection=e.connection,
                     error=e,
                 )
                 raise e
@@ -1780,12 +1784,16 @@ class RedisCluster(
         """
         Records operation duration metric directly.
         """
+        host = connection.host if connection else "unknown"
+        port = connection.port if connection else 0
+        db = str(connection.db) if connection and hasattr(connection, "db") else "0"
+
         record_operation_duration(
             command_name=command_name,
             duration_seconds=duration_seconds,
-            server_address=connection.host,
-            server_port=connection.port,
-            db_namespace=str(connection.db),
+            server_address=host,
+            server_port=port,
+            db_namespace=db,
             error=error,
         )
 
@@ -2520,7 +2528,7 @@ class ClusterPubSub(PubSub):
 
     IMPORTANT: before using ClusterPubSub, read about the known limitations
     with pubsub in Cluster mode and learn how to workaround them:
-    https://redis-py-cluster.readthedocs.io/en/stable/pubsub.html
+    https://redis.readthedocs.io/en/stable/clustering.html#known-pubsub-limitations
     """
 
     def __init__(
@@ -2684,14 +2692,18 @@ class ClusterPubSub(PubSub):
     def _pubsubs_generator(self):
         while True:
             current_nodes = list(self.node_pubsub_mapping.values())
+            if not current_nodes:
+                return  # Avoid infinite loop when no subscriptions exist
             yield from current_nodes
 
     def get_sharded_message(
         self, ignore_subscribe_messages=False, timeout=0.0, target_node=None
     ):
         if target_node:
+            # Don't pass ignore_subscribe_messages here - let get_sharded_message
+            # handle the filtering after processing subscription state changes
             message = self.node_pubsub_mapping[target_node.name].get_message(
-                ignore_subscribe_messages=ignore_subscribe_messages, timeout=timeout
+                ignore_subscribe_messages=False, timeout=timeout
             )
         else:
             message = self._sharded_message_generator(timeout=timeout)
@@ -2708,8 +2720,10 @@ class ClusterPubSub(PubSub):
             # There are no subscriptions anymore, set subscribed_event flag
             # to false
             self.subscribed_event.clear()
-        if self.ignore_subscribe_messages or ignore_subscribe_messages:
-            return None
+        # Only suppress subscribe/unsubscribe messages, not data messages (smessage)
+        if str_if_bytes(message["type"]) in ("ssubscribe", "sunsubscribe"):
+            if self.ignore_subscribe_messages or ignore_subscribe_messages:
+                return None
         return message
 
     def ssubscribe(self, *args, **kwargs):

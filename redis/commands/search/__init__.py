@@ -1,3 +1,5 @@
+from typing import Literal
+
 from redis.client import Pipeline as RedisPipeline
 
 from ...asyncio.client import Pipeline as AsyncioPipeline
@@ -186,6 +188,10 @@ class AsyncSearch(Search, AsyncSearchCommands):
 class Pipeline(SearchCommands, RedisPipeline):
     """Pipeline for the module."""
 
+    _is_async_client: Literal[False] = False
+
 
 class AsyncPipeline(AsyncSearchCommands, AsyncioPipeline, Pipeline):
     """AsyncPipeline for the module."""
+
+    _is_async_client: Literal[True] = True

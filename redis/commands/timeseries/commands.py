@@ -1,7 +1,17 @@
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Awaitable, Dict, List, Tuple, overload
 
 from redis.exceptions import DataError
-from redis.typing import KeyT, Number
+from redis.typing import (
+    AsyncClientProtocol,
+    EncodableT,
+    KeyT,
+    Number,
+    SyncClientProtocol,
+    TimeSeriesRangeResponse,
+    TimeSeriesSample,
+)
+
+from .info import TSInfo
 
 ADD_CMD = "TS.ADD"
 ALTER_CMD = "TS.ALTER"
@@ -25,17 +35,43 @@ REVRANGE_CMD = "TS.REVRANGE"
 class TimeSeriesCommands:
     """RedisTimeSeries Commands."""
 
+    @overload
+    def create(
+        self: SyncClientProtocol,
+        key: KeyT,
+        retention_msecs: int | None = None,
+        uncompressed: bool | None = False,
+        labels: Dict[str, str] | None = None,
+        chunk_size: int | None = None,
+        duplicate_policy: str | None = None,
+        ignore_max_time_diff: int | None = None,
+        ignore_max_val_diff: Number | None = None,
+    ) -> bool: ...
+
+    @overload
+    def create(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        retention_msecs: int | None = None,
+        uncompressed: bool | None = False,
+        labels: Dict[str, str] | None = None,
+        chunk_size: int | None = None,
+        duplicate_policy: str | None = None,
+        ignore_max_time_diff: int | None = None,
+        ignore_max_val_diff: Number | None = None,
+    ) -> Awaitable[bool]: ...
+
     def create(
         self,
         key: KeyT,
-        retention_msecs: Optional[int] = None,
-        uncompressed: Optional[bool] = False,
-        labels: Optional[Dict[str, str]] = None,
-        chunk_size: Optional[int] = None,
-        duplicate_policy: Optional[str] = None,
-        ignore_max_time_diff: Optional[int] = None,
-        ignore_max_val_diff: Optional[Number] = None,
-    ):
+        retention_msecs: int | None = None,
+        uncompressed: bool | None = False,
+        labels: Dict[str, str] | None = None,
+        chunk_size: int | None = None,
+        duplicate_policy: str | None = None,
+        ignore_max_time_diff: int | None = None,
+        ignore_max_val_diff: Number | None = None,
+    ) -> bool | Awaitable[bool]:
         """
         Create a new time-series.
 
@@ -85,7 +121,7 @@ class TimeSeriesCommands:
                 if `duplicate_policy` is set to `last`, and if `ignore_max_time_diff` is
                 also set. Available since RedisTimeSeries version 1.12.0.
         """
-        params = [key]
+        params: list[EncodableT] = [key]
         self._append_retention(params, retention_msecs)
         self._append_uncompressed(params, uncompressed)
         self._append_chunk_size(params, chunk_size)
@@ -97,16 +133,40 @@ class TimeSeriesCommands:
 
         return self.execute_command(CREATE_CMD, *params)
 
+    @overload
+    def alter(
+        self: SyncClientProtocol,
+        key: KeyT,
+        retention_msecs: int | None = None,
+        labels: Dict[str, str] | None = None,
+        chunk_size: int | None = None,
+        duplicate_policy: str | None = None,
+        ignore_max_time_diff: int | None = None,
+        ignore_max_val_diff: Number | None = None,
+    ) -> bool: ...
+
+    @overload
+    def alter(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        retention_msecs: int | None = None,
+        labels: Dict[str, str] | None = None,
+        chunk_size: int | None = None,
+        duplicate_policy: str | None = None,
+        ignore_max_time_diff: int | None = None,
+        ignore_max_val_diff: Number | None = None,
+    ) -> Awaitable[bool]: ...
+
     def alter(
         self,
         key: KeyT,
-        retention_msecs: Optional[int] = None,
-        labels: Optional[Dict[str, str]] = None,
-        chunk_size: Optional[int] = None,
-        duplicate_policy: Optional[str] = None,
-        ignore_max_time_diff: Optional[int] = None,
-        ignore_max_val_diff: Optional[Number] = None,
-    ):
+        retention_msecs: int | None = None,
+        labels: Dict[str, str] | None = None,
+        chunk_size: int | None = None,
+        duplicate_policy: str | None = None,
+        ignore_max_time_diff: int | None = None,
+        ignore_max_val_diff: Number | None = None,
+    ) -> bool | Awaitable[bool]:
         """
         Update an existing time series.
 
@@ -155,7 +215,7 @@ class TimeSeriesCommands:
                 if `duplicate_policy` is set to `last`, and if `ignore_max_time_diff` is
                 also set. Available since RedisTimeSeries version 1.12.0.
         """
-        params = [key]
+        params: list[EncodableT] = [key]
         self._append_retention(params, retention_msecs)
         self._append_chunk_size(params, chunk_size)
         self._append_duplicate_policy(params, duplicate_policy)
@@ -166,20 +226,52 @@ class TimeSeriesCommands:
 
         return self.execute_command(ALTER_CMD, *params)
 
+    @overload
+    def add(
+        self: SyncClientProtocol,
+        key: KeyT,
+        timestamp: int | str,
+        value: Number | str,
+        retention_msecs: int | None = None,
+        uncompressed: bool | None = False,
+        labels: Dict[str, str] | None = None,
+        chunk_size: int | None = None,
+        duplicate_policy: str | None = None,
+        ignore_max_time_diff: int | None = None,
+        ignore_max_val_diff: Number | None = None,
+        on_duplicate: str | None = None,
+    ) -> int: ...
+
+    @overload
+    def add(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        timestamp: int | str,
+        value: Number | str,
+        retention_msecs: int | None = None,
+        uncompressed: bool | None = False,
+        labels: Dict[str, str] | None = None,
+        chunk_size: int | None = None,
+        duplicate_policy: str | None = None,
+        ignore_max_time_diff: int | None = None,
+        ignore_max_val_diff: Number | None = None,
+        on_duplicate: str | None = None,
+    ) -> Awaitable[int]: ...
+
     def add(
         self,
         key: KeyT,
-        timestamp: Union[int, str],
-        value: Union[Number, str],
-        retention_msecs: Optional[int] = None,
-        uncompressed: Optional[bool] = False,
-        labels: Optional[Dict[str, str]] = None,
-        chunk_size: Optional[int] = None,
-        duplicate_policy: Optional[str] = None,
-        ignore_max_time_diff: Optional[int] = None,
-        ignore_max_val_diff: Optional[Number] = None,
-        on_duplicate: Optional[str] = None,
-    ):
+        timestamp: int | str,
+        value: Number | str,
+        retention_msecs: int | None = None,
+        uncompressed: bool | None = False,
+        labels: Dict[str, str] | None = None,
+        chunk_size: int | None = None,
+        duplicate_policy: str | None = None,
+        ignore_max_time_diff: int | None = None,
+        ignore_max_val_diff: Number | None = None,
+        on_duplicate: str | None = None,
+    ) -> int | Awaitable[int]:
         """
         Append a sample to a time series. When the specified key does not exist, a new
         time series is created.
@@ -238,7 +330,7 @@ class TimeSeriesCommands:
                 Use a specific duplicate policy for the specified timestamp. Overrides
                 the duplicate policy set by `duplicate_policy`.
         """
-        params = [key, timestamp, value]
+        params: list[EncodableT] = [key, timestamp, value]
         self._append_retention(params, retention_msecs)
         self._append_uncompressed(params, uncompressed)
         self._append_chunk_size(params, chunk_size)
@@ -251,7 +343,21 @@ class TimeSeriesCommands:
 
         return self.execute_command(ADD_CMD, *params)
 
-    def madd(self, ktv_tuples: List[Tuple[KeyT, Union[int, str], Union[Number, str]]]):
+    @overload
+    def madd(
+        self: SyncClientProtocol,
+        ktv_tuples: List[Tuple[KeyT, int | str, Number | str]],
+    ) -> list[int]: ...
+
+    @overload
+    def madd(
+        self: AsyncClientProtocol,
+        ktv_tuples: List[Tuple[KeyT, int | str, Number | str]],
+    ) -> Awaitable[list[int]]: ...
+
+    def madd(
+        self, ktv_tuples: List[Tuple[KeyT, int | str, Number | str]]
+    ) -> list[int] | Awaitable[list[int]]:
         """
         Append new samples to one or more time series.
 
@@ -274,25 +380,55 @@ class TimeSeriesCommands:
             A list that contains, for each sample, either the timestamp that was used,
             or an error, if the sample could not be added.
         """
-        params = []
+        params: list[EncodableT] = []
         for ktv in ktv_tuples:
             params.extend(ktv)
 
         return self.execute_command(MADD_CMD, *params)
 
+    @overload
+    def incrby(
+        self: SyncClientProtocol,
+        key: KeyT,
+        value: Number,
+        timestamp: int | str | None = None,
+        retention_msecs: int | None = None,
+        uncompressed: bool | None = False,
+        labels: Dict[str, str] | None = None,
+        chunk_size: int | None = None,
+        duplicate_policy: str | None = None,
+        ignore_max_time_diff: int | None = None,
+        ignore_max_val_diff: Number | None = None,
+    ) -> int: ...
+
+    @overload
+    def incrby(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        value: Number,
+        timestamp: int | str | None = None,
+        retention_msecs: int | None = None,
+        uncompressed: bool | None = False,
+        labels: Dict[str, str] | None = None,
+        chunk_size: int | None = None,
+        duplicate_policy: str | None = None,
+        ignore_max_time_diff: int | None = None,
+        ignore_max_val_diff: Number | None = None,
+    ) -> Awaitable[int]: ...
+
     def incrby(
         self,
         key: KeyT,
         value: Number,
-        timestamp: Optional[Union[int, str]] = None,
-        retention_msecs: Optional[int] = None,
-        uncompressed: Optional[bool] = False,
-        labels: Optional[Dict[str, str]] = None,
-        chunk_size: Optional[int] = None,
-        duplicate_policy: Optional[str] = None,
-        ignore_max_time_diff: Optional[int] = None,
-        ignore_max_val_diff: Optional[Number] = None,
-    ):
+        timestamp: int | str | None = None,
+        retention_msecs: int | None = None,
+        uncompressed: bool | None = False,
+        labels: Dict[str, str] | None = None,
+        chunk_size: int | None = None,
+        duplicate_policy: str | None = None,
+        ignore_max_time_diff: int | None = None,
+        ignore_max_val_diff: Number | None = None,
+    ) -> int | Awaitable[int]:
         """
         Increment the latest sample's of a series. When the specified key does not
         exist, a new time series is created.
@@ -359,7 +495,7 @@ class TimeSeriesCommands:
         Returns:
             The timestamp of the sample that was modified or added.
         """
-        params = [key, value]
+        params: list[EncodableT] = [key, value]
         self._append_timestamp(params, timestamp)
         self._append_retention(params, retention_msecs)
         self._append_uncompressed(params, uncompressed)
@@ -372,19 +508,49 @@ class TimeSeriesCommands:
 
         return self.execute_command(INCRBY_CMD, *params)
 
+    @overload
+    def decrby(
+        self: SyncClientProtocol,
+        key: KeyT,
+        value: Number,
+        timestamp: int | str | None = None,
+        retention_msecs: int | None = None,
+        uncompressed: bool | None = False,
+        labels: Dict[str, str] | None = None,
+        chunk_size: int | None = None,
+        duplicate_policy: str | None = None,
+        ignore_max_time_diff: int | None = None,
+        ignore_max_val_diff: Number | None = None,
+    ) -> int: ...
+
+    @overload
+    def decrby(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        value: Number,
+        timestamp: int | str | None = None,
+        retention_msecs: int | None = None,
+        uncompressed: bool | None = False,
+        labels: Dict[str, str] | None = None,
+        chunk_size: int | None = None,
+        duplicate_policy: str | None = None,
+        ignore_max_time_diff: int | None = None,
+        ignore_max_val_diff: Number | None = None,
+    ) -> Awaitable[int]: ...
+
     def decrby(
         self,
         key: KeyT,
         value: Number,
-        timestamp: Optional[Union[int, str]] = None,
-        retention_msecs: Optional[int] = None,
-        uncompressed: Optional[bool] = False,
-        labels: Optional[Dict[str, str]] = None,
-        chunk_size: Optional[int] = None,
-        duplicate_policy: Optional[str] = None,
-        ignore_max_time_diff: Optional[int] = None,
-        ignore_max_val_diff: Optional[Number] = None,
-    ):
+        timestamp: int | str | None = None,
+        retention_msecs: int | None = None,
+        uncompressed: bool | None = False,
+        labels: Dict[str, str] | None = None,
+        chunk_size: int | None = None,
+        duplicate_policy: str | None = None,
+        ignore_max_time_diff: int | None = None,
+        ignore_max_val_diff: Number | None = None,
+    ) -> int | Awaitable[int]:
         """
         Decrement the latest sample's of a series. When the specified key does not
         exist, a new time series is created.
@@ -451,7 +617,7 @@ class TimeSeriesCommands:
         Returns:
             The timestamp of the sample that was modified or added.
         """
-        params = [key, value]
+        params: list[EncodableT] = [key, value]
         self._append_timestamp(params, timestamp)
         self._append_retention(params, retention_msecs)
         self._append_uncompressed(params, uncompressed)
@@ -464,7 +630,17 @@ class TimeSeriesCommands:
 
         return self.execute_command(DECRBY_CMD, *params)
 
-    def delete(self, key: KeyT, from_time: int, to_time: int):
+    @overload
+    def delete(
+        self: SyncClientProtocol, key: KeyT, from_time: int, to_time: int
+    ) -> int: ...
+
+    @overload
+    def delete(
+        self: AsyncClientProtocol, key: KeyT, from_time: int, to_time: int
+    ) -> Awaitable[int]: ...
+
+    def delete(self, key: KeyT, from_time: int, to_time: int) -> int | Awaitable[int]:
         """
         Delete all samples between two timestamps for a given time series.
 
@@ -486,14 +662,34 @@ class TimeSeriesCommands:
         """
         return self.execute_command(DEL_CMD, key, from_time, to_time)
 
+    @overload
+    def createrule(
+        self: SyncClientProtocol,
+        source_key: KeyT,
+        dest_key: KeyT,
+        aggregation_type: str,
+        bucket_size_msec: int,
+        align_timestamp: int | None = None,
+    ) -> bool: ...
+
+    @overload
+    def createrule(
+        self: AsyncClientProtocol,
+        source_key: KeyT,
+        dest_key: KeyT,
+        aggregation_type: str,
+        bucket_size_msec: int,
+        align_timestamp: int | None = None,
+    ) -> Awaitable[bool]: ...
+
     def createrule(
         self,
         source_key: KeyT,
         dest_key: KeyT,
         aggregation_type: str,
         bucket_size_msec: int,
-        align_timestamp: Optional[int] = None,
-    ):
+        align_timestamp: int | None = None,
+    ) -> bool | Awaitable[bool]:
         """
         Create a compaction rule from values added to `source_key` into `dest_key`.
 
@@ -514,14 +710,24 @@ class TimeSeriesCommands:
                 Assure that there is a bucket that starts at exactly align_timestamp and
                 align all other buckets accordingly.
         """
-        params = [source_key, dest_key]
+        params: list[EncodableT] = [source_key, dest_key]
         self._append_aggregation(params, aggregation_type, bucket_size_msec)
         if align_timestamp is not None:
             params.append(align_timestamp)
 
         return self.execute_command(CREATERULE_CMD, *params)
 
-    def deleterule(self, source_key: KeyT, dest_key: KeyT):
+    @overload
+    def deleterule(
+        self: SyncClientProtocol, source_key: KeyT, dest_key: KeyT
+    ) -> bool: ...
+
+    @overload
+    def deleterule(
+        self: AsyncClientProtocol, source_key: KeyT, dest_key: KeyT
+    ) -> Awaitable[bool]: ...
+
+    def deleterule(self, source_key: KeyT, dest_key: KeyT) -> bool | Awaitable[bool]:
         """
         Delete a compaction rule from `source_key` to `dest_key`.
 
@@ -532,21 +738,21 @@ class TimeSeriesCommands:
     def __range_params(
         self,
         key: KeyT,
-        from_time: Union[int, str],
-        to_time: Union[int, str],
-        count: Optional[int],
-        aggregation_type: Optional[str],
-        bucket_size_msec: Optional[int],
-        filter_by_ts: Optional[List[int]],
-        filter_by_min_value: Optional[int],
-        filter_by_max_value: Optional[int],
-        align: Optional[Union[int, str]],
-        latest: Optional[bool],
-        bucket_timestamp: Optional[str],
-        empty: Optional[bool],
+        from_time: int | str,
+        to_time: int | str,
+        count: int | None,
+        aggregation_type: str | None,
+        bucket_size_msec: int | None,
+        filter_by_ts: List[int] | None,
+        filter_by_min_value: int | None,
+        filter_by_max_value: int | None,
+        align: int | str | None,
+        latest: bool | None,
+        bucket_timestamp: str | None,
+        empty: bool | None,
     ):
         """Create TS.RANGE and TS.REVRANGE arguments."""
-        params = [key, from_time, to_time]
+        params: list[EncodableT] = [key, from_time, to_time]
         self._append_latest(params, latest)
         self._append_filer_by_ts(params, filter_by_ts)
         self._append_filer_by_value(params, filter_by_min_value, filter_by_max_value)
@@ -558,22 +764,58 @@ class TimeSeriesCommands:
 
         return params
 
+    @overload
+    def range(
+        self: SyncClientProtocol,
+        key: KeyT,
+        from_time: int | str,
+        to_time: int | str,
+        count: int | None = None,
+        aggregation_type: str | None = None,
+        bucket_size_msec: int | None = 0,
+        filter_by_ts: List[int] | None = None,
+        filter_by_min_value: int | None = None,
+        filter_by_max_value: int | None = None,
+        align: int | str | None = None,
+        latest: bool | None = False,
+        bucket_timestamp: str | None = None,
+        empty: bool | None = False,
+    ) -> TimeSeriesRangeResponse: ...
+
+    @overload
+    def range(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        from_time: int | str,
+        to_time: int | str,
+        count: int | None = None,
+        aggregation_type: str | None = None,
+        bucket_size_msec: int | None = 0,
+        filter_by_ts: List[int] | None = None,
+        filter_by_min_value: int | None = None,
+        filter_by_max_value: int | None = None,
+        align: int | str | None = None,
+        latest: bool | None = False,
+        bucket_timestamp: str | None = None,
+        empty: bool | None = False,
+    ) -> Awaitable[TimeSeriesRangeResponse]: ...
+
     def range(
         self,
         key: KeyT,
-        from_time: Union[int, str],
-        to_time: Union[int, str],
-        count: Optional[int] = None,
-        aggregation_type: Optional[str] = None,
-        bucket_size_msec: Optional[int] = 0,
-        filter_by_ts: Optional[List[int]] = None,
-        filter_by_min_value: Optional[int] = None,
-        filter_by_max_value: Optional[int] = None,
-        align: Optional[Union[int, str]] = None,
-        latest: Optional[bool] = False,
-        bucket_timestamp: Optional[str] = None,
-        empty: Optional[bool] = False,
-    ):
+        from_time: int | str,
+        to_time: int | str,
+        count: int | None = None,
+        aggregation_type: str | None = None,
+        bucket_size_msec: int | None = 0,
+        filter_by_ts: List[int] | None = None,
+        filter_by_min_value: int | None = None,
+        filter_by_max_value: int | None = None,
+        align: int | str | None = None,
+        latest: bool | None = False,
+        bucket_timestamp: str | None = None,
+        empty: bool | None = False,
+    ) -> TimeSeriesRangeResponse | Awaitable[TimeSeriesRangeResponse]:
         """
         Query a range in forward direction for a specific time-series.
 
@@ -632,22 +874,58 @@ class TimeSeriesCommands:
         )
         return self.execute_command(RANGE_CMD, *params, keys=[key])
 
+    @overload
+    def revrange(
+        self: SyncClientProtocol,
+        key: KeyT,
+        from_time: int | str,
+        to_time: int | str,
+        count: int | None = None,
+        aggregation_type: str | None = None,
+        bucket_size_msec: int | None = 0,
+        filter_by_ts: List[int] | None = None,
+        filter_by_min_value: int | None = None,
+        filter_by_max_value: int | None = None,
+        align: int | str | None = None,
+        latest: bool | None = False,
+        bucket_timestamp: str | None = None,
+        empty: bool | None = False,
+    ) -> TimeSeriesRangeResponse: ...
+
+    @overload
+    def revrange(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        from_time: int | str,
+        to_time: int | str,
+        count: int | None = None,
+        aggregation_type: str | None = None,
+        bucket_size_msec: int | None = 0,
+        filter_by_ts: List[int] | None = None,
+        filter_by_min_value: int | None = None,
+        filter_by_max_value: int | None = None,
+        align: int | str | None = None,
+        latest: bool | None = False,
+        bucket_timestamp: str | None = None,
+        empty: bool | None = False,
+    ) -> Awaitable[TimeSeriesRangeResponse]: ...
+
     def revrange(
         self,
         key: KeyT,
-        from_time: Union[int, str],
-        to_time: Union[int, str],
-        count: Optional[int] = None,
-        aggregation_type: Optional[str] = None,
-        bucket_size_msec: Optional[int] = 0,
-        filter_by_ts: Optional[List[int]] = None,
-        filter_by_min_value: Optional[int] = None,
-        filter_by_max_value: Optional[int] = None,
-        align: Optional[Union[int, str]] = None,
-        latest: Optional[bool] = False,
-        bucket_timestamp: Optional[str] = None,
-        empty: Optional[bool] = False,
-    ):
+        from_time: int | str,
+        to_time: int | str,
+        count: int | None = None,
+        aggregation_type: str | None = None,
+        bucket_size_msec: int | None = 0,
+        filter_by_ts: List[int] | None = None,
+        filter_by_min_value: int | None = None,
+        filter_by_max_value: int | None = None,
+        align: int | str | None = None,
+        latest: bool | None = False,
+        bucket_timestamp: str | None = None,
+        empty: bool | None = False,
+    ) -> TimeSeriesRangeResponse | Awaitable[TimeSeriesRangeResponse]:
         """
         Query a range in reverse direction for a specific time-series.
 
@@ -710,26 +988,26 @@ class TimeSeriesCommands:
 
     def __mrange_params(
         self,
-        aggregation_type: Optional[str],
-        bucket_size_msec: Optional[int],
-        count: Optional[int],
+        aggregation_type: str | None,
+        bucket_size_msec: int | None,
+        count: int | None,
         filters: List[str],
-        from_time: Union[int, str],
-        to_time: Union[int, str],
-        with_labels: Optional[bool],
-        filter_by_ts: Optional[List[int]],
-        filter_by_min_value: Optional[int],
-        filter_by_max_value: Optional[int],
-        groupby: Optional[str],
-        reduce: Optional[str],
-        select_labels: Optional[List[str]],
-        align: Optional[Union[int, str]],
-        latest: Optional[bool],
-        bucket_timestamp: Optional[str],
-        empty: Optional[bool],
+        from_time: int | str,
+        to_time: int | str,
+        with_labels: bool | None,
+        filter_by_ts: List[int] | None,
+        filter_by_min_value: int | None,
+        filter_by_max_value: int | None,
+        groupby: str | None,
+        reduce: str | None,
+        select_labels: List[str] | None,
+        align: int | str | None,
+        latest: bool | None,
+        bucket_timestamp: str | None,
+        empty: bool | None,
     ):
         """Create TS.MRANGE and TS.MREVRANGE arguments."""
-        params = [from_time, to_time]
+        params: list[EncodableT] = [from_time, to_time]
         self._append_latest(params, latest)
         self._append_filer_by_ts(params, filter_by_ts)
         self._append_filer_by_value(params, filter_by_min_value, filter_by_max_value)
@@ -744,26 +1022,72 @@ class TimeSeriesCommands:
         self._append_groupby_reduce(params, groupby, reduce)
         return params
 
+    @overload
+    def mrange(
+        self: SyncClientProtocol,
+        from_time: int | str,
+        to_time: int | str,
+        filters: List[str],
+        count: int | None = None,
+        aggregation_type: str | None = None,
+        bucket_size_msec: int | None = 0,
+        with_labels: bool | None = False,
+        filter_by_ts: List[int] | None = None,
+        filter_by_min_value: int | None = None,
+        filter_by_max_value: int | None = None,
+        groupby: str | None = None,
+        reduce: str | None = None,
+        select_labels: List[str] | None = None,
+        align: int | str | None = None,
+        latest: bool | None = False,
+        bucket_timestamp: str | None = None,
+        empty: bool | None = False,
+    ) -> list[Any] | dict[str, list[Any]]: ...
+
+    @overload
+    def mrange(
+        self: AsyncClientProtocol,
+        from_time: int | str,
+        to_time: int | str,
+        filters: List[str],
+        count: int | None = None,
+        aggregation_type: str | None = None,
+        bucket_size_msec: int | None = 0,
+        with_labels: bool | None = False,
+        filter_by_ts: List[int] | None = None,
+        filter_by_min_value: int | None = None,
+        filter_by_max_value: int | None = None,
+        groupby: str | None = None,
+        reduce: str | None = None,
+        select_labels: List[str] | None = None,
+        align: int | str | None = None,
+        latest: bool | None = False,
+        bucket_timestamp: str | None = None,
+        empty: bool | None = False,
+    ) -> Awaitable[list[Any] | dict[str, list[Any]]]: ...
+
     def mrange(
         self,
-        from_time: Union[int, str],
-        to_time: Union[int, str],
+        from_time: int | str,
+        to_time: int | str,
         filters: List[str],
-        count: Optional[int] = None,
-        aggregation_type: Optional[str] = None,
-        bucket_size_msec: Optional[int] = 0,
-        with_labels: Optional[bool] = False,
-        filter_by_ts: Optional[List[int]] = None,
-        filter_by_min_value: Optional[int] = None,
-        filter_by_max_value: Optional[int] = None,
-        groupby: Optional[str] = None,
-        reduce: Optional[str] = None,
-        select_labels: Optional[List[str]] = None,
-        align: Optional[Union[int, str]] = None,
-        latest: Optional[bool] = False,
-        bucket_timestamp: Optional[str] = None,
-        empty: Optional[bool] = False,
-    ):
+        count: int | None = None,
+        aggregation_type: str | None = None,
+        bucket_size_msec: int | None = 0,
+        with_labels: bool | None = False,
+        filter_by_ts: List[int] | None = None,
+        filter_by_min_value: int | None = None,
+        filter_by_max_value: int | None = None,
+        groupby: str | None = None,
+        reduce: str | None = None,
+        select_labels: List[str] | None = None,
+        align: int | str | None = None,
+        latest: bool | None = False,
+        bucket_timestamp: str | None = None,
+        empty: bool | None = False,
+    ) -> (list[Any] | dict[str, list[Any]]) | Awaitable[
+        list[Any] | dict[str, list[Any]]
+    ]:
         """
         Query a range across multiple time-series by filters in forward direction.
 
@@ -838,26 +1162,72 @@ class TimeSeriesCommands:
 
         return self.execute_command(MRANGE_CMD, *params)
 
+    @overload
+    def mrevrange(
+        self: SyncClientProtocol,
+        from_time: int | str,
+        to_time: int | str,
+        filters: List[str],
+        count: int | None = None,
+        aggregation_type: str | None = None,
+        bucket_size_msec: int | None = 0,
+        with_labels: bool | None = False,
+        filter_by_ts: List[int] | None = None,
+        filter_by_min_value: int | None = None,
+        filter_by_max_value: int | None = None,
+        groupby: str | None = None,
+        reduce: str | None = None,
+        select_labels: List[str] | None = None,
+        align: int | str | None = None,
+        latest: bool | None = False,
+        bucket_timestamp: str | None = None,
+        empty: bool | None = False,
+    ) -> list[Any] | dict[str, list[Any]]: ...
+
+    @overload
+    def mrevrange(
+        self: AsyncClientProtocol,
+        from_time: int | str,
+        to_time: int | str,
+        filters: List[str],
+        count: int | None = None,
+        aggregation_type: str | None = None,
+        bucket_size_msec: int | None = 0,
+        with_labels: bool | None = False,
+        filter_by_ts: List[int] | None = None,
+        filter_by_min_value: int | None = None,
+        filter_by_max_value: int | None = None,
+        groupby: str | None = None,
+        reduce: str | None = None,
+        select_labels: List[str] | None = None,
+        align: int | str | None = None,
+        latest: bool | None = False,
+        bucket_timestamp: str | None = None,
+        empty: bool | None = False,
+    ) -> Awaitable[list[Any] | dict[str, list[Any]]]: ...
+
     def mrevrange(
         self,
-        from_time: Union[int, str],
-        to_time: Union[int, str],
+        from_time: int | str,
+        to_time: int | str,
         filters: List[str],
-        count: Optional[int] = None,
-        aggregation_type: Optional[str] = None,
-        bucket_size_msec: Optional[int] = 0,
-        with_labels: Optional[bool] = False,
-        filter_by_ts: Optional[List[int]] = None,
-        filter_by_min_value: Optional[int] = None,
-        filter_by_max_value: Optional[int] = None,
-        groupby: Optional[str] = None,
-        reduce: Optional[str] = None,
-        select_labels: Optional[List[str]] = None,
-        align: Optional[Union[int, str]] = None,
-        latest: Optional[bool] = False,
-        bucket_timestamp: Optional[str] = None,
-        empty: Optional[bool] = False,
-    ):
+        count: int | None = None,
+        aggregation_type: str | None = None,
+        bucket_size_msec: int | None = 0,
+        with_labels: bool | None = False,
+        filter_by_ts: List[int] | None = None,
+        filter_by_min_value: int | None = None,
+        filter_by_max_value: int | None = None,
+        groupby: str | None = None,
+        reduce: str | None = None,
+        select_labels: List[str] | None = None,
+        align: int | str | None = None,
+        latest: bool | None = False,
+        bucket_timestamp: str | None = None,
+        empty: bool | None = False,
+    ) -> (list[Any] | dict[str, list[Any]]) | Awaitable[
+        list[Any] | dict[str, list[Any]]
+    ]:
         """
         Query a range across multiple time-series by filters in reverse direction.
 
@@ -932,7 +1302,19 @@ class TimeSeriesCommands:
 
         return self.execute_command(MREVRANGE_CMD, *params)
 
-    def get(self, key: KeyT, latest: Optional[bool] = False):
+    @overload
+    def get(
+        self: SyncClientProtocol, key: KeyT, latest: bool | None = False
+    ) -> TimeSeriesSample | None: ...
+
+    @overload
+    def get(
+        self: AsyncClientProtocol, key: KeyT, latest: bool | None = False
+    ) -> Awaitable[TimeSeriesSample | None]: ...
+
+    def get(self, key: KeyT, latest: bool | None = False) -> (
+        TimeSeriesSample | None
+    ) | Awaitable[TimeSeriesSample | None]:
         """
         Get the last sample of `key`.
 
@@ -943,17 +1325,37 @@ class TimeSeriesCommands:
                 Used when a time series is a compaction, reports the compacted value of
                 the latest (possibly partial) bucket.
         """
-        params = [key]
+        params: list[EncodableT] = [key]
         self._append_latest(params, latest)
         return self.execute_command(GET_CMD, *params, keys=[key])
+
+    @overload
+    def mget(
+        self: SyncClientProtocol,
+        filters: List[str],
+        with_labels: bool | None = False,
+        select_labels: List[str] | None = None,
+        latest: bool | None = False,
+    ) -> list[Any] | dict[str, list[Any]]: ...
+
+    @overload
+    def mget(
+        self: AsyncClientProtocol,
+        filters: List[str],
+        with_labels: bool | None = False,
+        select_labels: List[str] | None = None,
+        latest: bool | None = False,
+    ) -> Awaitable[list[Any] | dict[str, list[Any]]]: ...
 
     def mget(
         self,
         filters: List[str],
-        with_labels: Optional[bool] = False,
-        select_labels: Optional[List[str]] = None,
-        latest: Optional[bool] = False,
-    ):
+        with_labels: bool | None = False,
+        select_labels: List[str] | None = None,
+        latest: bool | None = False,
+    ) -> (list[Any] | dict[str, list[Any]]) | Awaitable[
+        list[Any] | dict[str, list[Any]]
+    ]:
         """
         Get the last samples matching the specific `filter`.
 
@@ -972,14 +1374,24 @@ class TimeSeriesCommands:
                 Used when a time series is a compaction, reports the compacted value of
                 the latest possibly partial bucket.
         """
-        params = []
+        params: list[EncodableT] = []
         self._append_latest(params, latest)
         self._append_with_labels(params, with_labels, select_labels)
         params.extend(["FILTER"])
         params += filters
         return self.execute_command(MGET_CMD, *params)
 
-    def info(self, key: KeyT):
+    @overload
+    def info(self: SyncClientProtocol, key: KeyT) -> TSInfo | dict[str, Any]: ...
+
+    @overload
+    def info(
+        self: AsyncClientProtocol, key: KeyT
+    ) -> Awaitable[TSInfo | dict[str, Any]]: ...
+
+    def info(self, key: KeyT) -> (TSInfo | dict[str, Any]) | Awaitable[
+        TSInfo | dict[str, Any]
+    ]:
         """
         Get information of `key`.
 
@@ -987,7 +1399,19 @@ class TimeSeriesCommands:
         """
         return self.execute_command(INFO_CMD, key, keys=[key])
 
-    def queryindex(self, filters: List[str]):
+    @overload
+    def queryindex(
+        self: SyncClientProtocol, filters: List[str]
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def queryindex(
+        self: AsyncClientProtocol, filters: List[str]
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def queryindex(
+        self, filters: List[str]
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Get all time series keys matching the `filter` list.
 
@@ -996,16 +1420,16 @@ class TimeSeriesCommands:
         return self.execute_command(QUERYINDEX_CMD, *filters)
 
     @staticmethod
-    def _append_uncompressed(params: List[str], uncompressed: Optional[bool]):
+    def _append_uncompressed(params: list[EncodableT], uncompressed: bool | None):
         """Append UNCOMPRESSED tag to params."""
         if uncompressed:
             params.extend(["ENCODING", "UNCOMPRESSED"])
 
     @staticmethod
     def _append_with_labels(
-        params: List[str],
-        with_labels: Optional[bool],
-        select_labels: Optional[List[str]],
+        params: list[EncodableT],
+        with_labels: bool | None,
+        select_labels: list[str] | None,
     ):
         """Append labels behavior to params."""
         if with_labels and select_labels:
@@ -1020,20 +1444,20 @@ class TimeSeriesCommands:
 
     @staticmethod
     def _append_groupby_reduce(
-        params: List[str], groupby: Optional[str], reduce: Optional[str]
+        params: list[EncodableT], groupby: str | None, reduce: str | None
     ):
         """Append GROUPBY REDUCE property to params."""
         if groupby is not None and reduce is not None:
             params.extend(["GROUPBY", groupby, "REDUCE", reduce.upper()])
 
     @staticmethod
-    def _append_retention(params: List[str], retention: Optional[int]):
+    def _append_retention(params: list[EncodableT], retention: int | None):
         """Append RETENTION property to params."""
         if retention is not None:
             params.extend(["RETENTION", retention])
 
     @staticmethod
-    def _append_labels(params: List[str], labels: Optional[List[str]]):
+    def _append_labels(params: list[EncodableT], labels: dict[str, str] | None):
         """Append LABELS property to params."""
         if labels:
             params.append("LABELS")
@@ -1041,88 +1465,92 @@ class TimeSeriesCommands:
                 params.extend([k, v])
 
     @staticmethod
-    def _append_count(params: List[str], count: Optional[int]):
+    def _append_count(params: list[EncodableT], count: int | None):
         """Append COUNT property to params."""
         if count is not None:
             params.extend(["COUNT", count])
 
     @staticmethod
-    def _append_timestamp(params: List[str], timestamp: Optional[int]):
+    def _append_timestamp(params: list[EncodableT], timestamp: int | None):
         """Append TIMESTAMP property to params."""
         if timestamp is not None:
             params.extend(["TIMESTAMP", timestamp])
 
     @staticmethod
-    def _append_align(params: List[str], align: Optional[Union[int, str]]):
+    def _append_align(params: list[EncodableT], align: int | str | None):
         """Append ALIGN property to params."""
         if align is not None:
             params.extend(["ALIGN", align])
 
     @staticmethod
     def _append_aggregation(
-        params: List[str],
-        aggregation_type: Optional[str],
-        bucket_size_msec: Optional[int],
+        params: list[EncodableT],
+        aggregation_type: str | None,
+        bucket_size_msec: int | None,
     ):
         """Append AGGREGATION property to params."""
         if aggregation_type is not None:
             params.extend(["AGGREGATION", aggregation_type, bucket_size_msec])
 
     @staticmethod
-    def _append_chunk_size(params: List[str], chunk_size: Optional[int]):
+    def _append_chunk_size(params: list[EncodableT], chunk_size: int | None):
         """Append CHUNK_SIZE property to params."""
         if chunk_size is not None:
             params.extend(["CHUNK_SIZE", chunk_size])
 
     @staticmethod
-    def _append_duplicate_policy(params: List[str], duplicate_policy: Optional[str]):
+    def _append_duplicate_policy(
+        params: list[EncodableT], duplicate_policy: str | None
+    ):
         """Append DUPLICATE_POLICY property to params."""
         if duplicate_policy is not None:
             params.extend(["DUPLICATE_POLICY", duplicate_policy])
 
     @staticmethod
-    def _append_on_duplicate(params: List[str], on_duplicate: Optional[str]):
+    def _append_on_duplicate(params: list[EncodableT], on_duplicate: str | None):
         """Append ON_DUPLICATE property to params."""
         if on_duplicate is not None:
             params.extend(["ON_DUPLICATE", on_duplicate])
 
     @staticmethod
-    def _append_filer_by_ts(params: List[str], ts_list: Optional[List[int]]):
+    def _append_filer_by_ts(params: list[EncodableT], ts_list: list[int] | None):
         """Append FILTER_BY_TS property to params."""
         if ts_list is not None:
             params.extend(["FILTER_BY_TS", *ts_list])
 
     @staticmethod
     def _append_filer_by_value(
-        params: List[str], min_value: Optional[int], max_value: Optional[int]
+        params: list[EncodableT], min_value: int | None, max_value: int | None
     ):
         """Append FILTER_BY_VALUE property to params."""
         if min_value is not None and max_value is not None:
             params.extend(["FILTER_BY_VALUE", min_value, max_value])
 
     @staticmethod
-    def _append_latest(params: List[str], latest: Optional[bool]):
+    def _append_latest(params: list[EncodableT], latest: bool | None):
         """Append LATEST property to params."""
         if latest:
             params.append("LATEST")
 
     @staticmethod
-    def _append_bucket_timestamp(params: List[str], bucket_timestamp: Optional[str]):
+    def _append_bucket_timestamp(
+        params: list[EncodableT], bucket_timestamp: str | None
+    ):
         """Append BUCKET_TIMESTAMP property to params."""
         if bucket_timestamp is not None:
             params.extend(["BUCKETTIMESTAMP", bucket_timestamp])
 
     @staticmethod
-    def _append_empty(params: List[str], empty: Optional[bool]):
+    def _append_empty(params: list[EncodableT], empty: bool | None):
         """Append EMPTY property to params."""
         if empty:
             params.append("EMPTY")
 
     @staticmethod
     def _append_insertion_filters(
-        params: List[str],
-        ignore_max_time_diff: Optional[int] = None,
-        ignore_max_val_diff: Optional[Number] = None,
+        params: list[EncodableT],
+        ignore_max_time_diff: int | None = None,
+        ignore_max_val_diff: Number | None = None,
     ):
         """Append insertion filters to params."""
         if (ignore_max_time_diff is None) != (ignore_max_val_diff is None):
