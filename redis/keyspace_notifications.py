@@ -1253,6 +1253,19 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
         """Get all primary nodes in the cluster."""
         return self.cluster.get_primaries()
 
+    def _cleanup_node(self, node_name: str) -> None:
+        """Remove and close a node's PubSub.
+
+        Closing the ``PubSub`` disconnects its connection so it is not
+        left in a subscribed state inside the connection pool.
+        """
+        pubsub = self._node_pubsubs.pop(node_name, None)
+        if pubsub:
+            try:
+                pubsub.close()
+            except Exception:
+                pass
+
     def _ensure_node_pubsub(self, node) -> Any:
         """Get or create a PubSub instance for a node."""
         if node.name not in self._node_pubsubs:
@@ -1303,11 +1316,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
             except Exception:
                 # Remove the broken pubsub so refresh_subscriptions can
                 # re-create it later.
-                self._node_pubsubs.pop(node.name, None)
-                try:
-                    pubsub.close()
-                except Exception:
-                    pass
+                self._cleanup_node(node.name)
                 failed_nodes.append(node.name)
 
         if failed_nodes:
@@ -1343,11 +1352,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
                 else:
                     pubsub.unsubscribe(*channels)
             except Exception:
-                self._node_pubsubs.pop(node_name, None)
-                try:
-                    pubsub.close()
-                except Exception:
-                    pass
+                self._cleanup_node(node_name)
                 failed_nodes.append(node_name)
 
         if failed_nodes:
@@ -1570,12 +1575,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
                 current_primaries.keys()
             )
             for node_name in removed_nodes:
-                pubsub = self._node_pubsubs.pop(node_name, None)
-                if pubsub:
-                    try:
-                        pubsub.close()
-                    except Exception:
-                        pass
+                self._cleanup_node(node_name)
 
             # Detect broken connections for existing nodes and remove them
             # so they get re-created below
@@ -1586,11 +1586,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
                 pubsub = self._node_pubsubs.get(node_name)
                 if pubsub and not self._is_pubsub_connected(pubsub):
                     # Connection is broken, remove it so it gets re-created
-                    self._node_pubsubs.pop(node_name, None)
-                    try:
-                        pubsub.close()
-                    except Exception:
-                        pass
+                    self._cleanup_node(node_name)
 
             # Subscribe new nodes (and nodes with broken connections) to existing
             # patterns/channels
@@ -1607,11 +1603,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
                         pubsub.subscribe(**self._subscribed_channels)
                 except Exception:
                     # Subscription failed - remove from dict so retry is possible
-                    self._node_pubsubs.pop(node_name, None)
-                    try:
-                        pubsub.close()
-                    except Exception:
-                        pass
+                    self._cleanup_node(node_name)
                     failed_nodes.append(node_name)
 
             # Raise after attempting all nodes so we don't skip any
@@ -1623,11 +1615,7 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
     def close(self):
         """Close all pubsub connections and clean up resources."""
         self._closed = True
-        for pubsub in self._node_pubsubs.values():
-            try:
-                pubsub.close()
-            except Exception:
-                pass
-        self._node_pubsubs.clear()
+        for node_name in list(self._node_pubsubs.keys()):
+            self._cleanup_node(node_name)
         self._subscribed_patterns.clear()
         self._subscribed_channels.clear()
