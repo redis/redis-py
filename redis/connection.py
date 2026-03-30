@@ -1693,7 +1693,10 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                         while entry.connection_ref.can_read():
                             entry.connection_ref.read_response(push_request=True)
 
-                return
+                # Re-check: if the entry was invalidated during the drain,
+                # fall through to send the command over the network.
+                if self._cache.get(self._current_command_cache_key):
+                    return
 
             # Set temporary entry value to prevent
             # race condition from another connection.
