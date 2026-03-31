@@ -969,8 +969,6 @@ _RedisCallbacksRESP2 = {
     "ACL WHOAMI": str_if_bytes,
     "CLIENT GETNAME": str_if_bytes,
     "CLIENT TRACKINGINFO": lambda r: list(map(str_if_bytes, r)),
-    "CLUSTER GETKEYSINSLOT": lambda r: list(map(str_if_bytes, r)),
-    "COMMAND GETKEYS": lambda r: list(map(str_if_bytes, r)),
     "CONFIG GET": parse_config_get,
     "DEBUG OBJECT": parse_debug_object,
     "GEOHASH": lambda r: list(map(str_if_bytes, r)),
@@ -1028,6 +1026,15 @@ _RedisCallbacksRESP3 = {
     **string_keys_to_dict("XREAD XREADGROUP", parse_xread_resp3),
     **string_keys_to_dict("ZMPOP BZMPOP", parse_zmpop),
     "ZRANDMEMBER": zset_score_pairs_resp3,
+    "ACL CAT": lambda r: list(map(str_if_bytes, r)),
+    "ACL GENPASS": str_if_bytes,
+    "ACL HELP": lambda r: list(map(str_if_bytes, r)),
+    "ACL LIST": lambda r: list(map(str_if_bytes, r)),
+    "ACL USERS": lambda r: list(map(str_if_bytes, r)),
+    "ACL WHOAMI": str_if_bytes,
+    "CLIENT GETNAME": str_if_bytes,
+    "GEOHASH": lambda r: list(map(str_if_bytes, r)),
+    "RESET": str_if_bytes,
     "ACL LOG": lambda r: (
         [
             {str_if_bytes(key): str_if_bytes(value) for key, value in x.items()}

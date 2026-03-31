@@ -96,35 +96,47 @@
 
 ---
 
-## Batch 5: `str` vs `bytes` — Remove `str_if_bytes` from RESP2
+## Batch 5: `str` vs `bytes` — Unify `str_if_bytes` handling
 
-**Theme:** RESP2 callbacks apply `str_if_bytes` decoding bytes→str, while RESP3 returns raw bytes. Unify to raw `bytes` (let `decode_responses` handle decoding uniformly).
+**Theme:** RESP2 callbacks apply `str_if_bytes` decoding bytes→str for certain commands, while RESP3 returns raw bytes. Two groups:
+
+### Group A: Always-ASCII commands — Unify to `str` (apply `str_if_bytes` to RESP3 too)
+These commands return Redis-internal strings that are guaranteed printable ASCII (category names, hex passwords, help text, usernames, client names, geohashes). Unify by adding `str_if_bytes` to RESP3 callbacks so both protocols return `str`.
 
 | # | Command | Current RESP2 Type | Current RESP3 Type | Final Type | Action |
 |---|---------|-------------------|-------------------|------------|--------|
-| 1 | ACL CAT | `list[str]` | `list[bytes]` | `list[bytes]` | Remove RESP2 `str_if_bytes` mapping |
-| 2 | ACL GENPASS | `str` | `bytes` | `bytes` | Remove RESP2 `str_if_bytes` |
-| 3 | ACL HELP | `list[str]` | `list[bytes]` | `list[bytes]` | Remove RESP2 `str_if_bytes` mapping |
-| 4 | ACL LIST | `list[str]` | `list[bytes]` | `list[bytes]` | Remove RESP2 `str_if_bytes` mapping |
-| 5 | ACL USERS | `list[str]` | `list[bytes]` | `list[bytes]` | Remove RESP2 `str_if_bytes` mapping |
-| 6 | ACL WHOAMI | `str` | `bytes` | `bytes` | Remove RESP2 `str_if_bytes` |
-| 7 | CLIENT GETNAME | `str` | `bytes` | `bytes` | Remove RESP2 `str_if_bytes` |
-| 8 | CLUSTER GETKEYSINSLOT | `list[str]` | `list[bytes]` | `list[bytes]` | Remove RESP2 `str_if_bytes` mapping |
-| 9 | COMMAND GETKEYS | `list[str]` | `list[bytes]` | `list[bytes]` | Remove RESP2 `str_if_bytes` mapping |
-| 10 | GEOHASH | `list[str]` | `list[bytes]` | `list[bytes]` | Remove RESP2 `str_if_bytes` mapping |
-| 11 | RESET | `str` | `bytes` | `bytes` | Remove RESP2 `str_if_bytes` |
+| 1 | ACL CAT | `list[str]` | `list[bytes]` | `list[str]` | Add RESP3 callback with `str_if_bytes` |
+| 2 | ACL GENPASS | `str` | `bytes` | `str` | Add RESP3 callback with `str_if_bytes` |
+| 3 | ACL HELP | `list[str]` | `list[bytes]` | `list[str]` | Add RESP3 callback with `str_if_bytes` |
+| 4 | ACL LIST | `list[str]` | `list[bytes]` | `list[str]` | Add RESP3 callback with `str_if_bytes` |
+| 5 | ACL USERS | `list[str]` | `list[bytes]` | `list[str]` | Add RESP3 callback with `str_if_bytes` |
+| 6 | ACL WHOAMI | `str` | `bytes` | `str` | Add RESP3 callback with `str_if_bytes` |
+| 7 | CLIENT GETNAME | `str` | `bytes` | `str` | Add RESP3 callback with `str_if_bytes` |
+| 8 | GEOHASH | `list[str]` | `list[bytes]` | `list[str]` | Add RESP3 callback with `str_if_bytes` |
+| 9 | RESET | `str` | `bytes` | `str` | Add RESP3 callback with `str_if_bytes` |
+
+### Group B: User-data commands — Unify to `bytes` (remove `str_if_bytes` from RESP2)
+These commands return actual key names which can be arbitrary binary data (non-UTF-8). Unify by removing `str_if_bytes` from RESP2 so both protocols return raw `bytes`.
+
+| # | Command | Current RESP2 Type | Current RESP3 Type | Final Type | Action |
+|---|---------|-------------------|-------------------|------------|--------|
+| 1 | CLUSTER GETKEYSINSLOT | `list[str]` | `list[bytes]` | `list[bytes]` | Remove RESP2 `str_if_bytes` mapping |
+| 2 | COMMAND GETKEYS | `list[str]` | `list[bytes]` | `list[bytes]` | Remove RESP2 `str_if_bytes` mapping |
 
 **Implementation notes:**
-- All these currently have RESP2-only callbacks in `_RedisCallbacksRESP2` — remove them entirely
-- With `decode_responses=True`, both protocols already return `str` after the decoder layer
-- ⚠️ This is a **breaking change** for RESP2 users who relied on `str` without `decode_responses=True`
+- Group A: Keep existing RESP2 callbacks, add matching `str_if_bytes` callbacks in `_RedisCallbacksRESP3`
+- Group B: Remove the `str_if_bytes` mappings from `_RedisCallbacksRESP2` for these two commands
+- With `decode_responses=True`, both protocols already return `str` after the decoder layer for all commands
+- ⚠️ Group B is a **breaking change** for RESP2 users who relied on `str` without `decode_responses=True`
 
 **Unit test fixes (`tests/test_commands.py`):**
-- `test_client_getname`: replace `assert_resp_response(r, r.client_getname(), "redis_py_test", b"redis_py_test")` → `assert r.client_getname() == b"redis_py_test"` (line ~730)
-- `test_reset`: replace `assert_resp_response(r, r.reset(), "RESET", b"RESET")` → `assert r.reset() == b"RESET"` (line ~1128)
-- `test_command_getkeys`: replace `assert_resp_response(r, res, ["a", "c", "e"], [b"a", b"c", b"e"])` → `assert res == [b"a", b"c", b"e"]` (lines ~7068, ~7082)
-- `test_geohash`: replace any `assert_resp_response` with `assert ... == [b"..."]`
-- ACL tests (`test_acl_cat`, `test_acl_list`, `test_acl_users`, `test_acl_whoami`, `test_acl_genpass`, `test_acl_help`): replace string assertions with bytes assertions
+- Group A tests: replace `assert_resp_response(r, ..., "str_val", b"bytes_val")` → `assert ... == "str_val"` (unified to str)
+- `test_client_getname`: `assert r.client_getname() == "redis_py_test"`
+- `test_reset`: `assert r.reset() == "RESET"`
+- `test_geohash`: replace any `assert_resp_response` with `assert ... == ["..."]`
+- ACL tests: replace dual assertions with str-only assertions
+- Group B tests: replace `assert_resp_response(r, ..., ["str"], [b"bytes"])` → `assert ... == [b"bytes"]` (unified to bytes)
+- `test_command_getkeys`: `assert res == [b"a", b"c", b"e"]`
 - `test_cluster_getkeysinslot` (in cluster tests): replace string assertions with bytes
 
 ---

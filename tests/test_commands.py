@@ -146,7 +146,7 @@ class TestRedisCommands:
     def test_acl_cat_no_category(self, r):
         categories = r.acl_cat()
         assert isinstance(categories, list)
-        assert "read" in categories or b"read" in categories
+        assert "read" in categories
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
@@ -164,48 +164,48 @@ class TestRedisCommands:
         categories = r.acl_cat()
         assert isinstance(categories, list)
         for module_cat in modules_list:
-            assert module_cat in categories or module_cat.encode() in categories
+            assert module_cat in categories
 
     @skip_if_server_version_lt("6.0.0")
     def test_acl_cat_with_category(self, r):
         commands = r.acl_cat("read")
         assert isinstance(commands, list)
-        assert "get" in commands or b"get" in commands
+        assert "get" in commands
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
     def test_acl_modules_cat_with_category(self, r):
         search_commands = r.acl_cat("search")
         assert isinstance(search_commands, list)
-        assert "FT.SEARCH" in search_commands or b"FT.SEARCH" in search_commands
+        assert "FT.SEARCH" in search_commands
 
         bloom_commands = r.acl_cat("bloom")
         assert isinstance(bloom_commands, list)
-        assert "bf.add" in bloom_commands or b"bf.add" in bloom_commands
+        assert "bf.add" in bloom_commands
 
         json_commands = r.acl_cat("json")
         assert isinstance(json_commands, list)
-        assert "json.get" in json_commands or b"json.get" in json_commands
+        assert "json.get" in json_commands
 
         cuckoo_commands = r.acl_cat("cuckoo")
         assert isinstance(cuckoo_commands, list)
-        assert "cf.insert" in cuckoo_commands or b"cf.insert" in cuckoo_commands
+        assert "cf.insert" in cuckoo_commands
 
         cms_commands = r.acl_cat("cms")
         assert isinstance(cms_commands, list)
-        assert "cms.query" in cms_commands or b"cms.query" in cms_commands
+        assert "cms.query" in cms_commands
 
         topk_commands = r.acl_cat("topk")
         assert isinstance(topk_commands, list)
-        assert "topk.list" in topk_commands or b"topk.list" in topk_commands
+        assert "topk.list" in topk_commands
 
         tdigest_commands = r.acl_cat("tdigest")
         assert isinstance(tdigest_commands, list)
-        assert "tdigest.rank" in tdigest_commands or b"tdigest.rank" in tdigest_commands
+        assert "tdigest.rank" in tdigest_commands
 
         timeseries_commands = r.acl_cat("timeseries")
         assert isinstance(timeseries_commands, list)
-        assert "ts.range" in timeseries_commands or b"ts.range" in timeseries_commands
+        assert "ts.range" in timeseries_commands
 
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
@@ -251,7 +251,7 @@ class TestRedisCommands:
     @skip_if_redis_enterprise()
     def test_acl_genpass(self, r):
         password = r.acl_genpass()
-        assert isinstance(password, (str, bytes))
+        assert isinstance(password, str)
 
         with pytest.raises(exceptions.DataError):
             r.acl_genpass("value")
@@ -259,7 +259,7 @@ class TestRedisCommands:
             r.acl_genpass(5555)
 
         password = r.acl_genpass(555)
-        assert isinstance(password, (str, bytes))
+        assert isinstance(password, str)
         assert len(password) == 139
 
     @skip_if_server_version_lt("7.0.0")
@@ -513,7 +513,7 @@ class TestRedisCommands:
     @skip_if_server_version_lt("6.0.0")
     def test_acl_whoami(self, r):
         username = r.acl_whoami()
-        assert isinstance(username, (str, bytes))
+        assert isinstance(username, str)
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
@@ -730,7 +730,7 @@ class TestRedisCommands:
     @skip_if_server_version_lt("2.6.9")
     def test_client_setname(self, r):
         assert r.client_setname("redis_py_test")
-        assert_resp_response(r, r.client_getname(), "redis_py_test", b"redis_py_test")
+        assert r.client_getname() == "redis_py_test"
 
     @skip_if_server_version_lt("7.2.0")
     def test_client_setinfo(self, r: redis.Redis):
@@ -1128,7 +1128,7 @@ class TestRedisCommands:
     @skip_if_server_version_lt("6.2.0")
     @skip_if_redis_enterprise()
     def test_reset(self, r):
-        assert_resp_response(r, r.reset(), "RESET", b"RESET")
+        assert r.reset() == "RESET"
 
     def test_object(self, r):
         r["a"] = "foo"
@@ -4859,12 +4859,11 @@ class TestRedisCommands:
             "place2",
         )
         r.geoadd("barcelona", values)
-        assert_resp_response(
-            r,
-            r.geohash("barcelona", "place1", "place2", "place3"),
-            ["sp3e9yg3kd0", "sp3e9cbc3t0", None],
-            [b"sp3e9yg3kd0", b"sp3e9cbc3t0", None],
-        )
+        assert r.geohash("barcelona", "place1", "place2", "place3") == [
+            "sp3e9yg3kd0",
+            "sp3e9cbc3t0",
+            None,
+        ]
 
     @skip_unless_arch_bits(64)
     @skip_if_server_version_lt("3.2.0")
@@ -6985,7 +6984,7 @@ class TestRedisCommands:
     @skip_if_redis_enterprise()
     def test_command_getkeys(self, r):
         res = r.command_getkeys("MSET", "a", "b", "c", "d", "e", "f")
-        assert_resp_response(r, res, ["a", "c", "e"], [b"a", b"c", b"e"])
+        assert res == [b"a", b"c", b"e"]
         res = r.command_getkeys(
             "EVAL",
             '"not consulted"',
@@ -6998,9 +6997,7 @@ class TestRedisCommands:
             "arg3",
             "argN",
         )
-        assert_resp_response(
-            r, res, ["key1", "key2", "key3"], [b"key1", b"key2", b"key3"]
-        )
+        assert res == [b"key1", b"key2", b"key3"]
 
     @skip_if_server_version_lt("2.8.13")
     def test_command(self, r):

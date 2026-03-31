@@ -130,16 +130,16 @@ class ACLCommands(CommandsProtocol):
     @overload
     def acl_cat(
         self: SyncClientProtocol, category: str | None = None, **kwargs
-    ) -> list[bytes | str]: ...
+    ) -> list[str]: ...
 
     @overload
     def acl_cat(
         self: AsyncClientProtocol, category: str | None = None, **kwargs
-    ) -> Awaitable[list[bytes | str]]: ...
+    ) -> Awaitable[list[str]]: ...
 
     def acl_cat(
         self, category: str | None = None, **kwargs
-    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+    ) -> list[str] | Awaitable[list[str]]:
         """
         Returns a list of categories or commands within a category.
 
@@ -191,16 +191,14 @@ class ACLCommands(CommandsProtocol):
     @overload
     def acl_genpass(
         self: SyncClientProtocol, bits: int | None = None, **kwargs
-    ) -> bytes | str: ...
+    ) -> str: ...
 
     @overload
     def acl_genpass(
         self: AsyncClientProtocol, bits: int | None = None, **kwargs
-    ) -> Awaitable[bytes | str]: ...
+    ) -> Awaitable[str]: ...
 
-    def acl_genpass(self, bits: int | None = None, **kwargs) -> (
-        bytes | str
-    ) | Awaitable[bytes | str]:
+    def acl_genpass(self, bits: int | None = None, **kwargs) -> (str) | Awaitable[str]:
         """Generate a random password value.
         If ``bits`` is supplied then use this number of bits, rounded to
         the next multiple of 4.
@@ -242,14 +240,12 @@ class ACLCommands(CommandsProtocol):
         return self.execute_command("ACL GETUSER", username, **kwargs)
 
     @overload
-    def acl_help(self: SyncClientProtocol, **kwargs) -> list[bytes | str]: ...
+    def acl_help(self: SyncClientProtocol, **kwargs) -> list[str]: ...
 
     @overload
-    def acl_help(
-        self: AsyncClientProtocol, **kwargs
-    ) -> Awaitable[list[bytes | str]]: ...
+    def acl_help(self: AsyncClientProtocol, **kwargs) -> Awaitable[list[str]]: ...
 
-    def acl_help(self, **kwargs) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+    def acl_help(self, **kwargs) -> list[str] | Awaitable[list[str]]:
         """The ACL HELP command returns helpful text describing
         the different subcommands.
 
@@ -258,14 +254,12 @@ class ACLCommands(CommandsProtocol):
         return self.execute_command("ACL HELP", **kwargs)
 
     @overload
-    def acl_list(self: SyncClientProtocol, **kwargs) -> list[bytes | str]: ...
+    def acl_list(self: SyncClientProtocol, **kwargs) -> list[str]: ...
 
     @overload
-    def acl_list(
-        self: AsyncClientProtocol, **kwargs
-    ) -> Awaitable[list[bytes | str]]: ...
+    def acl_list(self: AsyncClientProtocol, **kwargs) -> Awaitable[list[str]]: ...
 
-    def acl_list(self, **kwargs) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+    def acl_list(self, **kwargs) -> list[str] | Awaitable[list[str]]:
         """
         Return a list of all ACLs on the server
 
@@ -583,14 +577,12 @@ class ACLCommands(CommandsProtocol):
         return self.execute_command("ACL SETUSER", *pieces, **kwargs)
 
     @overload
-    def acl_users(self: SyncClientProtocol, **kwargs) -> list[bytes | str]: ...
+    def acl_users(self: SyncClientProtocol, **kwargs) -> list[str]: ...
 
     @overload
-    def acl_users(
-        self: AsyncClientProtocol, **kwargs
-    ) -> Awaitable[list[bytes | str]]: ...
+    def acl_users(self: AsyncClientProtocol, **kwargs) -> Awaitable[list[str]]: ...
 
-    def acl_users(self, **kwargs) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+    def acl_users(self, **kwargs) -> list[str] | Awaitable[list[str]]:
         """Returns a list of all registered users on the server.
 
         For more information, see https://redis.io/commands/acl-users
@@ -598,12 +590,12 @@ class ACLCommands(CommandsProtocol):
         return self.execute_command("ACL USERS", **kwargs)
 
     @overload
-    def acl_whoami(self: SyncClientProtocol, **kwargs) -> bytes | str: ...
+    def acl_whoami(self: SyncClientProtocol, **kwargs) -> str: ...
 
     @overload
-    def acl_whoami(self: AsyncClientProtocol, **kwargs) -> Awaitable[bytes | str]: ...
+    def acl_whoami(self: AsyncClientProtocol, **kwargs) -> Awaitable[str]: ...
 
-    def acl_whoami(self, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
+    def acl_whoami(self, **kwargs) -> str | Awaitable[str]:
         """Get the username for the current connection
 
         For more information, see https://redis.io/commands/acl-whoami
@@ -872,16 +864,14 @@ class ManagementCommands(CommandsProtocol):
         return self.execute_command("CLIENT LIST", *args, **kwargs)
 
     @overload
-    def client_getname(self: SyncClientProtocol, **kwargs) -> bytes | str | None: ...
+    def client_getname(self: SyncClientProtocol, **kwargs) -> str | None: ...
 
     @overload
     def client_getname(
         self: AsyncClientProtocol, **kwargs
-    ) -> Awaitable[bytes | str | None]: ...
+    ) -> Awaitable[str | None]: ...
 
-    def client_getname(self, **kwargs) -> (bytes | str | None) | Awaitable[
-        bytes | str | None
-    ]:
+    def client_getname(self, **kwargs) -> (str | None) | Awaitable[str | None]:
         """
         Returns the current connection name
 
@@ -1768,12 +1758,12 @@ class ManagementCommands(CommandsProtocol):
             return self.execute_command("LOLWUT", **kwargs)
 
     @overload
-    def reset(self: SyncClientProtocol) -> bytes | str: ...
+    def reset(self: SyncClientProtocol) -> str: ...
 
     @overload
-    def reset(self: AsyncClientProtocol) -> Awaitable[bytes | str]: ...
+    def reset(self: AsyncClientProtocol) -> Awaitable[str]: ...
 
-    def reset(self) -> (bytes | str) | Awaitable[bytes | str]:
+    def reset(self) -> str | Awaitable[str]:
         """Perform a full reset on the connection's server-side context.
 
         See: https://redis.io/commands/reset
@@ -10338,16 +10328,16 @@ class GeoCommands(CommandsProtocol):
     @overload
     def geohash(
         self: SyncClientProtocol, name: KeyT, *values: FieldT
-    ) -> list[bytes | str | None]: ...
+    ) -> list[str | None]: ...
 
     @overload
     def geohash(
         self: AsyncClientProtocol, name: KeyT, *values: FieldT
-    ) -> Awaitable[list[bytes | str | None]]: ...
+    ) -> Awaitable[list[str | None]]: ...
 
     def geohash(
         self, name: KeyT, *values: FieldT
-    ) -> list[bytes | str | None] | Awaitable[list[bytes | str | None]]:
+    ) -> list[str | None] | Awaitable[list[str | None]]:
         """
         Return the geo hash string for each item of ``values`` members of
         the specified key identified by the ``name`` argument.
