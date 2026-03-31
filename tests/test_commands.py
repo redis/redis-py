@@ -1954,12 +1954,10 @@ class TestRedisCommands:
         r.mset({"foo": "ohmytext", "bar": "mynewtext"})
         assert r.lcs("foo", "bar") == b"mytext"
         assert r.lcs("foo", "bar", len=True) == 6
-        assert_resp_response(
-            r,
-            r.lcs("foo", "bar", idx=True, minmatchlen=3),
-            [b"matches", [[[4, 7], [5, 8]]], b"len", 6],
-            {b"matches": [[[4, 7], [5, 8]]], b"len": 6},
-        )
+        assert r.lcs("foo", "bar", idx=True, minmatchlen=3) == {
+            b"matches": [[[4, 7], [5, 8]]],
+            b"len": 6,
+        }
         with pytest.raises(redis.ResponseError):
             assert r.lcs("foo", "bar", len=True, idx=True)
 
@@ -3932,41 +3930,33 @@ class TestRedisCommands:
     @skip_if_server_version_lt("7.0.0")
     def test_zmpop(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-        assert_resp_response(
-            r,
-            r.zmpop("2", ["b", "a"], min=True, count=2),
-            [b"a", [[b"a1", b"1"], [b"a2", b"2"]]],
-            [b"a", [[b"a1", 1.0], [b"a2", 2.0]]],
-        )
+        assert r.zmpop("2", ["b", "a"], min=True, count=2) == [
+            b"a",
+            [[b"a1", 1.0], [b"a2", 2.0]],
+        ]
         with pytest.raises(redis.DataError):
             r.zmpop("2", ["b", "a"], count=2)
         r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
-        assert_resp_response(
-            r,
-            r.zmpop("2", ["b", "a"], max=True),
-            [b"b", [[b"b1", b"10"]]],
-            [b"b", [[b"b1", 10.0]]],
-        )
+        assert r.zmpop("2", ["b", "a"], max=True) == [
+            b"b",
+            [[b"b1", 10.0]],
+        ]
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
     def test_bzmpop(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-        assert_resp_response(
-            r,
-            r.bzmpop(1, "2", ["b", "a"], min=True, count=2),
-            [b"a", [[b"a1", b"1"], [b"a2", b"2"]]],
-            [b"a", [[b"a1", 1.0], [b"a2", 2.0]]],
-        )
+        assert r.bzmpop(1, "2", ["b", "a"], min=True, count=2) == [
+            b"a",
+            [[b"a1", 1.0], [b"a2", 2.0]],
+        ]
         with pytest.raises(redis.DataError):
             r.bzmpop(1, "2", ["b", "a"], count=2)
         r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
-        assert_resp_response(
-            r,
-            r.bzmpop(0, "2", ["b", "a"], max=True),
-            [b"b", [[b"b1", b"10"]]],
-            [b"b", [[b"b1", 10.0]]],
-        )
+        assert r.bzmpop(0, "2", ["b", "a"], max=True) == [
+            b"b",
+            [[b"b1", 10.0]],
+        ]
         assert r.bzmpop(1, "2", ["foo", "bar"], max=True) is None
 
     def test_zrange(self, r):

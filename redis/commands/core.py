@@ -4538,7 +4538,7 @@ class BasicKeyCommands(CommandsProtocol):
         idx: bool | None = False,
         minmatchlen: int | None = 0,
         withmatchlen: bool | None = False,
-    ) -> bytes | str | int | list[Any] | dict[Any, Any]: ...
+    ) -> bytes | str | int | dict[Any, Any]: ...
 
     @overload
     def lcs(
@@ -4549,7 +4549,7 @@ class BasicKeyCommands(CommandsProtocol):
         idx: bool | None = False,
         minmatchlen: int | None = 0,
         withmatchlen: bool | None = False,
-    ) -> Awaitable[bytes | str | int | list[Any] | dict[Any, Any]]: ...
+    ) -> Awaitable[bytes | str | int | dict[Any, Any]]: ...
 
     def lcs(
         self,
@@ -4559,8 +4559,8 @@ class BasicKeyCommands(CommandsProtocol):
         idx: bool | None = False,
         minmatchlen: int | None = 0,
         withmatchlen: bool | None = False,
-    ) -> (bytes | str | int | list[Any] | dict[Any, Any]) | Awaitable[
-        bytes | str | int | list[Any] | dict[Any, Any]
+    ) -> (bytes | str | int | dict[Any, Any]) | Awaitable[
+        bytes | str | int | dict[Any, Any]
     ]:
         """
         Find the longest common subsequence between ``key1`` and ``key2``.

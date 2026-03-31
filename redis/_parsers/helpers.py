@@ -280,6 +280,36 @@ def hrandfield_pairs(response, **options):
     return [[field, val] for field, val in zip(it, it)]
 
 
+def parse_zmpop(response, **options):
+    """
+    Parse ZMPOP/BZMPOP response, casting scores to float.
+    Response format: [key, [[member, score], ...]] or None.
+    """
+    if response is None:
+        return None
+    key, members = response
+    return [
+        key,
+        [
+            [member, score if isinstance(score, float) else float(score)]
+            for member, score in members
+        ],
+    ]
+
+
+def parse_lcs(response, **options):
+    """
+    Parse LCS response. Without modifiers returns the raw string.
+    With LEN returns an integer. With IDX returns a dict.
+    RESP2 with IDX returns a flat list [key, val, key, val, ...]
+    which we convert to a dict to match RESP3's native dict.
+    """
+    if isinstance(response, list):
+        it = iter(response)
+        return dict(zip(it, it))
+    return response
+
+
 def zpop_score_pairs_resp3(response, **options):
     """
     Handle ZPOPMAX/ZPOPMIN RESP3 responses which differ based on count:
@@ -960,7 +990,10 @@ _RedisCallbacksRESP2 = {
     "XINFO CONSUMERS": parse_list_of_dicts,
     "XINFO GROUPS": parse_list_of_dicts,
     "HRANDFIELD": hrandfield_pairs,
+    "LCS": parse_lcs,
     "ZADD": parse_zadd,
+    "ZMPOP": parse_zmpop,
+    "BZMPOP": parse_zmpop,
     "ZMSCORE": parse_zmscore,
     "ZRANDMEMBER": zset_score_pairs,
 }
@@ -993,6 +1026,7 @@ _RedisCallbacksRESP3 = {
         or None,
     ),
     **string_keys_to_dict("XREAD XREADGROUP", parse_xread_resp3),
+    **string_keys_to_dict("ZMPOP BZMPOP", parse_zmpop),
     "ZRANDMEMBER": zset_score_pairs_resp3,
     "ACL LOG": lambda r: (
         [
