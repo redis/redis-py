@@ -1737,7 +1737,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                         result=CSCResult.HIT,
                     )
                     record_csc_network_saved(
-                        bytes_saved=len(res),
+                        bytes_saved=len(res) if hasattr(res, "__len__") else 0,
                     )
                     return res
                 record_csc_request(

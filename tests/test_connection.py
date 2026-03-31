@@ -599,6 +599,90 @@ class TestUnitCacheProxyConnection:
         platform.python_implementation() == "PyPy",
         reason="Pypy doesn't support side_effect",
     )
+    @pytest.mark.parametrize(
+        "command,redis_keys,redis_args,cached_value",
+        [
+            ("ZCARD", ("myset",), ("ZCARD", "myset"), 2),
+            ("SCARD", ("myset",), ("SCARD", "myset"), 5),
+            ("LLEN", ("mylist",), ("LLEN", "mylist"), 0),
+            (
+                "LRANGE",
+                ("mylist",),
+                ("LRANGE", "mylist", "0", "-1"),
+                [b"a", b"b"],
+            ),
+            ("EXISTS", ("foo",), ("EXISTS", "foo"), True),
+        ],
+        ids=["int-zcard", "int-scard", "int-llen", "list-lrange", "bool-exists"],
+    )
+    def test_read_response_returns_cached_non_bytes_reply(
+        self, mock_cache, mock_connection, command, redis_keys, redis_args, cached_value
+    ):
+        """Test that cached non-bytes responses (int, list, bool) don't crash.
+
+        Regression test for https://github.com/redis/redis-py/issues/4009
+        """
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection._event_dispatcher = EventDispatcher()
+
+        cache_key = CacheKey(
+            command=command, redis_keys=redis_keys, redis_args=redis_args
+        )
+        mock_cache.is_cachable.return_value = True
+        mock_cache.get.side_effect = [
+            # send_command: first get returns None (cache miss)
+            None,
+            # send_command: second get for IN_PROGRESS check
+            None,
+            # read_response (first call): cache lookup returns IN_PROGRESS
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+                status=CacheEntryStatus.IN_PROGRESS,
+                connection_ref=mock_connection,
+            ),
+            # read_response (second call): cache lookup returns VALID
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=cached_value,
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            ),
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=cached_value,
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            ),
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=cached_value,
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            ),
+        ]
+        mock_connection.send_command.return_value = Any
+        mock_connection.read_response.return_value = cached_value
+        mock_connection.can_read.return_value = False
+
+        proxy_connection = CacheProxyConnection(
+            mock_connection, mock_cache, threading.RLock()
+        )
+        proxy_connection.send_command(*list(redis_args), **{"keys": list(redis_keys)})
+        # First call: cache miss, reads from connection
+        assert proxy_connection.read_response() == cached_value
+        assert proxy_connection._current_command_cache_key is None
+        # Second call: cache hit — this must not raise TypeError
+        assert proxy_connection.read_response() == cached_value
+
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Pypy doesn't support side_effect",
+    )
     def test_triggers_invalidation_processing_on_another_connection(
         self, mock_cache, mock_connection
     ):
