@@ -168,22 +168,23 @@ These commands return actual key names which can be arbitrary binary data (non-U
 
 ## Batch 7: Sentinel Commands — flags `str` → `set`, masters structure
 
-**Theme:** Sentinel commands have different flags representation and masters structure. Unify to RESP3 format.
+**Theme:** Sentinel commands have different flags representation and masters structure. Unify to RESP2 format for SENTINEL MASTERS (dict keyed by name), and unify flags to `set` across all sentinel commands.
 
 | # | Command | Current RESP2 Type | Current RESP3 Type | Final Type | Action |
 |---|---------|-------------------|-------------------|------------|--------|
-| 1 | SENTINEL MASTER | `dict` (flags=comma-separated `str`) | `dict` (flags=`set`) | `dict` (flags=`set`, typed values) | Update RESP2 `parse_sentinel_master` to split flags into `set` |
-| 2 | SENTINEL MASTERS | `dict[name→state_dict]` | `list[dict]` | `list[dict]` (flags=`set`) | Change RESP2 to return `list[dict]` instead of dict keyed by name |
-| 3 | SENTINEL SENTINELS | `list[dict]` (flags=`str`) | `list[dict]` (flags=`set`) | `list[dict]` (flags=`set`) | Update RESP2 to split flags into `set` |
+| 1 | SENTINEL MASTER | `dict` (flags=comma-separated `str`) | `dict` (flags=`set`) | `dict` (flags=`set`, typed values) | Update RESP2 `parse_sentinel_state` to produce flags as `set` instead of comma-separated `str` |
+| 2 | SENTINEL MASTERS | `dict[name→state_dict]` | `list[dict]` | `dict[name→state_dict]` (flags=`set`) | Keep RESP2 format (dict keyed by name). Update RESP3 `parse_sentinel_masters_resp3` to build `dict[name→state_dict]` instead of `list[dict]` |
+| 3 | SENTINEL SENTINELS | `list[dict]` (flags=`str`) | `list[dict]` (flags=`set`) | `list[dict]` (flags=`set`) | Update RESP2 to split flags into `set` (via shared `parse_sentinel_state`) |
 | 4 | SENTINEL SLAVES | `list[dict]` (flags=`str`) | `list[dict]` (flags=`set`) | `list[dict]` (flags=`set`) | Same as SENTINELS |
 
 **Implementation notes:**
-- SENTINEL MASTERS RESP2→RESP3 structural change: `result["mymaster"]["flags"]` → need to iterate `list`
-- ⚠️ Breaking change for SENTINEL MASTERS users who access by name key
+- SENTINEL MASTERS keeps RESP2's `dict[name→state_dict]` structure because the Sentinel client (`discover_master`) relies on `masters.get(service_name)` for O(1) lookup. Changing to `list[dict]` would break this internal usage and degrade ergonomics for users.
+- RESP3's `parse_sentinel_masters_resp3` must be updated to build `{state["name"]: state for state in masters}` to match.
+- The flags change (`str` → `set`) is safe for internal usage because `check_master_state` and `filter_slaves` only read derived boolean fields (`is_master`, `is_sdown`, etc.), never the raw `flags` field.
 
 **Unit test fixes:**
 - `tests/test_sentinel.py` / `tests/test_commands.py`: update any sentinel tests that check `flags` as comma-separated string → check as `set`
-- SENTINEL MASTERS: tests accessing `result["mastername"]` → update to iterate `list[dict]`
+- SENTINEL MASTERS: no structural change needed in tests (stays dict keyed by name)
 - Any `assert "master" in result["flags"]` (string substring) → `assert "master" in result["flags"]` (set membership — same syntax but different semantics, verify correctness)
 
 ---

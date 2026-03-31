@@ -125,6 +125,7 @@ SENTINEL_STATE_TYPES = {
 def parse_sentinel_state(item):
     result = pairs_to_dict_typed(item, SENTINEL_STATE_TYPES)
     flags = set(result["flags"].split(","))
+    result["flags"] = flags
     for name, flag in (
         ("is_master", "master"),
         ("is_slave", "slave"),
@@ -164,7 +165,11 @@ def parse_sentinel_masters(response, **options):
 
 
 def parse_sentinel_masters_resp3(response, **options):
-    return [parse_sentinel_state_resp3(master) for master in response]
+    result = {}
+    for master in response:
+        state = parse_sentinel_state_resp3(master)
+        result[state["name"]] = state
+    return result
 
 
 def parse_sentinel_slaves_and_sentinels(response, **options):
