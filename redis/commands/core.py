@@ -55,6 +55,7 @@ from redis.typing import (
     ExpiryT,
     FieldT,
     GroupT,
+    HRandFieldResponse,
     HScanResponse,
     KeysT,
     KeyT,
@@ -3933,7 +3934,7 @@ class BasicKeyCommands(CommandsProtocol):
         key: str,
         count: int | None = None,
         withvalues: bool = False,
-    ) -> bytes | str | list[bytes | str] | None: ...
+    ) -> HRandFieldResponse: ...
 
     @overload
     def hrandfield(
@@ -3941,13 +3942,11 @@ class BasicKeyCommands(CommandsProtocol):
         key: str,
         count: int | None = None,
         withvalues: bool = False,
-    ) -> Awaitable[bytes | str | list[bytes | str] | None]: ...
+    ) -> Awaitable[HRandFieldResponse]: ...
 
     def hrandfield(
         self, key: str, count: int | None = None, withvalues: bool = False
-    ) -> (bytes | str | list[bytes | str] | None) | Awaitable[
-        bytes | str | list[bytes | str] | None
-    ]:
+    ) -> HRandFieldResponse | Awaitable[HRandFieldResponse]:
         """
         Return a random field from the hash value stored at key.
 
@@ -3967,7 +3966,7 @@ class BasicKeyCommands(CommandsProtocol):
         if withvalues:
             params.append("WITHVALUES")
 
-        return self.execute_command("HRANDFIELD", key, *params)
+        return self.execute_command("HRANDFIELD", key, *params, withvalues=withvalues)
 
     @overload
     def randomkey(self: SyncClientProtocol, **kwargs) -> bytes | str | None: ...
@@ -7660,7 +7659,7 @@ class SortedSetCommands(CommandsProtocol):
         if withscores:
             params.append("WITHSCORES")
 
-        return self.execute_command("ZRANDMEMBER", key, *params)
+        return self.execute_command("ZRANDMEMBER", key, *params, withscores=withscores)
 
     @overload
     def bzpopmax(

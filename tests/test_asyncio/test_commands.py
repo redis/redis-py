@@ -2123,7 +2123,7 @@ class TestRedisCommands:
         assert await r.hrandfield("key") is not None
         assert len(await r.hrandfield("key", 2)) == 2
         # with values
-        assert_resp_response(r, len(await r.hrandfield("key", 2, True)), 4, 2)
+        assert len(await r.hrandfield("key", 2, True)) == 2
         # without duplications
         assert len(await r.hrandfield("key", 10)) == 5
         # with duplications

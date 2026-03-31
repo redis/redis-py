@@ -2779,7 +2779,7 @@ class TestRedisCommands:
         assert r.hrandfield("key") is not None
         assert len(r.hrandfield("key", 2)) == 2
         # with values
-        assert_resp_response(r, len(r.hrandfield("key", 2, withvalues=True)), 4, 2)
+        assert len(r.hrandfield("key", 2, withvalues=True)) == 2
         # without duplications
         assert len(r.hrandfield("key", 10)) == 5
         # with duplications
@@ -3896,12 +3896,7 @@ class TestRedisCommands:
         assert r.zrandmember("a") is not None
         assert len(r.zrandmember("a", 2)) == 2
         # with scores
-        assert_resp_response(
-            r,
-            len(r.zrandmember("a", 2, withscores=True)),
-            4,
-            2,
-        )
+        assert len(r.zrandmember("a", 2, withscores=True)) == 2
         # without duplications
         assert len(r.zrandmember("a", 10)) == 5
         # with duplications

@@ -269,6 +269,17 @@ def zset_score_pairs_resp3(response, **options):
     return [[name, score_cast_func(val)] for name, val in response]
 
 
+def hrandfield_pairs(response, **options):
+    """
+    If ``withvalues`` is specified in the options, return the response as
+    a list of [field, value] pairs (pairing flat interleaved list).
+    """
+    if not response or not options.get("withvalues"):
+        return response
+    it = iter(response)
+    return [[field, val] for field, val in zip(it, it)]
+
+
 def zpop_score_pairs_resp3(response, **options):
     """
     Handle ZPOPMAX/ZPOPMIN RESP3 responses which differ based on count:
@@ -948,8 +959,10 @@ _RedisCallbacksRESP2 = {
     "STRALGO": parse_stralgo,
     "XINFO CONSUMERS": parse_list_of_dicts,
     "XINFO GROUPS": parse_list_of_dicts,
+    "HRANDFIELD": hrandfield_pairs,
     "ZADD": parse_zadd,
     "ZMSCORE": parse_zmscore,
+    "ZRANDMEMBER": zset_score_pairs,
 }
 
 
@@ -980,6 +993,7 @@ _RedisCallbacksRESP3 = {
         or None,
     ),
     **string_keys_to_dict("XREAD XREADGROUP", parse_xread_resp3),
+    "ZRANDMEMBER": zset_score_pairs_resp3,
     "ACL LOG": lambda r: (
         [
             {str_if_bytes(key): str_if_bytes(value) for key, value in x.items()}

@@ -69,6 +69,7 @@ ACLLogData = list[ACLLogEntry]
 CommandGetKeysAndFlagsEntry = list[bytes | str | list[bytes | str]]
 CommandGetKeysAndFlagsResponse = list[CommandGetKeysAndFlagsEntry]
 BlockingListPopResponse = list[bytes | str] | None
+HRandFieldResponse = bytes | str | list[bytes | str] | list[list[bytes | str]] | None
 HScanPayload = dict[bytes | str, bytes | str] | list[bytes | str]
 HScanResponse = tuple[int, HScanPayload]
 ListMultiPopResponse = list[bytes | str | list[bytes | str]] | None
@@ -89,9 +90,7 @@ BloomScanDumpResponse = tuple[int, bytes | None]
 ModuleListResponse = list[int | float | str | None]
 BlockingZSetPopResponse = list[bytes | str | float] | None
 ZMPopResponse = list[bytes | str | list[list[Any]]] | None
-ZRandMemberResponse = (
-    bytes | str | None | list[bytes | str] | list[bytes | str | float] | list[list[Any]]
-)
+ZRandMemberResponse = bytes | str | None | list[bytes | str] | list[list[Any]]
 ZSetScoredMembers = list[list[Any]]
 ZSetRangeResponse = list[bytes | str] | ZSetScoredMembers
 ZScanResponse = tuple[int, list[list[bytes | str | float]]]
