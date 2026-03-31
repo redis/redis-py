@@ -70,7 +70,7 @@
 
 **Implementation notes:**
 - BZPOPMAX/BZPOPMIN RESP2 does `float(r[2])` — keep this normalization but return `list` not `tuple`
-- RESP3 score comes as native double — still apply `float()` for consistency
+- RESP3 score comes as native double — still apply `float()` for consistency, but only if the value is not already a `float` (guard with `isinstance` check to avoid redundant conversion)
 
 **Unit test fixes (`tests/test_commands.py`):**
 - `test_blpop`: replace `assert_resp_response(r, r.blpop(...), (b"b", b"3"), [b"b", b"3"])` → `assert r.blpop(...) == [b"b", b"3"]` (all 5 assertions)

@@ -915,9 +915,10 @@ _RedisCallbacksRESP2 = {
     ),
     **string_keys_to_dict("ZINCRBY ZSCORE", float_or_none),
     **string_keys_to_dict("BGREWRITEAOF BGSAVE", lambda r: True),
-    **string_keys_to_dict("BLPOP BRPOP", lambda r: r and tuple(r) or None),
+    **string_keys_to_dict("BLPOP BRPOP", lambda r: r and list(r) or None),
     **string_keys_to_dict(
-        "BZPOPMAX BZPOPMIN", lambda r: r and (r[0], r[1], float(r[2])) or None
+        "BZPOPMAX BZPOPMIN",
+        lambda r: r and [r[0], r[1], float(r[2])] or None,
     ),
     "ACL CAT": lambda r: list(map(str_if_bytes, r)),
     "ACL GENPASS": str_if_bytes,
@@ -971,6 +972,12 @@ _RedisCallbacksRESP3 = {
     **string_keys_to_dict(
         "ZREVRANK ZRANK",
         zset_score_for_rank_resp3,
+    ),
+    **string_keys_to_dict(
+        "BZPOPMAX BZPOPMIN",
+        lambda r: r
+        and [r[0], r[1], r[2] if isinstance(r[2], float) else float(r[2])]
+        or None,
     ),
     **string_keys_to_dict("XREAD XREADGROUP", parse_xread_resp3),
     "ACL LOG": lambda r: (

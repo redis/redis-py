@@ -68,7 +68,7 @@ ACLLogEntry = dict[str, str | float | dict[str, str | int]]
 ACLLogData = list[ACLLogEntry]
 CommandGetKeysAndFlagsEntry = list[bytes | str | list[bytes | str]]
 CommandGetKeysAndFlagsResponse = list[CommandGetKeysAndFlagsEntry]
-BlockingListPopResponse = tuple[bytes | str, bytes | str] | list[bytes | str] | None
+BlockingListPopResponse = list[bytes | str] | None
 HScanPayload = dict[bytes | str, bytes | str] | list[bytes | str]
 HScanResponse = tuple[int, HScanPayload]
 ListMultiPopResponse = list[bytes | str | list[bytes | str]] | None
@@ -87,9 +87,7 @@ TimeSeriesSample = tuple[int, float] | list[int | float]
 TimeSeriesRangeResponse = list[TimeSeriesSample]
 BloomScanDumpResponse = tuple[int, bytes | None]
 ModuleListResponse = list[int | float | str | None]
-BlockingZSetPopResponse = (
-    tuple[bytes | str, bytes | str, float] | list[bytes | str | float] | None
-)
+BlockingZSetPopResponse = list[bytes | str | float] | None
 ZMPopResponse = list[bytes | str | list[list[Any]]] | None
 ZRandMemberResponse = (
     bytes | str | None | list[bytes | str] | list[bytes | str | float] | list[list[Any]]
