@@ -238,13 +238,13 @@ def _wrap_score_cast_func(score_cast_func):
 def zset_score_pairs(response, **options):
     """
     If ``withscores`` is specified in the options, return the response as
-    a list of (value, score) pairs
+    a list of [value, score] pairs
     """
     if not response or not options.get("withscores"):
         return response
     score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
     it = iter(response)
-    return list(zip(it, map(score_cast_func, it)))
+    return [[val, score_cast_func(score)] for val, score in zip(it, it)]
 
 
 def zset_score_for_rank(response, **options):
@@ -267,6 +267,23 @@ def zset_score_pairs_resp3(response, **options):
         return response
     score_cast_func = options.get("score_cast_func", float)
     return [[name, score_cast_func(val)] for name, val in response]
+
+
+def zpop_score_pairs_resp3(response, **options):
+    """
+    Handle ZPOPMAX/ZPOPMIN RESP3 responses which differ based on count:
+    - Without count: flat [member, score]
+    - With count: nested [[member, score], ...]
+    Normalizes both to list of [member, score] pairs with score_cast_func applied.
+    """
+    if not response:
+        return response
+    score_cast_func = options.get("score_cast_func", float)
+    # Detect flat vs nested: if first element is a list, it's nested (with count)
+    if isinstance(response[0], list):
+        return [[name, score_cast_func(val)] for name, val in response]
+    else:
+        return [[response[0], score_cast_func(response[1])]]
 
 
 def zset_score_for_rank_resp3(response, **options):
@@ -453,7 +470,7 @@ def parse_zscan(response, **options):
     score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
     cursor, r = response
     it = iter(r)
-    return int(cursor), list(zip(it, map(score_cast_func, it)))
+    return int(cursor), [[val, score_cast_func(score)] for val, score in zip(it, it)]
 
 
 def parse_zmscore(response, **options):
@@ -940,12 +957,16 @@ _RedisCallbacksRESP3 = {
         "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
     ),
     **string_keys_to_dict(
-        "ZRANGE ZINTER ZPOPMAX ZPOPMIN HGETALL XREADGROUP",
+        "HGETALL XREADGROUP",
         lambda r, **kwargs: r,
     ),
     **string_keys_to_dict(
-        "ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE ZUNION",
+        "ZDIFF ZINTER ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE ZUNION",
         zset_score_pairs_resp3,
+    ),
+    **string_keys_to_dict(
+        "ZPOPMAX ZPOPMIN",
+        zpop_score_pairs_resp3,
     ),
     **string_keys_to_dict(
         "ZREVRANK ZRANK",

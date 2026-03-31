@@ -3536,9 +3536,9 @@ class TestRedisCommands:
         r.zadd("a", {"a": 1, "b": 2, "c": 3})
         cursor, pairs = r.zscan("a")
         assert cursor == 0
-        assert set(pairs) == {(b"a", 1), (b"b", 2), (b"c", 3)}
+        assert sorted(pairs) == [[b"a", 1], [b"b", 2], [b"c", 3]]
         _, pairs = r.zscan("a", match="a")
-        assert set(pairs) == {(b"a", 1)}
+        assert pairs == [[b"a", 1]]
 
     def test_zscan_score_cast_scientific_notation(self):
         """score_cast_func=int handles scientific notation scores (issue #4000)."""
@@ -3551,9 +3551,9 @@ class TestRedisCommands:
     def test_zscan_iter(self, r):
         r.zadd("a", {"a": 1, "b": 2, "c": 3})
         pairs = list(r.zscan_iter("a"))
-        assert set(pairs) == {(b"a", 1), (b"b", 2), (b"c", 3)}
+        assert sorted(pairs) == [[b"a", 1], [b"b", 2], [b"c", 3]]
         pairs = list(r.zscan_iter("a", match="a"))
-        assert set(pairs) == {(b"a", 1)}
+        assert pairs == [[b"a", 1]]
 
     # SET COMMANDS
     def test_sadd(self, r):
@@ -3699,12 +3699,11 @@ class TestRedisCommands:
     def test_zadd(self, r):
         mapping = {"a1": 1.0, "a2": 2.0, "a3": 3.0}
         r.zadd("a", mapping)
-        assert_resp_response(
-            r,
-            r.zrange("a", 0, -1, withscores=True),
-            [(b"a1", 1.0), (b"a2", 2.0), (b"a3", 3.0)],
-            [[b"a1", 1.0], [b"a2", 2.0], [b"a3", 3.0]],
-        )
+        assert r.zrange("a", 0, -1, withscores=True) == [
+            [b"a1", 1.0],
+            [b"a2", 2.0],
+            [b"a3", 3.0],
+        ]
 
         # error cases
         with pytest.raises(exceptions.DataError):
@@ -3721,32 +3720,23 @@ class TestRedisCommands:
     def test_zadd_nx(self, r):
         assert r.zadd("a", {"a1": 1}) == 1
         assert r.zadd("a", {"a1": 99, "a2": 2}, nx=True) == 1
-        assert_resp_response(
-            r,
-            r.zrange("a", 0, -1, withscores=True),
-            [(b"a1", 1.0), (b"a2", 2.0)],
-            [[b"a1", 1.0], [b"a2", 2.0]],
-        )
+        assert r.zrange("a", 0, -1, withscores=True) == [
+            [b"a1", 1.0],
+            [b"a2", 2.0],
+        ]
 
     def test_zadd_xx(self, r):
         assert r.zadd("a", {"a1": 1}) == 1
         assert r.zadd("a", {"a1": 99, "a2": 2}, xx=True) == 0
-        assert_resp_response(
-            r,
-            r.zrange("a", 0, -1, withscores=True),
-            [(b"a1", 99.0)],
-            [[b"a1", 99.0]],
-        )
+        assert r.zrange("a", 0, -1, withscores=True) == [[b"a1", 99.0]]
 
     def test_zadd_ch(self, r):
         assert r.zadd("a", {"a1": 1}) == 1
         assert r.zadd("a", {"a1": 99, "a2": 2}, ch=True) == 2
-        assert_resp_response(
-            r,
-            r.zrange("a", 0, -1, withscores=True),
-            [(b"a2", 2.0), (b"a1", 99.0)],
-            [[b"a2", 2.0], [b"a1", 99.0]],
-        )
+        assert r.zrange("a", 0, -1, withscores=True) == [
+            [b"a2", 2.0],
+            [b"a1", 99.0],
+        ]
 
     def test_zadd_incr(self, r):
         assert r.zadd("a", {"a1": 1}) == 1
@@ -3794,12 +3784,7 @@ class TestRedisCommands:
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         r.zadd("b", {"a1": 1, "a2": 2})
         assert r.zdiff(["a", "b"]) == [b"a3"]
-        assert_resp_response(
-            r,
-            r.zdiff(["a", "b"], withscores=True),
-            [b"a3", b"3"],
-            [[b"a3", 3.0]],
-        )
+        assert r.zdiff(["a", "b"], withscores=True) == [[b"a3", 3.0]]
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
@@ -3808,12 +3793,7 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 1, "a2": 2})
         assert r.zdiffstore("out", ["a", "b"])
         assert r.zrange("out", 0, -1) == [b"a3"]
-        assert_resp_response(
-            r,
-            r.zrange("out", 0, -1, withscores=True),
-            [(b"a3", 3.0)],
-            [[b"a3", 3.0]],
-        )
+        assert r.zrange("out", 0, -1, withscores=True) == [[b"a3", 3.0]]
 
     def test_zincrby(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
@@ -3839,33 +3819,25 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             r.zinter(["a", "b", "c"], aggregate="foo", withscores=True)
         # aggregate with SUM
-        assert_resp_response(
-            r,
-            r.zinter(["a", "b", "c"], withscores=True),
-            [(b"a3", 8), (b"a1", 9)],
-            [[b"a3", 8], [b"a1", 9]],
-        )
+        assert r.zinter(["a", "b", "c"], withscores=True) == [
+            [b"a3", 8],
+            [b"a1", 9],
+        ]
         # aggregate with MAX
-        assert_resp_response(
-            r,
-            r.zinter(["a", "b", "c"], aggregate="MAX", withscores=True),
-            [(b"a3", 5), (b"a1", 6)],
-            [[b"a3", 5], [b"a1", 6]],
-        )
+        assert r.zinter(["a", "b", "c"], aggregate="MAX", withscores=True) == [
+            [b"a3", 5],
+            [b"a1", 6],
+        ]
         # aggregate with MIN
-        assert_resp_response(
-            r,
-            r.zinter(["a", "b", "c"], aggregate="MIN", withscores=True),
-            [(b"a1", 1), (b"a3", 1)],
-            [[b"a1", 1], [b"a3", 1]],
-        )
+        assert r.zinter(["a", "b", "c"], aggregate="MIN", withscores=True) == [
+            [b"a1", 1],
+            [b"a3", 1],
+        ]
         # with weights
-        assert_resp_response(
-            r,
-            r.zinter({"a": 1, "b": 2, "c": 3}, withscores=True),
-            [(b"a3", 20), (b"a1", 23)],
-            [[b"a3", 20], [b"a1", 23]],
-        )
+        assert r.zinter({"a": 1, "b": 2, "c": 3}, withscores=True) == [
+            [b"a3", 20],
+            [b"a1", 23],
+        ]
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
@@ -3882,12 +3854,10 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zinterstore("d", ["a", "b", "c"]) == 2
-        assert_resp_response(
-            r,
-            r.zrange("d", 0, -1, withscores=True),
-            [(b"a3", 8), (b"a1", 9)],
-            [[b"a3", 8], [b"a1", 9]],
-        )
+        assert r.zrange("d", 0, -1, withscores=True) == [
+            [b"a3", 8],
+            [b"a1", 9],
+        ]
 
     @pytest.mark.onlynoncluster
     def test_zinterstore_max(self, r):
@@ -3895,12 +3865,10 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zinterstore("d", ["a", "b", "c"], aggregate="MAX") == 2
-        assert_resp_response(
-            r,
-            r.zrange("d", 0, -1, withscores=True),
-            [(b"a3", 5), (b"a1", 6)],
-            [[b"a3", 5], [b"a1", 6]],
-        )
+        assert r.zrange("d", 0, -1, withscores=True) == [
+            [b"a3", 5],
+            [b"a1", 6],
+        ]
 
     @pytest.mark.onlynoncluster
     def test_zinterstore_min(self, r):
@@ -3908,12 +3876,10 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 3, "a3": 5})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zinterstore("d", ["a", "b", "c"], aggregate="MIN") == 2
-        assert_resp_response(
-            r,
-            r.zrange("d", 0, -1, withscores=True),
-            [(b"a1", 1), (b"a3", 3)],
-            [[b"a1", 1], [b"a3", 3]],
-        )
+        assert r.zrange("d", 0, -1, withscores=True) == [
+            [b"a1", 1],
+            [b"a3", 3],
+        ]
 
     @pytest.mark.onlynoncluster
     def test_zinterstore_with_weight(self, r):
@@ -3921,36 +3887,24 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zinterstore("d", {"a": 1, "b": 2, "c": 3}) == 2
-        assert_resp_response(
-            r,
-            r.zrange("d", 0, -1, withscores=True),
-            [(b"a3", 20), (b"a1", 23)],
-            [[b"a3", 20], [b"a1", 23]],
-        )
+        assert r.zrange("d", 0, -1, withscores=True) == [
+            [b"a3", 20],
+            [b"a1", 23],
+        ]
 
     @skip_if_server_version_lt("4.9.0")
     def test_zpopmax(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-        assert_resp_response(r, r.zpopmax("a"), [(b"a3", 3)], [b"a3", 3.0])
+        assert r.zpopmax("a") == [[b"a3", 3.0]]
         # with count
-        assert_resp_response(
-            r,
-            r.zpopmax("a", count=2),
-            [(b"a2", 2), (b"a1", 1)],
-            [[b"a2", 2], [b"a1", 1]],
-        )
+        assert r.zpopmax("a", count=2) == [[b"a2", 2.0], [b"a1", 1.0]]
 
     @skip_if_server_version_lt("4.9.0")
     def test_zpopmin(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-        assert_resp_response(r, r.zpopmin("a"), [(b"a1", 1)], [b"a1", 1.0])
+        assert r.zpopmin("a") == [[b"a1", 1.0]]
         # with count
-        assert_resp_response(
-            r,
-            r.zpopmin("a", count=2),
-            [(b"a2", 2), (b"a3", 3)],
-            [[b"a2", 2], [b"a3", 3]],
-        )
+        assert r.zpopmin("a", count=2) == [[b"a2", 2.0], [b"a3", 3.0]]
 
     @skip_if_server_version_lt("6.2.0")
     def test_zrandemember(self, r):
@@ -4064,24 +4018,20 @@ class TestRedisCommands:
         assert r.zrange("a", 0, 2, desc=True) == [b"a3", b"a2", b"a1"]
 
         # withscores
-        assert_resp_response(
-            r,
-            r.zrange("a", 0, 1, withscores=True),
-            [(b"a1", 1.0), (b"a2", 2.0)],
-            [[b"a1", 1.0], [b"a2", 2.0]],
-        )
-        assert_resp_response(
-            r,
-            r.zrange("a", 1, 2, withscores=True),
-            [(b"a2", 2.0), (b"a3", 3.0)],
-            [[b"a2", 2.0], [b"a3", 3.0]],
-        )
+        assert r.zrange("a", 0, 1, withscores=True) == [
+            [b"a1", 1.0],
+            [b"a2", 2.0],
+        ]
+        assert r.zrange("a", 1, 2, withscores=True) == [
+            [b"a2", 2.0],
+            [b"a3", 3.0],
+        ]
 
         # custom score cast function
         assert_resp_response(
             r,
             r.zrange("a", 0, 1, withscores=True, score_cast_func=safe_str),
-            [(b"a1", "1"), (b"a2", "2")],
+            [[b"a1", "1"], [b"a2", "2"]],
             [[b"a1", "1.0"], [b"a2", "2.0"]],
         )
 
@@ -4130,20 +4080,14 @@ class TestRedisCommands:
             b"a3",
             b"a2",
         ]
-        assert_resp_response(
-            r,
-            r.zrange("a", 2, 4, byscore=True, withscores=True),
-            [(b"a2", 2.0), (b"a3", 3.0), (b"a4", 4.0)],
-            [[b"a2", 2.0], [b"a3", 3.0], [b"a4", 4.0]],
-        )
-        assert_resp_response(
-            r,
-            r.zrange(
-                "a", 4, 2, desc=True, byscore=True, withscores=True, score_cast_func=int
-            ),
-            [(b"a4", 4), (b"a3", 3), (b"a2", 2)],
-            [[b"a4", 4], [b"a3", 3], [b"a2", 2]],
-        )
+        assert r.zrange("a", 2, 4, byscore=True, withscores=True) == [
+            [b"a2", 2.0],
+            [b"a3", 3.0],
+            [b"a4", 4.0],
+        ]
+        assert r.zrange(
+            "a", 4, 2, desc=True, byscore=True, withscores=True, score_cast_func=int
+        ) == [[b"a4", 4], [b"a3", 3], [b"a2", 2]]
 
         # rev
         assert r.zrange("a", 0, 1, desc=True) == [b"a5", b"a4"]
@@ -4156,12 +4100,10 @@ class TestRedisCommands:
         assert r.zrange("b", 0, -1) == [b"a1", b"a2"]
         assert r.zrangestore("b", "a", 1, 2)
         assert r.zrange("b", 0, -1) == [b"a2", b"a3"]
-        assert_resp_response(
-            r,
-            r.zrange("b", 0, -1, withscores=True),
-            [(b"a2", 2), (b"a3", 3)],
-            [[b"a2", 2], [b"a3", 3]],
-        )
+        assert r.zrange("b", 0, -1, withscores=True) == [
+            [b"a2", 2],
+            [b"a3", 3],
+        ]
         # reversed order
         assert r.zrangestore("b", "a", 1, 2, desc=True)
         assert r.zrange("b", 0, -1) == [b"a1", b"a2"]
@@ -4196,23 +4138,21 @@ class TestRedisCommands:
         # slicing with start/num
         assert r.zrangebyscore("a", 2, 4, start=1, num=2) == [b"a3", b"a4"]
         # withscores
-        assert_resp_response(
-            r,
-            r.zrangebyscore("a", 2, 4, withscores=True),
-            [(b"a2", 2.0), (b"a3", 3.0), (b"a4", 4.0)],
-            [[b"a2", 2.0], [b"a3", 3.0], [b"a4", 4.0]],
-        )
-        assert_resp_response(
-            r,
-            r.zrangebyscore("a", 2, 4, withscores=True, score_cast_func=int),
-            [(b"a2", 2), (b"a3", 3), (b"a4", 4)],
-            [[b"a2", 2], [b"a3", 3], [b"a4", 4]],
-        )
+        assert r.zrangebyscore("a", 2, 4, withscores=True) == [
+            [b"a2", 2.0],
+            [b"a3", 3.0],
+            [b"a4", 4.0],
+        ]
+        assert r.zrangebyscore("a", 2, 4, withscores=True, score_cast_func=int) == [
+            [b"a2", 2],
+            [b"a3", 3],
+            [b"a4", 4],
+        ]
         # custom score cast function
         assert_resp_response(
             r,
             r.zrangebyscore("a", 2, 4, withscores=True, score_cast_func=safe_str),
-            [(b"a2", "2"), (b"a3", "3"), (b"a4", "4")],
+            [[b"a2", "2"], [b"a3", "3"], [b"a4", "4"]],
             [[b"a2", "2.0"], [b"a3", "3.0"], [b"a4", "4.0"]],
         )
 
@@ -4285,18 +4225,14 @@ class TestRedisCommands:
         assert r.zrevrange("a", 1, 2) == [b"a2", b"a1"]
 
         # withscores
-        assert_resp_response(
-            r,
-            r.zrevrange("a", 0, 1, withscores=True),
-            [(b"a3", 3.0), (b"a2", 2.0)],
-            [[b"a3", 3.0], [b"a2", 2.0]],
-        )
-        assert_resp_response(
-            r,
-            r.zrevrange("a", 1, 2, withscores=True),
-            [(b"a2", 2.0), (b"a1", 1.0)],
-            [[b"a2", 2.0], [b"a1", 1.0]],
-        )
+        assert r.zrevrange("a", 0, 1, withscores=True) == [
+            [b"a3", 3.0],
+            [b"a2", 2.0],
+        ]
+        assert r.zrevrange("a", 1, 2, withscores=True) == [
+            [b"a2", 2.0],
+            [b"a1", 1.0],
+        ]
 
         # custom score cast function
         # should be applied to resp2 and resp3
@@ -4304,7 +4240,7 @@ class TestRedisCommands:
         assert_resp_response(
             r,
             r.zrevrange("a", 0, 1, withscores=True, score_cast_func=safe_str),
-            [(b"a3", "3"), (b"a2", "2")],
+            [[b"a3", "3"], [b"a2", "2"]],
             [[b"a3", "3.0"], [b"a2", "2.0"]],
         )
 
@@ -4315,24 +4251,22 @@ class TestRedisCommands:
         assert r.zrevrangebyscore("a", 4, 2, start=1, num=2) == [b"a3", b"a2"]
 
         # withscores
-        assert_resp_response(
-            r,
-            r.zrevrangebyscore("a", 4, 2, withscores=True),
-            [(b"a4", 4.0), (b"a3", 3.0), (b"a2", 2.0)],
-            [[b"a4", 4.0], [b"a3", 3.0], [b"a2", 2.0]],
-        )
+        assert r.zrevrangebyscore("a", 4, 2, withscores=True) == [
+            [b"a4", 4.0],
+            [b"a3", 3.0],
+            [b"a2", 2.0],
+        ]
         # custom score type cast function
-        assert_resp_response(
-            r,
-            r.zrevrangebyscore("a", 4, 2, withscores=True, score_cast_func=int),
-            [(b"a4", 4.0), (b"a3", 3.0), (b"a2", 2.0)],
-            [[b"a4", 4.0], [b"a3", 3.0], [b"a2", 2.0]],
-        )
+        assert r.zrevrangebyscore("a", 4, 2, withscores=True, score_cast_func=int) == [
+            [b"a4", 4],
+            [b"a3", 3],
+            [b"a2", 2],
+        ]
         # custom score cast function
         assert_resp_response(
             r,
             r.zrevrangebyscore("a", 4, 2, withscores=True, score_cast_func=safe_str),
-            [(b"a4", "4"), (b"a3", "3"), (b"a2", "2")],
+            [[b"a4", "4"], [b"a3", "3"], [b"a2", "2"]],
             [[b"a4", "4.0"], [b"a3", "3.0"], [b"a2", "2.0"]],
         )
 
@@ -4381,38 +4315,38 @@ class TestRedisCommands:
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         # sum
         assert r.zunion(["a", "b", "c"]) == [b"a2", b"a4", b"a3", b"a1"]
-        assert_resp_response(
-            r,
-            r.zunion(["a", "b", "c"], withscores=True),
-            [(b"a2", 3), (b"a4", 4), (b"a3", 8), (b"a1", 9)],
-            [[b"a2", 3], [b"a4", 4], [b"a3", 8], [b"a1", 9]],
-        )
+        assert r.zunion(["a", "b", "c"], withscores=True) == [
+            [b"a2", 3],
+            [b"a4", 4],
+            [b"a3", 8],
+            [b"a1", 9],
+        ]
         # max
-        assert_resp_response(
-            r,
-            r.zunion(["a", "b", "c"], aggregate="MAX", withscores=True),
-            [(b"a2", 2), (b"a4", 4), (b"a3", 5), (b"a1", 6)],
-            [[b"a2", 2], [b"a4", 4], [b"a3", 5], [b"a1", 6]],
-        )
+        assert r.zunion(["a", "b", "c"], aggregate="MAX", withscores=True) == [
+            [b"a2", 2],
+            [b"a4", 4],
+            [b"a3", 5],
+            [b"a1", 6],
+        ]
         # min
-        assert_resp_response(
-            r,
-            r.zunion(["a", "b", "c"], aggregate="MIN", withscores=True),
-            [(b"a1", 1), (b"a2", 1), (b"a3", 1), (b"a4", 4)],
-            [[b"a1", 1], [b"a2", 1], [b"a3", 1], [b"a4", 4]],
-        )
+        assert r.zunion(["a", "b", "c"], aggregate="MIN", withscores=True) == [
+            [b"a1", 1],
+            [b"a2", 1],
+            [b"a3", 1],
+            [b"a4", 4],
+        ]
         # with weight
-        assert_resp_response(
-            r,
-            r.zunion({"a": 1, "b": 2, "c": 3}, withscores=True),
-            [(b"a2", 5), (b"a4", 12), (b"a3", 20), (b"a1", 23)],
-            [[b"a2", 5], [b"a4", 12], [b"a3", 20], [b"a1", 23]],
-        )
+        assert r.zunion({"a": 1, "b": 2, "c": 3}, withscores=True) == [
+            [b"a2", 5],
+            [b"a4", 12],
+            [b"a3", 20],
+            [b"a1", 23],
+        ]
         # with custom score cast function
         assert_resp_response(
             r,
             r.zunion(["a", "b", "c"], withscores=True, score_cast_func=safe_str),
-            [(b"a2", "3"), (b"a4", "4"), (b"a3", "8"), (b"a1", "9")],
+            [[b"a2", "3"], [b"a4", "4"], [b"a3", "8"], [b"a1", "9"]],
             [[b"a2", "3.0"], [b"a4", "4.0"], [b"a3", "8.0"], [b"a1", "9.0"]],
         )
 
@@ -4422,12 +4356,12 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zunionstore("d", ["a", "b", "c"]) == 4
-        assert_resp_response(
-            r,
-            r.zrange("d", 0, -1, withscores=True),
-            [(b"a2", 3), (b"a4", 4), (b"a3", 8), (b"a1", 9)],
-            [[b"a2", 3], [b"a4", 4], [b"a3", 8], [b"a1", 9]],
-        )
+        assert r.zrange("d", 0, -1, withscores=True) == [
+            [b"a2", 3],
+            [b"a4", 4],
+            [b"a3", 8],
+            [b"a1", 9],
+        ]
 
     @pytest.mark.onlynoncluster
     def test_zunionstore_max(self, r):
@@ -4435,12 +4369,12 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zunionstore("d", ["a", "b", "c"], aggregate="MAX") == 4
-        assert_resp_response(
-            r,
-            r.zrange("d", 0, -1, withscores=True),
-            [(b"a2", 2), (b"a4", 4), (b"a3", 5), (b"a1", 6)],
-            [[b"a2", 2], [b"a4", 4], [b"a3", 5], [b"a1", 6]],
-        )
+        assert r.zrange("d", 0, -1, withscores=True) == [
+            [b"a2", 2],
+            [b"a4", 4],
+            [b"a3", 5],
+            [b"a1", 6],
+        ]
 
     @pytest.mark.onlynoncluster
     def test_zunionstore_min(self, r):
@@ -4448,12 +4382,12 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 4})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zunionstore("d", ["a", "b", "c"], aggregate="MIN") == 4
-        assert_resp_response(
-            r,
-            r.zrange("d", 0, -1, withscores=True),
-            [(b"a1", 1), (b"a2", 2), (b"a3", 3), (b"a4", 4)],
-            [[b"a1", 1], [b"a2", 2], [b"a3", 3], [b"a4", 4]],
-        )
+        assert r.zrange("d", 0, -1, withscores=True) == [
+            [b"a1", 1],
+            [b"a2", 2],
+            [b"a3", 3],
+            [b"a4", 4],
+        ]
 
     @pytest.mark.onlynoncluster
     def test_zunionstore_with_weight(self, r):
@@ -4461,12 +4395,12 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zunionstore("d", {"a": 1, "b": 2, "c": 3}) == 4
-        assert_resp_response(
-            r,
-            r.zrange("d", 0, -1, withscores=True),
-            [(b"a2", 5), (b"a4", 12), (b"a3", 20), (b"a1", 23)],
-            [[b"a2", 5], [b"a4", 12], [b"a3", 20], [b"a1", 23]],
-        )
+        assert r.zrange("d", 0, -1, withscores=True) == [
+            [b"a2", 5],
+            [b"a4", 12],
+            [b"a3", 20],
+            [b"a1", 23],
+        ]
 
     @skip_if_server_version_lt("6.1.240")
     def test_zmscore(self, r):

@@ -7421,7 +7421,7 @@ class SortedSetCommands(CommandsProtocol):
         pieces = [len(keys), *keys]
         if withscores:
             pieces.append("WITHSCORES")
-        return self.execute_command("ZDIFF", *pieces, keys=keys)
+        return self.execute_command("ZDIFF", *pieces, keys=keys, withscores=withscores)
 
     @overload
     def zdiffstore(self: SyncClientProtocol, dest: KeyT, keys: KeysT) -> int: ...

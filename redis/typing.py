@@ -94,9 +94,9 @@ ZMPopResponse = list[bytes | str | list[list[Any]]] | None
 ZRandMemberResponse = (
     bytes | str | None | list[bytes | str] | list[bytes | str | float] | list[list[Any]]
 )
-ZSetScoredMembers = list[tuple[bytes | str, Any]] | list[list[Any]]
+ZSetScoredMembers = list[list[Any]]
 ZSetRangeResponse = list[bytes | str] | ZSetScoredMembers
-ZScanResponse = tuple[int, list[tuple[bytes | str, float]]]
+ZScanResponse = tuple[int, list[list[bytes | str | float]]]
 LCSMatch = list[int | tuple[int, int]]
 LCSResult = dict[str, int | list[LCSMatch]]
 StralgoResponse = str | int | LCSResult
