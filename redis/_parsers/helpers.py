@@ -212,6 +212,19 @@ def pairs_to_dict_typed(response, type_info):
     return result
 
 
+def _wrap_score_cast_func(score_cast_func):
+    """Wrap score_cast_func to handle scientific notation in RESP2 byte strings.
+
+    Redis returns scores as byte strings in RESP2, and large numbers may use
+    scientific notation (e.g., b'1.7732526297292595e+18'). Python's int() cannot
+    parse scientific notation directly, so we convert through float() first
+    when the cast function is not float itself.
+    """
+    if score_cast_func is float:
+        return score_cast_func
+    return lambda x: score_cast_func(float(x))
+
+
 def zset_score_pairs(response, **options):
     """
     If ``withscores`` is specified in the options, return the response as
@@ -219,7 +232,7 @@ def zset_score_pairs(response, **options):
     """
     if not response or not options.get("withscores"):
         return response
-    score_cast_func = options.get("score_cast_func", float)
+    score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
     it = iter(response)
     return list(zip(it, map(score_cast_func, it)))
 
@@ -231,7 +244,7 @@ def zset_score_for_rank(response, **options):
     """
     if not response or not options.get("withscore"):
         return response
-    score_cast_func = options.get("score_cast_func", float)
+    score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
     return [response[0], score_cast_func(response[1])]
 
 
@@ -427,7 +440,7 @@ def parse_hscan(response, **options):
 
 
 def parse_zscan(response, **options):
-    score_cast_func = options.get("score_cast_func", float)
+    score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
     cursor, r = response
     it = iter(r)
     return int(cursor), list(zip(it, map(score_cast_func, it)))
