@@ -418,8 +418,8 @@ def parse_xinfo_stream(response, **options):
 
 def parse_xread(response, **options):
     if response is None:
-        return []
-    return [[r[0], parse_stream_list(r[1], **options)] for r in response]
+        return {}
+    return {r[0]: [parse_stream_list(r[1], **options)] for r in response}
 
 
 def parse_xread_resp3(response, **options):
@@ -548,6 +548,23 @@ def parse_slowlog_get(response, **options):
     return [parse_item(item) for item in response]
 
 
+def parse_client_trackinginfo(response):
+    """
+    Parse CLIENT TRACKINGINFO response into a dict with str keys.
+    RESP2: flat list [key, val, key, val, ...] → dict
+    RESP3: native dict with bytes keys → dict with str keys
+    """
+    if isinstance(response, list):
+        data = pairs_to_dict(response, decode_keys=True)
+    else:
+        data = {str_if_bytes(k): v for k, v in response.items()}
+    if "flags" in data:
+        data["flags"] = [str_if_bytes(f) for f in data["flags"]]
+    if "prefixes" in data:
+        data["prefixes"] = [str_if_bytes(p) for p in data["prefixes"]]
+    return data
+
+
 def parse_stralgo(response, **options):
     """
     Parse the response from `STRALGO` command.
@@ -565,11 +582,11 @@ def parse_stralgo(response, **options):
     if options.get("idx", False):
         if options.get("withmatchlen", False):
             matches = [
-                [(int(match[-1]))] + list(map(tuple, match[:-1]))
+                [(int(match[-1]))] + [list(m) for m in match[:-1]]
                 for match in response[1]
             ]
         else:
-            matches = [list(map(tuple, match)) for match in response[1]]
+            matches = [[list(m) for m in match] for match in response[1]]
         return {
             str_if_bytes(response[0]): matches,
             str_if_bytes(response[2]): int(response[3]),
@@ -875,6 +892,7 @@ _RedisCallbacks = {
     "CLIENT LIST": parse_client_list,
     "CLIENT PAUSE": bool_ok,
     "CLIENT SETINFO": bool_ok,
+    "CLIENT TRACKINGINFO": parse_client_trackinginfo,
     "CLIENT SETNAME": bool_ok,
     "CLIENT UNBLOCK": bool,
     "CLUSTER ADDSLOTS": bool_ok,
@@ -968,12 +986,11 @@ _RedisCallbacksRESP2 = {
     "ACL USERS": lambda r: list(map(str_if_bytes, r)),
     "ACL WHOAMI": str_if_bytes,
     "CLIENT GETNAME": str_if_bytes,
-    "CLIENT TRACKINGINFO": lambda r: list(map(str_if_bytes, r)),
     "CONFIG GET": parse_config_get,
     "DEBUG OBJECT": parse_debug_object,
     "GEOHASH": lambda r: list(map(str_if_bytes, r)),
     "GEOPOS": lambda r: list(
-        map(lambda ll: (float(ll[0]), float(ll[1])) if ll is not None else None, r)
+        map(lambda ll: [float(ll[0]), float(ll[1])] if ll is not None else None, r)
     ),
     "HGETALL": lambda r: r and pairs_to_dict(r) or {},
     "HOTKEYS GET": lambda r: [pairs_to_dict(m) for m in r],
@@ -1002,7 +1019,7 @@ _RedisCallbacksRESP3 = {
         "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
     ),
     **string_keys_to_dict(
-        "HGETALL XREADGROUP",
+        "HGETALL",
         lambda r, **kwargs: r,
     ),
     **string_keys_to_dict(

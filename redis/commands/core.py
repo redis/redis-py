@@ -1115,18 +1115,16 @@ class ManagementCommands(CommandsProtocol):
         return self.execute_command("CLIENT TRACKING", *pieces, **kwargs)
 
     @overload
-    def client_trackinginfo(
-        self: SyncClientProtocol, **kwargs
-    ) -> list[bytes | str]: ...
+    def client_trackinginfo(self: SyncClientProtocol, **kwargs) -> dict[str, Any]: ...
 
     @overload
     def client_trackinginfo(
         self: AsyncClientProtocol, **kwargs
-    ) -> Awaitable[list[bytes | str]]: ...
+    ) -> Awaitable[dict[str, Any]]: ...
 
     def client_trackinginfo(
         self, **kwargs
-    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+    ) -> dict[str, Any] | Awaitable[dict[str, Any]]:
         """
         Returns the information about the current client connection's
         use of the server assisted client side cache.
@@ -10349,16 +10347,16 @@ class GeoCommands(CommandsProtocol):
     @overload
     def geopos(
         self: SyncClientProtocol, name: KeyT, *values: FieldT
-    ) -> list[tuple[float, float] | None]: ...
+    ) -> list[list[float] | None]: ...
 
     @overload
     def geopos(
         self: AsyncClientProtocol, name: KeyT, *values: FieldT
-    ) -> Awaitable[list[tuple[float, float] | None]]: ...
+    ) -> Awaitable[list[list[float] | None]]: ...
 
     def geopos(
         self, name: KeyT, *values: FieldT
-    ) -> list[tuple[float, float] | None] | Awaitable[list[tuple[float, float] | None]]:
+    ) -> list[list[float] | None] | Awaitable[list[list[float] | None]]:
         """
         Return the positions of each item of ``values`` as members of
         the specified key identified by the ``name`` argument. Each position
