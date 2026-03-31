@@ -4094,6 +4094,11 @@ class TestRedisCommands:
         # float cast is unaffected
         result = zset_score_pairs(response, withscores=True, score_cast_func=float)
         assert result == [(b"member1", 1.7732526297292595e18)]
+        # safe_str still receives raw bytes, not float (no "1.0" regression)
+        result = zset_score_pairs(
+            [b"a", b"1"], withscores=True, score_cast_func=safe_str
+        )
+        assert result == [(b"a", "1")]
 
     def test_zrange_errors(self, r):
         with pytest.raises(exceptions.DataError):
