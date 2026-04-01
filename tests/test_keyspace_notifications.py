@@ -4,7 +4,7 @@ Tests for Redis keyspace notifications support.
 
 import pytest
 import time
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock, Mock, PropertyMock
 
 from redis.exceptions import ConnectionError
 from redis.keyspace_notifications import (
@@ -866,6 +866,8 @@ class TestStandaloneClientKeyspaceNotificationsMocked:
         mock_pubsub = MagicMock()
         mock_pubsub.get_message = Mock(return_value=None)
         mock_pubsub.close = Mock()
+        # Default subscribed to False; tests that need True should set it
+        type(mock_pubsub).subscribed = PropertyMock(return_value=False)
         redis_client.pubsub = Mock(return_value=mock_pubsub)
         return redis_client, mock_pubsub
 
@@ -1058,6 +1060,7 @@ class TestStandaloneClientKeyspaceNotificationsMocked:
         redis_client, mock_pubsub = self._create_mock_redis()
 
         with KeyspaceNotifications(redis_client) as notifications:
+            type(mock_pubsub).subscribed = PropertyMock(return_value=True)
             notifications.subscribe(KeyspaceChannel("mykey"))
             assert notifications.subscribed
 
@@ -1065,15 +1068,20 @@ class TestStandaloneClientKeyspaceNotificationsMocked:
         mock_pubsub.close.assert_called_once()
 
     def test_subscribed_property(self):
-        """Test the subscribed property."""
-        redis_client, _ = self._create_mock_redis()
+        """Test the subscribed property delegates to the underlying PubSub."""
+        redis_client, mock_pubsub = self._create_mock_redis()
 
         notifications = KeyspaceNotifications(redis_client)
+        # Initially not subscribed
         assert not notifications.subscribed
 
+        # After subscribing, PubSub reports subscribed
+        type(mock_pubsub).subscribed = PropertyMock(return_value=True)
         notifications.subscribe(KeyspaceChannel("mykey"))
         assert notifications.subscribed
 
+        # After unsubscribing, PubSub reports not subscribed
+        type(mock_pubsub).subscribed = PropertyMock(return_value=False)
         notifications.unsubscribe(KeyspaceChannel("mykey"))
         assert not notifications.subscribed
 

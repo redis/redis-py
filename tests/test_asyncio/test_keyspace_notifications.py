@@ -5,7 +5,7 @@ Tests for async Redis keyspace notifications support.
 import asyncio
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock
 
 from redis.asyncio.keyspace_notifications import (
     AsyncClusterKeyspaceNotifications,
@@ -34,6 +34,8 @@ class TestAsyncStandaloneKeyspaceNotificationsMocked:
         mock_pubsub.unsubscribe = AsyncMock()
         mock_pubsub.punsubscribe = AsyncMock()
         mock_pubsub.aclose = AsyncMock()
+        # Configure subscribed as a PropertyMock since standalone delegates to it
+        type(mock_pubsub).subscribed = PropertyMock(return_value=False)
         redis_client.pubsub = Mock(return_value=mock_pubsub)
         return redis_client, mock_pubsub
 
@@ -293,6 +295,7 @@ class TestAsyncStandaloneKeyspaceNotificationsMocked:
         redis_client, mock_pubsub = self._create_mock_redis()
 
         async with AsyncKeyspaceNotifications(redis_client) as notifications:
+            type(mock_pubsub).subscribed = PropertyMock(return_value=True)
             await notifications.subscribe(KeyspaceChannel("mykey"))
             assert notifications.subscribed
 
@@ -302,14 +305,16 @@ class TestAsyncStandaloneKeyspaceNotificationsMocked:
     @pytest.mark.asyncio
     async def test_subscribed_property(self):
         """Test the subscribed property."""
-        redis_client, _ = self._create_mock_redis()
+        redis_client, mock_pubsub = self._create_mock_redis()
 
         notifications = AsyncKeyspaceNotifications(redis_client)
         assert not notifications.subscribed
 
+        type(mock_pubsub).subscribed = PropertyMock(return_value=True)
         await notifications.subscribe(KeyspaceChannel("mykey"))
         assert notifications.subscribed
 
+        type(mock_pubsub).subscribed = PropertyMock(return_value=False)
         await notifications.unsubscribe(KeyspaceChannel("mykey"))
         assert not notifications.subscribed
 

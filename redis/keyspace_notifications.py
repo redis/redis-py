@@ -87,6 +87,10 @@ if TYPE_CHECKING:
 ChannelT: TypeAlias = Union[str, bytes, "KeyspaceChannel", "KeyeventChannel"]
 
 
+# Type alias for sync handlers
+SyncHandlerT = Callable[["KeyNotification"], None]
+
+
 # =============================================================================
 # Event Type Constants
 # =============================================================================
@@ -287,11 +291,7 @@ class KeyNotification:
         if channel is None or data is None:
             return None
 
-        # Convert bytes to string if needed
-        channel = safe_str(channel)
-        data = safe_str(data)
-
-        return cls._parse(channel, data, key_prefix)
+        return cls.try_parse(channel, data, key_prefix)
 
     @classmethod
     def try_parse(
@@ -665,7 +665,7 @@ class KeyspaceNotificationsInterface(ABC):
     def subscribe(
         self,
         *channels: ChannelT,
-        handler: Callable[[KeyNotification], None] | None = None,
+        handler: SyncHandlerT | None = None,
     ):
         """Subscribe to keyspace notification channels."""
         pass
@@ -680,7 +680,7 @@ class KeyspaceNotificationsInterface(ABC):
         self,
         key_or_pattern: str,
         db: int = 0,
-        handler: Callable[[KeyNotification], None] | None = None,
+        handler: SyncHandlerT | None = None,
     ):
         """Subscribe to keyspace notifications for specific keys."""
         pass
@@ -690,7 +690,7 @@ class KeyspaceNotificationsInterface(ABC):
         self,
         event: str,
         db: int = 0,
-        handler: Callable[[KeyNotification], None] | None = None,
+        handler: SyncHandlerT | None = None,
     ):
         """Subscribe to keyevent notifications for specific event types."""
         pass
@@ -775,14 +775,12 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
         """
         self.key_prefix = key_prefix
         self.ignore_subscribe_messages = ignore_subscribe_messages
-        self._subscribed_patterns: dict[str, Any] = {}  # pattern -> handler
-        self._subscribed_channels: dict[str, Any] = {}  # channel -> handler
         self._closed = False
 
     def subscribe(
         self,
         *channels: ChannelT,
-        handler: Callable[[KeyNotification], None] | None = None,
+        handler: SyncHandlerT | None = None,
     ):
         """
         Subscribe to keyspace notification channels.
@@ -831,12 +829,7 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
         # implementations the operation is best-effort (partial failures are
         # logged, not raised) so tracking state is always updated afterwards.
         self._execute_subscribe(patterns, exact_channels)
-
-        if patterns:
-            self._subscribed_patterns.update(patterns)
-
-        if exact_channels:
-            self._subscribed_channels.update(exact_channels)
+        self._track_subscribe(patterns, exact_channels)
 
     @abstractmethod
     def _execute_subscribe(
@@ -881,11 +874,7 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
         # — this is intentional: the user asked to unsubscribe, so
         # refresh_subscriptions should not re-subscribe these channels.
         self._execute_unsubscribe(patterns, exact_channels)
-
-        for p in patterns:
-            self._subscribed_patterns.pop(p, None)
-        for c in exact_channels:
-            self._subscribed_channels.pop(c, None)
+        self._untrack_subscribe(patterns, exact_channels)
 
     @abstractmethod
     def _execute_unsubscribe(
@@ -900,11 +889,31 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
         """
         pass
 
+    def _track_subscribe(
+        self, patterns: dict[str, Any], exact_channels: dict[str, Any]
+    ) -> None:
+        """Track newly subscribed patterns/channels.
+
+        Override in subclasses that need to maintain their own subscription
+        registry (e.g. cluster implementations that must re-subscribe
+        new/failed-over nodes).  The default is a no-op because standalone
+        implementations delegate tracking to the underlying PubSub object.
+        """
+
+    def _untrack_subscribe(
+        self, patterns: list[str], exact_channels: list[str]
+    ) -> None:
+        """Remove patterns/channels from the subscription registry.
+
+        Override in subclasses that maintain their own subscription registry.
+        The default is a no-op.
+        """
+
     def subscribe_keyspace(
         self,
         key_or_pattern: str,
         db: int = 0,
-        handler: Callable[[KeyNotification], None] | None = None,
+        handler: SyncHandlerT | None = None,
     ):
         """
         Subscribe to keyspace notifications for specific keys.
@@ -925,7 +934,7 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
         self,
         event: str,
         db: int = 0,
-        handler: Callable[[KeyNotification], None] | None = None,
+        handler: SyncHandlerT | None = None,
     ):
         """
         Subscribe to keyevent notifications for specific event types.
@@ -948,13 +957,6 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
     def __exit__(self, _exc_type, _exc_val, _exc_tb):
         self.close()
         return False
-
-    @property
-    def subscribed(self) -> bool:
-        """Check if there are any active subscriptions and not closed."""
-        return not self._closed and bool(
-            self._subscribed_patterns or self._subscribed_channels
-        )
 
     def run_in_thread(
         self,
@@ -1007,12 +1009,7 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
             >>> # ... handlers are called automatically ...
             >>> thread.stop()
         """
-        for channel, handler in self._subscribed_channels.items():
-            if handler is None:
-                raise RedisError(f"Channel '{channel}' has no handler registered")
-        for pattern, handler in self._subscribed_patterns.items():
-            if handler is None:
-                raise RedisError(f"Pattern '{pattern}' has no handler registered")
+        self._validate_all_handlers()
 
         thread = KeyspaceWorkerThread(
             self,
@@ -1022,6 +1019,15 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
         )
         thread.start()
         return thread
+
+    @abstractmethod
+    def _validate_all_handlers(self) -> None:
+        """Raise :class:`~redis.RedisError` if any subscription lacks a handler.
+
+        Subclasses inspect their own subscription state to perform
+        the validation.
+        """
+        pass
 
 
 class KeyspaceWorkerThread(threading.Thread):
@@ -1207,6 +1213,20 @@ class KeyspaceNotifications(AbstractKeyspaceNotifications):
             if notification is not None:
                 yield notification
 
+    @property
+    def subscribed(self) -> bool:
+        """Check if there are any active subscriptions and not closed."""
+        return not self._closed and self._pubsub.subscribed
+
+    def _validate_all_handlers(self) -> None:
+        """Raise if any subscription in the underlying PubSub lacks a handler."""
+        for channel, handler in self._pubsub.channels.items():
+            if handler is None:
+                raise RedisError(f"Channel '{channel}' has no handler registered")
+        for pattern, handler in self._pubsub.patterns.items():
+            if handler is None:
+                raise RedisError(f"Pattern '{pattern}' has no handler registered")
+
     def close(self):
         """Close the pubsub connection and clean up resources."""
         self._closed = True
@@ -1214,8 +1234,6 @@ class KeyspaceNotifications(AbstractKeyspaceNotifications):
             self._pubsub.close()
         except Exception:
             pass
-        self._subscribed_patterns.clear()
-        self._subscribed_channels.clear()
 
 
 # =============================================================================
@@ -1254,6 +1272,13 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
         super().__init__(key_prefix, ignore_subscribe_messages)
         self.cluster = redis_cluster
 
+        # Canonical subscription registry: pattern/channel -> wrapped handler.
+        # In cluster mode there are multiple PubSub objects (one per node), so
+        # this is the single source of truth used to (re-)subscribe new or
+        # failed-over nodes.
+        self._subscribed_patterns: dict[str, Any] = {}
+        self._subscribed_channels: dict[str, Any] = {}
+
         # Track subscriptions per node
         self._node_pubsubs: dict[str, Any] = {}
 
@@ -1262,6 +1287,40 @@ class ClusterKeyspaceNotifications(AbstractKeyspaceNotifications):
 
         # Current pubsub index for round-robin polling
         self._poll_index = 0
+
+    @property
+    def subscribed(self) -> bool:
+        """Check if there are any active subscriptions and not closed."""
+        return not self._closed and bool(
+            self._subscribed_patterns or self._subscribed_channels
+        )
+
+    def _track_subscribe(
+        self, patterns: dict[str, Any], exact_channels: dict[str, Any]
+    ) -> None:
+        """Track newly subscribed patterns/channels in the cluster registry."""
+        if patterns:
+            self._subscribed_patterns.update(patterns)
+        if exact_channels:
+            self._subscribed_channels.update(exact_channels)
+
+    def _untrack_subscribe(
+        self, patterns: list[str], exact_channels: list[str]
+    ) -> None:
+        """Remove patterns/channels from the cluster registry."""
+        for p in patterns:
+            self._subscribed_patterns.pop(p, None)
+        for c in exact_channels:
+            self._subscribed_channels.pop(c, None)
+
+    def _validate_all_handlers(self) -> None:
+        """Raise if any subscription in the cluster registry lacks a handler."""
+        for channel, handler in self._subscribed_channels.items():
+            if handler is None:
+                raise RedisError(f"Channel '{channel}' has no handler registered")
+        for pattern, handler in self._subscribed_patterns.items():
+            if handler is None:
+                raise RedisError(f"Pattern '{pattern}' has no handler registered")
 
     def _get_all_primary_nodes(self):
         """Get all primary nodes in the cluster."""

@@ -241,8 +241,6 @@ class AbstractAsyncKeyspaceNotifications(AsyncKeyspaceNotificationsInterface):
         """
         self.key_prefix = key_prefix
         self.ignore_subscribe_messages = ignore_subscribe_messages
-        self._subscribed_patterns: dict[str, Any] = {}  # pattern -> handler
-        self._subscribed_channels: dict[str, Any] = {}  # channel -> handler
         self._closed = False
 
     async def subscribe(
@@ -309,12 +307,7 @@ class AbstractAsyncKeyspaceNotifications(AsyncKeyspaceNotificationsInterface):
         # implementations the operation is best-effort (partial failures are
         # logged, not raised) so tracking state is always updated afterwards.
         await self._execute_subscribe(patterns, exact_channels)
-
-        if patterns:
-            self._subscribed_patterns.update(patterns)
-
-        if exact_channels:
-            self._subscribed_channels.update(exact_channels)
+        self._track_subscribe(patterns, exact_channels)
 
     @abstractmethod
     async def _execute_subscribe(
@@ -345,11 +338,7 @@ class AbstractAsyncKeyspaceNotifications(AsyncKeyspaceNotificationsInterface):
         # — this is intentional: the user asked to unsubscribe, so
         # refresh_subscriptions should not re-subscribe these channels.
         await self._execute_unsubscribe(patterns, exact_channels)
-
-        for p in patterns:
-            self._subscribed_patterns.pop(p, None)
-        for c in exact_channels:
-            self._subscribed_channels.pop(c, None)
+        self._untrack_subscribe(patterns, exact_channels)
 
     @abstractmethod
     async def _execute_unsubscribe(
@@ -357,6 +346,26 @@ class AbstractAsyncKeyspaceNotifications(AsyncKeyspaceNotificationsInterface):
     ) -> None:
         """Execute the unsubscribe operation."""
         pass
+
+    def _track_subscribe(
+        self, patterns: dict[str, Any], exact_channels: dict[str, Any]
+    ) -> None:
+        """Track newly subscribed patterns/channels.
+
+        Override in subclasses that need to maintain their own subscription
+        registry (e.g. cluster implementations that must re-subscribe
+        new/failed-over nodes).  The default is a no-op because standalone
+        implementations delegate tracking to the underlying PubSub object.
+        """
+
+    def _untrack_subscribe(
+        self, patterns: list[str], exact_channels: list[str]
+    ) -> None:
+        """Remove patterns/channels from the subscription registry.
+
+        Override in subclasses that maintain their own subscription registry.
+        The default is a no-op.
+        """
 
     async def subscribe_keyspace(
         self,
@@ -384,13 +393,6 @@ class AbstractAsyncKeyspaceNotifications(AsyncKeyspaceNotificationsInterface):
     async def __aexit__(self, _exc_type, _exc_val, _exc_tb):
         await self.aclose()
         return False
-
-    @property
-    def subscribed(self) -> bool:
-        """Check if there are any active subscriptions and not closed."""
-        return not self._closed and bool(
-            self._subscribed_patterns or self._subscribed_channels
-        )
 
     async def run(
         self,
@@ -535,6 +537,11 @@ class AsyncKeyspaceNotifications(AbstractAsyncKeyspaceNotifications):
             if notification is not None:
                 yield notification
 
+    @property
+    def subscribed(self) -> bool:
+        """Check if there are any active subscriptions and not closed."""
+        return not self._closed and self._pubsub.subscribed
+
     async def aclose(self):
         """Close the pubsub connection and clean up resources."""
         self._closed = True
@@ -542,8 +549,6 @@ class AsyncKeyspaceNotifications(AbstractAsyncKeyspaceNotifications):
             await self._pubsub.aclose()
         except Exception:
             pass
-        self._subscribed_patterns.clear()
-        self._subscribed_channels.clear()
 
 
 # =============================================================================
@@ -581,6 +586,13 @@ class AsyncClusterKeyspaceNotifications(AbstractAsyncKeyspaceNotifications):
         super().__init__(key_prefix, ignore_subscribe_messages)
         self.cluster = redis_cluster
 
+        # Canonical subscription registry: pattern/channel -> wrapped handler.
+        # In cluster mode there are multiple PubSub objects (one per node), so
+        # this is the single source of truth used to (re-)subscribe new or
+        # failed-over nodes.
+        self._subscribed_patterns: dict[str, Any] = {}
+        self._subscribed_channels: dict[str, Any] = {}
+
         # Track subscriptions per node
         self._node_pubsubs: dict[str, PubSub] = {}
 
@@ -589,6 +601,31 @@ class AsyncClusterKeyspaceNotifications(AbstractAsyncKeyspaceNotifications):
 
         # Current pubsub index for round-robin polling
         self._poll_index = 0
+
+    @property
+    def subscribed(self) -> bool:
+        """Check if there are any active subscriptions and not closed."""
+        return not self._closed and bool(
+            self._subscribed_patterns or self._subscribed_channels
+        )
+
+    def _track_subscribe(
+        self, patterns: dict[str, Any], exact_channels: dict[str, Any]
+    ) -> None:
+        """Track newly subscribed patterns/channels in the cluster registry."""
+        if patterns:
+            self._subscribed_patterns.update(patterns)
+        if exact_channels:
+            self._subscribed_channels.update(exact_channels)
+
+    def _untrack_subscribe(
+        self, patterns: list[str], exact_channels: list[str]
+    ) -> None:
+        """Remove patterns/channels from the cluster registry."""
+        for p in patterns:
+            self._subscribed_patterns.pop(p, None)
+        for c in exact_channels:
+            self._subscribed_channels.pop(c, None)
 
     def _get_all_primary_nodes(self) -> list[ClusterNode]:
         """Get all primary nodes in the cluster."""
