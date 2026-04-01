@@ -2242,6 +2242,7 @@ class TestHybridSearch(AsyncSearchTestsBase):
                 ([5.0, 6.0, 7.0, 8.0], "black shoes"),
             ]
         items = items * items_sets
+        batch_size = 1000
         pipeline = client.pipeline()
         for i, vec in enumerate(items):
             vec, description = vec
@@ -2259,7 +2260,10 @@ class TestHybridSearch(AsyncSearchTestsBase):
                 "size": 10 + i % 3,
             }
             pipeline.hset(f"item:{i}", mapping=mapping)
-        await pipeline.execute()  # Execute all at once
+            if (i + 1) % batch_size == 0:
+                await pipeline.execute()
+                pipeline = client.pipeline()
+        await pipeline.execute()  # Execute remaining
 
     @staticmethod
     def _convert_dict_values_to_str(list_of_dicts):
