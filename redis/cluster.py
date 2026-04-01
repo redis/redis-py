@@ -10,6 +10,7 @@ from copy import copy
 from enum import Enum
 from itertools import chain
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     Dict,
@@ -20,6 +21,9 @@ from typing import (
     Tuple,
     Union,
 )
+
+if TYPE_CHECKING:
+    from redis.keyspace_notifications import ClusterKeyspaceNotifications
 
 from redis._parsers import CommandsParser, Encoder
 from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
@@ -1077,6 +1081,34 @@ class RedisCluster(
         connected to the specified node
         """
         return ClusterPubSub(self, node=node, host=host, port=port, **kwargs)
+
+    def keyspace_notifications(
+        self,
+        key_prefix: Union[str, bytes, None] = None,
+        ignore_subscribe_messages: bool = True,
+    ) -> "ClusterKeyspaceNotifications":
+        """
+        Return a :class:`~redis.keyspace_notifications.ClusterKeyspaceNotifications`
+        object for subscribing to keyspace and keyevent notifications across
+        all primary nodes in the cluster.
+
+        Note: Keyspace notifications must be enabled on all Redis cluster nodes
+        via the ``notify-keyspace-events`` configuration option.
+
+        Args:
+            key_prefix: Optional prefix to filter and strip from keys in
+                        notifications.
+            ignore_subscribe_messages: If True, subscribe/unsubscribe
+                                      confirmations are not returned by
+                                      get_message/listen.
+        """
+        from redis.keyspace_notifications import ClusterKeyspaceNotifications
+
+        return ClusterKeyspaceNotifications(
+            self,
+            key_prefix=key_prefix,
+            ignore_subscribe_messages=ignore_subscribe_messages,
+        )
 
     def pipeline(self, transaction=None, shard_hint=None):
         """
