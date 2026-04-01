@@ -1172,6 +1172,7 @@ class TestMaintNotificationsMetricsRecording:
         mock_connection.maintenance_state = MaintenanceState.NONE
         mock_connection.host = "localhost"
         mock_connection.port = 6379
+        mock_connection._sock.getsockname.return_value = ("127.0.0.1", 12345)
 
         config = MaintNotificationsConfig(enabled=True, relaxed_timeout=20)
         handler = MaintNotificationsConnectionHandler(mock_connection, config)
@@ -1197,6 +1198,7 @@ class TestMaintNotificationsMetricsRecording:
         mock_connection.maintenance_state = MaintenanceState.NONE
         mock_connection._maint_notifications_pool_handler = Mock()
         mock_connection._maint_notifications_pool_handler.pool = Mock()
+        mock_connection._sock.getsockname.return_value = ("127.0.0.1", 12345)
         mock_get_pool_name.return_value = "localhost:6379_abc123"
 
         config = MaintNotificationsConfig(enabled=True, relaxed_timeout=20)
@@ -1221,6 +1223,7 @@ class TestMaintNotificationsMetricsRecording:
         mock_connection.maintenance_state = MaintenanceState.MAINTENANCE
         mock_connection._maint_notifications_pool_handler = Mock()
         mock_connection._maint_notifications_pool_handler.pool = Mock()
+        mock_connection._sock.getsockname.return_value = ("127.0.0.1", 12345)
         mock_get_pool_name.return_value = "localhost:6379_abc123"
 
         config = MaintNotificationsConfig(relaxed_timeout=20)
@@ -1244,6 +1247,7 @@ class TestMaintNotificationsMetricsRecording:
         mock_connection.maintenance_state = MaintenanceState.NONE
         mock_connection.host = "localhost"
         mock_connection.port = 6379
+        mock_connection._sock.getsockname.return_value = ("127.0.0.1", 12345)
 
         config = MaintNotificationsConfig(enabled=True, relaxed_timeout=-1)
         handler = MaintNotificationsConnectionHandler(mock_connection, config)
