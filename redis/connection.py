@@ -292,6 +292,14 @@ class ConnectionInterface:
     def extract_connection_details(self) -> str:
         pass
 
+    @property
+    @abstractmethod
+    def is_connected(self) -> bool:
+        """
+        Return ``True`` if the connection to the server is active.
+        """
+        pass
+
 
 class MaintNotificationsAbstractConnection:
     """
@@ -931,6 +939,10 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             self.disconnect()
         except Exception:
             pass
+
+    @property
+    def is_connected(self) -> bool:
+        return self._sock is not None
 
     def _construct_command_packer(self, packer):
         if packer is not None:
@@ -1592,6 +1604,10 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
     def repr_pieces(self):
         return self._conn.repr_pieces()
+
+    @property
+    def is_connected(self) -> bool:
+        return self._conn.is_connected
 
     def register_connect_callback(self, callback):
         self._conn.register_connect_callback(callback)
