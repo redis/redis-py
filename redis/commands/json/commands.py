@@ -24,6 +24,30 @@ class FPHAType(str, Enum):
     FP32 = "FP32"
     FP64 = "FP64"
 
+    @classmethod
+    def from_value(cls, value: "FPHAType | str") -> "FPHAType":
+        """Convert a string or FPHAType instance to a validated FPHAType.
+
+        Args:
+            value: An ``FPHAType`` member or a case-insensitive string
+                (e.g. ``"bf16"``, ``"FP32"``).
+
+        Returns:
+            The corresponding ``FPHAType`` enum member.
+
+        Raises:
+            DataError: If the string does not match any valid FPHA type.
+        """
+        if isinstance(value, cls):
+            return value
+        try:
+            return cls(value.upper())
+        except ValueError:
+            raise DataError(
+                f"Invalid FPHA type: {value}. "
+                f"Must be one of {', '.join(t.value for t in cls)}"
+            )
+
 
 class JSONCommands:
     """json commands."""
@@ -500,17 +524,7 @@ class JSONCommands:
             pieces.append("XX")
 
         if fpha is not None:
-            if isinstance(fpha, FPHAType):
-                pieces.extend(["FPHA", fpha.value])
-            else:
-                try:
-                    fpha_enum = FPHAType(fpha.upper())
-                except ValueError:
-                    raise DataError(
-                        f"Invalid FPHA type: {fpha}. "
-                        f"Must be one of {', '.join(t.value for t in FPHAType)}"
-                    )
-                pieces.extend(["FPHA", fpha_enum.value])
+            pieces.extend(["FPHA", FPHAType.from_value(fpha).value])
 
         return self.execute_command("JSON.SET", *pieces)
 
