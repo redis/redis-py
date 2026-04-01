@@ -4049,6 +4049,7 @@ class TestHybridSearch(SearchTestsBase):
             ]
         items = items * items_sets
 
+        batch_size = 1000
         pipeline = client.pipeline()
         for i, vec in enumerate(items):
             vec, description = vec
@@ -4070,7 +4071,10 @@ class TestHybridSearch(SearchTestsBase):
                 f"item:{i}",
                 mapping=mapping,
             )
-        pipeline.execute()  # Execute all at once
+            if (i + 1) % batch_size == 0:
+                pipeline.execute()
+                pipeline = client.pipeline()
+        pipeline.execute()  # Execute remaining
 
     @staticmethod
     def _convert_dict_values_to_str(list_of_dicts):
