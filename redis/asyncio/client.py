@@ -101,6 +101,7 @@ _ArgT = TypeVar("_ArgT", KeyT, EncodableT)
 _RedisT = TypeVar("_RedisT", bound="Redis")
 _NormalizeKeysT = TypeVar("_NormalizeKeysT", bound=Mapping[ChannelT, object])
 if TYPE_CHECKING:
+    from redis.asyncio.keyspace_notifications import AsyncKeyspaceNotifications
     from redis.commands.core import Script
 
 
@@ -620,6 +621,33 @@ class Redis(
         """
         return PubSub(
             self.connection_pool, event_dispatcher=self._event_dispatcher, **kwargs
+        )
+
+    def keyspace_notifications(
+        self,
+        key_prefix: Union[str, bytes, None] = None,
+        ignore_subscribe_messages: bool = True,
+    ) -> "AsyncKeyspaceNotifications":
+        """
+        Return an :class:`~redis.asyncio.keyspace_notifications.AsyncKeyspaceNotifications`
+        object for subscribing to keyspace and keyevent notifications.
+
+        Note: Keyspace notifications must be enabled on the Redis server via
+        the ``notify-keyspace-events`` configuration option.
+
+        Args:
+            key_prefix: Optional prefix to filter and strip from keys in
+                        notifications.
+            ignore_subscribe_messages: If True, subscribe/unsubscribe
+                                      confirmations are not returned by
+                                      get_message/listen.
+        """
+        from redis.asyncio.keyspace_notifications import AsyncKeyspaceNotifications
+
+        return AsyncKeyspaceNotifications(
+            self,
+            key_prefix=key_prefix,
+            ignore_subscribe_messages=ignore_subscribe_messages,
         )
 
     def monitor(self) -> "Monitor":
