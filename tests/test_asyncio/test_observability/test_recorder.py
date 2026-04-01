@@ -970,7 +970,10 @@ class TestRecordConnectionCount:
 
     @pytest.fixture
     def setup_connection_count_recorder(
-        self, mock_meter_with_counter, mock_config_with_connection_basic
+        self,
+        mock_meter_with_counter,
+        mock_config_with_connection_basic,
+        mock_up_down_counter,
     ):
         """Setup recorder with mocked meter for connection count tests."""
         recorder.reset_collector()
@@ -981,6 +984,10 @@ class TestRecordConnectionCount:
             )
 
         with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+            # Reset mock call counts to avoid pollution from external code
+            # paths (e.g., connection pool operations in other tests) that may
+            # have called record_connection_count on our mock collector.
+            mock_up_down_counter.reset_mock()
             yield mock_meter_with_counter
 
         recorder.reset_collector()
