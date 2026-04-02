@@ -47,22 +47,12 @@ class _JSONBase(JSONCommands):
         }
 
         _RESP2_MODULE_CALLBACKS = {
-            "JSON.ARRAPPEND": self._decode,
-            "JSON.ARRINDEX": self._decode,
-            "JSON.ARRINSERT": self._decode,
-            "JSON.ARRLEN": self._decode,
-            "JSON.ARRTRIM": self._decode,
             "JSON.CLEAR": int,
             "JSON.DEL": int,
             "JSON.FORGET": int,
-            "JSON.GET": self._decode,
-            "JSON.NUMINCRBY": self._decode,
-            "JSON.NUMMULTBY": self._decode,
-            "JSON.OBJKEYS": self._decode,
-            "JSON.STRAPPEND": self._decode,
-            "JSON.OBJLEN": self._decode,
-            "JSON.STRLEN": self._decode,
-            "JSON.TOGGLE": self._decode,
+            "JSON.NUMINCRBY": self._decode_json_numop,
+            "JSON.NUMMULTBY": self._decode_json_numop,
+            "JSON.TYPE": lambda r: [r] if r is not None else r,
         }
 
         _RESP3_MODULE_CALLBACKS = {}
@@ -99,6 +89,26 @@ class _JSONBase(JSONCommands):
                 return decode_list(obj)
         except (AttributeError, JSONDecodeError):
             return decode_list(obj)
+
+    def _decode_json_numop(self, obj):
+        """Decode JSON numeric operation result and normalize to array format.
+
+        RESP2 returns a JSON bulk string: scalar for legacy paths (e.g. "5"),
+        array for dollar paths (e.g. "[null,4,7.0]").
+        RESP3 always returns an array. Normalize RESP2 to match RESP3 format
+        by wrapping scalar results in a list.
+        """
+        if obj is None:
+            return obj
+        try:
+            result = self.__decoder__.decode(
+                obj if isinstance(obj, str) else obj.decode()
+            )
+        except (AttributeError, JSONDecodeError):
+            return obj
+        if not isinstance(result, list):
+            result = [result]
+        return result
 
     def _encode(self, obj):
         """Get the encoder."""
