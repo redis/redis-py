@@ -1,5 +1,6 @@
 import datetime
 
+from redis.commands.core import GCRAResponse
 from redis.utils import str_if_bytes
 
 
@@ -769,6 +770,21 @@ def parse_set_result(response, **options):
     return response and str_if_bytes(response) == "OK"
 
 
+def parse_gcra(response, **options):
+    """
+    Parse the GCRA rate limiting command response into a GCRAResponse dataclass.
+
+    Response format: [limited, max_req_num, num_avail_req, retry_after, full_burst_after]
+    """
+    return GCRAResponse(
+        limited=bool(response[0]),
+        max_req_num=int(response[1]),
+        num_avail_req=int(response[2]),
+        retry_after=int(response[3]),
+        full_burst_after=int(response[4]),
+    )
+
+
 def string_keys_to_dict(key_string, callback):
     return dict.fromkeys(key_string.split(), callback)
 
@@ -825,6 +841,7 @@ _RedisCallbacks = {
     "FUNCTION DELETE": bool_ok,
     "FUNCTION FLUSH": bool_ok,
     "FUNCTION RESTORE": bool_ok,
+    "GCRA": parse_gcra,
     "GEODIST": float_or_none,
     "HSCAN": parse_hscan,
     "INFO": parse_info,
