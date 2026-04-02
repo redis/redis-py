@@ -717,6 +717,71 @@ class TestUnitCacheProxyConnection:
         assert another_conn.can_read.call_count == 2
         another_conn.read_response.assert_called_once()
 
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Pypy doesn't support side_effect",
+    )
+    def test_sends_command_when_cache_entry_invalidated_during_drain(
+        self, mock_cache, mock_connection
+    ):
+        """Regression test for issue #3600.
+
+        When another connection's invalidation drain removes the cache entry,
+        send_command must fall through and send the command over the wire
+        instead of returning early (which would cause read_response to hang).
+        """
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection._event_dispatcher = Mock(spec=EventDispatcher)
+
+        another_conn = copy.deepcopy(mock_connection)
+        another_conn.can_read.side_effect = [True, False]
+        another_conn.read_response.return_value = None
+
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache_entry = CacheEntry(
+            cache_key=cache_key,
+            cache_value=b"bar",
+            status=CacheEntryStatus.VALID,
+            connection_ref=another_conn,
+        )
+
+        mock_cache.is_cachable.return_value = True
+        # get() call sequence in send_command:
+        #   1st: check if entry exists (truthy → enter branch)
+        #   2nd: fetch the entry
+        #   3rd: re-check after drain (None → entry was invalidated)
+        mock_cache.get.side_effect = [cache_entry, cache_entry, None]
+        mock_connection.can_read.return_value = False
+        mock_connection.send_command.return_value = None
+
+        proxy_connection = CacheProxyConnection(
+            mock_connection, mock_cache, threading.RLock()
+        )
+        proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
+
+        # The drain should have happened on the other connection
+        assert another_conn.can_read.call_count == 2
+        another_conn.read_response.assert_called_once()
+
+        # The command must have been sent over the wire (not returned early)
+        mock_connection.send_command.assert_called_once_with("GET", "foo", keys=["foo"])
+
+        # An IN_PROGRESS entry must have been set for this connection
+        mock_cache.set.assert_called_once_with(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+                status=CacheEntryStatus.IN_PROGRESS,
+                connection_ref=mock_connection,
+            )
+        )
+
     def test_read_response_propagates_timeout_parameter(self, mock_connection):
         """Test that timeout parameter is propagated to underlying connection."""
         mock_connection.retry = "mock"
