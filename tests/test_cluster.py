@@ -2057,18 +2057,20 @@ class TestClusterRedisCommands:
         # invalid aggregation
         with pytest.raises(DataError):
             r.zinter(["{foo}a", "{foo}b", "{foo}c"], aggregate="foo", withscores=True)
-        assert r.zinter(
-            ["{foo}a", "{foo}b", "{foo}c"], withscores=True
-        ) == [[b"a3", 8], [b"a1", 9]]
+        assert r.zinter(["{foo}a", "{foo}b", "{foo}c"], withscores=True) == [
+            [b"a3", 8],
+            [b"a1", 9],
+        ]
         assert r.zinter(
             ["{foo}a", "{foo}b", "{foo}c"], withscores=True, aggregate="MAX"
         ) == [[b"a3", 5], [b"a1", 6]]
         assert r.zinter(
             ["{foo}a", "{foo}b", "{foo}c"], withscores=True, aggregate="MIN"
         ) == [[b"a1", 1], [b"a3", 1]]
-        assert r.zinter(
-            {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True
-        ) == [[b"a3", 20.0], [b"a1", 23.0]]
+        assert r.zinter({"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True) == [
+            [b"a3", 20.0],
+            [b"a1", 23.0],
+        ]
 
     def test_cluster_zinterstore_sum(self, r):
         r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
@@ -2172,9 +2174,12 @@ class TestClusterRedisCommands:
         r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
         # sum
         assert r.zunion(["{foo}a", "{foo}b", "{foo}c"]) == [b"a2", b"a4", b"a3", b"a1"]
-        assert r.zunion(
-            ["{foo}a", "{foo}b", "{foo}c"], withscores=True
-        ) == [[b"a2", 3.0], [b"a4", 4.0], [b"a3", 8.0], [b"a1", 9.0]]
+        assert r.zunion(["{foo}a", "{foo}b", "{foo}c"], withscores=True) == [
+            [b"a2", 3.0],
+            [b"a4", 4.0],
+            [b"a3", 8.0],
+            [b"a1", 9.0],
+        ]
         # max
         assert r.zunion(
             ["{foo}a", "{foo}b", "{foo}c"], aggregate="MAX", withscores=True
@@ -2184,9 +2189,12 @@ class TestClusterRedisCommands:
             ["{foo}a", "{foo}b", "{foo}c"], aggregate="MIN", withscores=True
         ) == [[b"a1", 1.0], [b"a2", 1.0], [b"a3", 1.0], [b"a4", 4.0]]
         # with weight
-        assert r.zunion(
-            {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True
-        ) == [[b"a2", 5.0], [b"a4", 12.0], [b"a3", 20.0], [b"a1", 23.0]]
+        assert r.zunion({"{foo}a": 1, "{foo}b": 2, "{foo}c": 3}, withscores=True) == [
+            [b"a2", 5.0],
+            [b"a4", 12.0],
+            [b"a3", 20.0],
+            [b"a1", 23.0],
+        ]
 
     def test_cluster_zunionstore_sum(self, r):
         r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})

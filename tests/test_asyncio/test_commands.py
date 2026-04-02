@@ -31,7 +31,6 @@ from redis.utils import safe_str
 import redis.asyncio as redis
 from tests.conftest import (
     assert_resp_response,
-    assert_resp_response_in,
     is_resp2_connection,
     skip_if_server_version_gte,
     skip_if_server_version_lt,

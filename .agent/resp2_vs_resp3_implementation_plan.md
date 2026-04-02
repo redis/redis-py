@@ -328,34 +328,164 @@ These commands return **actual numeric values** (quantile boundaries, probabilit
 ## Batch 11: Module Commands — TimeSeries (TS)
 
 **Theme:** RESP2 parses TS responses into structured objects; RESP3 returns raw. Unify to parsed objects.
+Apply Batch 10 lessons: no unnecessary RESP3 callbacks when native types suffice; no `nativestr()` on user data; identical callbacks go in common `_MODULE_CALLBACKS`.
+
+### Sub-batch 11a: TS.GET, TS.RANGE, TS.REVRANGE (simple value commands)
 
 | # | Command | Current RESP2 Type | Current RESP3 Type | Final Type | Action |
 |---|---------|-------------------|-------------------|------------|--------|
-| 1 | TS.GET | `tuple(int, float)\|None` | Raw response | `list[int, float]\|None` | Update RESP2 `parse_get` to return `list`; add RESP3 callback |
-| 2 | TS.INFO | `TSInfo` object | Raw response | `TSInfo` object | Add RESP3 callback constructing `TSInfo` from dict |
-| 3 | TS.RANGE | `list[tuple(timestamp, float)]` | Raw response | `list[list[timestamp, float]]` | Update RESP2 `parse_range` to return `list`; add RESP3 callback |
-| 4 | TS.REVRANGE | Same as TS.RANGE | Raw response | `list[list[timestamp, float]]` | Same |
-| 5 | TS.MGET | Parsed dict structure | Raw response | Parsed dict structure | Add RESP3 callback with same parsing |
-| 6 | TS.MRANGE | Parsed dict structure | Raw response | Parsed dict structure | Add RESP3 callback |
-| 7 | TS.MREVRANGE | Parsed dict structure | Raw response | Parsed dict structure | Same |
-| 8 | TS.QUERYINDEX | `list` | Raw response | `list` | Add RESP3 callback: `parse_to_list` |
+| 1 | TS.GET | `tuple(int, float)\|None` via `parse_get` | Raw `[int, float]` (native) | `list[int \| float] \| None` | Update RESP2 `parse_get` to return `list`; **no RESP3 callback** (RESP3 already returns `[int, float]` natively) |
+| 2 | TS.RANGE | `list[tuple]` via `parse_range` | Raw `list[list[int, float]]` (native) | `list[list[int \| float]]` | Update RESP2 `parse_range` to return `list[list]`; **no RESP3 callback** (RESP3 already returns correct structure) |
+| 3 | TS.REVRANGE | Same as RANGE | Same as RANGE | Same as RANGE | Same as RANGE |
 
-**Implementation notes:**
-- `parse_range` returns `list[tuple]` → change to `list[list]` (Batch 1 principle: list over tuple)
-- `parse_get` returns `tuple(int, float)` → change to `list[int, float]`
-- TSInfo constructor needs to handle dict input (RESP3) in addition to flat list (RESP2)
+**Why no RESP3 callbacks:** RESP3 natively returns integers and doubles. The protocol parser already produces `[int, float]` for TS.GET and `[[int, float], ...]` for TS.RANGE. Adding a callback would be a no-op (same lesson as TOPK.LIST in Batch 10).
 
-**Unit test fixes (`tests/test_timeseries.py`):**
-- `test_get` (lines ~200-204): replace `assert_resp_response(client, client.ts().get(2), (5, 1.5), [5, 1.5])` → `assert client.ts().get(2) == [5, 1.5]` (3 assertions)
-- `test_range` / `test_range_advanced` (lines ~253, ~291, ~295, ~297): replace `assert_resp_response(client, res, [(0, 10.0), (10, 1.0)], [[0, 10.0], [10, 1.0]])` → `assert res == [[0, 10.0], [10, 1.0]]`
-- `test_range_latest` (lines ~312-321): same tuple→list unification
-- `test_range_empty` (lines ~370-402): same pattern
-- `test_revrange_latest` (lines ~429-470): same pattern
-- `test_mget` / `test_mget_latest` (lines ~972-999): replace `assert_resp_response` with unified dict structure assertions
-- `test_mrange` / `test_mrevrange` (lines ~517-549, ~883-931): same pattern
-- `test_info` (lines ~39-139): replace `assert_resp_response(client, 128, info.get("chunk_size"), info.get("chunkSize"))` → use unified `TSInfo` attribute access
-- `test_queryindex` (line ~1028): replace `assert_resp_response(client, ..., [2], ["2"])` → unified `list` assertion
-- **~70+ `assert_resp_response` calls** across the file need updating — this is a high-volume batch
+**RESP2 callbacks are still needed** because RESP2 returns values as bulk strings that need `float()` conversion. Timestamps are already `int` in RESP2.
+
+**Implementation:**
+- `parse_get`: Change `return int(response[0]), float(response[1])` → `return [response[0], float(response[1])]` (timestamp is already int from RESP2 parser)
+- `parse_range`: Change `return [tuple((r[0], float(r[1]))) for r in response]` → `return [[r[0], float(r[1])] for r in response]`
+- Keep both in `_RESP2_MODULE_CALLBACKS` only (not common dict, since RESP3 needs no callback)
+
+**Type alias update in `redis/typing.py`:**
+- `TimeSeriesSample = tuple[int, float] | list[int | float]` → `TimeSeriesSample = list[int | float]` (tuples gone)
+- `TimeSeriesRangeResponse = list[TimeSeriesSample]` — unchanged
+
+**Type hint update in `redis/commands/timeseries/commands.py`:**
+- `get()` return type already uses `TimeSeriesSample | None` — correct after alias update
+- `range()`/`revrange()` return type already uses `TimeSeriesRangeResponse` — correct after alias update
+
+### Sub-batch 11b: TS.INFO
+
+| # | Command | Current RESP2 Type | Current RESP3 Type | Final Type | Action |
+|---|---------|-------------------|-------------------|------------|--------|
+| 4 | TS.INFO | `TSInfo` object | Raw `dict` (no callback) | `TSInfo` | Update `TSInfo.__init__` to handle dict input; callback goes in common `_MODULE_CALLBACKS` |
+
+**Implementation:**
+- Update `TSInfo.__init__` to detect if `args` is already a dict (RESP3) vs flat list (RESP2)
+- For RESP2: current behavior — `dict(zip(map(nativestr, args[::2]), args[1::2]))` (server-generated keys, `nativestr` acceptable)
+- For RESP3: `args` is already a dict with str keys — use directly
+- **Labels handling:** `list_to_dict` uses `nativestr()` on label keys/values which are **user data** — this violates `decode_responses=False`. However, fixing this is a deeper change affecting the labels dict structure. For now, note the issue but preserve existing behavior to avoid a breaking change.
+- **Rules handling:** RESP2 `rules` is a list of lists `[[key, bucket_size, agg_type], ...]`; RESP3 `rules` is a dict `{key: [bucket_size, agg_type]}`. Need to unify — decide on format.
+- Move `INFO_CMD: TSInfo` to common `_MODULE_CALLBACKS` (identical callback for both protocols)
+- Remove `| dict[str, Any]` from `info()` return type annotation
+
+### Sub-batch 11c: TS.QUERYINDEX
+
+| # | Command | Current RESP2 Type | Current RESP3 Type | Final Type | Action |
+|---|---------|-------------------|-------------------|------------|--------|
+| 5 | TS.QUERYINDEX | `list` via `parse_to_list` (coerces to int/float) | Raw `list` (native) | `list[bytes \| str]` | **Remove** RESP2 callback (deletion, not addition) |
+
+**Why delete the callback:** `parse_to_list` calls `nativestr()` + numeric coercion on key names. Key names are **user data** — coercing `"2"` to `2` is incorrect (same lesson as TOPK.ADD in Batch 10). RESP3 already returns a native list. RESP2 also returns a list — the only purpose of `parse_to_list` was `nativestr()` + coercion, which we're removing.
+
+**Current test shows the bug:**
+```
+assert_resp_response(client, client.ts().queryindex(["Taste=That"]), [2], ["2"])
+```
+RESP2 returns `[2]` (coerced int), RESP3 returns `["2"]` (correct string). After fix, both return `["2"]` (or `[b"2"]` with `decode_responses=False`).
+
+**Type hint:** Already correct at `list[bytes | str]`.
+
+### Sub-batch 11d: TS.MGET, TS.MRANGE, TS.MREVRANGE (complex structural commands)
+
+**Design decision: Unify to RESP3 dict format.**
+
+| # | Command | Current RESP2 Type | Current RESP3 Type | Final (Unified) Type | Action |
+|---|---------|-------------------|-------------------|------------|--------|
+| 6 | TS.MGET | `list[dict]` (sorted) via `parse_m_get` | `dict[str\|bytes, list]` (native map) | `dict[str\|bytes, list]` | Update RESP2 `parse_m_get` to return dict; remove `nativestr()`; no RESP3 callback needed |
+| 7 | TS.MRANGE | `list[dict]` (sorted) via `parse_m_range` | `dict[str\|bytes, list]` (native map) | `dict[str\|bytes, list]` | Update RESP2 `parse_m_range` to return dict; add empty metadata list; remove `nativestr()`; no RESP3 callback needed |
+| 8 | TS.MREVRANGE | Same as MRANGE | Same as MRANGE | Same as MRANGE | Same as MRANGE |
+
+**RESP3 native structure (target format):**
+
+TS.MGET:
+```
+{
+    key: [labels_dict, [timestamp, value]],   # 2 elements: labels, sample-as-list
+    ...
+}
+# When no data: {key: [{}, []], ...}
+```
+
+TS.MRANGE / TS.MREVRANGE:
+```
+{
+    key: [labels_dict, metadata_list, [[ts, val], [ts, val], ...]],   # 3 elements: labels, metadata (e.g. reducers/aggregators), samples
+    ...
+}
+```
+
+**RESP2 raw structure (before parsing):**
+
+TS.MGET:
+```
+[[key, [[label_k, label_v], ...], [timestamp, value]], ...]
+# When no data: [[key, [[label_k, label_v], ...], []], ...]
+```
+
+TS.MRANGE / TS.MREVRANGE:
+```
+[[key, [[label_k, label_v], ...], [[ts, val], [ts, val], ...]], ...]
+# Note: RESP2 does NOT include the metadata element that RESP3 has
+```
+
+**Implementation — `parse_m_get` (RESP2 → RESP3 format):**
+- Return a `dict` keyed by `item[0]` (key name, NO `nativestr()` — respect `decode_responses`)
+- Labels: convert `[[k, v], ...]` pairs to dict WITHOUT `nativestr()` — use keys/values as-is
+- Sample: nest `[timestamp, value]` in a list (RESP3 returns `[ts, val]` as a sub-list)
+- Empty sample: return `[]` (matching RESP3's `[]` for no-data case, instead of `None, None`)
+
+**Implementation — `parse_m_range` / `parse_m_revrange` (RESP2 → RESP3 format):**
+- Return a `dict` keyed by `item[0]` (key name, NO `nativestr()`)
+- Labels: same as MGET — pairs to dict without `nativestr()`
+- **Add empty list `[]` as second element** (metadata placeholder) — RESP2 does not include the
+  metadata/reducers element that RESP3 returns. Insert `[]` to match RESP3's 3-element structure.
+  Add a code comment: `# RESP2 does not include the metadata element (reducers/aggregators) that`
+  `# RESP3 returns as the second element. Insert empty list for structural parity.`
+- Range data: use updated `parse_range` (returns `list[list]` after 11a changes)
+- Remove sorting — RESP3 dict is unordered; RESP2 should match
+
+**`list_to_dict` refactor:**
+- Remove `nativestr()` calls — label keys and values are user data, must respect `decode_responses`
+- New: `{aList[i][0]: aList[i][1] for i in range(len(aList))}`
+- Note: this also affects `TSInfo.labels` (sub-batch 11b) — labels will now be `bytes` keys when `decode_responses=False`, which is the correct behavior
+
+**No RESP3 callbacks needed** — RESP3 already returns the target dict format natively.
+
+**Callbacks remain in `_RESP2_MODULE_CALLBACKS` only** (not common dict, since RESP3 needs no callback).
+
+**Unit test fixes (`tests/test_timeseries.py` and `tests/test_asyncio/test_timeseries.py`):**
+
+*Sub-batch 11a (GET/RANGE/REVRANGE):*
+- `test_get` (lines ~200-204): replace `assert_resp_response(client, client.ts().get(2), (5, 1.5), [5, 1.5])` → `assert client.ts().get(2) == [5, 1.5]`
+- `test_range` / `test_range_advanced` / `test_range_latest` / `test_range_empty`: replace `assert_resp_response(client, res, [(ts, val), ...], [[ts, val], ...])` → `assert res == [[ts, val], ...]`
+- `test_revrange` / `test_revrange_latest` / `test_revrange_empty`: same pattern
+- `test_delete`: range assertions same pattern
+- `test_incrby_decrby`: GET assertions same pattern
+- Various insertion filter tests: range assertions same pattern
+- **~50+ `assert_resp_response` calls** for GET/RANGE/REVRANGE
+
+*Sub-batch 11b (INFO):*
+- All `assert_resp_response(client, val, info.get("retention_msecs"), info.get("retentionTime"))` → `assert val == info.retention_msecs`
+- All `assert_resp_response(client, val, info.get("chunk_size"), info.get("chunkSize"))` → `assert val == info.chunk_size`
+- All `assert_resp_response(client, val, info.get("duplicate_policy"), info.get("duplicatePolicy"))` → `assert val == info.duplicate_policy`
+- `is_resp2_connection` branching for `info.memory_usage` vs `info["memoryUsage"]` → unified `info.memory_usage`
+- `is_resp2_connection` branching for `info.rules` (list vs dict) → unified attribute access (after rules format is unified)
+- **~20+ `assert_resp_response` / `is_resp2_connection` calls** for INFO
+
+*Sub-batch 11c (QUERYINDEX):*
+- `test_queryindex` (line ~1028): `assert_resp_response(client, ..., [2], ["2"])` → `assert client.ts().queryindex(["Taste=That"]) == ["2"]`
+- **1 assertion**
+
+*Sub-batch 11d (MGET/MRANGE/MREVRANGE):*
+- All `is_resp2_connection` branching for MGET/MRANGE/MREVRANGE → unified dict-based assertions
+- `test_mget`: `assert_resp_response(client, act_res, [{"1": [{}, None, None]}, ...], {"1": [{}, []], ...})` → `assert act_res == {"1": [{}, []], "2": [{}, []]}`
+- `test_mget`: `res[0]["1"][2]` (RESP2) / `res["1"][1][1]` (RESP3) → unified `res["1"][1][1]`
+- `test_mget_latest`: `assert_resp_response(client, res, [{"t2": [{}, 0, 4.0]}], {"t2": [{}, [0, 4.0]]})` → `assert res == {"t2": [{}, [0, 4.0]]}`
+- `test_mrange`: `res[0]["1"][1]` (RESP2) / `res["1"][2]` (RESP3) → unified `res["1"][2]`
+- `test_mrange`: labels at `res[0]["1"][0]` (RESP2) / `res["1"][0]` (RESP3) → unified `res["1"][0]`
+- All `test_multi_range_advanced`, `test_mrange_latest`, `test_multi_reverse_range`: same pattern
+- **~20+ `assert_resp_response` / `is_resp2_connection` calls**
 
 Also update `tests/test_asyncio/test_timeseries.py` with identical changes.
 

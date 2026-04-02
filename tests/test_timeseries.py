@@ -7,7 +7,6 @@ import redis
 
 from .conftest import (
     _get_client,
-    assert_resp_response,
     is_resp2_connection,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
@@ -36,15 +35,13 @@ def test_create(client):
     assert client.ts().create(3, labels={"Redis": "Labs"})
     assert client.ts().create(4, retention_msecs=20, labels={"Time": "Series"})
     info = client.ts().info(4)
-    assert_resp_response(
-        client, 20, info.get("retention_msecs"), info.get("retentionTime")
-    )
+    assert 20 == info.retention_msecs
     assert "Series" == info["labels"]["Time"]
 
     # Test for a chunk size of 128 Bytes
     assert client.ts().create("time-serie-1", chunk_size=128)
     info = client.ts().info("time-serie-1")
-    assert_resp_response(client, 128, info.get("chunk_size"), info.get("chunkSize"))
+    assert 128 == info.chunk_size
 
 
 @pytest.mark.redismod
@@ -55,33 +52,22 @@ def test_create_duplicate_policy(client):
         ts_name = f"time-serie-ooo-{duplicate_policy}"
         assert client.ts().create(ts_name, duplicate_policy=duplicate_policy)
         info = client.ts().info(ts_name)
-        assert_resp_response(
-            client,
-            duplicate_policy,
-            info.get("duplicate_policy"),
-            info.get("duplicatePolicy"),
-        )
+        assert duplicate_policy == info.get("duplicate_policy")
 
 
 @pytest.mark.redismod
 def test_alter(client):
     assert client.ts().create(1)
     info = client.ts().info(1)
-    assert_resp_response(
-        client, 0, info.get("retention_msecs"), info.get("retentionTime")
-    )
+    assert 0 == info.get("retention_msecs")
     assert client.ts().alter(1, retention_msecs=10)
     assert {} == client.ts().info(1)["labels"]
     info = client.ts().info(1)
-    assert_resp_response(
-        client, 10, info.get("retention_msecs"), info.get("retentionTime")
-    )
+    assert 10 == info.get("retention_msecs")
     assert client.ts().alter(1, labels={"Time": "Series"})
     assert "Series" == client.ts().info(1)["labels"]["Time"]
     info = client.ts().info(1)
-    assert_resp_response(
-        client, 10, info.get("retention_msecs"), info.get("retentionTime")
-    )
+    assert 10 == info.get("retention_msecs")
 
 
 @pytest.mark.redismod
@@ -90,14 +76,10 @@ def test_alter(client):
 def test_alter_duplicate_policy_prior_redis_8(client):
     assert client.ts().create(1)
     info = client.ts().info(1)
-    assert_resp_response(
-        client, None, info.get("duplicate_policy"), info.get("duplicatePolicy")
-    )
+    assert None is info.get("duplicate_policy")
     assert client.ts().alter(1, duplicate_policy="min")
     info = client.ts().info(1)
-    assert_resp_response(
-        client, "min", info.get("duplicate_policy"), info.get("duplicatePolicy")
-    )
+    assert "min" == info.get("duplicate_policy")
 
 
 @pytest.mark.redismod
@@ -106,14 +88,10 @@ def test_alter_duplicate_policy_prior_redis_8(client):
 def test_alter_duplicate_policy(client):
     assert client.ts().create(1)
     info = client.ts().info(1)
-    assert_resp_response(
-        client, "block", info.get("duplicate_policy"), info.get("duplicatePolicy")
-    )
+    assert "block" == info.get("duplicate_policy")
     assert client.ts().alter(1, duplicate_policy="min")
     info = client.ts().info(1)
-    assert_resp_response(
-        client, "min", info.get("duplicate_policy"), info.get("duplicatePolicy")
-    )
+    assert "min" == info.get("duplicate_policy")
 
 
 @pytest.mark.redismod
@@ -128,15 +106,13 @@ def test_add(client):
     assert abs(time.time() - float(client.ts().add(5, "*", 1)) / 1000) < 1.0
 
     info = client.ts().info(4)
-    assert_resp_response(
-        client, 10, info.get("retention_msecs"), info.get("retentionTime")
-    )
+    assert 10 == info.get("retention_msecs")
     assert "Labs" == info["labels"]["Redis"]
 
     # Test for a chunk size of 128 Bytes on TS.ADD
     assert client.ts().add("time-serie-1", 1, 10.0, chunk_size=128)
     info = client.ts().info("time-serie-1")
-    assert_resp_response(client, 128, info.get("chunk_size"), info.get("chunkSize"))
+    assert 128 == info.get("chunk_size")
 
 
 @pytest.mark.redismod
@@ -197,21 +173,21 @@ def test_incrby_decrby(client):
     assert 0 == client.ts().get(1)[1]
 
     assert client.ts().incrby(2, 1.5, timestamp=5)
-    assert_resp_response(client, client.ts().get(2), (5, 1.5), [5, 1.5])
+    assert [5, 1.5] == client.ts().get(2)
     assert client.ts().incrby(2, 2.25, timestamp=7)
-    assert_resp_response(client, client.ts().get(2), (7, 3.75), [7, 3.75])
+    assert [7, 3.75] == client.ts().get(2)
     assert client.ts().decrby(2, 1.5, timestamp=15)
-    assert_resp_response(client, client.ts().get(2), (15, 2.25), [15, 2.25])
+    assert [15, 2.25] == client.ts().get(2)
 
     # Test for a chunk size of 128 Bytes on TS.INCRBY
     assert client.ts().incrby("time-serie-1", 10, chunk_size=128)
     info = client.ts().info("time-serie-1")
-    assert_resp_response(client, 128, info.get("chunk_size"), info.get("chunkSize"))
+    assert 128 == info.get("chunk_size")
 
     # Test for a chunk size of 128 Bytes on TS.DECRBY
     assert client.ts().decrby("time-serie-2", 10, chunk_size=128)
     info = client.ts().info("time-serie-2")
-    assert_resp_response(client, 128, info.get("chunk_size"), info.get("chunkSize"))
+    assert 128 == info.get("chunk_size")
 
 
 @pytest.mark.redismod
@@ -227,10 +203,7 @@ def test_create_and_delete_rule(client):
     client.ts().add(1, time * 2, 1.5)
     assert round(client.ts().get(2)[1], 5) == 1.5
     info = client.ts().info(1)
-    if is_resp2_connection(client):
-        assert info.rules[0][1] == 100
-    else:
-        assert info["rules"]["2"][0] == 100
+    assert info.rules["2"][0] == 100
 
     # test rule deletion
     client.ts().deleterule(1, 2)
@@ -250,7 +223,7 @@ def test_del_range(client):
         client.ts().add(1, i, i % 7)
     assert 22 == client.ts().delete(1, 0, 21)
     assert [] == client.ts().range(1, 0, 21)
-    assert_resp_response(client, client.ts().range(1, 22, 22), [(22, 1.0)], [[22, 1.0]])
+    assert [[22, 1.0]] == client.ts().range(1, 22, 22)
 
 
 @pytest.mark.redismod
@@ -288,13 +261,13 @@ def test_range_advanced(client):
     res = client.ts().range(
         1, 0, 10, aggregation_type="count", bucket_size_msec=10, align="+"
     )
-    assert_resp_response(client, res, [(0, 10.0), (10, 1.0)], [[0, 10.0], [10, 1.0]])
+    assert [[0, 10.0], [10, 1.0]] == res
     res = client.ts().range(
         1, 0, 10, aggregation_type="count", bucket_size_msec=10, align=5
     )
-    assert_resp_response(client, res, [(0, 5.0), (5, 6.0)], [[0, 5.0], [5, 6.0]])
+    assert [[0, 5.0], [5, 6.0]] == res
     res = client.ts().range(1, 0, 10, aggregation_type="twa", bucket_size_msec=10)
-    assert_resp_response(client, res, [(0, 2.55), (10, 3.0)], [[0, 2.55], [10, 3.0]])
+    assert [[0, 2.55], [10, 3.0]] == res
 
 
 @pytest.mark.onlynoncluster
@@ -309,18 +282,11 @@ def test_range_latest(client: redis.Redis):
     timeseries.add("t1", 2, 3)
     timeseries.add("t1", 11, 7)
     timeseries.add("t1", 13, 1)
-    assert_resp_response(
-        client,
-        timeseries.range("t1", 0, 20),
-        [(1, 1.0), (2, 3.0), (11, 7.0), (13, 1.0)],
-        [[1, 1.0], [2, 3.0], [11, 7.0], [13, 1.0]],
-    )
-    assert_resp_response(client, timeseries.range("t2", 0, 10), [(0, 4.0)], [[0, 4.0]])
+    assert [[1, 1.0], [2, 3.0], [11, 7.0], [13, 1.0]] == timeseries.range("t1", 0, 20)
+    assert [[0, 4.0]] == timeseries.range("t2", 0, 10)
     res = timeseries.range("t2", 0, 10, latest=True)
-    assert_resp_response(client, res, [(0, 4.0), (10, 8.0)], [[0, 4.0], [10, 8.0]])
-    assert_resp_response(
-        client, timeseries.range("t2", 0, 9, latest=True), [(0, 4.0)], [[0, 4.0]]
-    )
+    assert [[0, 4.0], [10, 8.0]] == res
+    assert [[0, 4.0]] == timeseries.range("t2", 0, 9, latest=True)
 
 
 @pytest.mark.redismod
@@ -333,27 +299,17 @@ def test_range_bucket_timestamp(client: redis.Redis):
     timeseries.add("t1", 51, 3)
     timeseries.add("t1", 73, 5)
     timeseries.add("t1", 75, 3)
-    assert_resp_response(
-        client,
-        timeseries.range(
-            "t1", 0, 100, align=0, aggregation_type="max", bucket_size_msec=10
-        ),
-        [(10, 4.0), (50, 3.0), (70, 5.0)],
-        [[10, 4.0], [50, 3.0], [70, 5.0]],
+    assert [[10, 4.0], [50, 3.0], [70, 5.0]] == timeseries.range(
+        "t1", 0, 100, align=0, aggregation_type="max", bucket_size_msec=10
     )
-    assert_resp_response(
-        client,
-        timeseries.range(
-            "t1",
-            0,
-            100,
-            align=0,
-            aggregation_type="max",
-            bucket_size_msec=10,
-            bucket_timestamp="+",
-        ),
-        [(20, 4.0), (60, 3.0), (80, 5.0)],
-        [[20, 4.0], [60, 3.0], [80, 5.0]],
+    assert [[20, 4.0], [60, 3.0], [80, 5.0]] == timeseries.range(
+        "t1",
+        0,
+        100,
+        align=0,
+        aggregation_type="max",
+        bucket_size_msec=10,
+        bucket_timestamp="+",
     )
 
 
@@ -367,39 +323,25 @@ def test_range_empty(client: redis.Redis):
     timeseries.add("t1", 51, 3)
     timeseries.add("t1", 73, 5)
     timeseries.add("t1", 75, 3)
-    assert_resp_response(
-        client,
-        timeseries.range(
-            "t1", 0, 100, align=0, aggregation_type="max", bucket_size_msec=10
-        ),
-        [(10, 4.0), (50, 3.0), (70, 5.0)],
-        [[10, 4.0], [50, 3.0], [70, 5.0]],
+    assert [[10, 4.0], [50, 3.0], [70, 5.0]] == timeseries.range(
+        "t1", 0, 100, align=0, aggregation_type="max", bucket_size_msec=10
     )
     res = timeseries.range(
         "t1", 0, 100, align=0, aggregation_type="max", bucket_size_msec=10, empty=True
     )
     for i in range(len(res)):
         if math.isnan(res[i][1]):
-            res[i] = (res[i][0], None)
-    resp2_expected = [
-        (10, 4.0),
-        (20, None),
-        (30, None),
-        (40, None),
-        (50, 3.0),
-        (60, None),
-        (70, 5.0),
-    ]
-    resp3_expected = [
+            res[i] = [res[i][0], None]
+    expected = [
         [10, 4.0],
-        (20, None),
-        (30, None),
-        (40, None),
+        [20, None],
+        [30, None],
+        [40, None],
         [50, 3.0],
-        (60, None),
+        [60, None],
         [70, 5.0],
     ]
-    assert_resp_response(client, res, resp2_expected, resp3_expected)
+    assert expected == res
 
 
 @pytest.mark.redismod
@@ -426,27 +368,14 @@ def test_rev_range(client):
             filter_by_max_value=2,
         )
     )
-    assert_resp_response(
-        client,
-        client.ts().revrange(
-            1, 0, 10, aggregation_type="count", bucket_size_msec=10, align="+"
-        ),
-        [(10, 1.0), (0, 10.0)],
-        [[10, 1.0], [0, 10.0]],
+    assert [[10, 1.0], [0, 10.0]] == client.ts().revrange(
+        1, 0, 10, aggregation_type="count", bucket_size_msec=10, align="+"
     )
-    assert_resp_response(
-        client,
-        client.ts().revrange(
-            1, 0, 10, aggregation_type="count", bucket_size_msec=10, align=1
-        ),
-        [(1, 10.0), (0, 1.0)],
-        [[1, 10.0], [0, 1.0]],
+    assert [[1, 10.0], [0, 1.0]] == client.ts().revrange(
+        1, 0, 10, aggregation_type="count", bucket_size_msec=10, align=1
     )
-    assert_resp_response(
-        client,
-        client.ts().revrange(1, 0, 10, aggregation_type="twa", bucket_size_msec=10),
-        [(10, 3.0), (0, 2.55)],
-        [[10, 3.0], [0, 2.55]],
+    assert [[10, 3.0], [0, 2.55]] == client.ts().revrange(
+        1, 0, 10, aggregation_type="twa", bucket_size_msec=10
     )
 
 
@@ -462,12 +391,9 @@ def test_revrange_latest(client: redis.Redis):
     timeseries.add("t1", 2, 3)
     timeseries.add("t1", 11, 7)
     timeseries.add("t1", 13, 1)
-    res = timeseries.revrange("t2", 0, 10)
-    assert_resp_response(client, res, [(0, 4.0)], [[0, 4.0]])
-    res = timeseries.revrange("t2", 0, 10, latest=True)
-    assert_resp_response(client, res, [(10, 8.0), (0, 4.0)], [[10, 8.0], [0, 4.0]])
-    res = timeseries.revrange("t2", 0, 9, latest=True)
-    assert_resp_response(client, res, [(0, 4.0)], [[0, 4.0]])
+    assert [[0, 4.0]] == timeseries.revrange("t2", 0, 10)
+    assert [[10, 8.0], [0, 4.0]] == timeseries.revrange("t2", 0, 10, latest=True)
+    assert [[0, 4.0]] == timeseries.revrange("t2", 0, 9, latest=True)
 
 
 @pytest.mark.redismod
@@ -480,27 +406,17 @@ def test_revrange_bucket_timestamp(client: redis.Redis):
     timeseries.add("t1", 51, 3)
     timeseries.add("t1", 73, 5)
     timeseries.add("t1", 75, 3)
-    assert_resp_response(
-        client,
-        timeseries.revrange(
-            "t1", 0, 100, align=0, aggregation_type="max", bucket_size_msec=10
-        ),
-        [(70, 5.0), (50, 3.0), (10, 4.0)],
-        [[70, 5.0], [50, 3.0], [10, 4.0]],
+    assert [[70, 5.0], [50, 3.0], [10, 4.0]] == timeseries.revrange(
+        "t1", 0, 100, align=0, aggregation_type="max", bucket_size_msec=10
     )
-    assert_resp_response(
-        client,
-        timeseries.range(
-            "t1",
-            0,
-            100,
-            align=0,
-            aggregation_type="max",
-            bucket_size_msec=10,
-            bucket_timestamp="+",
-        ),
-        [(20, 4.0), (60, 3.0), (80, 5.0)],
-        [[20, 4.0], [60, 3.0], [80, 5.0]],
+    assert [[20, 4.0], [60, 3.0], [80, 5.0]] == timeseries.range(
+        "t1",
+        0,
+        100,
+        align=0,
+        aggregation_type="max",
+        bucket_size_msec=10,
+        bucket_timestamp="+",
     )
 
 
@@ -514,39 +430,25 @@ def test_revrange_empty(client: redis.Redis):
     timeseries.add("t1", 51, 3)
     timeseries.add("t1", 73, 5)
     timeseries.add("t1", 75, 3)
-    assert_resp_response(
-        client,
-        timeseries.revrange(
-            "t1", 0, 100, align=0, aggregation_type="max", bucket_size_msec=10
-        ),
-        [(70, 5.0), (50, 3.0), (10, 4.0)],
-        [[70, 5.0], [50, 3.0], [10, 4.0]],
+    assert [[70, 5.0], [50, 3.0], [10, 4.0]] == timeseries.revrange(
+        "t1", 0, 100, align=0, aggregation_type="max", bucket_size_msec=10
     )
     res = timeseries.revrange(
         "t1", 0, 100, align=0, aggregation_type="max", bucket_size_msec=10, empty=True
     )
     for i in range(len(res)):
         if math.isnan(res[i][1]):
-            res[i] = (res[i][0], None)
-    resp2_expected = [
-        (70, 5.0),
-        (60, None),
-        (50, 3.0),
-        (40, None),
-        (30, None),
-        (20, None),
-        (10, 4.0),
-    ]
-    resp3_expected = [
+            res[i] = [res[i][0], None]
+    expected = [
         [70, 5.0],
-        (60, None),
+        [60, None],
         [50, 3.0],
-        (40, None),
-        (30, None),
-        (20, None),
+        [40, None],
+        [30, None],
+        [20, None],
         [10, 4.0],
     ]
-    assert_resp_response(client, res, resp2_expected, resp3_expected)
+    assert expected == res
 
 
 @pytest.mark.onlynoncluster
@@ -560,42 +462,23 @@ def test_mrange(client):
 
     res = client.ts().mrange(0, 200, filters=["Test=This"])
     assert 2 == len(res)
-    if is_resp2_connection(client):
-        assert 100 == len(res[0]["1"][1])
+    assert 100 == len(res["1"][2])
 
-        res = client.ts().mrange(0, 200, filters=["Test=This"], count=10)
-        assert 10 == len(res[0]["1"][1])
+    res = client.ts().mrange(0, 200, filters=["Test=This"], count=10)
+    assert 10 == len(res["1"][2])
 
-        for i in range(100):
-            client.ts().add(1, i + 200, i % 7)
-        res = client.ts().mrange(
-            0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
-        )
-        assert 2 == len(res)
-        assert 20 == len(res[0]["1"][1])
+    for i in range(100):
+        client.ts().add(1, i + 200, i % 7)
+    res = client.ts().mrange(
+        0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
+    )
+    assert 2 == len(res)
+    assert 20 == len(res["1"][2])
 
-        # test withlabels
-        assert {} == res[0]["1"][0]
-        res = client.ts().mrange(0, 200, filters=["Test=This"], with_labels=True)
-        assert {"Test": "This", "team": "ny"} == res[0]["1"][0]
-    else:
-        assert 100 == len(res["1"][2])
-
-        res = client.ts().mrange(0, 200, filters=["Test=This"], count=10)
-        assert 10 == len(res["1"][2])
-
-        for i in range(100):
-            client.ts().add(1, i + 200, i % 7)
-        res = client.ts().mrange(
-            0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
-        )
-        assert 2 == len(res)
-        assert 20 == len(res["1"][2])
-
-        # test withlabels
-        assert {} == res["1"][0]
-        res = client.ts().mrange(0, 200, filters=["Test=This"], with_labels=True)
-        assert {"Test": "This", "team": "ny"} == res["1"][0]
+    # test withlabels
+    assert {} == res["1"][0]
+    res = client.ts().mrange(0, 200, filters=["Test=This"], with_labels=True)
+    assert {"Test": "This", "team": "ny"} == res["1"][0]
 
 
 @pytest.mark.onlynoncluster
@@ -610,106 +493,52 @@ def test_multi_range_advanced(client):
 
     # test with selected labels
     res = client.ts().mrange(0, 200, filters=["Test=This"], select_labels=["team"])
-    if is_resp2_connection(client):
-        assert {"team": "ny"} == res[0]["1"][0]
-        assert {"team": "sf"} == res[1]["2"][0]
+    assert {"team": "ny"} == res["1"][0]
+    assert {"team": "sf"} == res["2"][0]
 
-        # test with filterby
-        res = client.ts().mrange(
-            0,
-            200,
-            filters=["Test=This"],
-            filter_by_ts=[i for i in range(10, 20)],
-            filter_by_min_value=1,
-            filter_by_max_value=2,
-        )
-        assert [(15, 1.0), (16, 2.0)] == res[0]["1"][1]
+    # test with filterby
+    res = client.ts().mrange(
+        0,
+        200,
+        filters=["Test=This"],
+        filter_by_ts=[i for i in range(10, 20)],
+        filter_by_min_value=1,
+        filter_by_max_value=2,
+    )
+    assert [[15, 1.0], [16, 2.0]] == res["1"][2]
 
-        # test groupby
-        res = client.ts().mrange(
-            0, 3, filters=["Test=This"], groupby="Test", reduce="sum"
-        )
-        assert [(0, 0.0), (1, 2.0), (2, 4.0), (3, 6.0)] == res[0]["Test=This"][1]
-        res = client.ts().mrange(
-            0, 3, filters=["Test=This"], groupby="Test", reduce="max"
-        )
-        assert [(0, 0.0), (1, 1.0), (2, 2.0), (3, 3.0)] == res[0]["Test=This"][1]
-        res = client.ts().mrange(
-            0, 3, filters=["Test=This"], groupby="team", reduce="min"
-        )
-        assert 2 == len(res)
-        assert [(0, 0.0), (1, 1.0), (2, 2.0), (3, 3.0)] == res[0]["team=ny"][1]
-        assert [(0, 0.0), (1, 1.0), (2, 2.0), (3, 3.0)] == res[1]["team=sf"][1]
+    # test groupby
+    # Note: RESP3 includes extra reducers/sources metadata so samples are at
+    # index [3] vs RESP2's [2].  Keep protocol branching for groupby only.
+    res = client.ts().mrange(0, 3, filters=["Test=This"], groupby="Test", reduce="sum")
+    samples_idx = 2 if is_resp2_connection(client) else 3
+    assert [[0, 0.0], [1, 2.0], [2, 4.0], [3, 6.0]] == res["Test=This"][samples_idx]
+    res = client.ts().mrange(0, 3, filters=["Test=This"], groupby="Test", reduce="max")
+    assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["Test=This"][samples_idx]
+    res = client.ts().mrange(0, 3, filters=["Test=This"], groupby="team", reduce="min")
+    assert 2 == len(res)
+    assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["team=ny"][samples_idx]
+    assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["team=sf"][samples_idx]
 
-        # test align
-        res = client.ts().mrange(
-            0,
-            10,
-            filters=["team=ny"],
-            aggregation_type="count",
-            bucket_size_msec=10,
-            align="-",
-        )
-        assert [(0, 10.0), (10, 1.0)] == res[0]["1"][1]
-        res = client.ts().mrange(
-            0,
-            10,
-            filters=["team=ny"],
-            aggregation_type="count",
-            bucket_size_msec=10,
-            align=5,
-        )
-        assert [(0, 5.0), (5, 6.0)] == res[0]["1"][1]
-    else:
-        assert {"team": "ny"} == res["1"][0]
-        assert {"team": "sf"} == res["2"][0]
-
-        # test with filterby
-        res = client.ts().mrange(
-            0,
-            200,
-            filters=["Test=This"],
-            filter_by_ts=[i for i in range(10, 20)],
-            filter_by_min_value=1,
-            filter_by_max_value=2,
-        )
-        assert [[15, 1.0], [16, 2.0]] == res["1"][2]
-
-        # test groupby
-        res = client.ts().mrange(
-            0, 3, filters=["Test=This"], groupby="Test", reduce="sum"
-        )
-        assert [[0, 0.0], [1, 2.0], [2, 4.0], [3, 6.0]] == res["Test=This"][3]
-        res = client.ts().mrange(
-            0, 3, filters=["Test=This"], groupby="Test", reduce="max"
-        )
-        assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["Test=This"][3]
-        res = client.ts().mrange(
-            0, 3, filters=["Test=This"], groupby="team", reduce="min"
-        )
-        assert 2 == len(res)
-        assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["team=ny"][3]
-        assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["team=sf"][3]
-
-        # test align
-        res = client.ts().mrange(
-            0,
-            10,
-            filters=["team=ny"],
-            aggregation_type="count",
-            bucket_size_msec=10,
-            align="-",
-        )
-        assert [[0, 10.0], [10, 1.0]] == res["1"][2]
-        res = client.ts().mrange(
-            0,
-            10,
-            filters=["team=ny"],
-            aggregation_type="count",
-            bucket_size_msec=10,
-            align=5,
-        )
-        assert [[0, 5.0], [5, 6.0]] == res["1"][2]
+    # test align
+    res = client.ts().mrange(
+        0,
+        10,
+        filters=["team=ny"],
+        aggregation_type="count",
+        bucket_size_msec=10,
+        align="-",
+    )
+    assert [[0, 10.0], [10, 1.0]] == res["1"][2]
+    res = client.ts().mrange(
+        0,
+        10,
+        filters=["team=ny"],
+        aggregation_type="count",
+        bucket_size_msec=10,
+        align=5,
+    )
+    assert [[0, 5.0], [5, 6.0]] == res["1"][2]
 
 
 @pytest.mark.onlynoncluster
@@ -731,15 +560,12 @@ def test_mrange_latest(client: redis.Redis):
     timeseries.add("t3", 2, 3)
     timeseries.add("t3", 11, 7)
     timeseries.add("t3", 13, 1)
-    assert_resp_response(
-        client,
-        client.ts().mrange(0, 10, filters=["is_compaction=true"], latest=True),
-        [{"t2": [{}, [(0, 4.0), (10, 8.0)]]}, {"t4": [{}, [(0, 4.0), (10, 8.0)]]}],
-        {
-            "t2": [{}, {"aggregators": []}, [[0, 4.0], [10, 8.0]]],
-            "t4": [{}, {"aggregators": []}, [[0, 4.0], [10, 8.0]]],
-        },
-    )
+    res = client.ts().mrange(0, 10, filters=["is_compaction=true"], latest=True)
+    assert 2 == len(res)
+    assert {} == res["t2"][0]
+    assert {} == res["t4"][0]
+    assert [[0, 4.0], [10, 8.0]] == res["t2"][2]
+    assert [[0, 4.0], [10, 8.0]] == res["t4"][2]
 
 
 @pytest.mark.onlynoncluster
@@ -754,16 +580,10 @@ def test_multi_reverse_range(client):
 
     res = client.ts().mrange(0, 200, filters=["Test=This"])
     assert 2 == len(res)
-    if is_resp2_connection(client):
-        assert 100 == len(res[0]["1"][1])
-    else:
-        assert 100 == len(res["1"][2])
+    assert 100 == len(res["1"][2])
 
     res = client.ts().mrange(0, 200, filters=["Test=This"], count=10)
-    if is_resp2_connection(client):
-        assert 10 == len(res[0]["1"][1])
-    else:
-        assert 10 == len(res["1"][2])
+    assert 10 == len(res["1"][2])
 
     for i in range(100):
         client.ts().add(1, i + 200, i % 7)
@@ -771,28 +591,17 @@ def test_multi_reverse_range(client):
         0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
     )
     assert 2 == len(res)
-    if is_resp2_connection(client):
-        assert 20 == len(res[0]["1"][1])
-        assert {} == res[0]["1"][0]
-    else:
-        assert 20 == len(res["1"][2])
-        assert {} == res["1"][0]
+    assert 20 == len(res["1"][2])
+    assert {} == res["1"][0]
 
     # test withlabels
     res = client.ts().mrevrange(0, 200, filters=["Test=This"], with_labels=True)
-    if is_resp2_connection(client):
-        assert {"Test": "This", "team": "ny"} == res[0]["1"][0]
-    else:
-        assert {"Test": "This", "team": "ny"} == res["1"][0]
+    assert {"Test": "This", "team": "ny"} == res["1"][0]
 
     # test with selected labels
     res = client.ts().mrevrange(0, 200, filters=["Test=This"], select_labels=["team"])
-    if is_resp2_connection(client):
-        assert {"team": "ny"} == res[0]["1"][0]
-        assert {"team": "sf"} == res[1]["2"][0]
-    else:
-        assert {"team": "ny"} == res["1"][0]
-        assert {"team": "sf"} == res["2"][0]
+    assert {"team": "ny"} == res["1"][0]
+    assert {"team": "sf"} == res["2"][0]
 
     # test filterby
     res = client.ts().mrevrange(
@@ -803,36 +612,26 @@ def test_multi_reverse_range(client):
         filter_by_min_value=1,
         filter_by_max_value=2,
     )
-    if is_resp2_connection(client):
-        assert [(16, 2.0), (15, 1.0)] == res[0]["1"][1]
-    else:
-        assert [[16, 2.0], [15, 1.0]] == res["1"][2]
+    assert [[16, 2.0], [15, 1.0]] == res["1"][2]
 
     # test groupby
+    # Note: RESP3 includes extra reducers/sources metadata so samples are at
+    # index [3] vs RESP2's [2].  Keep protocol branching for groupby only.
+    samples_idx = 2 if is_resp2_connection(client) else 3
     res = client.ts().mrevrange(
         0, 3, filters=["Test=This"], groupby="Test", reduce="sum"
     )
-    if is_resp2_connection(client):
-        assert [(3, 6.0), (2, 4.0), (1, 2.0), (0, 0.0)] == res[0]["Test=This"][1]
-    else:
-        assert [[3, 6.0], [2, 4.0], [1, 2.0], [0, 0.0]] == res["Test=This"][3]
+    assert [[3, 6.0], [2, 4.0], [1, 2.0], [0, 0.0]] == res["Test=This"][samples_idx]
     res = client.ts().mrevrange(
         0, 3, filters=["Test=This"], groupby="Test", reduce="max"
     )
-    if is_resp2_connection(client):
-        assert [(3, 3.0), (2, 2.0), (1, 1.0), (0, 0.0)] == res[0]["Test=This"][1]
-    else:
-        assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["Test=This"][3]
+    assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["Test=This"][samples_idx]
     res = client.ts().mrevrange(
         0, 3, filters=["Test=This"], groupby="team", reduce="min"
     )
     assert 2 == len(res)
-    if is_resp2_connection(client):
-        assert [(3, 3.0), (2, 2.0), (1, 1.0), (0, 0.0)] == res[0]["team=ny"][1]
-        assert [(3, 3.0), (2, 2.0), (1, 1.0), (0, 0.0)] == res[1]["team=sf"][1]
-    else:
-        assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["team=ny"][3]
-        assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["team=sf"][3]
+    assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["team=ny"][samples_idx]
+    assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["team=sf"][samples_idx]
 
     # test align
     res = client.ts().mrevrange(
@@ -843,10 +642,7 @@ def test_multi_reverse_range(client):
         bucket_size_msec=10,
         align="-",
     )
-    if is_resp2_connection(client):
-        assert [(10, 1.0), (0, 10.0)] == res[0]["1"][1]
-    else:
-        assert [[10, 1.0], [0, 10.0]] == res["1"][2]
+    assert [[10, 1.0], [0, 10.0]] == res["1"][2]
     res = client.ts().mrevrange(
         0,
         10,
@@ -855,10 +651,7 @@ def test_multi_reverse_range(client):
         bucket_size_msec=10,
         align=1,
     )
-    if is_resp2_connection(client):
-        assert [(1, 10.0), (0, 1.0)] == res[0]["1"][1]
-    else:
-        assert [[1, 10.0], [0, 1.0]] == res["1"][2]
+    assert [[1, 10.0], [0, 1.0]] == res["1"][2]
 
 
 @pytest.mark.onlynoncluster
@@ -880,15 +673,12 @@ def test_mrevrange_latest(client: redis.Redis):
     timeseries.add("t3", 2, 3)
     timeseries.add("t3", 11, 7)
     timeseries.add("t3", 13, 1)
-    assert_resp_response(
-        client,
-        client.ts().mrevrange(0, 10, filters=["is_compaction=true"], latest=True),
-        [{"t2": [{}, [(10, 8.0), (0, 4.0)]]}, {"t4": [{}, [(10, 8.0), (0, 4.0)]]}],
-        {
-            "t2": [{}, {"aggregators": []}, [[10, 8.0], [0, 4.0]]],
-            "t4": [{}, {"aggregators": []}, [[10, 8.0], [0, 4.0]]],
-        },
-    )
+    res = client.ts().mrevrange(0, 10, filters=["is_compaction=true"], latest=True)
+    assert 2 == len(res)
+    assert {} == res["t2"][0]
+    assert {} == res["t4"][0]
+    assert [[10, 8.0], [0, 4.0]] == res["t2"][2]
+    assert [[10, 8.0], [0, 4.0]] == res["t4"][2]
 
 
 @pytest.mark.redismod
@@ -914,10 +704,8 @@ def test_get_latest(client: redis.Redis):
     timeseries.add("t1", 2, 3)
     timeseries.add("t1", 11, 7)
     timeseries.add("t1", 13, 1)
-    assert_resp_response(client, timeseries.get("t2"), (0, 4.0), [0, 4.0])
-    assert_resp_response(
-        client, timeseries.get("t2", latest=True), (10, 8.0), [10, 8.0]
-    )
+    assert [0, 4.0] == timeseries.get("t2")
+    assert [10, 8.0] == timeseries.get("t2", latest=True)
 
 
 @pytest.mark.onlynoncluster
@@ -926,34 +714,19 @@ def test_mget(client):
     client.ts().create(1, labels={"Test": "This"})
     client.ts().create(2, labels={"Test": "This", "Taste": "That"})
     act_res = client.ts().mget(["Test=This"])
-    exp_res = [{"1": [{}, None, None]}, {"2": [{}, None, None]}]
-    exp_res_resp3 = {"1": [{}, []], "2": [{}, []]}
-    assert_resp_response(client, act_res, exp_res, exp_res_resp3)
+    assert {"1": [{}, []], "2": [{}, []]} == act_res
     client.ts().add(1, "*", 15)
     client.ts().add(2, "*", 25)
     res = client.ts().mget(["Test=This"])
-    if is_resp2_connection(client):
-        assert 15 == res[0]["1"][2]
-        assert 25 == res[1]["2"][2]
-    else:
-        assert 15 == res["1"][1][1]
-        assert 25 == res["2"][1][1]
+    assert 15 == res["1"][1][1]
+    assert 25 == res["2"][1][1]
     res = client.ts().mget(["Taste=That"])
-    if is_resp2_connection(client):
-        assert 25 == res[0]["2"][2]
-    else:
-        assert 25 == res["2"][1][1]
+    assert 25 == res["2"][1][1]
 
     # test with_labels
-    if is_resp2_connection(client):
-        assert {} == res[0]["2"][0]
-    else:
-        assert {} == res["2"][0]
+    assert {} == res["2"][0]
     res = client.ts().mget(["Taste=That"], with_labels=True)
-    if is_resp2_connection(client):
-        assert {"Taste": "That", "Test": "This"} == res[0]["2"][0]
-    else:
-        assert {"Taste": "That", "Test": "This"} == res["2"][0]
+    assert {"Taste": "That", "Test": "This"} == res["2"][0]
 
 
 @pytest.mark.onlynoncluster
@@ -969,18 +742,16 @@ def test_mget_latest(client: redis.Redis):
     timeseries.add("t1", 11, 7)
     timeseries.add("t1", 13, 1)
     res = timeseries.mget(filters=["is_compaction=true"])
-    assert_resp_response(client, res, [{"t2": [{}, 0, 4.0]}], {"t2": [{}, [0, 4.0]]})
+    assert {"t2": [{}, [0, 4.0]]} == res
     res = timeseries.mget(filters=["is_compaction=true"], latest=True)
-    assert_resp_response(client, res, [{"t2": [{}, 10, 8.0]}], {"t2": [{}, [10, 8.0]]})
+    assert {"t2": [{}, [10, 8.0]]} == res
 
 
 @pytest.mark.redismod
 def test_info(client):
     client.ts().create(1, retention_msecs=5, labels={"currentLabel": "currentData"})
     info = client.ts().info(1)
-    assert_resp_response(
-        client, 5, info.get("retention_msecs"), info.get("retentionTime")
-    )
+    assert 5 == info.retention_msecs
     assert info["labels"]["currentLabel"] == "currentData"
 
 
@@ -990,15 +761,11 @@ def test_info(client):
 def test_info_duplicate_policy(client):
     client.ts().create(1, retention_msecs=5, labels={"currentLabel": "currentData"})
     info = client.ts().info(1)
-    assert_resp_response(
-        client, "block", info.get("duplicate_policy"), info.get("duplicatePolicy")
-    )
+    assert "block" == info.duplicate_policy
 
     client.ts().create("time-serie-2", duplicate_policy="min")
     info = client.ts().info("time-serie-2")
-    assert_resp_response(
-        client, "min", info.get("duplicate_policy"), info.get("duplicatePolicy")
-    )
+    assert "min" == info.duplicate_policy
 
 
 @pytest.mark.redismod
@@ -1007,15 +774,11 @@ def test_info_duplicate_policy(client):
 def test_info_duplicate_policy_prior_redis_8(client):
     client.ts().create(1, retention_msecs=5, labels={"currentLabel": "currentData"})
     info = client.ts().info(1)
-    assert_resp_response(
-        client, None, info.get("duplicate_policy"), info.get("duplicatePolicy")
-    )
+    assert info.duplicate_policy is None
 
     client.ts().create("time-serie-2", duplicate_policy="min")
     info = client.ts().info("time-serie-2")
-    assert_resp_response(
-        client, "min", info.get("duplicate_policy"), info.get("duplicatePolicy")
-    )
+    assert "min" == info.duplicate_policy
 
 
 @pytest.mark.redismod
@@ -1025,7 +788,7 @@ def test_query_index(client):
     client.ts().create(2, labels={"Test": "This", "Taste": "That"})
     assert 2 == len(client.ts().queryindex(["Test=This"]))
     assert 1 == len(client.ts().queryindex(["Taste=That"]))
-    assert_resp_response(client, client.ts().queryindex(["Taste=That"]), [2], ["2"])
+    assert ["2"] == client.ts().queryindex(["Taste=That"])
 
 
 @pytest.mark.redismod
@@ -1037,12 +800,8 @@ def test_pipeline(client):
     pipeline.execute()
 
     info = client.ts().info("with_pipeline")
-    assert_resp_response(
-        client, 99, info.get("last_timestamp"), info.get("lastTimestamp")
-    )
-    assert_resp_response(
-        client, 100, info.get("total_samples"), info.get("totalSamples")
-    )
+    assert 99 == info.last_timestamp
+    assert 100 == info.total_samples
     assert client.ts().get("with_pipeline")[1] == 99 * 1.1
 
 
@@ -1055,10 +814,7 @@ def test_uncompressed(client):
         client.ts().add("uncompressed", i, i)
     compressed_info = client.ts().info("compressed")
     uncompressed_info = client.ts().info("uncompressed")
-    if is_resp2_connection(client):
-        assert compressed_info.memory_usage < uncompressed_info.memory_usage
-    else:
-        assert compressed_info["memoryUsage"] < uncompressed_info["memoryUsage"]
+    assert compressed_info.memory_usage < uncompressed_info.memory_usage
 
 
 @pytest.mark.redismod
@@ -1077,12 +833,7 @@ def test_create_with_insertion_filters(client):
     assert 1021 == client.ts().add("time-series-1", 1021, 22.0)
 
     data_points = client.ts().range("time-series-1", "-", "+")
-    assert_resp_response(
-        client,
-        data_points,
-        [(1000, 1.0), (1010, 11.0), (1020, 11.5), (1021, 22.0)],
-        [[1000, 1.0], [1010, 11.0], [1020, 11.5], [1021, 22.0]],
-    )
+    assert [[1000, 1.0], [1010, 11.0], [1020, 11.5], [1021, 22.0]] == data_points
 
 
 @pytest.mark.redismod
@@ -1099,12 +850,7 @@ def test_create_with_insertion_filters_other_duplicate_policy(client):
     assert 1013 == client.ts().add("time-series-1", 1013, 10.0)
 
     data_points = client.ts().range("time-series-1", "-", "+")
-    assert_resp_response(
-        client,
-        data_points,
-        [(1000, 1.0), (1010, 11.0), (1013, 10)],
-        [[1000, 1.0], [1010, 11.0], [1013, 10]],
-    )
+    assert [[1000, 1.0], [1010, 11.0], [1013, 10]] == data_points
 
 
 @pytest.mark.redismod
@@ -1124,12 +870,7 @@ def test_alter_with_insertion_filters(client):
     assert 1013 == client.ts().add("time-series-1", 1015, 11.5)
 
     data_points = client.ts().range("time-series-1", "-", "+")
-    assert_resp_response(
-        client,
-        data_points,
-        [(1000, 1.0), (1010, 11.0), (1013, 10.0)],
-        [[1000, 1.0], [1010, 11.0], [1013, 10.0]],
-    )
+    assert [[1000, 1.0], [1010, 11.0], [1013, 10.0]] == data_points
 
 
 @pytest.mark.redismod
@@ -1147,7 +888,7 @@ def test_add_with_insertion_filters(client):
     assert 1000 == client.ts().add("time-series-1", 1004, 3.0)
 
     data_points = client.ts().range("time-series-1", "-", "+")
-    assert_resp_response(client, data_points, [(1000, 1.0)], [[1000, 1.0]])
+    assert [[1000, 1.0]] == data_points
 
 
 @pytest.mark.redismod
@@ -1165,12 +906,12 @@ def test_incrby_with_insertion_filters(client):
     assert 1000 == client.ts().incrby("time-series-1", 3.0, timestamp=1000)
 
     data_points = client.ts().range("time-series-1", "-", "+")
-    assert_resp_response(client, data_points, [(1000, 1.0)], [[1000, 1.0]])
+    assert [[1000, 1.0]] == data_points
 
     assert 1000 == client.ts().incrby("time-series-1", 10.1, timestamp=1000)
 
     data_points = client.ts().range("time-series-1", "-", "+")
-    assert_resp_response(client, data_points, [(1000, 11.1)], [[1000, 11.1]])
+    assert [[1000, 11.1]] == data_points
 
 
 @pytest.mark.redismod
@@ -1188,12 +929,12 @@ def test_decrby_with_insertion_filters(client):
     assert 1000 == client.ts().decrby("time-series-1", 3.0, timestamp=1000)
 
     data_points = client.ts().range("time-series-1", "-", "+")
-    assert_resp_response(client, data_points, [(1000, -1.0)], [[1000, -1.0]])
+    assert [[1000, -1.0]] == data_points
 
     assert 1000 == client.ts().decrby("time-series-1", 10.1, timestamp=1000)
 
     data_points = client.ts().range("time-series-1", "-", "+")
-    assert_resp_response(client, data_points, [(1000, -11.1)], [[1000, -11.1]])
+    assert [[1000, -11.1]] == data_points
 
 
 @pytest.mark.redismod
@@ -1216,12 +957,7 @@ def test_madd_with_insertion_filters(client):
     )
 
     data_points = client.ts().range("time-series-1", "-", "+")
-    assert_resp_response(
-        client,
-        data_points,
-        [(1010, 1.0), (1020, 2.0), (1021, 22.0)],
-        [[1010, 1.0], [1020, 2.0], [1021, 22.0]],
-    )
+    assert [[1010, 1.0], [1020, 2.0], [1021, 22.0]] == data_points
 
 
 @pytest.mark.redismod
@@ -1245,12 +981,7 @@ def test_range_with_count_nan_count_all_aggregators(client):
         aggregation_type="countNan",
         bucket_size_msec=1000,
     )
-    assert_resp_response(
-        client,
-        data_points,
-        [(1000, 3)],
-        [[1000, 3]],
-    )
+    assert [[1000, 3]] == data_points
 
     # Ensure we count ALL values
     data_points = client.ts().range(
@@ -1260,12 +991,7 @@ def test_range_with_count_nan_count_all_aggregators(client):
         aggregation_type="countAll",
         bucket_size_msec=1000,
     )
-    assert_resp_response(
-        client,
-        data_points,
-        [(1000, 4)],
-        [[1000, 4]],
-    )
+    assert [[1000, 4]] == data_points
 
 
 @pytest.mark.redismod
@@ -1289,12 +1015,7 @@ def test_rev_range_with_count_nan_count_all_aggregators(client):
         aggregation_type="countNan",
         bucket_size_msec=1000,
     )
-    assert_resp_response(
-        client,
-        data_points,
-        [(1000, 3)],
-        [[1000, 3]],
-    )
+    assert [[1000, 3]] == data_points
 
     # Ensure we count ALL values
     data_points = client.ts().revrange(
@@ -1304,12 +1025,7 @@ def test_rev_range_with_count_nan_count_all_aggregators(client):
         aggregation_type="countAll",
         bucket_size_msec=1000,
     )
-    assert_resp_response(
-        client,
-        data_points,
-        [(1000, 4)],
-        [[1000, 4]],
-    )
+    assert [[1000, 4]] == data_points
 
 
 @pytest.mark.redismod
@@ -1340,18 +1056,11 @@ def test_mrange_with_count_nan_count_all_aggregators(client):
         bucket_size_msec=1000,
         filters=["type=temperature"],
     )
-    assert_resp_response(
-        client,
-        data_points,
-        [
-            {"temperature:A": [{}, [(1000, 1.0)]]},
-            {"temperature:B": [{}, [(1000, 1.0)]]},
-        ],
-        {
-            "temperature:A": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
-            "temperature:B": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
-        },
-    )
+    assert 2 == len(data_points)
+    assert {} == data_points["temperature:A"][0]
+    assert [[1000, 1.0]] == data_points["temperature:A"][2]
+    assert {} == data_points["temperature:B"][0]
+    assert [[1000, 1.0]] == data_points["temperature:B"][2]
 
     # Ensure we count ALL values
     data_points = client.ts().mrange(
@@ -1361,18 +1070,9 @@ def test_mrange_with_count_nan_count_all_aggregators(client):
         bucket_size_msec=1000,
         filters=["type=temperature"],
     )
-    assert_resp_response(
-        client,
-        data_points,
-        [
-            {"temperature:A": [{}, [(1000, 2.0)]]},
-            {"temperature:B": [{}, [(1000, 2.0)]]},
-        ],
-        {
-            "temperature:A": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
-            "temperature:B": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
-        },
-    )
+    assert 2 == len(data_points)
+    assert [[1000, 2.0]] == data_points["temperature:A"][2]
+    assert [[1000, 2.0]] == data_points["temperature:B"][2]
 
 
 @pytest.mark.redismod
@@ -1403,18 +1103,11 @@ def test_mrevrange_with_count_nan_count_all_aggregators(client):
         bucket_size_msec=1000,
         filters=["type=temperature"],
     )
-    assert_resp_response(
-        client,
-        data_points,
-        [
-            {"temperature:A": [{}, [(1000, 1.0)]]},
-            {"temperature:B": [{}, [(1000, 1.0)]]},
-        ],
-        {
-            "temperature:A": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
-            "temperature:B": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
-        },
-    )
+    assert 2 == len(data_points)
+    assert {} == data_points["temperature:A"][0]
+    assert [[1000, 1.0]] == data_points["temperature:A"][2]
+    assert {} == data_points["temperature:B"][0]
+    assert [[1000, 1.0]] == data_points["temperature:B"][2]
 
     # Ensure we count ALL values
     data_points = client.ts().mrevrange(
@@ -1424,15 +1117,6 @@ def test_mrevrange_with_count_nan_count_all_aggregators(client):
         bucket_size_msec=1000,
         filters=["type=temperature"],
     )
-    assert_resp_response(
-        client,
-        data_points,
-        [
-            {"temperature:A": [{}, [(1000, 2.0)]]},
-            {"temperature:B": [{}, [(1000, 2.0)]]},
-        ],
-        {
-            "temperature:A": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
-            "temperature:B": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
-        },
-    )
+    assert 2 == len(data_points)
+    assert [[1000, 2.0]] == data_points["temperature:A"][2]
+    assert [[1000, 2.0]] == data_points["temperature:B"][2]

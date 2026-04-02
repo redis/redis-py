@@ -1995,10 +1995,26 @@ class TestClusterRedisCommands:
     async def test_cluster_bzpopmax(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 2})
         await r.zadd("{foo}b", {"b1": 10, "b2": 20})
-        assert await r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) == [b"{foo}b", b"b2", 20]
-        assert await r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) == [b"{foo}b", b"b1", 10]
-        assert await r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) == [b"{foo}a", b"a2", 2]
-        assert await r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) == [b"{foo}a", b"a1", 1]
+        assert await r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) == [
+            b"{foo}b",
+            b"b2",
+            20,
+        ]
+        assert await r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) == [
+            b"{foo}b",
+            b"b1",
+            10,
+        ]
+        assert await r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) == [
+            b"{foo}a",
+            b"a2",
+            2,
+        ]
+        assert await r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) == [
+            b"{foo}a",
+            b"a1",
+            1,
+        ]
         assert await r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) is None
         await r.zadd("{foo}c", {"c1": 100})
         assert await r.bzpopmax("{foo}c", timeout=1) == [b"{foo}c", b"c1", 100]
@@ -2007,10 +2023,26 @@ class TestClusterRedisCommands:
     async def test_cluster_bzpopmin(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 2})
         await r.zadd("{foo}b", {"b1": 10, "b2": 20})
-        assert await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) == [b"{foo}b", b"b1", 10]
-        assert await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) == [b"{foo}b", b"b2", 20]
-        assert await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) == [b"{foo}a", b"a1", 1]
-        assert await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) == [b"{foo}a", b"a2", 2]
+        assert await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) == [
+            b"{foo}b",
+            b"b1",
+            10,
+        ]
+        assert await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) == [
+            b"{foo}b",
+            b"b2",
+            20,
+        ]
+        assert await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) == [
+            b"{foo}a",
+            b"a1",
+            1,
+        ]
+        assert await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) == [
+            b"{foo}a",
+            b"a2",
+            2,
+        ]
         assert await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) is None
         await r.zadd("{foo}c", {"c1": 100})
         assert await r.bzpopmin("{foo}c", timeout=1) == [b"{foo}c", b"c1", 100]
