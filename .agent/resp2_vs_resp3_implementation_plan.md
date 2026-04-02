@@ -240,7 +240,11 @@ These commands return actual key names which can be arbitrary binary data (non-U
 
 ## Batch 10: Module Commands — Probabilistic (BF, CF, CMS, TopK, TDigest)
 
-**Theme:** RESP2 parses into custom Info objects; RESP3 returns raw dicts. Unify to Info objects (semantic type).
+**Theme:** Two sub-themes: (a) RESP2 parses into custom Info objects; RESP3 returns raw dicts — unify to Info objects. (b) TOPK commands use `parse_to_list` which incorrectly coerces user-provided item names to int/float — fix by using command-specific parsers that respect the semantic type of each response.
+
+**Related issue:** [#3573](https://github.com/redis/redis-py/issues/3573) — `topk().list` decodes "infinity" as float. Fixed partially in PR #3586 (added special-value handling for "infinity"/"nan"/"-infinity") but the broader problem remains: any numeric-looking user string (e.g., `"42"`) is still coerced to `int(42)` by `parse_to_list`. This batch fixes that.
+
+### Sub-batch 10a: INFO commands — unify to Info objects
 
 | # | Command | Current RESP2 Type | Current RESP3 Type | Final Type | Action |
 |---|---------|-------------------|-------------------|------------|--------|
@@ -248,26 +252,76 @@ These commands return actual key names which can be arbitrary binary data (non-U
 | 2 | CF.INFO | `CFInfo` object | Raw `dict` | `CFInfo` object | Add RESP3 module callback that constructs `CFInfo` from dict |
 | 3 | CMS.INFO | `CMSInfo` object | Raw `dict` | `CMSInfo` object | Add RESP3 module callback |
 | 4 | TOPK.INFO | `TopKInfo` object | Raw `dict` | `TopKInfo` object | Add RESP3 module callback |
-| 5 | TOPK.ADD | `list` (via `parse_to_list`) | Raw response | `list` | Add RESP3 callback: `parse_to_list` |
-| 6 | TOPK.INCRBY | `list` | Raw response | `list` | Add RESP3 callback: `parse_to_list` |
-| 7 | TOPK.LIST | `list` | Raw response | `list` | Add RESP3 callback: `parse_to_list` |
-| 8 | TDIGEST.INFO | `TDigestInfo` object | Raw `dict` | `TDigestInfo` object | Add RESP3 module callback |
-| 9 | TDIGEST.BYRANK | `list` | Raw response | `list` | Add RESP3 callback: `parse_to_list` |
-| 10 | TDIGEST.BYREVRANK | `list` | Raw response | `list` | Add RESP3 callback: `parse_to_list` |
-| 11 | TDIGEST.CDF | `list` | Raw response | `list` | Add RESP3 callback: `parse_to_list` |
-| 12 | TDIGEST.QUANTILE | `list` | Raw response | `list` | Add RESP3 callback: `parse_to_list` |
+| 5 | TDIGEST.INFO | `TDigestInfo` object | Raw `dict` | `TDigestInfo` object | Add RESP3 module callback |
 
-**Implementation notes:**
+**Implementation notes (10a):**
 - Info classes (`BFInfo`, `CFInfo`, etc.) currently expect a flat list `[key, val, key, val]` — RESP3 sends a dict. Need to update constructors or add factory methods that accept both formats
-- `parse_to_list` just ensures the response is a list — needed for RESP3 when server might return different types
 - Exception to RESP3-preference: Info objects provide better API than raw dicts
 
-**Unit test fixes (`tests/test_bloom.py`):**
-- BF.INFO tests (lines ~99-111): currently use `assert_resp_response` comparing `BFInfo` fields vs raw dict keys (e.g., `info.get("chunk_size")` vs `info.get("chunkSize")`). After unification, both return `BFInfo` → replace with single `assert info.capacity == N` style assertions
-- CF.INFO tests (lines ~173-182): same pattern — unify to `CFInfo` attribute access
-- CMS.INFO tests (lines ~229-235): same pattern — unify to `CMSInfo`
-- TOPK tests (line ~421): replace `assert_resp_response` with single assertion on unified `list` type
-- TDigest tests: similar pattern — replace dual assertions with single `TDigestInfo` attribute assertions
+### Sub-batch 10b: TOPK item-returning commands — remove incorrect callbacks
+
+TOPK.ADD, TOPK.INCRBY, and TOPK.LIST return **user-provided item names** (opaque strings). The current RESP2 parser `parse_to_list` aggressively coerces every element via `int()` then `float()`, which silently converts user strings like `"42"` → `42` and `"3.14"` → `3.14`. This is semantically incorrect — these are key names, not numeric values.
+
+The fix is to **remove the RESP2 callbacks entirely** — no new callback is needed for either protocol. Both RESP2 and RESP3 parsers already return native Python lists, and the connection layer already handles `bytes→str` decoding based on the `decode_responses` setting. A callback would be a no-op at best, and lossy at worst.
+
+| # | Command | Current RESP2 Type | Current RESP3 Type | Final Type | Action |
+|---|---------|-------------------|-------------------|------------|--------|
+| 6 | TOPK.ADD | `list` (via `parse_to_list` — coerces to int/float) | `list` (no callback — correct) | `list[str\|None]` or `list[bytes\|None]` | **Remove** RESP2 callback. No RESP3 callback needed. |
+| 7 | TOPK.INCRBY | `list` (via `parse_to_list` — coerces to int/float) | `list` (no callback — correct) | `list[str\|None]` or `list[bytes\|None]` | Same |
+| 8 | TOPK.LIST | `list` (via `parse_to_list` — coerces to int/float) | `list` (no callback — correct) | `list[str]` or `list[bytes]` | Same |
+
+**Design rationale — no callback needed:**
+Both RESP2 and RESP3 protocol parsers return array responses as Python `list`. The connection layer handles encoding/decoding based on `decode_responses`:
+- `decode_responses=True` → items arrive as `str` — correct as-is
+- `decode_responses=False` → items arrive as `bytes` — correct as-is
+
+The existing `parse_to_list` callback was harmful because it called `nativestr()` on every element, which:
+1. **Violates `decode_responses=False`**: Users who explicitly opt out of decoding still get `str` instead of `bytes`
+2. **Lossy for non-UTF-8 binary data**: Non-UTF-8 bytes become `�` (U+FFFD replacement character) — data is permanently lost
+3. **Converts `"null"` to `None`**: `nativestr()` maps the string `"null"` to Python `None`, silently dropping user data
+4. **Numeric coercion**: `int()`/`float()` coercion changes the type of user-provided opaque strings
+
+By removing the callback entirely, the response passes through untouched from the connection layer — which is already doing the right thing.
+
+**Behavioral changes (RESP2):** This is a **correctness fix** that changes existing RESP2 behavior:
+- Before: `topk().add("k", "42")` → displaced item `"42"` returns as `42` (int)
+- After: `topk().add("k", "42")` → displaced item `"42"` returns as `"42"` (str) or `b"42"` (bytes if `decode_responses=False`)
+- Before: `topk().add("k", "null")` → displaced item `"null"` returns as `None`
+- After: `topk().add("k", "null")` → displaced item `"null"` returns as `"null"` (str)
+- Before: `decode_responses=False` + non-UTF-8 binary → lossy `str` with `�` characters
+- After: `decode_responses=False` + non-UTF-8 binary → raw `bytes` preserved faithfully
+- This aligns with the fix direction established in issue #3573 / PR #3586
+
+### Sub-batch 10c: TDIGEST numeric commands — keep numeric coercion (correct here)
+
+These commands return **actual numeric values** (quantile boundaries, probabilities) — `parse_to_list` with int/float coercion is semantically correct.
+
+| # | Command | Current RESP2 Type | Current RESP3 Type | Final Type | Action |
+|---|---------|-------------------|-------------------|------------|--------|
+| 9 | TDIGEST.BYRANK | `list[float\|str]` (via `parse_to_list`) | Raw `list` | `list[float\|str]` | Add RESP3 callback: `parse_to_list` |
+| 10 | TDIGEST.BYREVRANK | `list[float\|str]` | Raw `list` | `list[float\|str]` | Add RESP3 callback: `parse_to_list` |
+| 11 | TDIGEST.CDF | `list[float]` | Raw `list` | `list[float]` | Add RESP3 callback: `parse_to_list` |
+| 12 | TDIGEST.QUANTILE | `list[float\|str]` | Raw `list` | `list[float\|str]` | Add RESP3 callback: `parse_to_list` |
+
+**Note:** `parse_to_list` keeps "infinity"/"nan"/"-infinity" as strings (per PR #3586 fix). For TDIGEST, these represent valid mathematical boundaries (e.g., `TDIGEST.BYRANK` returns `"inf"` for out-of-range ranks). Keeping them as strings is acceptable; converting to `float('inf')` would also be defensible but would re-introduce the issue from #3573 for hypothetical edge cases.
+
+### Implementation order
+
+1. Remove `parse_to_list` from `_TOPKBloomBase._RESP2_MODULE_CALLBACKS` for ADD/INCRBY/LIST (no replacement needed)
+2. Add `_RESP3_MODULE_CALLBACKS` to `_TOPKBloomBase` with `TopKInfo` for INFO only
+3. Add `_RESP3_MODULE_CALLBACKS` to `_TDigestBloomBase` with `parse_to_list` for numeric commands + `TDigestInfo` for INFO
+4. Add `_RESP3_MODULE_CALLBACKS` to BF/CF/CMS base classes for INFO commands
+5. Update Info class constructors to accept dict input (RESP3 format)
+6. Update tests in `tests/test_bloom.py` and `tests/test_asyncio/test_bloom.py`
+
+**Unit test fixes (`tests/test_bloom.py`, `tests/test_asyncio/test_bloom.py`):**
+- BF.INFO tests: replace `assert_resp_response` with single `assert info.capacity == N` style assertions
+- CF.INFO tests: same pattern — unify to `CFInfo` attribute access
+- CMS.INFO tests: same pattern — unify to `CMSInfo`
+- TOPK.INFO tests: unify to `TopKInfo` attribute access
+- TOPK.ADD/LIST/INCRBY tests: replace `assert_resp_response` with single assertion; verify items are always `str` (not `int`/`float`)
+- TDIGEST.INFO tests: unify to `TDigestInfo` attribute access
+- TDIGEST.BYRANK/CDF/QUANTILE tests: replace dual assertions with single unified `list` assertion
 
 ---
 
