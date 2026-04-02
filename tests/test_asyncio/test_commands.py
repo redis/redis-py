@@ -341,7 +341,9 @@ class TestRedisCommands:
         assert len(await r.acl_log(count=1)) == 1
         assert isinstance((await r.acl_log())[0], dict)
         expected = (await r.acl_log(count=1))[0]
-        assert_resp_response_in(r, "client-info", expected, expected.keys())
+        assert "client-info" in expected
+        assert isinstance(expected["client-info"], dict)
+        assert isinstance(expected["age-seconds"], float)
         assert await r.acl_log_reset()
 
     @skip_if_server_version_lt(REDIS_6_VERSION)

@@ -389,12 +389,9 @@ class TestRedisCommands:
         assert set(acl["keys"]) == {"~cache:*", "~objects:*"}
         assert len(acl["passwords"]) == 2
         assert set(acl["channels"]) == {"&message:*"}
-        assert_resp_response(
-            r,
-            acl["selectors"],
-            [["commands", "-@all +set", "keys", "%W~app*", "channels", ""]],
-            [{"commands": "-@all +set", "keys": "%W~app*", "channels": ""}],
-        )
+        assert acl["selectors"] == [
+            {"commands": "-@all +set", "keys": "%W~app*", "channels": ""}
+        ]
 
     @skip_if_server_version_lt("6.0.0")
     def test_acl_help(self, r):
@@ -458,12 +455,9 @@ class TestRedisCommands:
         assert len(r.acl_log(count=1)) == 1
         assert isinstance(r.acl_log()[0], dict)
         expected = r.acl_log(count=1)[0]
-        assert_resp_response_in(
-            r,
-            "client-info",
-            expected,
-            expected.keys(),
-        )
+        assert "client-info" in expected
+        assert isinstance(expected["client-info"], dict)
+        assert isinstance(expected["age-seconds"], float)
 
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
@@ -6961,6 +6955,10 @@ class TestRedisCommands:
         cmds = list(res.keys())
         assert "set" in cmds
         assert "get" in cmds
+        # Verify unified format: flags as set, acl_categories present
+        set_cmd = res["set"]
+        assert isinstance(set_cmd["flags"], set)
+        assert "acl_categories" in set_cmd
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")

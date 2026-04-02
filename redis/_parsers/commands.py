@@ -80,7 +80,7 @@ class AbstractCommandsParser:
         cmd_name = str_if_bytes(command[0])
         cmd_dict["name"] = cmd_name
         cmd_dict["arity"] = int(command[1])
-        cmd_dict["flags"] = [str_if_bytes(flag) for flag in command[2]]
+        cmd_dict["flags"] = {str_if_bytes(flag) for flag in command[2]}
         cmd_dict["first_key_pos"] = command[3]
         cmd_dict["last_key_pos"] = command[4]
         cmd_dict["step_count"] = command[5]

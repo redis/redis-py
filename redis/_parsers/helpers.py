@@ -86,12 +86,19 @@ def parse_info(response):
 
 def parse_memory_stats(response, **kwargs):
     """Parse the results of MEMORY STATS"""
-    stats = pairs_to_dict(response, decode_keys=True, decode_string_values=True)
+    stats = pairs_to_dict(response, decode_keys=True)
     for key, value in stats.items():
         if key.startswith("db.") and isinstance(value, list):
-            stats[key] = pairs_to_dict(
-                value, decode_keys=True, decode_string_values=True
-            )
+            stats[key] = pairs_to_dict(value, decode_keys=True)
+    return stats
+
+
+def parse_memory_stats_resp3(response, **kwargs):
+    """Parse MEMORY STATS for RESP3 — decode keys to str, preserve native values."""
+    stats = {str_if_bytes(key): value for key, value in response.items()}
+    for key, value in stats.items():
+        if key.startswith("db.") and isinstance(value, dict):
+            stats[key] = {str_if_bytes(k): v for k, v in value.items()}
     return stats
 
 
@@ -700,10 +707,12 @@ def parse_command(response, **options):
         cmd_name = str_if_bytes(command[0])
         cmd_dict["name"] = cmd_name
         cmd_dict["arity"] = int(command[1])
-        cmd_dict["flags"] = [str_if_bytes(flag) for flag in command[2]]
+        cmd_dict["flags"] = {str_if_bytes(flag) for flag in command[2]}
         cmd_dict["first_key_pos"] = command[3]
         cmd_dict["last_key_pos"] = command[4]
         cmd_dict["step_count"] = command[5]
+        if len(command) > 6:
+            cmd_dict["acl_categories"] = command[6]
         if len(command) > 7:
             cmd_dict["tips"] = command[7]
             cmd_dict["key_specifications"] = command[8]
@@ -766,8 +775,10 @@ def parse_acl_getuser(response, **options):
             data["channels"] = []
     if "selectors" in data:
         if data["selectors"] != [] and isinstance(data["selectors"][0], list):
+            # RESP2: flat list [key, val, key, val] → convert to dict
             data["selectors"] = [
-                list(map(str_if_bytes, selector)) for selector in data["selectors"]
+                pairs_to_dict(selector, decode_keys=True, decode_string_values=True)
+                for selector in data["selectors"]
             ]
         elif data["selectors"] != []:
             data["selectors"] = [
@@ -801,6 +812,28 @@ def parse_acl_log(response, **options):
             data.append(log_data)
     else:
         data = bool_ok(response)
+    return data
+
+
+def parse_acl_log_resp3(response, **options):
+    """Parse ACL LOG for RESP3 — normalize to match RESP2 semantic richness.
+    Converts age-seconds to float and client-info to parsed dict."""
+    if not isinstance(response, list):
+        return bool_ok(response)
+    data = []
+    for entry in response:
+        log_data = {str_if_bytes(k): v for k, v in entry.items()}
+        # Ensure age-seconds is float
+        if "age-seconds" in log_data:
+            log_data["age-seconds"] = float(log_data["age-seconds"])
+        # Parse client-info string into dict
+        if "client-info" in log_data:
+            log_data["client-info"] = parse_client_info(log_data["client-info"])
+        # Decode remaining string values
+        for key in log_data:
+            if key not in ("age-seconds", "client-info"):
+                log_data[key] = str_if_bytes(log_data[key])
+        data.append(log_data)
     return data
 
 
@@ -1057,14 +1090,7 @@ _RedisCallbacksRESP3 = {
     "CLIENT GETNAME": str_if_bytes,
     "GEOHASH": lambda r: list(map(str_if_bytes, r)),
     "RESET": str_if_bytes,
-    "ACL LOG": lambda r: (
-        [
-            {str_if_bytes(key): str_if_bytes(value) for key, value in x.items()}
-            for x in r
-        ]
-        if isinstance(r, list)
-        else bool_ok(r)
-    ),
+    "ACL LOG": parse_acl_log_resp3,
     "COMMAND": parse_command_resp3,
     "CONFIG GET": lambda r: {
         str_if_bytes(key) if key is not None else None: (
@@ -1072,7 +1098,9 @@ _RedisCallbacksRESP3 = {
         )
         for key, value in r.items()
     },
-    "MEMORY STATS": lambda r: {str_if_bytes(key): value for key, value in r.items()},
+    **string_keys_to_dict("BGREWRITEAOF BGSAVE", lambda r: True),
+    "DEBUG OBJECT": parse_debug_object,
+    "MEMORY STATS": parse_memory_stats_resp3,
     "SENTINEL MASTER": parse_sentinel_state_resp3,
     "SENTINEL MASTERS": parse_sentinel_masters_resp3,
     "SENTINEL SENTINELS": parse_sentinel_slaves_and_sentinels_resp3,
