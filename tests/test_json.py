@@ -5,12 +5,7 @@ from redis.commands.json.commands import FPHAType
 from redis.commands.json.decoders import decode_list, unstring
 from redis.commands.json.path import Path
 
-from .conftest import (
-    _get_client,
-    assert_resp_response,
-    skip_if_server_version_lt,
-    skip_ifmodversion_lt,
-)
+from .conftest import _get_client, skip_if_server_version_lt, skip_ifmodversion_lt
 
 
 @pytest.fixture
@@ -1141,63 +1136,7 @@ def test_resp_dollar(client):
     client.json().set("doc1", "$", data)
     # Test multi
     res = client.json().resp("doc1", "$..a")
-    resp2 = [
-        [
-            "{",
-            "A1_B1",
-            10,
-            "A1_B2",
-            "false",
-            "A1_B3",
-            [
-                "{",
-                "A1_B3_C1",
-                None,
-                "A1_B3_C2",
-                [
-                    "[",
-                    "A1_B3_C2_D1_1",
-                    "A1_B3_C2_D1_2",
-                    "-19.5",
-                    "A1_B3_C2_D1_4",
-                    "A1_B3_C2_D1_5",
-                    ["{", "A1_B3_C2_D1_6_E1", "true"],
-                ],
-                "A1_B3_C3",
-                ["[", 1],
-            ],
-            "A1_B4",
-            ["{", "A1_B4_C1", "foo"],
-        ],
-        [
-            "{",
-            "A2_B1",
-            20,
-            "A2_B2",
-            "false",
-            "A2_B3",
-            [
-                "{",
-                "A2_B3_C1",
-                None,
-                "A2_B3_C2",
-                [
-                    "[",
-                    "A2_B3_C2_D1_1",
-                    "A2_B3_C2_D1_2",
-                    "-37.5",
-                    "A2_B3_C2_D1_4",
-                    "A2_B3_C2_D1_5",
-                    ["{", "A2_B3_C2_D1_6_E1", "false"],
-                ],
-                "A2_B3_C3",
-                ["[", 2],
-            ],
-            "A2_B4",
-            ["{", "A2_B4_C1", "bar"],
-        ],
-    ]
-    resp3 = [
+    expected = [
         [
             "{",
             "A1_B1",
@@ -1253,40 +1192,11 @@ def test_resp_dollar(client):
             ["{", "A2_B4_C1", "bar"],
         ],
     ]
-    assert_resp_response(client, res, resp2, resp3)
+    assert res == expected
 
     # Test single
     res = client.json().resp("doc1", "$.L1.a")
-    resp2 = [
-        [
-            "{",
-            "A1_B1",
-            10,
-            "A1_B2",
-            "false",
-            "A1_B3",
-            [
-                "{",
-                "A1_B3_C1",
-                None,
-                "A1_B3_C2",
-                [
-                    "[",
-                    "A1_B3_C2_D1_1",
-                    "A1_B3_C2_D1_2",
-                    "-19.5",
-                    "A1_B3_C2_D1_4",
-                    "A1_B3_C2_D1_5",
-                    ["{", "A1_B3_C2_D1_6_E1", "true"],
-                ],
-                "A1_B3_C3",
-                ["[", 1],
-            ],
-            "A1_B4",
-            ["{", "A1_B4_C1", "foo"],
-        ]
-    ]
-    resp3 = [
+    expected = [
         [
             "{",
             "A1_B1",
@@ -1315,7 +1225,7 @@ def test_resp_dollar(client):
             ["{", "A1_B4_C1", "foo"],
         ]
     ]
-    assert_resp_response(client, res, resp2, resp3)
+    assert res == expected
 
     # Test missing path
     client.json().resp("doc1", "$.nowhere")

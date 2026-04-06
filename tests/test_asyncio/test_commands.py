@@ -30,7 +30,6 @@ from redis.utils import safe_str
 
 import redis.asyncio as redis
 from tests.conftest import (
-    assert_resp_response,
     is_resp2_connection,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
@@ -724,7 +723,7 @@ class TestRedisCommands:
                 "search-default-dialect"
             ] == default_dialect_new
             assert (
-                ((await r.ft().config_get("*"))[b"DEFAULT_DIALECT"]).decode()
+                (await r.ft().config_get("*"))["DEFAULT_DIALECT"]
                 == default_dialect_new
             )
         except AssertionError as ex:
@@ -2931,12 +2930,7 @@ class TestRedisCommands:
 
         # custom score cast function
         response = await r.zrange("a", 0, 1, withscores=True, score_cast_func=safe_str)
-        assert_resp_response(
-            r,
-            response,
-            [[b"a1", "1"], [b"a2", "2"]],
-            [[b"a1", "1.0"], [b"a2", "2.0"]],
-        )
+        assert response == [[b"a1", "1.0"], [b"a2", "2.0"]]
 
     @skip_if_server_version_lt("2.8.9")
     async def test_zrangebylex(self, r: redis.Redis):
@@ -2981,12 +2975,7 @@ class TestRedisCommands:
         response = await r.zrangebyscore(
             "a", 2, 4, withscores=True, score_cast_func=safe_str
         )
-        assert_resp_response(
-            r,
-            response,
-            [[b"a2", "2"], [b"a3", "3"], [b"a4", "4"]],
-            [[b"a2", "2.0"], [b"a3", "3.0"], [b"a4", "4.0"]],
-        )
+        assert response == [[b"a2", "2.0"], [b"a3", "3.0"], [b"a4", "4.0"]]
 
     async def test_zrank(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
@@ -3000,14 +2989,12 @@ class TestRedisCommands:
         assert await r.zrank("a", "a1") == 0
         assert await r.zrank("a", "a2") == 1
         assert await r.zrank("a", "a6") is None
-        assert_resp_response(
-            r, await r.zrank("a", "a3", withscore=True), [2, 3.0], [2, 3.0]
-        )
+        assert await r.zrank("a", "a3", withscore=True) == [2, 3.0]
         assert await r.zrank("a", "a6", withscore=True) is None
 
         # custom score cast function
         response = await r.zrank("a", "a3", withscore=True, score_cast_func=safe_str)
-        assert_resp_response(r, response, [2, "3"], [2, "3.0"])
+        assert response == [2, "3.0"]
 
     async def test_zrem(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
@@ -3064,12 +3051,7 @@ class TestRedisCommands:
         response = await r.zrevrange(
             "a", 0, 1, withscores=True, score_cast_func=safe_str
         )
-        assert_resp_response(
-            r,
-            response,
-            [[b"a3", "3"], [b"a2", "2"]],
-            [[b"a3", "3.0"], [b"a2", "2.0"]],
-        )
+        assert response == [[b"a3", "3.0"], [b"a2", "2.0"]]
 
     async def test_zrevrangebyscore(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
@@ -3100,9 +3082,7 @@ class TestRedisCommands:
         assert await r.zrevrank("a", "a1") == 4
         assert await r.zrevrank("a", "a2") == 3
         assert await r.zrevrank("a", "a6") is None
-        assert_resp_response(
-            r, await r.zrevrank("a", "a3", withscore=True), [2, 3.0], [2, 3.0]
-        )
+        assert await r.zrevrank("a", "a3", withscore=True) == [2, 3.0]
         assert await r.zrevrank("a", "a6", withscore=True) is None
 
     async def test_zscore(self, r: redis.Redis):

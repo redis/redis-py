@@ -93,7 +93,7 @@ class _TimeSeriesBase(TimeSeriesCommands):
         else:
             p = Pipeline(
                 connection_pool=self.client.connection_pool,
-                response_callbacks=self._MODULE_CALLBACKS,
+                response_callbacks=self.client.response_callbacks,
                 transaction=transaction,
                 shard_hint=shard_hint,
             )

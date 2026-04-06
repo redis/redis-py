@@ -54,8 +54,6 @@ from tests.test_pubsub import wait_for_message
 
 from .conftest import (
     _get_client,
-    assert_resp_response,
-    is_resp2_connection,
     skip_if_redis_enterprise,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
@@ -1297,26 +1295,19 @@ class TestClusterRedisCommands:
         assert isinstance(cluster_shards, list)
         assert isinstance(cluster_shards[0], dict)
         attributes = [
-            b"id",
-            b"endpoint",
-            b"ip",
-            b"hostname",
-            b"port",
-            b"tls-port",
-            b"role",
-            b"replication-offset",
-            b"health",
+            "id",
+            "endpoint",
+            "ip",
+            "hostname",
+            "port",
+            "tls-port",
+            "role",
+            "replication-offset",
+            "health",
         ]
         for x in cluster_shards:
-            assert_resp_response(
-                r, list(x.keys()), ["slots", "nodes"], [b"slots", b"nodes"]
-            )
-            try:
-                x["nodes"]
-                key = "nodes"
-            except KeyError:
-                key = b"nodes"
-            for node in x[key]:
+            assert list(x.keys()) == ["slots", "nodes"]
+            for node in x["nodes"]:
                 for attribute in node.keys():
                     assert attribute in attributes
 
@@ -1573,18 +1564,11 @@ class TestClusterRedisCommands:
     def test_cluster_links(self, r):
         node = r.get_random_node()
         res = r.cluster_links(node)
-        if is_resp2_connection(r):
-            links_to = sum(x.count(b"to") for x in res)
-            links_for = sum(x.count(b"from") for x in res)
-            assert links_to == links_for
-            for i in range(0, len(res) - 1, 2):
-                assert res[i][3] == res[i + 1][3]
-        else:
-            links_to = len(list(filter(lambda x: x[b"direction"] == b"to", res)))
-            links_for = len(list(filter(lambda x: x[b"direction"] == b"from", res)))
-            assert links_to == links_for
-            for i in range(0, len(res) - 1, 2):
-                assert res[i][b"node"] == res[i + 1][b"node"]
+        links_to = len(list(filter(lambda x: x["direction"] == b"to", res)))
+        links_for = len(list(filter(lambda x: x["direction"] == b"from", res)))
+        assert links_to == links_for
+        for i in range(0, len(res) - 1, 2):
+            assert res[i]["node"] == res[i + 1]["node"]
 
     def test_cluster_flshslots_not_implemented(self, r):
         with pytest.raises(NotImplementedError):

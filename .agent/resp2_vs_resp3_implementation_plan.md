@@ -493,77 +493,206 @@ Also update `tests/test_asyncio/test_timeseries.py` with identical changes.
 
 ## Batch 12: Module Commands — JSON
 
-**Theme:** RESP2 applies `self._decode`; RESP3 returns raw. Unify to decoded format.
+**Theme:** Most RESP2 `_decode` callbacks are no-ops for integer-returning commands. Only NUMINCRBY/NUMMULTBY have a real structural mismatch (scalar vs array for legacy paths). OBJKEYS has a `nativestr` violation. JSON.TYPE has a server-level wrapping difference.
 
 | # | Command | Current RESP2 Type | Current RESP3 Type | Final Type | Action |
 |---|---------|-------------------|-------------------|------------|--------|
-| 1 | JSON.ARRAPPEND | Decoded | Raw response | Decoded | Add RESP3 callback applying `_decode` |
-| 2 | JSON.ARRINDEX | Decoded | Raw response | Decoded | Same |
-| 3 | JSON.ARRINSERT | Decoded | Raw response | Decoded | Same |
-| 4 | JSON.ARRLEN | Decoded | Raw response | Decoded | Same |
-| 5 | JSON.ARRTRIM | Decoded | Raw response | Decoded | Same |
-| 6 | JSON.NUMINCRBY | Decoded | Raw response | Decoded | Same |
-| 7 | JSON.NUMMULTBY | Decoded | Raw response | Decoded | Same |
-| 8 | JSON.OBJKEYS | Decoded | Raw response | Decoded | Same |
-| 9 | JSON.OBJLEN | Decoded | Raw response | Decoded | Same |
-| 10 | JSON.STRAPPEND | Decoded | Raw response | Decoded | Same |
-| 11 | JSON.STRLEN | Decoded | Raw response | Decoded | Same |
+| 1 | JSON.ARRAPPEND | `int` or `list[int]` (via `_decode`, no-op) | `int` or `list[int]` | `int` or `list[int]` | Remove from `_RESP2_MODULE_CALLBACKS` — `_decode` is a no-op on integers |
+| 2 | JSON.ARRINDEX | `int` or `list[int\|None]` (via `_decode`, no-op) | `int` or `list[int\|None]` | `int` or `list[int\|None]` | Same — remove redundant callback |
+| 3 | JSON.ARRINSERT | `int` or `list[int]` (via `_decode`, no-op) | `int` or `list[int]` | `int` or `list[int]` | Same |
+| 4 | JSON.ARRLEN | `int\|None` or `list[int\|None]` (via `_decode`, no-op) | `int\|None` or `list[int\|None]` | `int\|None` or `list[int\|None]` | Same |
+| 5 | JSON.ARRTRIM | `int` or `list[int]` (via `_decode`, no-op) | `int` or `list[int]` | `int` or `list[int]` | Same |
+| 6 | JSON.NUMINCRBY | `scalar` (legacy) or `list` (dollar) via `_decode` JSON parse | `list` (always array) | `list` (always array) | Replace `_decode` with `_decode_json_numop`: parse JSON + wrap scalar in `[scalar]` |
+| 7 | JSON.NUMMULTBY | Same as NUMINCRBY | Same as NUMINCRBY | `list` (always array) | Same as NUMINCRBY |
+| 8 | JSON.OBJKEYS | `list[str]` (via `_decode` → `decode_list` → `nativestr`) | `list[str\|bytes]` | `list[str\|bytes]` | Remove from `_RESP2_MODULE_CALLBACKS` — fixes `nativestr` violation when `decode_responses=False` |
+| 9 | JSON.OBJLEN | `int\|None` or `list[int\|None]` (via `_decode`, no-op) | `int\|None` or `list[int\|None]` | `int\|None` or `list[int\|None]` | Same as ARRAPPEND — remove redundant callback |
+| 10 | JSON.STRAPPEND | `int\|None` or `list[int\|None]` (via `_decode`, no-op) | `int\|None` or `list[int\|None]` | `int\|None` or `list[int\|None]` | Same |
+| 11 | JSON.STRLEN | `int\|None` or `list[int\|None]` (via `_decode`, no-op) | `int\|None` or `list[int\|None]` | `int\|None` or `list[int\|None]` | Same |
+| 12 | JSON.TYPE | `str` (legacy) or `list[str]` (dollar) — no callback | `[str]` (legacy) or `[list[str]]` (dollar) — array-wrapped | `[str]` or `[list[str]]` (array-wrapped) | Add RESP2 callback: wrap result in `[result]` to match RESP3 |
 
 **Implementation notes:**
-- JSON module has instance-level decoder — RESP3 callbacks need access to `self._decode`
-- May need to register RESP3 callbacks at instance level (in `__init__`) similar to how RESP2 callbacks are registered
 
-**Unit test fixes (`tests/test_json.py`):**
-- `test_json_setgetjson` and related (lines ~133-164): replace `assert_resp_response(client, client.json().get("arr"), [], [])` → `assert client.json().get("arr") == []` (already same in this case)
-- `assert_resp_response(client, client.json().type("1"), "integer", ["integer"])` → unify to single expected format (likely `["integer"]` or `"integer"` — decide based on final decode behavior)
-- Multiple `assert_resp_response` calls throughout the file: after unification both protocols return decoded format → replace with single `assert` statements
-- Also update `tests/test_asyncio/test_json.py` with identical changes
+### Sub-batch 12a: Remove redundant RESP2 callbacks (9 commands: #1-5, #8-11)
+
+- Remove ARRAPPEND, ARRINDEX, ARRINSERT, ARRLEN, ARRTRIM, OBJKEYS, OBJLEN, STRAPPEND, STRLEN from `_RESP2_MODULE_CALLBACKS`
+- Why `_decode` is a no-op on integers: `json.loads(int)` → TypeError → `int.decode()` → AttributeError → `decode_list(int)` → returns int unchanged
+- OBJKEYS special case: `_decode` → `decode_list` applies `nativestr()` to each key, forcing `bytes → str` when `decode_responses=False`. Removing the callback fixes this violation — raw response already respects `decode_responses`
+- No RESP3 callbacks needed — RESP2 and RESP3 already return identical types
+- No test changes — all existing tests already use plain `assert`
+
+### Sub-batch 12b: Unify NUMINCRBY/NUMMULTBY to RESP3 array format (#6-7)
+
+- Legacy path mismatch: RESP2 `_decode` returns scalar (`json.loads("5")` → `5`), RESP3 returns `[5]`
+- Dollar path already matches: RESP2 `_decode` returns `[None, 4, 7.0]`, RESP3 returns `[None, 4, 7.0]`
+- Create new callback `_decode_json_numop(self, obj)`: parse JSON string → Python object, then wrap in `[result]` if not already a list
+- Register for NUMINCRBY and NUMMULTBY in `_RESP2_MODULE_CALLBACKS`
+- No RESP3 callback needed (RESP3 already returns arrays)
+
+```python
+def _decode_json_numop(self, obj):
+    """Decode JSON numeric operation result and normalize to array format.
+
+    RESP2 returns a JSON bulk string: scalar for legacy paths, array for dollar paths.
+    RESP3 always returns an array. Normalize RESP2 to match RESP3 format.
+    """
+    if obj is None:
+        return obj
+    try:
+        result = self.__decoder__.decode(obj if isinstance(obj, str) else obj.decode())
+    except (AttributeError, JSONDecodeError):
+        return obj
+    if not isinstance(result, list):
+        result = [result]
+    return result
+```
+
+### Sub-batch 12c: Unify JSON.TYPE to RESP3 array-wrapped format (#12)
+
+- Add RESP2 callback: `lambda r: [r] if r is not None else r`
+- Legacy `"integer"` → `["integer"]`, Dollar `["object", "array"]` → `[["object", "array"]]`
+- Note on None handling: need to verify whether RESP3 returns `None` or `[None]` for missing keys — if `[None]`, callback should be `lambda r: [r]` (always wrap)
+- No RESP3 callback needed
+
+### Sub-batch 12d: Cleanup identical `assert_resp_response` calls
+
+- No callback changes — just replace `assert_resp_response(client, result, X, X)` where both RESP2 and RESP3 expected values are identical with plain `assert result == X`
+- Affected: `test_strappend_dollar` (JSON.GET calls), `test_json_setgetjson` and related
+
+### Sub-batch 12e: JSON.RESP float normalization ✅ IMPLEMENTED
+
+**JSON.RESP** — Previously marked as excluded ("not fixable with callbacks"). **Solved** by adding a recursive float-conversion walker.
+
+- Added `_convert_resp_floats()` static method: recursively walks nested lists; attempts `float()` on every string leaf; ints, None, structure markers (`"{"`, `"["`), and boolean strings are safely skipped.
+- Added `_decode_resp_command()`: calls `_decode` first (standard processing), then applies `_convert_resp_floats`.
+- Registered `"JSON.RESP": self._decode_resp_command` in `_RESP2_MODULE_CALLBACKS`.
+- RESP3 needs no callback (already returns native floats).
+- Test: `test_resp_dollar` — replaced `assert_resp_response` with unified `assert res == expected` using native floats.
+
+### Sub-batch 12f: JSON.TYPE RESP3 None normalization ✅ IMPLEMENTED
+
+- RESP3 returns `[None]` for non-existing keys; RESP2 returns `None`.
+- Added RESP3 callback: `"JSON.TYPE": lambda r: None if r == [None] else r` in `_RESP3_MODULE_CALLBACKS`.
+
+### Sub-batch 12g: JSON Pipeline response_callbacks fix ✅ IMPLEMENTED
+
+- `_JSONBase.pipeline()` was passing `response_callbacks=self._MODULE_CALLBACKS` which only contained module-specific callbacks, missing all core Redis callbacks.
+- Changed to `response_callbacks=self.client.response_callbacks` which includes both core and module callbacks.
+
+**Unit test fixes (`tests/test_json.py` and `tests/test_asyncio/test_json.py`):**
+- Sub-batch 12b: `test_numincrby` — `assert_resp_response(client, res, 5, [5])` → `assert res == [5]` (~3 assertions sync + 3 async)
+- Sub-batch 12b: `test_nummultby` — same pattern (~3 sync + 3 async)
+- Sub-batch 12b: `test_numby_commands_dollar` — legacy-path assertions (~2 sync + 2 async)
+- Sub-batch 12c: `test_type` / `test_type_dollar` — `assert_resp_response(client, result, "integer", ["integer"])` → `assert result == ["integer"]` (~6 sync + 6 async)
+- Sub-batch 12d: `test_strappend_dollar` / `test_json_setgetjson` — `assert_resp_response(client, result, res, res)` → `assert result == res` (~4 sync + 4 async)
 
 ---
 
 ## Batch 13: Module Commands — Search (FT)
 
-**Theme:** RESP2 applies custom parsing; RESP3 returns raw. Unify to parsed format.
+**Theme:** RESP2 applies custom parsing into rich objects; RESP3 returns raw dicts. Unify by adding RESP3 callbacks that construct the same rich objects. Direction confirmed by Confluence doc: client-side normalization, no breaking API changes.
 
-| # | Command | Current RESP2 Type | Current RESP3 Type | Final Type | Action |
-|---|---------|-------------------|-------------------|------------|--------|
-| 1 | FT.INFO | Parsed dict | Raw response | Parsed dict | Add RESP3 `_parse_info` handling dict input |
-| 2 | FT.SEARCH | `Result` object | Raw response | `Result` object | Add RESP3 `_parse_search` handling dict/map input |
-| 3 | FT._HYBRID | Parsed | Raw response | Parsed | Add RESP3 callback |
-| 4 | FT.AGGREGATE | Parsed | Raw response | Parsed | Add RESP3 callback |
-| 5 | FT.PROFILE | Parsed | Raw response | Parsed | Add RESP3 callback |
-| 6 | FT.SPELLCHECK | Parsed | Raw response | Parsed | Add RESP3 callback |
-| 7 | FT.CONFIG GET | Parsed | Raw response | Parsed | Add RESP3 callback |
-| 8 | FT.SYNDUMP | Parsed | Raw response | Parsed | Add RESP3 callback |
+**Reference:** Confluence doc "Client-side RESP3 fixes for RQE" (`.agent/resp2_vs_resp3_command_analysis_confluence.wiki`)
 
-**Implementation notes:**
-- Search module is complex — parsers assume RESP2 flat list format
-- Need to create RESP3-aware versions of each parser or make existing parsers handle both formats
-- `Result` object construction needs to work from RESP3 dict format
-- ⚠️ This is the highest-effort batch
+### RESP3 field disposition (from Confluence)
 
-**Unit test fixes (`tests/test_search.py`):**
-- Search tests are extensive — many test `Result` objects, `AggregateResult`, spell check results
-- After unification, both protocols return parsed `Result` objects → any `assert_resp_response` or `is_resp2_connection` branching in search tests should be replaced with single assertions
-- Check for tests that directly inspect raw response structure vs `Result` attributes
-- Also update `tests/test_asyncio/test_search.py` with identical changes
-- ⚠️ Search tests are the most complex to update — may need to run tests iteratively to catch all differences
+| RESP3 Field | Action | Mapping |
+|---|---|---|
+| `attributes` | ❌ Ignore | Currently unused |
+| `total_results` | ✅ Keep | → `Result.total` / `AggregateResult.total` |
+| `format` | ❌ Ignore | Not supported in 8.6.1 |
+| `results` | ✅ Keep | → parse into `Result.docs` / `AggregateResult.rows` |
+| `results[x].id` | ✅ Keep | → `Document.id` |
+| `results[x].score` | ✅ Keep | → `Document.score` (only when `WITHSCORES`) |
+| `results[x].values` | ❌ Ignore | |
+| `results[x].extra_attributes` | ✅ Keep | → `Document` fields (via `setattr`) |
+| `warning` | ✅ Add | → `Result.warnings` / `AggregateResult.warnings` as `list[str]` (default `[]`) |
 
----
+### Unified response schema (from Confluence, mapped to existing classes)
 
-## Batch 14: Module Commands — VectorSet
+**`Result`** (search result — `redis/commands/search/result.py`):
 
-**Theme:** RESP2 parses; RESP3 returns raw. Unify.
+| Attribute | Type | Source (RESP2) | Source (RESP3) | Change needed |
+|---|---|---|---|---|
+| `total` | `int` | `res[0]` | `res["total_results"]` | None — already exists |
+| `docs` | `list[Document]` | Parsed from flat list | Parsed from `res["results"]` | Add RESP3 construction path |
+| `warnings` | `list[str]` | `[]` (not in RESP2) | `res["warning"]` | **New attribute** |
+| `duration` | `float` | Passed in | Passed in | None — already exists |
 
-| # | Command | Current RESP2 Type | Current RESP3 Type | Final Type | Action |
-|---|---------|-------------------|-------------------|------------|--------|
-| 1 | VINFO | `dict` (via `pairs_to_dict`) | Raw `dict` (native map) | `dict` | Already equivalent — just verify key types match; may need RESP3 callback for str key normalization |
-| 2 | VLINKS | Parsed `list[list]\|list[dict]` | Raw response | Parsed `list[list]\|list[dict]` | Add RESP3 callback applying `parse_vlinks_result` |
+**`Document`** (single doc — `redis/commands/search/document.py`):
 
-**Unit test fixes (`tests/test_vectorset.py`):**
-- Check for any `assert_resp_response` calls related to VINFO/VLINKS — if present, replace with single assertions
-- VINFO: verify key type consistency (str vs bytes keys in dict) — may need minor assertion updates
-- VLINKS: verify parsed structure is identical after adding RESP3 callback
+| Attribute | Type | Source (RESP2) | Source (RESP3) | Change needed |
+|---|---|---|---|---|
+| `id` | `str` | `res[i]` | `result["id"]` | None — already exists |
+| `score` | `float \| None` | `res[i+1]` when `WITHSCORES` | `result["score"]` when `WITHSCORES` | None — already exists |
+| `payload` | `str \| None` | `res[i+offset]` when `has_payload` | N/A (payloads removed) | None |
+| field attrs | dynamic via `setattr` | From flat KV pairs | From `result["extra_attributes"]` dict | Add RESP3 path |
+
+**`AggregateResult`** (aggregation result — `redis/commands/search/aggregation.py`):
+
+| Attribute | Type | Source (RESP2) | Source (RESP3) | Change needed |
+|---|---|---|---|---|
+| `rows` | `list[list]` | Flat KV sublists from `res[1:]` | Convert `res["results"][x]["extra_attributes"]` dicts to flat KV lists | Add RESP3 construction path |
+| `cursor` | `Cursor` | Parsed from response | Parsed from response | None — already exists |
+| `schema` | `list` | Passed in | Passed in | None — already exists |
+| `total` | `int` | ❌ Missing — not currently set | `res["total_results"]` | **New attribute** |
+| `warnings` | `list[str]` | `[]` (not in RESP2) | `res["warning"]` | **New attribute** |
+
+### Commands
+
+| # | Command | Current RESP2 Parsed | Current RESP3 (raw) | Final Type | Action |
+|---|---------|---------------------|---------------------|------------|--------|
+| 1 | FT.INFO | `dict` via `to_string` on pairs — attributes are flat sublists | Native map — attributes are nested dicts with `"flags"` key | `dict` — normalize RESP2 attributes to match RESP3 nested structure | Add RESP3 callback; normalize RESP2 `attributes` from flat sublists to nested dicts with `"flags"` key to match RESP3 format |
+| 2 | FT.SEARCH | `Result` object (`.total`, `.docs`, `.duration`) | Native map: `{"total_results": N, "results": [{...}], "warning": [...]}` | `Result` object with new `.warnings` field | Add RESP3 callback constructing `Result` from dict; add `warnings` to `Result` |
+| 3 | FT.AGGREGATE | `AggregateResult` object (`.rows`, `.cursor`, `.schema`) | Native map: `{"total_results": N, "results": [{"extra_attributes": {...}}], "warning": [...]}` | `AggregateResult` with new `.total` and `.warnings` fields | Add RESP3 callback constructing `AggregateResult` from dict; add `total` and `warnings` |
+| 4 | FT.HYBRID | `HybridResult` object (`.total_results`, `.results`, `.warnings`, `.execution_time`) | Native map: `{"total_results": N, "results": [...], "warnings": [...], "execution_time": ...}` | `HybridResult` / `HybridCursorResult` | Add RESP3 callback constructing `HybridResult` from dict |
+| 5 | FT.PROFILE | Tuple: `(Result\|AggregateResult, ProfileInformation)` | `ProfileInformation(res)` wrapping everything | Tuple: `(Result\|AggregateResult, ProfileInformation)` | Add RESP3 callback that extracts search/agg result + profile data and returns same tuple format |
+| 6 | FT.SPELLCHECK | `dict[term, list[dict]]` — e.g. `{"impornant": [{"score": "0.5", "suggestion": "important"}]}` | Raw nested arrays (same structure as RESP2) | `dict[term, list[dict]]` | Add RESP3 callback applying same `_parse_spellcheck` parser |
+
+### Implementation sub-batches
+
+**13a — Schema changes (new attributes on existing classes):**
+- Add `warnings: list[str] = []` to `Result.__init__`
+- Add `total: int = 0` and `warnings: list[str] = []` to `AggregateResult.__init__`
+- Set `warnings` from RESP2 responses too (empty list, for forward compat)
+
+**13b — FT.SEARCH RESP3 callback:**
+- Add `Result.from_resp3(res, with_scores, ...)` classmethod or make `Result.__init__` detect dict input
+- Parse `res["total_results"]` → `.total`
+- Parse `res["results"]` → list of `Document` (id from `["id"]`, score from `["score"]`, fields from `["extra_attributes"]`)
+- Parse `res["warning"]` → `.warnings`
+- Register in `_MODULE_CALLBACKS`
+
+**13c — FT.AGGREGATE RESP3 callback:**
+- Construct `AggregateResult` from RESP3 dict
+- Convert `res["results"][x]["extra_attributes"]` dicts to flat KV lists for `.rows` (preserving existing API)
+- Parse `res["total_results"]` → `.total`
+- Parse `res["warning"]` → `.warnings`
+- Register in `_MODULE_CALLBACKS`
+
+**13d — FT.HYBRID RESP3 callback:**
+- Construct `HybridResult` / `HybridCursorResult` from RESP3 dict
+- Register in `_MODULE_CALLBACKS`
+
+**13e — FT.PROFILE RESP3 callback:**
+- Extract search/aggregate result from RESP3 response, construct `Result` or `AggregateResult`
+- Extract profile data, construct `ProfileInformation`
+- Return same `(result, profile_info)` tuple as RESP2
+- Register in `_MODULE_CALLBACKS`
+
+**13f — FT.SPELLCHECK RESP3 callback:**
+- Apply `_parse_spellcheck` to RESP3 response (verify structure matches RESP2 first)
+- Register in `_MODULE_CALLBACKS`
+
+**13g — FT.INFO normalization:**
+- Add RESP3 callback that passes through (already a dict)
+- Normalize RESP2 `attributes` from flat sublists to nested dicts with `"flags"` key to match RESP3 format
+- Register in `_MODULE_CALLBACKS`
+
+**13h — Test cleanup:**
+- Remove ~102 `is_resp2_connection` / `assert_resp_response` branches in `tests/test_search.py`
+- Remove same branches in `tests/test_asyncio/test_search.py`
+- Replace with single assertions using unified `Result` / `AggregateResult` API
+- Add assertions for new `.warnings` attribute where appropriate
 
 ---
 
@@ -583,10 +712,9 @@ Also update `tests/test_asyncio/test_timeseries.py` with identical changes.
 | 10 | 12 | Low — adding missing RESP3 callbacks | Medium — Info class updates | 🟡 Medium |
 | 11 | 8 | Low — adding missing RESP3 callbacks | Medium — parser updates | 🟡 Medium |
 | 12 | 11 | Low — adding missing RESP3 callbacks | Medium — instance callbacks | 🟡 Medium |
-| 13 | 8 | Medium — complex parsers | 🔴 High — Search is complex | 🔴 High |
-| 14 | 2 | Low | Low | 🟢 Low |
+| 13 | 6 | Medium — complex parsers, structural diffs | 🔴 High — Search is complex | 🔴 High |
 
-**Total: ~88 commands across 14 batches**
+**Total: ~84 commands across 13 batches**
 
 ### Suggested Execution Order
 
@@ -599,9 +727,114 @@ Also update `tests/test_asyncio/test_timeseries.py` with identical changes.
 7. **Batch 6** (XREAD, GEOPOS, etc.) — structural changes
 8. **Batch 7** (Sentinel) — structural changes
 9. **Batch 8** (COMMAND, ACL LOG, etc.) — heterogeneous
-10. **Batch 14** (VectorSet) — quick win
-11. **Batch 10** (Probabilistic modules) — module callbacks
-12. **Batch 11** (TimeSeries) — module callbacks
-13. **Batch 12** (JSON) — module callbacks
-14. **Batch 13** (Search) — most complex, save for last
+10. **Batch 10** (Probabilistic modules) — module callbacks
+11. **Batch 11** (TimeSeries) — module callbacks
+12. **Batch 12** (JSON) — module callbacks
+13. **Batch 13** (Search) — most complex, save for last
 
+
+
+---
+
+## Completed Changes Log
+
+This section documents all changes that have been implemented, including items not originally in the plan.
+
+### Batch 1 — ZSET Score Normalization ✅ IMPLEMENTED
+
+**What was planned:** Convert `tuple` → `list` for score pairs.
+
+**What was actually implemented:** Score type normalization — cast scores to `float()` before applying `score_cast_func` so that `str(score)` produces consistent results (e.g., `"1.0"` instead of `"1"` in RESP2 vs `"1.0"` in RESP3).
+
+**Files changed:**
+- `redis/_parsers/helpers.py`: `zset_score_pairs()`, `zset_score_for_rank()`, `parse_zscan()` — added `float(score)` before `score_cast_func`.
+- `tests/test_commands.py`, `tests/test_asyncio/test_commands.py`: Replaced `assert_resp_response` for `ZRANK ... withscore=True`.
+
+### Batch 6 item 5 — STRALGO RESP3 Parser ✅ IMPLEMENTED
+
+**What was planned:** Change RESP2 `parse_stralgo` to return `list` instead of `tuple`.
+
+**What was actually implemented:** Added `parse_stralgo_resp3()` that restructures the RESP3 dict response (`{b"matches": [...], b"len": N}`) into the same format as RESP2's `parse_stralgo` output. Replaced inline lambda in `_RedisCallbacksRESP3["STRALGO"]`.
+
+**Files changed:**
+- `redis/_parsers/helpers.py`: Added `parse_stralgo_resp3()`, updated RESP3 callback.
+
+### CLUSTER LINKS Parser ✅ IMPLEMENTED (not in original plan)
+
+Added `parse_cluster_links()` to normalize CLUSTER LINKS output. RESP2 returns flat lists; RESP3 returns dicts with bytes keys. Both normalized to `[{"direction": ..., "node": ..., ...}, ...]` with string keys.
+
+**Files changed:**
+- `redis/_parsers/helpers.py`: Added `parse_cluster_links()`, registered in `_RedisCallbacks["CLUSTER LINKS"]`.
+
+### CLUSTER SHARDS Key Normalization ✅ IMPLEMENTED (not in original plan)
+
+Updated `parse_cluster_shards()` to normalize all dictionary keys to strings in both protocols. Previously RESP3 returned bytes keys; RESP2 had bytes keys at the node attribute level.
+
+**Files changed:**
+- `redis/cluster.py`: Updated `parse_cluster_shards()` — both paths now produce string keys.
+- `tests/test_cluster.py`, `tests/test_asyncio/test_cluster.py`: Updated attributes lists and assertions.
+
+### FUNCTION LIST RESP2 Parser ✅ IMPLEMENTED (not in original plan)
+
+Added `parse_function_list()` to convert RESP2's flat list format into nested dicts matching RESP3's native dict format.
+
+**Files changed:**
+- `redis/_parsers/helpers.py`: Added `parse_function_list()`, registered in `_RedisCallbacksRESP2["FUNCTION LIST"]`.
+- `tests/test_function.py`: Replaced all 6 `assert_resp_response` calls with unified `assert`.
+
+### XINFO STREAM Test Cleanup ✅ IMPLEMENTED
+
+`parse_xinfo_stream(full=True)` already normalizes `entries` to a dict in both protocols. Replaced `assert_resp_response_in` with simple `assert m1 in info["entries"]`.
+
+**Files changed:**
+- `tests/test_commands.py`: Removed `assert_resp_response_in` and unused imports.
+
+### Batch 12 — JSON Module ✅ IMPLEMENTED
+
+See sub-batches 12e–12g above (JSON.RESP float normalization, JSON.TYPE RESP3 None normalization, Pipeline response_callbacks fix).
+
+### Batch 13 — Search (FT) Module ✅ IMPLEMENTED
+
+All RESP3 parsers implemented as planned:
+- `_parse_search_resp3()`, `_parse_aggregate_resp3()`, `_parse_hybrid_search_resp3()`
+- `_parse_profile_resp3()`, `_parse_spellcheck_resp3()`
+- `_parse_info_resp3()`, `_parse_config_get_resp3()`, `_parse_syndump_resp3()`
+
+**Additional RESP2 fixes (not in original plan):**
+- `_parse_config_get()`: Added `to_string()` calls for key/value normalization.
+- `_parse_profile()`: Added detection of >= 7.9.0 flat key-value profile format.
+
+**Schema changes:**
+- `Result`: Added `warnings: list[str]`; added `from_resp3()` classmethod.
+- `AggregateResult`: Added `total` and `warnings` attributes.
+
+**Pipeline overhaul (not in original plan details):**
+- Search `Pipeline`/`AsyncPipeline`: Added `execute()` overrides for post-processing.
+- Added `client` property; lazy `_ensure_resp2_callbacks()`.
+- Commands pass query objects via `_search_query`, `_agg_query`, `_hybrid_query`, `_has_cursor`.
+
+**Files changed:**
+- `redis/commands/search/commands.py`, `redis/commands/search/__init__.py`
+- `redis/commands/search/result.py`, `redis/commands/search/aggregation.py`
+- `tests/test_search.py`, `tests/test_asyncio/test_search.py`
+
+### TimeSeries Pipeline Fix ✅ IMPLEMENTED (not in original plan)
+
+Changed `_TimeSeriesBase.pipeline()` from `response_callbacks=self._MODULE_CALLBACKS` to `response_callbacks=self.client.response_callbacks`.
+
+**Files changed:**
+- `redis/commands/timeseries/__init__.py`
+
+### Infrastructure: Removed Test Assertion Helpers ✅ IMPLEMENTED (not in original plan)
+
+Removed `assert_resp_response()` and `assert_resp_response_in()` from `tests/conftest.py`.
+
+**Files changed:**
+- `tests/conftest.py`
+
+### Test Policy Cleanup ✅ IMPLEMENTED (not in original plan)
+
+Removed `is_resp2_connection` branching from command policy tests.
+
+**Files changed:**
+- `tests/test_command_policies.py`, `tests/test_asyncio/test_command_policies.py`

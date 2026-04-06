@@ -256,7 +256,9 @@ def zset_score_pairs(response, **options):
         return response
     score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
     it = iter(response)
-    return [[val, score_cast_func(score)] for val, score in zip(it, it)]
+    # Normalise RESP2 byte-string scores to float before applying the cast
+    # so that score_cast_func receives the same type as in RESP3.
+    return [[val, score_cast_func(float(score))] for val, score in zip(it, it)]
 
 
 def zset_score_for_rank(response, **options):
@@ -267,7 +269,9 @@ def zset_score_for_rank(response, **options):
     if not response or not options.get("withscore"):
         return response
     score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
-    return [response[0], score_cast_func(response[1])]
+    # Normalise RESP2 byte-string scores to float before applying the cast
+    # so that score_cast_func receives the same type as in RESP3.
+    return [response[0], score_cast_func(float(response[1]))]
 
 
 def zset_score_pairs_resp3(response, **options):
@@ -523,7 +527,11 @@ def parse_zscan(response, **options):
     score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
     cursor, r = response
     it = iter(r)
-    return int(cursor), [[val, score_cast_func(score)] for val, score in zip(it, it)]
+    # Normalise scores to float before applying the cast so that
+    # score_cast_func receives the same type regardless of protocol.
+    return int(cursor), [
+        [val, score_cast_func(float(score))] for val, score in zip(it, it)
+    ]
 
 
 def parse_zmscore(response, **options):
@@ -604,6 +612,52 @@ def parse_stralgo(response, **options):
             str_if_bytes(response[2]): int(response[3]),
         }
     return str_if_bytes(response)
+
+
+def parse_stralgo_resp3(response, **options):
+    """Parse RESP3 ``STRALGO`` response to match RESP2 ``parse_stralgo`` output.
+
+    RESP3 returns a dict ``{b"matches": [...], b"len": N}`` for ``idx=True``,
+    an int for ``len=True``, or a plain string otherwise.  The match
+    restructuring mirrors :func:`parse_stralgo` exactly so both protocols
+    produce identical results.
+    """
+    if options.get("len", False):
+        return int(response)
+    if options.get("idx", False):
+        if isinstance(response, dict):
+            raw_matches = response.get("matches", response.get(b"matches", []))
+            raw_len = response.get("len", response.get(b"len", 0))
+        else:
+            return str_if_bytes(response)
+        if options.get("withmatchlen", False):
+            matches = [
+                [int(match[-1])] + [list(m) for m in match[:-1]]
+                for match in raw_matches
+            ]
+        else:
+            matches = [[list(m) for m in match] for match in raw_matches]
+        return {
+            "matches": matches,
+            "len": int(raw_len),
+        }
+    return str_if_bytes(response)
+
+
+def parse_cluster_links(response, **options):
+    """Parse CLUSTER LINKS into a list of dicts with str keys.
+
+    RESP2 returns a list of flat lists ``[key, val, key, val, ...]``.
+    RESP3 returns a list of dicts with bytes keys.
+    Both are normalised to ``[{"direction": ..., "node": ..., ...}, ...]``.
+    """
+    result = []
+    for item in response:
+        if isinstance(item, dict):
+            result.append({str_if_bytes(k): v for k, v in item.items()})
+        else:
+            result.append(pairs_to_dict(item, decode_keys=True))
+    return result
 
 
 def parse_cluster_info(response, **options):
@@ -896,6 +950,23 @@ def parse_gcra(response, **options):
         retry_after=int(response[3]),
         full_burst_after=int(response[4]),
     )
+def parse_function_list(response):
+    """Parse FUNCTION LIST response from RESP2 flat lists into nested dicts.
+
+    RESP2 returns: [[key, val, key, val, ...], ...]
+    where nested 'functions' values are also flat lists.
+    Converts to match RESP3's native dict format.
+    """
+    result = []
+    for lib_flat in response:
+        lib_dict = pairs_to_dict(lib_flat)
+        # Convert each function's flat list to a dict
+        if b"functions" in lib_dict:
+            lib_dict[b"functions"] = [
+                pairs_to_dict(func) for func in lib_dict[b"functions"]
+            ]
+        result.append(lib_dict)
+    return result
 
 
 def string_keys_to_dict(key_string, callback):
@@ -940,6 +1011,7 @@ _RedisCallbacks = {
     "CLUSTER FAILOVER": bool_ok,
     "CLUSTER FORGET": bool_ok,
     "CLUSTER INFO": parse_cluster_info,
+    "CLUSTER LINKS": parse_cluster_links,
     "CLUSTER MEET": bool_ok,
     "CLUSTER NODES": parse_cluster_nodes,
     "CLUSTER REPLICAS": parse_cluster_nodes,
@@ -1040,6 +1112,7 @@ _RedisCallbacksRESP2 = {
     "SENTINEL SENTINELS": parse_sentinel_slaves_and_sentinels,
     "SENTINEL SLAVES": parse_sentinel_slaves_and_sentinels,
     "STRALGO": parse_stralgo,
+    "FUNCTION LIST": parse_function_list,
     "XINFO CONSUMERS": parse_list_of_dicts,
     "XINFO GROUPS": parse_list_of_dicts,
     "HRANDFIELD": hrandfield_pairs,
@@ -1105,11 +1178,7 @@ _RedisCallbacksRESP3 = {
     "SENTINEL MASTERS": parse_sentinel_masters_resp3,
     "SENTINEL SENTINELS": parse_sentinel_slaves_and_sentinels_resp3,
     "SENTINEL SLAVES": parse_sentinel_slaves_and_sentinels_resp3,
-    "STRALGO": lambda r, **options: (
-        {str_if_bytes(key): str_if_bytes(value) for key, value in r.items()}
-        if isinstance(r, dict)
-        else str_if_bytes(r)
-    ),
+    "STRALGO": lambda r, **options: parse_stralgo_resp3(r, **options),
     "XINFO CONSUMERS": lambda r: [
         {str_if_bytes(key): value for key, value in x.items()} for x in r
     ],

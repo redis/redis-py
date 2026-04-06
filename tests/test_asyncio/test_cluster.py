@@ -43,7 +43,6 @@ from redis.exceptions import (
 )
 from redis.utils import str_if_bytes
 from tests.conftest import (
-    is_resp2_connection,
     skip_if_redis_enterprise,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
@@ -1448,18 +1447,11 @@ class TestClusterRedisCommands:
     async def test_cluster_links(self, r: RedisCluster):
         node = r.get_random_node()
         res = await r.cluster_links(node)
-        if is_resp2_connection(r):
-            links_to = sum(x.count(b"to") for x in res)
-            links_for = sum(x.count(b"from") for x in res)
-            assert links_to == links_for
-            for i in range(0, len(res) - 1, 2):
-                assert res[i][3] == res[i + 1][3]
-        else:
-            links_to = len(list(filter(lambda x: x[b"direction"] == b"to", res)))
-            links_for = len(list(filter(lambda x: x[b"direction"] == b"from", res)))
-            assert links_to == links_for
-            for i in range(0, len(res) - 1, 2):
-                assert res[i][b"node"] == res[i + 1][b"node"]
+        links_to = len(list(filter(lambda x: x["direction"] == b"to", res)))
+        links_for = len(list(filter(lambda x: x["direction"] == b"from", res)))
+        assert links_to == links_for
+        for i in range(0, len(res) - 1, 2):
+            assert res[i]["node"] == res[i + 1]["node"]
 
     @skip_if_redis_enterprise()
     async def test_readonly(self) -> None:
