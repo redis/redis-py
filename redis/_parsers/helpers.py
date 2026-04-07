@@ -767,7 +767,7 @@ def parse_command(response, **options):
         cmd_dict["last_key_pos"] = command[4]
         cmd_dict["step_count"] = command[5]
         if len(command) > 6:
-            cmd_dict["acl_categories"] = command[6]
+            cmd_dict["acl_categories"] = {str_if_bytes(c) for c in command[6]}
         if len(command) > 7:
             cmd_dict["tips"] = command[7]
             cmd_dict["key_specifications"] = command[8]
@@ -787,7 +787,7 @@ def parse_command_resp3(response, **options):
         cmd_dict["first_key_pos"] = command[3]
         cmd_dict["last_key_pos"] = command[4]
         cmd_dict["step_count"] = command[5]
-        cmd_dict["acl_categories"] = command[6]
+        cmd_dict["acl_categories"] = {str_if_bytes(c) for c in command[6]}
         if len(command) > 7:
             cmd_dict["tips"] = command[7]
             cmd_dict["key_specifications"] = command[8]

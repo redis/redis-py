@@ -6925,10 +6925,12 @@ class TestRedisCommands:
         cmds = list(res.keys())
         assert "set" in cmds
         assert "get" in cmds
-        # Verify unified format: flags as set, acl_categories present
+        # Verify unified format: flags and acl_categories as sets of strings
         set_cmd = res["set"]
         assert isinstance(set_cmd["flags"], set)
         assert "acl_categories" in set_cmd
+        assert isinstance(set_cmd["acl_categories"], set)
+        assert all(isinstance(c, str) for c in set_cmd["acl_categories"])
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")

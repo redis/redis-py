@@ -414,10 +414,19 @@ class SearchCommands:
     def _parse_profile_resp3(self, res, **kwargs):
         """Parse RESP3 FT.PROFILE response into (result, ProfileInformation) tuple.
 
-        RESP3 format: {"Results": {search/aggregate result dict},
-                       "Profile": {profile information dict}}
-        RESP2 format: [search/aggregate result, profile information]
+        RESP3 format (aligned, RediSearch >= MOD-6816):
+            {"Results": {search/aggregate result dict},
+             "Profile": {profile information dict}}
+
+        Older RediSearch versions may return a list (same as RESP2) even
+        when the connection uses RESP3.  In that case we delegate to the
+        RESP2 ``_parse_profile`` parser.
         """
+        # Older RediSearch returns a list even in RESP3 mode – fall back
+        # to the RESP2 parser which already handles that format.
+        if isinstance(res, list):
+            return self._parse_profile(res, **kwargs)
+
         query = kwargs["query"]
         # RESP3 returns a dict with "Results" and "Profile" keys.
         # Handle both decoded (str) and raw (bytes) keys.
