@@ -1032,10 +1032,7 @@ class TestRedisCommands:
             default_dialect_new = "3"
             assert r.config_set("search-default-dialect", default_dialect_new)
             assert r.config_get("*")["search-default-dialect"] == default_dialect_new
-            assert (
-                r.ft().config_get("*")["DEFAULT_DIALECT"]
-                == default_dialect_new
-            )
+            assert r.ft().config_get("*")["DEFAULT_DIALECT"] == default_dialect_new
         except AssertionError as ex:
             raise ex
         finally:
@@ -3512,7 +3509,7 @@ class TestRedisCommands:
         response = (b"0", [b"member1", b"1.7732526297292595e+18"])
         cursor, pairs = parse_zscan(response, score_cast_func=int)
         assert cursor == 0
-        assert pairs == [(b"member1", 1773252629729259520)]
+        assert pairs == [[b"member1", 1773252629729259520]]
 
     @skip_if_server_version_lt("2.8.0")
     def test_zscan_iter(self, r):
@@ -3972,15 +3969,16 @@ class TestRedisCommands:
         # Simulates RESP2 response with large score in scientific notation
         response = [b"member1", b"1.7732526297292595e+18"]
         result = zset_score_pairs(response, withscores=True, score_cast_func=int)
-        assert result == [(b"member1", 1773252629729259520)]
+        assert result == [[b"member1", 1773252629729259520]]
         # float cast is unaffected
         result = zset_score_pairs(response, withscores=True, score_cast_func=float)
-        assert result == [(b"member1", 1.7732526297292595e18)]
-        # safe_str still receives raw bytes, not float (no "1.0" regression)
+        assert result == [[b"member1", 1.7732526297292595e18]]
+        # safe_str receives a float (scores are normalised via float() before
+        # the cast func is applied, matching RESP3 behaviour)
         result = zset_score_pairs(
             [b"a", b"1"], withscores=True, score_cast_func=safe_str
         )
-        assert result == [(b"a", "1")]
+        assert result == [[b"a", "1.0"]]
 
     def test_zrange_errors(self, r):
         with pytest.raises(exceptions.DataError):
@@ -4089,7 +4087,7 @@ class TestRedisCommands:
         """score_cast_func=int handles scientific notation scores (issue #4000)."""
         response = [b"a1", b"1.7732526297292595e+18", b"a2", b"2.5"]
         result = zset_score_pairs(response, withscores=True, score_cast_func=int)
-        assert result == [(b"a1", 1773252629729259520), (b"a2", 2)]
+        assert result == [[b"a1", 1773252629729259520], [b"a2", 2]]
 
     def test_zrank(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
@@ -4107,9 +4105,10 @@ class TestRedisCommands:
         assert r.zrank("a", "a6", withscore=True) is None
 
         # custom score cast function
-        assert r.zrank(
-            "a", "a3", withscore=True, score_cast_func=safe_str
-        ) == [2, "3.0"]
+        assert r.zrank("a", "a3", withscore=True, score_cast_func=safe_str) == [
+            2,
+            "3.0",
+        ]
 
     def test_zrem(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
@@ -4163,9 +4162,10 @@ class TestRedisCommands:
         # custom score cast function
         # should be applied to resp2 and resp3
         # responses
-        assert r.zrevrange(
-            "a", 0, 1, withscores=True, score_cast_func=safe_str
-        ) == [[b"a3", "3.0"], [b"a2", "2.0"]]
+        assert r.zrevrange("a", 0, 1, withscores=True, score_cast_func=safe_str) == [
+            [b"a3", "3.0"],
+            [b"a2", "2.0"],
+        ]
 
     def test_zrevrangebyscore(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
@@ -4206,9 +4206,10 @@ class TestRedisCommands:
         assert r.zrevrank("a", "a6", withscore=True) is None
 
         # custom score cast function
-        assert r.zrevrank(
-            "a", "a3", withscore=True, score_cast_func=safe_str
-        ) == [2, "3.0"]
+        assert r.zrevrank("a", "a3", withscore=True, score_cast_func=safe_str) == [
+            2,
+            "3.0",
+        ]
 
     def test_zrevrank_score_cast_scientific_notation(self):
         """score_cast_func=int handles scientific notation scores (issue #4000)."""
@@ -4258,9 +4259,12 @@ class TestRedisCommands:
             [b"a1", 23],
         ]
         # with custom score cast function
-        assert r.zunion(
-            ["a", "b", "c"], withscores=True, score_cast_func=safe_str
-        ) == [[b"a2", "3.0"], [b"a4", "4.0"], [b"a3", "8.0"], [b"a1", "9.0"]]
+        assert r.zunion(["a", "b", "c"], withscores=True, score_cast_func=safe_str) == [
+            [b"a2", "3.0"],
+            [b"a4", "4.0"],
+            [b"a3", "8.0"],
+            [b"a1", "9.0"],
+        ]
 
     @pytest.mark.onlynoncluster
     def test_zunionstore_sum(self, r):

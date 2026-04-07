@@ -121,19 +121,9 @@ class _TOPKBloomBase(TOPKCommands, AbstractBloom):
             TOPK_INFO: TopKInfo,
         }
 
-        _RESP2_MODULE_CALLBACKS = {
-            TOPK_LIST: parse_to_list,
-        }
-        _RESP3_MODULE_CALLBACKS = {}
-
         self.client = client
         self.commandmixin = TOPKCommands
         self.execute_command = client.execute_command
-
-        if get_protocol_version(self.client) in ["3", 3]:
-            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
-        else:
-            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
 
         for k, v in _MODULE_CALLBACKS.items():
             self.client.set_response_callback(k, v)
