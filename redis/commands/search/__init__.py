@@ -8,6 +8,7 @@ from .commands import (
     AGGREGATE_CMD,
     CURSOR_CMD,
     HYBRID_CMD,
+    PROFILE_CMD,
     SEARCH_CMD,
     AsyncSearchCommands,
     SearchCommands,
@@ -196,6 +197,7 @@ class Pipeline(SearchCommands, RedisPipeline):
             self._parse_results, AGGREGATE_CMD
         )
         self.response_callbacks[HYBRID_CMD] = partial(self._parse_results, HYBRID_CMD)
+        self.response_callbacks[PROFILE_CMD] = partial(self._parse_results, PROFILE_CMD)
 
     @property
     def client(self):
@@ -223,6 +225,7 @@ class AsyncPipeline(AsyncSearchCommands, AsyncioPipeline, Pipeline):
             self._parse_results, AGGREGATE_CMD
         )
         self.response_callbacks[HYBRID_CMD] = partial(self._parse_results, HYBRID_CMD)
+        self.response_callbacks[PROFILE_CMD] = partial(self._parse_results, PROFILE_CMD)
 
     @property
     def client(self):
