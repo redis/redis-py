@@ -457,6 +457,15 @@ class SearchCommands:
             profile_data = res.get(b"profile")
         if profile_data is None:
             profile_data = res.get(1)
+        # On older servers (pre MOD-6816, e.g. Redis 7.2/7.4) the "Results"
+        # value is a bare list of result-item dicts, not the wrapper dict
+        # ``{"total_results": N, "results": [...], "warning": [...]}``.
+        # Wrap the list so downstream parsers receive the expected format.
+        if isinstance(results_data, list):
+            results_data = {
+                "total_results": len(results_data),
+                "results": results_data,
+            }
         if isinstance(query, AggregateRequest):
             result = self._parse_aggregate_resp3(
                 results_data, query=query, has_cursor=bool(query._cursor)
