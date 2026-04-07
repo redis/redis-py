@@ -98,6 +98,8 @@ class Result:
         }
         """
         instance = cls.__new__(cls)
+        if res is None:
+            res = {}
         instance.total = res.get("total_results", 0)
         instance.duration = duration
         instance.docs = []

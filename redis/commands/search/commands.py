@@ -290,7 +290,14 @@ class SearchCommands:
         return {str_if_bytes(kvs[0]): str_if_bytes(kvs[1]) for kvs in res}
 
     def _parse_syndump(self, res, **kwargs):
-        return {res[i]: res[i + 1] for i in range(0, len(res), 2)}
+        if not res:
+            return {}
+        return {
+            str_if_bytes(res[i]): [str_if_bytes(s) for s in res[i + 1]]
+            if isinstance(res[i + 1], list)
+            else str_if_bytes(res[i + 1])
+            for i in range(0, len(res), 2)
+        }
 
     # ---- RESP3 parsers ----
 
@@ -436,10 +443,18 @@ class SearchCommands:
         if results_data is None:
             results_data = res.get(b"Results")
         if results_data is None:
+            results_data = res.get("results")
+        if results_data is None:
+            results_data = res.get(b"results")
+        if results_data is None:
             results_data = res.get(0)
         profile_data = res.get("Profile")
         if profile_data is None:
             profile_data = res.get(b"Profile")
+        if profile_data is None:
+            profile_data = res.get("profile")
+        if profile_data is None:
+            profile_data = res.get(b"profile")
         if profile_data is None:
             profile_data = res.get(1)
         if isinstance(query, AggregateRequest):
