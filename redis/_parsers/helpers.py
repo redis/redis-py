@@ -316,13 +316,16 @@ def parse_zmpop(response, **options):
 def parse_lcs(response, **options):
     """
     Parse LCS response. Without modifiers returns the raw string.
-    With LEN returns an integer. With IDX returns a dict.
+    With LEN returns an integer. With IDX returns a dict with string keys.
     RESP2 with IDX returns a flat list [key, val, key, val, ...]
-    which we convert to a dict to match RESP3's native dict.
+    which we convert to a dict. RESP3 returns a native dict.
+    Both have keys normalized to strings.
     """
     if isinstance(response, list):
         it = iter(response)
-        return dict(zip(it, it))
+        return {str_if_bytes(k): v for k, v in zip(it, it)}
+    if isinstance(response, dict):
+        return {str_if_bytes(k): v for k, v in response.items()}
     return response
 
 

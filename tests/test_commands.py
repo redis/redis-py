@@ -1946,8 +1946,8 @@ class TestRedisCommands:
         assert r.lcs("foo", "bar") == b"mytext"
         assert r.lcs("foo", "bar", len=True) == 6
         assert r.lcs("foo", "bar", idx=True, minmatchlen=3) == {
-            b"matches": [[[4, 7], [5, 8]]],
-            b"len": 6,
+            "matches": [[[4, 7], [5, 8]]],
+            "len": 6,
         }
         with pytest.raises(redis.ResponseError):
             assert r.lcs("foo", "bar", len=True, idx=True)

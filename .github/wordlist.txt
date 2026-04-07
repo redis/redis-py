@@ -83,6 +83,7 @@ TCP
 TemporaryUnavailableException
 TLS
 TOPKCommands
+TimeSeries
 TimeSeriesCommands
 Uptrace
 ValueError
