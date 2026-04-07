@@ -1070,6 +1070,7 @@ _RedisCallbacks = {
     "XINFO STREAM": parse_xinfo_stream,
     "XPENDING": parse_xpending,
     "ZSCAN": parse_zscan,
+    "LCS": parse_lcs,
 }
 
 
@@ -1120,7 +1121,6 @@ _RedisCallbacksRESP2 = {
     "XINFO CONSUMERS": parse_list_of_dicts,
     "XINFO GROUPS": parse_list_of_dicts,
     "HRANDFIELD": hrandfield_pairs,
-    "LCS": parse_lcs,
     "ZADD": parse_zadd,
     "ZMPOP": parse_zmpop,
     "BZMPOP": parse_zmpop,
