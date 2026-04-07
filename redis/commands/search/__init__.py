@@ -7,9 +7,6 @@ from ...asyncio.client import Pipeline as AsyncioPipeline
 from .commands import (
     AGGREGATE_CMD,
     CURSOR_CMD,
-    HYBRID_CMD,
-    PROFILE_CMD,
-    SEARCH_CMD,
     AsyncSearchCommands,
     SearchCommands,
 )
@@ -95,7 +92,6 @@ class Search(SearchCommands):
 
         If conn is not None, we employ an already existing redis connection
         """
-        self._MODULE_CALLBACKS = {}
         self.client = client
         self.index_name = index_name
         self.execute_command = client.execute_command
@@ -189,15 +185,18 @@ class Pipeline(SearchCommands, RedisPipeline):
         # Register search-specific response callbacks so that the standard
         # pipeline callback mechanism (and future cluster pipeline support)
         # can apply them automatically — no execute() override needed.
-        self.response_callbacks[SEARCH_CMD] = partial(self._parse_results, SEARCH_CMD)
-        self.response_callbacks[AGGREGATE_CMD] = partial(
-            self._parse_results, AGGREGATE_CMD
-        )
+        # Derive the set of commands from the module callback maps built by
+        # _init_module_callbacks() so new commands are picked up automatically.
+        # _parse_results dispatches to the correct protocol-specific callback
+        # at runtime, so we only need the union of command names here.
+        for cmd in (
+            self._RESP2_MODULE_CALLBACKS.keys() | self._RESP3_MODULE_CALLBACKS.keys()
+        ):
+            self.response_callbacks[cmd] = partial(self._parse_results, cmd)
+        # CURSOR_CMD reuses the AGGREGATE parser but isn't in the maps.
         self.response_callbacks[CURSOR_CMD] = partial(
             self._parse_results, AGGREGATE_CMD
         )
-        self.response_callbacks[HYBRID_CMD] = partial(self._parse_results, HYBRID_CMD)
-        self.response_callbacks[PROFILE_CMD] = partial(self._parse_results, PROFILE_CMD)
 
     @property
     def client(self):
@@ -217,15 +216,13 @@ class AsyncPipeline(AsyncSearchCommands, AsyncioPipeline, Pipeline):
             connection_pool, dict(response_callbacks), transaction, shard_hint
         )
         self._init_module_callbacks()
-        self.response_callbacks[SEARCH_CMD] = partial(self._parse_results, SEARCH_CMD)
-        self.response_callbacks[AGGREGATE_CMD] = partial(
-            self._parse_results, AGGREGATE_CMD
-        )
+        for cmd in (
+            self._RESP2_MODULE_CALLBACKS.keys() | self._RESP3_MODULE_CALLBACKS.keys()
+        ):
+            self.response_callbacks[cmd] = partial(self._parse_results, cmd)
         self.response_callbacks[CURSOR_CMD] = partial(
             self._parse_results, AGGREGATE_CMD
         )
-        self.response_callbacks[HYBRID_CMD] = partial(self._parse_results, HYBRID_CMD)
-        self.response_callbacks[PROFILE_CMD] = partial(self._parse_results, PROFILE_CMD)
 
     @property
     def client(self):

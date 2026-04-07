@@ -478,7 +478,63 @@ class SearchCommands:
             )
         # Normalize profile data keys/values to strings
         profile_data = self._to_string_recursive(profile_data)
+        # On pre-7.9.0 servers, convert RESP3 profile dict to the RESP2
+        # list-of-pairs format so consumers see a consistent structure
+        # regardless of protocol.  Post-7.9.0 responses contain a "Shards"
+        # key and are already handled uniformly by both parsers as dicts.
+        if isinstance(profile_data, dict) and "Shards" not in profile_data:
+            profile_data = self._resp3_profile_dict_to_list(profile_data)
         return result, ProfileInformation(profile_data)
+
+    @staticmethod
+    def _resp3_profile_dict_to_list(data):
+        """Convert RESP3 profile dict into RESP2-style list-of-pairs.
+
+        On pre-7.9.0 servers, RESP2 returns profile data as a list of
+        ``[key, value]`` pairs where nested structures are flat alternating
+        key-value lists.  RESP3 returns the same data as nested dicts.
+        This converts the RESP3 dict back to the RESP2 list format so
+        consumers see a consistent structure regardless of protocol.
+
+        Key structural difference: when a dict value is a list of dicts
+        (e.g. ``"Child iterators": [{...}, {...}]``), RESP2 expands each
+        dict as a separate sibling element in the parent flat list rather
+        than keeping them nested inside a single value.
+        """
+
+        def _is_list_of_dicts(obj):
+            return isinstance(obj, list) and obj and isinstance(obj[0], dict)
+
+        def _convert(obj, top_level=False):
+            if isinstance(obj, dict):
+                if top_level:
+                    # Top-level: list of [key, ...values] entries
+                    result = []
+                    for k, v in obj.items():
+                        entry = [k]
+                        if _is_list_of_dicts(v):
+                            for item in v:
+                                entry.append(_convert(item))
+                        else:
+                            entry.append(_convert(v))
+                        result.append(entry)
+                    return result
+                else:
+                    # Nested: flat alternating key-value list
+                    result = []
+                    for k, v in obj.items():
+                        result.append(k)
+                        if _is_list_of_dicts(v):
+                            for item in v:
+                                result.append(_convert(item))
+                        else:
+                            result.append(_convert(v))
+                    return result
+            elif isinstance(obj, list):
+                return [_convert(item) for item in obj]
+            return obj
+
+        return _convert(data, top_level=True)
 
     @staticmethod
     def _to_string_recursive(obj):
