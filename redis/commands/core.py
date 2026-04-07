@@ -7581,8 +7581,7 @@ class SortedSetCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/zpopmax
         """
         args = (count is not None) and [count] or []
-        options = {"withscores": True}
-        return self.execute_command("ZPOPMAX", name, *args, **options)
+        return self.execute_command("ZPOPMAX", name, *args)
 
     @overload
     def zpopmin(
@@ -7604,8 +7603,7 @@ class SortedSetCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/zpopmin
         """
         args = (count is not None) and [count] or []
-        options = {"withscores": True}
-        return self.execute_command("ZPOPMIN", name, *args, **options)
+        return self.execute_command("ZPOPMIN", name, *args)
 
     @overload
     def zrandmember(

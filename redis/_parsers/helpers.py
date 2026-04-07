@@ -329,6 +329,21 @@ def parse_lcs(response, **options):
     return response
 
 
+def zpop_score_pairs(response, **options):
+    """
+    Handle ZPOPMAX/ZPOPMIN RESP2 responses.
+    RESP2 always returns a flat array: [member1, score1, member2, score2, ...]
+    Scores are byte strings that need to be cast to float.
+    Always pairs and casts scores — no ``withscores`` gate required because
+    ZPOPMAX/ZPOPMIN always include scores in their response.
+    """
+    if not response:
+        return response
+    score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
+    it = iter(response)
+    return [[val, score_cast_func(float(score))] for val, score in zip(it, it)]
+
+
 def zpop_score_pairs_resp3(response, **options):
     """
     Handle ZPOPMAX/ZPOPMIN RESP3 responses which differ based on count:
@@ -1079,9 +1094,12 @@ _RedisCallbacksRESP2 = {
         "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
     ),
     **string_keys_to_dict(
-        "ZDIFF ZINTER ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZREVRANGE "
-        "ZREVRANGEBYSCORE ZUNION",
+        "ZDIFF ZINTER ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE ZUNION",
         zset_score_pairs,
+    ),
+    **string_keys_to_dict(
+        "ZPOPMAX ZPOPMIN",
+        zpop_score_pairs,
     ),
     **string_keys_to_dict(
         "ZREVRANK ZRANK",
