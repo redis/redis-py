@@ -632,38 +632,40 @@ class TestUnitCacheProxyConnection:
         cache_key = CacheKey(
             command=command, redis_keys=redis_keys, redis_args=redis_args
         )
+        valid_entry = CacheEntry(
+            cache_key=cache_key,
+            cache_value=cached_value,
+            status=CacheEntryStatus.VALID,
+            connection_ref=mock_connection,
+        )
+        in_progress_entry = CacheEntry(
+            cache_key=cache_key,
+            cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+            status=CacheEntryStatus.IN_PROGRESS,
+            connection_ref=mock_connection,
+        )
         mock_cache.is_cachable.return_value = True
         mock_cache.get.side_effect = [
-            # send_command: first get returns None (cache miss)
+            # 1st send_command: cache.get(key) → None (cache miss)
             None,
-            # send_command: second get for IN_PROGRESS check
-            None,
-            # read_response (first call): cache lookup returns IN_PROGRESS
-            CacheEntry(
-                cache_key=cache_key,
-                cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
-                status=CacheEntryStatus.IN_PROGRESS,
-                connection_ref=mock_connection,
-            ),
-            # read_response (second call): cache lookup returns VALID
-            CacheEntry(
-                cache_key=cache_key,
-                cache_value=cached_value,
-                status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection,
-            ),
-            CacheEntry(
-                cache_key=cache_key,
-                cache_value=cached_value,
-                status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection,
-            ),
-            CacheEntry(
-                cache_key=cache_key,
-                cache_value=cached_value,
-                status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection,
-            ),
+            # 1st read_response: cache.get(key) is not None check
+            in_progress_entry,
+            # 1st read_response: cache.get(key).status check
+            in_progress_entry,
+            # 1st read_response: cache.get(key) after wire read (to update entry)
+            in_progress_entry,
+            # 2nd send_command: cache.get(key) → truthy (cache hit, enter branch)
+            valid_entry,
+            # 2nd send_command: entry = cache.get(key)
+            valid_entry,
+            # 2nd send_command: re-check cache.get(key) → truthy (return early)
+            valid_entry,
+            # 2nd read_response: cache.get(key) is not None check
+            valid_entry,
+            # 2nd read_response: cache.get(key).status check (VALID != IN_PROGRESS)
+            valid_entry,
+            # 2nd read_response: cache.get(key).cache_value (deep copy)
+            valid_entry,
         ]
         mock_connection.send_command.return_value = Any
         mock_connection.read_response.return_value = cached_value
@@ -676,8 +678,16 @@ class TestUnitCacheProxyConnection:
         # First call: cache miss, reads from connection
         assert proxy_connection.read_response() == cached_value
         assert proxy_connection._current_command_cache_key is None
+
+        # Re-issue send_command so _current_command_cache_key is set again;
+        # this time send_command sees a VALID entry and returns early.
+        proxy_connection.send_command(*list(redis_args), **{"keys": list(redis_keys)})
         # Second call: cache hit — this must not raise TypeError
         assert proxy_connection.read_response() == cached_value
+        # Verify the second read_response used the cache, not the wire:
+        # mock_connection.read_response should have been called only once
+        # (during the first read_response).
+        mock_connection.read_response.assert_called_once()
 
     @pytest.mark.skipif(
         platform.python_implementation() == "PyPy",
