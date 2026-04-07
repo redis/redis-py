@@ -241,8 +241,8 @@ Changes for RESP3 Users (protocol=3)
 If you are already using RESP3, fewer changes affect your code, but several
 commands now gain proper parsing that was previously missing.
 
-Search Module — Raw Dicts → Rich Objects
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Search Module — Raw Dictionaries → Rich Objects
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 This is the most significant change for RESP3 users.  Search commands now
 return the same rich objects as RESP2:
@@ -251,8 +251,8 @@ return the same rich objects as RESP2:
 - ``FT.AGGREGATE`` → ``AggregateResult`` object (with ``.total``, ``.rows``, ``.warnings``)
 - ``FT.PROFILE`` → ``(Result|AggregateResult, ProfileInformation)`` tuple
 
-Probabilistic Module — Raw Dicts → Info Objects
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Probabilistic Module — Raw Dictionaries → Info Objects
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ``BF.INFO``, ``CF.INFO``, ``CMS.INFO``, ``TOPK.INFO``, and ``TDIGEST.INFO``
 now return their respective ``*Info`` objects instead of raw dicts with bytes
