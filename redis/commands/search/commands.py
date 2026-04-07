@@ -421,8 +421,18 @@ class SearchCommands:
         query = kwargs["query"]
         # RESP3 returns a dict with "Results" and "Profile" keys.
         # Handle both decoded (str) and raw (bytes) keys.
-        results_data = res.get("Results") or res.get(b"Results") or res.get(0)
-        profile_data = res.get("Profile") or res.get(b"Profile") or res.get(1)
+        # Use `is not None` instead of truthiness to avoid dropping falsy
+        # values such as empty dicts/lists.
+        results_data = res.get("Results")
+        if results_data is None:
+            results_data = res.get(b"Results")
+        if results_data is None:
+            results_data = res.get(0)
+        profile_data = res.get("Profile")
+        if profile_data is None:
+            profile_data = res.get(b"Profile")
+        if profile_data is None:
+            profile_data = res.get(1)
         if isinstance(query, AggregateRequest):
             result = self._parse_aggregate_resp3(
                 results_data, query=query, has_cursor=bool(query._cursor)
