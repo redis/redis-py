@@ -887,7 +887,6 @@ class TestBaseSearchFunctionality(AsyncSearchTestsBase):
             "The text field is not decoded correctly"
         )
 
-
     @pytest.mark.redismod
     @skip_if_resp_version(3)
     async def test_load_document_field_encodings(self, create_redis, stack_url):
@@ -1792,7 +1791,6 @@ class TestHybridSearch(AsyncSearchTestsBase):
             assert isinstance(item["description"], str), (
                 f"Expected str for description, got {type(item['description'])}"
             )
-
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")

@@ -204,8 +204,10 @@ class SearchCommands:
         for res_item in res_dict["results"]:
             item_dict = pairs_to_dict(res_item, decode_keys=True)
             results.append(
-                {k: decode_field_value(v, k, field_encodings)
-                 for k, v in item_dict.items()}
+                {
+                    k: decode_field_value(v, k, field_encodings)
+                    for k, v in item_dict.items()
+                }
             )
 
         return HybridResult(
@@ -356,15 +358,20 @@ class SearchCommands:
         for res_item in res.get("results", []):
             if isinstance(res_item, dict):
                 results.append(
-                    {str_if_bytes(k): decode_field_value(
-                        v, str_if_bytes(k), field_encodings)
-                     for k, v in res_item.items()}
+                    {
+                        str_if_bytes(k): decode_field_value(
+                            v, str_if_bytes(k), field_encodings
+                        )
+                        for k, v in res_item.items()
+                    }
                 )
             else:
                 item_dict = pairs_to_dict(res_item, decode_keys=True)
                 results.append(
-                    {k: decode_field_value(v, k, field_encodings)
-                     for k, v in item_dict.items()}
+                    {
+                        k: decode_field_value(v, k, field_encodings)
+                        for k, v in item_dict.items()
+                    }
                 )
 
         return HybridResult(
@@ -414,12 +421,8 @@ class SearchCommands:
         query = kwargs["query"]
         # RESP3 returns a dict with "Results" and "Profile" keys.
         # Handle both decoded (str) and raw (bytes) keys.
-        results_data = (
-            res.get("Results") or res.get(b"Results") or res.get(0)
-        )
-        profile_data = (
-            res.get("Profile") or res.get(b"Profile") or res.get(1)
-        )
+        results_data = res.get("Results") or res.get(b"Results") or res.get(0)
+        profile_data = res.get("Profile") or res.get(b"Profile") or res.get(1)
         if isinstance(query, AggregateRequest):
             result = self._parse_aggregate_resp3(
                 results_data, query=query, has_cursor=bool(query._cursor)
@@ -967,9 +970,7 @@ class SearchCommands:
             raise ValueError("Bad query", query)
         cmd += self.get_params_args(query_params)
 
-        raw = self.execute_command(
-            *cmd, query=query, has_cursor=has_cursor
-        )
+        raw = self.execute_command(*cmd, query=query, has_cursor=has_cursor)
 
         if isinstance(raw, Pipeline):
             return raw
@@ -1454,9 +1455,7 @@ class AsyncSearchCommands(SearchCommands):
             raise ValueError("Bad query", query)
         cmd += self.get_params_args(query_params)
 
-        raw = await self.execute_command(
-            *cmd, query=query, has_cursor=has_cursor
-        )
+        raw = await self.execute_command(*cmd, query=query, has_cursor=has_cursor)
 
         if isinstance(raw, Pipeline):
             return raw

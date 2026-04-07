@@ -64,9 +64,7 @@ class TestFunction:
         ]
         assert r.function_list() == expected
         assert r.function_list(library="*lib") == expected
-        expected[0][b"library_code"] = (
-            f"#!{engine} name={lib} \n {function}".encode()
-        )
+        expected[0][b"library_code"] = f"#!{engine} name={lib} \n {function}".encode()
         assert r.function_list(withcode=True) == expected
 
     @pytest.mark.onlycluster

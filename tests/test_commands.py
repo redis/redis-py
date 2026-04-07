@@ -5960,19 +5960,19 @@ class TestRedisCommands:
         ]
         # xread starting at 0 returns both messages
         assert r.xread(streams={stream: 0}) == {
-            stream_name: [expected_entries],
+            stream_name: expected_entries,
         }
 
         expected_entries = [get_stream_message(r, stream, m1)]
         # xread starting at 0 and count=1 returns only the first message
         assert r.xread(streams={stream: 0}, count=1) == {
-            stream_name: [expected_entries],
+            stream_name: expected_entries,
         }
 
         expected_entries = [get_stream_message(r, stream, m2)]
         # xread starting at m1 returns only the second message
         assert r.xread(streams={stream: m1}) == {
-            stream_name: [expected_entries],
+            stream_name: expected_entries,
         }
 
         # xread starting at the last message returns an empty dict
@@ -5995,7 +5995,7 @@ class TestRedisCommands:
 
         # xread starting at 0 returns both messages
         assert r.xreadgroup(group, consumer, streams={stream: ">"}) == {
-            stream_name: [expected_entries],
+            stream_name: expected_entries,
         }
 
         r.xgroup_destroy(stream, group)
@@ -6005,7 +6005,7 @@ class TestRedisCommands:
 
         # xread with count=1 returns only the first message
         assert r.xreadgroup(group, consumer, streams={stream: ">"}, count=1) == {
-            stream_name: [expected_entries],
+            stream_name: expected_entries,
         }
 
         r.xgroup_destroy(stream, group)
@@ -6022,9 +6022,9 @@ class TestRedisCommands:
         r.xgroup_create(stream, group, "0")
         res = r.xreadgroup(group, consumer, streams={stream: ">"}, noack=True)
         empty_res = r.xreadgroup(group, consumer, streams={stream: "0"})
-        assert len(res[stream_name][0]) == 2
+        assert len(res[stream_name]) == 2
         # now there should be nothing pending
-        assert len(empty_res[stream_name][0]) == 0
+        assert len(empty_res[stream_name]) == 0
 
         r.xgroup_destroy(stream, group)
         r.xgroup_create(stream, group, "0")
@@ -6033,7 +6033,7 @@ class TestRedisCommands:
         r.xreadgroup(group, consumer, streams={stream: ">"})
         r.xtrim(stream, 0)
         assert r.xreadgroup(group, consumer, streams={stream: "0"}) == {
-            stream_name: [expected_entries],
+            stream_name: expected_entries,
         }
 
     def _validate_xreadgroup_with_claim_min_idle_time_response(
@@ -6045,7 +6045,7 @@ class TestRedisCommands:
         expected_streams = expected_entries.keys()
         for expected_stream in expected_streams:
             expected_entries_per_stream = expected_entries[expected_stream]
-            actual_entries_per_stream = response[expected_stream][0]
+            actual_entries_per_stream = response[expected_stream]
 
             # validate the number of entries
             assert len(actual_entries_per_stream) == len(expected_entries_per_stream)
@@ -6123,7 +6123,7 @@ class TestRedisCommands:
         ]
         # read all the messages - this will save the msgs in PEL
         res = r.xreadgroup(group, consumer_1, streams={stream: ">"})
-        assert res == {stream_name: [expected_entries]}
+        assert res == {stream_name: expected_entries}
 
         # add 2 more messages
         m7 = r.xadd(stream, {"key_m7": "val_m7"})

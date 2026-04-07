@@ -435,15 +435,13 @@ def parse_xinfo_stream(response, **options):
 def parse_xread(response, **options):
     if response is None:
         return {}
-    return {r[0]: [parse_stream_list(r[1], **options)] for r in response}
+    return {r[0]: parse_stream_list(r[1], **options) for r in response}
 
 
 def parse_xread_resp3(response, **options):
     if response is None:
         return {}
-    return {
-        key: [parse_stream_list(value, **options)] for key, value in response.items()
-    }
+    return {key: parse_stream_list(value, **options) for key, value in response.items()}
 
 
 def parse_xpending(response, **options):
@@ -950,6 +948,8 @@ def parse_gcra(response, **options):
         retry_after=int(response[3]),
         full_burst_after=int(response[4]),
     )
+
+
 def parse_function_list(response):
     """Parse FUNCTION LIST response from RESP2 flat lists into nested dicts.
 
@@ -960,11 +960,12 @@ def parse_function_list(response):
     result = []
     for lib_flat in response:
         lib_dict = pairs_to_dict(lib_flat)
-        # Convert each function's flat list to a dict
-        if b"functions" in lib_dict:
-            lib_dict[b"functions"] = [
-                pairs_to_dict(func) for func in lib_dict[b"functions"]
-            ]
+        # Convert each function's flat list to a dict.
+        # The key is b"functions" normally, but "functions" when
+        # decode_responses=True.
+        func_key = "functions" if "functions" in lib_dict else b"functions"
+        if func_key in lib_dict:
+            lib_dict[func_key] = [pairs_to_dict(func) for func in lib_dict[func_key]]
         result.append(lib_dict)
     return result
 

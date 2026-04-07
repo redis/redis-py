@@ -722,10 +722,9 @@ class TestRedisCommands:
             assert (await r.config_get("*"))[
                 "search-default-dialect"
             ] == default_dialect_new
-            assert (
-                (await r.ft().config_get("*"))["DEFAULT_DIALECT"]
-                == default_dialect_new
-            )
+            assert (await r.ft().config_get("*"))[
+                "DEFAULT_DIALECT"
+            ] == default_dialect_new
         except AssertionError as ex:
             raise ex
         finally:
@@ -4226,17 +4225,17 @@ class TestRedisCommands:
         ]
         # xread starting at 0 returns both messages
         res = await r.xread(streams={stream: 0})
-        assert res == {strem_name: [expected_entries]}
+        assert res == {strem_name: expected_entries}
 
         expected_entries = [await get_stream_message(r, stream, m1)]
         # xread starting at 0 and count=1 returns only the first message
         res = await r.xread(streams={stream: 0}, count=1)
-        assert res == {strem_name: [expected_entries]}
+        assert res == {strem_name: expected_entries}
 
         expected_entries = [await get_stream_message(r, stream, m2)]
         # xread starting at m1 returns only the second message
         res = await r.xread(streams={stream: m1})
-        assert res == {strem_name: [expected_entries]}
+        assert res == {strem_name: expected_entries}
 
     @skip_if_server_version_lt("5.0.0")
     async def test_xreadgroup(self, r: redis.Redis):
@@ -4255,7 +4254,7 @@ class TestRedisCommands:
 
         # xread starting at 0 returns both messages
         res = await r.xreadgroup(group, consumer, streams={stream: ">"})
-        assert res == {strem_name: [expected_entries]}
+        assert res == {strem_name: expected_entries}
 
         await r.xgroup_destroy(stream, group)
         await r.xgroup_create(stream, group, 0)
@@ -4264,7 +4263,7 @@ class TestRedisCommands:
 
         # xread with count=1 returns only the first message
         res = await r.xreadgroup(group, consumer, streams={stream: ">"}, count=1)
-        assert res == {strem_name: [expected_entries]}
+        assert res == {strem_name: expected_entries}
 
         await r.xgroup_destroy(stream, group)
 
@@ -4281,9 +4280,9 @@ class TestRedisCommands:
         await r.xgroup_create(stream, group, "0")
         res = await r.xreadgroup(group, consumer, streams={stream: ">"}, noack=True)
         empty_res = await r.xreadgroup(group, consumer, streams={stream: "0"})
-        assert len(res[strem_name][0]) == 2
+        assert len(res[strem_name]) == 2
         # now there should be nothing pending
-        assert len(empty_res[strem_name][0]) == 0
+        assert len(empty_res[strem_name]) == 0
 
         await r.xgroup_destroy(stream, group)
         await r.xgroup_create(stream, group, "0")
@@ -4292,7 +4291,7 @@ class TestRedisCommands:
         await r.xreadgroup(group, consumer, streams={stream: ">"})
         await r.xtrim(stream, 0)
         res = await r.xreadgroup(group, consumer, streams={stream: "0"})
-        assert res == {strem_name: [expected_entries]}
+        assert res == {strem_name: expected_entries}
 
     def _validate_xreadgroup_with_claim_min_idle_time_response(
         self, r, response, expected_entries
@@ -4303,7 +4302,7 @@ class TestRedisCommands:
         expected_streams = expected_entries.keys()
         for expected_stream in expected_streams:
             expected_entries_per_stream = expected_entries[expected_stream]
-            actual_entries_per_stream = response[expected_stream][0]
+            actual_entries_per_stream = response[expected_stream]
 
             # validate the number of entries
             assert len(actual_entries_per_stream) == len(expected_entries_per_stream)
@@ -4381,7 +4380,7 @@ class TestRedisCommands:
         ]
         # read all the messages - this will save the msgs in PEL
         res = await r.xreadgroup(group, consumer_1, streams={stream: ">"})
-        assert res == {stream_name: [expected_entries]}
+        assert res == {stream_name: expected_entries}
 
         # add 2 more messages
         m7 = await r.xadd(stream, {"key_m7": "val_m7"})

@@ -57,9 +57,7 @@ class Result:
                 values = res[i + fields_offset][1::2]
 
                 for key, value in zip(keys, values):
-                    fields[key] = decode_field_value(
-                        value, key, field_encodings
-                    )
+                    fields[key] = decode_field_value(value, key, field_encodings)
 
             try:
                 del fields["id"]

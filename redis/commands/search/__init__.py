@@ -195,9 +195,7 @@ class Pipeline(SearchCommands, RedisPipeline):
         self.response_callbacks[CURSOR_CMD] = partial(
             self._parse_results, AGGREGATE_CMD
         )
-        self.response_callbacks[HYBRID_CMD] = partial(
-            self._parse_results, HYBRID_CMD
-        )
+        self.response_callbacks[HYBRID_CMD] = partial(self._parse_results, HYBRID_CMD)
 
     @property
     def client(self):
@@ -224,9 +222,7 @@ class AsyncPipeline(AsyncSearchCommands, AsyncioPipeline, Pipeline):
         self.response_callbacks[CURSOR_CMD] = partial(
             self._parse_results, AGGREGATE_CMD
         )
-        self.response_callbacks[HYBRID_CMD] = partial(
-            self._parse_results, HYBRID_CMD
-        )
+        self.response_callbacks[HYBRID_CMD] = partial(self._parse_results, HYBRID_CMD)
 
     @property
     def client(self):

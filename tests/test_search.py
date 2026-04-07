@@ -1033,7 +1033,6 @@ class TestBaseSearchFunctionality(SearchTestsBase):
             "The text field is not decoded correctly"
         )
 
-
     @pytest.mark.redismod
     @skip_if_resp_version(3)
     def test_load_document_field_encodings(self, request, stack_url):
@@ -3375,9 +3374,7 @@ class TestHybridSearch(SearchTestsBase):
         assert len(res.results) == 10
         assert res.warnings == []
         assert res.execution_time > 0
-        assert all(
-            isinstance(res.results[i]["__score"], str) for i in range(10)
-        )
+        assert all(isinstance(res.results[i]["__score"], str) for i in range(10))
         assert all(isinstance(res.results[i]["__key"], str) for i in range(10))
 
     @pytest.mark.redismod

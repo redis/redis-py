@@ -171,9 +171,7 @@ def parse_cluster_shards(resp, **options):
             raw_nodes = item.get("nodes") or item.get(b"nodes", [])
             for node in raw_nodes:
                 if isinstance(node, dict):
-                    shard["nodes"].append(
-                        {str_if_bytes(k): v for k, v in node.items()}
-                    )
+                    shard["nodes"].append({str_if_bytes(k): v for k, v in node.items()})
                 else:
                     shard["nodes"].append(node)
             shards.append(shard)
