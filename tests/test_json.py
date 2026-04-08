@@ -1,10 +1,16 @@
 import pytest
 import redis
 from redis import Redis, exceptions
+from redis.commands.json.commands import FPHAType
 from redis.commands.json.decoders import decode_list, unstring
 from redis.commands.json.path import Path
 
-from .conftest import _get_client, assert_resp_response, skip_ifmodversion_lt
+from .conftest import (
+    _get_client,
+    assert_resp_response,
+    skip_if_server_version_lt,
+    skip_ifmodversion_lt,
+)
 
 
 @pytest.fixture
@@ -45,6 +51,101 @@ def test_json_get_jset(client):
     assert client.json().get("baz") is None
     assert 1 == client.json().delete("foo")
     assert client.exists("foo") == 0
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.7.0")
+def test_json_set_fpha(client):
+    """Test JSON.SET with FPHA (FP Homogeneous Array) argument."""
+    # Set a JSON value with an FP array using FP32
+    fp_array = [1.1, 2.2, 3.3, 4.4]
+    assert client.json().set("fpha_key", Path.root_path(), fp_array, fpha="FP32")
+    result = client.json().get("fpha_key", Path.root_path())
+    assert isinstance(result, list)
+    assert len(result) == 4
+
+    # Test with FP64
+    assert client.json().set("fpha_key64", Path.root_path(), fp_array, fpha="FP64")
+    result = client.json().get("fpha_key64", Path.root_path())
+    assert isinstance(result, list)
+    assert len(result) == 4
+
+    # Test with FP16
+    assert client.json().set("fpha_key16", Path.root_path(), fp_array, fpha="FP16")
+    result = client.json().get("fpha_key16", Path.root_path())
+    assert isinstance(result, list)
+    assert len(result) == 4
+
+    # Test with BF16
+    assert client.json().set("fpha_keybf16", Path.root_path(), fp_array, fpha="BF16")
+    result = client.json().get("fpha_keybf16", Path.root_path())
+    assert isinstance(result, list)
+    assert len(result) == 4
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.7.0")
+def test_json_set_fpha_with_nx_xx(client):
+    """Test JSON.SET with FPHA combined with NX/XX modifiers."""
+    fp_array = [1.5, 2.5, 3.5]
+
+    # Set with NX + FPHA (should succeed since key doesn't exist)
+    assert client.json().set(
+        "fpha_nx", Path.root_path(), fp_array, nx=True, fpha="FP32"
+    )
+
+    # Set with NX + FPHA again (should fail since key exists)
+    assert (
+        client.json().set("fpha_nx", Path.root_path(), [4.5, 5.5], nx=True, fpha="FP32")
+        is None
+    )
+
+    # Set with XX + FPHA (should succeed since key exists)
+    assert client.json().set(
+        "fpha_nx", Path.root_path(), [4.5, 5.5], xx=True, fpha="FP32"
+    )
+
+
+@pytest.mark.redismod
+def test_json_set_fpha_invalid_type(client):
+    """Test JSON.SET with invalid FPHA type raises an error."""
+    fp_array = [1.1, 2.2, 3.3]
+    with pytest.raises(exceptions.DataError, match="Invalid FPHA type"):
+        client.json().set("fpha_invalid", Path.root_path(), fp_array, fpha="INVALID")
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.7.0")
+def test_json_set_fpha_case_insensitive(client):
+    """Test JSON.SET FPHA type is case-insensitive."""
+    fp_array = [1.1, 2.2, 3.3]
+    # Lowercase should work
+    assert client.json().set("fpha_lower", Path.root_path(), fp_array, fpha="fp32")
+    # Mixed case should work
+    assert client.json().set("fpha_mixed", Path.root_path(), fp_array, fpha="Fp64")
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.7.0")
+def test_json_set_fpha_enum(client):
+    """Test JSON.SET with FPHAType enum values."""
+    fp_array = [1.1, 2.2, 3.3, 4.4]
+    assert client.json().set(
+        "fpha_enum", Path.root_path(), fp_array, fpha=FPHAType.FP32
+    )
+    result = client.json().get("fpha_enum", Path.root_path())
+    assert isinstance(result, list)
+    assert len(result) == 4
+
+    assert client.json().set(
+        "fpha_enum64", Path.root_path(), fp_array, fpha=FPHAType.FP64
+    )
+    assert client.json().set(
+        "fpha_enum16", Path.root_path(), fp_array, fpha=FPHAType.FP16
+    )
+    assert client.json().set(
+        "fpha_enumbf16", Path.root_path(), fp_array, fpha=FPHAType.BF16
+    )
 
 
 @pytest.mark.redismod
