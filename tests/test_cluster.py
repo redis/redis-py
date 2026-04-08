@@ -660,9 +660,11 @@ class TestRedisClusterObj:
             (True, None, [7001, 7002, 7001]),
             (True, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
             (True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
+            (True, LoadBalancingStrategy.RANDOM, [7002, 7001, 7002]),
             (True, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
             (False, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
             (False, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
+            (False, LoadBalancingStrategy.RANDOM, [7002, 7001, 7002]),
             (False, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
         ],
     )
@@ -672,6 +674,25 @@ class TestRedisClusterObj:
         load_balancing_strategy: LoadBalancingStrategy,
         mocks_srv_ports: List[int],
     ):
+        def _make_mock_randint():
+            _state = 1 # Start with 1 so we have clearly different results from round robin
+
+            def _mock_randint(lower: int, upper: int) -> int:
+                """
+                Return a controlled sequence of numbers when called repeatedly
+                """
+                if lower == upper:
+                    return lower
+
+                nonlocal _state
+                res = _state + lower
+                _state ^= 1
+                return res
+            
+            return _mock_randint
+        
+        mock_randint = _make_mock_randint()
+
         with patch.multiple(
             Connection,
             send_command=DEFAULT,
@@ -680,7 +701,9 @@ class TestRedisClusterObj:
             can_read=DEFAULT,
             on_connect=DEFAULT,
         ) as mocks:
-            with patch.object(Redis, "parse_response") as parse_response:
+            with patch.object(Redis, "parse_response") as parse_response, patch(
+                "random.randint", wraps=mock_randint
+            ):
 
                 def parse_response_mock_first(connection, *args, **options):
                     # Primary
@@ -732,8 +755,9 @@ class TestRedisClusterObj:
                 if (
                     load_balancing_strategy is None
                     or load_balancing_strategy == LoadBalancingStrategy.ROUND_ROBIN
+                    or load_balancing_strategy == LoadBalancingStrategy.RANDOM
                 ):
-                    # in the round robin strategy the primary node can also receive read
+                    # in the round robin and random strategies, the primary node can also receive read
                     # requests and this means that there will be second node connected
                     expected_calls_list.append(call("READONLY"))
 
@@ -1092,6 +1116,7 @@ class TestClusterRedisCommands:
         [
             LoadBalancingStrategy.ROUND_ROBIN,
             LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+            LoadBalancingStrategy.RANDOM,
             LoadBalancingStrategy.RANDOM_REPLICA,
         ],
     )

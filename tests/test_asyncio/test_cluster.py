@@ -770,9 +770,11 @@ class TestRedisClusterObj:
             (True, None, [7001, 7002, 7001]),
             (True, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
             (True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
+            (True, LoadBalancingStrategy.RANDOM, [7002, 7001, 7002]),
             (True, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
             (False, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
             (False, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
+            (False, LoadBalancingStrategy.RANDOM, [7002, 7001, 7002]),
             (False, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
         ],
     )
@@ -782,6 +784,25 @@ class TestRedisClusterObj:
         load_balancing_strategy: LoadBalancingStrategy,
         mocks_srv_ports: List[int],
     ) -> None:
+        def _make_mock_randint():
+            _state = 1 # Start with 1 so we have clearly different results from round robin
+
+            def _mock_randint(lower: int, upper: int) -> int:
+                """
+                Return a controlled sequence of numbers when called repeatedly
+                """
+                if lower == upper:
+                    return lower
+
+                nonlocal _state
+                res = _state + lower
+                _state ^= 1
+                return res
+            
+            return _mock_randint
+        
+        mock_randint = _make_mock_randint()
+
         with mock.patch.multiple(
             Connection,
             send_command=mock.DEFAULT,
@@ -792,7 +813,9 @@ class TestRedisClusterObj:
         ) as mocks:
             with mock.patch.object(
                 ClusterNode, "execute_command", autospec=True
-            ) as execute_command:
+            ) as execute_command, patch(
+                "random.randint", wraps=mock_randint
+            ):
 
                 async def execute_command_mock_first(self, *args, **options):
                     await self.connection_class(**self.connection_kwargs).connect()
@@ -1092,6 +1115,7 @@ class TestClusterRedisCommands:
         [
             LoadBalancingStrategy.ROUND_ROBIN,
             LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+            LoadBalancingStrategy.RANDOM,
             LoadBalancingStrategy.RANDOM_REPLICA,
         ],
     )
