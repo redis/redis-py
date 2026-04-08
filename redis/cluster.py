@@ -1955,8 +1955,8 @@ class ClusterNode:
 class LoadBalancingStrategy(Enum):
     ROUND_ROBIN = "round_robin"
     ROUND_ROBIN_REPLICAS = "round_robin_replicas"
-    RANDOM_REPLICA = "random_replica"
     RANDOM = "random"
+    RANDOM_REPLICA = "random_replica"
 
 
 class LoadBalancer:
@@ -1975,15 +1975,15 @@ class LoadBalancer:
         list_size: int,
         load_balancing_strategy: LoadBalancingStrategy = LoadBalancingStrategy.ROUND_ROBIN,
     ) -> int:
-        if (
-            load_balancing_strategy == LoadBalancingStrategy.RANDOM_REPLICA
-            or load_balancing_strategy == LoadBalancingStrategy.RANDOM
-        ):
-            return self._get_random_replica_index(
+        if load_balancing_strategy == LoadBalancingStrategy.RANDOM_REPLICA:
+            return self._get_random_server_index(
                 list_size,
-                replicas_only=(
-                    load_balancing_strategy == LoadBalancingStrategy.RANDOM_REPLICA
-                ),
+                replicas_only=True,
+            )
+        elif load_balancing_strategy == LoadBalancingStrategy.RANDOM:
+            return self._get_random_server_index(
+                list_size,
+                replicas_only=False,
             )
         else:
             return self._get_round_robin_index(
@@ -1996,7 +1996,7 @@ class LoadBalancer:
         with self._lock:
             self.primary_to_idx.clear()
 
-    def _get_random_replica_index(self, list_size: int, replicas_only: bool) -> int:
+    def _get_random_server_index(self, list_size: int, replicas_only: bool) -> int:
         return random.randint(1 if replicas_only else 0, list_size - 1)
 
     def _get_round_robin_index(
