@@ -1,4 +1,5 @@
 import os
+from enum import Enum
 from json import JSONDecodeError, loads
 from typing import Any, Awaitable, overload
 
@@ -9,6 +10,43 @@ from redis.utils import deprecated_function
 from ._util import JsonType
 from .decoders import decode_dict_keys
 from .path import Path
+
+
+class FPHAType(str, Enum):
+    """Floating-point type options for homogeneous array storage in JSON.SET.
+
+    Used with the ``fpha`` parameter to force Redis to store all FP arrays
+    using the specified floating-point type.
+    """
+
+    BF16 = "BF16"
+    FP16 = "FP16"
+    FP32 = "FP32"
+    FP64 = "FP64"
+
+    @classmethod
+    def from_value(cls, value: "FPHAType | str") -> "FPHAType":
+        """Convert a string or FPHAType instance to a validated FPHAType.
+
+        Args:
+            value: An ``FPHAType`` member or a case-insensitive string
+                (e.g. ``"bf16"``, ``"FP32"``).
+
+        Returns:
+            The corresponding ``FPHAType`` enum member.
+
+        Raises:
+            DataError: If the string does not match any valid FPHA type.
+        """
+        if isinstance(value, cls):
+            return value
+        try:
+            return cls(value.upper())
+        except ValueError:
+            raise DataError(
+                f"Invalid FPHA type: {value}. "
+                f"Must be one of {', '.join(t.value for t in cls)}"
+            )
 
 
 class JSONCommands:
@@ -425,6 +463,7 @@ class JSONCommands:
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> bool | None: ...
 
     @overload
@@ -436,6 +475,7 @@ class JSONCommands:
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> Awaitable[bool | None]: ...
 
     def set(
@@ -446,6 +486,7 @@ class JSONCommands:
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> (bool | None) | Awaitable[bool | None]:
         """
         Set the JSON value at key ``name`` under the ``path`` to ``obj``.
@@ -454,6 +495,10 @@ class JSONCommands:
         ``xx`` if set to True, set ``value`` only if it exists.
         ``decode_keys`` If set to True, the keys of ``obj`` will be decoded
         with utf-8.
+        ``fpha`` if set, forces Redis to use the specified floating-point type
+        for storing all FP homogeneous arrays in ``obj``.
+        Accepts a :class:`FPHAType` enum value or a string
+        (``"BF16"``, ``"FP16"``, ``"FP32"``, ``"FP64"``).
 
         For the purpose of using this within a pipeline, this command is also
         aliased to JSON.SET.
@@ -475,6 +520,10 @@ class JSONCommands:
             pieces.append("NX")
         elif xx:
             pieces.append("XX")
+
+        if fpha is not None:
+            pieces.extend(["FPHA", FPHAType.from_value(fpha).value])
+
         return self.execute_command("JSON.SET", *pieces)
 
     @overload
@@ -554,6 +603,7 @@ class JSONCommands:
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> bool | None: ...
 
     @overload
@@ -565,6 +615,7 @@ class JSONCommands:
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> Awaitable[bool | None]: ...
 
     def set_file(
@@ -575,6 +626,7 @@ class JSONCommands:
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> (bool | None) | Awaitable[bool | None]:
         """
         Set the JSON value at key ``name`` under the ``path`` to the content
@@ -584,13 +636,19 @@ class JSONCommands:
         ``xx`` if set to True, set ``value`` only if it exists.
         ``decode_keys`` If set to True, the keys of ``obj`` will be decoded
         with utf-8.
+        ``fpha`` if set, forces Redis to use the specified floating-point type
+        for storing all FP homogeneous arrays in the file content.
+        Accepts a :class:`FPHAType` enum value or a string
+        (``"BF16"``, ``"FP16"``, ``"FP32"``, ``"FP64"``).
 
         """
 
         with open(file_name) as fp:
             file_content = loads(fp.read())
 
-        return self.set(name, path, file_content, nx=nx, xx=xx, decode_keys=decode_keys)
+        return self.set(
+            name, path, file_content, nx=nx, xx=xx, decode_keys=decode_keys, fpha=fpha
+        )
 
     @overload
     def set_path(
@@ -600,6 +658,7 @@ class JSONCommands:
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> dict[str, bool]: ...
 
     @overload
@@ -610,6 +669,7 @@ class JSONCommands:
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> Awaitable[dict[str, bool]]: ...
 
     def set_path(
@@ -619,6 +679,7 @@ class JSONCommands:
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> dict[str, bool] | Awaitable[dict[str, bool]]:
         """
         Iterate over ``root_folder`` and set each JSON file to a value
@@ -628,6 +689,10 @@ class JSONCommands:
         ``xx`` if set to True, set ``value`` only if it exists.
         ``decode_keys`` If set to True, the keys of ``obj`` will be decoded
         with utf-8.
+        ``fpha`` if set, forces Redis to use the specified floating-point type
+        for storing all FP homogeneous arrays in the file content.
+        Accepts a :class:`FPHAType` enum value or a string
+        (``"BF16"``, ``"FP16"``, ``"FP32"``, ``"FP64"``).
 
         """
         set_files_result = {}
@@ -646,6 +711,7 @@ class JSONCommands:
                         nx=nx,
                         xx=xx,
                         decode_keys=decode_keys,
+                        fpha=fpha,
                     )
                     set_files_result[file_path] = True
                 except JSONDecodeError:
