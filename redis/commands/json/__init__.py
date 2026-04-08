@@ -6,7 +6,7 @@ from typing import Literal
 import redis
 
 from ..helpers import get_protocol_version, nativestr
-from .commands import JSONCommands
+from .commands import FPHAType, JSONCommands
 from .decoders import bulk_of_jsons, decode_list
 
 
@@ -165,6 +165,7 @@ class AsyncJSON(_JSONBase):
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> bool | None:
         """
         Set the JSON value at key ``name`` under the ``path`` to the content
@@ -180,7 +181,13 @@ class AsyncJSON(_JSONBase):
 
         file_content = await asyncio.to_thread(_read_file, file_name)
         return await self.set(
-            name, path, file_content, nx=nx, xx=xx, decode_keys=decode_keys
+            name,
+            path,
+            file_content,
+            nx=nx,
+            xx=xx,
+            decode_keys=decode_keys,
+            fpha=fpha,
         )
 
     async def set_path(
@@ -190,6 +197,7 @@ class AsyncJSON(_JSONBase):
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> dict[str, bool]:
         """
         Iterate over ``root_folder`` and set each JSON file to a value
@@ -225,6 +233,7 @@ class AsyncJSON(_JSONBase):
                     nx=nx,
                     xx=xx,
                     decode_keys=decode_keys,
+                    fpha=fpha,
                 )
                 set_files_result[file_path] = True
             except JSONDecodeError:
