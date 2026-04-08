@@ -13,7 +13,7 @@ from redis.commands.search.field import TextField, NumericField
 from tests.conftest import skip_if_server_version_lt
 
 
-@pytest.mark.onlycluster
+@pytest.mark.fixed_client
 class TestBasePolicyResolver:
     def test_resolve(self):
         mock_command_parser = Mock(spec=CommandsParser)

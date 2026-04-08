@@ -10,6 +10,7 @@ from redis.utils import (
 )
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "version1,version2,expected_res",
     [
@@ -42,6 +43,7 @@ def redis_server_time(client):
 
 
 # Tests for deprecated_function decorator
+@pytest.mark.fixed_client
 class TestDeprecatedFunction:
     def test_sync_function_warns(self):
         @deprecated_function(reason="use new_func", version="1.0.0")
@@ -69,6 +71,7 @@ class TestDeprecatedFunction:
 
 
 # Tests for deprecated_args decorator
+@pytest.mark.fixed_client
 class TestDeprecatedArgs:
     def test_sync_function_warns_on_deprecated_arg(self):
         @deprecated_args(args_to_warn=["old_param"], reason="use new_param")
@@ -108,6 +111,7 @@ class TestDeprecatedArgs:
 
 
 # Tests for experimental_method decorator
+@pytest.mark.fixed_client
 class TestExperimentalMethod:
     def test_sync_function_warns(self):
         @experimental_method()
@@ -124,6 +128,7 @@ class TestExperimentalMethod:
 
 
 # Tests for experimental_args decorator
+@pytest.mark.fixed_client
 class TestExperimentalArgs:
     def test_sync_function_warns_on_experimental_arg(self):
         @experimental_args(args_to_warn=["beta_param"])

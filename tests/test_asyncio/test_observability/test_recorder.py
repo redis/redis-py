@@ -166,6 +166,7 @@ def setup_async_recorder(metrics_collector, mock_instruments):
     get_observables_registry_instance().clear()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestRecordOperationDuration:
     """Tests for record_operation_duration - verifies Histogram.record() calls."""
@@ -219,6 +220,7 @@ class TestRecordOperationDuration:
         assert attrs[ERROR_TYPE] == "ConnectionError"
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestRecordConnectionCreateTime:
     """Tests for record_connection_create_time - verifies Histogram.record() calls."""
@@ -248,6 +250,7 @@ class TestRecordConnectionCreateTime:
         assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "localhost:6379_a1b2c3d4"
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestRecordConnectionTimeout:
     """Tests for record_connection_timeout - verifies Counter.add() calls."""
@@ -266,6 +269,7 @@ class TestRecordConnectionTimeout:
         assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "test_pool"
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestRecordConnectionWaitTime:
     """Tests for record_connection_wait_time - verifies Histogram.record() calls."""
@@ -287,6 +291,7 @@ class TestRecordConnectionWaitTime:
         assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "test_pool"
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestRecordConnectionClosed:
     """Tests for record_connection_closed - verifies Counter.add() calls."""
@@ -303,6 +308,7 @@ class TestRecordConnectionClosed:
         instruments.connection_closed.add.assert_called_once()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestRecordConnectionRelaxedTimeout:
     """Tests for record_connection_relaxed_timeout - verifies UpDownCounter calls."""
@@ -340,6 +346,7 @@ class TestRecordConnectionRelaxedTimeout:
         assert call_args[0][0] == -1  # -1 for unrelaxed
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestRecordConnectionHandoff:
     """Tests for record_connection_handoff - verifies Counter.add() calls."""
@@ -355,6 +362,7 @@ class TestRecordConnectionHandoff:
         assert call_args[0][0] == 1
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestRecordErrorCount:
     """Tests for record_error_count - verifies Counter.add() calls."""
@@ -412,6 +420,7 @@ class TestRecordErrorCount:
         assert attrs[REDIS_CLIENT_OPERATION_RETRY_ATTEMPTS] == 2
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestRecordPubsubMessage:
     """Tests for record_pubsub_message - verifies Counter.add() calls."""
@@ -441,6 +450,7 @@ class TestRecordPubsubMessage:
         instruments.pubsub_messages.add.assert_called_once()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestRecordGeoFailover:
     """Tests for record_geo_failover - verifies Counter.add() calls."""
@@ -513,6 +523,7 @@ class TestRecordGeoFailover:
         assert attrs[DB_CLIENT_GEOFAILOVER_REASON] == "manual"
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestHidePubSubChannelNames:
     """Tests for hide_pubsub_channel_names configuration option."""
@@ -599,6 +610,7 @@ class TestHidePubSubChannelNames:
         assert attrs[REDIS_CLIENT_PUBSUB_CHANNEL] == "bytes-channel"
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestRecordStreamingLag:
     """Tests for record_streaming_lag - verifies Histogram.record() calls."""
@@ -618,6 +630,7 @@ class TestRecordStreamingLag:
         assert call_args[0][0] == 0.150
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestRecordStreamingLagFromResponse:
     """Tests for record_streaming_lag_from_response - RESP2/RESP3 parsing and timestamp extraction."""
@@ -874,6 +887,7 @@ class TestRecordStreamingLagFromResponse:
         # Should not raise - bytes message ID should be handled
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestRecorderDisabled:
     """Tests for recorder behavior when observability is disabled."""
@@ -944,6 +958,7 @@ class TestRecorderDisabled:
         recorder.reset_collector()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestRecordConnectionCount:
     """Tests for record_connection_count (UpDownCounter)."""

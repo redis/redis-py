@@ -98,6 +98,7 @@ class TestConnectionPool:
         )
         return pool
 
+    @pytest.mark.fixed_client
     def test_connection_creation(self):
         connection_kwargs = {
             "foo": "bar",
@@ -111,6 +112,7 @@ class TestConnectionPool:
         assert isinstance(connection, DummyConnection)
         assert_kwargs_match(connection.kwargs, connection_kwargs)
 
+    @pytest.mark.fixed_client
     def test_closing(self):
         connection_kwargs = {"foo": "bar", "biz": "baz"}
         pool = redis.ConnectionPool(
@@ -161,6 +163,7 @@ class TestConnectionPool:
         pool2.release(c1)
         assert len(pool2._available_connections) == 1
 
+    @pytest.mark.fixed_client
     def test_repr_contains_db_info_tcp(self):
         connection_kwargs = {
             "host": "localhost",
@@ -174,6 +177,7 @@ class TestConnectionPool:
         expected = "host=localhost,port=6379,db=1,client_name=test-client"
         assert expected in repr(pool)
 
+    @pytest.mark.fixed_client
     def test_repr_contains_db_info_unix(self):
         connection_kwargs = {"path": "/abc", "db": 1, "client_name": "test-client"}
         pool = self.get_pool(
@@ -272,6 +276,7 @@ class TestBlockingConnectionPool:
         c2 = pool.get_connection()
         assert c1 == c2
 
+    @pytest.mark.fixed_client
     def test_repr_contains_db_info_tcp(self):
         pool = redis.ConnectionPool(
             host="localhost", port=6379, client_name="test-client"
@@ -279,6 +284,7 @@ class TestBlockingConnectionPool:
         expected = "host=localhost,port=6379,client_name=test-client"
         assert expected in repr(pool)
 
+    @pytest.mark.fixed_client
     def test_repr_contains_db_info_unix(self):
         pool = redis.ConnectionPool(
             connection_class=redis.UnixDomainSocketConnection,
@@ -289,6 +295,7 @@ class TestBlockingConnectionPool:
         expected = "path=abc,db=0,client_name=test-client"
         assert expected in repr(pool)
 
+    @pytest.mark.fixed_client
     def test_repr_redacts_sensitive_information(self):
         """Test that __repr__ redacts sensitive values like password and username."""
         pool = redis.ConnectionPool(
@@ -345,6 +352,7 @@ class TestBlockingConnectionPool:
         assert conn._sock
 
 
+@pytest.mark.fixed_client
 class TestConnectionPoolURLParsing:
     def test_hostname(self):
         pool = redis.ConnectionPool.from_url("redis://my.host")
@@ -513,6 +521,7 @@ class TestConnectionPoolURLParsing:
         )
 
 
+@pytest.mark.fixed_client
 class TestBlockingConnectionPoolURLParsing:
     def test_extra_typed_querystring_options(self):
         pool = redis.BlockingConnectionPool.from_url(
@@ -541,6 +550,7 @@ class TestBlockingConnectionPoolURLParsing:
             )
 
 
+@pytest.mark.fixed_client
 class TestConnectionPoolUnixSocketURLParsing:
     def test_defaults(self):
         pool = redis.ConnectionPool.from_url("unix:///socket")
@@ -633,6 +643,7 @@ class TestConnectionPoolUnixSocketURLParsing:
         assert pool.connection_class == MyConnection
 
 
+@pytest.mark.fixed_client
 @pytest.mark.skipif(not SSL_AVAILABLE, reason="SSL not installed")
 class TestSSLConnectionURLParsing:
     def test_host(self):
@@ -730,6 +741,7 @@ class TestSSLConnectionURLParsing:
 
 
 class TestConnection:
+    @pytest.mark.fixed_client
     def test_on_connect_error(self):
         """
         An error in Connection.on_connect should disconnect from the server
@@ -804,6 +816,7 @@ class TestConnection:
             # as the db being full
             r.execute_command("DEBUG", "ERROR", "OOM blah blah")
 
+    @pytest.mark.fixed_client
     def test_connect_from_url_tcp(self):
         connection = redis.Redis.from_url("redis://localhost:6379?db=0")
         pool = connection.connection_pool
@@ -821,6 +834,7 @@ class TestConnection:
         for expected in ("db=0", "host=localhost", "port=6379"):
             assert expected in groups[2]
 
+    @pytest.mark.fixed_client
     def test_connect_from_url_unix(self):
         connection = redis.Redis.from_url("unix:///path/to/socket")
         pool = connection.connection_pool
@@ -1064,6 +1078,7 @@ class TestHealthCheck:
             self.assert_interval_advanced(p.connection)
 
 
+@pytest.mark.fixed_client
 class TestConnectionPoolReleasedEventEmission:
     """Tests for AfterConnectionReleasedEvent emission from ConnectionPool."""
 
