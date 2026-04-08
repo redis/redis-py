@@ -17,6 +17,9 @@ from redis._parsers.helpers import (
     _RedisCallbacksRESP2,
     _RedisCallbacksRESP3,
     parse_info,
+    parse_zscan,
+    zset_score_for_rank,
+    zset_score_pairs,
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
 from redis.commands.core import DataPersistOptions, GCRAResponse, HotkeysMetricsTypes
@@ -3537,6 +3540,13 @@ class TestRedisCommands:
         _, pairs = r.zscan("a", match="a")
         assert set(pairs) == {(b"a", 1)}
 
+    def test_zscan_score_cast_scientific_notation(self):
+        """score_cast_func=int handles scientific notation scores (issue #4000)."""
+        response = (b"0", [b"member1", b"1.7732526297292595e+18"])
+        cursor, pairs = parse_zscan(response, score_cast_func=int)
+        assert cursor == 0
+        assert pairs == [(b"member1", 1773252629729259520)]
+
     @skip_if_server_version_lt("2.8.0")
     def test_zscan_iter(self, r):
         r.zadd("a", {"a": 1, "b": 2, "c": 3})
@@ -4075,6 +4085,21 @@ class TestRedisCommands:
             [[b"a1", "1.0"], [b"a2", "2.0"]],
         )
 
+    def test_zrange_score_cast_scientific_notation(self):
+        """score_cast_func=int handles scientific notation scores (issue #4000)."""
+        # Simulates RESP2 response with large score in scientific notation
+        response = [b"member1", b"1.7732526297292595e+18"]
+        result = zset_score_pairs(response, withscores=True, score_cast_func=int)
+        assert result == [(b"member1", 1773252629729259520)]
+        # float cast is unaffected
+        result = zset_score_pairs(response, withscores=True, score_cast_func=float)
+        assert result == [(b"member1", 1.7732526297292595e18)]
+        # safe_str still receives raw bytes, not float (no "1.0" regression)
+        result = zset_score_pairs(
+            [b"a", b"1"], withscores=True, score_cast_func=safe_str
+        )
+        assert result == [(b"a", "1")]
+
     def test_zrange_errors(self, r):
         with pytest.raises(exceptions.DataError):
             r.zrange("a", 0, 1, byscore=True, bylex=True)
@@ -4190,6 +4215,12 @@ class TestRedisCommands:
             [(b"a2", "2"), (b"a3", "3"), (b"a4", "4")],
             [[b"a2", "2.0"], [b"a3", "3.0"], [b"a4", "4.0"]],
         )
+
+    def test_zrangebyscore_score_cast_scientific_notation(self):
+        """score_cast_func=int handles scientific notation scores (issue #4000)."""
+        response = [b"a1", b"1.7732526297292595e+18", b"a2", b"2.5"]
+        result = zset_score_pairs(response, withscores=True, score_cast_func=int)
+        assert result == [(b"a1", 1773252629729259520), (b"a2", 2)]
 
     def test_zrank(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
@@ -4329,6 +4360,12 @@ class TestRedisCommands:
             [2, "3"],
             [2, "3.0"],
         )
+
+    def test_zrevrank_score_cast_scientific_notation(self):
+        """score_cast_func=int handles scientific notation scores (issue #4000)."""
+        response = [2, b"1.7732526297292595e+18"]
+        result = zset_score_for_rank(response, withscore=True, score_cast_func=int)
+        assert result == [2, 1773252629729259520]
 
     def test_zscore(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
