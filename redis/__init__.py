@@ -49,7 +49,6 @@ from redis.sentinel import (
     SentinelManagedConnection,
     SentinelManagedSSLConnection,
 )
-from redis.commands.core import GCRAResponse
 from redis.utils import from_url
 
 
@@ -82,7 +81,6 @@ __all__ = [
     "DriverInfo",
     "EventType",
     "from_url",
-    "GCRAResponse",
     "default_backoff",
     "InvalidPipelineStack",
     "InvalidResponse",
