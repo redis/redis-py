@@ -116,7 +116,7 @@ class SearchCommands:
     # raw ``execute_command("FT.SEARCH", ...)`` call), return the response
     # unparsed so we don't crash.
     _QUERY_REQUIRED_CMDS = frozenset(
-        {SEARCH_CMD, AGGREGATE_CMD, CURSOR_CMD, HYBRID_CMD}
+        {SEARCH_CMD, AGGREGATE_CMD, CURSOR_CMD, HYBRID_CMD, PROFILE_CMD}
     )
 
     def _parse_results(self, cmd, res, **kwargs):
