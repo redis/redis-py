@@ -1,6 +1,6 @@
 # RESP2 vs RESP3 Command Response Analysis — Unified in redis-py 8.0+
 
-This document lists commands where the Python return object **previously** differed between RESP2 and RESP3 protocols, and documents how each has been **unified** in redis-py 8.0+.
+This document lists commands where the Python return object was **previously different** between RESP2 and RESP3 protocols, and documents how each has been **unified** in redis-py 8.0+.
 
 > ⚠️ **All changes listed below are breaking changes** for existing users.
 
