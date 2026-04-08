@@ -94,6 +94,7 @@ Other Core Changes
 - ``LCS`` with IDX: flat list → ``dict``
 - ``CLIENT TRACKINGINFO``: flat list → ``dict``
 - ``GEOPOS``: coordinate tuples → lists
+- ``GEOSEARCH`` / ``GEORADIUS`` / ``GEORADIUSBYMEMBER`` (withcoord): coordinate tuples → lists
 - ``SENTINEL`` commands: ``flags`` comma-string → ``set``
 - ``COMMAND``: ``flags`` list → ``set``; new ``acl_categories`` field
 - ``ACL GETUSER``: selectors flat lists → dicts
@@ -205,6 +206,10 @@ Detailed RESP2 Core Command Reference
      - Tuples → lists for coordinates
      - ``[(1.0, 2.0), None]``
      - ``[[1.0, 2.0], None]``
+   * - ``GEOSEARCH`` / ``GEORADIUS`` / ``GEORADIUSBYMEMBER`` (withcoord)
+     - Tuples → lists for coordinates
+     - ``[b"place", (1.0, 2.0)]``
+     - ``[b"place", [1.0, 2.0]]``
    * - ``SENTINEL`` commands
      - Flags comma-string → set
      - ``{"flags": "master,odown"}``

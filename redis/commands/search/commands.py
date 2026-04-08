@@ -1134,7 +1134,10 @@ class SearchCommands:
         else:
             raise ValueError("Must provide AggregateRequest object or Query object.")
 
-        res = self.execute_command(*cmd)
+        res = self.execute_command(*cmd, query=query)
+
+        if isinstance(res, Pipeline):
+            return res
 
         return self._parse_results(
             PROFILE_CMD, res, query=query, duration=(time.monotonic() - st) * 1000.0
@@ -1561,6 +1564,49 @@ class AsyncSearchCommands(SearchCommands):
 
         return self._parse_results(
             AGGREGATE_CMD, raw, query=query, has_cursor=has_cursor
+        )
+
+    async def profile(
+        self,
+        query: Union[Query, AggregateRequest],
+        limited: bool = False,
+        query_params: Optional[Dict[str, Union[str, int, float, bytes]]] = None,
+    ):
+        """
+        Performs a search or aggregate command and collects performance
+        information.
+
+        ### Parameters
+
+        **query**: This can be either an `AggregateRequest` or `Query`.
+        **limited**: If set to True, removes details of reader iterator.
+        **query_params**: Define one or more value parameters.
+        Each parameter has a name and a value.
+
+        """
+        st = time.monotonic()
+        cmd = [PROFILE_CMD, self.index_name, ""]
+        if limited:
+            cmd.append("LIMITED")
+        cmd.append("QUERY")
+
+        if isinstance(query, AggregateRequest):
+            cmd[2] = "AGGREGATE"
+            cmd += query.build_args()
+        elif isinstance(query, Query):
+            cmd[2] = "SEARCH"
+            cmd += query.get_args()
+            cmd += self.get_params_args(query_params)
+        else:
+            raise ValueError("Must provide AggregateRequest object or Query object.")
+
+        res = await self.execute_command(*cmd, query=query)
+
+        if isinstance(res, Pipeline):
+            return res
+
+        return self._parse_results(
+            PROFILE_CMD, res, query=query, duration=(time.monotonic() - st) * 1000.0
         )
 
     async def spellcheck(self, query, distance=None, include=None, exclude=None):

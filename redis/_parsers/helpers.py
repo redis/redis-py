@@ -759,7 +759,7 @@ def parse_geosearch_generic(response, **options):
 
     cast = {
         "withdist": float,
-        "withcoord": lambda ll: (float(ll[0]), float(ll[1])),
+        "withcoord": lambda ll: [float(ll[0]), float(ll[1])],
         "withhash": int,
     }
 
