@@ -22,7 +22,7 @@ Add relevant Redis-CLI examples here.
 
 ## Test plan
 
-Specify how do you want to test the command in terms of integration testing. For example:
+Specify how you want to test the command in terms of integration testing. For example:
 
 - Test only with required arguments, assert that single value returned
 - Test with required arguments and optional XX modifier, ensure that 1 returned
