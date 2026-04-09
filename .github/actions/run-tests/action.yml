@@ -22,8 +22,8 @@ inputs:
     description: 'Event loop to use'
     required: false
     default: 'asyncio'
-  protocol:
-    description: 'RESP protocol version to use'
+  test-config:
+    description: 'Test configuration to run. Can be "all", "fixed-clients", "2-standalone", "2-cluster", "3-standalone" or "3-cluster"'
     required: false
     default: 'all'
   repository:
@@ -151,7 +151,7 @@ runs:
         set -e
 
         run_tests() {
-          local protocol=$1
+          test_config=$1
           local eventloop=""
 
           if [ "${{inputs.event-loop}}" == "uvloop" ]; then
@@ -160,28 +160,34 @@ runs:
 
           echo "REDIS_MOD_URL=${REDIS_MOD_URL}"
 
-          if [ "$protocol" == "None" ]; then
-            echo "::group::RESP${protocol} fixed client tests"
+          if [ "$test_config" == "fixed-clients" ]; then
+            echo "::group::Fixed client tests"
             echo "Running fixed client tests - in those tests client instance and configuration is fixed and not changed by pytest configuration"
             invoke fixed-client-tests $eventloop
             echo "::endgroup::"
           else
-            echo "::group::RESP${protocol} standalone tests"
-            invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop --protocol="${protocol}"
-            echo "::endgroup::"
-
-            echo "::group::RESP${protocol} cluster tests"
-            invoke cluster-tests $eventloop --protocol=${protocol}
-            echo "::endgroup::"
+            protocol="${test_config%%-*}"
+            test_type="${test_config#*-}"
+            if [ "$test_type" == "standalone" ]; then
+              echo "::group::RESP${protocol} standalone tests"
+              invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop --protocol="${protocol}"
+              echo "::endgroup::"
+            elif [ "$test_type" == "cluster" ]; then
+              echo "::group::RESP${protocol} cluster tests"
+              invoke cluster-tests $eventloop --protocol=${protocol}
+              echo "::endgroup::"
+            fi
           fi
         }
 
-        if [ "${{inputs.protocol}}" == "all" ]; then
-          run_tests None "${{inputs.event-loop}}"
-          run_tests 2 "${{inputs.event-loop}}"
-          run_tests 3 "${{inputs.event-loop}}"
+        if [ "${{inputs.test-config}}" == "all" ]; then
+          run_tests fixed-clients "${{inputs.event-loop}}"
+          run_tests 2-standalone "${{inputs.event-loop}}"
+          run_tests 2-cluster "${{inputs.event-loop}}"
+          run_tests 3-standalone "${{inputs.event-loop}}"
+          run_tests 3-cluster "${{inputs.event-loop}}"
         else
-          run_tests "${{inputs.protocol}}" "${{inputs.event-loop}}"
+          run_tests "${{inputs.test-config}}" "${{inputs.event-loop}}"
         fi
       shell: bash
 
@@ -198,7 +204,7 @@ runs:
     - name: Upload test results and profiling data
       uses: actions/upload-artifact@v4
       with:
-        name: pytest-results-redis_${{inputs.redis-version}}-python_${{inputs.python-version}}-parser_${{env.PARSER_BACKEND}}-el_${{inputs.event-loop}}-protocol_${{inputs.protocol}}
+        name: pytest-results-redis_${{inputs.redis-version}}-python_${{inputs.python-version}}-parser_${{env.PARSER_BACKEND}}-el_${{inputs.event-loop}}-config_${{inputs.test-config}}
         path: |
           *-results.xml
           prof/**
