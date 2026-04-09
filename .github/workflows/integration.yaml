@@ -84,7 +84,7 @@ jobs:
         python-version: ['3.10', '3.14']
         parser-backend: ['plain']
         event-loop: ['asyncio']
-        protocol: ['2', '3']
+        protocol: ['None', '2', '3']
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Protocol:${{matrix.protocol}}
@@ -110,7 +110,7 @@ jobs:
         python-version: ['3.11', '3.12', '3.13']
         parser-backend: [ 'plain' ]
         event-loop: [ 'asyncio' ]
-        protocol: ['2', '3']
+        protocol: ['None', '2', '3']
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Protocol:${{matrix.protocol}}
@@ -166,7 +166,7 @@ jobs:
         parser-backend: [ 'hiredis' ]
         hiredis-version: [ '>=3.2.0', '<3.0.0' ]
         event-loop: [ 'asyncio' ]
-        protocol: ['2', '3']
+        protocol: ['None', '2', '3']
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}} (${{ matrix.hiredis-version }}); EL:${{matrix.event-loop}}; Protocol:${{matrix.protocol}}
@@ -193,7 +193,7 @@ jobs:
         python-version: [ '3.10', '3.14' ]
         parser-backend: [ 'plain' ]
         event-loop: [ 'uvloop' ]
-        protocol: ['2', '3']
+        protocol: ['None', '2', '3']
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Protocol:${{matrix.protocol}}

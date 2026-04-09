@@ -158,7 +158,6 @@ runs:
             eventloop="--uvloop"
           fi
 
-          echo "::group::RESP${protocol} standalone tests"
           echo "REDIS_MOD_URL=${REDIS_MOD_URL}"
 
           if [ "$protocol" == "None" ]; then
