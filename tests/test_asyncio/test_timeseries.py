@@ -5,7 +5,6 @@ import pytest
 import pytest_asyncio
 import redis.asyncio as redis
 from tests.conftest import (
-    assert_resp_response,
     is_resp2_connection,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
@@ -33,15 +32,13 @@ async def test_create(decoded_r: redis.Redis):
         KEY4, retention_msecs=20, labels={"Time": "Series"}
     )
     info = await decoded_r.ts().info(KEY4)
-    assert_resp_response(
-        decoded_r, 20, info.get("retention_msecs"), info.get("retentionTime")
-    )
+    assert 20 == info.retention_msecs
     assert "Series" == info["labels"]["Time"]
 
     # Test for a chunk size of 128 Bytes
     assert await decoded_r.ts().create("time-serie-1", chunk_size=128)
     info = await decoded_r.ts().info("time-serie-1")
-    assert_resp_response(decoded_r, 128, info.get("chunk_size"), info.get("chunkSize"))
+    assert 128 == info.chunk_size
 
 
 @pytest.mark.redismod
@@ -52,35 +49,22 @@ async def test_create_duplicate_policy(decoded_r: redis.Redis):
         ts_name = f"time-serie-ooo-{duplicate_policy}"
         assert await decoded_r.ts().create(ts_name, duplicate_policy=duplicate_policy)
         info = await decoded_r.ts().info(ts_name)
-        assert_resp_response(
-            decoded_r,
-            duplicate_policy,
-            info.get("duplicate_policy"),
-            info.get("duplicatePolicy"),
-        )
+        assert duplicate_policy == info.get("duplicate_policy")
 
 
 @pytest.mark.redismod
 async def test_alter(decoded_r: redis.Redis):
     assert await decoded_r.ts().create(KEY1)
-    res = await decoded_r.ts().info(KEY1)
-    assert_resp_response(
-        decoded_r, 0, res.get("retention_msecs"), res.get("retentionTime")
-    )
+    info = await decoded_r.ts().info(KEY1)
+    assert 0 == info.get("retention_msecs")
     assert await decoded_r.ts().alter(KEY1, retention_msecs=10)
-    res = await decoded_r.ts().info(KEY1)
     assert {} == (await decoded_r.ts().info(KEY1))["labels"]
     info = await decoded_r.ts().info(KEY1)
-    assert_resp_response(
-        decoded_r, 10, info.get("retention_msecs"), info.get("retentionTime")
-    )
+    assert 10 == info.get("retention_msecs")
     assert await decoded_r.ts().alter(KEY1, labels={"Time": "Series"})
-    res = await decoded_r.ts().info(KEY1)
     assert "Series" == (await decoded_r.ts().info(KEY1))["labels"]["Time"]
     info = await decoded_r.ts().info(KEY1)
-    assert_resp_response(
-        decoded_r, 10, info.get("retention_msecs"), info.get("retentionTime")
-    )
+    assert 10 == info.get("retention_msecs")
 
 
 @pytest.mark.redismod
@@ -89,14 +73,10 @@ async def test_alter(decoded_r: redis.Redis):
 async def test_alter_duplicate_policy(decoded_r: redis.Redis):
     assert await decoded_r.ts().create(KEY1)
     info = await decoded_r.ts().info(KEY1)
-    assert_resp_response(
-        decoded_r, "block", info.get("duplicate_policy"), info.get("duplicatePolicy")
-    )
+    assert "block" == info.get("duplicate_policy")
     assert await decoded_r.ts().alter(KEY1, duplicate_policy="min")
     info = await decoded_r.ts().info(KEY1)
-    assert_resp_response(
-        decoded_r, "min", info.get("duplicate_policy"), info.get("duplicatePolicy")
-    )
+    assert "min" == info.get("duplicate_policy")
 
 
 @pytest.mark.redismod
@@ -105,14 +85,10 @@ async def test_alter_duplicate_policy(decoded_r: redis.Redis):
 async def test_alter_duplicate_policy_prior_redis_8(decoded_r: redis.Redis):
     assert await decoded_r.ts().create(KEY1)
     info = await decoded_r.ts().info(KEY1)
-    assert_resp_response(
-        decoded_r, None, info.get("duplicate_policy"), info.get("duplicatePolicy")
-    )
+    assert None is info.get("duplicate_policy")
     assert await decoded_r.ts().alter(KEY1, duplicate_policy="min")
     info = await decoded_r.ts().info(KEY1)
-    assert_resp_response(
-        decoded_r, "min", info.get("duplicate_policy"), info.get("duplicatePolicy")
-    )
+    assert "min" == info.get("duplicate_policy")
 
 
 @pytest.mark.redismod
@@ -127,15 +103,13 @@ async def test_add(decoded_r: redis.Redis):
     assert abs(time.time() - round(float(res) / 1000)) < 1.0
 
     info = await decoded_r.ts().info(KEY4)
-    assert_resp_response(
-        decoded_r, 10, info.get("retention_msecs"), info.get("retentionTime")
-    )
+    assert 10 == info.get("retention_msecs")
     assert "Labs" == info["labels"]["Redis"]
 
     # Test for a chunk size of 128 Bytes on TS.ADD
     assert await decoded_r.ts().add("time-serie-1", 1, 10.0, chunk_size=128)
     info = await decoded_r.ts().info("time-serie-1")
-    assert_resp_response(decoded_r, 128, info.get("chunk_size"), info.get("chunkSize"))
+    assert 128 == info.get("chunk_size")
 
 
 @pytest.mark.redismod
@@ -205,25 +179,21 @@ async def test_incrby_decrby(decoded_r: redis.Redis):
     assert 0 == (await decoded_r.ts().get(KEY1))[1]
 
     assert await decoded_r.ts().incrby(KEY2, 1.5, timestamp=5)
-    assert_resp_response(decoded_r, await decoded_r.ts().get(KEY2), (5, 1.5), [5, 1.5])
+    assert [5, 1.5] == await decoded_r.ts().get(KEY2)
     assert await decoded_r.ts().incrby(KEY2, 2.25, timestamp=7)
-    assert_resp_response(
-        decoded_r, await decoded_r.ts().get(KEY2), (7, 3.75), [7, 3.75]
-    )
+    assert [7, 3.75] == await decoded_r.ts().get(KEY2)
     assert await decoded_r.ts().decrby(KEY2, 1.5, timestamp=15)
-    assert_resp_response(
-        decoded_r, await decoded_r.ts().get(KEY2), (15, 2.25), [15, 2.25]
-    )
+    assert [15, 2.25] == await decoded_r.ts().get(KEY2)
 
     # Test for a chunk size of 128 Bytes on TS.INCRBY
     assert await decoded_r.ts().incrby("time-serie-1", 10, chunk_size=128)
     info = await decoded_r.ts().info("time-serie-1")
-    assert_resp_response(decoded_r, 128, info.get("chunk_size"), info.get("chunkSize"))
+    assert 128 == info.get("chunk_size")
 
     # Test for a chunk size of 128 Bytes on TS.DECRBY
     assert await decoded_r.ts().decrby("time-serie-2", 10, chunk_size=128)
     info = await decoded_r.ts().info("time-serie-2")
-    assert_resp_response(decoded_r, 128, info.get("chunk_size"), info.get("chunkSize"))
+    assert 128 == info.get("chunk_size")
 
 
 @pytest.mark.redismod
@@ -239,10 +209,7 @@ async def test_create_and_delete_rule(decoded_r: redis.Redis):
     await decoded_r.ts().add(KEY1, time * 2, 1.5)
     assert round((await decoded_r.ts().get(KEY2))[1], 5) == 1.5
     info = await decoded_r.ts().info(KEY1)
-    if is_resp2_connection(decoded_r):
-        assert info.rules[0][1] == 100
-    else:
-        assert info["rules"][KEY2][0] == 100
+    assert info.rules[KEY2][0] == 100
 
     # test rule deletion
     await decoded_r.ts().deleterule(KEY1, KEY2)
@@ -262,12 +229,7 @@ async def test_del_range(decoded_r: redis.Redis):
         await decoded_r.ts().add(KEY1, i, i % 7)
     assert 22 == await decoded_r.ts().delete(KEY1, 0, 21)
     assert [] == await decoded_r.ts().range(KEY1, 0, 21)
-    assert_resp_response(
-        decoded_r,
-        await decoded_r.ts().range(KEY1, 22, 22),
-        [(22, 1.0)],
-        [[22, 1.0]],
-    )
+    assert [[22, 1.0]] == await decoded_r.ts().range(KEY1, 22, 22)
 
 
 @pytest.mark.redismod
@@ -307,15 +269,15 @@ async def test_range_advanced(decoded_r: redis.Redis):
     res = await decoded_r.ts().range(
         KEY1, 0, 10, aggregation_type="count", bucket_size_msec=10, align="+"
     )
-    assert_resp_response(decoded_r, res, [(0, 10.0), (10, 1.0)], [[0, 10.0], [10, 1.0]])
+    assert [[0, 10.0], [10, 1.0]] == res
     res = await decoded_r.ts().range(
         KEY1, 0, 10, aggregation_type="count", bucket_size_msec=10, align=5
     )
-    assert_resp_response(decoded_r, res, [(0, 5.0), (5, 6.0)], [[0, 5.0], [5, 6.0]])
+    assert [[0, 5.0], [5, 6.0]] == res
     res = await decoded_r.ts().range(
         KEY1, 0, 10, aggregation_type="twa", bucket_size_msec=10
     )
-    assert_resp_response(decoded_r, res, [(0, 2.55), (10, 3.0)], [[0, 2.55], [10, 3.0]])
+    assert [[0, 2.55], [10, 3.0]] == res
 
 
 @pytest.mark.redismod
@@ -344,21 +306,11 @@ async def test_rev_range(decoded_r: redis.Redis):
             filter_by_max_value=2,
         )
     )
-    assert_resp_response(
-        decoded_r,
-        await decoded_r.ts().revrange(
-            KEY1, 0, 10, aggregation_type="count", bucket_size_msec=10, align="+"
-        ),
-        [(10, 1.0), (0, 10.0)],
-        [[10, 1.0], [0, 10.0]],
+    assert [[10, 1.0], [0, 10.0]] == await decoded_r.ts().revrange(
+        KEY1, 0, 10, aggregation_type="count", bucket_size_msec=10, align="+"
     )
-    assert_resp_response(
-        decoded_r,
-        await decoded_r.ts().revrange(
-            KEY1, 0, 10, aggregation_type="count", bucket_size_msec=10, align=1
-        ),
-        [(1, 10.0), (0, 1.0)],
-        [[1, 10.0], [0, 1.0]],
+    assert [[1, 10.0], [0, 1.0]] == await decoded_r.ts().revrange(
+        KEY1, 0, 10, aggregation_type="count", bucket_size_msec=10, align=1
     )
 
 
@@ -374,54 +326,24 @@ async def test_multi_range(decoded_r: redis.Redis):
         await decoded_r.ts().add(KEY2, i, i % 11)
 
     res = await decoded_r.ts().mrange(0, 200, filters=["Test=This"])
-    assert res is not None
     assert 2 == len(res)
-    if is_resp2_connection(decoded_r):
-        assert 100 == len(res[0][KEY1][1])
+    assert 100 == len(res[KEY1][2])
 
-        res = await decoded_r.ts().mrange(0, 200, filters=["Test=This"], count=10)
-        assert res is not None
-        assert 10 == len(res[0][KEY1][1])
+    res = await decoded_r.ts().mrange(0, 200, filters=["Test=This"], count=10)
+    assert 10 == len(res[KEY1][2])
 
-        for i in range(100):
-            await decoded_r.ts().add(KEY1, i + 200, i % 7)
-        res = await decoded_r.ts().mrange(
-            0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
-        )
-        assert res is not None
-        assert 2 == len(res)
-        assert 20 == len(res[0][KEY1][1])
+    for i in range(100):
+        await decoded_r.ts().add(KEY1, i + 200, i % 7)
+    res = await decoded_r.ts().mrange(
+        0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
+    )
+    assert 2 == len(res)
+    assert 20 == len(res[KEY1][2])
 
-        # test withlabels
-        assert {} == res[0][KEY1][0]
-        res = await decoded_r.ts().mrange(
-            0, 200, filters=["Test=This"], with_labels=True
-        )
-        assert res is not None
-        assert {"Test": "This", "team": "ny"} == res[0][KEY1][0]
-    else:
-        assert 100 == len(res[KEY1][2])
-
-        res = await decoded_r.ts().mrange(0, 200, filters=["Test=This"], count=10)
-        assert res is not None
-        assert 10 == len(res[KEY1][2])
-
-        for i in range(100):
-            await decoded_r.ts().add(KEY1, i + 200, i % 7)
-        res = await decoded_r.ts().mrange(
-            0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
-        )
-        assert res is not None
-        assert 2 == len(res)
-        assert 20 == len(res[KEY1][2])
-
-        # test withlabels
-        assert {} == res[KEY1][0]
-        res = await decoded_r.ts().mrange(
-            0, 200, filters=["Test=This"], with_labels=True
-        )
-        assert res is not None
-        assert {"Test": "This", "team": "ny"} == res[KEY1][0]
+    # test withlabels
+    assert {} == res[KEY1][0]
+    res = await decoded_r.ts().mrange(0, 200, filters=["Test=This"], with_labels=True)
+    assert {"Test": "This", "team": "ny"} == res[KEY1][0]
 
 
 @pytest.mark.onlynoncluster
@@ -440,120 +362,58 @@ async def test_multi_range_advanced(decoded_r: redis.Redis):
     res = await decoded_r.ts().mrange(
         0, 200, filters=["Test=This"], select_labels=["team"]
     )
-    assert res is not None
-    if is_resp2_connection(decoded_r):
-        assert {"team": "ny"} == res[0][KEY1][0]
-        assert {"team": "sf"} == res[1][KEY2][0]
+    assert {"team": "ny"} == res[KEY1][0]
+    assert {"team": "sf"} == res[KEY2][0]
 
-        # test with filterby
-        res = await decoded_r.ts().mrange(
-            0,
-            200,
-            filters=["Test=This"],
-            filter_by_ts=[i for i in range(10, 20)],
-            filter_by_min_value=1,
-            filter_by_max_value=2,
-        )
-        assert res is not None
-        assert [(15, 1.0), (16, 2.0)] == res[0][KEY1][1]
+    # test with filterby
+    res = await decoded_r.ts().mrange(
+        0,
+        200,
+        filters=["Test=This"],
+        filter_by_ts=[i for i in range(10, 20)],
+        filter_by_min_value=1,
+        filter_by_max_value=2,
+    )
+    assert [[15, 1.0], [16, 2.0]] == res[KEY1][2]
 
-        # test groupby
-        res = await decoded_r.ts().mrange(
-            0, 3, filters=["Test=This"], groupby="Test", reduce="sum"
-        )
-        assert res is not None
-        assert [(0, 0.0), (1, 2.0), (2, 4.0), (3, 6.0)] == res[0]["Test=This"][1]
-        res = await decoded_r.ts().mrange(
-            0, 3, filters=["Test=This"], groupby="Test", reduce="max"
-        )
-        assert res is not None
-        assert [(0, 0.0), (1, 1.0), (2, 2.0), (3, 3.0)] == res[0]["Test=This"][1]
-        res = await decoded_r.ts().mrange(
-            0, 3, filters=["Test=This"], groupby="team", reduce="min"
-        )
-        assert res is not None
-        assert 2 == len(res)
-        assert [(0, 0.0), (1, 1.0), (2, 2.0), (3, 3.0)] == res[0]["team=ny"][1]
-        assert [(0, 0.0), (1, 1.0), (2, 2.0), (3, 3.0)] == res[1]["team=sf"][1]
+    # test groupby
+    # Note: RESP3 includes extra reducers/sources metadata so samples are at
+    # index [3] vs RESP2's [2].  Keep protocol branching for groupby only.
+    res = await decoded_r.ts().mrange(
+        0, 3, filters=["Test=This"], groupby="Test", reduce="sum"
+    )
+    samples_idx = 2 if is_resp2_connection(decoded_r) else 3
+    assert [[0, 0.0], [1, 2.0], [2, 4.0], [3, 6.0]] == res["Test=This"][samples_idx]
+    res = await decoded_r.ts().mrange(
+        0, 3, filters=["Test=This"], groupby="Test", reduce="max"
+    )
+    assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["Test=This"][samples_idx]
+    res = await decoded_r.ts().mrange(
+        0, 3, filters=["Test=This"], groupby="team", reduce="min"
+    )
+    assert 2 == len(res)
+    assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["team=ny"][samples_idx]
+    assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["team=sf"][samples_idx]
 
-        # test align
-        res = await decoded_r.ts().mrange(
-            0,
-            10,
-            filters=["team=ny"],
-            aggregation_type="count",
-            bucket_size_msec=10,
-            align="-",
-        )
-        assert res is not None
-        assert [(0, 10.0), (10, 1.0)] == res[0][KEY1][1]
-        res = await decoded_r.ts().mrange(
-            0,
-            10,
-            filters=["team=ny"],
-            aggregation_type="count",
-            bucket_size_msec=10,
-            align=5,
-        )
-        assert res is not None
-        assert [(0, 5.0), (5, 6.0)] == res[0][KEY1][1]
-    else:
-        assert {"team": "ny"} == res[KEY1][0]
-        assert {"team": "sf"} == res[KEY2][0]
-
-        # test with filterby
-        res = await decoded_r.ts().mrange(
-            0,
-            200,
-            filters=["Test=This"],
-            filter_by_ts=[i for i in range(10, 20)],
-            filter_by_min_value=1,
-            filter_by_max_value=2,
-        )
-        assert res is not None
-        assert [[15, 1.0], [16, 2.0]] == res[KEY1][2]
-
-        # test groupby
-        res = await decoded_r.ts().mrange(
-            0, 3, filters=["Test=This"], groupby="Test", reduce="sum"
-        )
-        assert res is not None
-        assert [[0, 0.0], [1, 2.0], [2, 4.0], [3, 6.0]] == res["Test=This"][3]
-        res = await decoded_r.ts().mrange(
-            0, 3, filters=["Test=This"], groupby="Test", reduce="max"
-        )
-        assert res is not None
-        assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["Test=This"][3]
-        res = await decoded_r.ts().mrange(
-            0, 3, filters=["Test=This"], groupby="team", reduce="min"
-        )
-        assert res is not None
-        assert 2 == len(res)
-
-        assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["team=ny"][3]
-        assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["team=sf"][3]
-
-        # test align
-        res = await decoded_r.ts().mrange(
-            0,
-            10,
-            filters=["team=ny"],
-            aggregation_type="count",
-            bucket_size_msec=10,
-            align="-",
-        )
-        assert res is not None
-        assert [[0, 10.0], [10, 1.0]] == res[KEY1][2]
-        res = await decoded_r.ts().mrange(
-            0,
-            10,
-            filters=["team=ny"],
-            aggregation_type="count",
-            bucket_size_msec=10,
-            align=5,
-        )
-        assert res is not None
-        assert [[0, 5.0], [5, 6.0]] == res[KEY1][2]
+    # test align
+    res = await decoded_r.ts().mrange(
+        0,
+        10,
+        filters=["team=ny"],
+        aggregation_type="count",
+        bucket_size_msec=10,
+        align="-",
+    )
+    assert [[0, 10.0], [10, 1.0]] == res[KEY1][2]
+    res = await decoded_r.ts().mrange(
+        0,
+        10,
+        filters=["team=ny"],
+        aggregation_type="count",
+        bucket_size_msec=10,
+        align=5,
+    )
+    assert [[0, 5.0], [5, 6.0]] == res[KEY1][2]
 
 
 @pytest.mark.onlynoncluster
@@ -569,176 +429,83 @@ async def test_multi_reverse_range(decoded_r: redis.Redis):
         await decoded_r.ts().add(KEY2, i, i % 11)
 
     res = await decoded_r.ts().mrange(0, 200, filters=["Test=This"])
-    assert res is not None
     assert 2 == len(res)
-    if is_resp2_connection(decoded_r):
-        assert 100 == len(res[0][KEY1][1])
+    assert 100 == len(res[KEY1][2])
 
-        res = await decoded_r.ts().mrange(0, 200, filters=["Test=This"], count=10)
-        assert res is not None
-        assert 10 == len(res[0][KEY1][1])
+    res = await decoded_r.ts().mrange(0, 200, filters=["Test=This"], count=10)
+    assert 10 == len(res[KEY1][2])
 
-        for i in range(100):
-            await decoded_r.ts().add(KEY1, i + 200, i % 7)
-        res = await decoded_r.ts().mrevrange(
-            0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
-        )
-        assert res is not None
-        assert 2 == len(res)
-        assert 20 == len(res[0][KEY1][1])
-        assert {} == res[0][KEY1][0]
+    for i in range(100):
+        await decoded_r.ts().add(KEY1, i + 200, i % 7)
+    res = await decoded_r.ts().mrevrange(
+        0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
+    )
+    assert 2 == len(res)
+    assert 20 == len(res[KEY1][2])
+    assert {} == res[KEY1][0]
 
-        # test withlabels
-        res = await decoded_r.ts().mrevrange(
-            0, 200, filters=["Test=This"], with_labels=True
-        )
-        assert res is not None
-        assert {"Test": "This", "team": "ny"} == res[0][KEY1][0]
+    # test withlabels
+    res = await decoded_r.ts().mrevrange(
+        0, 200, filters=["Test=This"], with_labels=True
+    )
+    assert {"Test": "This", "team": "ny"} == res[KEY1][0]
 
-        # test with selected labels
-        res = await decoded_r.ts().mrevrange(
-            0, 200, filters=["Test=This"], select_labels=["team"]
-        )
-        assert res is not None
-        assert {"team": "ny"} == res[0][KEY1][0]
-        assert {"team": "sf"} == res[1][KEY2][0]
+    # test with selected labels
+    res = await decoded_r.ts().mrevrange(
+        0, 200, filters=["Test=This"], select_labels=["team"]
+    )
+    assert {"team": "ny"} == res[KEY1][0]
+    assert {"team": "sf"} == res[KEY2][0]
 
-        # test filterby
-        res = await decoded_r.ts().mrevrange(
-            0,
-            200,
-            filters=["Test=This"],
-            filter_by_ts=[i for i in range(10, 20)],
-            filter_by_min_value=1,
-            filter_by_max_value=2,
-        )
-        assert res is not None
-        assert [(16, 2.0), (15, 1.0)] == res[0][KEY1][1]
+    # test filterby
+    res = await decoded_r.ts().mrevrange(
+        0,
+        200,
+        filters=["Test=This"],
+        filter_by_ts=[i for i in range(10, 20)],
+        filter_by_min_value=1,
+        filter_by_max_value=2,
+    )
+    assert [[16, 2.0], [15, 1.0]] == res[KEY1][2]
 
-        # test groupby
-        res = await decoded_r.ts().mrevrange(
-            0, 3, filters=["Test=This"], groupby="Test", reduce="sum"
-        )
-        assert res is not None
-        assert [(3, 6.0), (2, 4.0), (1, 2.0), (0, 0.0)] == res[0]["Test=This"][1]
-        res = await decoded_r.ts().mrevrange(
-            0, 3, filters=["Test=This"], groupby="Test", reduce="max"
-        )
-        assert res is not None
-        assert [(3, 3.0), (2, 2.0), (1, 1.0), (0, 0.0)] == res[0]["Test=This"][1]
-        res = await decoded_r.ts().mrevrange(
-            0, 3, filters=["Test=This"], groupby="team", reduce="min"
-        )
-        assert res is not None
-        assert 2 == len(res)
-        assert [(3, 3.0), (2, 2.0), (1, 1.0), (0, 0.0)] == res[0]["team=ny"][1]
-        assert [(3, 3.0), (2, 2.0), (1, 1.0), (0, 0.0)] == res[1]["team=sf"][1]
+    # test groupby
+    # Note: RESP3 includes extra reducers/sources metadata so samples are at
+    # index [3] vs RESP2's [2].  Keep protocol branching for groupby only.
+    samples_idx = 2 if is_resp2_connection(decoded_r) else 3
+    res = await decoded_r.ts().mrevrange(
+        0, 3, filters=["Test=This"], groupby="Test", reduce="sum"
+    )
+    assert [[3, 6.0], [2, 4.0], [1, 2.0], [0, 0.0]] == res["Test=This"][samples_idx]
+    res = await decoded_r.ts().mrevrange(
+        0, 3, filters=["Test=This"], groupby="Test", reduce="max"
+    )
+    assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["Test=This"][samples_idx]
+    res = await decoded_r.ts().mrevrange(
+        0, 3, filters=["Test=This"], groupby="team", reduce="min"
+    )
+    assert 2 == len(res)
+    assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["team=ny"][samples_idx]
+    assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["team=sf"][samples_idx]
 
-        # test align
-        res = await decoded_r.ts().mrevrange(
-            0,
-            10,
-            filters=["team=ny"],
-            aggregation_type="count",
-            bucket_size_msec=10,
-            align="-",
-        )
-        assert res is not None
-        assert [(10, 1.0), (0, 10.0)] == res[0][KEY1][1]
-        res = await decoded_r.ts().mrevrange(
-            0,
-            10,
-            filters=["team=ny"],
-            aggregation_type="count",
-            bucket_size_msec=10,
-            align=1,
-        )
-        assert res is not None
-        assert [(1, 10.0), (0, 1.0)] == res[0][KEY1][1]
-    else:
-        assert 100 == len(res[KEY1][2])
-
-        res = await decoded_r.ts().mrange(0, 200, filters=["Test=This"], count=10)
-        assert res is not None
-        assert 10 == len(res[KEY1][2])
-
-        for i in range(100):
-            await decoded_r.ts().add(KEY1, i + 200, i % 7)
-        res = await decoded_r.ts().mrevrange(
-            0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
-        )
-        assert res is not None
-        assert 2 == len(res)
-        assert 20 == len(res[KEY1][2])
-        assert {} == res[KEY1][0]
-
-        # test withlabels
-        res = await decoded_r.ts().mrevrange(
-            0, 200, filters=["Test=This"], with_labels=True
-        )
-        assert res is not None
-        assert {"Test": "This", "team": "ny"} == res[KEY1][0]
-
-        # test with selected labels
-        res = await decoded_r.ts().mrevrange(
-            0, 200, filters=["Test=This"], select_labels=["team"]
-        )
-        assert res is not None
-        assert {"team": "ny"} == res[KEY1][0]
-        assert {"team": "sf"} == res[KEY2][0]
-
-        # test filterby
-        res = await decoded_r.ts().mrevrange(
-            0,
-            200,
-            filters=["Test=This"],
-            filter_by_ts=[i for i in range(10, 20)],
-            filter_by_min_value=1,
-            filter_by_max_value=2,
-        )
-        assert res is not None
-        assert [[16, 2.0], [15, 1.0]] == res[KEY1][2]
-
-        # test groupby
-        res = await decoded_r.ts().mrevrange(
-            0, 3, filters=["Test=This"], groupby="Test", reduce="sum"
-        )
-        assert res is not None
-        assert [[3, 6.0], [2, 4.0], [1, 2.0], [0, 0.0]] == res["Test=This"][3]
-        res = await decoded_r.ts().mrevrange(
-            0, 3, filters=["Test=This"], groupby="Test", reduce="max"
-        )
-        assert res is not None
-        assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["Test=This"][3]
-        res = await decoded_r.ts().mrevrange(
-            0, 3, filters=["Test=This"], groupby="team", reduce="min"
-        )
-        assert res is not None
-        assert 2 == len(res)
-        assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["team=ny"][3]
-        assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["team=sf"][3]
-
-        # test align
-        res = await decoded_r.ts().mrevrange(
-            0,
-            10,
-            filters=["team=ny"],
-            aggregation_type="count",
-            bucket_size_msec=10,
-            align="-",
-        )
-        assert res is not None
-        assert [[10, 1.0], [0, 10.0]] == res[KEY1][2]
-        res = await decoded_r.ts().mrevrange(
-            0,
-            10,
-            filters=["team=ny"],
-            aggregation_type="count",
-            bucket_size_msec=10,
-            align=1,
-        )
-        assert res is not None
-        assert [[1, 10.0], [0, 1.0]] == res[KEY1][2]
+    # test align
+    res = await decoded_r.ts().mrevrange(
+        0,
+        10,
+        filters=["team=ny"],
+        aggregation_type="count",
+        bucket_size_msec=10,
+        align="-",
+    )
+    assert [[10, 1.0], [0, 10.0]] == res[KEY1][2]
+    res = await decoded_r.ts().mrevrange(
+        0,
+        10,
+        filters=["team=ny"],
+        aggregation_type="count",
+        bucket_size_msec=10,
+        align=1,
+    )
+    assert [[1, 10.0], [0, 1.0]] == res[KEY1][2]
 
 
 @pytest.mark.redismod
@@ -758,37 +525,19 @@ async def test_mget(decoded_r: redis.Redis):
     await decoded_r.ts().create(KEY1, labels={"Test": "This"})
     await decoded_r.ts().create(KEY2, labels={"Test": "This", "Taste": "That"})
     act_res = await decoded_r.ts().mget(["Test=This"])
-    exp_res = [{KEY1: [{}, None, None]}, {KEY2: [{}, None, None]}]
-    exp_res_resp3 = {KEY1: [{}, []], KEY2: [{}, []]}
-    assert_resp_response(decoded_r, act_res, exp_res, exp_res_resp3)
+    assert {KEY1: [{}, []], KEY2: [{}, []]} == act_res
     await decoded_r.ts().add(KEY1, "*", 15)
     await decoded_r.ts().add(KEY2, "*", 25)
     res = await decoded_r.ts().mget(["Test=This"])
-    assert res is not None
-    if is_resp2_connection(decoded_r):
-        assert 15 == res[0][KEY1][2]
-        assert 25 == res[1][KEY2][2]
-    else:
-        assert 15 == res[KEY1][1][1]
-        assert 25 == res[KEY2][1][1]
+    assert 15 == res[KEY1][1][1]
+    assert 25 == res[KEY2][1][1]
     res = await decoded_r.ts().mget(["Taste=That"])
-    assert res is not None
-    if is_resp2_connection(decoded_r):
-        assert 25 == res[0][KEY2][2]
-    else:
-        assert 25 == res[KEY2][1][1]
+    assert 25 == res[KEY2][1][1]
 
     # test with_labels
-    if is_resp2_connection(decoded_r):
-        assert {} == res[0][KEY2][0]
-    else:
-        assert {} == res[KEY2][0]
+    assert {} == res[KEY2][0]
     res = await decoded_r.ts().mget(["Taste=That"], with_labels=True)
-    assert res is not None
-    if is_resp2_connection(decoded_r):
-        assert {"Taste": "That", "Test": "This"} == res[0][KEY2][0]
-    else:
-        assert {"Taste": "That", "Test": "This"} == res[KEY2][0]
+    assert {"Taste": "That", "Test": "This"} == res[KEY2][0]
 
 
 @pytest.mark.redismod
@@ -797,9 +546,7 @@ async def test_info(decoded_r: redis.Redis):
         KEY1, retention_msecs=5, labels={"currentLabel": "currentData"}
     )
     info = await decoded_r.ts().info(KEY1)
-    assert_resp_response(
-        decoded_r, 5, info.get("retention_msecs"), info.get("retentionTime")
-    )
+    assert 5 == info.retention_msecs
     assert info["labels"]["currentLabel"] == "currentData"
 
 
@@ -811,15 +558,11 @@ async def test_info_duplicate_policy(decoded_r: redis.Redis):
         KEY1, retention_msecs=5, labels={"currentLabel": "currentData"}
     )
     info = await decoded_r.ts().info(KEY1)
-    assert_resp_response(
-        decoded_r, "block", info.get("duplicate_policy"), info.get("duplicatePolicy")
-    )
+    assert "block" == info.duplicate_policy
 
     await decoded_r.ts().create("time-serie-2", duplicate_policy="min")
     info = await decoded_r.ts().info("time-serie-2")
-    assert_resp_response(
-        decoded_r, "min", info.get("duplicate_policy"), info.get("duplicatePolicy")
-    )
+    assert "min" == info.duplicate_policy
 
 
 @pytest.mark.redismod
@@ -830,15 +573,11 @@ async def test_info_duplicate_policy_prior_redis_8(decoded_r: redis.Redis):
         KEY1, retention_msecs=5, labels={"currentLabel": "currentData"}
     )
     info = await decoded_r.ts().info(KEY1)
-    assert_resp_response(
-        decoded_r, None, info.get("duplicate_policy"), info.get("duplicatePolicy")
-    )
+    assert info.duplicate_policy is None
 
     await decoded_r.ts().create("time-serie-2", duplicate_policy="min")
     info = await decoded_r.ts().info("time-serie-2")
-    assert_resp_response(
-        decoded_r, "min", info.get("duplicate_policy"), info.get("duplicatePolicy")
-    )
+    assert "min" == info.duplicate_policy
 
 
 @pytest.mark.onlynoncluster
@@ -848,12 +587,7 @@ async def test_query_index(decoded_r: redis.Redis):
     await decoded_r.ts().create(KEY2, labels={"Test": "This", "Taste": "That"})
     assert 2 == len(await decoded_r.ts().queryindex(["Test=This"]))
     assert 1 == len(await decoded_r.ts().queryindex(["Taste=That"]))
-    assert_resp_response(
-        decoded_r,
-        await decoded_r.ts().queryindex(["Taste=That"]),
-        [KEY2],
-        [KEY2],
-    )
+    assert [KEY2] == await decoded_r.ts().queryindex(["Taste=That"])
 
 
 @pytest.mark.redismod
@@ -865,10 +599,7 @@ async def test_uncompressed(decoded_r: redis.Redis):
         await decoded_r.ts().add("uncompressed", i, i)
     compressed_info = await decoded_r.ts().info("compressed")
     uncompressed_info = await decoded_r.ts().info("uncompressed")
-    if is_resp2_connection(decoded_r):
-        assert compressed_info.memory_usage != uncompressed_info.memory_usage
-    else:
-        assert compressed_info["memoryUsage"] != uncompressed_info["memoryUsage"]
+    assert compressed_info.memory_usage < uncompressed_info.memory_usage
 
 
 @pytest.mark.redismod
@@ -887,12 +618,7 @@ async def test_create_with_insertion_filters(decoded_r: redis.Redis):
     assert 1021 == await decoded_r.ts().add("time-series-1", 1021, 22.0)
 
     data_points = await decoded_r.ts().range("time-series-1", "-", "+")
-    assert_resp_response(
-        decoded_r,
-        data_points,
-        [(1000, 1.0), (1010, 11.0), (1020, 11.5), (1021, 22.0)],
-        [[1000, 1.0], [1010, 11.0], [1020, 11.5], [1021, 22.0]],
-    )
+    assert [[1000, 1.0], [1010, 11.0], [1020, 11.5], [1021, 22.0]] == data_points
 
 
 @pytest.mark.redismod
@@ -912,12 +638,7 @@ async def test_alter_with_insertion_filters(decoded_r: redis.Redis):
     assert 1013 == await decoded_r.ts().add("time-series-1", 1015, 11.5)
 
     data_points = await decoded_r.ts().range("time-series-1", "-", "+")
-    assert_resp_response(
-        decoded_r,
-        data_points,
-        [(1000, 1.0), (1010, 11.0), (1013, 10.0)],
-        [[1000, 1.0], [1010, 11.0], [1013, 10.0]],
-    )
+    assert [[1000, 1.0], [1010, 11.0], [1013, 10.0]] == data_points
 
 
 @pytest.mark.redismod
@@ -935,7 +656,7 @@ async def test_add_with_insertion_filters(decoded_r: redis.Redis):
     assert 1000 == await decoded_r.ts().add("time-series-1", 1004, 3.0)
 
     data_points = await decoded_r.ts().range("time-series-1", "-", "+")
-    assert_resp_response(decoded_r, data_points, [(1000, 1.0)], [[1000, 1.0]])
+    assert [[1000, 1.0]] == data_points
 
 
 @pytest.mark.redismod
@@ -953,12 +674,12 @@ async def test_incrby_with_insertion_filters(decoded_r: redis.Redis):
     assert 1000 == await decoded_r.ts().incrby("time-series-1", 3.0, timestamp=1000)
 
     data_points = await decoded_r.ts().range("time-series-1", "-", "+")
-    assert_resp_response(decoded_r, data_points, [(1000, 1.0)], [[1000, 1.0]])
+    assert [[1000, 1.0]] == data_points
 
     assert 1000 == await decoded_r.ts().incrby("time-series-1", 10.1, timestamp=1000)
 
     data_points = await decoded_r.ts().range("time-series-1", "-", "+")
-    assert_resp_response(decoded_r, data_points, [(1000, 11.1)], [[1000, 11.1]])
+    assert [[1000, 11.1]] == data_points
 
 
 @pytest.mark.redismod
@@ -976,12 +697,12 @@ async def test_decrby_with_insertion_filters(decoded_r: redis.Redis):
     assert 1000 == await decoded_r.ts().decrby("time-series-1", 3.0, timestamp=1000)
 
     data_points = await decoded_r.ts().range("time-series-1", "-", "+")
-    assert_resp_response(decoded_r, data_points, [(1000, -1.0)], [[1000, -1.0]])
+    assert [[1000, -1.0]] == data_points
 
     assert 1000 == await decoded_r.ts().decrby("time-series-1", 10.1, timestamp=1000)
 
     data_points = await decoded_r.ts().range("time-series-1", "-", "+")
-    assert_resp_response(decoded_r, data_points, [(1000, -11.1)], [[1000, -11.1]])
+    assert [[1000, -11.1]] == data_points
 
 
 @pytest.mark.redismod
@@ -1005,12 +726,7 @@ async def test_range_with_count_nan_count_all_aggregators(decoded_r: redis.Redis
         aggregation_type="countNan",
         bucket_size_msec=1000,
     )
-    assert_resp_response(
-        decoded_r,
-        data_points,
-        [(1000, 3)],
-        [[1000, 3]],
-    )
+    assert [[1000, 3]] == data_points
 
     # Ensure we count ALL values
     data_points = await decoded_r.ts().range(
@@ -1020,12 +736,7 @@ async def test_range_with_count_nan_count_all_aggregators(decoded_r: redis.Redis
         aggregation_type="countAll",
         bucket_size_msec=1000,
     )
-    assert_resp_response(
-        decoded_r,
-        data_points,
-        [(1000, 4)],
-        [[1000, 4]],
-    )
+    assert [[1000, 4]] == data_points
 
 
 @pytest.mark.redismod
@@ -1049,12 +760,7 @@ async def test_rev_range_with_count_nan_count_all_aggregators(decoded_r: redis.R
         aggregation_type="countNan",
         bucket_size_msec=1000,
     )
-    assert_resp_response(
-        decoded_r,
-        data_points,
-        [(1000, 3)],
-        [[1000, 3]],
-    )
+    assert [[1000, 3]] == data_points
 
     # Ensure we count ALL values
     data_points = await decoded_r.ts().revrange(
@@ -1064,12 +770,7 @@ async def test_rev_range_with_count_nan_count_all_aggregators(decoded_r: redis.R
         aggregation_type="countAll",
         bucket_size_msec=1000,
     )
-    assert_resp_response(
-        decoded_r,
-        data_points,
-        [(1000, 4)],
-        [[1000, 4]],
-    )
+    assert [[1000, 4]] == data_points
 
 
 @pytest.mark.redismod
@@ -1100,18 +801,11 @@ async def test_mrange_with_count_nan_count_all_aggregators(decoded_r: redis.Redi
         bucket_size_msec=1000,
         filters=["type=temperature"],
     )
-    assert_resp_response(
-        decoded_r,
-        data_points,
-        [
-            {"temperature:A": [{}, [(1000, 1.0)]]},
-            {"temperature:B": [{}, [(1000, 1.0)]]},
-        ],
-        {
-            "temperature:A": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
-            "temperature:B": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
-        },
-    )
+    assert 2 == len(data_points)
+    assert {} == data_points["temperature:A"][0]
+    assert [[1000, 1.0]] == data_points["temperature:A"][2]
+    assert {} == data_points["temperature:B"][0]
+    assert [[1000, 1.0]] == data_points["temperature:B"][2]
 
     # Ensure we count ALL values
     data_points = await decoded_r.ts().mrange(
@@ -1121,18 +815,9 @@ async def test_mrange_with_count_nan_count_all_aggregators(decoded_r: redis.Redi
         bucket_size_msec=1000,
         filters=["type=temperature"],
     )
-    assert_resp_response(
-        decoded_r,
-        data_points,
-        [
-            {"temperature:A": [{}, [(1000, 2.0)]]},
-            {"temperature:B": [{}, [(1000, 2.0)]]},
-        ],
-        {
-            "temperature:A": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
-            "temperature:B": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
-        },
-    )
+    assert 2 == len(data_points)
+    assert [[1000, 2.0]] == data_points["temperature:A"][2]
+    assert [[1000, 2.0]] == data_points["temperature:B"][2]
 
 
 @pytest.mark.redismod
@@ -1163,18 +848,11 @@ async def test_mrevrange_with_count_nan_count_all_aggregators(decoded_r: redis.R
         bucket_size_msec=1000,
         filters=["type=temperature"],
     )
-    assert_resp_response(
-        decoded_r,
-        data_points,
-        [
-            {"temperature:A": [{}, [(1000, 1.0)]]},
-            {"temperature:B": [{}, [(1000, 1.0)]]},
-        ],
-        {
-            "temperature:A": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
-            "temperature:B": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
-        },
-    )
+    assert 2 == len(data_points)
+    assert {} == data_points["temperature:A"][0]
+    assert [[1000, 1.0]] == data_points["temperature:A"][2]
+    assert {} == data_points["temperature:B"][0]
+    assert [[1000, 1.0]] == data_points["temperature:B"][2]
 
     # Ensure we count ALL values
     data_points = await decoded_r.ts().mrevrange(
@@ -1184,15 +862,6 @@ async def test_mrevrange_with_count_nan_count_all_aggregators(decoded_r: redis.R
         bucket_size_msec=1000,
         filters=["type=temperature"],
     )
-    assert_resp_response(
-        decoded_r,
-        data_points,
-        [
-            {"temperature:A": [{}, [(1000, 2.0)]]},
-            {"temperature:B": [{}, [(1000, 2.0)]]},
-        ],
-        {
-            "temperature:A": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
-            "temperature:B": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
-        },
-    )
+    assert 2 == len(data_points)
+    assert [[1000, 2.0]] == data_points["temperature:A"][2]
+    assert [[1000, 2.0]] == data_points["temperature:B"][2]

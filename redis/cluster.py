@@ -155,9 +155,29 @@ def parse_cluster_slots(
 def parse_cluster_shards(resp, **options):
     """
     Parse CLUSTER SHARDS response.
+
+    Normalises the output so that all dictionary keys are strings regardless
+    of protocol version (RESP2 returns bytes keys for node attributes,
+    RESP3 returns bytes keys at every level).
     """
     if isinstance(resp[0], dict):
-        return resp
+        # RESP3 – native dicts with bytes keys; decode them.
+        shards = []
+        for item in resp:
+            shard = {
+                "slots": item.get("slots") or item.get(b"slots", []),
+                "nodes": [],
+            }
+            raw_nodes = item.get("nodes") or item.get(b"nodes", [])
+            for node in raw_nodes:
+                if isinstance(node, dict):
+                    shard["nodes"].append({str_if_bytes(k): v for k, v in node.items()})
+                else:
+                    shard["nodes"].append(node)
+            shards.append(shard)
+        return shards
+
+    # RESP2 – flat list structure; build dicts with string keys.
     shards = []
     for x in resp:
         shard = {"slots": [], "nodes": []}
@@ -167,7 +187,7 @@ def parse_cluster_shards(resp, **options):
         for node in nodes:
             dict_node = {}
             for i in range(0, len(node), 2):
-                dict_node[node[i]] = node[i + 1]
+                dict_node[str_if_bytes(node[i])] = node[i + 1]
             shard["nodes"].append(dict_node)
         shards.append(shard)
 
@@ -1955,6 +1975,7 @@ class ClusterNode:
 class LoadBalancingStrategy(Enum):
     ROUND_ROBIN = "round_robin"
     ROUND_ROBIN_REPLICAS = "round_robin_replicas"
+    RANDOM = "random"
     RANDOM_REPLICA = "random_replica"
 
 
@@ -1975,7 +1996,15 @@ class LoadBalancer:
         load_balancing_strategy: LoadBalancingStrategy = LoadBalancingStrategy.ROUND_ROBIN,
     ) -> int:
         if load_balancing_strategy == LoadBalancingStrategy.RANDOM_REPLICA:
-            return self._get_random_replica_index(list_size)
+            return self._get_random_server_index(
+                list_size,
+                replicas_only=True,
+            )
+        elif load_balancing_strategy == LoadBalancingStrategy.RANDOM:
+            return self._get_random_server_index(
+                list_size,
+                replicas_only=False,
+            )
         else:
             return self._get_round_robin_index(
                 primary,
@@ -1987,8 +2016,8 @@ class LoadBalancer:
         with self._lock:
             self.primary_to_idx.clear()
 
-    def _get_random_replica_index(self, list_size: int) -> int:
-        return random.randint(1, list_size - 1)
+    def _get_random_server_index(self, list_size: int, replicas_only: bool) -> int:
+        return random.randint(1 if replicas_only else 0, list_size - 1)
 
     def _get_round_robin_index(
         self, primary: str, list_size: int, replicas_only: bool

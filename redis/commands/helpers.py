@@ -63,10 +63,10 @@ def parse_to_list(response):
         else:
             try:
                 res.append(int(item))
-            except ValueError:
+            except (ValueError, OverflowError, TypeError):
                 try:
                     res.append(float(item))
-                except ValueError:
+                except (ValueError, TypeError):
                     res.append(item_str)
 
     return res
