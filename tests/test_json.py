@@ -5,12 +5,7 @@ from redis.commands.json.commands import FPHAType
 from redis.commands.json.decoders import decode_list, unstring
 from redis.commands.json.path import Path
 
-from .conftest import (
-    _get_client,
-    assert_resp_response,
-    skip_if_server_version_lt,
-    skip_ifmodversion_lt,
-)
+from .conftest import _get_client, skip_if_server_version_lt, skip_ifmodversion_lt
 
 
 @pytest.fixture
@@ -231,30 +226,22 @@ def test_mset(client):
 def test_clear(client):
     client.json().set("arr", Path.root_path(), [0, 1, 2, 3, 4])
     assert 1 == client.json().clear("arr", Path.root_path())
-    assert_resp_response(client, client.json().get("arr"), [], [])
+    assert client.json().get("arr") == []
 
 
 @pytest.mark.redismod
 def test_type(client):
     client.json().set("1", Path.root_path(), 1)
-    assert_resp_response(
-        client, client.json().type("1", Path.root_path()), "integer", ["integer"]
-    )
-    assert_resp_response(client, client.json().type("1"), "integer", ["integer"])
+    assert client.json().type("1", Path.root_path()) == ["integer"]
+    assert client.json().type("1") == ["integer"]
 
 
 @pytest.mark.redismod
 def test_numincrby(client):
     client.json().set("num", Path.root_path(), 1)
-    assert_resp_response(
-        client, client.json().numincrby("num", Path.root_path(), 1), 2, [2]
-    )
-    assert_resp_response(
-        client, client.json().numincrby("num", Path.root_path(), 0.5), 2.5, [2.5]
-    )
-    assert_resp_response(
-        client, client.json().numincrby("num", Path.root_path(), -1.25), 1.25, [1.25]
-    )
+    assert client.json().numincrby("num", Path.root_path(), 1) == [2]
+    assert client.json().numincrby("num", Path.root_path(), 0.5) == [2.5]
+    assert client.json().numincrby("num", Path.root_path(), -1.25) == [1.25]
 
 
 @pytest.mark.redismod
@@ -262,15 +249,9 @@ def test_nummultby(client):
     client.json().set("num", Path.root_path(), 1)
 
     with pytest.deprecated_call():
-        assert_resp_response(
-            client, client.json().nummultby("num", Path.root_path(), 2), 2, [2]
-        )
-        assert_resp_response(
-            client, client.json().nummultby("num", Path.root_path(), 2.5), 5, [5]
-        )
-        assert_resp_response(
-            client, client.json().nummultby("num", Path.root_path(), 0.5), 2.5, [2.5]
-        )
+        assert client.json().nummultby("num", Path.root_path(), 2) == [2]
+        assert client.json().nummultby("num", Path.root_path(), 2.5) == [5]
+        assert client.json().nummultby("num", Path.root_path(), 0.5) == [2.5]
 
 
 @pytest.mark.redismod
@@ -612,15 +593,13 @@ def test_numby_commands_dollar(client):
 
     # Test legacy NUMINCRBY
     client.json().set("doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]})
-    assert_resp_response(client, client.json().numincrby("doc1", ".b[0].a", 3), 5, [5])
+    assert client.json().numincrby("doc1", ".b[0].a", 3) == [5]
 
     # Test legacy NUMMULTBY
     client.json().set("doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]})
 
     with pytest.deprecated_call():
-        assert_resp_response(
-            client, client.json().nummultby("doc1", ".b[0].a", 3), 6, [6]
-        )
+        assert client.json().nummultby("doc1", ".b[0].a", 3) == [6]
 
 
 @pytest.mark.redismod
@@ -632,13 +611,13 @@ def test_strappend_dollar(client):
     assert client.json().strappend("doc1", "bar", "$..a") == [6, 8, None]
 
     res = [{"a": "foobar", "nested1": {"a": "hellobar"}, "nested2": {"a": 31}}]
-    assert_resp_response(client, client.json().get("doc1", "$"), res, res)
+    assert client.json().get("doc1", "$") == res
 
     # Test single
     assert client.json().strappend("doc1", "baz", "$.nested1.a") == [11]
 
     res = [{"a": "foobar", "nested1": {"a": "hellobarbaz"}, "nested2": {"a": 31}}]
-    assert_resp_response(client, client.json().get("doc1", "$"), res, res)
+    assert client.json().get("doc1", "$") == res
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
@@ -647,7 +626,7 @@ def test_strappend_dollar(client):
     # Test multi
     assert client.json().strappend("doc1", "bar", ".*.a") == 14
     res = [{"a": "foobar", "nested1": {"a": "hellobarbazbar"}, "nested2": {"a": 31}}]
-    assert_resp_response(client, client.json().get("doc1", "$"), res, res)
+    assert client.json().get("doc1", "$") == res
 
     # Test missing path
     with pytest.raises(exceptions.ResponseError):
@@ -1023,17 +1002,13 @@ def test_type_dollar(client):
     jdata, jtypes = load_types_data("a")
     client.json().set("doc1", "$", jdata)
     # Test multi
-    assert_resp_response(client, client.json().type("doc1", "$..a"), jtypes, [jtypes])
+    assert client.json().type("doc1", "$..a") == [jtypes]
 
     # Test single
-    assert_resp_response(
-        client, client.json().type("doc1", "$.nested2.a"), [jtypes[1]], [[jtypes[1]]]
-    )
+    assert client.json().type("doc1", "$.nested2.a") == [[jtypes[1]]]
 
     # Test missing key
-    assert_resp_response(
-        client, client.json().type("non_existing_doc", "..a"), None, [None]
-    )
+    assert client.json().type("non_existing_doc", "..a") is None
 
 
 @pytest.mark.redismod
@@ -1161,63 +1136,7 @@ def test_resp_dollar(client):
     client.json().set("doc1", "$", data)
     # Test multi
     res = client.json().resp("doc1", "$..a")
-    resp2 = [
-        [
-            "{",
-            "A1_B1",
-            10,
-            "A1_B2",
-            "false",
-            "A1_B3",
-            [
-                "{",
-                "A1_B3_C1",
-                None,
-                "A1_B3_C2",
-                [
-                    "[",
-                    "A1_B3_C2_D1_1",
-                    "A1_B3_C2_D1_2",
-                    "-19.5",
-                    "A1_B3_C2_D1_4",
-                    "A1_B3_C2_D1_5",
-                    ["{", "A1_B3_C2_D1_6_E1", "true"],
-                ],
-                "A1_B3_C3",
-                ["[", 1],
-            ],
-            "A1_B4",
-            ["{", "A1_B4_C1", "foo"],
-        ],
-        [
-            "{",
-            "A2_B1",
-            20,
-            "A2_B2",
-            "false",
-            "A2_B3",
-            [
-                "{",
-                "A2_B3_C1",
-                None,
-                "A2_B3_C2",
-                [
-                    "[",
-                    "A2_B3_C2_D1_1",
-                    "A2_B3_C2_D1_2",
-                    "-37.5",
-                    "A2_B3_C2_D1_4",
-                    "A2_B3_C2_D1_5",
-                    ["{", "A2_B3_C2_D1_6_E1", "false"],
-                ],
-                "A2_B3_C3",
-                ["[", 2],
-            ],
-            "A2_B4",
-            ["{", "A2_B4_C1", "bar"],
-        ],
-    ]
-    resp3 = [
+    expected = [
         [
             "{",
             "A1_B1",
@@ -1273,40 +1192,11 @@ def test_resp_dollar(client):
             ["{", "A2_B4_C1", "bar"],
         ],
     ]
-    assert_resp_response(client, res, resp2, resp3)
+    assert res == expected
 
     # Test single
     res = client.json().resp("doc1", "$.L1.a")
-    resp2 = [
-        [
-            "{",
-            "A1_B1",
-            10,
-            "A1_B2",
-            "false",
-            "A1_B3",
-            [
-                "{",
-                "A1_B3_C1",
-                None,
-                "A1_B3_C2",
-                [
-                    "[",
-                    "A1_B3_C2_D1_1",
-                    "A1_B3_C2_D1_2",
-                    "-19.5",
-                    "A1_B3_C2_D1_4",
-                    "A1_B3_C2_D1_5",
-                    ["{", "A1_B3_C2_D1_6_E1", "true"],
-                ],
-                "A1_B3_C3",
-                ["[", 1],
-            ],
-            "A1_B4",
-            ["{", "A1_B4_C1", "foo"],
-        ]
-    ]
-    resp3 = [
+    expected = [
         [
             "{",
             "A1_B1",
@@ -1335,7 +1225,7 @@ def test_resp_dollar(client):
             ["{", "A1_B4_C1", "foo"],
         ]
     ]
-    assert_resp_response(client, res, resp2, resp3)
+    assert res == expected
 
     # Test missing path
     client.json().resp("doc1", "$.nowhere")

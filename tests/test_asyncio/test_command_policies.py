@@ -10,9 +10,9 @@ from redis.commands.policies import (
     AsyncDynamicPolicyResolver,
     AsyncStaticPolicyResolver,
 )
-from redis.commands.search.aggregation import AggregateRequest, Cursor
+from redis.commands.search.aggregation import AggregateRequest
 from redis.commands.search.field import NumericField, TextField
-from tests.conftest import skip_if_server_version_lt, is_resp2_connection
+from tests.conftest import skip_if_server_version_lt
 
 
 @pytest.mark.asyncio
@@ -117,10 +117,7 @@ class TestClusterWithPolicies:
             # Routed to another random primary node
             info = await r.ft().info()
 
-            if is_resp2_connection(r):
-                assert info["index_name"] == "idx"
-            else:
-                assert info[b"index_name"] == b"idx"
+            assert info["index_name"] == "idx"
 
             assert determined_nodes[0] == primary_nodes[1]
 
@@ -160,10 +157,7 @@ class TestClusterWithPolicies:
             req = AggregateRequest("redis").group_by("@parent").cursor(1)
             res = await r.ft().aggregate(req)
 
-            if is_resp2_connection(r):
-                cursor = res.cursor
-            else:
-                cursor = Cursor(res[1])
+            cursor = res.cursor
 
             # Ensure that aggregate node was cached.
             assert determined_nodes[0] == r._aggregate_nodes[0]
