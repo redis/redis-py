@@ -139,7 +139,7 @@ jobs:
         python-version: ['pypy-3.10', 'pypy-3.11']
         parser-backend: [ 'plain' ]
         event-loop: [ 'asyncio' ]
-        protocol: ['2', '3']
+        protocol: ['None', '2', '3']
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: PyPy Redis ${{ matrix.redis-version }}; ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Protocol:${{matrix.protocol}}

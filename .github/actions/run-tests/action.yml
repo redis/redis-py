@@ -161,21 +161,24 @@ runs:
           echo "::group::RESP${protocol} standalone tests"
           echo "REDIS_MOD_URL=${REDIS_MOD_URL}"
 
-          if (( $REDIS_MAJOR_VERSION < 7 )) && [ "$protocol" == "3" ]; then
-            echo "Skipping module tests: Modules doesn't support RESP3 for Redis versions < 7"
-            invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop --protocol="${protocol}" --extra-markers="not redismod and not cp_integration"
+          if [ "$protocol" == "None" ]; then
+            echo "::group::RESP${protocol} fixed client tests"
+            echo "Running fixed client tests - in those tests client instance and configuration is fixed and not changed by pytest configuration"
+            invoke fixed-client-tests $eventloop
+            echo "::endgroup::"
           else
+            echo "::group::RESP${protocol} standalone tests"
             invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop --protocol="${protocol}"
+            echo "::endgroup::"
+
+            echo "::group::RESP${protocol} cluster tests"
+            invoke cluster-tests $eventloop --protocol=${protocol}
+            echo "::endgroup::"
           fi
-
-          echo "::endgroup::"
-
-          echo "::group::RESP${protocol} cluster tests"
-          invoke cluster-tests $eventloop --protocol=${protocol}
-          echo "::endgroup::"
         }
 
         if [ "${{inputs.protocol}}" == "all" ]; then
+          run_tests None "${{inputs.event-loop}}"
           run_tests 2 "${{inputs.event-loop}}"
           run_tests 3 "${{inputs.event-loop}}"
         else
