@@ -58,10 +58,12 @@ def fixed_client_tests(c, uvloop=False, profile=False):
     profile_arg = "--profile" if profile else ""
     if uvloop:
         run(
-            f"pytest {profile_arg} --uvloop --junit-xml=fixed_client-uvloop-results.xml -m fixed_client"
+            f"pytest {profile_arg} --uvloop --cov=./ --cov-report=xml:coverage_fixed_client_uvloop.xml --junit-xml=fixed_client-uvloop-results.xml -m fixed_client"
         )
     else:
-        run(f"pytest {profile_arg} --junit-xml=fixed_client-results.xml -m fixed_client")
+        run(
+            f"pytest {profile_arg} --cov=./ --cov-report=xml:coverage_fixed_client.xml --junit-xml=fixed_client-results.xml -m fixed_client"
+        )
 
 @task
 def standalone_tests(
