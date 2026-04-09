@@ -85,7 +85,7 @@ as possible.
 ### Testing
 
 Command tests are located in `tests/test_*command_type*.py` and `tests/test_asyncio/test_*command_type*.py` for async
-commands. So it's important to indentify command type upfront to resolve correct test file.
+commands. So it's important to identify command type upfront to resolve correct test file.
 
 We usually provide only integration testing for commands with defined version constraint (if required). It's controlled
 by custom annotations `@skip_if_server_version_lt()` and `@skip_if_server_version_gte()` defined in `tests/conftest.py`.
