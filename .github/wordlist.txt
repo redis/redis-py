@@ -83,6 +83,7 @@ TCP
 TemporaryUnavailableException
 TLS
 TOPKCommands
+TimeSeries
 TimeSeriesCommands
 Uptrace
 ValueError
@@ -173,6 +174,18 @@ unicode
 url
 virtualenv
 www
+blpop
+callables
+dicts
+func
+mylist
+myset
+sublists
+withscore
+withscores
+withvalues
 XREAD
 XREADGROUP
 yaml
+zrange
+ZMPOP
