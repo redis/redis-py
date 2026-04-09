@@ -23,7 +23,6 @@ redis/
 │   ├── helpers.py       # Helpers for commands modules
 │   ├── redismodules.py  # Trait for all Redis modules
 │   └── sentinel.py      # Sentinel commands public API
-└── 
 ```
 
 ## Commands Public API
