@@ -151,7 +151,7 @@ runs:
         set -e
 
         run_tests() {
-          test_config=$1
+          local test_config=$1
           local eventloop=""
 
           if [ "${{inputs.event-loop}}" == "uvloop" ]; then
