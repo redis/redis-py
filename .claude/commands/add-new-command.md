@@ -1,5 +1,5 @@
 ---
-description: Add new Redis command support
+description: Adds a new Redis command support from given specification. Check command-specification-template.md.
 argument-hint: [path-to-specification]
 ---
 

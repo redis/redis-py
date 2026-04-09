@@ -31,7 +31,7 @@ claude /skills
 **Augment CLI**
 
 ```
-auggie commands
+auggie command list
 ```
 
 ## Your First Contribution
