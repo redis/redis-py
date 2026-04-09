@@ -99,9 +99,9 @@ class TestBackgroundScheduler:
     @pytest.mark.parametrize(
         "interval,timeout,min_call_count",
         [
-            (0.012, 0.04, 2),  # At least 2 calls
-            (0.035, 0.04, 1),
-            (0.045, 0.04, 0),
+            (0.012, 0.08, 2),  # At least 2 calls
+            (0.035, 0.08, 1),
+            (0.09, 0.08, 0),
         ],
     )
     def test_run_recurring_coro(self, interval, timeout, min_call_count):

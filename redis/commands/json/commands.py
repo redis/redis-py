@@ -141,7 +141,7 @@ class JSONCommands:
         name: str,
         path: str | None = Path.root_path(),
         index: int | None = -1,
-    ) -> JsonType | str | list[Any] | None: ...
+    ) -> JsonType: ...
 
     @overload
     def arrpop(
@@ -149,16 +149,14 @@ class JSONCommands:
         name: str,
         path: str | None = Path.root_path(),
         index: int | None = -1,
-    ) -> Awaitable[JsonType | str | list[Any] | None]: ...
+    ) -> Awaitable[JsonType]: ...
 
     def arrpop(
         self,
         name: str,
         path: str | None = Path.root_path(),
         index: int | None = -1,
-    ) -> (JsonType | str | list[Any] | None) | Awaitable[
-        JsonType | str | list[Any] | None
-    ]:
+    ) -> JsonType | Awaitable[JsonType]:
         """Pop the element at ``index`` in the array JSON value under
         ``path`` at key ``name``.
 
@@ -189,16 +187,16 @@ class JSONCommands:
     @overload
     def type(
         self: SyncClientProtocol, name: str, path: str | None = Path.root_path()
-    ) -> str | None | list[str | None] | list[list[str]]: ...
+    ) -> None | list[str | None] | list[list[str | None]]: ...
 
     @overload
     def type(
         self: AsyncClientProtocol, name: str, path: str | None = Path.root_path()
-    ) -> Awaitable[str | None | list[str | None] | list[list[str]]]: ...
+    ) -> Awaitable[None | list[str | None] | list[list[str | None]]]: ...
 
     def type(self, name: str, path: str | None = Path.root_path()) -> (
-        str | None | list[str | None] | list[list[str]]
-    ) | Awaitable[str | None | list[str | None] | list[list[str]]]:
+        None | list[str | None] | list[list[str | None]]
+    ) | Awaitable[None | list[str | None] | list[list[str | None]]]:
         """Get the type of the JSON value under ``path`` from key ``name``.
 
         For more information see `JSON.TYPE <https://redis.io/commands/json.type>`_.
@@ -267,16 +265,16 @@ class JSONCommands:
     @overload
     def numincrby(
         self: SyncClientProtocol, name: str, path: str, number: int
-    ) -> int | float | list[int | float | None]: ...
+    ) -> list[int | float | None]: ...
 
     @overload
     def numincrby(
         self: AsyncClientProtocol, name: str, path: str, number: int
-    ) -> Awaitable[int | float | list[int | float | None]]: ...
+    ) -> Awaitable[list[int | float | None]]: ...
 
-    def numincrby(self, name: str, path: str, number: int) -> (
-        int | float | list[int | float | None]
-    ) | Awaitable[int | float | list[int | float | None]]:
+    def numincrby(
+        self, name: str, path: str, number: int
+    ) -> (list[int | float | None]) | Awaitable[list[int | float | None]]:
         """Increment the numeric (integer or floating point) JSON value under
         ``path`` at key ``name`` by the provided ``number``.
 
@@ -289,17 +287,17 @@ class JSONCommands:
     @overload
     def nummultby(
         self: SyncClientProtocol, name: str, path: str, number: int
-    ) -> int | float | list[int | float | None]: ...
+    ) -> list[int | float | None]: ...
 
     @overload
     def nummultby(
         self: AsyncClientProtocol, name: str, path: str, number: int
-    ) -> Awaitable[int | float | list[int | float | None]]: ...
+    ) -> Awaitable[list[int | float | None]]: ...
 
     @deprecated_function(version="4.0.0", reason="deprecated since redisjson 1.0.0")
-    def nummultby(self, name: str, path: str, number: int) -> (
-        int | float | list[int | float | None]
-    ) | Awaitable[int | float | list[int | float | None]]:
+    def nummultby(
+        self, name: str, path: str, number: int
+    ) -> (list[int | float | None]) | Awaitable[list[int | float | None]]:
         """Multiply the numeric (integer or floating point) JSON value under
         ``path`` at key ``name`` with the provided ``number``.
 
@@ -357,16 +355,16 @@ class JSONCommands:
     @overload
     def get(
         self: SyncClientProtocol, name: str, *args, no_escape: bool | None = False
-    ) -> Any | None: ...
+    ) -> JsonType: ...
 
     @overload
     def get(
         self: AsyncClientProtocol, name: str, *args, no_escape: bool | None = False
-    ) -> Awaitable[Any | None]: ...
+    ) -> Awaitable[JsonType]: ...
 
-    def get(self, name: str, *args, no_escape: bool | None = False) -> (
-        Any | None
-    ) | Awaitable[Any | None]:
+    def get(
+        self, name: str, *args, no_escape: bool | None = False
+    ) -> JsonType | Awaitable[JsonType]:
         """
         Get the object stored as a JSON value at key ``name``.
 
@@ -765,17 +763,15 @@ class JSONCommands:
         return self.execute_command("JSON.DEBUG", *pieces)
 
     @overload
-    def jsonget(self: SyncClientProtocol, *args, **kwargs) -> Any | None: ...
+    def jsonget(self: SyncClientProtocol, *args, **kwargs) -> JsonType: ...
 
     @overload
-    def jsonget(
-        self: AsyncClientProtocol, *args, **kwargs
-    ) -> Awaitable[Any | None]: ...
+    def jsonget(self: AsyncClientProtocol, *args, **kwargs) -> Awaitable[JsonType]: ...
 
     @deprecated_function(
         version="4.0.0", reason="redisjson-py supported this, call get directly."
     )
-    def jsonget(self, *args, **kwargs) -> (Any | None) | Awaitable[Any | None]:
+    def jsonget(self, *args, **kwargs) -> JsonType | Awaitable[JsonType]:
         return self.get(*args, **kwargs)
 
     @overload
