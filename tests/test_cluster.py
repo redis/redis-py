@@ -675,7 +675,9 @@ class TestRedisClusterObj:
         mocks_srv_ports: List[int],
     ):
         def _make_mock_randint():
-            _state = 1 # Start with 1 so we have clearly different results from round robin
+            _state = (
+                1  # Start with 1 so we have clearly different results from round robin
+            )
 
             def _mock_randint(lower: int, upper: int) -> int:
                 """
@@ -688,9 +690,9 @@ class TestRedisClusterObj:
                 res = _state + lower
                 _state ^= 1
                 return res
-            
+
             return _mock_randint
-        
+
         mock_randint = _make_mock_randint()
 
         with patch.multiple(
@@ -701,8 +703,9 @@ class TestRedisClusterObj:
             can_read=DEFAULT,
             on_connect=DEFAULT,
         ) as mocks:
-            with patch.object(Redis, "parse_response") as parse_response, patch(
-                "random.randint", wraps=mock_randint
+            with (
+                patch.object(Redis, "parse_response") as parse_response,
+                patch("random.randint", wraps=mock_randint),
             ):
 
                 def parse_response_mock_first(connection, *args, **options):

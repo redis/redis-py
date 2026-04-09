@@ -785,7 +785,9 @@ class TestRedisClusterObj:
         mocks_srv_ports: List[int],
     ) -> None:
         def _make_mock_randint():
-            _state = 1 # Start with 1 so we have clearly different results from round robin
+            _state = (
+                1  # Start with 1 so we have clearly different results from round robin
+            )
 
             def _mock_randint(lower: int, upper: int) -> int:
                 """
@@ -798,9 +800,9 @@ class TestRedisClusterObj:
                 res = _state + lower
                 _state ^= 1
                 return res
-            
+
             return _mock_randint
-        
+
         mock_randint = _make_mock_randint()
 
         with mock.patch.multiple(
@@ -811,10 +813,11 @@ class TestRedisClusterObj:
             can_read_destructive=mock.DEFAULT,
             on_connect=mock.DEFAULT,
         ) as mocks:
-            with mock.patch.object(
-                ClusterNode, "execute_command", autospec=True
-            ) as execute_command, patch(
-                "random.randint", wraps=mock_randint
+            with (
+                mock.patch.object(
+                    ClusterNode, "execute_command", autospec=True
+                ) as execute_command,
+                patch("random.randint", wraps=mock_randint),
             ):
 
                 async def execute_command_mock_first(self, *args, **options):
