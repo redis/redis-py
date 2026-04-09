@@ -584,7 +584,7 @@ def parse_slowlog_get(response, **options):
     return [parse_item(item) for item in response]
 
 
-def parse_client_trackinginfo(response):
+def parse_client_trackinginfo(response, **kwargs):
     """
     Parse CLIENT TRACKINGINFO response into a dict with str keys.
     RESP2: flat list [key, val, key, val, ...] → dict
