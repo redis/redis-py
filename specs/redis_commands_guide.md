@@ -2,11 +2,11 @@
 
 ## Commands API specification
 
-The Redis API is specified in the [Redis documentation](https://redis.io/commands). This is a source of the truth
-for all command related information. However, Redis is a living project and new commands are added all the time.
+The Redis API is specified in the [Redis documentation](https://redis.io/commands). This is the source of truth
+for all command-related information. However, Redis is a living project and new commands are added all the time.
 
-New command might be not yet available in the documentation. In this case the developer needs to create a new
-command specification from `.claude/command-specification-template.md` template.
+A new command may not yet be available in the documentation. In this case, the developer needs to create a new
+command specification from the `.claude/command-specification-template.md` template.
 
 ## Files structure
 
