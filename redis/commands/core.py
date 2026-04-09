@@ -6802,6 +6802,78 @@ class StreamCommands(CommandsProtocol):
         return self.execute_command("XLEN", name, keys=[name])
 
     @overload
+    def xnack(
+        self: SyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        mode: Literal["SILENT", "FAIL", "FATAL"],
+        *ids: StreamIdT,
+        retrycount: int | None = None,
+        force: bool = False,
+    ) -> int: ...
+
+    @overload
+    def xnack(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        mode: Literal["SILENT", "FAIL", "FATAL"],
+        *ids: StreamIdT,
+        retrycount: int | None = None,
+        force: bool = False,
+    ) -> Awaitable[int]: ...
+
+    def xnack(
+        self,
+        name: KeyT,
+        groupname: GroupT,
+        mode: Literal["SILENT", "FAIL", "FATAL"],
+        *ids: StreamIdT,
+        retrycount: int | None = None,
+        force: bool = False,
+    ) -> int | Awaitable[int]:
+        """
+        Negatively acknowledges one or more messages in a consumer group's
+        Pending Entries List (PEL).
+
+        Args:
+            name: name of the stream.
+            groupname: name of the consumer group.
+            mode: the nacking mode. One of SILENT, FAIL, or FATAL.
+                SILENT: consumer shutting down; decrements delivery counter.
+                FAIL: consumer unable to process; delivery counter unchanged.
+                FATAL: invalid/malicious message; delivery counter set to max.
+            *ids: one or more message IDs to NACK.
+            retrycount: optional integer >= 0. Overrides the mode's implicit
+                delivery counter adjustment with an exact value.
+            force: if True, creates a new unowned PEL entry for any ID not
+                already in the group's PEL.
+
+        Returns:
+            The number of messages successfully NACKed.
+
+        For more information, see https://redis.io/commands/xnack
+        """
+        if not ids:
+            raise DataError("XNACK requires at least one message ID")
+
+        if mode not in {"SILENT", "FAIL", "FATAL"}:
+            raise DataError("XNACK mode must be one of: SILENT, FAIL, FATAL")
+
+        pieces: list = [name, groupname, mode, "IDS", len(ids)]
+        pieces.extend(ids)
+
+        if retrycount is not None:
+            if retrycount < 0:
+                raise DataError("XNACK retrycount must be >= 0")
+            pieces.extend([b"RETRYCOUNT", retrycount])
+
+        if force:
+            pieces.append(b"FORCE")
+
+        return self.execute_command("XNACK", *pieces)
+
+    @overload
     def xpending(
         self: SyncClientProtocol, name: KeyT, groupname: GroupT
     ) -> dict[str, Any]: ...

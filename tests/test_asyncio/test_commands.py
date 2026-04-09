@@ -4301,6 +4301,114 @@ class TestRedisCommands:
         await r.xadd(stream, {"foo": "bar"})
         assert await r.xlen(stream) == 2
 
+    @skip_if_server_version_lt("8.8.0")
+    async def test_xnack_silent(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        m2 = await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+        await r.xreadgroup(group, consumer, streams={stream: ">"})
+        result = await r.xnack(stream, group, "SILENT", m1, m2)
+        assert result == 2
+
+    @skip_if_server_version_lt("8.8.0")
+    async def test_xnack_fail(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+        await r.xreadgroup(group, consumer, streams={stream: ">"})
+        result = await r.xnack(stream, group, "FAIL", m1)
+        assert result == 1
+
+    @skip_if_server_version_lt("8.8.0")
+    async def test_xnack_fatal(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+        await r.xreadgroup(group, consumer, streams={stream: ">"})
+        result = await r.xnack(stream, group, "FATAL", m1)
+        assert result == 1
+
+    @skip_if_server_version_lt("8.8.0")
+    async def test_xnack_multiple_ids(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        m2 = await r.xadd(stream, {"foo": "bar"})
+        m3 = await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+        await r.xreadgroup(group, consumer, streams={stream: ">"})
+        result = await r.xnack(stream, group, "FAIL", m1, m2, m3)
+        assert result == 3
+
+    @skip_if_server_version_lt("8.8.0")
+    async def test_xnack_some_ids_not_in_pel(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        m2 = await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+        await r.xreadgroup(group, consumer, streams={stream: ">"})
+        result = await r.xnack(stream, group, "FAIL", m1, m2, "999999-0")
+        assert result == 2
+
+    @skip_if_server_version_lt("8.8.0")
+    async def test_xnack_retrycount(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+        await r.xreadgroup(group, consumer, streams={stream: ">"})
+        result = await r.xnack(stream, group, "FAIL", m1, retrycount=5)
+        assert result == 1
+
+    @skip_if_server_version_lt("8.8.0")
+    async def test_xnack_force(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+        result = await r.xnack(stream, group, "FAIL", m1, force=True)
+        assert result == 1
+
+    @skip_if_server_version_lt("8.8.0")
+    async def test_xnack_invalid_mode(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+        with pytest.raises(redis.DataError):
+            await r.xnack(stream, group, "INVALID", m1)
+
+    @skip_if_server_version_lt("8.8.0")
+    async def test_xnack_no_ids(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+        await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+        with pytest.raises(redis.DataError):
+            await r.xnack(stream, group, "FAIL")
+
+    @skip_if_server_version_lt("8.8.0")
+    async def test_xnack_negative_retrycount(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+        await r.xreadgroup(group, consumer, streams={stream: ">"})
+        with pytest.raises(redis.DataError):
+            await r.xnack(stream, group, "FAIL", m1, retrycount=-1)
+
     @skip_if_server_version_lt("5.0.0")
     async def test_xpending(self, r: redis.Redis):
         stream = "stream"
