@@ -249,7 +249,6 @@ class AbstractConnection:
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
         self._socket_read_size = socket_read_size
-        self.set_parser(parser_class)
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
         self._buffer_cutoff = 6000
         self._re_auth_token: Optional[TokenInterface] = None
@@ -265,6 +264,14 @@ class AbstractConnection:
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
         self.protocol = p
+        # Reconcile parser ↔ protocol mismatches.
+        # Hiredis handles both RESP2 and RESP3 natively, so only
+        # pure-Python parsers need to be swapped.
+        if self.protocol == 3 and parser_class == _AsyncRESP2Parser:
+            parser_class = _AsyncRESP3Parser
+        elif self.protocol == 2 and parser_class == _AsyncRESP3Parser:
+            parser_class = _AsyncRESP2Parser
+        self.set_parser(parser_class)
 
     def __del__(self, _warnings: Any = warnings):
         # For some reason, the individual streams don't get properly garbage

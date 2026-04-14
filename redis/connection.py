@@ -899,13 +899,13 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
         self.protocol = p
+        # Reconcile parser ↔ protocol mismatches.
+        # Hiredis handles both RESP2 and RESP3 natively, so only
+        # pure-Python parsers need to be swapped.
         if self.protocol == 3 and parser_class == _RESP2Parser:
-            # If the protocol is 3 but the parser is RESP2, change it to RESP3
-            # This is needed because the parser might be set before the protocol
-            # or might be provided as a kwarg to the constructor
-            # We need to react on discrepancy only for RESP2 and RESP3
-            # as hiredis supports both
             parser_class = _RESP3Parser
+        elif self.protocol == 2 and parser_class == _RESP3Parser:
+            parser_class = _RESP2Parser
         self.set_parser(parser_class)
 
         self._command_packer = self._construct_command_packer(command_packer)
