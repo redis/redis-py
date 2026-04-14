@@ -107,13 +107,13 @@ SYM_DOLLAR = b"$"
 SYM_CRLF = b"\r\n"
 SYM_EMPTY = b""
 
-DEFAULT_RESP_VERSION = 2
+DEFAULT_RESP_VERSION = 3
 
 DefaultParser: Type[Union[_RESP2Parser, _RESP3Parser, _HiredisParser]]
 if HIREDIS_AVAILABLE:
     DefaultParser = _HiredisParser
 else:
-    DefaultParser = _RESP2Parser
+    DefaultParser = _RESP3Parser
 
 
 class HiredisRespSerializer:
@@ -799,7 +799,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         retry: Union[Any, None] = None,
         redis_connect_func: Optional[Callable[[], None]] = None,
         credential_provider: Optional[CredentialProvider] = None,
-        protocol: Optional[int] = 2,
+        protocol: Optional[int] = 3,
         command_packer: Optional[Callable[[], None]] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,

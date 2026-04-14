@@ -108,7 +108,7 @@ DefaultParser: Type[Union[_AsyncRESP2Parser, _AsyncRESP3Parser, _AsyncHiredisPar
 if HIREDIS_AVAILABLE:
     DefaultParser = _AsyncHiredisParser
 else:
-    DefaultParser = _AsyncRESP2Parser
+    DefaultParser = _AsyncRESP3Parser
 
 
 class ConnectCallbackProtocol(Protocol):
@@ -183,7 +183,7 @@ class AbstractConnection:
         redis_connect_func: Optional[ConnectCallbackT] = None,
         encoder_class: Type[Encoder] = Encoder,
         credential_provider: Optional[CredentialProvider] = None,
-        protocol: Optional[int] = 2,
+        protocol: Optional[int] = 3,
         event_dispatcher: Optional[EventDispatcher] = None,
     ):
         """

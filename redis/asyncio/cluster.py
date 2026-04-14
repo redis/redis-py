@@ -336,7 +336,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_keyfile: Optional[str] = None,
         ssl_min_version: Optional[TLSVersion] = None,
         ssl_ciphers: Optional[str] = None,
-        protocol: Optional[int] = 2,
+        protocol: Optional[int] = 3,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
         policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver(),

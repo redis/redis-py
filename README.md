@@ -89,11 +89,20 @@ The above code connects to localhost on port 6379, sets a value in Redis, and re
 
 
 #### RESP3 Support
-To enable support for RESP3, ensure you have at least version 5.0 of the client, and change your connection object to include *protocol=3*
+RESP3 is the default protocol used by the client.
+To use support for RESP3, ensure you have at least version 5.0 of the client.
 
 ``` python
 >>> import redis
 >>> r = redis.Redis(host='localhost', port=6379, db=0, protocol=3)
+```
+
+#### RESP2 Support
+To use support for RESP2, ensure you provide *protocol=2* when creating the client.
+
+``` python
+>>> import redis
+>>> r = redis.Redis(host='localhost', port=6379, db=0, protocol=2)
 ```
 
 ### Connection Pools

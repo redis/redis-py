@@ -276,7 +276,7 @@ class Redis(
         auto_close_connection_pool: Optional[bool] = None,
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
-        protocol: Optional[int] = 2,
+        protocol: Optional[int] = 3,
         event_dispatcher: Optional[EventDispatcher] = None,
     ):
         """
