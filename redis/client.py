@@ -87,6 +87,8 @@ if TYPE_CHECKING:
 
     import OpenSSL
 
+    from redis.keyspace_notifications import KeyspaceNotifications
+
 SYM_EMPTY = b""
 EMPTY_RESPONSE = "EMPTY_RESPONSE"
 
@@ -686,6 +688,33 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         """
         return PubSub(
             self.connection_pool, event_dispatcher=self._event_dispatcher, **kwargs
+        )
+
+    def keyspace_notifications(
+        self,
+        key_prefix: Union[str, bytes, None] = None,
+        ignore_subscribe_messages: bool = True,
+    ) -> "KeyspaceNotifications":
+        """
+        Return a :class:`~redis.keyspace_notifications.KeyspaceNotifications`
+        object for subscribing to keyspace and keyevent notifications.
+
+        Note: Keyspace notifications must be enabled on the Redis server via
+        the ``notify-keyspace-events`` configuration option.
+
+        Args:
+            key_prefix: Optional prefix to filter and strip from keys in
+                        notifications.
+            ignore_subscribe_messages: If True, subscribe/unsubscribe
+                                      confirmations are not returned by
+                                      get_message/listen.
+        """
+        from redis.keyspace_notifications import KeyspaceNotifications
+
+        return KeyspaceNotifications(
+            self,
+            key_prefix=key_prefix,
+            ignore_subscribe_messages=ignore_subscribe_messages,
         )
 
     def monitor(self):

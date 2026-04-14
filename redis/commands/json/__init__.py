@@ -6,7 +6,7 @@ from typing import Literal
 import redis
 
 from ..helpers import get_protocol_version, nativestr
-from .commands import JSONCommands
+from .commands import FPHAType, JSONCommands
 from .decoders import bulk_of_jsons, decode_list
 
 
@@ -47,25 +47,20 @@ class _JSONBase(JSONCommands):
         }
 
         _RESP2_MODULE_CALLBACKS = {
-            "JSON.ARRAPPEND": self._decode,
-            "JSON.ARRINDEX": self._decode,
-            "JSON.ARRINSERT": self._decode,
-            "JSON.ARRLEN": self._decode,
-            "JSON.ARRTRIM": self._decode,
             "JSON.CLEAR": int,
             "JSON.DEL": int,
             "JSON.FORGET": int,
-            "JSON.GET": self._decode,
-            "JSON.NUMINCRBY": self._decode,
-            "JSON.NUMMULTBY": self._decode,
-            "JSON.OBJKEYS": self._decode,
-            "JSON.STRAPPEND": self._decode,
-            "JSON.OBJLEN": self._decode,
-            "JSON.STRLEN": self._decode,
-            "JSON.TOGGLE": self._decode,
+            "JSON.NUMINCRBY": self._decode_json_numop,
+            "JSON.NUMMULTBY": self._decode_json_numop,
+            "JSON.RESP": self._decode_resp_command,
+            "JSON.TYPE": lambda r: [r] if r is not None else r,
         }
 
-        _RESP3_MODULE_CALLBACKS = {}
+        _RESP3_MODULE_CALLBACKS = {
+            # RESP3 returns [None] for non-existing keys; normalise to None
+            # to match the RESP2 behaviour.
+            "JSON.TYPE": lambda r: None if r == [None] else r,
+        }
 
         self.client = client
         self.execute_command = client.execute_command
@@ -100,6 +95,55 @@ class _JSONBase(JSONCommands):
         except (AttributeError, JSONDecodeError):
             return decode_list(obj)
 
+    @staticmethod
+    def _convert_resp_floats(obj):
+        """Recursively convert string-encoded floats in a JSON.RESP response.
+
+        In RESP2, JSON floats are sent as bulk strings (e.g. "-19.5") because
+        RESP2 has no double type.  Integers are sent as RESP integers (Python
+        int), so any string that parses as a float must be a JSON float.
+        Structure markers ("{", "[") and boolean strings ("true", "false")
+        are not valid float literals and are therefore safely skipped.
+        """
+        if isinstance(obj, list):
+            return [_JSONBase._convert_resp_floats(item) for item in obj]
+        if isinstance(obj, (str, bytes)):
+            s = obj.decode() if isinstance(obj, bytes) else obj
+            try:
+                return float(s)
+            except (ValueError, OverflowError):
+                return obj
+        return obj
+
+    def _decode_resp_command(self, obj):
+        """Decode JSON.RESP response for RESP2.
+
+        First applies the standard _decode logic, then recursively converts
+        string-encoded floats to native floats to match RESP3 output.
+        """
+        decoded = self._decode(obj)
+        return self._convert_resp_floats(decoded)
+
+    def _decode_json_numop(self, obj):
+        """Decode JSON numeric operation result and normalize to array format.
+
+        RESP2 returns a JSON bulk string: scalar for legacy paths (e.g. "5"),
+        array for dollar paths (e.g. "[null,4,7.0]").
+        RESP3 always returns an array. Normalize RESP2 to match RESP3 format
+        by wrapping scalar results in a list.
+        """
+        if obj is None:
+            return obj
+        try:
+            result = self.__decoder__.decode(
+                obj if isinstance(obj, str) else obj.decode()
+            )
+        except (AttributeError, JSONDecodeError):
+            return obj
+        if not isinstance(result, list):
+            result = [result]
+        return result
+
     def _encode(self, obj):
         """Get the encoder."""
         return self.__encoder__.encode(obj)
@@ -132,7 +176,7 @@ class _JSONBase(JSONCommands):
         else:
             p = Pipeline(
                 connection_pool=self.client.connection_pool,
-                response_callbacks=self._MODULE_CALLBACKS,
+                response_callbacks=self.client.response_callbacks,
                 transaction=transaction,
                 shard_hint=shard_hint,
             )
@@ -165,6 +209,7 @@ class AsyncJSON(_JSONBase):
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> bool | None:
         """
         Set the JSON value at key ``name`` under the ``path`` to the content
@@ -180,7 +225,13 @@ class AsyncJSON(_JSONBase):
 
         file_content = await asyncio.to_thread(_read_file, file_name)
         return await self.set(
-            name, path, file_content, nx=nx, xx=xx, decode_keys=decode_keys
+            name,
+            path,
+            file_content,
+            nx=nx,
+            xx=xx,
+            decode_keys=decode_keys,
+            fpha=fpha,
         )
 
     async def set_path(
@@ -190,6 +241,7 @@ class AsyncJSON(_JSONBase):
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> dict[str, bool]:
         """
         Iterate over ``root_folder`` and set each JSON file to a value
@@ -225,6 +277,7 @@ class AsyncJSON(_JSONBase):
                     nx=nx,
                     xx=xx,
                     decode_keys=decode_keys,
+                    fpha=fpha,
                 )
                 set_files_result[file_path] = True
             except JSONDecodeError:

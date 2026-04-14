@@ -11,6 +11,18 @@ from redis.connection import (
     UnixDomainSocketConnection,
 )
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
+from redis.keyspace_notifications import (
+    ChannelType,
+    ClusterKeyspaceNotifications,
+    EventType,
+    KeyeventChannel,
+    KeyNotification,
+    KeyspaceChannel,
+    KeyspaceNotifications,
+    KeyspaceNotificationsInterface,
+    KeyspaceWorkerThread,
+    get_channel_type,
+)
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -37,6 +49,7 @@ from redis.sentinel import (
     SentinelManagedConnection,
     SentinelManagedSSLConnection,
 )
+from redis.commands.core import GCRAResponse
 from redis.utils import from_url
 
 
@@ -57,7 +70,9 @@ __all__ = [
     "AuthenticationWrongNumberOfArgsError",
     "BlockingConnectionPool",
     "BusyLoadingError",
+    "ChannelType",
     "ChildDeadlockedError",
+    "ClusterKeyspaceNotifications",
     "Connection",
     "ConnectionError",
     "ConnectionPool",
@@ -65,10 +80,19 @@ __all__ = [
     "CrossSlotTransactionError",
     "DataError",
     "DriverInfo",
+    "EventType",
     "from_url",
+    "GCRAResponse",
     "default_backoff",
     "InvalidPipelineStack",
     "InvalidResponse",
+    "KeyeventChannel",
+    "KeyNotification",
+    "KeyspaceChannel",
+    "KeyspaceNotifications",
+    "KeyspaceNotificationsInterface",
+    "KeyspaceWorkerThread",
+    "get_channel_type",
     "MaxConnectionsError",
     "OutOfMemoryError",
     "PubSubError",

@@ -574,6 +574,16 @@ class AbstractConnection:
         health_check_failed: bool = False,
     ) -> None:
         """Disconnects from the Redis server"""
+        # On Python 3.13+, asyncio.timeout() raises RuntimeError when called
+        # outside a running Task (e.g. during GC finalization or event-loop
+        # callbacks).  In that context we fall back to a synchronous close.
+        # See https://github.com/redis/redis-py/issues/3856
+        if asyncio.current_task() is None:
+            self._parser.on_disconnect()
+            self.reset_should_reconnect()
+            self._close()
+            return
+
         try:
             async with async_timeout(self.socket_connect_timeout):
                 self._parser.on_disconnect()

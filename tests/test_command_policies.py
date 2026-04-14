@@ -8,9 +8,9 @@ from redis import ResponseError
 from redis._parsers import CommandsParser
 from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
 from redis.commands.policies import DynamicPolicyResolver, StaticPolicyResolver
-from redis.commands.search.aggregation import AggregateRequest, Cursor
+from redis.commands.search.aggregation import AggregateRequest
 from redis.commands.search.field import TextField, NumericField
-from tests.conftest import skip_if_server_version_lt, is_resp2_connection
+from tests.conftest import skip_if_server_version_lt
 
 
 @pytest.mark.onlycluster
@@ -117,10 +117,7 @@ class TestClusterWithPolicies:
 
             # Routed to another random primary node
             info = r.ft().info()
-            if is_resp2_connection(r):
-                assert info["index_name"] == "idx"
-            else:
-                assert info[b"index_name"] == b"idx"
+            assert info["index_name"] == "idx"
 
             assert determined_nodes[0] == primary_nodes[1]
 
@@ -159,10 +156,7 @@ class TestClusterWithPolicies:
 
             req = AggregateRequest("redis").group_by("@parent").cursor(1)
 
-            if is_resp2_connection(r):
-                cursor = r.ft().aggregate(req).cursor
-            else:
-                cursor = Cursor(r.ft().aggregate(req)[1])
+            cursor = r.ft().aggregate(req).cursor
 
             # Ensure that aggregate node was cached.
             assert determined_nodes[0] == r._aggregate_nodes[0]

@@ -1,4 +1,5 @@
 import os
+from enum import Enum
 from json import JSONDecodeError, loads
 from typing import Any, Awaitable, overload
 
@@ -9,6 +10,43 @@ from redis.utils import deprecated_function
 from ._util import JsonType
 from .decoders import decode_dict_keys
 from .path import Path
+
+
+class FPHAType(str, Enum):
+    """Floating-point type options for homogeneous array storage in JSON.SET.
+
+    Used with the ``fpha`` parameter to force Redis to store all FP arrays
+    using the specified floating-point type.
+    """
+
+    BF16 = "BF16"
+    FP16 = "FP16"
+    FP32 = "FP32"
+    FP64 = "FP64"
+
+    @classmethod
+    def from_value(cls, value: "FPHAType | str") -> "FPHAType":
+        """Convert a string or FPHAType instance to a validated FPHAType.
+
+        Args:
+            value: An ``FPHAType`` member or a case-insensitive string
+                (e.g. ``"bf16"``, ``"FP32"``).
+
+        Returns:
+            The corresponding ``FPHAType`` enum member.
+
+        Raises:
+            DataError: If the string does not match any valid FPHA type.
+        """
+        if isinstance(value, cls):
+            return value
+        try:
+            return cls(value.upper())
+        except ValueError:
+            raise DataError(
+                f"Invalid FPHA type: {value}. "
+                f"Must be one of {', '.join(t.value for t in cls)}"
+            )
 
 
 class JSONCommands:
@@ -141,7 +179,7 @@ class JSONCommands:
         name: str,
         path: str | None = Path.root_path(),
         index: int | None = -1,
-    ) -> JsonType | str | list[Any] | None: ...
+    ) -> JsonType: ...
 
     @overload
     def arrpop(
@@ -149,16 +187,14 @@ class JSONCommands:
         name: str,
         path: str | None = Path.root_path(),
         index: int | None = -1,
-    ) -> Awaitable[JsonType | str | list[Any] | None]: ...
+    ) -> Awaitable[JsonType]: ...
 
     def arrpop(
         self,
         name: str,
         path: str | None = Path.root_path(),
         index: int | None = -1,
-    ) -> (JsonType | str | list[Any] | None) | Awaitable[
-        JsonType | str | list[Any] | None
-    ]:
+    ) -> JsonType | Awaitable[JsonType]:
         """Pop the element at ``index`` in the array JSON value under
         ``path`` at key ``name``.
 
@@ -189,16 +225,16 @@ class JSONCommands:
     @overload
     def type(
         self: SyncClientProtocol, name: str, path: str | None = Path.root_path()
-    ) -> str | None | list[str | None] | list[list[str]]: ...
+    ) -> None | list[str | None] | list[list[str | None]]: ...
 
     @overload
     def type(
         self: AsyncClientProtocol, name: str, path: str | None = Path.root_path()
-    ) -> Awaitable[str | None | list[str | None] | list[list[str]]]: ...
+    ) -> Awaitable[None | list[str | None] | list[list[str | None]]]: ...
 
     def type(self, name: str, path: str | None = Path.root_path()) -> (
-        str | None | list[str | None] | list[list[str]]
-    ) | Awaitable[str | None | list[str | None] | list[list[str]]]:
+        None | list[str | None] | list[list[str | None]]
+    ) | Awaitable[None | list[str | None] | list[list[str | None]]]:
         """Get the type of the JSON value under ``path`` from key ``name``.
 
         For more information see `JSON.TYPE <https://redis.io/commands/json.type>`_.
@@ -267,16 +303,16 @@ class JSONCommands:
     @overload
     def numincrby(
         self: SyncClientProtocol, name: str, path: str, number: int
-    ) -> int | float | list[int | float | None]: ...
+    ) -> list[int | float | None]: ...
 
     @overload
     def numincrby(
         self: AsyncClientProtocol, name: str, path: str, number: int
-    ) -> Awaitable[int | float | list[int | float | None]]: ...
+    ) -> Awaitable[list[int | float | None]]: ...
 
-    def numincrby(self, name: str, path: str, number: int) -> (
-        int | float | list[int | float | None]
-    ) | Awaitable[int | float | list[int | float | None]]:
+    def numincrby(
+        self, name: str, path: str, number: int
+    ) -> (list[int | float | None]) | Awaitable[list[int | float | None]]:
         """Increment the numeric (integer or floating point) JSON value under
         ``path`` at key ``name`` by the provided ``number``.
 
@@ -289,17 +325,17 @@ class JSONCommands:
     @overload
     def nummultby(
         self: SyncClientProtocol, name: str, path: str, number: int
-    ) -> int | float | list[int | float | None]: ...
+    ) -> list[int | float | None]: ...
 
     @overload
     def nummultby(
         self: AsyncClientProtocol, name: str, path: str, number: int
-    ) -> Awaitable[int | float | list[int | float | None]]: ...
+    ) -> Awaitable[list[int | float | None]]: ...
 
     @deprecated_function(version="4.0.0", reason="deprecated since redisjson 1.0.0")
-    def nummultby(self, name: str, path: str, number: int) -> (
-        int | float | list[int | float | None]
-    ) | Awaitable[int | float | list[int | float | None]]:
+    def nummultby(
+        self, name: str, path: str, number: int
+    ) -> (list[int | float | None]) | Awaitable[list[int | float | None]]:
         """Multiply the numeric (integer or floating point) JSON value under
         ``path`` at key ``name`` with the provided ``number``.
 
@@ -357,16 +393,16 @@ class JSONCommands:
     @overload
     def get(
         self: SyncClientProtocol, name: str, *args, no_escape: bool | None = False
-    ) -> Any | None: ...
+    ) -> JsonType: ...
 
     @overload
     def get(
         self: AsyncClientProtocol, name: str, *args, no_escape: bool | None = False
-    ) -> Awaitable[Any | None]: ...
+    ) -> Awaitable[JsonType]: ...
 
-    def get(self, name: str, *args, no_escape: bool | None = False) -> (
-        Any | None
-    ) | Awaitable[Any | None]:
+    def get(
+        self, name: str, *args, no_escape: bool | None = False
+    ) -> JsonType | Awaitable[JsonType]:
         """
         Get the object stored as a JSON value at key ``name``.
 
@@ -427,6 +463,7 @@ class JSONCommands:
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> bool | None: ...
 
     @overload
@@ -438,6 +475,7 @@ class JSONCommands:
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> Awaitable[bool | None]: ...
 
     def set(
@@ -448,6 +486,7 @@ class JSONCommands:
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> (bool | None) | Awaitable[bool | None]:
         """
         Set the JSON value at key ``name`` under the ``path`` to ``obj``.
@@ -456,6 +495,10 @@ class JSONCommands:
         ``xx`` if set to True, set ``value`` only if it exists.
         ``decode_keys`` If set to True, the keys of ``obj`` will be decoded
         with utf-8.
+        ``fpha`` if set, forces Redis to use the specified floating-point type
+        for storing all FP homogeneous arrays in ``obj``.
+        Accepts a :class:`FPHAType` enum value or a string
+        (``"BF16"``, ``"FP16"``, ``"FP32"``, ``"FP64"``).
 
         For the purpose of using this within a pipeline, this command is also
         aliased to JSON.SET.
@@ -477,6 +520,10 @@ class JSONCommands:
             pieces.append("NX")
         elif xx:
             pieces.append("XX")
+
+        if fpha is not None:
+            pieces.extend(["FPHA", FPHAType.from_value(fpha).value])
+
         return self.execute_command("JSON.SET", *pieces)
 
     @overload
@@ -556,6 +603,7 @@ class JSONCommands:
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> bool | None: ...
 
     @overload
@@ -567,6 +615,7 @@ class JSONCommands:
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> Awaitable[bool | None]: ...
 
     def set_file(
@@ -577,6 +626,7 @@ class JSONCommands:
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> (bool | None) | Awaitable[bool | None]:
         """
         Set the JSON value at key ``name`` under the ``path`` to the content
@@ -586,13 +636,19 @@ class JSONCommands:
         ``xx`` if set to True, set ``value`` only if it exists.
         ``decode_keys`` If set to True, the keys of ``obj`` will be decoded
         with utf-8.
+        ``fpha`` if set, forces Redis to use the specified floating-point type
+        for storing all FP homogeneous arrays in the file content.
+        Accepts a :class:`FPHAType` enum value or a string
+        (``"BF16"``, ``"FP16"``, ``"FP32"``, ``"FP64"``).
 
         """
 
         with open(file_name) as fp:
             file_content = loads(fp.read())
 
-        return self.set(name, path, file_content, nx=nx, xx=xx, decode_keys=decode_keys)
+        return self.set(
+            name, path, file_content, nx=nx, xx=xx, decode_keys=decode_keys, fpha=fpha
+        )
 
     @overload
     def set_path(
@@ -602,6 +658,7 @@ class JSONCommands:
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> dict[str, bool]: ...
 
     @overload
@@ -612,6 +669,7 @@ class JSONCommands:
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> Awaitable[dict[str, bool]]: ...
 
     def set_path(
@@ -621,6 +679,7 @@ class JSONCommands:
         nx: bool | None = False,
         xx: bool | None = False,
         decode_keys: bool | None = False,
+        fpha: FPHAType | str | None = None,
     ) -> dict[str, bool] | Awaitable[dict[str, bool]]:
         """
         Iterate over ``root_folder`` and set each JSON file to a value
@@ -630,6 +689,10 @@ class JSONCommands:
         ``xx`` if set to True, set ``value`` only if it exists.
         ``decode_keys`` If set to True, the keys of ``obj`` will be decoded
         with utf-8.
+        ``fpha`` if set, forces Redis to use the specified floating-point type
+        for storing all FP homogeneous arrays in the file content.
+        Accepts a :class:`FPHAType` enum value or a string
+        (``"BF16"``, ``"FP16"``, ``"FP32"``, ``"FP64"``).
 
         """
         set_files_result = {}
@@ -648,6 +711,7 @@ class JSONCommands:
                         nx=nx,
                         xx=xx,
                         decode_keys=decode_keys,
+                        fpha=fpha,
                     )
                     set_files_result[file_path] = True
                 except JSONDecodeError:
@@ -765,17 +829,15 @@ class JSONCommands:
         return self.execute_command("JSON.DEBUG", *pieces)
 
     @overload
-    def jsonget(self: SyncClientProtocol, *args, **kwargs) -> Any | None: ...
+    def jsonget(self: SyncClientProtocol, *args, **kwargs) -> JsonType: ...
 
     @overload
-    def jsonget(
-        self: AsyncClientProtocol, *args, **kwargs
-    ) -> Awaitable[Any | None]: ...
+    def jsonget(self: AsyncClientProtocol, *args, **kwargs) -> Awaitable[JsonType]: ...
 
     @deprecated_function(
         version="4.0.0", reason="redisjson-py supported this, call get directly."
     )
-    def jsonget(self, *args, **kwargs) -> (Any | None) | Awaitable[Any | None]:
+    def jsonget(self, *args, **kwargs) -> JsonType | Awaitable[JsonType]:
         return self.get(*args, **kwargs)
 
     @overload

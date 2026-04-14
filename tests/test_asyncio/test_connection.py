@@ -562,3 +562,68 @@ async def test_unix_socket_connection_failure():
     with pytest.raises(ConnectionError, match=exp_err):
         redis = Redis(unix_socket_path="unix:///tmp/a.sock")
         await redis.set("a", "b")
+
+
+async def test_disconnect_no_current_task(request):
+    """
+    Regression test for issue #3856:
+    On Python 3.13+, asyncio.timeout() raises RuntimeError when called
+    outside a running Task (e.g. during GC finalization or event-loop
+    callbacks where asyncio.current_task() is None).
+
+    disconnect() should fall back to a synchronous _close() in that case,
+    rather than entering async_timeout and raising RuntimeError.
+    """
+    url: str = request.config.getoption("--redis-url")
+    conn = Connection(**parse_url(url))
+    await conn.connect()
+    assert conn.is_connected
+
+    # Invoke disconnect() from a loop.call_soon callback where
+    # asyncio.current_task() returns None — the same context as
+    # GC finalization of a suspended coroutine.
+    loop = asyncio.get_running_loop()
+    error_holder: list = []
+    done = asyncio.Event()
+
+    def _disconnect_without_task():
+        coro = conn.disconnect(nowait=True)
+        try:
+            coro.send(None)
+        except StopIteration:
+            pass
+        except BaseException as exc:
+            error_holder.append(exc)
+        finally:
+            coro.close()
+            done.set()
+
+    loop.call_soon(_disconnect_without_task)
+    await done.wait()
+
+    assert not error_holder, f"disconnect() raised: {error_holder[0]}"
+    assert not conn.is_connected
+
+
+async def test_disconnect_no_current_task_calls_close(request):
+    """
+    Verify that disconnect() outside a task context calls _close()
+    and properly resets parser state.
+    """
+    url: str = request.config.getoption("--redis-url")
+    conn = Connection(**parse_url(url))
+    await conn.connect()
+    assert conn.is_connected
+
+    with mock.patch.object(conn, "_close", wraps=conn._close) as mock_close:
+        with mock.patch.object(
+            conn._parser, "on_disconnect", wraps=conn._parser.on_disconnect
+        ) as mock_on_disconnect:
+            # Simulate the no-task context by patching current_task
+            with mock.patch("asyncio.current_task", return_value=None):
+                await conn.disconnect(nowait=True)
+
+            mock_close.assert_called_once()
+            mock_on_disconnect.assert_called_once()
+
+    assert not conn.is_connected

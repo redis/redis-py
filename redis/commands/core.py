@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import inspect
+from dataclasses import dataclass
 
 # Try to import the xxhash library as an optional dependency
 try:
@@ -54,6 +55,7 @@ from redis.typing import (
     ExpiryT,
     FieldT,
     GroupT,
+    HRandFieldResponse,
     HScanResponse,
     KeysT,
     KeyT,
@@ -100,6 +102,25 @@ if TYPE_CHECKING:
     import redis.cluster
 
 
+@dataclass
+class GCRAResponse:
+    """Response from the GCRA (Generic Cell Rate Algorithm) rate limiting command.
+
+    Attributes:
+        limited: Whether the request was rate limited (True) or allowed (False).
+        max_req_num: Maximum number of requests allowed (always equals max_burst + 1).
+        num_avail_req: Number of requests available immediately.
+        retry_after: Seconds until the caller should retry. Returns -1 if not limited.
+        full_burst_after: Seconds until the full burst allowance is restored.
+    """
+
+    limited: bool
+    max_req_num: int
+    num_avail_req: int
+    retry_after: int
+    full_burst_after: int
+
+
 class ACLCommands(CommandsProtocol):
     """
     Redis Access Control List (ACL) commands.
@@ -109,16 +130,16 @@ class ACLCommands(CommandsProtocol):
     @overload
     def acl_cat(
         self: SyncClientProtocol, category: str | None = None, **kwargs
-    ) -> list[bytes | str]: ...
+    ) -> list[str]: ...
 
     @overload
     def acl_cat(
         self: AsyncClientProtocol, category: str | None = None, **kwargs
-    ) -> Awaitable[list[bytes | str]]: ...
+    ) -> Awaitable[list[str]]: ...
 
     def acl_cat(
         self, category: str | None = None, **kwargs
-    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+    ) -> list[str] | Awaitable[list[str]]:
         """
         Returns a list of categories or commands within a category.
 
@@ -170,16 +191,14 @@ class ACLCommands(CommandsProtocol):
     @overload
     def acl_genpass(
         self: SyncClientProtocol, bits: int | None = None, **kwargs
-    ) -> bytes | str: ...
+    ) -> str: ...
 
     @overload
     def acl_genpass(
         self: AsyncClientProtocol, bits: int | None = None, **kwargs
-    ) -> Awaitable[bytes | str]: ...
+    ) -> Awaitable[str]: ...
 
-    def acl_genpass(self, bits: int | None = None, **kwargs) -> (
-        bytes | str
-    ) | Awaitable[bytes | str]:
+    def acl_genpass(self, bits: int | None = None, **kwargs) -> (str) | Awaitable[str]:
         """Generate a random password value.
         If ``bits`` is supplied then use this number of bits, rounded to
         the next multiple of 4.
@@ -221,14 +240,12 @@ class ACLCommands(CommandsProtocol):
         return self.execute_command("ACL GETUSER", username, **kwargs)
 
     @overload
-    def acl_help(self: SyncClientProtocol, **kwargs) -> list[bytes | str]: ...
+    def acl_help(self: SyncClientProtocol, **kwargs) -> list[str]: ...
 
     @overload
-    def acl_help(
-        self: AsyncClientProtocol, **kwargs
-    ) -> Awaitable[list[bytes | str]]: ...
+    def acl_help(self: AsyncClientProtocol, **kwargs) -> Awaitable[list[str]]: ...
 
-    def acl_help(self, **kwargs) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+    def acl_help(self, **kwargs) -> list[str] | Awaitable[list[str]]:
         """The ACL HELP command returns helpful text describing
         the different subcommands.
 
@@ -237,14 +254,12 @@ class ACLCommands(CommandsProtocol):
         return self.execute_command("ACL HELP", **kwargs)
 
     @overload
-    def acl_list(self: SyncClientProtocol, **kwargs) -> list[bytes | str]: ...
+    def acl_list(self: SyncClientProtocol, **kwargs) -> list[str]: ...
 
     @overload
-    def acl_list(
-        self: AsyncClientProtocol, **kwargs
-    ) -> Awaitable[list[bytes | str]]: ...
+    def acl_list(self: AsyncClientProtocol, **kwargs) -> Awaitable[list[str]]: ...
 
-    def acl_list(self, **kwargs) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+    def acl_list(self, **kwargs) -> list[str] | Awaitable[list[str]]:
         """
         Return a list of all ACLs on the server
 
@@ -562,14 +577,12 @@ class ACLCommands(CommandsProtocol):
         return self.execute_command("ACL SETUSER", *pieces, **kwargs)
 
     @overload
-    def acl_users(self: SyncClientProtocol, **kwargs) -> list[bytes | str]: ...
+    def acl_users(self: SyncClientProtocol, **kwargs) -> list[str]: ...
 
     @overload
-    def acl_users(
-        self: AsyncClientProtocol, **kwargs
-    ) -> Awaitable[list[bytes | str]]: ...
+    def acl_users(self: AsyncClientProtocol, **kwargs) -> Awaitable[list[str]]: ...
 
-    def acl_users(self, **kwargs) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+    def acl_users(self, **kwargs) -> list[str] | Awaitable[list[str]]:
         """Returns a list of all registered users on the server.
 
         For more information, see https://redis.io/commands/acl-users
@@ -577,12 +590,12 @@ class ACLCommands(CommandsProtocol):
         return self.execute_command("ACL USERS", **kwargs)
 
     @overload
-    def acl_whoami(self: SyncClientProtocol, **kwargs) -> bytes | str: ...
+    def acl_whoami(self: SyncClientProtocol, **kwargs) -> str: ...
 
     @overload
-    def acl_whoami(self: AsyncClientProtocol, **kwargs) -> Awaitable[bytes | str]: ...
+    def acl_whoami(self: AsyncClientProtocol, **kwargs) -> Awaitable[str]: ...
 
-    def acl_whoami(self, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
+    def acl_whoami(self, **kwargs) -> str | Awaitable[str]:
         """Get the username for the current connection
 
         For more information, see https://redis.io/commands/acl-whoami
@@ -851,16 +864,14 @@ class ManagementCommands(CommandsProtocol):
         return self.execute_command("CLIENT LIST", *args, **kwargs)
 
     @overload
-    def client_getname(self: SyncClientProtocol, **kwargs) -> bytes | str | None: ...
+    def client_getname(self: SyncClientProtocol, **kwargs) -> str | None: ...
 
     @overload
     def client_getname(
         self: AsyncClientProtocol, **kwargs
-    ) -> Awaitable[bytes | str | None]: ...
+    ) -> Awaitable[str | None]: ...
 
-    def client_getname(self, **kwargs) -> (bytes | str | None) | Awaitable[
-        bytes | str | None
-    ]:
+    def client_getname(self, **kwargs) -> (str | None) | Awaitable[str | None]:
         """
         Returns the current connection name
 
@@ -1104,18 +1115,16 @@ class ManagementCommands(CommandsProtocol):
         return self.execute_command("CLIENT TRACKING", *pieces, **kwargs)
 
     @overload
-    def client_trackinginfo(
-        self: SyncClientProtocol, **kwargs
-    ) -> list[bytes | str]: ...
+    def client_trackinginfo(self: SyncClientProtocol, **kwargs) -> dict[str, Any]: ...
 
     @overload
     def client_trackinginfo(
         self: AsyncClientProtocol, **kwargs
-    ) -> Awaitable[list[bytes | str]]: ...
+    ) -> Awaitable[dict[str, Any]]: ...
 
     def client_trackinginfo(
         self, **kwargs
-    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+    ) -> dict[str, Any] | Awaitable[dict[str, Any]]:
         """
         Returns the information about the current client connection's
         use of the server assisted client side cache.
@@ -1747,12 +1756,12 @@ class ManagementCommands(CommandsProtocol):
             return self.execute_command("LOLWUT", **kwargs)
 
     @overload
-    def reset(self: SyncClientProtocol) -> bytes | str: ...
+    def reset(self: SyncClientProtocol) -> str: ...
 
     @overload
-    def reset(self: AsyncClientProtocol) -> Awaitable[bytes | str]: ...
+    def reset(self: AsyncClientProtocol) -> Awaitable[str]: ...
 
-    def reset(self) -> (bytes | str) | Awaitable[bytes | str]:
+    def reset(self) -> str | Awaitable[str]:
         """Perform a full reset on the connection's server-side context.
 
         See: https://redis.io/commands/reset
@@ -2418,6 +2427,75 @@ class ManagementCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/hotkeys-get
         """
         return self.execute_command("HOTKEYS GET", **kwargs)
+
+    @overload
+    def gcra(
+        self: SyncClientProtocol,
+        key: KeyT,
+        max_burst: int,
+        requests_per_period: int,
+        period: float,
+        num_requests: int | None = None,
+    ) -> GCRAResponse: ...
+
+    @overload
+    def gcra(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        max_burst: int,
+        requests_per_period: int,
+        period: float,
+        num_requests: int | None = None,
+    ) -> Awaitable[GCRAResponse]: ...
+
+    def gcra(
+        self,
+        key: KeyT,
+        max_burst: int,
+        requests_per_period: int,
+        period: float,
+        num_requests: int | None = None,
+    ) -> GCRAResponse | Awaitable[GCRAResponse]:
+        """
+        Rate limit via GCRA (Generic Cell Rate Algorithm).
+
+        ``key`` is the key related to a specific rate limiting case
+            (e.g., use ``user:123`` for limiting requests of user 123).
+
+        ``max_burst`` is the maximum number of tokens allowed as a burst
+            (in addition to the sustained rate). Minimum: 0.
+
+        ``requests_per_period`` is the number of requests allowed per period.
+            Minimum: 1.
+
+        ``period`` is the period in seconds as a floating point number used for
+            calculating the sustained rate. Minimum: 1.0, Maximum: 1e12.
+
+        ``num_requests`` is the cost (or weight) of this rate-limiting request.
+            A higher cost drains the allowance faster. Default: 1.
+
+        Returns a GCRAResponse dataclass with:
+            - limited: whether the request was rate limited (bool)
+            - max_req_num: maximum number of requests (always max_burst + 1)
+            - num_avail_req: number of requests available immediately
+            - retry_after: seconds after which caller should retry
+                (-1 if not limited)
+            - full_burst_after: seconds after which a full burst will be allowed
+
+        For more information, see https://redis.io/commands/gcra
+        """
+        if max_burst < 0:
+            raise DataError("GCRA max_burst must be >= 0")
+        if requests_per_period < 1:
+            raise DataError("GCRA requests_per_period must be >= 1")
+        if period < 1.0 or period > 1e12:
+            raise DataError("GCRA period must be between 1.0 and 1e12")
+
+        pieces: list[EncodableT] = [key, max_burst, requests_per_period, period]
+        if num_requests is not None:
+            pieces.extend(["NUM_REQUESTS", num_requests])
+
+        return self.execute_command("GCRA", *pieces)
 
 
 class AsyncManagementCommands(ManagementCommands):
@@ -3844,7 +3922,7 @@ class BasicKeyCommands(CommandsProtocol):
         key: str,
         count: int | None = None,
         withvalues: bool = False,
-    ) -> bytes | str | list[bytes | str] | None: ...
+    ) -> HRandFieldResponse: ...
 
     @overload
     def hrandfield(
@@ -3852,13 +3930,11 @@ class BasicKeyCommands(CommandsProtocol):
         key: str,
         count: int | None = None,
         withvalues: bool = False,
-    ) -> Awaitable[bytes | str | list[bytes | str] | None]: ...
+    ) -> Awaitable[HRandFieldResponse]: ...
 
     def hrandfield(
         self, key: str, count: int | None = None, withvalues: bool = False
-    ) -> (bytes | str | list[bytes | str] | None) | Awaitable[
-        bytes | str | list[bytes | str] | None
-    ]:
+    ) -> HRandFieldResponse | Awaitable[HRandFieldResponse]:
         """
         Return a random field from the hash value stored at key.
 
@@ -3878,7 +3954,7 @@ class BasicKeyCommands(CommandsProtocol):
         if withvalues:
             params.append("WITHVALUES")
 
-        return self.execute_command("HRANDFIELD", key, *params)
+        return self.execute_command("HRANDFIELD", key, *params, withvalues=withvalues)
 
     @overload
     def randomkey(self: SyncClientProtocol, **kwargs) -> bytes | str | None: ...
@@ -4450,7 +4526,7 @@ class BasicKeyCommands(CommandsProtocol):
         idx: bool | None = False,
         minmatchlen: int | None = 0,
         withmatchlen: bool | None = False,
-    ) -> bytes | str | int | list[Any] | dict[Any, Any]: ...
+    ) -> bytes | str | int | dict[Any, Any]: ...
 
     @overload
     def lcs(
@@ -4461,7 +4537,7 @@ class BasicKeyCommands(CommandsProtocol):
         idx: bool | None = False,
         minmatchlen: int | None = 0,
         withmatchlen: bool | None = False,
-    ) -> Awaitable[bytes | str | int | list[Any] | dict[Any, Any]]: ...
+    ) -> Awaitable[bytes | str | int | dict[Any, Any]]: ...
 
     def lcs(
         self,
@@ -4471,8 +4547,8 @@ class BasicKeyCommands(CommandsProtocol):
         idx: bool | None = False,
         minmatchlen: int | None = 0,
         withmatchlen: bool | None = False,
-    ) -> (bytes | str | int | list[Any] | dict[Any, Any]) | Awaitable[
-        bytes | str | int | list[Any] | dict[Any, Any]
+    ) -> (bytes | str | int | dict[Any, Any]) | Awaitable[
+        bytes | str | int | dict[Any, Any]
     ]:
         """
         Find the longest common subsequence between ``key1`` and ``key2``.
@@ -7332,7 +7408,7 @@ class SortedSetCommands(CommandsProtocol):
         pieces = [len(keys), *keys]
         if withscores:
             pieces.append("WITHSCORES")
-        return self.execute_command("ZDIFF", *pieces, keys=keys)
+        return self.execute_command("ZDIFF", *pieces, keys=keys, withscores=withscores)
 
     @overload
     def zdiffstore(self: SyncClientProtocol, dest: KeyT, keys: KeysT) -> int: ...
@@ -7505,8 +7581,7 @@ class SortedSetCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/zpopmax
         """
         args = (count is not None) and [count] or []
-        options = {"withscores": True}
-        return self.execute_command("ZPOPMAX", name, *args, **options)
+        return self.execute_command("ZPOPMAX", name, *args)
 
     @overload
     def zpopmin(
@@ -7528,8 +7603,7 @@ class SortedSetCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/zpopmin
         """
         args = (count is not None) and [count] or []
-        options = {"withscores": True}
-        return self.execute_command("ZPOPMIN", name, *args, **options)
+        return self.execute_command("ZPOPMIN", name, *args)
 
     @overload
     def zrandmember(
@@ -7571,7 +7645,7 @@ class SortedSetCommands(CommandsProtocol):
         if withscores:
             params.append("WITHSCORES")
 
-        return self.execute_command("ZRANDMEMBER", key, *params)
+        return self.execute_command("ZRANDMEMBER", key, *params, withscores=withscores)
 
     @overload
     def bzpopmax(
@@ -10250,16 +10324,16 @@ class GeoCommands(CommandsProtocol):
     @overload
     def geohash(
         self: SyncClientProtocol, name: KeyT, *values: FieldT
-    ) -> list[bytes | str | None]: ...
+    ) -> list[str | None]: ...
 
     @overload
     def geohash(
         self: AsyncClientProtocol, name: KeyT, *values: FieldT
-    ) -> Awaitable[list[bytes | str | None]]: ...
+    ) -> Awaitable[list[str | None]]: ...
 
     def geohash(
         self, name: KeyT, *values: FieldT
-    ) -> list[bytes | str | None] | Awaitable[list[bytes | str | None]]:
+    ) -> list[str | None] | Awaitable[list[str | None]]:
         """
         Return the geo hash string for each item of ``values`` members of
         the specified key identified by the ``name`` argument.
@@ -10271,16 +10345,16 @@ class GeoCommands(CommandsProtocol):
     @overload
     def geopos(
         self: SyncClientProtocol, name: KeyT, *values: FieldT
-    ) -> list[tuple[float, float] | None]: ...
+    ) -> list[list[float] | None]: ...
 
     @overload
     def geopos(
         self: AsyncClientProtocol, name: KeyT, *values: FieldT
-    ) -> Awaitable[list[tuple[float, float] | None]]: ...
+    ) -> Awaitable[list[list[float] | None]]: ...
 
     def geopos(
         self, name: KeyT, *values: FieldT
-    ) -> list[tuple[float, float] | None] | Awaitable[list[tuple[float, float] | None]]:
+    ) -> list[list[float] | None] | Awaitable[list[list[float] | None]]:
         """
         Return the positions of each item of ``values`` as members of
         the specified key identified by the ``name`` argument. Each position

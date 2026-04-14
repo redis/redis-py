@@ -292,6 +292,14 @@ class ConnectionInterface:
     def extract_connection_details(self) -> str:
         pass
 
+    @property
+    @abstractmethod
+    def is_connected(self) -> bool:
+        """
+        Return ``True`` if the connection to the server is active.
+        """
+        pass
+
 
 class MaintNotificationsAbstractConnection:
     """
@@ -931,6 +939,10 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             self.disconnect()
         except Exception:
             pass
+
+    @property
+    def is_connected(self) -> bool:
+        return self._sock is not None
 
     def _construct_command_packer(self, packer):
         if packer is not None:
@@ -1593,6 +1605,10 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def repr_pieces(self):
         return self._conn.repr_pieces()
 
+    @property
+    def is_connected(self) -> bool:
+        return self._conn.is_connected
+
     def register_connect_callback(self, callback):
         self._conn.register_connect_callback(callback)
 
@@ -1693,7 +1709,10 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                         while entry.connection_ref.can_read():
                             entry.connection_ref.read_response(push_request=True)
 
-                return
+                # Re-check: if the entry was invalidated during the drain,
+                # fall through to send the command over the network.
+                if self._cache.get(self._current_command_cache_key):
+                    return
 
             # Set temporary entry value to prevent
             # race condition from another connection.
@@ -1737,7 +1756,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                         result=CSCResult.HIT,
                     )
                     record_csc_network_saved(
-                        bytes_saved=len(res),
+                        bytes_saved=len(res) if hasattr(res, "__len__") else 0,
                     )
                     return res
                 record_csc_request(

@@ -429,6 +429,90 @@ def r(request):
         yield client
 
 
+def _enable_keyspace_notifications(client):
+    """
+    Enable keyspace notifications on a Redis server (standalone or cluster).
+
+    Returns a function to restore the original configuration.
+    """
+    cluster_mode = REDIS_INFO.get("cluster_enabled", False)
+
+    if cluster_mode:
+        # For cluster, configure all primary nodes
+        # Store both the original config and the node connection for cleanup
+        original_configs = {}
+        node_connections = {}
+        for node in client.get_primaries():
+            node_client = client.get_redis_connection(node)
+            original = node_client.config_get("notify-keyspace-events")
+            original_configs[node.name] = original.get("notify-keyspace-events", "")
+            node_connections[node.name] = node_client
+            node_client.config_set("notify-keyspace-events", "KEA")
+
+        def restore():
+            # Restore configuration on all nodes that were originally configured
+            # Use the stored connections to ensure we restore the same nodes
+            for node_name, original_value in original_configs.items():
+                try:
+                    # First try the stored connection
+                    if node_name in node_connections:
+                        node_connections[node_name].config_set(
+                            "notify-keyspace-events", original_value
+                        )
+                    else:
+                        # Fallback: try to find the node in current topology
+                        for node in client.get_primaries():
+                            if node.name == node_name:
+                                node_client = client.get_redis_connection(node)
+                                node_client.config_set(
+                                    "notify-keyspace-events", original_value
+                                )
+                                break
+                except Exception as e:
+                    # Log but don't fail cleanup - node may have changed
+                    import warnings
+
+                    warnings.warn(
+                        f"Failed to restore keyspace config on {node_name}: {e}"
+                    )
+
+        return restore
+    else:
+        # For standalone, configure the single server
+        original_config = client.config_get("notify-keyspace-events")
+        original_value = original_config.get("notify-keyspace-events", "")
+        client.config_set("notify-keyspace-events", "KEA")
+
+        def restore():
+            try:
+                client.config_set("notify-keyspace-events", original_value)
+            except Exception as e:
+                import warnings
+
+                warnings.warn(f"Failed to restore keyspace config: {e}")
+
+        return restore
+
+
+@pytest.fixture()
+def r_with_keyspace_notifications(request):
+    """
+    A Redis client with keyspace notifications enabled on the server.
+
+    This fixture configures the server to emit all keyspace and keyevent
+    notifications (notify-keyspace-events=KEA) for the duration of the test,
+    then restores the original configuration.
+
+    Works for both standalone Redis and RedisCluster.
+    """
+    with _get_client(redis.Redis, request) as client:
+        restore = _enable_keyspace_notifications(client)
+        try:
+            yield client
+        finally:
+            restore()
+
+
 @pytest.fixture()
 def stack_url(request):
     return request.config.getoption("--redis-mod-url", default=default_redismod_url)
@@ -699,19 +783,3 @@ def get_protocol_version(r):
         return r.connection_pool.connection_kwargs.get("protocol")
     elif isinstance(r, redis.cluster.AbstractRedisCluster):
         return r.nodes_manager.connection_kwargs.get("protocol")
-
-
-def assert_resp_response(r, response, resp2_expected, resp3_expected):
-    protocol = get_protocol_version(r)
-    if protocol in [2, "2", None]:
-        assert response == resp2_expected
-    else:
-        assert response == resp3_expected
-
-
-def assert_resp_response_in(r, response, resp2_expected, resp3_expected):
-    protocol = get_protocol_version(r)
-    if protocol in [2, "2", None]:
-        assert response in resp2_expected
-    else:
-        assert response in resp3_expected
