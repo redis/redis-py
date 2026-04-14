@@ -23,7 +23,11 @@ inputs:
     required: false
     default: 'asyncio'
   test-config:
-    description: 'Test configuration to run. Can be "all", "fixed-clients", "2-standalone", "2-cluster", "3-standalone" or "3-cluster"'
+    description: |
+      Test configuration to run. Can be "all", "fixed-clients",
+      "2-standalone", "2-cluster", "3-standalone" or "3-cluster",
+      where the number is the RESP protocol version to test with,
+      the word describes the topology to test.
     required: false
     default: 'all'
   repository:
