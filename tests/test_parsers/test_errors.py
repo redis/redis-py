@@ -118,6 +118,7 @@ class MockSocket:
         pass
 
 
+@pytest.mark.fixed_client
 class TestErrorParsing:
     def setup_method(self):
         """Set up test fixtures with mocked sockets."""

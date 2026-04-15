@@ -1,5 +1,7 @@
 from unittest.mock import Mock, AsyncMock
 
+import pytest
+
 from redis.event import (
     EventListenerInterface,
     EventDispatcher,
@@ -7,6 +9,7 @@ from redis.event import (
 )
 
 
+@pytest.mark.fixed_client
 class TestEventDispatcher:
     def test_register_listeners(self):
         mock_event = Mock(spec=object)

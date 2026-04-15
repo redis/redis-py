@@ -20,6 +20,7 @@ from redis.observability.providers import (
 )
 
 
+@pytest.mark.fixed_client
 class TestOTelProviderManagerInit:
     """Tests for OTelProviderManager initialization."""
 
@@ -42,6 +43,7 @@ class TestOTelProviderManagerInit:
         assert "DEBUG" in manager.config.exclude_commands
 
 
+@pytest.mark.fixed_client
 class TestOTelProviderManagerGetMeterProvider:
     """Tests for get_meter_provider method."""
 
@@ -103,6 +105,7 @@ class TestOTelProviderManagerGetMeterProvider:
         assert result1 is result2
 
 
+@pytest.mark.fixed_client
 class TestOTelProviderManagerShutdown:
     """Tests for shutdown method."""
 
@@ -128,6 +131,7 @@ class TestOTelProviderManagerShutdown:
         mock_flush.assert_called_once_with(timeout_millis=30000)
 
 
+@pytest.mark.fixed_client
 class TestOTelProviderManagerForceFlush:
     """Tests for force_flush method."""
 
@@ -167,6 +171,7 @@ class TestOTelProviderManagerForceFlush:
         assert result is False
 
 
+@pytest.mark.fixed_client
 class TestOTelProviderManagerContextManager:
     """Tests for context manager support."""
 
@@ -200,6 +205,7 @@ class TestOTelProviderManagerContextManager:
             mock_shutdown.assert_called_once()
 
 
+@pytest.mark.fixed_client
 class TestOTelProviderManagerRepr:
     """Tests for __repr__ method."""
 
@@ -214,6 +220,7 @@ class TestOTelProviderManagerRepr:
         assert "config=" in repr_str
 
 
+@pytest.mark.fixed_client
 class TestObservabilityInstanceInit:
     """Tests for ObservabilityInstance initialization."""
 
@@ -250,6 +257,7 @@ class TestObservabilityInstanceInit:
         assert "SLOWLOG" in instance._provider_manager.config.exclude_commands
 
 
+@pytest.mark.fixed_client
 class TestObservabilityInstanceIsEnabled:
     """Tests for is_enabled method."""
 
@@ -278,6 +286,7 @@ class TestObservabilityInstanceIsEnabled:
         assert instance.is_enabled() is False
 
 
+@pytest.mark.fixed_client
 class TestObservabilityInstanceGetProviderManager:
     """Tests for get_provider_manager method."""
 
@@ -299,6 +308,7 @@ class TestObservabilityInstanceGetProviderManager:
         assert manager.config is config
 
 
+@pytest.mark.fixed_client
 class TestObservabilityInstanceShutdown:
     """Tests for shutdown method."""
 
@@ -337,6 +347,7 @@ class TestObservabilityInstanceShutdown:
         assert instance._provider_manager is None
 
 
+@pytest.mark.fixed_client
 class TestObservabilityInstanceForceFlush:
     """Tests for force_flush method."""
 
@@ -363,6 +374,7 @@ class TestObservabilityInstanceForceFlush:
         assert result is True
 
 
+@pytest.mark.fixed_client
 class TestGetObservabilityInstance:
     """Tests for get_observability_instance function."""
 
@@ -417,6 +429,7 @@ class TestGetObservabilityInstance:
             providers._observability_instance = original_instance
 
 
+@pytest.mark.fixed_client
 class TestObservabilityInstanceIntegration:
     """Integration tests for ObservabilityInstance."""
 

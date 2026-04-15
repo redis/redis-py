@@ -24,7 +24,7 @@ from redis.asyncio.retry import Retry
 from redis.multidb.circuit import CircuitBreaker
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestMultiDbConfig:
     def test_default_config(self):
         db_configs = [
@@ -140,7 +140,7 @@ class TestMultiDbConfig:
         assert config.auto_fallback_interval == auto_fallback_interval
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestDatabaseConfig:
     def test_default_config(self):
         config = DatabaseConfig(
