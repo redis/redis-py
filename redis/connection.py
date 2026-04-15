@@ -82,6 +82,7 @@ from .observability.recorder import (
 from .retry import Retry
 from .utils import (
     CRYPTOGRAPHY_AVAILABLE,
+    DEFAULT_RESP_VERSION,
     HIREDIS_AVAILABLE,
     SSL_AVAILABLE,
     check_protocol_version,
@@ -107,7 +108,6 @@ SYM_DOLLAR = b"$"
 SYM_CRLF = b"\r\n"
 SYM_EMPTY = b""
 
-DEFAULT_RESP_VERSION = 3
 
 DefaultParser: Type[Union[_RESP2Parser, _RESP3Parser, _HiredisParser]]
 if HIREDIS_AVAILABLE:
@@ -2343,7 +2343,9 @@ class MaintNotificationsAbstractConnectionPool:
         **kwargs,
     ):
         # Initialize maintenance notifications
-        is_protocol_supported = check_protocol_version(kwargs.get("protocol"), 3)
+        is_protocol_supported = check_protocol_version(
+            kwargs.get("protocol", DEFAULT_RESP_VERSION), 3
+        )
 
         if maint_notifications_config is None and is_protocol_supported:
             maint_notifications_config = MaintNotificationsConfig()
@@ -2844,7 +2846,9 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             self._event_dispatcher = EventDispatcher()
 
         if connection_kwargs.get("cache_config") or connection_kwargs.get("cache"):
-            if not check_protocol_version(self._connection_kwargs.get("protocol"), 3):
+            if not check_protocol_version(
+                self._connection_kwargs.get("protocol", DEFAULT_RESP_VERSION), 3
+            ):
                 raise RedisError("Client caching is only supported with RESP version 3")
 
             cache = self._connection_kwargs.get("cache")
