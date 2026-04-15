@@ -5,8 +5,9 @@ As of version 5.0, redis-py supports the `RESP 3 standard <https://github.com/re
 
 Connecting
 -----------
+As of version 8.0, redis-py uses RESP3 by default.
 
-Enabling RESP3 is no different than other connections in redis-py. In all cases, the connection type must be extending by setting `protocol=3`. The following are some base examples illustrating how to enable a RESP 3 connection.
+For older versions enabling RESP3 is no different than other connections in redis-py. In all cases, the connection type must be extending by setting `protocol=3`. The following are some base examples illustrating how to enable a RESP 3 connection.
 
 Connect with a standard connection, but specifying resp 3:
 
@@ -63,7 +64,7 @@ This means that should you want to perform something, on a given push notificati
     >>    if message.find("This special thing happened"):
     >>        raise IOError("This was the message: \n" + message)
     >>
-    >> r = Redis(protocol=3)
+    >> r = Redis()
     >> p = r.pubsub(push_handler_func=our_func)
 
 In the example above, upon receipt of a push notification, rather than log the message, in the case where specific text occurs, an IOError is raised. This example, highlights how one could start implementing a customized message handler.
@@ -84,7 +85,7 @@ Enable caching with default configuration:
 
     >>> import redis
     >>> from redis.cache import CacheConfig
-    >>> r = redis.Redis(host='localhost', port=6379, protocol=3, cache_config=CacheConfig())
+    >>> r = redis.Redis(host='localhost', port=6379, cache_config=CacheConfig())
 
 The same interface applies to Redis Cluster and Sentinel.
 
@@ -94,7 +95,7 @@ Enable caching with custom cache implementation:
 
     >>> import redis
     >>> from foo.bar import CacheImpl
-    >>> r = redis.Redis(host='localhost', port=6379, protocol=3, cache=CacheImpl())
+    >>> r = redis.Redis(host='localhost', port=6379, cache=CacheImpl())
 
 CacheImpl should implement a `CacheInterface` specified in `redis.cache` package.
 
