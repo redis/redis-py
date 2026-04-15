@@ -32,7 +32,7 @@ from tests.ssl_utils import get_tls_certificates
 
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/0"
-default_protocol = "2"
+default_protocol = "3"
 default_redismod_url = "redis://localhost:6479"
 
 # default ssl client ignores verification for the purpose of testing
