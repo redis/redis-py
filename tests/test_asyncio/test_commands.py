@@ -2870,6 +2870,28 @@ class TestRedisCommands:
         response = await r.zrange("d", 0, -1, withscores=True)
         assert response == [[b"a3", 20.0], [b"a1", 23.0]]
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.7.0")
+    async def test_zinterstore_count(self, r: redis.Redis):
+        await r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        await r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert await r.zinterstore("d", ["a", "b", "c"], aggregate="COUNT") == 2
+        response = await r.zrange("d", 0, -1, withscores=True)
+        assert response == [[b"a1", 3.0], [b"a3", 3.0]]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.7.0")
+    async def test_zinterstore_count_with_weight(self, r: redis.Redis):
+        await r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        await r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert (
+            await r.zinterstore("d", {"a": 1, "b": 2, "c": 3}, aggregate="COUNT") == 2
+        )
+        response = await r.zrange("d", 0, -1, withscores=True)
+        assert response == [[b"a1", 6.0], [b"a3", 6.0]]
+
     @skip_if_server_version_lt("4.9.0")
     async def test_zpopmax(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
@@ -3125,6 +3147,38 @@ class TestRedisCommands:
         assert await r.zunionstore("d", {"a": 1, "b": 2, "c": 3}) == 4
         response = await r.zrange("d", 0, -1, withscores=True)
         assert response == [[b"a2", 5.0], [b"a4", 12.0], [b"a3", 20.0], [b"a1", 23.0]]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.7.0")
+    async def test_zunionstore_count(self, r: redis.Redis):
+        await r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        await r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert await r.zunionstore("d", ["a", "b", "c"], aggregate="COUNT") == 4
+        response = await r.zrange("d", 0, -1, withscores=True)
+        assert response == [
+            [b"a4", 1.0],
+            [b"a2", 2.0],
+            [b"a1", 3.0],
+            [b"a3", 3.0],
+        ]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.7.0")
+    async def test_zunionstore_count_with_weight(self, r: redis.Redis):
+        await r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        await r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert (
+            await r.zunionstore("d", {"a": 1, "b": 2, "c": 3}, aggregate="COUNT") == 4
+        )
+        response = await r.zrange("d", 0, -1, withscores=True)
+        assert response == [
+            [b"a2", 3.0],
+            [b"a4", 3.0],
+            [b"a1", 6.0],
+            [b"a3", 6.0],
+        ]
 
     # HYPERLOGLOG TESTS
     @skip_if_server_version_lt("2.8.9")
