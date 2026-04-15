@@ -5,6 +5,7 @@ import pytest
 from redis.backoff import ExponentialWithJitterBackoff
 
 
+@pytest.mark.fixed_client
 def test_exponential_with_jitter_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_random = Mock(side_effect=[0.25, 0.5, 0.75, 1.0, 0.9])
     monkeypatch.setattr("random.random", mock_random)

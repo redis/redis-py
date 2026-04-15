@@ -24,7 +24,7 @@ from tests.helpers import wait_for_condition
 from tests.test_multidb.conftest import create_weighted_list
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestMultiDbClient:
     @pytest.mark.parametrize(
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
@@ -943,7 +943,7 @@ class TestMultiDbClient:
                 client.close()
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestGeoFailoverMetricRecording:
     """Tests for geo failover metric recording in MultiDBClient."""
 
@@ -1095,7 +1095,7 @@ class TestGeoFailoverMetricRecording:
                 client.close()
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestInitialHealthCheckPolicy:
     """Tests for initial health check policy evaluation."""
 

@@ -151,6 +151,7 @@ class TestConnectionPool:
         finally:
             await pool.disconnect(inuse_connections=True)
 
+    @pytest.mark.fixed_client
     async def test_connection_creation(self):
         connection_kwargs = {"foo": "bar", "biz": "baz"}
         async with self.get_pool(
@@ -160,6 +161,7 @@ class TestConnectionPool:
             assert isinstance(connection, DummyConnection)
             assert connection.kwargs == connection_kwargs
 
+    @pytest.mark.fixed_client
     async def test_aclosing(self):
         connection_kwargs = {"foo": "bar", "biz": "baz"}
         pool = redis.ConnectionPool(
@@ -195,6 +197,7 @@ class TestConnectionPool:
             c2 = await pool.get_connection()
             assert c1 == c2
 
+    @pytest.mark.fixed_client
     async def test_repr_contains_db_info_tcp(self):
         connection_kwargs = {
             "host": "localhost",
@@ -208,6 +211,7 @@ class TestConnectionPool:
             expected = "host=localhost,port=6379,db=1,client_name=test-client"
             assert expected in repr(pool)
 
+    @pytest.mark.fixed_client
     async def test_repr_contains_db_info_unix(self):
         connection_kwargs = {"path": "/abc", "db": 1, "client_name": "test-client"}
         async with self.get_pool(
@@ -231,6 +235,7 @@ class TestConnectionPool:
             await pool.disconnect(inuse_connections=False)
             assert conn.is_connected
 
+    @pytest.mark.fixed_client
     async def test_lock_not_held_during_connection_establishment(self):
         """
         Test that the connection pool lock is not held during the
@@ -262,6 +267,7 @@ class TestConnectionPool:
 
             await pool.release(connection)
 
+    @pytest.mark.fixed_client
     async def test_concurrent_connection_acquisition_performance(self):
         """
         Test that multiple concurrent connection acquisitions don't block
@@ -401,6 +407,7 @@ class TestBlockingConnectionPool:
             c2 = await pool.get_connection()
             assert c1 == c2
 
+    @pytest.mark.fixed_client
     def test_repr_contains_db_info_tcp(self):
         pool = redis.ConnectionPool(
             host="localhost", port=6379, client_name="test-client"
@@ -408,6 +415,7 @@ class TestBlockingConnectionPool:
         expected = "host=localhost,port=6379,client_name=test-client"
         assert expected in repr(pool)
 
+    @pytest.mark.fixed_client
     def test_repr_contains_db_info_unix(self):
         pool = redis.ConnectionPool(
             connection_class=redis.UnixDomainSocketConnection,
@@ -418,6 +426,7 @@ class TestBlockingConnectionPool:
         expected = "path=abc,db=0,client_name=test-client"
         assert expected in repr(pool)
 
+    @pytest.mark.fixed_client
     def test_repr_redacts_sensitive_information(self):
         """Test that __repr__ redacts sensitive values like password and username."""
         pool = ConnectionPool(
@@ -444,6 +453,7 @@ class TestBlockingConnectionPool:
         assert "db=0" in repr_output
 
 
+@pytest.mark.fixed_client
 class TestConnectionPoolURLParsing:
     def test_hostname(self):
         pool = redis.ConnectionPool.from_url("redis://my.host")
@@ -586,6 +596,7 @@ class TestConnectionPoolURLParsing:
         )
 
 
+@pytest.mark.fixed_client
 class TestBlockingConnectionPoolURLParsing:
     def test_extra_typed_querystring_options(self):
         pool = redis.BlockingConnectionPool.from_url(
@@ -611,6 +622,7 @@ class TestBlockingConnectionPoolURLParsing:
             )
 
 
+@pytest.mark.fixed_client
 class TestConnectionPoolUnixSocketURLParsing:
     def test_defaults(self):
         pool = redis.ConnectionPool.from_url("unix:///socket")
@@ -679,6 +691,7 @@ class TestConnectionPoolUnixSocketURLParsing:
         assert pool.connection_kwargs == {"path": "/socket", "a": "1", "b": "2"}
 
 
+@pytest.mark.fixed_client
 class TestSSLConnectionURLParsing:
     def test_host(self):
         pool = redis.ConnectionPool.from_url("rediss://my.host")
@@ -709,6 +722,7 @@ class TestSSLConnectionURLParsing:
 
 
 class TestConnection:
+    @pytest.mark.fixed_client
     async def test_on_connect_error(self):
         """
         An error in Connection.on_connect should disconnect from the server
@@ -787,6 +801,7 @@ class TestConnection:
             # as the db being full
             await r.execute_command("DEBUG", "ERROR", "OOM blah blah")
 
+    @pytest.mark.fixed_client
     def test_connect_from_url_tcp(self):
         connection = redis.Redis.from_url("redis://localhost:6379?db=0")
         pool = connection.connection_pool
@@ -799,6 +814,7 @@ class TestConnection:
             "db=0,host=localhost,port=6379",
         )
 
+    @pytest.mark.fixed_client
     def test_connect_from_url_unix(self):
         connection = redis.Redis.from_url("unix:///path/to/socket")
         pool = connection.connection_pool
@@ -1028,6 +1044,7 @@ class TestHealthCheck:
             self.assert_interval_advanced(p.connection)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestAsyncConnectionPoolMetricsRecording:
     """Tests for async ConnectionPool metrics recording (create time and wait time)."""

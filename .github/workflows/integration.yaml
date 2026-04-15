@@ -84,10 +84,10 @@ jobs:
         python-version: ['3.10', '3.14']
         parser-backend: ['plain']
         event-loop: ['asyncio']
-        protocol: ['2', '3']
+        test-config: ['fixed-clients', '2-standalone', '2-cluster', '3-standalone', '3-cluster']
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Protocol:${{matrix.protocol}}
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
     steps:
       - uses: actions/checkout@v6
       - name: Run tests
@@ -96,7 +96,7 @@ jobs:
             python-version: ${{ matrix.python-version }}
             parser-backend: ${{ matrix.parser-backend }}
             redis-version: ${{ matrix.redis-version }}
-            protocol: ${{ matrix.protocol }}
+            test-config: ${{ matrix.test-config }}
 
   python-compatibility-tests:
     runs-on: ubuntu-latest
@@ -110,10 +110,10 @@ jobs:
         python-version: ['3.11', '3.12', '3.13']
         parser-backend: [ 'plain' ]
         event-loop: [ 'asyncio' ]
-        protocol: ['2', '3']
+        test-config: ['fixed-clients', '2-standalone', '2-cluster', '3-standalone', '3-cluster']
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Protocol:${{matrix.protocol}}
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
     steps:
       - uses: actions/checkout@v6
       - name: Run tests
@@ -122,7 +122,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           parser-backend: ${{ matrix.parser-backend }}
           redis-version: ${{ matrix.redis-version }}
-          protocol: ${{ matrix.protocol }}
+          test-config: ${{ matrix.test-config }}
 
   pypy-compatibility-tests:
     runs-on: ubuntu-latest
@@ -139,10 +139,10 @@ jobs:
         python-version: ['pypy-3.10', 'pypy-3.11']
         parser-backend: [ 'plain' ]
         event-loop: [ 'asyncio' ]
-        protocol: ['2', '3']
+        test-config: ['fixed-clients', '2-standalone', '2-cluster', '3-standalone', '3-cluster']
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: PyPy Redis ${{ matrix.redis-version }}; ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Protocol:${{matrix.protocol}}
+    name: PyPy Redis ${{ matrix.redis-version }}; ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
     steps:
       - uses: actions/checkout@v6
       - name: Run tests
@@ -151,7 +151,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           parser-backend: ${{ matrix.parser-backend }}
           redis-version: ${{ matrix.redis-version }}
-          protocol: ${{ matrix.protocol }}
+          test-config: ${{ matrix.test-config }}
 
   hiredis-tests:
     runs-on: ubuntu-latest
@@ -166,10 +166,10 @@ jobs:
         parser-backend: [ 'hiredis' ]
         hiredis-version: [ '>=3.2.0', '<3.0.0' ]
         event-loop: [ 'asyncio' ]
-        protocol: ['2', '3']
+        test-config: ['fixed-clients', '2-standalone', '2-cluster', '3-standalone', '3-cluster']
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}} (${{ matrix.hiredis-version }}); EL:${{matrix.event-loop}}; Protocol:${{matrix.protocol}}
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}} (${{ matrix.hiredis-version }}); EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
     steps:
       - uses: actions/checkout@v6
       - name: Run tests
@@ -179,7 +179,7 @@ jobs:
           parser-backend: ${{ matrix.parser-backend }}
           redis-version: ${{ matrix.redis-version }}
           hiredis-version: ${{ matrix.hiredis-version }}
-          protocol: ${{ matrix.protocol }}
+          test-config: ${{ matrix.test-config }}
 
   uvloop-tests:
     runs-on: ubuntu-latest
@@ -193,10 +193,10 @@ jobs:
         python-version: [ '3.10', '3.14' ]
         parser-backend: [ 'plain' ]
         event-loop: [ 'uvloop' ]
-        protocol: ['2', '3']
+        test-config: ['fixed-clients', '2-standalone', '2-cluster', '3-standalone', '3-cluster']
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Protocol:${{matrix.protocol}}
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
     steps:
       - uses: actions/checkout@v6
       - name: Run tests
@@ -206,7 +206,7 @@ jobs:
           parser-backend: ${{ matrix.parser-backend }}
           redis-version: ${{ matrix.redis-version }}
           event-loop: ${{ matrix.event-loop }}
-          protocol: ${{ matrix.protocol }}
+          test-config: ${{ matrix.test-config }}
 
   build-and-test-package:
     name: Validate building and installing the package

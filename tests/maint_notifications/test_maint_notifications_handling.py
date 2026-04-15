@@ -466,6 +466,7 @@ class TestMaintenanceNotificationsBase:
         return test_redis_client
 
 
+@pytest.mark.fixed_client
 class TestMaintenanceNotificationsHandshake(TestMaintenanceNotificationsBase):
     """Integration tests for maintenance notifications handling with real connection pool."""
 
@@ -530,6 +531,7 @@ class TestMaintenanceNotificationsHandshake(TestMaintenanceNotificationsBase):
             test_redis_client.close()
 
 
+@pytest.mark.fixed_client
 class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificationsBase):
     """Integration tests for maintenance notifications handling with real connection pool."""
 
@@ -1980,6 +1982,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
             pool.disconnect()
 
 
+@pytest.mark.fixed_client
 class TestMaintenanceNotificationsHandlingMultipleProxies(
     TestMaintenanceNotificationsBase
 ):

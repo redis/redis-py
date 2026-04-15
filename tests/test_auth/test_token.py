@@ -5,6 +5,7 @@ from redis.auth.err import InvalidTokenSchemaErr
 from redis.auth.token import JWToken, SimpleToken
 
 
+@pytest.mark.fixed_client
 class TestToken:
     def test_simple_token(self):
         token = SimpleToken(

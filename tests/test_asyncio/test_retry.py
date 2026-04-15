@@ -19,6 +19,7 @@ class BackoffMock(AbstractBackoff):
         return 0
 
 
+@pytest.mark.fixed_client
 class TestConnectionConstructorWithRetry:
     "Test that the Connection constructors properly handles Retry objects"
 
@@ -72,6 +73,7 @@ class TestConnectionConstructorWithRetry:
         assert set(c.retry._supported_errors) == set(retry_on_error)
 
 
+@pytest.mark.fixed_client
 class TestRetry:
     "Test that Retry calls backoff and retries the expected number of times"
 

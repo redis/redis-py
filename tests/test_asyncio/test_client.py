@@ -19,6 +19,7 @@ from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestAsyncRedisClientOperationDurationMetricsRecording:
     """
@@ -214,6 +215,7 @@ class TestAsyncRedisClientOperationDurationMetricsRecording:
         async_recorder.reset_collector()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestAsyncRedisClientErrorMetricsRecording:
     """
