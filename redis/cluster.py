@@ -2835,7 +2835,8 @@ class ClusterPubSub(PubSub):
         if self.connection:
             self.connection.disconnect()
         for pubsub in self.node_pubsub_mapping.values():
-            pubsub.connection.disconnect()
+            if pubsub.connection:
+                pubsub.connection.disconnect()
 
 
 class ClusterPipeline(RedisCluster):
