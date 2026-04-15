@@ -50,7 +50,7 @@ async def test_invalid_response(create_redis):
     await r.connection.disconnect()
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 async def test_single_connection():
     """Test that concurrent requests on a single client are synchronised."""
     r = Redis(single_connection_client=True)
@@ -157,6 +157,7 @@ async def test_connect_retry_on_timeout_error(connect_args):
     await conn.disconnect()
 
 
+@pytest.mark.fixed_client
 async def test_connect_without_retry_on_non_retryable_error():
     """
     Test that the _connect function is not being retried in case of a CancelledError -
@@ -169,6 +170,7 @@ async def test_connect_without_retry_on_non_retryable_error():
         assert _connect.call_count == 1
 
 
+@pytest.mark.fixed_client
 async def test_connect_with_retries():
     """
     Test that retries occur for the entire connect+handshake flow when OSError happens during the handshake phase.
@@ -184,6 +186,7 @@ async def test_connect_with_retries():
         assert writelines.call_count == 3
 
 
+@pytest.mark.fixed_client
 async def test_connect_timeout_error_without_retry():
     """Test that the _connect function is not being retried if retry_on_timeout is
     set to False"""
@@ -311,7 +314,7 @@ async def test_connection_disconect_race(parser_class, connect_args):
     assert vals == [b"Hello, World!", None]
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 def test_create_single_connection_client_from_url():
     client = Redis.from_url("redis://localhost:6379/0?", single_connection_client=True)
     assert client.single_connection_client is True
@@ -550,6 +553,7 @@ async def test_format_error_message(conn, error, expected_message):
     assert error_message == expected_message
 
 
+@pytest.mark.fixed_client
 async def test_network_connection_failure():
     exp_err = rf"^Error {ECONNREFUSED} connecting to 127.0.0.1:9999.(.+)$"
     with pytest.raises(ConnectionError, match=exp_err):
@@ -557,6 +561,7 @@ async def test_network_connection_failure():
         await redis.set("a", "b")
 
 
+@pytest.mark.fixed_client
 async def test_unix_socket_connection_failure():
     exp_err = "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
     with pytest.raises(ConnectionError, match=exp_err):
