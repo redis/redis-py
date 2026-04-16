@@ -4,7 +4,7 @@ from redis import Redis, exceptions
 from redis.commands.json.decoders import decode_list, unstring
 from redis.commands.json.path import Path
 
-from .conftest import _get_client, skip_if_server_version_lt, skip_ifmodversion_lt
+from .conftest import _get_client, skip_ifmodversion_lt
 
 
 @pytest.fixture

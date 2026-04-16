@@ -3,7 +3,7 @@ import pytest_asyncio
 import redis.asyncio as redis
 from redis import exceptions
 from redis.commands.json.path import Path
-from tests.conftest import skip_if_server_version_lt, skip_ifmodversion_lt
+from tests.conftest import skip_ifmodversion_lt
 
 
 @pytest_asyncio.fixture()
