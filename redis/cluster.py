@@ -77,6 +77,7 @@ from redis.observability.recorder import (
 )
 from redis.retry import Retry
 from redis.utils import (
+    DEFAULT_RESP_VERSION,
     check_protocol_version,
     deprecated_args,
     deprecated_function,
@@ -281,7 +282,9 @@ class MaintNotificationsAbstractRedisCluster:
         **kwargs,
     ):
         # Initialize maintenance notifications
-        is_protocol_supported = check_protocol_version(kwargs.get("protocol"), 3)
+        is_protocol_supported = check_protocol_version(
+            kwargs.get("protocol", DEFAULT_RESP_VERSION), 3
+        )
 
         if (
             maint_notifications_config
@@ -814,7 +817,7 @@ class RedisCluster(
             kwargs.get("encoding_errors", "strict"),
             kwargs.get("decode_responses", False),
         )
-        protocol = kwargs.get("protocol", None)
+        protocol = kwargs.get("protocol", DEFAULT_RESP_VERSION)
         if (cache_config or cache) and not check_protocol_version(protocol, 3):
             raise RedisError("Client caching is only supported with RESP version 3")
 

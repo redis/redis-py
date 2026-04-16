@@ -5,7 +5,10 @@ These tests verify that all symbols exported from redis.observability
 are correctly re-exported and match the original implementations.
 """
 
+import pytest
 
+
+@pytest.mark.fixed_client
 class TestPublicAPIExports:
     """Tests for public API exports from redis.observability."""
 

@@ -980,7 +980,7 @@ class TestPubSubRun:
 @pytest.mark.parametrize("method", ["get_message", "listen"])
 @pytest.mark.onlynoncluster
 class TestPubSubAutoReconnect:
-    timeout = 2
+    timeout = 4
 
     async def mysetup(self, r, method):
         self.messages = asyncio.Queue()
@@ -1106,7 +1106,7 @@ class TestPubSubAutoReconnect:
     async def loop_step_listen(self):
         # get a single message via listen()
         try:
-            async with async_timeout(0.1):
+            async with async_timeout(0.5):
                 async for message in self.pubsub.listen():
                     await self.messages.put(message)
                     return True

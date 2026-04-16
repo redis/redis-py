@@ -3,9 +3,12 @@ import random
 from concurrent.futures import ThreadPoolExecutor
 from time import sleep
 
+import pytest
+
 from redis.data_structure import WeightedList
 
 
+@pytest.mark.fixed_client
 class TestWeightedList:
     def test_add_items(self):
         wlist = WeightedList()

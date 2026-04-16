@@ -4,6 +4,7 @@ from redis.driver_info import DriverInfo
 from redis.utils import get_lib_version
 
 
+@pytest.mark.fixed_client
 def test_driver_info_default_name_no_upstream():
     info = DriverInfo()
     assert info.formatted_name == "redis-py"
@@ -11,17 +12,20 @@ def test_driver_info_default_name_no_upstream():
     assert info.lib_version == get_lib_version()
 
 
+@pytest.mark.fixed_client
 def test_driver_info_custom_lib_version():
     info = DriverInfo(lib_version="5.0.0")
     assert info.lib_version == "5.0.0"
     assert info.formatted_name == "redis-py"
 
 
+@pytest.mark.fixed_client
 def test_driver_info_single_upstream():
     info = DriverInfo().add_upstream_driver("django-redis", "5.4.0")
     assert info.formatted_name == "redis-py(django-redis_v5.4.0)"
 
 
+@pytest.mark.fixed_client
 def test_driver_info_multiple_upstreams_latest_first():
     info = DriverInfo()
     info.add_upstream_driver("django-redis", "5.4.0")
@@ -29,6 +33,7 @@ def test_driver_info_multiple_upstreams_latest_first():
     assert info.formatted_name == "redis-py(celery_v5.4.1;django-redis_v5.4.0)"
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "name",
     [
@@ -44,6 +49,7 @@ def test_driver_info_invalid_name(name):
         info.add_upstream_driver(name, "3.2.0")
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "version",
     [

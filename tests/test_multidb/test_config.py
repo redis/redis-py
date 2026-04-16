@@ -22,7 +22,7 @@ from redis.multidb.failover import WeightBasedFailoverStrategy, FailoverStrategy
 from redis.retry import Retry
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestMultiDbConfig:
     def test_default_config(self):
         db_configs = [
@@ -196,7 +196,7 @@ class TestMultiDbConfig:
         assert pool._maint_notifications_pool_handler.config.enabled is True
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestDatabaseConfig:
     def test_default_config(self):
         config = DatabaseConfig(
