@@ -52,7 +52,7 @@ def subscriber(ready_event: threading.Event) -> None:
             # Confirmation of subscription -- nothing to process.
             continue
 
-        if msg_type in ("message", "pmatch"):
+        if msg_type in ("message", "pmessage"):
             channel = message["channel"]
             data = message["data"]
             print(f"[subscriber] Received on '{channel}': {data}")
