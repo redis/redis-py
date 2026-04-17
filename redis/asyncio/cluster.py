@@ -43,7 +43,6 @@ from redis.asyncio.client import PubSub, ResponseCallbackT
 from redis.asyncio.connection import (
     AbstractConnection,
     Connection,
-    ConnectionPool,
     SSLConnection,
     parse_url,
 )
@@ -3052,6 +3051,43 @@ class TransactionStrategy(AbstractStrategy):
         return self.execute_command("UNLINK", *names)
 
 
+class _ClusterNodePoolAdapter:
+    """Thin adapter exposing the :class:`ConnectionPool` interface that
+    :class:`PubSub` requires, backed by a :class:`ClusterNode`'s own
+    connection pool.
+
+    Connections are acquired from the node via
+    :meth:`ClusterNode.acquire_connection` and returned via
+    :meth:`ClusterNode.release`.  :meth:`PubSub.aclose` already
+    disconnects the connection *before* calling :meth:`release`, so the
+    connection is returned to the node's free-queue in a disconnected
+    state — guaranteeing that a subscribed socket is never silently
+    reused for regular commands.
+    """
+
+    def __init__(self, node: "ClusterNode") -> None:
+        self._node = node
+        self.connection_kwargs = node.connection_kwargs
+
+    # -- methods used by PubSub ------------------------------------------------
+
+    def get_encoder(self) -> Encoder:
+        return self._node.get_encoder()
+
+    async def get_connection(
+        self, command_name: Optional[str] = None, *keys: Any, **options: Any
+    ) -> Any:
+        connection = self._node.acquire_connection()
+        await connection.connect()
+        return connection
+
+    async def release(self, connection: Any) -> None:
+        # PubSub.aclose() disconnects the connection before calling
+        # release(), so it is safe to put it back in the node's free
+        # queue – it will reconnect lazily on next use.
+        self._node.release(connection)
+
+
 class ClusterPubSub(PubSub):
     """
     Async cluster implementation for pub/sub.
@@ -3090,12 +3126,10 @@ class ClusterPubSub(PubSub):
         self.node = None
         self.set_pubsub_node(redis_cluster, node, host, port)
 
-        # Create connection pool if node is specified
+        # Borrow the node's own connection pool via an adapter rather than
+        # creating a second, detached ConnectionPool for pubsub.
         if self.node is not None:
-            connection_pool = ConnectionPool(
-                connection_class=self.node.connection_class,
-                **self.node.connection_kwargs,
-            )
+            connection_pool = _ClusterNodePoolAdapter(self.node)
         else:
             connection_pool = None
 
@@ -3161,13 +3195,8 @@ class ClusterPubSub(PubSub):
         try:
             return self.node_pubsub_mapping[node.name]
         except KeyError:
-            # Create a minimal connection pool for this node
-            connection_pool = ConnectionPool(
-                connection_class=node.connection_class, **node.connection_kwargs
-            )
-
             pubsub = PubSub(
-                connection_pool=connection_pool,
+                connection_pool=_ClusterNodePoolAdapter(node),
                 encoder=self.cluster.encoder,
                 push_handler_func=self.push_handler_func,
                 event_dispatcher=self._event_dispatcher,
@@ -3367,10 +3396,7 @@ class ClusterPubSub(PubSub):
                     # Get a random node
                     node = self.cluster.get_random_node()
                 self.node = node
-                self.connection_pool = ConnectionPool(
-                    connection_class=node.connection_class,
-                    **node.connection_kwargs,
-                )
+                self.connection_pool = _ClusterNodePoolAdapter(node)
 
         # Now we have a connection_pool, use parent's execute_command
         return await super().execute_command(*args, **kwargs)

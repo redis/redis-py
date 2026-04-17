@@ -2735,9 +2735,8 @@ class ClusterPubSub(PubSub):
         try:
             return self.node_pubsub_mapping[node.name]
         except KeyError:
-            pubsub = node.redis_connection.pubsub(
-                push_handler_func=self.push_handler_func
-            )
+            redis_connection = self.cluster.get_redis_connection(node)
+            pubsub = redis_connection.pubsub(push_handler_func=self.push_handler_func)
             self.node_pubsub_mapping[node.name] = pubsub
             return pubsub
 
