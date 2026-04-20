@@ -5986,7 +5986,7 @@ class TestRedisCommands:
         r.xadd(stream, {"foo": "bar"})
         assert r.xlen(stream) == 2
 
-    @skip_if_server_version_lt("8.8.0")
+    @skip_if_server_version_lt("8.7.2")
     def test_xnack_silent(self, r):
         stream = "stream"
         group = "group"
@@ -5999,7 +5999,7 @@ class TestRedisCommands:
         result = r.xnack(stream, group, "SILENT", m1, m2)
         assert result == 2
 
-    @skip_if_server_version_lt("8.8.0")
+    @skip_if_server_version_lt("8.7.2")
     def test_xnack_fail(self, r):
         stream = "stream"
         group = "group"
@@ -6011,7 +6011,7 @@ class TestRedisCommands:
         result = r.xnack(stream, group, "FAIL", m1)
         assert result == 1
 
-    @skip_if_server_version_lt("8.8.0")
+    @skip_if_server_version_lt("8.7.2")
     def test_xnack_fatal(self, r):
         stream = "stream"
         group = "group"
@@ -6023,7 +6023,7 @@ class TestRedisCommands:
         result = r.xnack(stream, group, "FATAL", m1)
         assert result == 1
 
-    @skip_if_server_version_lt("8.8.0")
+    @skip_if_server_version_lt("8.7.2")
     def test_xnack_multiple_ids(self, r):
         stream = "stream"
         group = "group"
@@ -6036,7 +6036,7 @@ class TestRedisCommands:
         result = r.xnack(stream, group, "FAIL", m1, m2, m3)
         assert result == 3
 
-    @skip_if_server_version_lt("8.8.0")
+    @skip_if_server_version_lt("8.7.2")
     def test_xnack_some_ids_not_in_pel(self, r):
         stream = "stream"
         group = "group"
@@ -6049,7 +6049,7 @@ class TestRedisCommands:
         result = r.xnack(stream, group, "FAIL", m1, m2, "999999-0")
         assert result == 2
 
-    @skip_if_server_version_lt("8.8.0")
+    @skip_if_server_version_lt("8.7.2")
     def test_xnack_retrycount(self, r):
         stream = "stream"
         group = "group"
@@ -6061,7 +6061,7 @@ class TestRedisCommands:
         result = r.xnack(stream, group, "FAIL", m1, retrycount=5)
         assert result == 1
 
-    @skip_if_server_version_lt("8.8.0")
+    @skip_if_server_version_lt("8.7.2")
     def test_xnack_force(self, r):
         stream = "stream"
         group = "group"
@@ -6071,7 +6071,7 @@ class TestRedisCommands:
         result = r.xnack(stream, group, "FAIL", m1, force=True)
         assert result == 1
 
-    @skip_if_server_version_lt("8.8.0")
+    @skip_if_server_version_lt("8.7.2")
     def test_xnack_invalid_mode(self, r):
         stream = "stream"
         group = "group"
@@ -6080,7 +6080,7 @@ class TestRedisCommands:
         with pytest.raises(redis.DataError):
             r.xnack(stream, group, "INVALID", m1)
 
-    @skip_if_server_version_lt("8.8.0")
+    @skip_if_server_version_lt("8.7.2")
     def test_xnack_no_ids(self, r):
         stream = "stream"
         group = "group"
@@ -6089,7 +6089,7 @@ class TestRedisCommands:
         with pytest.raises(redis.DataError):
             r.xnack(stream, group, "FAIL")
 
-    @skip_if_server_version_lt("8.8.0")
+    @skip_if_server_version_lt("8.7.2")
     def test_xnack_negative_retrycount(self, r):
         stream = "stream"
         group = "group"

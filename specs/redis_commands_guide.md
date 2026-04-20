@@ -44,9 +44,9 @@ like `KeyT`, `EncodableT`, etc. in `redis/typing.py`.
 ## Protocols compatibility
 
 SDK supports two types of Redis wire protocol: RESP2 and RESP3. And aims to provide a compatibility between them
-for seamless user experience. However, there are some differences in types that defined by these protocols.
+for seamless user experience. However, there are some differences in types that are defined by these protocols.
 
-Because, RESP3 introduce new types that wasn't previously supported by RESP2, we're aiming for forward compatibility
+Because, RESP3 introduce new types that weren't previously supported by RESP2, we're aiming for forward compatibility
 and ensure that all new types supported by RESP3 can be used with RESP2. In most cases the semantic of RESP3 can be
 easily recognized and converting existing RESP2 response in RESP3 is a matter of parsing strategy.
 
@@ -56,7 +56,8 @@ To understand how does Redis types defined by RESP2 and RESP3 protocol maps to P
 see `redis/_parsers/resp2.py` and `redis/_parsers/resp3.py`.
 
 Parsers are responsible for RESP protocol parsing. However, protocols compatibility is achieved by 2nd layer
-parsing as `response_callbacks` defined in `redis/_parsers/helpers.py` and can be extended/updated on client level.
+parsing as `response_callbacks` defined in `redis/_parsers/helpers.py` for core or `redis/commands/$module/utils.py` 
+for module commands and can be extended/updated on client level.
 
 ## Arguments definition
 
