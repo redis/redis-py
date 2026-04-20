@@ -5823,6 +5823,120 @@ class TestRedisCommands:
         r.xadd(stream, {"foo": "bar"})
         assert r.xlen(stream) == 2
 
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_silent(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        m2 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        # SILENT mode returns count of NACKed messages
+        result = r.xnack(stream, group, "SILENT", m1, m2)
+        assert result == 2
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_fail(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        # FAIL mode returns count of NACKed messages
+        result = r.xnack(stream, group, "FAIL", m1)
+        assert result == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_fatal(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        # FATAL mode returns count of NACKed messages
+        result = r.xnack(stream, group, "FATAL", m1)
+        assert result == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_multiple_ids(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        m2 = r.xadd(stream, {"foo": "bar"})
+        m3 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        result = r.xnack(stream, group, "FAIL", m1, m2, m3)
+        assert result == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_some_ids_not_in_pel(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        m2 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        # Only m1 and m2 are in PEL; "999999-0" is not
+        result = r.xnack(stream, group, "FAIL", m1, m2, "999999-0")
+        assert result == 2
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_retrycount(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        # Explicit retrycount overrides mode's counter adjustment
+        result = r.xnack(stream, group, "FAIL", m1, retrycount=5)
+        assert result == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_force(self, r):
+        stream = "stream"
+        group = "group"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        # FORCE creates unowned PEL entries for IDs not already in PEL
+        result = r.xnack(stream, group, "FAIL", m1, force=True)
+        assert result == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_invalid_mode(self, r):
+        stream = "stream"
+        group = "group"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        with pytest.raises(redis.DataError):
+            r.xnack(stream, group, "INVALID", m1)
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_no_ids(self, r):
+        stream = "stream"
+        group = "group"
+        r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        with pytest.raises(redis.DataError):
+            r.xnack(stream, group, "FAIL")
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_negative_retrycount(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        with pytest.raises(redis.DataError):
+            r.xnack(stream, group, "FAIL", m1, retrycount=-1)
+
     @skip_if_server_version_lt("5.0.0")
     def test_xpending(self, r):
         stream = "stream"
