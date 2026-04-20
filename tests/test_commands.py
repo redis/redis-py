@@ -7210,7 +7210,7 @@ class TestGCRACommands:
         r.delete(key)
 
         # First request should not be limited
-        result = r.gcra(key, max_burst=10, requests_per_period=5, period=10.0)
+        result = r.gcra(key, max_burst=10, tokens_per_period=5, period=10.0)
 
         assert isinstance(result, GCRAResponse)
 
@@ -7226,15 +7226,13 @@ class TestGCRACommands:
         assert result.full_burst_after >= 0
 
     @skip_if_server_version_lt("8.7.0")
-    def test_gcra_with_num_requests(self, r):
-        """Test GCRA command with NUM_REQUESTS option"""
-        key = "gcra_test_num_requests"
+    def test_gcra_with_tokens(self, r):
+        """Test GCRA command with TOKENS option"""
+        key = "gcra_test_tokens"
         r.delete(key)
 
         # Request with a cost of 3
-        result = r.gcra(
-            key, max_burst=10, requests_per_period=5, period=10.0, num_requests=3
-        )
+        result = r.gcra(key, max_burst=10, tokens_per_period=5, period=10.0, tokens=3)
 
         assert isinstance(result, GCRAResponse)
         assert result.limited is False  # Should not be limited initially
@@ -7262,7 +7260,7 @@ class TestGCRACommands:
             result = r.gcra(
                 rate_limit_key,
                 max_burst=1,
-                requests_per_period=2,
+                tokens_per_period=2,
                 period=60.0,
             )
             assert isinstance(result, GCRAResponse)
@@ -7286,22 +7284,22 @@ class TestGCRACommands:
     def test_gcra_invalid_max_burst(self, r):
         """Test GCRA command with invalid max_burst parameter"""
         with pytest.raises(exceptions.DataError):
-            r.gcra("test_key", max_burst=-1, requests_per_period=5, period=10.0)
+            r.gcra("test_key", max_burst=-1, tokens_per_period=5, period=10.0)
 
-    def test_gcra_invalid_requests_per_period(self, r):
-        """Test GCRA command with invalid requests_per_period parameter"""
+    def test_gcra_invalid_tokens_per_period(self, r):
+        """Test GCRA command with invalid tokens_per_period parameter"""
         with pytest.raises(exceptions.DataError):
-            r.gcra("test_key", max_burst=10, requests_per_period=0, period=10.0)
+            r.gcra("test_key", max_burst=10, tokens_per_period=0, period=10.0)
 
     def test_gcra_invalid_period_too_small(self, r):
         """Test GCRA command with period less than 1.0"""
         with pytest.raises(exceptions.DataError):
-            r.gcra("test_key", max_burst=10, requests_per_period=5, period=0.5)
+            r.gcra("test_key", max_burst=10, tokens_per_period=5, period=0.5)
 
     def test_gcra_invalid_period_too_large(self, r):
         """Test GCRA command with period greater than 1e12"""
         with pytest.raises(exceptions.DataError):
-            r.gcra("test_key", max_burst=10, requests_per_period=5, period=1e13)
+            r.gcra("test_key", max_burst=10, tokens_per_period=5, period=1e13)
 
 
 @pytest.mark.onlynoncluster

@@ -2433,9 +2433,9 @@ class ManagementCommands(CommandsProtocol):
         self: SyncClientProtocol,
         key: KeyT,
         max_burst: int,
-        requests_per_period: int,
+        tokens_per_period: int,
         period: float,
-        num_requests: int | None = None,
+        tokens: int | None = None,
     ) -> GCRAResponse: ...
 
     @overload
@@ -2443,18 +2443,18 @@ class ManagementCommands(CommandsProtocol):
         self: AsyncClientProtocol,
         key: KeyT,
         max_burst: int,
-        requests_per_period: int,
+        tokens_per_period: int,
         period: float,
-        num_requests: int | None = None,
+        tokens: int | None = None,
     ) -> Awaitable[GCRAResponse]: ...
 
     def gcra(
         self,
         key: KeyT,
         max_burst: int,
-        requests_per_period: int,
+        tokens_per_period: int,
         period: float,
-        num_requests: int | None = None,
+        tokens: int | None = None,
     ) -> GCRAResponse | Awaitable[GCRAResponse]:
         """
         Rate limit via GCRA (Generic Cell Rate Algorithm).
@@ -2465,13 +2465,13 @@ class ManagementCommands(CommandsProtocol):
         ``max_burst`` is the maximum number of tokens allowed as a burst
             (in addition to the sustained rate). Minimum: 0.
 
-        ``requests_per_period`` is the number of requests allowed per period.
+        ``tokens_per_period`` is the number of tokens allowed per period.
             Minimum: 1.
 
         ``period`` is the period in seconds as a floating point number used for
             calculating the sustained rate. Minimum: 1.0, Maximum: 1e12.
 
-        ``num_requests`` is the cost (or weight) of this rate-limiting request.
+        ``tokens`` is the cost (or weight) of this rate-limiting request.
             A higher cost drains the allowance faster. Default: 1.
 
         Returns a GCRAResponse dataclass with:
@@ -2486,14 +2486,14 @@ class ManagementCommands(CommandsProtocol):
         """
         if max_burst < 0:
             raise DataError("GCRA max_burst must be >= 0")
-        if requests_per_period < 1:
-            raise DataError("GCRA requests_per_period must be >= 1")
+        if tokens_per_period < 1:
+            raise DataError("GCRA tokens_per_period must be >= 1")
         if period < 1.0 or period > 1e12:
             raise DataError("GCRA period must be between 1.0 and 1e12")
 
-        pieces: list[EncodableT] = [key, max_burst, requests_per_period, period]
-        if num_requests is not None:
-            pieces.extend(["NUM_REQUESTS", num_requests])
+        pieces: list[EncodableT] = [key, max_burst, tokens_per_period, period]
+        if tokens is not None:
+            pieces.extend(["TOKENS", tokens])
 
         return self.execute_command("GCRA", *pieces)
 
