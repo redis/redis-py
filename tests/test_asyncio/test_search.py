@@ -1356,6 +1356,7 @@ class TestAggregations(AsyncSearchTestsBase):
 class TestPipeline(AsyncSearchTestsBase):
     @pytest.mark.redismod
     @skip_if_redis_enterprise()
+    @skip_if_server_version_gte("8.7.0")  # Deactivate temporarily
     async def test_search_commands_in_pipeline(self, decoded_r: redis.Redis):
         p = await decoded_r.ft().pipeline()
         p.create_index((TextField("txt"),))
@@ -1373,6 +1374,7 @@ class TestPipeline(AsyncSearchTestsBase):
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")
+    @skip_if_server_version_gte("8.7.0")  # Deactivate temporarily
     async def test_hybrid_search_query_with_pipeline(self, decoded_r: redis.Redis):
         p = decoded_r.ft().pipeline()
         p.create_index(

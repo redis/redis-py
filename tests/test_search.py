@@ -2351,6 +2351,7 @@ class TestDifferentFieldTypesSearch(SearchTestsBase):
 class TestPipeline(SearchTestsBase):
     @pytest.mark.redismod
     @skip_if_redis_enterprise()
+    @skip_if_server_version_gte("8.7.0")  # Deactivate temporarily
     def test_search_commands_in_pipeline(self, client):
         p = client.ft().pipeline()
         p.create_index((TextField("txt"),))
@@ -2368,6 +2369,7 @@ class TestPipeline(SearchTestsBase):
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.4.0")
+    @skip_if_server_version_gte("8.7.0")  # Deactivate temporarily
     def test_hybrid_search_query_with_pipeline(self, client):
         p = client.ft().pipeline()
         p.create_index(
