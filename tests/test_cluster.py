@@ -3357,6 +3357,48 @@ class TestClusterPubSubObject:
         p = r.pubsub(node=node)
         assert p.get_redis_connection() == node.redis_connection
 
+    def test_disconnect_with_none_connections(self, r):
+        """
+        Test that disconnect() does not raise when pubsub.connection is None,
+        both on the ClusterPubSub itself and on node pubsub instances in
+        node_pubsub_mapping.
+        """
+        node = r.get_default_node()
+        p = r.pubsub(node=node)
+        # Ensure self.connection is None
+        p.connection = None
+
+        # Add a mock pubsub with connection=None into node_pubsub_mapping
+        mock_pubsub = Mock()
+        mock_pubsub.connection = None
+        p.node_pubsub_mapping["fake_node"] = mock_pubsub
+
+        # Should not raise AttributeError
+        p.disconnect()
+
+    def test_disconnect_calls_disconnect_on_existing_connections(self, r):
+        """
+        Test that disconnect() properly disconnects non-None connections
+        on both self and node_pubsub_mapping entries.
+        """
+        node = r.get_default_node()
+        p = r.pubsub(node=node)
+
+        # Mock self.connection
+        mock_conn = Mock()
+        p.connection = mock_conn
+
+        # Add a mock pubsub with a real connection into node_pubsub_mapping
+        mock_node_conn = Mock()
+        mock_node_pubsub = Mock()
+        mock_node_pubsub.connection = mock_node_conn
+        p.node_pubsub_mapping["fake_node"] = mock_node_pubsub
+
+        p.disconnect()
+
+        mock_conn.disconnect.assert_called_once()
+        mock_node_conn.disconnect.assert_called_once()
+
 
 @pytest.mark.onlycluster
 class TestClusterPipeline:
