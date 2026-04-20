@@ -16,9 +16,9 @@ helpful contributions that mean less work for you.
 
 ## AI-driven contributions
 
-Redis-py defines a list of custom Claude commands (skills) that may simplify your contribution by enriching agent's 
-context with necessary information and repository best practices. Commands are well-structured instructions for common 
-recurring tasks (f.e adding support for new Redis command API).
+Redis-py defines a list of custom Claude commands (skills) that may simplify your contribution by enriching the agent's
+context with necessary information and repository best practices. Commands are well-structured instructions for common
+recurring tasks (e.g., adding support for a new Redis command API).
 
 The list of available commands is available via:
 

@@ -2,11 +2,11 @@
 
 ## Commands API specification
 
-The Redis API is specified in the [Redis documentation](https://redis.io/commands). This is a source of the truth
-for all command related information. However, Redis is a living project and new commands are added all the time.
+The Redis API is specified in the [Redis documentation](https://redis.io/commands). This is the source of truth
+for all command-related information. However, Redis is a living project and new commands are added all the time.
 
-New command might be not yet available in the documentation. In this case the developer needs to create a new
-command specification from `.claude/command-specification-template.md` template.
+A new command may not yet be available in the documentation. In this case, the developer needs to create a new
+command specification from the `.claude/command-specification-template.md` template.
 
 ## Files structure
 
@@ -23,7 +23,6 @@ redis/
 │   ├── helpers.py       # Helpers for commands modules
 │   ├── redismodules.py  # Trait for all Redis modules
 │   └── sentinel.py      # Sentinel commands public API
-└── 
 ```
 
 ## Commands Public API
@@ -87,7 +86,7 @@ as possible.
 ### Testing
 
 Command tests are located in `tests/test_*command_type*.py` and `tests/test_asyncio/test_*command_type*.py` for async
-commands. So it's important to indentify command type upfront to resolve correct test file.
+commands. So it's important to identify command type upfront to resolve correct test file.
 
 We usually provide only integration testing for commands with defined version constraint (if required). It's controlled
 by custom annotations `@skip_if_server_version_lt()` and `@skip_if_server_version_gte()` defined in `tests/conftest.py`.
