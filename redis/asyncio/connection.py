@@ -7,7 +7,7 @@ import sys
 import time
 import warnings
 import weakref
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from itertools import chain
 from types import MappingProxyType
 from typing import (
@@ -1241,7 +1241,59 @@ def parse_url(url: str) -> ConnectKwargs:
 _CP = TypeVar("_CP", bound="ConnectionPool")
 
 
-class ConnectionPool:
+class ConnectionPoolInterface(ABC):
+    @abstractmethod
+    def get_protocol(self):
+        pass
+
+    @abstractmethod
+    def reset(self) -> None:
+        pass
+
+    @abstractmethod
+    @deprecated_args(
+        args_to_warn=["*"],
+        reason="Use get_connection() without args instead",
+        version="5.3.0",
+    )
+    async def get_connection(
+        self, command_name: Optional[str] = None, *keys: Any, **options: Any
+    ) -> "AbstractConnection":
+        pass
+
+    @abstractmethod
+    def get_encoder(self) -> "Encoder":
+        pass
+
+    @abstractmethod
+    async def release(self, connection: "AbstractConnection") -> None:
+        pass
+
+    @abstractmethod
+    async def disconnect(self, inuse_connections: bool = True) -> None:
+        pass
+
+    @abstractmethod
+    async def aclose(self) -> None:
+        pass
+
+    @abstractmethod
+    def set_retry(self, retry: "Retry") -> None:
+        pass
+
+    @abstractmethod
+    async def re_auth_callback(self, token: TokenInterface) -> None:
+        pass
+
+    @abstractmethod
+    def get_connection_count(self) -> List[Tuple[int, dict]]:
+        """
+        Returns a connection count (both idle and in use).
+        """
+        pass
+
+
+class ConnectionPool(ConnectionPoolInterface):
     """
     Create a connection pool. ``If max_connections`` is set, then this
     object raises :py:class:`~redis.ConnectionError` when the pool's
@@ -1347,6 +1399,14 @@ class ConnectionPool:
             f"(<{self.connection_class.__module__}.{self.connection_class.__name__}"
             f"({conn_kwargs})>)>"
         )
+
+    def get_protocol(self):
+        """
+        Returns:
+            The RESP protocol version, or ``None`` if the protocol is not specified,
+            in which case the server default will be used.
+        """
+        return self.connection_kwargs.get("protocol", None)
 
     def reset(self):
         # Record metrics for connections being removed before clearing

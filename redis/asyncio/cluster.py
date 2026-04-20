@@ -43,6 +43,7 @@ from redis.asyncio.client import PubSub, ResponseCallbackT
 from redis.asyncio.connection import (
     AbstractConnection,
     Connection,
+    ConnectionPoolInterface,
     SSLConnection,
     parse_url,
 )
@@ -3051,8 +3052,8 @@ class TransactionStrategy(AbstractStrategy):
         return self.execute_command("UNLINK", *names)
 
 
-class _ClusterNodePoolAdapter:
-    """Thin adapter exposing the :class:`ConnectionPool` interface that
+class _ClusterNodePoolAdapter(ConnectionPoolInterface):
+    """Thin adapter exposing the :class:`ConnectionPoolInterface` that
     :class:`PubSub` requires, backed by a :class:`ClusterNode`'s own
     connection pool.
 
@@ -3063,6 +3064,11 @@ class _ClusterNodePoolAdapter:
     connection is returned to the node's free-queue in a disconnected
     state — guaranteeing that a subscribed socket is never silently
     reused for regular commands.
+
+    Methods that do not apply to this adapter (the underlying node's
+    lifecycle is managed by the cluster, not by individual PubSub
+    instances) are implemented as no-ops so the adapter remains a valid
+    :class:`ConnectionPoolInterface`.
     """
 
     def __init__(self, node: "ClusterNode") -> None:
@@ -3076,16 +3082,43 @@ class _ClusterNodePoolAdapter:
 
     async def get_connection(
         self, command_name: Optional[str] = None, *keys: Any, **options: Any
-    ) -> Any:
+    ) -> AbstractConnection:
         connection = self._node.acquire_connection()
         await connection.connect()
         return connection
 
-    async def release(self, connection: Any) -> None:
+    async def release(self, connection: AbstractConnection) -> None:
         # PubSub.aclose() disconnects the connection before calling
         # release(), so it is safe to put it back in the node's free
         # queue – it will reconnect lazily on next use.
         self._node.release(connection)
+
+    # -- no-op stubs for the rest of ConnectionPoolInterface -------------------
+    # The node's connections are shared with regular cluster traffic and its
+    # lifecycle is managed by RedisCluster / NodesManager, so the adapter must
+    # not reset, disconnect, retry-configure or re-auth them on behalf of a
+    # single PubSub instance.
+
+    def get_protocol(self):
+        return self.connection_kwargs.get("protocol", None)
+
+    def reset(self) -> None:
+        pass
+
+    async def disconnect(self, inuse_connections: bool = True) -> None:
+        pass
+
+    async def aclose(self) -> None:
+        pass
+
+    def set_retry(self, retry: "Retry") -> None:
+        pass
+
+    async def re_auth_callback(self, token: TokenInterface) -> None:
+        pass
+
+    def get_connection_count(self) -> List[Tuple[int, dict]]:
+        return []
 
 
 class ClusterPubSub(PubSub):
