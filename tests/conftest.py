@@ -32,7 +32,7 @@ from tests.ssl_utils import get_tls_certificates
 
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/0"
-default_protocol = "2"
+default_protocol = "3"
 default_redismod_url = "redis://localhost:6479"
 
 # default ssl client ignores verification for the purpose of testing
@@ -783,19 +783,3 @@ def get_protocol_version(r):
         return r.connection_pool.connection_kwargs.get("protocol")
     elif isinstance(r, redis.cluster.AbstractRedisCluster):
         return r.nodes_manager.connection_kwargs.get("protocol")
-
-
-def assert_resp_response(r, response, resp2_expected, resp3_expected):
-    protocol = get_protocol_version(r)
-    if protocol in [2, "2", None]:
-        assert response == resp2_expected
-    else:
-        assert response == resp3_expected
-
-
-def assert_resp_response_in(r, response, resp2_expected, resp3_expected):
-    protocol = get_protocol_version(r)
-    if protocol in [2, "2", None]:
-        assert response in resp2_expected
-    else:
-        assert response in resp3_expected

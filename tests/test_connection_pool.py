@@ -15,6 +15,7 @@ from redis.event import (
     EventDispatcher,
     EventListenerInterface,
 )
+from redis.maint_notifications import MaintNotificationsConfig
 from redis.utils import SSL_AVAILABLE
 
 from .conftest import (
@@ -27,6 +28,35 @@ from .test_pubsub import wait_for_message
 
 if SSL_AVAILABLE:
     import ssl
+
+
+# Default maint notification keys injected into connection_kwargs when protocol
+# defaults to RESP3.  Tests must expect these keys to be present.
+MAINT_NOTIFICATION_KEYS = {
+    "maint_notifications_config",
+    "maint_notifications_pool_handler",
+    "orig_host_address",
+    "orig_socket_connect_timeout",
+    "orig_socket_timeout",
+}
+
+
+def assert_kwargs_match(actual, expected):
+    """Assert *expected* items are a subset of *actual* and that the default
+    maintenance-notification keys are present (RESP3 default)."""
+    assert expected.items() <= actual.items(), (
+        f"Expected keys missing or mismatched.\n"
+        f"  Expected: {expected}\n"
+        f"  Actual:   {actual}"
+    )
+    assert MAINT_NOTIFICATION_KEYS <= set(actual.keys()), (
+        f"Default maint notification keys missing.\n"
+        f"  Missing: {MAINT_NOTIFICATION_KEYS - set(actual.keys())}"
+    )
+    # Verify the auto-created config is the right type
+    assert isinstance(
+        actual.get("maint_notifications_config"), MaintNotificationsConfig
+    )
 
 
 class DummyConnection:
@@ -68,6 +98,7 @@ class TestConnectionPool:
         )
         return pool
 
+    @pytest.mark.fixed_client
     def test_connection_creation(self):
         connection_kwargs = {
             "foo": "bar",
@@ -79,8 +110,9 @@ class TestConnectionPool:
 
         connection = pool.get_connection()
         assert isinstance(connection, DummyConnection)
-        assert connection.kwargs == connection_kwargs
+        assert_kwargs_match(connection.kwargs, connection_kwargs)
 
+    @pytest.mark.fixed_client
     def test_closing(self):
         connection_kwargs = {"foo": "bar", "biz": "baz"}
         pool = redis.ConnectionPool(
@@ -131,6 +163,7 @@ class TestConnectionPool:
         pool2.release(c1)
         assert len(pool2._available_connections) == 1
 
+    @pytest.mark.fixed_client
     def test_repr_contains_db_info_tcp(self):
         connection_kwargs = {
             "host": "localhost",
@@ -144,6 +177,7 @@ class TestConnectionPool:
         expected = "host=localhost,port=6379,db=1,client_name=test-client"
         assert expected in repr(pool)
 
+    @pytest.mark.fixed_client
     def test_repr_contains_db_info_unix(self):
         connection_kwargs = {"path": "/abc", "db": 1, "client_name": "test-client"}
         pool = self.get_pool(
@@ -191,7 +225,7 @@ class TestBlockingConnectionPool:
         pool = self.get_pool(connection_kwargs=connection_kwargs)
         connection = pool.get_connection()
         assert isinstance(connection, DummyConnection)
-        assert connection.kwargs == connection_kwargs
+        assert_kwargs_match(connection.kwargs, connection_kwargs)
 
     def test_multiple_connections(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}
@@ -242,6 +276,7 @@ class TestBlockingConnectionPool:
         c2 = pool.get_connection()
         assert c1 == c2
 
+    @pytest.mark.fixed_client
     def test_repr_contains_db_info_tcp(self):
         pool = redis.ConnectionPool(
             host="localhost", port=6379, client_name="test-client"
@@ -249,6 +284,7 @@ class TestBlockingConnectionPool:
         expected = "host=localhost,port=6379,client_name=test-client"
         assert expected in repr(pool)
 
+    @pytest.mark.fixed_client
     def test_repr_contains_db_info_unix(self):
         pool = redis.ConnectionPool(
             connection_class=redis.UnixDomainSocketConnection,
@@ -259,6 +295,7 @@ class TestBlockingConnectionPool:
         expected = "path=abc,db=0,client_name=test-client"
         assert expected in repr(pool)
 
+    @pytest.mark.fixed_client
     def test_repr_redacts_sensitive_information(self):
         """Test that __repr__ redacts sensitive values like password and username."""
         pool = redis.ConnectionPool(
@@ -315,27 +352,30 @@ class TestBlockingConnectionPool:
         assert conn._sock
 
 
+@pytest.mark.fixed_client
 class TestConnectionPoolURLParsing:
     def test_hostname(self):
         pool = redis.ConnectionPool.from_url("redis://my.host")
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {"host": "my.host"}
+        assert_kwargs_match(pool.connection_kwargs, {"host": "my.host"})
 
     def test_quoted_hostname(self):
         pool = redis.ConnectionPool.from_url("redis://my %2F host %2B%3D+")
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {"host": "my / host +=+"}
+        assert_kwargs_match(pool.connection_kwargs, {"host": "my / host +=+"})
 
     def test_port(self):
         pool = redis.ConnectionPool.from_url("redis://localhost:6380")
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {"host": "localhost", "port": 6380}
+        assert_kwargs_match(pool.connection_kwargs, {"host": "localhost", "port": 6380})
 
     @skip_if_server_version_lt("6.0.0")
     def test_username(self):
         pool = redis.ConnectionPool.from_url("redis://myuser:@localhost")
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {"host": "localhost", "username": "myuser"}
+        assert_kwargs_match(
+            pool.connection_kwargs, {"host": "localhost", "username": "myuser"}
+        )
 
     @skip_if_server_version_lt("6.0.0")
     def test_quoted_username(self):
@@ -343,50 +383,61 @@ class TestConnectionPoolURLParsing:
             "redis://%2Fmyuser%2F%2B name%3D%24+:@localhost"
         )
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {
-            "host": "localhost",
-            "username": "/myuser/+ name=$+",
-        }
+        assert_kwargs_match(
+            pool.connection_kwargs,
+            {
+                "host": "localhost",
+                "username": "/myuser/+ name=$+",
+            },
+        )
 
     def test_password(self):
         pool = redis.ConnectionPool.from_url("redis://:mypassword@localhost")
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {"host": "localhost", "password": "mypassword"}
+        assert_kwargs_match(
+            pool.connection_kwargs, {"host": "localhost", "password": "mypassword"}
+        )
 
     def test_quoted_password(self):
         pool = redis.ConnectionPool.from_url(
             "redis://:%2Fmypass%2F%2B word%3D%24+@localhost"
         )
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {
-            "host": "localhost",
-            "password": "/mypass/+ word=$+",
-        }
+        assert_kwargs_match(
+            pool.connection_kwargs,
+            {
+                "host": "localhost",
+                "password": "/mypass/+ word=$+",
+            },
+        )
 
     @skip_if_server_version_lt("6.0.0")
     def test_username_and_password(self):
         pool = redis.ConnectionPool.from_url("redis://myuser:mypass@localhost")
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {
-            "host": "localhost",
-            "username": "myuser",
-            "password": "mypass",
-        }
+        assert_kwargs_match(
+            pool.connection_kwargs,
+            {
+                "host": "localhost",
+                "username": "myuser",
+                "password": "mypass",
+            },
+        )
 
     def test_db_as_argument(self):
         pool = redis.ConnectionPool.from_url("redis://localhost", db=1)
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {"host": "localhost", "db": 1}
+        assert_kwargs_match(pool.connection_kwargs, {"host": "localhost", "db": 1})
 
     def test_db_in_path(self):
         pool = redis.ConnectionPool.from_url("redis://localhost/2", db=1)
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {"host": "localhost", "db": 2}
+        assert_kwargs_match(pool.connection_kwargs, {"host": "localhost", "db": 2})
 
     def test_db_in_querystring(self):
         pool = redis.ConnectionPool.from_url("redis://localhost/2?db=3", db=1)
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {"host": "localhost", "db": 3}
+        assert_kwargs_match(pool.connection_kwargs, {"host": "localhost", "db": 3})
 
     def test_extra_typed_querystring_options(self):
         pool = redis.ConnectionPool.from_url(
@@ -395,13 +446,16 @@ class TestConnectionPoolURLParsing:
         )
 
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {
-            "host": "localhost",
-            "db": 2,
-            "socket_timeout": 20.0,
-            "socket_connect_timeout": 10.0,
-            "retry_on_timeout": True,
-        }
+        assert_kwargs_match(
+            pool.connection_kwargs,
+            {
+                "host": "localhost",
+                "db": 2,
+                "socket_timeout": 20.0,
+                "socket_connect_timeout": 10.0,
+                "retry_on_timeout": True,
+            },
+        )
         assert pool.max_connections == 10
 
     def test_boolean_parsing(self):
@@ -437,7 +491,9 @@ class TestConnectionPoolURLParsing:
     def test_extra_querystring_options(self):
         pool = redis.ConnectionPool.from_url("redis://localhost?a=1&b=2")
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {"host": "localhost", "a": "1", "b": "2"}
+        assert_kwargs_match(
+            pool.connection_kwargs, {"host": "localhost", "a": "1", "b": "2"}
+        )
 
     def test_calling_from_subclass_returns_correct_instance(self):
         pool = redis.BlockingConnectionPool.from_url("redis://localhost")
@@ -446,7 +502,7 @@ class TestConnectionPoolURLParsing:
     def test_client_creates_connection_pool(self):
         r = redis.Redis.from_url("redis://myhost")
         assert r.connection_pool.connection_class == redis.Connection
-        assert r.connection_pool.connection_kwargs == {"host": "myhost"}
+        assert_kwargs_match(r.connection_pool.connection_kwargs, {"host": "myhost"})
 
     def test_invalid_scheme_raises_error(self):
         with pytest.raises(ValueError) as cm:
@@ -465,6 +521,7 @@ class TestConnectionPoolURLParsing:
         )
 
 
+@pytest.mark.fixed_client
 class TestBlockingConnectionPoolURLParsing:
     def test_extra_typed_querystring_options(self):
         pool = redis.BlockingConnectionPool.from_url(
@@ -473,13 +530,16 @@ class TestBlockingConnectionPoolURLParsing:
         )
 
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {
-            "host": "localhost",
-            "db": 2,
-            "socket_timeout": 20.0,
-            "socket_connect_timeout": 10.0,
-            "retry_on_timeout": True,
-        }
+        assert_kwargs_match(
+            pool.connection_kwargs,
+            {
+                "host": "localhost",
+                "db": 2,
+                "socket_timeout": 20.0,
+                "socket_connect_timeout": 10.0,
+                "retry_on_timeout": True,
+            },
+        )
         assert pool.max_connections == 10
         assert pool.timeout == 42.0
 
@@ -490,17 +550,20 @@ class TestBlockingConnectionPoolURLParsing:
             )
 
 
+@pytest.mark.fixed_client
 class TestConnectionPoolUnixSocketURLParsing:
     def test_defaults(self):
         pool = redis.ConnectionPool.from_url("unix:///socket")
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket"}
+        assert_kwargs_match(pool.connection_kwargs, {"path": "/socket"})
 
     @skip_if_server_version_lt("6.0.0")
     def test_username(self):
         pool = redis.ConnectionPool.from_url("unix://myuser:@/socket")
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "username": "myuser"}
+        assert_kwargs_match(
+            pool.connection_kwargs, {"path": "/socket", "username": "myuser"}
+        )
 
     @skip_if_server_version_lt("6.0.0")
     def test_quoted_username(self):
@@ -508,45 +571,56 @@ class TestConnectionPoolUnixSocketURLParsing:
             "unix://%2Fmyuser%2F%2B name%3D%24+:@/socket"
         )
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {
-            "path": "/socket",
-            "username": "/myuser/+ name=$+",
-        }
+        assert_kwargs_match(
+            pool.connection_kwargs,
+            {
+                "path": "/socket",
+                "username": "/myuser/+ name=$+",
+            },
+        )
 
     def test_password(self):
         pool = redis.ConnectionPool.from_url("unix://:mypassword@/socket")
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "password": "mypassword"}
+        assert_kwargs_match(
+            pool.connection_kwargs, {"path": "/socket", "password": "mypassword"}
+        )
 
     def test_quoted_password(self):
         pool = redis.ConnectionPool.from_url(
             "unix://:%2Fmypass%2F%2B word%3D%24+@/socket"
         )
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {
-            "path": "/socket",
-            "password": "/mypass/+ word=$+",
-        }
+        assert_kwargs_match(
+            pool.connection_kwargs,
+            {
+                "path": "/socket",
+                "password": "/mypass/+ word=$+",
+            },
+        )
 
     def test_quoted_path(self):
         pool = redis.ConnectionPool.from_url(
             "unix://:mypassword@/my%2Fpath%2Fto%2F..%2F+_%2B%3D%24ocket"
         )
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {
-            "path": "/my/path/to/../+_+=$ocket",
-            "password": "mypassword",
-        }
+        assert_kwargs_match(
+            pool.connection_kwargs,
+            {
+                "path": "/my/path/to/../+_+=$ocket",
+                "password": "mypassword",
+            },
+        )
 
     def test_db_as_argument(self):
         pool = redis.ConnectionPool.from_url("unix:///socket", db=1)
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "db": 1}
+        assert_kwargs_match(pool.connection_kwargs, {"path": "/socket", "db": 1})
 
     def test_db_in_querystring(self):
         pool = redis.ConnectionPool.from_url("unix:///socket?db=2", db=1)
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "db": 2}
+        assert_kwargs_match(pool.connection_kwargs, {"path": "/socket", "db": 2})
 
     def test_client_name_in_querystring(self):
         pool = redis.ConnectionPool.from_url("redis://location?client_name=test-client")
@@ -555,7 +629,9 @@ class TestConnectionPoolUnixSocketURLParsing:
     def test_extra_querystring_options(self):
         pool = redis.ConnectionPool.from_url("unix:///socket?a=1&b=2")
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "a": "1", "b": "2"}
+        assert_kwargs_match(
+            pool.connection_kwargs, {"path": "/socket", "a": "1", "b": "2"}
+        )
 
     def test_connection_class_override(self):
         class MyConnection(redis.UnixDomainSocketConnection):
@@ -567,12 +643,13 @@ class TestConnectionPoolUnixSocketURLParsing:
         assert pool.connection_class == MyConnection
 
 
+@pytest.mark.fixed_client
 @pytest.mark.skipif(not SSL_AVAILABLE, reason="SSL not installed")
 class TestSSLConnectionURLParsing:
     def test_host(self):
         pool = redis.ConnectionPool.from_url("rediss://my.host")
         assert pool.connection_class == redis.SSLConnection
-        assert pool.connection_kwargs == {"host": "my.host"}
+        assert_kwargs_match(pool.connection_kwargs, {"host": "my.host"})
 
     def test_connection_class_override(self):
         class MyConnection(redis.SSLConnection):
@@ -664,6 +741,7 @@ class TestSSLConnectionURLParsing:
 
 
 class TestConnection:
+    @pytest.mark.fixed_client
     def test_on_connect_error(self):
         """
         An error in Connection.on_connect should disconnect from the server
@@ -738,29 +816,38 @@ class TestConnection:
             # as the db being full
             r.execute_command("DEBUG", "ERROR", "OOM blah blah")
 
+    @pytest.mark.fixed_client
     def test_connect_from_url_tcp(self):
         connection = redis.Redis.from_url("redis://localhost:6379?db=0")
         pool = connection.connection_pool
 
-        assert re.match(
-            r"< .*?([^\.]+) \( < .*?([^\.]+) \( (.+) \) > \) >", repr(pool), re.VERBOSE
-        ).groups() == (
-            "ConnectionPool",
-            "Connection",
-            "db=0,host=localhost,port=6379",
+        match = re.match(
+            r"< .*?([^\.]+) \( < .*?([^\.]+) \( (.+) \) > \) >",
+            repr(pool),
+            re.VERBOSE,
         )
+        groups = match.groups()
+        assert groups[0] == "ConnectionPool"
+        assert groups[1] == "Connection"
+        # The kwargs string now includes maint notification keys by default;
+        # verify the essential connection parameters are present.
+        for expected in ("db=0", "host=localhost", "port=6379"):
+            assert expected in groups[2]
 
+    @pytest.mark.fixed_client
     def test_connect_from_url_unix(self):
         connection = redis.Redis.from_url("unix:///path/to/socket")
         pool = connection.connection_pool
 
-        assert re.match(
-            r"< .*?([^\.]+) \( < .*?([^\.]+) \( (.+) \) > \) >", repr(pool), re.VERBOSE
-        ).groups() == (
-            "ConnectionPool",
-            "UnixDomainSocketConnection",
-            "path=/path/to/socket",
+        match = re.match(
+            r"< .*?([^\.]+) \( < .*?([^\.]+) \( (.+) \) > \) >",
+            repr(pool),
+            re.VERBOSE,
         )
+        groups = match.groups()
+        assert groups[0] == "ConnectionPool"
+        assert groups[1] == "UnixDomainSocketConnection"
+        assert "path=/path/to/socket" in groups[2]
 
     @skip_if_redis_enterprise()
     def test_connect_no_auth_configured(self, r):
@@ -991,6 +1078,7 @@ class TestHealthCheck:
             self.assert_interval_advanced(p.connection)
 
 
+@pytest.mark.fixed_client
 class TestConnectionPoolReleasedEventEmission:
     """Tests for AfterConnectionReleasedEvent emission from ConnectionPool."""
 

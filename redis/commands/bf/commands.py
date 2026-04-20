@@ -1,4 +1,4 @@
-from typing import Any, Awaitable, overload
+from typing import Awaitable, overload
 
 from redis.client import NEVER_DECODE
 from redis.typing import (
@@ -253,14 +253,12 @@ class BFCommands:
         return self.execute_command(BF_LOADCHUNK, key, iter, data)
 
     @overload
-    def info(self: SyncClientProtocol, key) -> BFInfo | dict[str, Any]: ...
+    def info(self: SyncClientProtocol, key) -> BFInfo: ...
 
     @overload
-    def info(self: AsyncClientProtocol, key) -> Awaitable[BFInfo | dict[str, Any]]: ...
+    def info(self: AsyncClientProtocol, key) -> Awaitable[BFInfo]: ...
 
-    def info(self, key) -> (BFInfo | dict[str, Any]) | Awaitable[
-        BFInfo | dict[str, Any]
-    ]:
+    def info(self, key) -> BFInfo | Awaitable[BFInfo]:
         """
         Return capacity, size, number of filters, number of items inserted, and expansion rate.
         For more information see `BF.INFO <https://redis.io/commands/bf.info>`_.
@@ -491,14 +489,12 @@ class CFCommands:
         return self.execute_command(CF_LOADCHUNK, key, iter, data)
 
     @overload
-    def info(self: SyncClientProtocol, key) -> CFInfo | dict[str, Any]: ...
+    def info(self: SyncClientProtocol, key) -> CFInfo: ...
 
     @overload
-    def info(self: AsyncClientProtocol, key) -> Awaitable[CFInfo | dict[str, Any]]: ...
+    def info(self: AsyncClientProtocol, key) -> Awaitable[CFInfo]: ...
 
-    def info(self, key) -> (CFInfo | dict[str, Any]) | Awaitable[
-        CFInfo | dict[str, Any]
-    ]:
+    def info(self, key) -> CFInfo | Awaitable[CFInfo]:
         """
         Return size, number of buckets, number of filter, number of items inserted,
         number of items deleted, bucket size, expansion rate, and max iteration.
@@ -527,14 +523,16 @@ class TOPKCommands:
         return self.execute_command(TOPK_RESERVE, key, k, width, depth, decay)
 
     @overload
-    def add(self: SyncClientProtocol, key, *items) -> ModuleListResponse: ...
+    def add(self: SyncClientProtocol, key, *items) -> list[bytes | str | None]: ...
 
     @overload
     def add(
         self: AsyncClientProtocol, key, *items
-    ) -> Awaitable[ModuleListResponse]: ...
+    ) -> Awaitable[list[bytes | str | None]]: ...
 
-    def add(self, key, *items) -> ModuleListResponse | Awaitable[ModuleListResponse]:
+    def add(
+        self, key, *items
+    ) -> list[bytes | str | None] | Awaitable[list[bytes | str | None]]:
         """
         Add one `item` or more to a Top-K Filter `key`.
         For more information see `TOPK.ADD <https://redis.io/commands/topk.add>`_.
@@ -544,16 +542,16 @@ class TOPKCommands:
     @overload
     def incrby(
         self: SyncClientProtocol, key, items, increments
-    ) -> ModuleListResponse: ...
+    ) -> list[bytes | str | None]: ...
 
     @overload
     def incrby(
         self: AsyncClientProtocol, key, items, increments
-    ) -> Awaitable[ModuleListResponse]: ...
+    ) -> Awaitable[list[bytes | str | None]]: ...
 
     def incrby(
         self, key, items, increments
-    ) -> ModuleListResponse | Awaitable[ModuleListResponse]:
+    ) -> list[bytes | str | None] | Awaitable[list[bytes | str | None]]:
         """
         Add/increase `items` to a Top-K Sketch `key` by ''increments''.
         Both `items` and `increments` are lists.
@@ -619,16 +617,12 @@ class TOPKCommands:
         return self.execute_command(TOPK_LIST, *params)
 
     @overload
-    def info(self: SyncClientProtocol, key) -> TopKInfo | dict[str, Any]: ...
+    def info(self: SyncClientProtocol, key) -> TopKInfo: ...
 
     @overload
-    def info(
-        self: AsyncClientProtocol, key
-    ) -> Awaitable[TopKInfo | dict[str, Any]]: ...
+    def info(self: AsyncClientProtocol, key) -> Awaitable[TopKInfo]: ...
 
-    def info(self, key) -> (TopKInfo | dict[str, Any]) | Awaitable[
-        TopKInfo | dict[str, Any]
-    ]:
+    def info(self, key) -> TopKInfo | Awaitable[TopKInfo]:
         """
         Return k, width, depth and decay values of `key`.
         For more information see `TOPK.INFO <https://redis.io/commands/topk.info>`_.
@@ -745,16 +739,16 @@ class TDigestCommands:
     @overload
     def quantile(
         self: SyncClientProtocol, key, quantile, *quantiles
-    ) -> ModuleListResponse: ...
+    ) -> list[float]: ...
 
     @overload
     def quantile(
         self: AsyncClientProtocol, key, quantile, *quantiles
-    ) -> Awaitable[ModuleListResponse]: ...
+    ) -> Awaitable[list[float]]: ...
 
     def quantile(
         self, key, quantile, *quantiles
-    ) -> ModuleListResponse | Awaitable[ModuleListResponse]:
+    ) -> list[float] | Awaitable[list[float]]:
         """
         Returns estimates of one or more cutoffs such that a specified fraction of the
         observations added to this t-digest would be less than or equal to each of the
@@ -764,16 +758,14 @@ class TDigestCommands:
         return self.execute_command(TDIGEST_QUANTILE, key, quantile, *quantiles)
 
     @overload
-    def cdf(self: SyncClientProtocol, key, value, *values) -> ModuleListResponse: ...
+    def cdf(self: SyncClientProtocol, key, value, *values) -> list[float]: ...
 
     @overload
     def cdf(
         self: AsyncClientProtocol, key, value, *values
-    ) -> Awaitable[ModuleListResponse]: ...
+    ) -> Awaitable[list[float]]: ...
 
-    def cdf(
-        self, key, value, *values
-    ) -> ModuleListResponse | Awaitable[ModuleListResponse]:
+    def cdf(self, key, value, *values) -> list[float] | Awaitable[list[float]]:
         """
         Return double fraction of all points added which are <= value.
         For more information see `TDIGEST.CDF <https://redis.io/commands/tdigest.cdf>`_.
@@ -781,16 +773,12 @@ class TDigestCommands:
         return self.execute_command(TDIGEST_CDF, key, value, *values)
 
     @overload
-    def info(self: SyncClientProtocol, key) -> TDigestInfo | dict[str, Any]: ...
+    def info(self: SyncClientProtocol, key) -> TDigestInfo: ...
 
     @overload
-    def info(
-        self: AsyncClientProtocol, key
-    ) -> Awaitable[TDigestInfo | dict[str, Any]]: ...
+    def info(self: AsyncClientProtocol, key) -> Awaitable[TDigestInfo]: ...
 
-    def info(self, key) -> (TDigestInfo | dict[str, Any]) | Awaitable[
-        TDigestInfo | dict[str, Any]
-    ]:
+    def info(self, key) -> TDigestInfo | Awaitable[TDigestInfo]:
         """
         Return Compression, Capacity, Merged Nodes, Unmerged Nodes, Merged Weight, Unmerged Weight
         and Total Compressions.
@@ -855,16 +843,14 @@ class TDigestCommands:
         return self.execute_command(TDIGEST_REVRANK, key, value, *values)
 
     @overload
-    def byrank(self: SyncClientProtocol, key, rank, *ranks) -> ModuleListResponse: ...
+    def byrank(self: SyncClientProtocol, key, rank, *ranks) -> list[float]: ...
 
     @overload
     def byrank(
         self: AsyncClientProtocol, key, rank, *ranks
-    ) -> Awaitable[ModuleListResponse]: ...
+    ) -> Awaitable[list[float]]: ...
 
-    def byrank(
-        self, key, rank, *ranks
-    ) -> ModuleListResponse | Awaitable[ModuleListResponse]:
+    def byrank(self, key, rank, *ranks) -> list[float] | Awaitable[list[float]]:
         """
         Retrieve an estimation of the value with the given rank.
 
@@ -873,18 +859,14 @@ class TDigestCommands:
         return self.execute_command(TDIGEST_BYRANK, key, rank, *ranks)
 
     @overload
-    def byrevrank(
-        self: SyncClientProtocol, key, rank, *ranks
-    ) -> ModuleListResponse: ...
+    def byrevrank(self: SyncClientProtocol, key, rank, *ranks) -> list[float]: ...
 
     @overload
     def byrevrank(
         self: AsyncClientProtocol, key, rank, *ranks
-    ) -> Awaitable[ModuleListResponse]: ...
+    ) -> Awaitable[list[float]]: ...
 
-    def byrevrank(
-        self, key, rank, *ranks
-    ) -> ModuleListResponse | Awaitable[ModuleListResponse]:
+    def byrevrank(self, key, rank, *ranks) -> list[float] | Awaitable[list[float]]:
         """
         Retrieve an estimation of the value with the given reverse rank.
 
@@ -983,14 +965,12 @@ class CMSCommands:
         return self.execute_command(CMS_MERGE, *params)
 
     @overload
-    def info(self: SyncClientProtocol, key) -> CMSInfo | dict[str, Any]: ...
+    def info(self: SyncClientProtocol, key) -> CMSInfo: ...
 
     @overload
-    def info(self: AsyncClientProtocol, key) -> Awaitable[CMSInfo | dict[str, Any]]: ...
+    def info(self: AsyncClientProtocol, key) -> Awaitable[CMSInfo]: ...
 
-    def info(self, key) -> (CMSInfo | dict[str, Any]) | Awaitable[
-        CMSInfo | dict[str, Any]
-    ]:
+    def info(self, key) -> CMSInfo | Awaitable[CMSInfo]:
         """
         Return width, depth and total count of the sketch.
         For more information see `CMS.INFO <https://redis.io/commands/cms.info>`_.

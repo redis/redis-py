@@ -10,7 +10,7 @@ from redis.multidb.circuit import State as CBState
 from redis.exceptions import ConnectionError
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestCommandFailureDetector:
     @pytest.mark.parametrize(
         "min_num_failures,failure_rate_threshold,circuit_state",

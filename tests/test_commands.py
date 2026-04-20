@@ -31,8 +31,6 @@ from tests.test_utils import redis_server_time
 
 from .conftest import (
     _get_client,
-    assert_resp_response,
-    assert_resp_response_in,
     is_resp2_connection,
     skip_if_redis_enterprise,
     skip_if_server_version_gte,
@@ -146,7 +144,7 @@ class TestRedisCommands:
     def test_acl_cat_no_category(self, r):
         categories = r.acl_cat()
         assert isinstance(categories, list)
-        assert "read" in categories or b"read" in categories
+        assert "read" in categories
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
@@ -164,48 +162,48 @@ class TestRedisCommands:
         categories = r.acl_cat()
         assert isinstance(categories, list)
         for module_cat in modules_list:
-            assert module_cat in categories or module_cat.encode() in categories
+            assert module_cat in categories
 
     @skip_if_server_version_lt("6.0.0")
     def test_acl_cat_with_category(self, r):
         commands = r.acl_cat("read")
         assert isinstance(commands, list)
-        assert "get" in commands or b"get" in commands
+        assert "get" in commands
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
     def test_acl_modules_cat_with_category(self, r):
         search_commands = r.acl_cat("search")
         assert isinstance(search_commands, list)
-        assert "FT.SEARCH" in search_commands or b"FT.SEARCH" in search_commands
+        assert "FT.SEARCH" in search_commands
 
         bloom_commands = r.acl_cat("bloom")
         assert isinstance(bloom_commands, list)
-        assert "bf.add" in bloom_commands or b"bf.add" in bloom_commands
+        assert "bf.add" in bloom_commands
 
         json_commands = r.acl_cat("json")
         assert isinstance(json_commands, list)
-        assert "json.get" in json_commands or b"json.get" in json_commands
+        assert "json.get" in json_commands
 
         cuckoo_commands = r.acl_cat("cuckoo")
         assert isinstance(cuckoo_commands, list)
-        assert "cf.insert" in cuckoo_commands or b"cf.insert" in cuckoo_commands
+        assert "cf.insert" in cuckoo_commands
 
         cms_commands = r.acl_cat("cms")
         assert isinstance(cms_commands, list)
-        assert "cms.query" in cms_commands or b"cms.query" in cms_commands
+        assert "cms.query" in cms_commands
 
         topk_commands = r.acl_cat("topk")
         assert isinstance(topk_commands, list)
-        assert "topk.list" in topk_commands or b"topk.list" in topk_commands
+        assert "topk.list" in topk_commands
 
         tdigest_commands = r.acl_cat("tdigest")
         assert isinstance(tdigest_commands, list)
-        assert "tdigest.rank" in tdigest_commands or b"tdigest.rank" in tdigest_commands
+        assert "tdigest.rank" in tdigest_commands
 
         timeseries_commands = r.acl_cat("timeseries")
         assert isinstance(timeseries_commands, list)
-        assert "ts.range" in timeseries_commands or b"ts.range" in timeseries_commands
+        assert "ts.range" in timeseries_commands
 
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
@@ -251,7 +249,7 @@ class TestRedisCommands:
     @skip_if_redis_enterprise()
     def test_acl_genpass(self, r):
         password = r.acl_genpass()
-        assert isinstance(password, (str, bytes))
+        assert isinstance(password, str)
 
         with pytest.raises(exceptions.DataError):
             r.acl_genpass("value")
@@ -259,7 +257,7 @@ class TestRedisCommands:
             r.acl_genpass(5555)
 
         password = r.acl_genpass(555)
-        assert isinstance(password, (str, bytes))
+        assert isinstance(password, str)
         assert len(password) == 139
 
     @skip_if_server_version_lt("7.0.0")
@@ -389,12 +387,9 @@ class TestRedisCommands:
         assert set(acl["keys"]) == {"~cache:*", "~objects:*"}
         assert len(acl["passwords"]) == 2
         assert set(acl["channels"]) == {"&message:*"}
-        assert_resp_response(
-            r,
-            acl["selectors"],
-            [["commands", "-@all +set", "keys", "%W~app*", "channels", ""]],
-            [{"commands": "-@all +set", "keys": "%W~app*", "channels": ""}],
-        )
+        assert acl["selectors"] == [
+            {"commands": "-@all +set", "keys": "%W~app*", "channels": ""}
+        ]
 
     @skip_if_server_version_lt("6.0.0")
     def test_acl_help(self, r):
@@ -458,12 +453,9 @@ class TestRedisCommands:
         assert len(r.acl_log(count=1)) == 1
         assert isinstance(r.acl_log()[0], dict)
         expected = r.acl_log(count=1)[0]
-        assert_resp_response_in(
-            r,
-            "client-info",
-            expected,
-            expected.keys(),
-        )
+        assert "client-info" in expected
+        assert isinstance(expected["client-info"], dict)
+        assert isinstance(expected["age-seconds"], float)
 
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
@@ -513,7 +505,7 @@ class TestRedisCommands:
     @skip_if_server_version_lt("6.0.0")
     def test_acl_whoami(self, r):
         username = r.acl_whoami()
-        assert isinstance(username, (str, bytes))
+        assert isinstance(username, str)
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
@@ -688,8 +680,10 @@ class TestRedisCommands:
     @skip_if_redis_enterprise()
     def test_client_trackinginfo(self, r):
         res = r.client_trackinginfo()
-        assert len(res) > 2
-        assert "prefixes" in res or b"prefixes" in res
+        assert isinstance(res, dict)
+        assert "flags" in res
+        assert "redirect" in res
+        assert "prefixes" in res
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
@@ -730,7 +724,7 @@ class TestRedisCommands:
     @skip_if_server_version_lt("2.6.9")
     def test_client_setname(self, r):
         assert r.client_setname("redis_py_test")
-        assert_resp_response(r, r.client_getname(), "redis_py_test", b"redis_py_test")
+        assert r.client_getname() == "redis_py_test"
 
     @skip_if_server_version_lt("7.2.0")
     def test_client_setinfo(self, r: redis.Redis):
@@ -1038,10 +1032,7 @@ class TestRedisCommands:
             default_dialect_new = "3"
             assert r.config_set("search-default-dialect", default_dialect_new)
             assert r.config_get("*")["search-default-dialect"] == default_dialect_new
-            assert (
-                (r.ft().config_get("*")[b"DEFAULT_DIALECT"]).decode()
-                == default_dialect_new
-            )
+            assert r.ft().config_get("*")["DEFAULT_DIALECT"] == default_dialect_new
         except AssertionError as ex:
             raise ex
         finally:
@@ -1128,7 +1119,7 @@ class TestRedisCommands:
     @skip_if_server_version_lt("6.2.0")
     @skip_if_redis_enterprise()
     def test_reset(self, r):
-        assert_resp_response(r, r.reset(), "RESET", b"RESET")
+        assert r.reset() == "RESET"
 
     def test_object(self, r):
         r["a"] = "foo"
@@ -1954,12 +1945,10 @@ class TestRedisCommands:
         r.mset({"foo": "ohmytext", "bar": "mynewtext"})
         assert r.lcs("foo", "bar") == b"mytext"
         assert r.lcs("foo", "bar", len=True) == 6
-        assert_resp_response(
-            r,
-            r.lcs("foo", "bar", idx=True, minmatchlen=3),
-            [b"matches", [[[4, 7], [5, 8]]], b"len", 6],
-            {b"matches": [[[4, 7], [5, 8]]], b"len": 6},
-        )
+        assert r.lcs("foo", "bar", idx=True, minmatchlen=3) == {
+            "matches": [[[4, 7], [5, 8]]],
+            "len": 6,
+        }
         with pytest.raises(redis.ResponseError):
             assert r.lcs("foo", "bar", len=True, idx=True)
 
@@ -2779,7 +2768,7 @@ class TestRedisCommands:
         assert r.hrandfield("key") is not None
         assert len(r.hrandfield("key", 2)) == 2
         # with values
-        assert_resp_response(r, len(r.hrandfield("key", 2, withvalues=True)), 4, 2)
+        assert len(r.hrandfield("key", 2, withvalues=True)) == 2
         # without duplications
         assert len(r.hrandfield("key", 10)) == 5
         # with duplications
@@ -3027,26 +3016,17 @@ class TestRedisCommands:
         assert r.stralgo("LCS", key1, key2, specific_argument="keys") == res
         # test other labels
         assert r.stralgo("LCS", value1, value2, len=True) == len(res)
-        assert_resp_response(
-            r,
-            r.stralgo("LCS", value1, value2, idx=True),
-            {"len": len(res), "matches": [[(4, 7), (5, 8)], [(2, 3), (0, 1)]]},
-            {"len": len(res), "matches": [[[4, 7], [5, 8]], [[2, 3], [0, 1]]]},
-        )
-        assert_resp_response(
-            r,
-            r.stralgo("LCS", value1, value2, idx=True, withmatchlen=True),
-            {"len": len(res), "matches": [[4, (4, 7), (5, 8)], [2, (2, 3), (0, 1)]]},
-            {"len": len(res), "matches": [[[4, 7], [5, 8], 4], [[2, 3], [0, 1], 2]]},
-        )
-        assert_resp_response(
-            r,
-            r.stralgo(
-                "LCS", value1, value2, idx=True, withmatchlen=True, minmatchlen=4
-            ),
-            {"len": len(res), "matches": [[4, (4, 7), (5, 8)]]},
-            {"len": len(res), "matches": [[[4, 7], [5, 8], 4]]},
-        )
+        assert r.stralgo("LCS", value1, value2, idx=True) == {
+            "len": len(res),
+            "matches": [[[4, 7], [5, 8]], [[2, 3], [0, 1]]],
+        }
+        assert r.stralgo("LCS", value1, value2, idx=True, withmatchlen=True) == {
+            "len": len(res),
+            "matches": [[4, [4, 7], [5, 8]], [2, [2, 3], [0, 1]]],
+        }
+        assert r.stralgo(
+            "LCS", value1, value2, idx=True, withmatchlen=True, minmatchlen=4
+        ) == {"len": len(res), "matches": [[4, [4, 7], [5, 8]]]}
 
     @skip_if_server_version_lt("6.0.0")
     @skip_if_server_version_gte("7.0.0")
@@ -3119,41 +3099,25 @@ class TestRedisCommands:
     def test_blpop(self, r):
         r.rpush("a", "1", "2")
         r.rpush("b", "3", "4")
-        assert_resp_response(
-            r, r.blpop(["b", "a"], timeout=1), (b"b", b"3"), [b"b", b"3"]
-        )
-        assert_resp_response(
-            r, r.blpop(["b", "a"], timeout=1), (b"b", b"4"), [b"b", b"4"]
-        )
-        assert_resp_response(
-            r, r.blpop(["b", "a"], timeout=1), (b"a", b"1"), [b"a", b"1"]
-        )
-        assert_resp_response(
-            r, r.blpop(["b", "a"], timeout=1), (b"a", b"2"), [b"a", b"2"]
-        )
+        assert r.blpop(["b", "a"], timeout=1) == [b"b", b"3"]
+        assert r.blpop(["b", "a"], timeout=1) == [b"b", b"4"]
+        assert r.blpop(["b", "a"], timeout=1) == [b"a", b"1"]
+        assert r.blpop(["b", "a"], timeout=1) == [b"a", b"2"]
         assert r.blpop(["b", "a"], timeout=1) is None
         r.rpush("c", "1")
-        assert_resp_response(r, r.blpop("c", timeout=1), (b"c", b"1"), [b"c", b"1"])
+        assert r.blpop("c", timeout=1) == [b"c", b"1"]
 
     @pytest.mark.onlynoncluster
     def test_brpop(self, r):
         r.rpush("a", "1", "2")
         r.rpush("b", "3", "4")
-        assert_resp_response(
-            r, r.brpop(["b", "a"], timeout=1), (b"b", b"4"), [b"b", b"4"]
-        )
-        assert_resp_response(
-            r, r.brpop(["b", "a"], timeout=1), (b"b", b"3"), [b"b", b"3"]
-        )
-        assert_resp_response(
-            r, r.brpop(["b", "a"], timeout=1), (b"a", b"2"), [b"a", b"2"]
-        )
-        assert_resp_response(
-            r, r.brpop(["b", "a"], timeout=1), (b"a", b"1"), [b"a", b"1"]
-        )
+        assert r.brpop(["b", "a"], timeout=1) == [b"b", b"4"]
+        assert r.brpop(["b", "a"], timeout=1) == [b"b", b"3"]
+        assert r.brpop(["b", "a"], timeout=1) == [b"a", b"2"]
+        assert r.brpop(["b", "a"], timeout=1) == [b"a", b"1"]
         assert r.brpop(["b", "a"], timeout=1) is None
         r.rpush("c", "1")
-        assert_resp_response(r, r.brpop("c", timeout=1), (b"c", b"1"), [b"c", b"1"])
+        assert r.brpop("c", timeout=1) == [b"c", b"1"]
 
     @pytest.mark.onlynoncluster
     def test_brpoplpush(self, r):
@@ -3536,24 +3500,24 @@ class TestRedisCommands:
         r.zadd("a", {"a": 1, "b": 2, "c": 3})
         cursor, pairs = r.zscan("a")
         assert cursor == 0
-        assert set(pairs) == {(b"a", 1), (b"b", 2), (b"c", 3)}
+        assert sorted(pairs) == [[b"a", 1], [b"b", 2], [b"c", 3]]
         _, pairs = r.zscan("a", match="a")
-        assert set(pairs) == {(b"a", 1)}
+        assert pairs == [[b"a", 1]]
 
     def test_zscan_score_cast_scientific_notation(self):
         """score_cast_func=int handles scientific notation scores (issue #4000)."""
         response = (b"0", [b"member1", b"1.7732526297292595e+18"])
         cursor, pairs = parse_zscan(response, score_cast_func=int)
         assert cursor == 0
-        assert pairs == [(b"member1", 1773252629729259520)]
+        assert pairs == [[b"member1", 1773252629729259520]]
 
     @skip_if_server_version_lt("2.8.0")
     def test_zscan_iter(self, r):
         r.zadd("a", {"a": 1, "b": 2, "c": 3})
         pairs = list(r.zscan_iter("a"))
-        assert set(pairs) == {(b"a", 1), (b"b", 2), (b"c", 3)}
+        assert sorted(pairs) == [[b"a", 1], [b"b", 2], [b"c", 3]]
         pairs = list(r.zscan_iter("a", match="a"))
-        assert set(pairs) == {(b"a", 1)}
+        assert pairs == [[b"a", 1]]
 
     # SET COMMANDS
     def test_sadd(self, r):
@@ -3699,12 +3663,11 @@ class TestRedisCommands:
     def test_zadd(self, r):
         mapping = {"a1": 1.0, "a2": 2.0, "a3": 3.0}
         r.zadd("a", mapping)
-        assert_resp_response(
-            r,
-            r.zrange("a", 0, -1, withscores=True),
-            [(b"a1", 1.0), (b"a2", 2.0), (b"a3", 3.0)],
-            [[b"a1", 1.0], [b"a2", 2.0], [b"a3", 3.0]],
-        )
+        assert r.zrange("a", 0, -1, withscores=True) == [
+            [b"a1", 1.0],
+            [b"a2", 2.0],
+            [b"a3", 3.0],
+        ]
 
         # error cases
         with pytest.raises(exceptions.DataError):
@@ -3721,32 +3684,23 @@ class TestRedisCommands:
     def test_zadd_nx(self, r):
         assert r.zadd("a", {"a1": 1}) == 1
         assert r.zadd("a", {"a1": 99, "a2": 2}, nx=True) == 1
-        assert_resp_response(
-            r,
-            r.zrange("a", 0, -1, withscores=True),
-            [(b"a1", 1.0), (b"a2", 2.0)],
-            [[b"a1", 1.0], [b"a2", 2.0]],
-        )
+        assert r.zrange("a", 0, -1, withscores=True) == [
+            [b"a1", 1.0],
+            [b"a2", 2.0],
+        ]
 
     def test_zadd_xx(self, r):
         assert r.zadd("a", {"a1": 1}) == 1
         assert r.zadd("a", {"a1": 99, "a2": 2}, xx=True) == 0
-        assert_resp_response(
-            r,
-            r.zrange("a", 0, -1, withscores=True),
-            [(b"a1", 99.0)],
-            [[b"a1", 99.0]],
-        )
+        assert r.zrange("a", 0, -1, withscores=True) == [[b"a1", 99.0]]
 
     def test_zadd_ch(self, r):
         assert r.zadd("a", {"a1": 1}) == 1
         assert r.zadd("a", {"a1": 99, "a2": 2}, ch=True) == 2
-        assert_resp_response(
-            r,
-            r.zrange("a", 0, -1, withscores=True),
-            [(b"a2", 2.0), (b"a1", 99.0)],
-            [[b"a2", 2.0], [b"a1", 99.0]],
-        )
+        assert r.zrange("a", 0, -1, withscores=True) == [
+            [b"a2", 2.0],
+            [b"a1", 99.0],
+        ]
 
     def test_zadd_incr(self, r):
         assert r.zadd("a", {"a1": 1}) == 1
@@ -3794,12 +3748,7 @@ class TestRedisCommands:
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         r.zadd("b", {"a1": 1, "a2": 2})
         assert r.zdiff(["a", "b"]) == [b"a3"]
-        assert_resp_response(
-            r,
-            r.zdiff(["a", "b"], withscores=True),
-            [b"a3", b"3"],
-            [[b"a3", 3.0]],
-        )
+        assert r.zdiff(["a", "b"], withscores=True) == [[b"a3", 3.0]]
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
@@ -3808,12 +3757,7 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 1, "a2": 2})
         assert r.zdiffstore("out", ["a", "b"])
         assert r.zrange("out", 0, -1) == [b"a3"]
-        assert_resp_response(
-            r,
-            r.zrange("out", 0, -1, withscores=True),
-            [(b"a3", 3.0)],
-            [[b"a3", 3.0]],
-        )
+        assert r.zrange("out", 0, -1, withscores=True) == [[b"a3", 3.0]]
 
     def test_zincrby(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
@@ -3839,33 +3783,25 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             r.zinter(["a", "b", "c"], aggregate="foo", withscores=True)
         # aggregate with SUM
-        assert_resp_response(
-            r,
-            r.zinter(["a", "b", "c"], withscores=True),
-            [(b"a3", 8), (b"a1", 9)],
-            [[b"a3", 8], [b"a1", 9]],
-        )
+        assert r.zinter(["a", "b", "c"], withscores=True) == [
+            [b"a3", 8],
+            [b"a1", 9],
+        ]
         # aggregate with MAX
-        assert_resp_response(
-            r,
-            r.zinter(["a", "b", "c"], aggregate="MAX", withscores=True),
-            [(b"a3", 5), (b"a1", 6)],
-            [[b"a3", 5], [b"a1", 6]],
-        )
+        assert r.zinter(["a", "b", "c"], aggregate="MAX", withscores=True) == [
+            [b"a3", 5],
+            [b"a1", 6],
+        ]
         # aggregate with MIN
-        assert_resp_response(
-            r,
-            r.zinter(["a", "b", "c"], aggregate="MIN", withscores=True),
-            [(b"a1", 1), (b"a3", 1)],
-            [[b"a1", 1], [b"a3", 1]],
-        )
+        assert r.zinter(["a", "b", "c"], aggregate="MIN", withscores=True) == [
+            [b"a1", 1],
+            [b"a3", 1],
+        ]
         # with weights
-        assert_resp_response(
-            r,
-            r.zinter({"a": 1, "b": 2, "c": 3}, withscores=True),
-            [(b"a3", 20), (b"a1", 23)],
-            [[b"a3", 20], [b"a1", 23]],
-        )
+        assert r.zinter({"a": 1, "b": 2, "c": 3}, withscores=True) == [
+            [b"a3", 20],
+            [b"a1", 23],
+        ]
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
@@ -3882,12 +3818,10 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zinterstore("d", ["a", "b", "c"]) == 2
-        assert_resp_response(
-            r,
-            r.zrange("d", 0, -1, withscores=True),
-            [(b"a3", 8), (b"a1", 9)],
-            [[b"a3", 8], [b"a1", 9]],
-        )
+        assert r.zrange("d", 0, -1, withscores=True) == [
+            [b"a3", 8],
+            [b"a1", 9],
+        ]
 
     @pytest.mark.onlynoncluster
     def test_zinterstore_max(self, r):
@@ -3895,12 +3829,10 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zinterstore("d", ["a", "b", "c"], aggregate="MAX") == 2
-        assert_resp_response(
-            r,
-            r.zrange("d", 0, -1, withscores=True),
-            [(b"a3", 5), (b"a1", 6)],
-            [[b"a3", 5], [b"a1", 6]],
-        )
+        assert r.zrange("d", 0, -1, withscores=True) == [
+            [b"a3", 5],
+            [b"a1", 6],
+        ]
 
     @pytest.mark.onlynoncluster
     def test_zinterstore_min(self, r):
@@ -3908,12 +3840,10 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 3, "a3": 5})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zinterstore("d", ["a", "b", "c"], aggregate="MIN") == 2
-        assert_resp_response(
-            r,
-            r.zrange("d", 0, -1, withscores=True),
-            [(b"a1", 1), (b"a3", 3)],
-            [[b"a1", 1], [b"a3", 3]],
-        )
+        assert r.zrange("d", 0, -1, withscores=True) == [
+            [b"a1", 1],
+            [b"a3", 3],
+        ]
 
     @pytest.mark.onlynoncluster
     def test_zinterstore_with_weight(self, r):
@@ -3921,36 +3851,24 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zinterstore("d", {"a": 1, "b": 2, "c": 3}) == 2
-        assert_resp_response(
-            r,
-            r.zrange("d", 0, -1, withscores=True),
-            [(b"a3", 20), (b"a1", 23)],
-            [[b"a3", 20], [b"a1", 23]],
-        )
+        assert r.zrange("d", 0, -1, withscores=True) == [
+            [b"a3", 20],
+            [b"a1", 23],
+        ]
 
     @skip_if_server_version_lt("4.9.0")
     def test_zpopmax(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-        assert_resp_response(r, r.zpopmax("a"), [(b"a3", 3)], [b"a3", 3.0])
+        assert r.zpopmax("a") == [[b"a3", 3.0]]
         # with count
-        assert_resp_response(
-            r,
-            r.zpopmax("a", count=2),
-            [(b"a2", 2), (b"a1", 1)],
-            [[b"a2", 2], [b"a1", 1]],
-        )
+        assert r.zpopmax("a", count=2) == [[b"a2", 2.0], [b"a1", 1.0]]
 
     @skip_if_server_version_lt("4.9.0")
     def test_zpopmin(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-        assert_resp_response(r, r.zpopmin("a"), [(b"a1", 1)], [b"a1", 1.0])
+        assert r.zpopmin("a") == [[b"a1", 1.0]]
         # with count
-        assert_resp_response(
-            r,
-            r.zpopmin("a", count=2),
-            [(b"a2", 2), (b"a3", 3)],
-            [[b"a2", 2], [b"a3", 3]],
-        )
+        assert r.zpopmin("a", count=2) == [[b"a2", 2.0], [b"a3", 3.0]]
 
     @skip_if_server_version_lt("6.2.0")
     def test_zrandemember(self, r):
@@ -3958,12 +3876,7 @@ class TestRedisCommands:
         assert r.zrandmember("a") is not None
         assert len(r.zrandmember("a", 2)) == 2
         # with scores
-        assert_resp_response(
-            r,
-            len(r.zrandmember("a", 2, withscores=True)),
-            4,
-            2,
-        )
+        assert len(r.zrandmember("a", 2, withscores=True)) == 2
         # without duplications
         assert len(r.zrandmember("a", 10)) == 5
         # with duplications
@@ -3974,86 +3887,58 @@ class TestRedisCommands:
     def test_bzpopmax(self, r):
         r.zadd("a", {"a1": 1, "a2": 2})
         r.zadd("b", {"b1": 10, "b2": 20})
-        assert_resp_response(
-            r, r.bzpopmax(["b", "a"], timeout=1), (b"b", b"b2", 20), [b"b", b"b2", 20]
-        )
-        assert_resp_response(
-            r, r.bzpopmax(["b", "a"], timeout=1), (b"b", b"b1", 10), [b"b", b"b1", 10]
-        )
-        assert_resp_response(
-            r, r.bzpopmax(["b", "a"], timeout=1), (b"a", b"a2", 2), [b"a", b"a2", 2]
-        )
-        assert_resp_response(
-            r, r.bzpopmax(["b", "a"], timeout=1), (b"a", b"a1", 1), [b"a", b"a1", 1]
-        )
+        assert r.bzpopmax(["b", "a"], timeout=1) == [b"b", b"b2", 20.0]
+        assert r.bzpopmax(["b", "a"], timeout=1) == [b"b", b"b1", 10.0]
+        assert r.bzpopmax(["b", "a"], timeout=1) == [b"a", b"a2", 2.0]
+        assert r.bzpopmax(["b", "a"], timeout=1) == [b"a", b"a1", 1.0]
         assert r.bzpopmax(["b", "a"], timeout=1) is None
         r.zadd("c", {"c1": 100})
-        assert_resp_response(
-            r, r.bzpopmax("c", timeout=1), (b"c", b"c1", 100), [b"c", b"c1", 100]
-        )
+        assert r.bzpopmax("c", timeout=1) == [b"c", b"c1", 100.0]
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("4.9.0")
     def test_bzpopmin(self, r):
         r.zadd("a", {"a1": 1, "a2": 2})
         r.zadd("b", {"b1": 10, "b2": 20})
-        assert_resp_response(
-            r, r.bzpopmin(["b", "a"], timeout=1), (b"b", b"b1", 10), [b"b", b"b1", 10]
-        )
-        assert_resp_response(
-            r, r.bzpopmin(["b", "a"], timeout=1), (b"b", b"b2", 20), [b"b", b"b2", 20]
-        )
-        assert_resp_response(
-            r, r.bzpopmin(["b", "a"], timeout=1), (b"a", b"a1", 1), [b"a", b"a1", 1]
-        )
-        assert_resp_response(
-            r, r.bzpopmin(["b", "a"], timeout=1), (b"a", b"a2", 2), [b"a", b"a2", 2]
-        )
+        assert r.bzpopmin(["b", "a"], timeout=1) == [b"b", b"b1", 10.0]
+        assert r.bzpopmin(["b", "a"], timeout=1) == [b"b", b"b2", 20.0]
+        assert r.bzpopmin(["b", "a"], timeout=1) == [b"a", b"a1", 1.0]
+        assert r.bzpopmin(["b", "a"], timeout=1) == [b"a", b"a2", 2.0]
         assert r.bzpopmin(["b", "a"], timeout=1) is None
         r.zadd("c", {"c1": 100})
-        assert_resp_response(
-            r, r.bzpopmin("c", timeout=1), (b"c", b"c1", 100), [b"c", b"c1", 100]
-        )
+        assert r.bzpopmin("c", timeout=1) == [b"c", b"c1", 100.0]
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
     def test_zmpop(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-        assert_resp_response(
-            r,
-            r.zmpop("2", ["b", "a"], min=True, count=2),
-            [b"a", [[b"a1", b"1"], [b"a2", b"2"]]],
-            [b"a", [[b"a1", 1.0], [b"a2", 2.0]]],
-        )
+        assert r.zmpop("2", ["b", "a"], min=True, count=2) == [
+            b"a",
+            [[b"a1", 1.0], [b"a2", 2.0]],
+        ]
         with pytest.raises(redis.DataError):
             r.zmpop("2", ["b", "a"], count=2)
         r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
-        assert_resp_response(
-            r,
-            r.zmpop("2", ["b", "a"], max=True),
-            [b"b", [[b"b1", b"10"]]],
-            [b"b", [[b"b1", 10.0]]],
-        )
+        assert r.zmpop("2", ["b", "a"], max=True) == [
+            b"b",
+            [[b"b1", 10.0]],
+        ]
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
     def test_bzmpop(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-        assert_resp_response(
-            r,
-            r.bzmpop(1, "2", ["b", "a"], min=True, count=2),
-            [b"a", [[b"a1", b"1"], [b"a2", b"2"]]],
-            [b"a", [[b"a1", 1.0], [b"a2", 2.0]]],
-        )
+        assert r.bzmpop(1, "2", ["b", "a"], min=True, count=2) == [
+            b"a",
+            [[b"a1", 1.0], [b"a2", 2.0]],
+        ]
         with pytest.raises(redis.DataError):
             r.bzmpop(1, "2", ["b", "a"], count=2)
         r.zadd("b", {"b1": 10, "ab": 9, "b3": 8})
-        assert_resp_response(
-            r,
-            r.bzmpop(0, "2", ["b", "a"], max=True),
-            [b"b", [[b"b1", b"10"]]],
-            [b"b", [[b"b1", 10.0]]],
-        )
+        assert r.bzmpop(0, "2", ["b", "a"], max=True) == [
+            b"b",
+            [[b"b1", 10.0]],
+        ]
         assert r.bzmpop(1, "2", ["foo", "bar"], max=True) is None
 
     def test_zrange(self, r):
@@ -4064,41 +3949,36 @@ class TestRedisCommands:
         assert r.zrange("a", 0, 2, desc=True) == [b"a3", b"a2", b"a1"]
 
         # withscores
-        assert_resp_response(
-            r,
-            r.zrange("a", 0, 1, withscores=True),
-            [(b"a1", 1.0), (b"a2", 2.0)],
-            [[b"a1", 1.0], [b"a2", 2.0]],
-        )
-        assert_resp_response(
-            r,
-            r.zrange("a", 1, 2, withscores=True),
-            [(b"a2", 2.0), (b"a3", 3.0)],
-            [[b"a2", 2.0], [b"a3", 3.0]],
-        )
+        assert r.zrange("a", 0, 1, withscores=True) == [
+            [b"a1", 1.0],
+            [b"a2", 2.0],
+        ]
+        assert r.zrange("a", 1, 2, withscores=True) == [
+            [b"a2", 2.0],
+            [b"a3", 3.0],
+        ]
 
         # custom score cast function
-        assert_resp_response(
-            r,
-            r.zrange("a", 0, 1, withscores=True, score_cast_func=safe_str),
-            [(b"a1", "1"), (b"a2", "2")],
-            [[b"a1", "1.0"], [b"a2", "2.0"]],
-        )
+        assert r.zrange("a", 0, 1, withscores=True, score_cast_func=safe_str) == [
+            [b"a1", "1.0"],
+            [b"a2", "2.0"],
+        ]
 
     def test_zrange_score_cast_scientific_notation(self):
         """score_cast_func=int handles scientific notation scores (issue #4000)."""
         # Simulates RESP2 response with large score in scientific notation
         response = [b"member1", b"1.7732526297292595e+18"]
         result = zset_score_pairs(response, withscores=True, score_cast_func=int)
-        assert result == [(b"member1", 1773252629729259520)]
+        assert result == [[b"member1", 1773252629729259520]]
         # float cast is unaffected
         result = zset_score_pairs(response, withscores=True, score_cast_func=float)
-        assert result == [(b"member1", 1.7732526297292595e18)]
-        # safe_str still receives raw bytes, not float (no "1.0" regression)
+        assert result == [[b"member1", 1.7732526297292595e18]]
+        # safe_str receives a float (scores are normalised via float() before
+        # the cast func is applied, matching RESP3 behaviour)
         result = zset_score_pairs(
             [b"a", b"1"], withscores=True, score_cast_func=safe_str
         )
-        assert result == [(b"a", "1")]
+        assert result == [[b"a", "1.0"]]
 
     def test_zrange_errors(self, r):
         with pytest.raises(exceptions.DataError):
@@ -4130,20 +4010,14 @@ class TestRedisCommands:
             b"a3",
             b"a2",
         ]
-        assert_resp_response(
-            r,
-            r.zrange("a", 2, 4, byscore=True, withscores=True),
-            [(b"a2", 2.0), (b"a3", 3.0), (b"a4", 4.0)],
-            [[b"a2", 2.0], [b"a3", 3.0], [b"a4", 4.0]],
-        )
-        assert_resp_response(
-            r,
-            r.zrange(
-                "a", 4, 2, desc=True, byscore=True, withscores=True, score_cast_func=int
-            ),
-            [(b"a4", 4), (b"a3", 3), (b"a2", 2)],
-            [[b"a4", 4], [b"a3", 3], [b"a2", 2]],
-        )
+        assert r.zrange("a", 2, 4, byscore=True, withscores=True) == [
+            [b"a2", 2.0],
+            [b"a3", 3.0],
+            [b"a4", 4.0],
+        ]
+        assert r.zrange(
+            "a", 4, 2, desc=True, byscore=True, withscores=True, score_cast_func=int
+        ) == [[b"a4", 4], [b"a3", 3], [b"a2", 2]]
 
         # rev
         assert r.zrange("a", 0, 1, desc=True) == [b"a5", b"a4"]
@@ -4156,12 +4030,10 @@ class TestRedisCommands:
         assert r.zrange("b", 0, -1) == [b"a1", b"a2"]
         assert r.zrangestore("b", "a", 1, 2)
         assert r.zrange("b", 0, -1) == [b"a2", b"a3"]
-        assert_resp_response(
-            r,
-            r.zrange("b", 0, -1, withscores=True),
-            [(b"a2", 2), (b"a3", 3)],
-            [[b"a2", 2], [b"a3", 3]],
-        )
+        assert r.zrange("b", 0, -1, withscores=True) == [
+            [b"a2", 2],
+            [b"a3", 3],
+        ]
         # reversed order
         assert r.zrangestore("b", "a", 1, 2, desc=True)
         assert r.zrange("b", 0, -1) == [b"a1", b"a2"]
@@ -4196,31 +4068,26 @@ class TestRedisCommands:
         # slicing with start/num
         assert r.zrangebyscore("a", 2, 4, start=1, num=2) == [b"a3", b"a4"]
         # withscores
-        assert_resp_response(
-            r,
-            r.zrangebyscore("a", 2, 4, withscores=True),
-            [(b"a2", 2.0), (b"a3", 3.0), (b"a4", 4.0)],
-            [[b"a2", 2.0], [b"a3", 3.0], [b"a4", 4.0]],
-        )
-        assert_resp_response(
-            r,
-            r.zrangebyscore("a", 2, 4, withscores=True, score_cast_func=int),
-            [(b"a2", 2), (b"a3", 3), (b"a4", 4)],
-            [[b"a2", 2], [b"a3", 3], [b"a4", 4]],
-        )
+        assert r.zrangebyscore("a", 2, 4, withscores=True) == [
+            [b"a2", 2.0],
+            [b"a3", 3.0],
+            [b"a4", 4.0],
+        ]
+        assert r.zrangebyscore("a", 2, 4, withscores=True, score_cast_func=int) == [
+            [b"a2", 2],
+            [b"a3", 3],
+            [b"a4", 4],
+        ]
         # custom score cast function
-        assert_resp_response(
-            r,
-            r.zrangebyscore("a", 2, 4, withscores=True, score_cast_func=safe_str),
-            [(b"a2", "2"), (b"a3", "3"), (b"a4", "4")],
-            [[b"a2", "2.0"], [b"a3", "3.0"], [b"a4", "4.0"]],
-        )
+        assert r.zrangebyscore(
+            "a", 2, 4, withscores=True, score_cast_func=safe_str
+        ) == [[b"a2", "2.0"], [b"a3", "3.0"], [b"a4", "4.0"]]
 
     def test_zrangebyscore_score_cast_scientific_notation(self):
         """score_cast_func=int handles scientific notation scores (issue #4000)."""
         response = [b"a1", b"1.7732526297292595e+18", b"a2", b"2.5"]
         result = zset_score_pairs(response, withscores=True, score_cast_func=int)
-        assert result == [(b"a1", 1773252629729259520), (b"a2", 2)]
+        assert result == [[b"a1", 1773252629729259520], [b"a2", 2]]
 
     def test_zrank(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
@@ -4234,16 +4101,14 @@ class TestRedisCommands:
         assert r.zrank("a", "a1") == 0
         assert r.zrank("a", "a2") == 1
         assert r.zrank("a", "a6") is None
-        assert_resp_response(r, r.zrank("a", "a3", withscore=True), [2, 3.0], [2, 3.0])
+        assert r.zrank("a", "a3", withscore=True) == [2, 3.0]
         assert r.zrank("a", "a6", withscore=True) is None
 
         # custom score cast function
-        assert_resp_response(
-            r,
-            r.zrank("a", "a3", withscore=True, score_cast_func=safe_str),
-            [2, "3"],
-            [2, "3.0"],
-        )
+        assert r.zrank("a", "a3", withscore=True, score_cast_func=safe_str) == [
+            2,
+            "3.0",
+        ]
 
     def test_zrem(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
@@ -4285,28 +4150,22 @@ class TestRedisCommands:
         assert r.zrevrange("a", 1, 2) == [b"a2", b"a1"]
 
         # withscores
-        assert_resp_response(
-            r,
-            r.zrevrange("a", 0, 1, withscores=True),
-            [(b"a3", 3.0), (b"a2", 2.0)],
-            [[b"a3", 3.0], [b"a2", 2.0]],
-        )
-        assert_resp_response(
-            r,
-            r.zrevrange("a", 1, 2, withscores=True),
-            [(b"a2", 2.0), (b"a1", 1.0)],
-            [[b"a2", 2.0], [b"a1", 1.0]],
-        )
+        assert r.zrevrange("a", 0, 1, withscores=True) == [
+            [b"a3", 3.0],
+            [b"a2", 2.0],
+        ]
+        assert r.zrevrange("a", 1, 2, withscores=True) == [
+            [b"a2", 2.0],
+            [b"a1", 1.0],
+        ]
 
         # custom score cast function
         # should be applied to resp2 and resp3
         # responses
-        assert_resp_response(
-            r,
-            r.zrevrange("a", 0, 1, withscores=True, score_cast_func=safe_str),
-            [(b"a3", "3"), (b"a2", "2")],
-            [[b"a3", "3.0"], [b"a2", "2.0"]],
-        )
+        assert r.zrevrange("a", 0, 1, withscores=True, score_cast_func=safe_str) == [
+            [b"a3", "3.0"],
+            [b"a2", "2.0"],
+        ]
 
     def test_zrevrangebyscore(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
@@ -4315,26 +4174,21 @@ class TestRedisCommands:
         assert r.zrevrangebyscore("a", 4, 2, start=1, num=2) == [b"a3", b"a2"]
 
         # withscores
-        assert_resp_response(
-            r,
-            r.zrevrangebyscore("a", 4, 2, withscores=True),
-            [(b"a4", 4.0), (b"a3", 3.0), (b"a2", 2.0)],
-            [[b"a4", 4.0], [b"a3", 3.0], [b"a2", 2.0]],
-        )
+        assert r.zrevrangebyscore("a", 4, 2, withscores=True) == [
+            [b"a4", 4.0],
+            [b"a3", 3.0],
+            [b"a2", 2.0],
+        ]
         # custom score type cast function
-        assert_resp_response(
-            r,
-            r.zrevrangebyscore("a", 4, 2, withscores=True, score_cast_func=int),
-            [(b"a4", 4.0), (b"a3", 3.0), (b"a2", 2.0)],
-            [[b"a4", 4.0], [b"a3", 3.0], [b"a2", 2.0]],
-        )
+        assert r.zrevrangebyscore("a", 4, 2, withscores=True, score_cast_func=int) == [
+            [b"a4", 4],
+            [b"a3", 3],
+            [b"a2", 2],
+        ]
         # custom score cast function
-        assert_resp_response(
-            r,
-            r.zrevrangebyscore("a", 4, 2, withscores=True, score_cast_func=safe_str),
-            [(b"a4", "4"), (b"a3", "3"), (b"a2", "2")],
-            [[b"a4", "4.0"], [b"a3", "3.0"], [b"a2", "2.0"]],
-        )
+        assert r.zrevrangebyscore(
+            "a", 4, 2, withscores=True, score_cast_func=safe_str
+        ) == [[b"a4", "4.0"], [b"a3", "3.0"], [b"a2", "2.0"]]
 
     def test_zrevrank(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
@@ -4348,18 +4202,14 @@ class TestRedisCommands:
         assert r.zrevrank("a", "a1") == 4
         assert r.zrevrank("a", "a2") == 3
         assert r.zrevrank("a", "a6") is None
-        assert_resp_response(
-            r, r.zrevrank("a", "a3", withscore=True), [2, 3.0], [2, 3.0]
-        )
+        assert r.zrevrank("a", "a3", withscore=True) == [2, 3.0]
         assert r.zrevrank("a", "a6", withscore=True) is None
 
         # custom score cast function
-        assert_resp_response(
-            r,
-            r.zrevrank("a", "a3", withscore=True, score_cast_func=safe_str),
-            [2, "3"],
-            [2, "3.0"],
-        )
+        assert r.zrevrank("a", "a3", withscore=True, score_cast_func=safe_str) == [
+            2,
+            "3.0",
+        ]
 
     def test_zrevrank_score_cast_scientific_notation(self):
         """score_cast_func=int handles scientific notation scores (issue #4000)."""
@@ -4381,40 +4231,40 @@ class TestRedisCommands:
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         # sum
         assert r.zunion(["a", "b", "c"]) == [b"a2", b"a4", b"a3", b"a1"]
-        assert_resp_response(
-            r,
-            r.zunion(["a", "b", "c"], withscores=True),
-            [(b"a2", 3), (b"a4", 4), (b"a3", 8), (b"a1", 9)],
-            [[b"a2", 3], [b"a4", 4], [b"a3", 8], [b"a1", 9]],
-        )
+        assert r.zunion(["a", "b", "c"], withscores=True) == [
+            [b"a2", 3],
+            [b"a4", 4],
+            [b"a3", 8],
+            [b"a1", 9],
+        ]
         # max
-        assert_resp_response(
-            r,
-            r.zunion(["a", "b", "c"], aggregate="MAX", withscores=True),
-            [(b"a2", 2), (b"a4", 4), (b"a3", 5), (b"a1", 6)],
-            [[b"a2", 2], [b"a4", 4], [b"a3", 5], [b"a1", 6]],
-        )
+        assert r.zunion(["a", "b", "c"], aggregate="MAX", withscores=True) == [
+            [b"a2", 2],
+            [b"a4", 4],
+            [b"a3", 5],
+            [b"a1", 6],
+        ]
         # min
-        assert_resp_response(
-            r,
-            r.zunion(["a", "b", "c"], aggregate="MIN", withscores=True),
-            [(b"a1", 1), (b"a2", 1), (b"a3", 1), (b"a4", 4)],
-            [[b"a1", 1], [b"a2", 1], [b"a3", 1], [b"a4", 4]],
-        )
+        assert r.zunion(["a", "b", "c"], aggregate="MIN", withscores=True) == [
+            [b"a1", 1],
+            [b"a2", 1],
+            [b"a3", 1],
+            [b"a4", 4],
+        ]
         # with weight
-        assert_resp_response(
-            r,
-            r.zunion({"a": 1, "b": 2, "c": 3}, withscores=True),
-            [(b"a2", 5), (b"a4", 12), (b"a3", 20), (b"a1", 23)],
-            [[b"a2", 5], [b"a4", 12], [b"a3", 20], [b"a1", 23]],
-        )
+        assert r.zunion({"a": 1, "b": 2, "c": 3}, withscores=True) == [
+            [b"a2", 5],
+            [b"a4", 12],
+            [b"a3", 20],
+            [b"a1", 23],
+        ]
         # with custom score cast function
-        assert_resp_response(
-            r,
-            r.zunion(["a", "b", "c"], withscores=True, score_cast_func=safe_str),
-            [(b"a2", "3"), (b"a4", "4"), (b"a3", "8"), (b"a1", "9")],
-            [[b"a2", "3.0"], [b"a4", "4.0"], [b"a3", "8.0"], [b"a1", "9.0"]],
-        )
+        assert r.zunion(["a", "b", "c"], withscores=True, score_cast_func=safe_str) == [
+            [b"a2", "3.0"],
+            [b"a4", "4.0"],
+            [b"a3", "8.0"],
+            [b"a1", "9.0"],
+        ]
 
     @pytest.mark.onlynoncluster
     def test_zunionstore_sum(self, r):
@@ -4422,12 +4272,12 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zunionstore("d", ["a", "b", "c"]) == 4
-        assert_resp_response(
-            r,
-            r.zrange("d", 0, -1, withscores=True),
-            [(b"a2", 3), (b"a4", 4), (b"a3", 8), (b"a1", 9)],
-            [[b"a2", 3], [b"a4", 4], [b"a3", 8], [b"a1", 9]],
-        )
+        assert r.zrange("d", 0, -1, withscores=True) == [
+            [b"a2", 3],
+            [b"a4", 4],
+            [b"a3", 8],
+            [b"a1", 9],
+        ]
 
     @pytest.mark.onlynoncluster
     def test_zunionstore_max(self, r):
@@ -4435,12 +4285,12 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zunionstore("d", ["a", "b", "c"], aggregate="MAX") == 4
-        assert_resp_response(
-            r,
-            r.zrange("d", 0, -1, withscores=True),
-            [(b"a2", 2), (b"a4", 4), (b"a3", 5), (b"a1", 6)],
-            [[b"a2", 2], [b"a4", 4], [b"a3", 5], [b"a1", 6]],
-        )
+        assert r.zrange("d", 0, -1, withscores=True) == [
+            [b"a2", 2],
+            [b"a4", 4],
+            [b"a3", 5],
+            [b"a1", 6],
+        ]
 
     @pytest.mark.onlynoncluster
     def test_zunionstore_min(self, r):
@@ -4448,12 +4298,12 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 4})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zunionstore("d", ["a", "b", "c"], aggregate="MIN") == 4
-        assert_resp_response(
-            r,
-            r.zrange("d", 0, -1, withscores=True),
-            [(b"a1", 1), (b"a2", 2), (b"a3", 3), (b"a4", 4)],
-            [[b"a1", 1], [b"a2", 2], [b"a3", 3], [b"a4", 4]],
-        )
+        assert r.zrange("d", 0, -1, withscores=True) == [
+            [b"a1", 1],
+            [b"a2", 2],
+            [b"a3", 3],
+            [b"a4", 4],
+        ]
 
     @pytest.mark.onlynoncluster
     def test_zunionstore_with_weight(self, r):
@@ -4461,12 +4311,12 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zunionstore("d", {"a": 1, "b": 2, "c": 3}) == 4
-        assert_resp_response(
-            r,
-            r.zrange("d", 0, -1, withscores=True),
-            [(b"a2", 5), (b"a4", 12), (b"a3", 20), (b"a1", 23)],
-            [[b"a2", 5], [b"a4", 12], [b"a3", 20], [b"a1", 23]],
-        )
+        assert r.zrange("d", 0, -1, withscores=True) == [
+            [b"a2", 5],
+            [b"a4", 12],
+            [b"a3", 20],
+            [b"a1", 23],
+        ]
 
     @skip_if_server_version_lt("6.1.240")
     def test_zmscore(self, r):
@@ -4976,12 +4826,11 @@ class TestRedisCommands:
             "place2",
         )
         r.geoadd("barcelona", values)
-        assert_resp_response(
-            r,
-            r.geohash("barcelona", "place1", "place2", "place3"),
-            ["sp3e9yg3kd0", "sp3e9cbc3t0", None],
-            [b"sp3e9yg3kd0", b"sp3e9cbc3t0", None],
-        )
+        assert r.geohash("barcelona", "place1", "place2", "place3") == [
+            "sp3e9yg3kd0",
+            "sp3e9cbc3t0",
+            None,
+        ]
 
     @skip_unless_arch_bits(64)
     @skip_if_server_version_lt("3.2.0")
@@ -4993,18 +4842,11 @@ class TestRedisCommands:
         )
         r.geoadd("barcelona", values)
         # redis uses 52 bits precision, hereby small errors may be introduced.
-        assert_resp_response(
-            r,
-            r.geopos("barcelona", "place1", "place2"),
-            [
-                (2.19093829393386841, 41.43379028184083523),
-                (2.18737632036209106, 41.40634178640635099),
-            ],
-            [
-                [2.19093829393386841, 41.43379028184083523],
-                [2.18737632036209106, 41.40634178640635099],
-            ],
-        )
+        result = r.geopos("barcelona", "place1", "place2")
+        assert result == [
+            [2.19093829393386841, 41.43379028184083523],
+            [2.18737632036209106, 41.40634178640635099],
+        ]
 
     @skip_if_server_version_lt("4.0.0")
     def test_geopos_no_value(self, r):
@@ -5073,13 +4915,13 @@ class TestRedisCommands:
                 b"\x80place2",
                 3067.4157,
                 3471609625421029,
-                (2.187376320362091, 41.40634178640635),
+                [2.187376320362091, 41.40634178640635],
             ],
             [
                 b"place1",
                 0.0,
                 3471609698139488,
-                (2.1909382939338684, 41.433790281840835),
+                [2.1909382939338684, 41.433790281840835],
             ],
         ]
 
@@ -5124,7 +4966,7 @@ class TestRedisCommands:
                 b"place1",
                 0.0881,
                 3471609698139488,
-                (2.19093829393386841, 41.43379028184083523),
+                [2.19093829393386841, 41.43379028184083523],
             ]
         ]
         assert r.geosearch(
@@ -5135,7 +4977,7 @@ class TestRedisCommands:
             unit="km",
             withdist=True,
             withcoord=True,
-        ) == [[b"place1", 0.0881, (2.19093829393386841, 41.43379028184083523)]]
+        ) == [[b"place1", 0.0881, [2.19093829393386841, 41.43379028184083523]]]
         assert r.geosearch(
             "barcelona",
             longitude=2.191,
@@ -5145,7 +4987,7 @@ class TestRedisCommands:
             withhash=True,
             withcoord=True,
         ) == [
-            [b"place1", 3471609698139488, (2.19093829393386841, 41.43379028184083523)]
+            [b"place1", 3471609698139488, [2.19093829393386841, 41.43379028184083523]]
         ]
         # test no values.
         assert (
@@ -5312,18 +5154,18 @@ class TestRedisCommands:
                 b"place1",
                 0.0881,
                 3471609698139488,
-                (2.19093829393386841, 41.43379028184083523),
+                [2.19093829393386841, 41.43379028184083523],
             ]
         ]
 
         assert r.georadius(
             "barcelona", 2.191, 41.433, 1, unit="km", withdist=True, withcoord=True
-        ) == [[b"place1", 0.0881, (2.19093829393386841, 41.43379028184083523)]]
+        ) == [[b"place1", 0.0881, [2.19093829393386841, 41.43379028184083523]]]
 
         assert r.georadius(
             "barcelona", 2.191, 41.433, 1, unit="km", withhash=True, withcoord=True
         ) == [
-            [b"place1", 3471609698139488, (2.19093829393386841, 41.43379028184083523)]
+            [b"place1", 3471609698139488, [2.19093829393386841, 41.43379028184083523]]
         ]
 
         # test no values.
@@ -5424,13 +5266,13 @@ class TestRedisCommands:
                 b"\x80place2",
                 3067.4157,
                 3471609625421029,
-                (2.187376320362091, 41.40634178640635),
+                [2.187376320362091, 41.40634178640635],
             ],
             [
                 b"place1",
                 0.0,
                 3471609698139488,
-                (2.1909382939338684, 41.433790281840835),
+                [2.1909382939338684, 41.433790281840835],
             ],
         ]
 
@@ -5913,12 +5755,7 @@ class TestRedisCommands:
         r.xgroup_create(stream, group, 0)
         info = r.xinfo_stream(stream, full=True)
         assert info["length"] == 1
-        assert_resp_response_in(
-            r,
-            m1,
-            info["entries"],
-            info["entries"].keys(),
-        )
+        assert m1 in info["entries"]
         assert len(info["groups"]) == 1
 
         r.xreadgroup(group, "consumer", streams={stream: ">"})
@@ -6236,33 +6073,24 @@ class TestRedisCommands:
             get_stream_message(r, stream, m2),
         ]
         # xread starting at 0 returns both messages
-        assert_resp_response(
-            r,
-            r.xread(streams={stream: 0}),
-            [[stream_name, expected_entries]],
-            {stream_name: [expected_entries]},
-        )
+        assert r.xread(streams={stream: 0}) == {
+            stream_name: expected_entries,
+        }
 
         expected_entries = [get_stream_message(r, stream, m1)]
         # xread starting at 0 and count=1 returns only the first message
-        assert_resp_response(
-            r,
-            r.xread(streams={stream: 0}, count=1),
-            [[stream_name, expected_entries]],
-            {stream_name: [expected_entries]},
-        )
+        assert r.xread(streams={stream: 0}, count=1) == {
+            stream_name: expected_entries,
+        }
 
         expected_entries = [get_stream_message(r, stream, m2)]
         # xread starting at m1 returns only the second message
-        assert_resp_response(
-            r,
-            r.xread(streams={stream: m1}),
-            [[stream_name, expected_entries]],
-            {stream_name: [expected_entries]},
-        )
+        assert r.xread(streams={stream: m1}) == {
+            stream_name: expected_entries,
+        }
 
-        # xread starting at the last message returns an empty list
-        assert_resp_response(r, r.xread(streams={stream: m2}), [], {})
+        # xread starting at the last message returns an empty dict
+        assert r.xread(streams={stream: m2}) == {}
 
     @skip_if_server_version_lt("5.0.0")
     def test_xreadgroup(self, r):
@@ -6280,12 +6108,9 @@ class TestRedisCommands:
         ]
 
         # xread starting at 0 returns both messages
-        assert_resp_response(
-            r,
-            r.xreadgroup(group, consumer, streams={stream: ">"}),
-            [[stream_name, expected_entries]],
-            {stream_name: [expected_entries]},
-        )
+        assert r.xreadgroup(group, consumer, streams={stream: ">"}) == {
+            stream_name: expected_entries,
+        }
 
         r.xgroup_destroy(stream, group)
         r.xgroup_create(stream, group, 0)
@@ -6293,12 +6118,9 @@ class TestRedisCommands:
         expected_entries = [get_stream_message(r, stream, m1)]
 
         # xread with count=1 returns only the first message
-        assert_resp_response(
-            r,
-            r.xreadgroup(group, consumer, streams={stream: ">"}, count=1),
-            [[stream_name, expected_entries]],
-            {stream_name: [expected_entries]},
-        )
+        assert r.xreadgroup(group, consumer, streams={stream: ">"}, count=1) == {
+            stream_name: expected_entries,
+        }
 
         r.xgroup_destroy(stream, group)
 
@@ -6306,24 +6128,17 @@ class TestRedisCommands:
         # will only find messages added after this
         r.xgroup_create(stream, group, "$")
 
-        # xread starting after the last message returns an empty message list
-        assert_resp_response(
-            r, r.xreadgroup(group, consumer, streams={stream: ">"}), [], {}
-        )
+        # xread starting after the last message returns an empty dict
+        assert r.xreadgroup(group, consumer, streams={stream: ">"}) == {}
 
         # xreadgroup with noack does not have any items in the PEL
         r.xgroup_destroy(stream, group)
         r.xgroup_create(stream, group, "0")
         res = r.xreadgroup(group, consumer, streams={stream: ">"}, noack=True)
         empty_res = r.xreadgroup(group, consumer, streams={stream: "0"})
-        if is_resp2_connection(r):
-            assert len(res[0][1]) == 2
-            # now there should be nothing pending
-            assert len(empty_res[0][1]) == 0
-        else:
-            assert len(res[stream_name][0]) == 2
-            # now there should be nothing pending
-            assert len(empty_res[stream_name][0]) == 0
+        assert len(res[stream_name]) == 2
+        # now there should be nothing pending
+        assert len(empty_res[stream_name]) == 0
 
         r.xgroup_destroy(stream, group)
         r.xgroup_create(stream, group, "0")
@@ -6331,12 +6146,9 @@ class TestRedisCommands:
         expected_entries = [(m1, {}), (m2, {})]
         r.xreadgroup(group, consumer, streams={stream: ">"})
         r.xtrim(stream, 0)
-        assert_resp_response(
-            r,
-            r.xreadgroup(group, consumer, streams={stream: "0"}),
-            [[stream_name, expected_entries]],
-            {stream_name: [expected_entries]},
-        )
+        assert r.xreadgroup(group, consumer, streams={stream: "0"}) == {
+            stream_name: expected_entries,
+        }
 
     def _validate_xreadgroup_with_claim_min_idle_time_response(
         self, r, response, expected_entries
@@ -6345,15 +6157,9 @@ class TestRedisCommands:
         assert len(response) == len(expected_entries)
 
         expected_streams = expected_entries.keys()
-        for str_index, expected_stream in enumerate(expected_streams):
+        for expected_stream in expected_streams:
             expected_entries_per_stream = expected_entries[expected_stream]
-
-            if is_resp2_connection(r):
-                actual_entries_per_stream = response[str_index][1]
-                actual_stream = response[str_index][0]
-                assert actual_stream == expected_stream
-            else:
-                actual_entries_per_stream = response[expected_stream][0]
+            actual_entries_per_stream = response[expected_stream]
 
             # validate the number of entries
             assert len(actual_entries_per_stream) == len(expected_entries_per_stream)
@@ -6431,12 +6237,7 @@ class TestRedisCommands:
         ]
         # read all the messages - this will save the msgs in PEL
         res = r.xreadgroup(group, consumer_1, streams={stream: ">"})
-        assert_resp_response(
-            r,
-            res,
-            [[stream_name, expected_entries]],
-            {stream_name: [expected_entries]},
-        )
+        assert res == {stream_name: expected_entries}
 
         # add 2 more messages
         m7 = r.xadd(stream, {"key_m7": "val_m7"})
@@ -7216,7 +7017,7 @@ class TestRedisCommands:
     @skip_if_redis_enterprise()
     def test_command_getkeys(self, r):
         res = r.command_getkeys("MSET", "a", "b", "c", "d", "e", "f")
-        assert_resp_response(r, res, ["a", "c", "e"], [b"a", b"c", b"e"])
+        assert res == [b"a", b"c", b"e"]
         res = r.command_getkeys(
             "EVAL",
             '"not consulted"',
@@ -7229,9 +7030,7 @@ class TestRedisCommands:
             "arg3",
             "argN",
         )
-        assert_resp_response(
-            r, res, ["key1", "key2", "key3"], [b"key1", b"key2", b"key3"]
-        )
+        assert res == [b"key1", b"key2", b"key3"]
 
     @skip_if_server_version_lt("2.8.13")
     def test_command(self, r):
@@ -7240,6 +7039,12 @@ class TestRedisCommands:
         cmds = list(res.keys())
         assert "set" in cmds
         assert "get" in cmds
+        # Verify unified format: flags and acl_categories as sets of strings
+        set_cmd = res["set"]
+        assert isinstance(set_cmd["flags"], set)
+        assert "acl_categories" in set_cmd
+        assert isinstance(set_cmd["acl_categories"], set)
+        assert all(isinstance(c, str) for c in set_cmd["acl_categories"])
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")

@@ -19,6 +19,7 @@ from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestAsyncRedisClientOperationDurationMetricsRecording:
     """
@@ -57,7 +58,7 @@ class TestAsyncRedisClientOperationDurationMetricsRecording:
         pool.get_connection = AsyncMock(return_value=mock_async_connection)
         pool.release = AsyncMock()
         pool.get_encoder.return_value = MagicMock()
-        pool.get_protocol.return_value = 2
+        pool.get_protocol.return_value = 3
         return pool
 
     @pytest.fixture
@@ -214,6 +215,7 @@ class TestAsyncRedisClientOperationDurationMetricsRecording:
         async_recorder.reset_collector()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestAsyncRedisClientErrorMetricsRecording:
     """
@@ -252,7 +254,7 @@ class TestAsyncRedisClientErrorMetricsRecording:
         pool.get_connection = AsyncMock(return_value=mock_async_connection)
         pool.release = AsyncMock()
         pool.get_encoder.return_value = MagicMock()
-        pool.get_protocol.return_value = 2
+        pool.get_protocol.return_value = 3
         return pool
 
     @pytest.fixture
