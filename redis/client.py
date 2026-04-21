@@ -791,7 +791,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         """Execute a command and return a parsed response"""
         pool = self.connection_pool
         command_name = args[0]
-        conn = self.connection or pool.get_connection()
+        conn = None
 
         if self._local_cache is not None:
             if isinstance(command_name, bytes):
@@ -806,8 +806,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 key = args[1]
                 cached_value = self._local_cache.get(key)
                 if cached_value is not None:
-                    if not self.connection:
-                        pool.release(conn)
                     return cached_value
             
             elif command_upper in ("SET", "SETEX", "DEL") and len(args) >= 2:
@@ -817,6 +815,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 else:
                     key = args[1]
                     self._local_cache.delete(key)
+
+        conn = self.connection or pool.get_connection()
 
         # Start timing for observability
         start_time = time.monotonic()
@@ -879,7 +879,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 conn.connect()
             if self._single_connection_client:
                 self.single_connection_lock.release()
-            if not self.connection:
+            if not self.connection and conn:
                 pool.release(conn)
 
     def parse_response(self, connection, command_name, **options):
