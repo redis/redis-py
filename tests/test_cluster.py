@@ -3284,6 +3284,81 @@ class TestNodesManager:
             assert nodes_cache_names == [node1.name]
 
 
+@pytest.mark.fixed_client
+class TestClusterPubSubWithMocks:
+    """
+    Unit tests for ClusterPubSub that do not require a running cluster.
+    """
+
+    def _make_pubsub(self, cluster_mock):
+        """Create a ClusterPubSub with no node set, using the provided cluster mock."""
+        from redis._parsers import Encoder
+        from redis.cluster import ClusterPubSub
+
+        cluster_mock.encoder = Encoder("utf-8", "strict", False)
+        return ClusterPubSub(cluster_mock)
+
+    def test_get_node_pubsub_uses_cluster_get_redis_connection(self):
+        """
+        _get_node_pubsub must route through cluster.get_redis_connection(node)
+        so newly-discovered nodes are materialised via NodesManager.
+        """
+        cluster = Mock()
+        redis_conn = Mock()
+        shard_pubsub = Mock()
+        redis_conn.pubsub.return_value = shard_pubsub
+        cluster.get_redis_connection.return_value = redis_conn
+
+        pubsub = self._make_pubsub(cluster)
+        node = ClusterNode("127.0.0.1", 7000)
+
+        result = pubsub._get_node_pubsub(node)
+
+        cluster.get_redis_connection.assert_called_once_with(node)
+        redis_conn.pubsub.assert_called_once_with(push_handler_func=None)
+        assert result is shard_pubsub
+        assert pubsub.node_pubsub_mapping[node.name] is shard_pubsub
+
+    def test_get_node_pubsub_caches_by_node_name(self):
+        """Repeated calls must not re-materialise the shard PubSub."""
+        cluster = Mock()
+        redis_conn = Mock()
+        redis_conn.pubsub.return_value = Mock()
+        cluster.get_redis_connection.return_value = redis_conn
+
+        pubsub = self._make_pubsub(cluster)
+        node = ClusterNode("127.0.0.1", 7000)
+
+        first = pubsub._get_node_pubsub(node)
+        second = pubsub._get_node_pubsub(node)
+
+        assert first is second
+        cluster.get_redis_connection.assert_called_once_with(node)
+        redis_conn.pubsub.assert_called_once()
+
+    def test_disconnect_tolerates_shard_pubsub_with_no_connection(self):
+        """
+        disconnect() must skip shard PubSub entries whose connection has not
+        been materialised yet (pubsub.connection is None).
+        """
+        cluster = Mock()
+        pubsub = self._make_pubsub(cluster)
+
+        pending_pubsub = Mock()
+        pending_pubsub.connection = None
+        active_pubsub = Mock()
+        active_pubsub.connection = Mock()
+
+        pubsub.node_pubsub_mapping = {
+            "127.0.0.1:7000": pending_pubsub,
+            "127.0.0.1:7001": active_pubsub,
+        }
+
+        pubsub.disconnect()
+
+        active_pubsub.connection.disconnect.assert_called_once()
+
+
 @pytest.mark.onlycluster
 class TestClusterPubSubObject:
     """

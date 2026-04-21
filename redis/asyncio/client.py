@@ -1038,7 +1038,11 @@ class PubSub:
             return
         async with self._lock:
             if self.connection:
-                await self.connection.disconnect()
+                # Use nowait=True to avoid awaiting StreamWriter.wait_closed(),
+                # which can deadlock when a concurrent reader task (e.g. one
+                # running pubsub.run() or get_message(block=True)) still holds
+                # the transport.  See https://github.com/redis/redis-py/issues/3941
+                await self.connection.disconnect(nowait=True)
                 self.connection.deregister_connect_callback(self.on_connect)
                 await self.connection_pool.release(self.connection)
                 self.connection = None

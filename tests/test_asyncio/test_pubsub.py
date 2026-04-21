@@ -1470,3 +1470,67 @@ class TestPubSubHandleMessageMetrics:
             )
 
             mock_record.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.fixed_client
+class TestPubSubAcloseWithMocks:
+    """
+    Regression tests for https://github.com/redis/redis-py/issues/3941 —
+    PubSub.aclose() must not hang inside StreamWriter.wait_closed() when a
+    concurrent reader task still owns the pubsub connection's transport.
+    """
+
+    def _make_pubsub(self):
+        pool = MagicMock()
+        pool.get_encoder = MagicMock(
+            return_value=MagicMock(
+                decode_responses=False,
+                encode=lambda v: v.encode() if isinstance(v, str) else v,
+            )
+        )
+        pool.release = AsyncMock()
+        pubsub = PubSub(connection_pool=pool)
+        connection = MagicMock()
+        connection.disconnect = AsyncMock()
+        connection.deregister_connect_callback = MagicMock()
+        pubsub.connection = connection
+        return pubsub, pool, connection
+
+    async def test_aclose_disconnects_with_nowait(self):
+        """aclose() must call connection.disconnect(nowait=True) to avoid
+        awaiting StreamWriter.wait_closed(), which can deadlock when another
+        task is blocked in parse_response() on the same socket."""
+        pubsub, pool, connection = self._make_pubsub()
+
+        await pubsub.aclose()
+
+        connection.disconnect.assert_awaited_once_with(nowait=True)
+        connection.deregister_connect_callback.assert_called_once_with(
+            pubsub.on_connect
+        )
+        pool.release.assert_awaited_once_with(connection)
+        assert pubsub.connection is None
+
+    async def test_aclose_does_not_hang_when_wait_closed_would_block(self):
+        """
+        End-to-end regression: even if the underlying StreamWriter.wait_closed()
+        would hang forever (as happens when a concurrent reader still holds the
+        transport), aclose() returns promptly because it passes nowait=True to
+        disconnect().
+        """
+        pubsub, _pool, connection = self._make_pubsub()
+
+        async def fake_disconnect(nowait: bool = False, **_):
+            # Simulates AbstractConnection.disconnect(): if nowait=False we
+            # would hang awaiting wait_closed(); with nowait=True we return
+            # immediately.
+            if not nowait:
+                await asyncio.Event().wait()
+
+        connection.disconnect = AsyncMock(side_effect=fake_disconnect)
+
+        async with async_timeout(2):
+            await pubsub.aclose()
+
+        connection.disconnect.assert_awaited_once_with(nowait=True)
