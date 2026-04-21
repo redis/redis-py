@@ -3086,7 +3086,16 @@ class _ClusterNodePoolAdapter(ConnectionPoolInterface):
         self, command_name: Optional[str] = None, *keys: Any, **options: Any
     ) -> AbstractConnection:
         connection = self._node.acquire_connection()
-        await connection.connect()
+        try:
+            await connection.connect()
+        except BaseException:
+            # connect() may fail mid-handshake (e.g. after the TCP socket
+            # is established but before AUTH/HELLO completes) leaving the
+            # connection in a partially-connected state.  Disconnect before
+            # returning it to the node's free queue so it is not reused.
+            await connection.disconnect()
+            self._node.release(connection)
+            raise
         return connection
 
     async def release(self, connection: AbstractConnection) -> None:
