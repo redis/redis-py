@@ -7541,12 +7541,26 @@ class SortedSetCommands(CommandsProtocol):
     ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Return the intersect of multiple sorted sets specified by ``keys``.
+
         With the ``aggregate`` option, it is possible to specify how the
-        results of the union are aggregated. This option defaults to SUM,
-        where the score of an element is summed across the inputs where it
-        exists. When this option is set to either MIN or MAX, the resulting
-        set will contain the minimum or maximum score of an element across
-        the inputs where it exists.
+        results of the intersection are aggregated. Available aggregation
+        modes:
+
+        - ``SUM`` (default): the score of an element is summed across the
+          inputs where it exists.
+          Score = SUM(score₁×weight₁, score₂×weight₂, ...)
+        - ``MIN``: the resulting set will contain the minimum score of an
+          element across the inputs where it exists.
+          Score = MIN(score₁×weight₁, score₂×weight₂, ...)
+        - ``MAX``: the resulting set will contain the maximum score of an
+          element across the inputs where it exists.
+          Score = MAX(score₁×weight₁, score₂×weight₂, ...)
+        - ``COUNT``: ignores the original scores and counts weighted set
+          membership. Each element's score is the sum of the weights of
+          the input sets that contain it.
+          Score = SUM(weight₁, weight₂, ...) for sets containing the element.
+          When all weights are 1 (default), the score equals the number
+          of input sets containing the element.
 
         For more information, see https://redis.io/commands/zinter
         """
@@ -7577,11 +7591,25 @@ class SortedSetCommands(CommandsProtocol):
         """
         Intersect multiple sorted sets specified by ``keys`` into a new
         sorted set, ``dest``. Scores in the destination will be aggregated
-        based on the ``aggregate``. This option defaults to SUM, where the
-        score of an element is summed across the inputs where it exists.
-        When this option is set to either MIN or MAX, the resulting set will
-        contain the minimum or maximum score of an element across the inputs
-        where it exists.
+        based on the ``aggregate``.
+
+        Available aggregation modes:
+
+        - ``SUM`` (default): the score of an element is summed across the
+          inputs where it exists.
+          Score = SUM(score₁×weight₁, score₂×weight₂, ...)
+        - ``MIN``: the resulting set will contain the minimum score of an
+          element across the inputs where it exists.
+          Score = MIN(score₁×weight₁, score₂×weight₂, ...)
+        - ``MAX``: the resulting set will contain the maximum score of an
+          element across the inputs where it exists.
+          Score = MAX(score₁×weight₁, score₂×weight₂, ...)
+        - ``COUNT``: ignores the original scores and counts weighted set
+          membership. Each element's score is the sum of the weights of
+          the input sets that contain it.
+          Score = SUM(weight₁, weight₂, ...) for sets containing the element.
+          When all weights are 1 (default), the score equals the number
+          of input sets containing the element.
 
         For more information, see https://redis.io/commands/zinterstore
         """
@@ -8562,6 +8590,24 @@ class SortedSetCommands(CommandsProtocol):
         Scores will be aggregated based on the ``aggregate``, or SUM if
         none is provided.
 
+        Available aggregation modes:
+
+        - ``SUM`` (default): the score of an element is summed across the
+          inputs where it exists.
+          Score = SUM(score₁×weight₁, score₂×weight₂, ...)
+        - ``MIN``: the resulting set will contain the minimum score of an
+          element across the inputs where it exists.
+          Score = MIN(score₁×weight₁, score₂×weight₂, ...)
+        - ``MAX``: the resulting set will contain the maximum score of an
+          element across the inputs where it exists.
+          Score = MAX(score₁×weight₁, score₂×weight₂, ...)
+        - ``COUNT``: ignores the original scores and counts weighted set
+          membership. Each element's score is the sum of the weights of
+          the input sets that contain it.
+          Score = SUM(weight₁, weight₂, ...) for sets containing the element.
+          When all weights are 1 (default), the score equals the number
+          of input sets containing the element.
+
         ``score_cast_func`` a callable used to cast the score return value
 
         For more information, see https://redis.io/commands/zunion
@@ -8601,6 +8647,24 @@ class SortedSetCommands(CommandsProtocol):
         Union multiple sorted sets specified by ``keys`` into
         a new sorted set, ``dest``. Scores in the destination will be
         aggregated based on the ``aggregate``, or SUM if none is provided.
+
+        Available aggregation modes:
+
+        - ``SUM`` (default): the score of an element is summed across the
+          inputs where it exists.
+          Score = SUM(score₁×weight₁, score₂×weight₂, ...)
+        - ``MIN``: the resulting set will contain the minimum score of an
+          element across the inputs where it exists.
+          Score = MIN(score₁×weight₁, score₂×weight₂, ...)
+        - ``MAX``: the resulting set will contain the maximum score of an
+          element across the inputs where it exists.
+          Score = MAX(score₁×weight₁, score₂×weight₂, ...)
+        - ``COUNT``: ignores the original scores and counts weighted set
+          membership. Each element's score is the sum of the weights of
+          the input sets that contain it.
+          Score = SUM(weight₁, weight₂, ...) for sets containing the element.
+          When all weights are 1 (default), the score equals the number
+          of input sets containing the element.
 
         For more information, see https://redis.io/commands/zunionstore
         """
@@ -8655,11 +8719,11 @@ class SortedSetCommands(CommandsProtocol):
             pieces.append(b"WEIGHTS")
             pieces.extend(weights)
         if aggregate:
-            if aggregate.upper() in ["SUM", "MIN", "MAX"]:
+            if aggregate.upper() in ["SUM", "MIN", "MAX", "COUNT"]:
                 pieces.append(b"AGGREGATE")
                 pieces.append(aggregate)
             else:
-                raise DataError("aggregate can be sum, min or max.")
+                raise DataError("aggregate can be sum, min, max or count.")
         if options.get("withscores", False):
             pieces.append(b"WITHSCORES")
         options["keys"] = keys
