@@ -3804,6 +3804,25 @@ class TestRedisCommands:
         ]
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.7.0")
+    def test_zinter_count(self, r):
+        r.zadd("a", {"a1": 1, "a2": 2, "a3": 1})
+        r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        # aggregate with COUNT (scores ignored, counts membership)
+        assert r.zinter(["a", "b", "c"], aggregate="COUNT", withscores=True) == [
+            [b"a1", 3],
+            [b"a3", 3],
+        ]
+        # COUNT with weights
+        assert r.zinter(
+            {"a": 1, "b": 2, "c": 3}, aggregate="COUNT", withscores=True
+        ) == [
+            [b"a1", 6],
+            [b"a3", 6],
+        ]
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
     def test_zintercard(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 1})
@@ -3856,6 +3875,30 @@ class TestRedisCommands:
             [b"a1", 23],
         ]
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.7.0")
+    def test_zinterstore_count(self, r):
+        r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert r.zinterstore("d", ["a", "b", "c"], aggregate="COUNT") == 2
+        assert r.zrange("d", 0, -1, withscores=True) == [
+            [b"a1", 3],
+            [b"a3", 3],
+        ]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.7.0")
+    def test_zinterstore_count_with_weight(self, r):
+        r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert r.zinterstore("d", {"a": 1, "b": 2, "c": 3}, aggregate="COUNT") == 2
+        assert r.zrange("d", 0, -1, withscores=True) == [
+            [b"a1", 6],
+            [b"a3", 6],
+        ]
+
     @skip_if_server_version_lt("4.9.0")
     def test_zpopmax(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
@@ -3875,6 +3918,7 @@ class TestRedisCommands:
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
         assert r.zrandmember("a") is not None
         assert len(r.zrandmember("a", 2)) == 2
+
         # with scores
         assert len(r.zrandmember("a", 2, withscores=True)) == 2
         # without duplications
@@ -4267,6 +4311,29 @@ class TestRedisCommands:
         ]
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.7.0")
+    def test_zunion_count(self, r):
+        r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        # aggregate with COUNT (scores ignored, counts membership)
+        assert r.zunion(["a", "b", "c"], aggregate="COUNT", withscores=True) == [
+            [b"a4", 1],
+            [b"a2", 2],
+            [b"a1", 3],
+            [b"a3", 3],
+        ]
+        # COUNT with weights
+        assert r.zunion(
+            {"a": 1, "b": 2, "c": 3}, aggregate="COUNT", withscores=True
+        ) == [
+            [b"a2", 3],
+            [b"a4", 3],
+            [b"a1", 6],
+            [b"a3", 6],
+        ]
+
+    @pytest.mark.onlynoncluster
     def test_zunionstore_sum(self, r):
         r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
@@ -4316,6 +4383,34 @@ class TestRedisCommands:
             [b"a4", 12],
             [b"a3", 20],
             [b"a1", 23],
+        ]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.7.0")
+    def test_zunionstore_count(self, r):
+        r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert r.zunionstore("d", ["a", "b", "c"], aggregate="COUNT") == 4
+        assert r.zrange("d", 0, -1, withscores=True) == [
+            [b"a4", 1],
+            [b"a2", 2],
+            [b"a1", 3],
+            [b"a3", 3],
+        ]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.7.0")
+    def test_zunionstore_count_with_weight(self, r):
+        r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert r.zunionstore("d", {"a": 1, "b": 2, "c": 3}, aggregate="COUNT") == 4
+        assert r.zrange("d", 0, -1, withscores=True) == [
+            [b"a2", 3],
+            [b"a4", 3],
+            [b"a1", 6],
+            [b"a3", 6],
         ]
 
     @skip_if_server_version_lt("6.1.240")
@@ -5823,6 +5918,120 @@ class TestRedisCommands:
         r.xadd(stream, {"foo": "bar"})
         assert r.xlen(stream) == 2
 
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_silent(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        m2 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        # SILENT mode returns count of NACKed messages
+        result = r.xnack(stream, group, "SILENT", m1, m2)
+        assert result == 2
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_fail(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        # FAIL mode returns count of NACKed messages
+        result = r.xnack(stream, group, "FAIL", m1)
+        assert result == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_fatal(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        # FATAL mode returns count of NACKed messages
+        result = r.xnack(stream, group, "FATAL", m1)
+        assert result == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_multiple_ids(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        m2 = r.xadd(stream, {"foo": "bar"})
+        m3 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        result = r.xnack(stream, group, "FAIL", m1, m2, m3)
+        assert result == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_some_ids_not_in_pel(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        m2 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        # Only m1 and m2 are in PEL; "999999-0" is not
+        result = r.xnack(stream, group, "FAIL", m1, m2, "999999-0")
+        assert result == 2
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_retrycount(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        # Explicit retrycount overrides mode's counter adjustment
+        result = r.xnack(stream, group, "FAIL", m1, retrycount=5)
+        assert result == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_force(self, r):
+        stream = "stream"
+        group = "group"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        # FORCE creates unowned PEL entries for IDs not already in PEL
+        result = r.xnack(stream, group, "FAIL", m1, force=True)
+        assert result == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_invalid_mode(self, r):
+        stream = "stream"
+        group = "group"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        with pytest.raises(redis.DataError):
+            r.xnack(stream, group, "INVALID", m1)
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_no_ids(self, r):
+        stream = "stream"
+        group = "group"
+        r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        with pytest.raises(redis.DataError):
+            r.xnack(stream, group, "FAIL")
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_negative_retrycount(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        with pytest.raises(redis.DataError):
+            r.xnack(stream, group, "FAIL", m1, retrycount=-1)
+
     @skip_if_server_version_lt("5.0.0")
     def test_xpending(self, r):
         stream = "stream"
@@ -7096,7 +7305,7 @@ class TestGCRACommands:
         r.delete(key)
 
         # First request should not be limited
-        result = r.gcra(key, max_burst=10, requests_per_period=5, period=10.0)
+        result = r.gcra(key, max_burst=10, tokens_per_period=5, period=10.0)
 
         assert isinstance(result, GCRAResponse)
 
@@ -7112,15 +7321,13 @@ class TestGCRACommands:
         assert result.full_burst_after >= 0
 
     @skip_if_server_version_lt("8.7.0")
-    def test_gcra_with_num_requests(self, r):
-        """Test GCRA command with NUM_REQUESTS option"""
-        key = "gcra_test_num_requests"
+    def test_gcra_with_tokens(self, r):
+        """Test GCRA command with TOKENS option"""
+        key = "gcra_test_tokens"
         r.delete(key)
 
         # Request with a cost of 3
-        result = r.gcra(
-            key, max_burst=10, requests_per_period=5, period=10.0, num_requests=3
-        )
+        result = r.gcra(key, max_burst=10, tokens_per_period=5, period=10.0, tokens=3)
 
         assert isinstance(result, GCRAResponse)
         assert result.limited is False  # Should not be limited initially
@@ -7148,7 +7355,7 @@ class TestGCRACommands:
             result = r.gcra(
                 rate_limit_key,
                 max_burst=1,
-                requests_per_period=2,
+                tokens_per_period=2,
                 period=60.0,
             )
             assert isinstance(result, GCRAResponse)
@@ -7172,22 +7379,22 @@ class TestGCRACommands:
     def test_gcra_invalid_max_burst(self, r):
         """Test GCRA command with invalid max_burst parameter"""
         with pytest.raises(exceptions.DataError):
-            r.gcra("test_key", max_burst=-1, requests_per_period=5, period=10.0)
+            r.gcra("test_key", max_burst=-1, tokens_per_period=5, period=10.0)
 
-    def test_gcra_invalid_requests_per_period(self, r):
-        """Test GCRA command with invalid requests_per_period parameter"""
+    def test_gcra_invalid_tokens_per_period(self, r):
+        """Test GCRA command with invalid tokens_per_period parameter"""
         with pytest.raises(exceptions.DataError):
-            r.gcra("test_key", max_burst=10, requests_per_period=0, period=10.0)
+            r.gcra("test_key", max_burst=10, tokens_per_period=0, period=10.0)
 
     def test_gcra_invalid_period_too_small(self, r):
         """Test GCRA command with period less than 1.0"""
         with pytest.raises(exceptions.DataError):
-            r.gcra("test_key", max_burst=10, requests_per_period=5, period=0.5)
+            r.gcra("test_key", max_burst=10, tokens_per_period=5, period=0.5)
 
     def test_gcra_invalid_period_too_large(self, r):
         """Test GCRA command with period greater than 1e12"""
         with pytest.raises(exceptions.DataError):
-            r.gcra("test_key", max_burst=10, requests_per_period=5, period=1e13)
+            r.gcra("test_key", max_burst=10, tokens_per_period=5, period=1e13)
 
 
 @pytest.mark.onlynoncluster

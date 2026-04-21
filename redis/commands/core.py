@@ -2433,9 +2433,9 @@ class ManagementCommands(CommandsProtocol):
         self: SyncClientProtocol,
         key: KeyT,
         max_burst: int,
-        requests_per_period: int,
+        tokens_per_period: int,
         period: float,
-        num_requests: int | None = None,
+        tokens: int | None = None,
     ) -> GCRAResponse: ...
 
     @overload
@@ -2443,18 +2443,18 @@ class ManagementCommands(CommandsProtocol):
         self: AsyncClientProtocol,
         key: KeyT,
         max_burst: int,
-        requests_per_period: int,
+        tokens_per_period: int,
         period: float,
-        num_requests: int | None = None,
+        tokens: int | None = None,
     ) -> Awaitable[GCRAResponse]: ...
 
     def gcra(
         self,
         key: KeyT,
         max_burst: int,
-        requests_per_period: int,
+        tokens_per_period: int,
         period: float,
-        num_requests: int | None = None,
+        tokens: int | None = None,
     ) -> GCRAResponse | Awaitable[GCRAResponse]:
         """
         Rate limit via GCRA (Generic Cell Rate Algorithm).
@@ -2465,13 +2465,13 @@ class ManagementCommands(CommandsProtocol):
         ``max_burst`` is the maximum number of tokens allowed as a burst
             (in addition to the sustained rate). Minimum: 0.
 
-        ``requests_per_period`` is the number of requests allowed per period.
+        ``tokens_per_period`` is the number of tokens allowed per period.
             Minimum: 1.
 
         ``period`` is the period in seconds as a floating point number used for
             calculating the sustained rate. Minimum: 1.0, Maximum: 1e12.
 
-        ``num_requests`` is the cost (or weight) of this rate-limiting request.
+        ``tokens`` is the cost (or weight) of this rate-limiting request.
             A higher cost drains the allowance faster. Default: 1.
 
         Returns a GCRAResponse dataclass with:
@@ -2486,14 +2486,14 @@ class ManagementCommands(CommandsProtocol):
         """
         if max_burst < 0:
             raise DataError("GCRA max_burst must be >= 0")
-        if requests_per_period < 1:
-            raise DataError("GCRA requests_per_period must be >= 1")
+        if tokens_per_period < 1:
+            raise DataError("GCRA tokens_per_period must be >= 1")
         if period < 1.0 or period > 1e12:
             raise DataError("GCRA period must be between 1.0 and 1e12")
 
-        pieces: list[EncodableT] = [key, max_burst, requests_per_period, period]
-        if num_requests is not None:
-            pieces.extend(["NUM_REQUESTS", num_requests])
+        pieces: list[EncodableT] = [key, max_burst, tokens_per_period, period]
+        if tokens is not None:
+            pieces.extend(["TOKENS", tokens])
 
         return self.execute_command("GCRA", *pieces)
 
@@ -6789,6 +6789,78 @@ class StreamCommands(CommandsProtocol):
         return self.execute_command("XLEN", name, keys=[name])
 
     @overload
+    def xnack(
+        self: SyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        mode: Literal["SILENT", "FAIL", "FATAL"],
+        *ids: StreamIdT,
+        retrycount: int | None = None,
+        force: bool = False,
+    ) -> int: ...
+
+    @overload
+    def xnack(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        groupname: GroupT,
+        mode: Literal["SILENT", "FAIL", "FATAL"],
+        *ids: StreamIdT,
+        retrycount: int | None = None,
+        force: bool = False,
+    ) -> Awaitable[int]: ...
+
+    def xnack(
+        self,
+        name: KeyT,
+        groupname: GroupT,
+        mode: Literal["SILENT", "FAIL", "FATAL"],
+        *ids: StreamIdT,
+        retrycount: int | None = None,
+        force: bool = False,
+    ) -> int | Awaitable[int]:
+        """
+        Negatively acknowledges one or more messages in a consumer group's
+        Pending Entries List (PEL).
+
+        Args:
+            name: name of the stream.
+            groupname: name of the consumer group.
+            mode: the nacking mode. One of SILENT, FAIL, or FATAL.
+                SILENT: consumer shutting down; decrements delivery counter.
+                FAIL: consumer unable to process; delivery counter unchanged.
+                FATAL: invalid/malicious message; delivery counter set to max.
+            *ids: one or more message IDs to NACK.
+            retrycount: optional integer >= 0. Overrides the mode's implicit
+                delivery counter adjustment with an exact value.
+            force: if True, creates a new unowned PEL entry for any ID not
+                already in the group's PEL.
+
+        Returns:
+            The number of messages successfully NACKed.
+
+        For more information, see https://redis.io/commands/xnack
+        """
+        if not ids:
+            raise DataError("XNACK requires at least one message ID")
+
+        if mode not in {"SILENT", "FAIL", "FATAL"}:
+            raise DataError("XNACK mode must be one of: SILENT, FAIL, FATAL")
+
+        pieces: list = [name, groupname, mode, "IDS", len(ids)]
+        pieces.extend(ids)
+
+        if retrycount is not None:
+            if retrycount < 0:
+                raise DataError("XNACK retrycount must be >= 0")
+            pieces.extend([b"RETRYCOUNT", retrycount])
+
+        if force:
+            pieces.append(b"FORCE")
+
+        return self.execute_command("XNACK", *pieces)
+
+    @overload
     def xpending(
         self: SyncClientProtocol, name: KeyT, groupname: GroupT
     ) -> dict[str, Any]: ...
@@ -7469,12 +7541,26 @@ class SortedSetCommands(CommandsProtocol):
     ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Return the intersect of multiple sorted sets specified by ``keys``.
+
         With the ``aggregate`` option, it is possible to specify how the
-        results of the union are aggregated. This option defaults to SUM,
-        where the score of an element is summed across the inputs where it
-        exists. When this option is set to either MIN or MAX, the resulting
-        set will contain the minimum or maximum score of an element across
-        the inputs where it exists.
+        results of the intersection are aggregated. Available aggregation
+        modes:
+
+        - ``SUM`` (default): the score of an element is summed across the
+          inputs where it exists.
+          Score = SUM(score₁×weight₁, score₂×weight₂, ...)
+        - ``MIN``: the resulting set will contain the minimum score of an
+          element across the inputs where it exists.
+          Score = MIN(score₁×weight₁, score₂×weight₂, ...)
+        - ``MAX``: the resulting set will contain the maximum score of an
+          element across the inputs where it exists.
+          Score = MAX(score₁×weight₁, score₂×weight₂, ...)
+        - ``COUNT``: ignores the original scores and counts weighted set
+          membership. Each element's score is the sum of the weights of
+          the input sets that contain it.
+          Score = SUM(weight₁, weight₂, ...) for sets containing the element.
+          When all weights are 1 (default), the score equals the number
+          of input sets containing the element.
 
         For more information, see https://redis.io/commands/zinter
         """
@@ -7505,11 +7591,25 @@ class SortedSetCommands(CommandsProtocol):
         """
         Intersect multiple sorted sets specified by ``keys`` into a new
         sorted set, ``dest``. Scores in the destination will be aggregated
-        based on the ``aggregate``. This option defaults to SUM, where the
-        score of an element is summed across the inputs where it exists.
-        When this option is set to either MIN or MAX, the resulting set will
-        contain the minimum or maximum score of an element across the inputs
-        where it exists.
+        based on the ``aggregate``.
+
+        Available aggregation modes:
+
+        - ``SUM`` (default): the score of an element is summed across the
+          inputs where it exists.
+          Score = SUM(score₁×weight₁, score₂×weight₂, ...)
+        - ``MIN``: the resulting set will contain the minimum score of an
+          element across the inputs where it exists.
+          Score = MIN(score₁×weight₁, score₂×weight₂, ...)
+        - ``MAX``: the resulting set will contain the maximum score of an
+          element across the inputs where it exists.
+          Score = MAX(score₁×weight₁, score₂×weight₂, ...)
+        - ``COUNT``: ignores the original scores and counts weighted set
+          membership. Each element's score is the sum of the weights of
+          the input sets that contain it.
+          Score = SUM(weight₁, weight₂, ...) for sets containing the element.
+          When all weights are 1 (default), the score equals the number
+          of input sets containing the element.
 
         For more information, see https://redis.io/commands/zinterstore
         """
@@ -8490,6 +8590,24 @@ class SortedSetCommands(CommandsProtocol):
         Scores will be aggregated based on the ``aggregate``, or SUM if
         none is provided.
 
+        Available aggregation modes:
+
+        - ``SUM`` (default): the score of an element is summed across the
+          inputs where it exists.
+          Score = SUM(score₁×weight₁, score₂×weight₂, ...)
+        - ``MIN``: the resulting set will contain the minimum score of an
+          element across the inputs where it exists.
+          Score = MIN(score₁×weight₁, score₂×weight₂, ...)
+        - ``MAX``: the resulting set will contain the maximum score of an
+          element across the inputs where it exists.
+          Score = MAX(score₁×weight₁, score₂×weight₂, ...)
+        - ``COUNT``: ignores the original scores and counts weighted set
+          membership. Each element's score is the sum of the weights of
+          the input sets that contain it.
+          Score = SUM(weight₁, weight₂, ...) for sets containing the element.
+          When all weights are 1 (default), the score equals the number
+          of input sets containing the element.
+
         ``score_cast_func`` a callable used to cast the score return value
 
         For more information, see https://redis.io/commands/zunion
@@ -8529,6 +8647,24 @@ class SortedSetCommands(CommandsProtocol):
         Union multiple sorted sets specified by ``keys`` into
         a new sorted set, ``dest``. Scores in the destination will be
         aggregated based on the ``aggregate``, or SUM if none is provided.
+
+        Available aggregation modes:
+
+        - ``SUM`` (default): the score of an element is summed across the
+          inputs where it exists.
+          Score = SUM(score₁×weight₁, score₂×weight₂, ...)
+        - ``MIN``: the resulting set will contain the minimum score of an
+          element across the inputs where it exists.
+          Score = MIN(score₁×weight₁, score₂×weight₂, ...)
+        - ``MAX``: the resulting set will contain the maximum score of an
+          element across the inputs where it exists.
+          Score = MAX(score₁×weight₁, score₂×weight₂, ...)
+        - ``COUNT``: ignores the original scores and counts weighted set
+          membership. Each element's score is the sum of the weights of
+          the input sets that contain it.
+          Score = SUM(weight₁, weight₂, ...) for sets containing the element.
+          When all weights are 1 (default), the score equals the number
+          of input sets containing the element.
 
         For more information, see https://redis.io/commands/zunionstore
         """
@@ -8583,11 +8719,11 @@ class SortedSetCommands(CommandsProtocol):
             pieces.append(b"WEIGHTS")
             pieces.extend(weights)
         if aggregate:
-            if aggregate.upper() in ["SUM", "MIN", "MAX"]:
+            if aggregate.upper() in ["SUM", "MIN", "MAX", "COUNT"]:
                 pieces.append(b"AGGREGATE")
                 pieces.append(aggregate)
             else:
-                raise DataError("aggregate can be sum, min or max.")
+                raise DataError("aggregate can be sum, min, max or count.")
         if options.get("withscores", False):
             pieces.append(b"WITHSCORES")
         options["keys"] = keys

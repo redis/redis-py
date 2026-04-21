@@ -14,6 +14,26 @@ If you don't know where to start, consider improving
 documentation, bug triaging, and writing tutorials are all examples of
 helpful contributions that mean less work for you.
 
+## AI-driven contributions
+
+Redis-py defines a list of custom Claude commands (skills) that may simplify your contribution by enriching the agent's
+context with necessary information and repository best practices. Commands are well-structured instructions for common
+recurring tasks (e.g., adding support for a new Redis command API).
+
+The list of available commands is available via:
+
+**Claude CLI**
+
+```
+claude /skills
+```
+
+**Augment CLI**
+
+```
+auggie command list
+```
+
 ## Your First Contribution
 
 Unsure where to begin contributing? You can start by looking through
