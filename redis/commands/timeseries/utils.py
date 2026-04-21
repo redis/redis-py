@@ -5,6 +5,11 @@ def _pairs_to_dict(pairs):
 
 def parse_range(response, **kwargs):
     """Parse range response. Used by TS.RANGE and TS.REVRANGE."""
+    if not response:
+        return []
+    # Multi-aggregator: samples have >2 elements [timestamp, val1, val2, ...]
+    if len(response[0]) > 2:
+        return [[r[0]] + [float(v) for v in r[1:]] for r in response]
     return [[r[0], float(r[1])] for r in response]
 
 
