@@ -2009,6 +2009,40 @@ class TestClusterRedisCommands:
             [b"a1", 23.0],
         ]
 
+    @skip_if_server_version_lt("8.7.0")
+    async def test_cluster_zinterstore_count(self, r: RedisCluster) -> None:
+        await r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
+        await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
+        await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
+        assert (
+            await r.zinterstore(
+                "{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="COUNT"
+            )
+            == 2
+        )
+        assert await r.zrange("{foo}d", 0, -1, withscores=True) == [
+            [b"a1", 3.0],
+            [b"a3", 3.0],
+        ]
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_cluster_zinterstore_count_with_weight(self, r: RedisCluster) -> None:
+        await r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
+        await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
+        await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
+        assert (
+            await r.zinterstore(
+                "{foo}d",
+                {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3},
+                aggregate="COUNT",
+            )
+            == 2
+        )
+        assert await r.zrange("{foo}d", 0, -1, withscores=True) == [
+            [b"a1", 6.0],
+            [b"a3", 6.0],
+        ]
+
     @skip_if_server_version_lt("4.9.0")
     async def test_cluster_bzpopmax(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 2})
@@ -2179,6 +2213,44 @@ class TestClusterRedisCommands:
             [b"a4", 12.0],
             [b"a3", 20.0],
             [b"a1", 23.0],
+        ]
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_cluster_zunionstore_count(self, r: RedisCluster) -> None:
+        await r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
+        await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
+        await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
+        assert (
+            await r.zunionstore(
+                "{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="COUNT"
+            )
+            == 4
+        )
+        assert await r.zrange("{foo}d", 0, -1, withscores=True) == [
+            [b"a4", 1.0],
+            [b"a2", 2.0],
+            [b"a1", 3.0],
+            [b"a3", 3.0],
+        ]
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_cluster_zunionstore_count_with_weight(self, r: RedisCluster) -> None:
+        await r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
+        await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
+        await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
+        assert (
+            await r.zunionstore(
+                "{foo}d",
+                {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3},
+                aggregate="COUNT",
+            )
+            == 4
+        )
+        assert await r.zrange("{foo}d", 0, -1, withscores=True) == [
+            [b"a2", 3.0],
+            [b"a4", 3.0],
+            [b"a1", 6.0],
+            [b"a3", 6.0],
         ]
 
     @skip_if_server_version_lt("2.8.9")

@@ -865,3 +865,129 @@ async def test_mrevrange_with_count_nan_count_all_aggregators(decoded_r: redis.R
     assert 2 == len(data_points)
     assert [[1000, 2.0]] == data_points["temperature:A"][2]
     assert [[1000, 2.0]] == data_points["temperature:B"][2]
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.7.0")
+async def test_range_multiple_aggregators(decoded_r: redis.Redis):
+    """Test TS.RANGE with multiple aggregators (Redis 8.8+)."""
+    await decoded_r.ts().create("ts:multi_agg")
+    await decoded_r.ts().add("ts:multi_agg", 1000, 10)
+    await decoded_r.ts().add("ts:multi_agg", 1001, 20)
+    await decoded_r.ts().add("ts:multi_agg", 1002, 30)
+
+    result = await decoded_r.ts().range(
+        "ts:multi_agg",
+        1000,
+        1002,
+        aggregation_type=["min", "max", "avg"],
+        bucket_size_msec=10,
+    )
+    assert len(result) == 1
+    assert result[0][0] == 1000  # timestamp
+    assert result[0][1] == 10.0  # min
+    assert result[0][2] == 30.0  # max
+    assert result[0][3] == 20.0  # avg
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.7.0")
+async def test_revrange_multiple_aggregators(decoded_r: redis.Redis):
+    """Test TS.REVRANGE with multiple aggregators (Redis 8.8+)."""
+    await decoded_r.ts().create("ts:multi_agg")
+    await decoded_r.ts().add("ts:multi_agg", 1000, 10)
+    await decoded_r.ts().add("ts:multi_agg", 1001, 20)
+    await decoded_r.ts().add("ts:multi_agg", 1002, 30)
+
+    result = await decoded_r.ts().revrange(
+        "ts:multi_agg",
+        1000,
+        1002,
+        aggregation_type=["min", "max", "avg"],
+        bucket_size_msec=10,
+    )
+    assert len(result) == 1
+    assert result[0][0] == 1000  # timestamp
+    assert result[0][1] == 10.0  # min
+    assert result[0][2] == 30.0  # max
+    assert result[0][3] == 20.0  # avg
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.7.0")
+async def test_mrange_multiple_aggregators(decoded_r: redis.Redis):
+    """Test TS.MRANGE with multiple aggregators (Redis 8.8+)."""
+    await decoded_r.ts().create("ts:multi_agg_a", labels={"type": "test_multi_agg"})
+    await decoded_r.ts().add("ts:multi_agg_a", 1000, 10)
+    await decoded_r.ts().add("ts:multi_agg_a", 1001, 20)
+
+    result = await decoded_r.ts().mrange(
+        1000,
+        1001,
+        filters=["type=test_multi_agg"],
+        aggregation_type=["min", "max"],
+        bucket_size_msec=10,
+    )
+    assert "ts:multi_agg_a" in result
+    samples = result["ts:multi_agg_a"][2]
+    assert len(samples) == 1
+    assert samples[0][0] == 1000  # timestamp
+    assert samples[0][1] == 10.0  # min
+    assert samples[0][2] == 20.0  # max
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.7.0")
+async def test_mrevrange_multiple_aggregators(decoded_r: redis.Redis):
+    """Test TS.MREVRANGE with multiple aggregators (Redis 8.8+)."""
+    await decoded_r.ts().create("ts:multi_agg_b", labels={"type": "test_multi_agg_rev"})
+    await decoded_r.ts().add("ts:multi_agg_b", 1000, 10)
+    await decoded_r.ts().add("ts:multi_agg_b", 1001, 20)
+
+    result = await decoded_r.ts().mrevrange(
+        1000,
+        1001,
+        filters=["type=test_multi_agg_rev"],
+        aggregation_type=["min", "max"],
+        bucket_size_msec=10,
+    )
+    assert "ts:multi_agg_b" in result
+    samples = result["ts:multi_agg_b"][2]
+    assert len(samples) == 1
+    assert samples[0][0] == 1000  # timestamp
+    assert samples[0][1] == 10.0  # min
+    assert samples[0][2] == 20.0  # max
+
+
+@pytest.mark.redismod
+async def test_mrange_groupby_multiple_aggregators_raises(decoded_r: redis.Redis):
+    """Test that GROUPBY with multiple aggregators raises DataError."""
+    await decoded_r.ts().create("ts:gb_test", labels={"type": "test_gb"})
+
+    with pytest.raises(redis.DataError, match="GROUPBY is not allowed"):
+        await decoded_r.ts().mrange(
+            0,
+            100,
+            filters=["type=test_gb"],
+            aggregation_type=["min", "max"],
+            bucket_size_msec=10,
+            groupby="type",
+            reduce="max",
+        )
+
+
+@pytest.mark.redismod
+async def test_mrevrange_groupby_multiple_aggregators_raises(decoded_r: redis.Redis):
+    """Test that GROUPBY with multiple aggregators raises DataError."""
+    await decoded_r.ts().create("ts:gb_test2", labels={"type": "test_gb2"})
+
+    with pytest.raises(redis.DataError, match="GROUPBY is not allowed"):
+        await decoded_r.ts().mrevrange(
+            0,
+            100,
+            filters=["type=test_gb2"],
+            aggregation_type=["min", "max"],
+            bucket_size_msec=10,
+            groupby="type",
+            reduce="max",
+        )
