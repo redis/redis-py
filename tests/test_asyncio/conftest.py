@@ -285,3 +285,43 @@ def redis_url(request):
 def connect_args(request):
     url = request.config.getoption("--redis-url")
     return parse_url(url)
+
+
+@pytest_asyncio.fixture()
+async def async_r_with_keyspace_notifications(create_redis):
+    """An async Redis client with keyspace notifications enabled.
+
+    Works for both standalone Redis and RedisCluster.
+    In cluster mode, keyspace notifications are enabled on all primary nodes.
+    """
+    client = await create_redis()
+    cluster_mode = REDIS_INFO.get("cluster_enabled", False)
+
+    original_configs = {}
+    if cluster_mode:
+        for node in client.get_primaries():
+            node_conn = redis.Redis(host=node.host, port=node.port)
+            original = await node_conn.config_get("notify-keyspace-events")
+            original_configs[node.name] = (
+                node_conn,
+                original.get("notify-keyspace-events", ""),
+            )
+            await node_conn.config_set("notify-keyspace-events", "KEASTIV")
+    else:
+        original = await client.config_get("notify-keyspace-events")
+        original_configs["standalone"] = (
+            client,
+            original.get("notify-keyspace-events", ""),
+        )
+        await client.config_set("notify-keyspace-events", "KEASTIV")
+
+    try:
+        yield client
+    finally:
+        for _name, (conn, original_value) in original_configs.items():
+            try:
+                await conn.config_set("notify-keyspace-events", original_value)
+            except Exception:
+                pass
+            if cluster_mode:
+                await conn.aclose()
