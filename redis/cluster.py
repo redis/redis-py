@@ -4,6 +4,7 @@ import socket
 import sys
 import threading
 import time
+import weakref
 from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
 from copy import copy
@@ -2058,6 +2059,9 @@ class NodesManager:
         self.startup_nodes: dict[str, ClusterNode] = {n.name: n for n in startup_nodes}
         self.default_node: Optional[ClusterNode] = None
         self._epoch: int = 0
+        # Observers notified after slots_cache is refreshed (e.g. ClusterPubSub
+        # instances that need to reconcile per-node shard subscriptions).
+        self._pubsub_observers: "weakref.WeakSet[ClusterPubSub]" = weakref.WeakSet()
         self.from_url = from_url
         self._require_full_coverage = require_full_coverage
         self._dynamic_startup_nodes = dynamic_startup_nodes
@@ -2122,6 +2126,7 @@ class NodesManager:
         """
         Update the slot's node with the redirected one
         """
+        node_changed = False
         with self._lock:
             redirected_node = self.get_node(host=e.host, port=e.port)
             if redirected_node is not None:
@@ -2140,6 +2145,7 @@ class NodesManager:
                 # shard. We need to remove all current nodes from the slot's list
                 # (including replications) and add just the new node.
                 self.slots_cache[e.slot_id] = [redirected_node]
+                node_changed = True
             elif redirected_node is not slot_nodes[0]:
                 # The MOVED error resulted from a failover, and the new slot owner
                 # had previously been a replica.
@@ -2156,7 +2162,13 @@ class NodesManager:
                 if self.default_node == old_primary:
                     # Update the default node with the new primary
                     self.default_node = redirected_node
+                node_changed = True
             # else: circular MOVED to current primary -> no-op
+        # Notify observers outside the lock so reconciliation can acquire its
+        # own locks without risk of deadlock. Skipped on the no-op branch to
+        # avoid needless reconciliation walks under MOVED storms.
+        if node_changed:
+            self._notify_pubsub_observers()
 
     @deprecated_args(
         args_to_warn=["server_type"],
@@ -2548,6 +2560,42 @@ class NodesManager:
                     self.startup_nodes = tmp_nodes_cache
                 # Increment the epoch to signal that initialization has completed
                 self._epoch += 1
+            # Notify observers (e.g. ClusterPubSub) that slot ownership may
+            # have changed so they can reconcile per-node subscriptions.
+            self._notify_pubsub_observers()
+
+    def register_pubsub_observer(self, observer: "ClusterPubSub") -> None:
+        """
+        Register a pubsub observer to be notified after slots-cache changes.
+        Thread-safe; safe to call concurrently with slots-cache refreshes.
+        """
+        with self._lock:
+            self._pubsub_observers.add(observer)
+
+    def unregister_pubsub_observer(self, observer: "ClusterPubSub") -> None:
+        """
+        Remove a pubsub observer. Thread-safe; silently ignored if missing.
+        """
+        with self._lock:
+            self._pubsub_observers.discard(observer)
+
+    def _notify_pubsub_observers(self) -> None:
+        # Snapshot the observer set under the lock because WeakSet is not
+        # thread-safe for concurrent mutation + iteration. Callbacks are
+        # invoked outside the lock to avoid holding it across code that may
+        # re-enter the NodesManager (e.g. cluster.get_node_from_key).
+        with self._lock:
+            observers = list(self._pubsub_observers)
+        for observer in observers:
+            try:
+                observer._on_slots_changed()
+            except Exception:
+                # Observers must not break slots-cache refresh; log and
+                # continue so a single buggy observer cannot starve the rest.
+                logger.exception(
+                    "pubsub observer %r raised during slots-cache change",
+                    observer,
+                )
 
     def close(self) -> None:
         with self._lock:
@@ -2628,6 +2676,10 @@ class ClusterPubSub(PubSub):
         )
         self.cluster = redis_cluster
         self.node_pubsub_mapping = {}
+        # Reverse index: shard channel (normalized) -> owning node.name. Used to
+        # route sunsubscribe calls and reconcile subscriptions after slot
+        # migration / failover.
+        self._shard_channel_to_node: dict = {}
         self._pubsubs_generator = self._pubsubs_generator()
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -2640,6 +2692,12 @@ class ClusterPubSub(PubSub):
             event_dispatcher=self._event_dispatcher,
             **kwargs,
         )
+        # Register for slots-cache change notifications so shard subscriptions
+        # can be reconciled automatically after topology refreshes.
+        try:
+            redis_cluster.nodes_manager.register_pubsub_observer(self)
+        except AttributeError:
+            pass
 
     def set_pubsub_node(self, cluster, node=None, host=None, port=None):
         """
@@ -2760,6 +2818,12 @@ class ClusterPubSub(PubSub):
             self.node_pubsub_mapping[node.name] = pubsub
             return pubsub
 
+    def _find_node_name_for_pubsub(self, pubsub):
+        for node_name, node_pubsub in self.node_pubsub_mapping.items():
+            if node_pubsub is pubsub:
+                return node_name
+        return None
+
     def _sharded_message_generator(self, timeout=0.0):
         for _ in range(len(self.node_pubsub_mapping)):
             pubsub = next(self._pubsubs_generator)
@@ -2769,8 +2833,8 @@ class ClusterPubSub(PubSub):
                 ignore_subscribe_messages=False, timeout=timeout
             )
             if message is not None:
-                return message
-        return None
+                return pubsub, message
+        return None, None
 
     def _pubsubs_generator(self):
         while True:
@@ -2785,20 +2849,38 @@ class ClusterPubSub(PubSub):
         if target_node:
             # Don't pass ignore_subscribe_messages here - let get_sharded_message
             # handle the filtering after processing subscription state changes
-            message = self.node_pubsub_mapping[target_node.name].get_message(
+            pubsub = self.node_pubsub_mapping[target_node.name]
+            message = pubsub.get_message(
                 ignore_subscribe_messages=False, timeout=timeout
             )
         else:
-            message = self._sharded_message_generator(timeout=timeout)
+            pubsub, message = self._sharded_message_generator(timeout=timeout)
         if message is None:
             return None
         elif str_if_bytes(message["type"]) == "sunsubscribe":
             if message["channel"] in self.pending_unsubscribe_shard_channels:
+                # User-initiated sunsubscribe: drop from cluster-level tracking.
                 self.pending_unsubscribe_shard_channels.remove(message["channel"])
                 self.shard_channels.pop(message["channel"], None)
-                node = self.cluster.get_node_from_key(message["channel"])
-                if self.node_pubsub_mapping[node.name].subscribed is False:
-                    self.node_pubsub_mapping.pop(node.name)
+                self._shard_channel_to_node.pop(message["channel"], None)
+            # Drop the per-node pubsub that delivered the confirmation once it
+            # no longer holds any shard subscriptions, regardless of whether
+            # the sunsubscribe was user-initiated or driven by slot-migration
+            # reconciliation (_migrate_shard_channel, which intentionally does
+            # not add the channel to pending_unsubscribe_shard_channels). This
+            # releases the dedicated connection that would otherwise linger.
+            # Identifying the receiving pubsub directly (rather than via the
+            # cluster's current slot map) is required after slot migration,
+            # where the channel's owner is no longer the node that received
+            # our original SSUBSCRIBE.
+            if pubsub is not None and not pubsub.subscribed:
+                name = self._find_node_name_for_pubsub(pubsub)
+                if name is not None:
+                    try:
+                        pubsub.reset()
+                    except Exception:
+                        pass
+                    self.node_pubsub_mapping.pop(name, None)
         if not self.channels and not self.patterns and not self.shard_channels:
             # There are no subscriptions anymore, set subscribed_event flag
             # to false
@@ -2816,12 +2898,29 @@ class ClusterPubSub(PubSub):
         s_channels.update(kwargs)
         for s_channel, handler in s_channels.items():
             node = self.cluster.get_node_from_key(s_channel)
+            # Lazy re-route: if this channel is already tracked against a
+            # different node (e.g. after a slot migration), migrate it now so
+            # the caller's intent is applied on the current owner.
+            normalized_key = next(iter(self._normalize_keys({s_channel: None})))
+            old_name = self._shard_channel_to_node.get(normalized_key)
+            if old_name and old_name != node.name:
+                # Match PubSub.ssubscribe() dict.update() semantics: the
+                # caller's newly supplied handler (including None) always
+                # overrides any previously registered handler.
+                self._migrate_shard_channel(
+                    normalized_key,
+                    handler,
+                    old_name,
+                    node,
+                )
+                continue
             pubsub = self._get_node_pubsub(node)
             if handler:
                 pubsub.ssubscribe(**{s_channel: handler})
             else:
                 pubsub.ssubscribe(s_channel)
             self.shard_channels.update(pubsub.shard_channels)
+            self._shard_channel_to_node[normalized_key] = node.name
             self.pending_unsubscribe_shard_channels.difference_update(
                 self._normalize_keys({s_channel: None})
             )
@@ -2833,15 +2932,111 @@ class ClusterPubSub(PubSub):
         if args:
             args = list_or_args(args[0], args[1:])
         else:
-            args = self.shard_channels
+            args = list(self.shard_channels)
 
         for s_channel in args:
-            node = self.cluster.get_node_from_key(s_channel)
-            p = self._get_node_pubsub(node)
+            normalized_key = next(iter(self._normalize_keys({s_channel: None})))
+            # Route via the reverse index so we unsubscribe on the node that
+            # actually holds the subscription. After a slot migration the
+            # cluster's current owner may no longer be that node.
+            name = self._shard_channel_to_node.get(normalized_key)
+            if name and name in self.node_pubsub_mapping:
+                p = self.node_pubsub_mapping[name]
+            else:
+                node = self.cluster.get_node_from_key(s_channel)
+                p = self._get_node_pubsub(node)
             p.sunsubscribe(s_channel)
             self.pending_unsubscribe_shard_channels.update(
                 p.pending_unsubscribe_shard_channels
             )
+
+    def reinitialize_shard_subscriptions(self):
+        """
+        Reconcile per-node shard subscriptions against the cluster's current
+        slot ownership map. For each tracked shard channel whose owning node
+        has changed (e.g. after CLUSTER SETSLOT / failover), sunsubscribe on
+        the old node's pubsub and ssubscribe on the new owner's pubsub,
+        preserving any registered handler.
+        """
+        uncovered: list = []
+        with self._lock:
+            for channel, handler in list(self.shard_channels.items()):
+                try:
+                    new_node = self.cluster.get_node_from_key(channel)
+                except SlotNotCoveredError:
+                    # Slot is transiently uncovered (mid-migration / partial
+                    # topology refresh). Defer this channel so coverable
+                    # siblings still reconcile this pass; we surface the
+                    # error below so the caller (and logs) know not every
+                    # channel was reconciled. Retry happens on the next
+                    # slots-cache change notification.
+                    uncovered.append(channel)
+                    continue
+                old_name = self._shard_channel_to_node.get(channel)
+                if old_name == new_node.name:
+                    continue
+                self._migrate_shard_channel(channel, handler, old_name, new_node)
+            # Garbage-collect per-node pubsubs that no longer hold any
+            # subscription so their connections are released.
+            for name, pubsub in list(self.node_pubsub_mapping.items()):
+                if not pubsub.subscribed:
+                    try:
+                        pubsub.reset()
+                    except Exception:
+                        pass
+                    self.node_pubsub_mapping.pop(name, None)
+        if uncovered:
+            # Surface the uncovered channels so the caller (and observer
+            # notification path) knows reconciliation was incomplete. All
+            # coverable siblings have already been migrated above.
+            raise SlotNotCoveredError(
+                f"{len(uncovered)} shard channel(s) left unreconciled; "
+                f"slot(s) not covered by the cluster: {uncovered!r}"
+            )
+
+    def _migrate_shard_channel(self, channel, handler, old_name, new_node):
+        # Detach from the old per-node pubsub, best-effort: the old node may
+        # already be unreachable during migration / failover.
+        if old_name and old_name in self.node_pubsub_mapping:
+            old_pubsub = self.node_pubsub_mapping[old_name]
+            try:
+                old_pubsub.sunsubscribe(channel)
+            except (ConnectionError, TimeoutError, OSError):
+                pass
+        # Attach to the new per-node pubsub, preserving the handler. Decode to
+        # a text key only when we must pass it as a kwarg (handler present).
+        new_pubsub = self._get_node_pubsub(new_node)
+        if handler:
+            decoded = (
+                self.encoder.decode(channel, force=True)
+                if isinstance(channel, (bytes, bytearray))
+                else channel
+            )
+            new_pubsub.ssubscribe(**{decoded: handler})
+        else:
+            new_pubsub.ssubscribe(channel)
+        self.shard_channels.update(new_pubsub.shard_channels)
+        normalized_key = next(iter(self._normalize_keys({channel: None})))
+        self._shard_channel_to_node[normalized_key] = new_node.name
+        self.pending_unsubscribe_shard_channels.difference_update(
+            self._normalize_keys({channel: None})
+        )
+        if new_pubsub.subscribed and not self.subscribed:
+            self.subscribed_event.set()
+            self.health_check_response_counter = 0
+
+    def _on_slots_changed(self):
+        # Observer hook invoked by NodesManager after a slots-cache refresh.
+        # Avoid work when there are no shard subscriptions to reconcile.
+        if not self.shard_channels:
+            return
+        self.reinitialize_shard_subscriptions()
+
+    def reset(self) -> None:
+        super().reset()
+        # _shard_channel_to_node may not exist yet on the very first call that
+        # happens from super().__init__() -> self.reset().
+        self._shard_channel_to_node = {}
 
     def get_redis_connection(self):
         """

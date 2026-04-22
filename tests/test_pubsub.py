@@ -14,7 +14,7 @@ from redis.client import PubSub
 from redis.cluster import ClusterPubSub
 from redis.crc import key_slot
 from redis.event import EventDispatcher
-from redis.exceptions import ConnectionError
+from redis.exceptions import ConnectionError, SlotNotCoveredError
 from redis.observability import recorder
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
@@ -2257,3 +2257,231 @@ class TestClusterPubSubResubscribe:
             assert ch_b.encode() in p.shard_channels
         finally:
             p.close()
+
+
+@pytest.mark.fixed_client
+class TestClusterPubSubSlotMigration:
+    """
+    Deterministic unit tests for ClusterPubSub shard-channel slot migration
+    handling. These tests bypass all I/O by mocking the per-node PubSub
+    instances and the cluster's node-resolution layer, verifying the
+    reconciler logic and the reverse-index routing in isolation (no live
+    cluster required).
+    """
+
+    def _make_cluster_pubsub(self):
+        from redis._parsers.encoders import Encoder
+        from redis.cluster import ClusterPubSub
+
+        pubsub = ClusterPubSub.__new__(ClusterPubSub)
+        # Base PubSub state normally wired up by PubSub.__init__.
+        pubsub.encoder = Encoder("utf-8", "strict", False)
+        pubsub._lock = threading.RLock()
+        pubsub.subscribed_event = threading.Event()
+        pubsub.health_check_response_counter = 0
+        pubsub.channels = {}
+        pubsub.shard_channels = {}
+        pubsub.pending_unsubscribe_shard_channels = set()
+        pubsub.patterns = {}
+        pubsub.ignore_subscribe_messages = False
+        # ClusterPubSub-specific state.
+        pubsub.cluster = mock.MagicMock()
+        pubsub.node_pubsub_mapping = {}
+        pubsub._shard_channel_to_node = {}
+        pubsub.push_handler_func = None
+        return pubsub
+
+    def _make_node(self, name):
+        node = mock.MagicMock()
+        node.name = name
+        return node
+
+    def _make_node_pubsub(self, shard_channels=None):
+        p = mock.MagicMock()
+        p.shard_channels = dict(shard_channels or {})
+        p.pending_unsubscribe_shard_channels = set()
+        p.subscribed = True
+        return p
+
+    def test_reinitialize_moves_channel_to_new_owner(self):
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        old_ps = self._make_node_pubsub({channel: None})
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+
+        pubsub.reinitialize_shard_subscriptions()
+
+        old_ps.sunsubscribe.assert_called_once_with(channel)
+        new_ps.ssubscribe.assert_called_once_with(channel)
+        assert pubsub._shard_channel_to_node[channel] == new_node.name
+
+    def test_reinitialize_noop_when_owner_unchanged(self):
+        pubsub = self._make_cluster_pubsub()
+        owner = self._make_node("127.0.0.1:7000")
+        channel = b"foo"
+        owner_ps = self._make_node_pubsub({channel: None})
+        pubsub.node_pubsub_mapping[owner.name] = owner_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub._shard_channel_to_node = {channel: owner.name}
+        pubsub.cluster.get_node_from_key.return_value = owner
+
+        pubsub.reinitialize_shard_subscriptions()
+
+        owner_ps.sunsubscribe.assert_not_called()
+        owner_ps.ssubscribe.assert_not_called()
+        assert pubsub._shard_channel_to_node[channel] == owner.name
+
+    def test_reinitialize_tolerates_old_node_disconnect(self):
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        old_ps = self._make_node_pubsub({channel: None})
+        old_ps.sunsubscribe.side_effect = ConnectionError("old node is gone")
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+
+        pubsub.reinitialize_shard_subscriptions()
+
+        old_ps.sunsubscribe.assert_called_once_with(channel)
+        new_ps.ssubscribe.assert_called_once_with(channel)
+        assert pubsub._shard_channel_to_node[channel] == new_node.name
+
+    def test_sunsubscribe_routes_via_reverse_index_after_migration(self):
+        """
+        After a slot migration, sunsubscribe must hit the node that currently
+        holds the subscription (tracked in ``_shard_channel_to_node``) rather
+        than re-resolving via ``cluster.get_node_from_key``, which by then
+        points to the new owner and would miss the actual subscription.
+        """
+        pubsub = self._make_cluster_pubsub()
+        holding_node_name = "127.0.0.1:7000"
+        new_owner = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        holding_ps = self._make_node_pubsub({channel: None})
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[holding_node_name] = holding_ps
+        pubsub.node_pubsub_mapping[new_owner.name] = new_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub._shard_channel_to_node = {channel: holding_node_name}
+        pubsub.cluster.get_node_from_key.return_value = new_owner
+
+        pubsub.sunsubscribe(channel)
+
+        holding_ps.sunsubscribe.assert_called_once_with(channel)
+        new_ps.sunsubscribe.assert_not_called()
+
+    def test_ssubscribe_migration_applies_newly_supplied_handler(self):
+        """
+        Regression: the lazy-reroute branch in ssubscribe must honour the
+        caller's newly supplied handler, matching PubSub.ssubscribe()'s
+        dict.update() semantics. Previously it fell back to the stale handler
+        tracked in ``shard_channels`` and silently dropped the new one.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        old_ps = self._make_node_pubsub({channel: None})
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        # Channel was previously subscribed with no handler.
+        pubsub.shard_channels = {channel: None}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+
+        new_handler = mock.Mock()
+        pubsub.ssubscribe(foo=new_handler)
+
+        old_ps.sunsubscribe.assert_called_once_with(channel)
+        new_ps.ssubscribe.assert_called_once_with(foo=new_handler)
+
+    def test_migration_driven_sunsubscribe_drops_empty_pubsub(self):
+        """
+        Regression: when a migration-driven sunsubscribe confirmation arrives
+        (the channel is not in ``pending_unsubscribe_shard_channels`` because
+        migration must not touch cluster-level tracking), the per-node pubsub
+        must still be dropped from ``node_pubsub_mapping`` once it no longer
+        holds any subscriptions. Otherwise long-running clients with slot
+        churn accumulate dead per-node pubsubs and their connections.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        channel = b"foo"
+        # Old per-node pubsub has already processed the sunsubscribe internally
+        # (shard_channels empty, subscribed=False); the message is about to be
+        # surfaced to the cluster-level pubsub.
+        old_ps = self._make_node_pubsub()
+        old_ps.subscribed = False
+        old_ps.get_message.return_value = {"type": "sunsubscribe", "channel": channel}
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        # Migration-driven: channel is already tracked on the new owner, so
+        # cluster-level state does not reference old_node and the channel is
+        # NOT in pending_unsubscribe_shard_channels.
+        pubsub.shard_channels = {}
+        pubsub._shard_channel_to_node = {}
+        pubsub.pending_unsubscribe_shard_channels = set()
+
+        message = pubsub.get_sharded_message(target_node=old_node)
+
+        assert message is not None
+        assert old_node.name not in pubsub.node_pubsub_mapping
+        # The per-node pubsub's dedicated connection must be released back
+        # to its pool before the mapping drop; otherwise the instance is
+        # GC-eligible with no path that closes it (PubSub.__del__ does not
+        # release connections), leaking a pool slot per migration.
+        old_ps.reset.assert_called_once()
+
+    def test_reinitialize_partial_progress_when_slot_uncovered(self):
+        """
+        A SlotNotCoveredError on one channel (slot transiently uncovered
+        mid-migration) must not abort the reconcile pass for coverable
+        siblings, but it MUST be surfaced at the end so the caller knows
+        reconciliation was incomplete and a retry will happen on the next
+        slots-cache change notification.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        covered_channel = b"covered"
+        uncovered_channel = b"uncovered"
+        old_ps = self._make_node_pubsub(
+            {covered_channel: None, uncovered_channel: None}
+        )
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {covered_channel: None, uncovered_channel: None}
+        pubsub._shard_channel_to_node = {
+            covered_channel: old_node.name,
+            uncovered_channel: old_node.name,
+        }
+
+        def _resolve(channel, *args, **kwargs):
+            if channel == uncovered_channel:
+                raise SlotNotCoveredError('Slot "0" is not covered by the cluster.')
+            return new_node
+
+        pubsub.cluster.get_node_from_key.side_effect = _resolve
+
+        with pytest.raises(SlotNotCoveredError):
+            pubsub.reinitialize_shard_subscriptions()
+
+        # covered_channel was migrated before the error surfaced;
+        # uncovered_channel is left in place for the next reconcile pass.
+        new_ps.ssubscribe.assert_called_once_with(covered_channel)
+        old_ps.sunsubscribe.assert_called_once_with(covered_channel)
+        assert pubsub._shard_channel_to_node[covered_channel] == new_node.name
+        assert pubsub._shard_channel_to_node[uncovered_channel] == old_node.name

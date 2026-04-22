@@ -2582,12 +2582,12 @@ class TestClusterRedisCommands:
             r.hotkeys_stop()
 
 
-@pytest.mark.onlycluster
 class TestNodesManager:
     """
     Tests for the NodesManager class
     """
 
+    @pytest.mark.onlycluster
     def test_load_balancer(self, r):
         n_manager = r.nodes_manager
         lb = n_manager.read_load_balancer
@@ -2645,6 +2645,7 @@ class TestNodesManager:
 
             assert srv_index > 0 and srv_index <= 2
 
+    @pytest.mark.fixed_client
     def test_init_slots_cache_not_all_slots_covered(self):
         """
         Test that if not all slots are covered it should raise an exception
@@ -2666,6 +2667,7 @@ class TestNodesManager:
             "All slots are not covered after query all startup_nodes."
         )
 
+    @pytest.mark.fixed_client
     def test_init_slots_cache_not_require_full_coverage_success(self):
         """
         When require_full_coverage is set to False and not all slots are
@@ -2687,6 +2689,7 @@ class TestNodesManager:
 
         assert 5460 not in rc.nodes_manager.slots_cache
 
+    @pytest.mark.fixed_client
     def test_init_slots_cache(self):
         """
         Test that slots cache can in initialized and all slots are covered
@@ -2716,6 +2719,7 @@ class TestNodesManager:
 
         assert len(n_manager.nodes_cache) == 6
 
+    @pytest.mark.fixed_client
     def test_init_promote_server_type_for_node_in_cache(self):
         """
         When replica is promoted to master, nodes_cache must change the server type
@@ -2767,6 +2771,7 @@ class TestNodesManager:
             assert nm.default_node.port == 7003
             assert nm.default_node.server_type == PRIMARY
 
+    @pytest.mark.fixed_client
     def test_init_slots_cache_cluster_mode_disabled(self):
         """
         Test that creating a RedisCluster failes if one of the startup nodes
@@ -2781,6 +2786,7 @@ class TestNodesManager:
             )
             assert "Cluster mode is not enabled on this node" in str(e.value)
 
+    @pytest.mark.fixed_client
     def test_empty_startup_nodes(self):
         """
         It should not be possible to create a node manager with no nodes
@@ -2789,6 +2795,7 @@ class TestNodesManager:
         with pytest.raises(RedisClusterException):
             NodesManager([])
 
+    @pytest.mark.fixed_client
     def test_wrong_startup_nodes_type(self):
         """
         If something other then a list type itteratable is provided it should
@@ -2797,6 +2804,7 @@ class TestNodesManager:
         with pytest.raises(RedisClusterException):
             NodesManager({})
 
+    @pytest.mark.fixed_client
     def test_init_slots_cache_slots_collision(self, request):
         """
         Test that if 2 nodes do not agree on the same slots setup it should
@@ -2851,6 +2859,7 @@ class TestNodesManager:
                 "startup_nodes could not agree on a valid slots cache"
             ), str(ex.value)
 
+    @pytest.mark.fixed_client
     def test_cluster_one_instance(self):
         """
         If the cluster exists of only 1 node then there is some hacks that must
@@ -2870,6 +2879,7 @@ class TestNodesManager:
         for i in range(0, REDIS_CLUSTER_HASH_SLOTS):
             assert n.slots_cache[i] == [n_node]
 
+    @pytest.mark.fixed_client
     def test_init_with_down_node(self):
         """
         If I can't connect to one of the nodes, everything should still work.
@@ -2932,6 +2942,7 @@ class TestNodesManager:
                 assert rc.get_node(host=default_host, port=7001) is not None
                 assert rc.get_node(host=default_host, port=7002) is not None
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize("dynamic_startup_nodes", [True, False])
     def test_init_slots_dynamic_startup_nodes(self, dynamic_startup_nodes):
         rc = get_mocked_redis_client(
@@ -2953,6 +2964,7 @@ class TestNodesManager:
         else:
             assert startup_nodes == ["my@DNS.com:7000"]
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize(
         "connection_pool_class", [ConnectionPool, BlockingConnectionPool]
     )
@@ -2968,6 +2980,7 @@ class TestNodesManager:
                 node.redis_connection.connection_pool, connection_pool_class
             )
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize("queue_class", [Queue, LifoQueue])
     def test_allow_custom_queue_class(self, queue_class):
         rc = get_mocked_redis_client(
@@ -2980,6 +2993,7 @@ class TestNodesManager:
         for node in rc.nodes_manager.nodes_cache.values():
             assert node.redis_connection.connection_pool.queue_class == queue_class
 
+    @pytest.mark.fixed_client
     def test_concurrent_initialize_exact_timing(self):
         """
         Test that exactly two concurrent initialize calls result in only
@@ -3064,6 +3078,7 @@ class TestNodesManager:
             assert len(nm.nodes_cache) > 0
             assert len(nm.slots_cache) > 0
 
+    @pytest.mark.fixed_client
     def test_concurrent_slot_moves(self):
         # ensure multiple concurrently moved slots are processed correctly,
         # eg: not dropping updates
@@ -3120,6 +3135,7 @@ class TestNodesManager:
             )
             assert primary_node.server_type == PRIMARY
 
+    @pytest.mark.fixed_client
     def test_concurrent_initialize_and_move_slot(self):
         # race initialize & move slot to ensure that the two operations
         # don't conflict with each other.
@@ -3190,6 +3206,107 @@ class TestNodesManager:
                     # primary should be first
                     assert slot_nodes[0].server_type == PRIMARY
 
+    def _register_observer(self, nm):
+        """
+        Register a tracking observer via the public ``register_pubsub_observer``
+        API. A plain class (not MagicMock) is used so the WeakSet can hold a
+        reference. The returned instance must be kept alive by the caller for
+        the duration of the test.
+        """
+
+        class _TrackingObserver:
+            def __init__(self):
+                self._on_slots_changed = Mock()
+
+        observer = _TrackingObserver()
+        nm.register_pubsub_observer(observer)
+        return observer
+
+    @pytest.mark.fixed_client
+    def test_register_and_unregister_pubsub_observer(self):
+        """
+        register_pubsub_observer / unregister_pubsub_observer must correctly
+        add and remove observers from the notification set, and the new API
+        must be used for thread-safe observer management.
+        """
+        r = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_enabled=True,
+        )
+        nm = r.nodes_manager
+        observer = self._register_observer(nm)
+
+        # Registered observer receives notifications.
+        nm._notify_pubsub_observers()
+        observer._on_slots_changed.assert_called_once_with()
+
+        # After unregister, further notifications are not delivered.
+        observer._on_slots_changed.reset_mock()
+        nm.unregister_pubsub_observer(observer)
+        nm._notify_pubsub_observers()
+        observer._on_slots_changed.assert_not_called()
+
+        # Unregister a second time is a silent no-op.
+        nm.unregister_pubsub_observer(observer)
+
+    @pytest.mark.fixed_client
+    def test_move_slot_notifies_observers_when_slot_moves_to_new_node(self):
+        """
+        move_slot() must notify slot-cache observers when the redirected node
+        is not currently serving the slot (new primary from a different shard).
+        """
+        r = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_enabled=True,
+        )
+        nm = r.nodes_manager
+        observer = self._register_observer(nm)
+        # Default layout: slot 0 is served by 127.0.0.1:7000; redirect it to
+        # 127.0.0.1:7001, which is the primary for a different shard.
+        nm.move_slot(MovedError("0 127.0.0.1:7001"))
+
+        observer._on_slots_changed.assert_called_once_with()
+
+    @pytest.mark.fixed_client
+    def test_move_slot_notifies_observers_on_failover(self):
+        """
+        move_slot() must notify observers when the redirected node was a
+        replica of the same slot and is being promoted (failover case).
+        """
+        r = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_enabled=True,
+        )
+        nm = r.nodes_manager
+        observer = self._register_observer(nm)
+        # Default layout: slot 0 -> [7000 (primary), 7003 (replica)].
+        # Redirect to the replica, triggering the failover branch.
+        nm.move_slot(MovedError("0 127.0.0.1:7003"))
+
+        observer._on_slots_changed.assert_called_once_with()
+
+    @pytest.mark.fixed_client
+    def test_move_slot_skips_notify_on_circular_redirect(self):
+        """
+        move_slot() must not notify observers when the redirect points to
+        the slot's current primary (no-op branch).
+        """
+        r = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_enabled=True,
+        )
+        nm = r.nodes_manager
+        observer = self._register_observer(nm)
+        # Slot 0's current primary is 127.0.0.1:7000 -> no-op redirect.
+        nm.move_slot(MovedError("0 127.0.0.1:7000"))
+
+        observer._on_slots_changed.assert_not_called()
+
+    @pytest.mark.fixed_client
     def test_move_node_to_end_of_cached_nodes(self):
         """
         Test that move_node_to_end_of_cached_nodes moves a node to the end of
@@ -3238,6 +3355,7 @@ class TestNodesManager:
             assert startup_node_names == [node2.name, node1.name, node3.name]
             assert nodes_cache_names == [node2.name, node1.name, node3.name]
 
+    @pytest.mark.fixed_client
     def test_move_node_to_end_of_cached_nodes_nonexistent(self):
         """
         Test that move_node_to_end_of_cached_nodes does nothing for a
@@ -3261,6 +3379,7 @@ class TestNodesManager:
             assert startup_node_names == [node1.name, node2.name]
             assert nodes_cache_names == [node1.name, node2.name]
 
+    @pytest.mark.fixed_client
     def test_move_node_to_end_of_cached_nodes_single_node(self):
         """
         Test that move_node_to_end_of_cached_nodes does nothing when there's
