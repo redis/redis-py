@@ -23,7 +23,7 @@ from redis.asyncio.client import PubSub
 from redis.asyncio.cluster import ClusterPubSub
 from redis.crc import key_slot
 
-from redis.exceptions import ConnectionError, SlotNotCoveredError
+from redis.exceptions import ConnectionError, SlotNotCoveredError, TimeoutError
 from redis.typing import EncodableT
 from tests.conftest import get_protocol_version, skip_if_server_version_lt
 
@@ -1773,6 +1773,49 @@ class TestClusterPubSubSlotMigration:
         assert pubsub._shard_channel_to_node[channel] == owner.name
 
     async def test_reinitialize_tolerates_old_node_disconnect(self):
+        """
+        When the old node is still part of the cluster topology but just
+        transiently unreachable / slow, the failed sunsubscribe must not
+        abort migration, and the old per-node pubsub must be left in
+        place so ``PubSub._execute`` can auto-reconnect and
+        ``on_connect`` can re-subscribe the remaining channels on the
+        next read.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        old_ps = self._make_node_pubsub({channel: None})
+        old_ps.sunsubscribe.side_effect = TimeoutError("old node is slow")
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+        # Old node is still known to the cluster (transient error).
+        pubsub.cluster.get_node.return_value = old_node
+
+        await pubsub.reinitialize_shard_subscriptions()
+
+        old_ps.sunsubscribe.assert_awaited_once_with(channel)
+        new_ps.ssubscribe.assert_awaited_once_with(channel)
+        assert pubsub._shard_channel_to_node[channel] == new_node.name
+        # Node still in topology → keep the pubsub so auto-reconnect can
+        # recover it; the dedicated socket was already torn down by
+        # Connection.disconnect() before the exception surfaced.
+        old_ps.aclose.assert_not_awaited()
+        assert old_node.name in pubsub.node_pubsub_mapping
+
+    async def test_reinitialize_drops_old_pubsub_when_node_removed_from_topology(self):
+        """
+        When the failed sunsubscribe coincides with the old node being
+        removed from the cluster topology (failover / topology refresh
+        dropped it), the pubsub has nowhere to reconnect to and would
+        stay in ``node_pubsub_mapping`` with ``subscribed=True`` forever
+        (the ACK can never arrive), poisoning the round-robin generator.
+        Drop it eagerly in that case.
+        """
         pubsub = self._make_cluster_pubsub()
         old_node = self._make_node("127.0.0.1:7000")
         new_node = self._make_node("127.0.0.1:7001")
@@ -1785,12 +1828,14 @@ class TestClusterPubSubSlotMigration:
         pubsub.shard_channels = {channel: None}
         pubsub._shard_channel_to_node = {channel: old_node.name}
         pubsub.cluster.get_node_from_key.return_value = new_node
+        # Old node was removed from topology.
+        pubsub.cluster.get_node.return_value = None
 
         await pubsub.reinitialize_shard_subscriptions()
 
-        old_ps.sunsubscribe.assert_awaited_once_with(channel)
-        new_ps.ssubscribe.assert_awaited_once_with(channel)
         assert pubsub._shard_channel_to_node[channel] == new_node.name
+        old_ps.aclose.assert_awaited_once()
+        assert old_node.name not in pubsub.node_pubsub_mapping
 
     async def test_sunsubscribe_routes_via_reverse_index_after_migration(self):
         """

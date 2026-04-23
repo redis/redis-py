@@ -3004,7 +3004,29 @@ class ClusterPubSub(PubSub):
             try:
                 old_pubsub.sunsubscribe(channel)
             except (ConnectionError, TimeoutError, OSError):
-                pass
+                # redis-py's Connection has already called ``disconnect()``
+                # before raising (see Connection.read_response /
+                # send_packed_command with ``disconnect_on_error=True``),
+                # so ``old_pubsub``'s dedicated socket is gone. Two cases:
+                #
+                # 1. The old node is no longer in the cluster topology
+                #    (e.g. removed by failover / topology refresh): no
+                #    reconnect target exists, so ``old_pubsub.subscribed``
+                #    would stay True forever and the end-of-pass GC block
+                #    would skip it. Drop it eagerly so the round-robin
+                #    generator does not keep yielding a dead pubsub that
+                #    produces periodic errors from ``get_sharded_message``.
+                # 2. The old node is still known (transiently slow /
+                #    unreachable): ``PubSub._execute`` auto-reconnects and
+                #    ``on_connect`` re-subscribes to remaining channels,
+                #    so other subscriptions on the same pubsub recover
+                #    naturally. Leave it alone.
+                if self.cluster.get_node(node_name=old_name) is None:
+                    try:
+                        old_pubsub.reset()
+                    except Exception:
+                        pass
+                    self.node_pubsub_mapping.pop(old_name, None)
         # Attach to the new per-node pubsub, preserving the handler. Decode to
         # a text key only when we must pass it as a kwarg (handler present).
         new_pubsub = self._get_node_pubsub(new_node)
