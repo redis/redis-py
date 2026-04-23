@@ -66,6 +66,7 @@ from redis.asyncio.observability.recorder import (
 )
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
+from redis.connection import DEFAULT_RESP_VERSION
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import (
     AuthenticationError,
@@ -79,7 +80,7 @@ from redis.exceptions import (
 )
 from redis.observability.metrics import CloseReason
 from redis.typing import EncodableT
-from redis.utils import DEFAULT_RESP_VERSION, HIREDIS_AVAILABLE, str_if_bytes
+from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
 
 from .._parsers import (
     BaseParser,
@@ -107,7 +108,7 @@ DefaultParser: Type[Union[_AsyncRESP2Parser, _AsyncRESP3Parser, _AsyncHiredisPar
 if HIREDIS_AVAILABLE:
     DefaultParser = _AsyncHiredisParser
 else:
-    DefaultParser = _AsyncRESP3Parser
+    DefaultParser = _AsyncRESP2Parser
 
 
 class ConnectCallbackProtocol(Protocol):
@@ -182,7 +183,7 @@ class AbstractConnection:
         redis_connect_func: Optional[ConnectCallbackT] = None,
         encoder_class: Type[Encoder] = Encoder,
         credential_provider: Optional[CredentialProvider] = None,
-        protocol: Optional[int] = 3,
+        protocol: Optional[int] = 2,
         event_dispatcher: Optional[EventDispatcher] = None,
     ):
         """
@@ -248,6 +249,7 @@ class AbstractConnection:
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
         self._socket_read_size = socket_read_size
+        self.set_parser(parser_class)
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
         self._buffer_cutoff = 6000
         self._re_auth_token: Optional[TokenInterface] = None
@@ -263,14 +265,6 @@ class AbstractConnection:
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
         self.protocol = p
-        # Reconcile parser ↔ protocol mismatches.
-        # Hiredis handles both RESP2 and RESP3 natively, so only
-        # pure-Python parsers need to be swapped.
-        if self.protocol == 3 and parser_class == _AsyncRESP2Parser:
-            parser_class = _AsyncRESP3Parser
-        elif self.protocol == 2 and parser_class == _AsyncRESP3Parser:
-            parser_class = _AsyncRESP2Parser
-        self.set_parser(parser_class)
 
     def __del__(self, _warnings: Any = warnings):
         # For some reason, the individual streams don't get properly garbage

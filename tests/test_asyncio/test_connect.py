@@ -17,13 +17,7 @@ _CLIENT_NAME = "test-suite-client"
 _CMD_SEP = b"\r\n"
 _SUCCESS_RESP = b"+OK" + _CMD_SEP
 _ERROR_RESP = b"-ERR" + _CMD_SEP
-_HELLO_RESP = (
-    b"%1" + _CMD_SEP + b"$5" + _CMD_SEP + b"proto" + _CMD_SEP + b":3" + _CMD_SEP
-)
-_SUPPORTED_CMDS = {
-    f"CLIENT SETNAME {_CLIENT_NAME}": _SUCCESS_RESP,
-    "HELLO 3": _HELLO_RESP,
-}
+_SUPPORTED_CMDS = {f"CLIENT SETNAME {_CLIENT_NAME}": _SUCCESS_RESP}
 
 
 @pytest.fixture
