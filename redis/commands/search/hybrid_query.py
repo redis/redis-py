@@ -189,29 +189,6 @@ class HybridQuery:
         """
         self._search_query = search_query
         self._vector_similarity_query = vector_similarity_query
-        self._return_fields_decode_as: Dict[str, Optional[str]] = {}
-
-    def return_field(
-        self,
-        field: str,
-        decode_field: Optional[bool] = True,
-        encoding: Optional[str] = "utf8",
-    ) -> "HybridQuery":
-        """
-        Add a field to the list of fields with specific decoding preferences.
-
-        - **field**: The field name to configure decoding for
-        - **decode_field**: Whether to decode the field from bytes to string
-        - **encoding**: The encoding to use when decoding the field
-        """
-        self._return_fields_decode_as[field] = encoding if decode_field else None
-        return self
-
-    def return_fields(self, *fields: str) -> "HybridQuery":
-        """Add fields with default decoding preferences."""
-        for field in fields:
-            self.return_field(field)
-        return self
 
     def get_args(self) -> List[str]:
         args = []

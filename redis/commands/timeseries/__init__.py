@@ -3,7 +3,7 @@ from typing import Literal
 import redis
 from redis._parsers.helpers import bool_ok
 
-from ..helpers import get_protocol_version
+from ..helpers import get_protocol_version, parse_to_list
 from .commands import (
     ALTER_CMD,
     CREATE_CMD,
@@ -15,6 +15,7 @@ from .commands import (
     MGET_CMD,
     MRANGE_CMD,
     MREVRANGE_CMD,
+    QUERYINDEX_CMD,
     RANGE_CMD,
     REVRANGE_CMD,
     TimeSeriesCommands,
@@ -39,17 +40,18 @@ class _TimeSeriesBase(TimeSeriesCommands):
             CREATE_CMD: bool_ok,
             CREATERULE_CMD: bool_ok,
             DELETERULE_CMD: bool_ok,
-            INFO_CMD: TSInfo,
         }
 
         _RESP2_MODULE_CALLBACKS = {
             DEL_CMD: int,
             GET_CMD: parse_get,
+            INFO_CMD: TSInfo,
             MGET_CMD: parse_m_get,
             MRANGE_CMD: parse_m_range,
             MREVRANGE_CMD: parse_m_range,
             RANGE_CMD: parse_range,
             REVRANGE_CMD: parse_range,
+            QUERYINDEX_CMD: parse_to_list,
         }
         _RESP3_MODULE_CALLBACKS = {}
 
@@ -93,7 +95,7 @@ class _TimeSeriesBase(TimeSeriesCommands):
         else:
             p = Pipeline(
                 connection_pool=self.client.connection_pool,
-                response_callbacks=self.client.response_callbacks,
+                response_callbacks=self._MODULE_CALLBACKS,
                 transaction=transaction,
                 shard_hint=shard_hint,
             )

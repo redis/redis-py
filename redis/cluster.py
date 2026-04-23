@@ -155,29 +155,9 @@ def parse_cluster_slots(
 def parse_cluster_shards(resp, **options):
     """
     Parse CLUSTER SHARDS response.
-
-    Normalises the output so that all dictionary keys are strings regardless
-    of protocol version (RESP2 returns bytes keys for node attributes,
-    RESP3 returns bytes keys at every level).
     """
     if isinstance(resp[0], dict):
-        # RESP3 – native dicts with bytes keys; decode them.
-        shards = []
-        for item in resp:
-            shard = {
-                "slots": item.get("slots") or item.get(b"slots", []),
-                "nodes": [],
-            }
-            raw_nodes = item.get("nodes") or item.get(b"nodes", [])
-            for node in raw_nodes:
-                if isinstance(node, dict):
-                    shard["nodes"].append({str_if_bytes(k): v for k, v in node.items()})
-                else:
-                    shard["nodes"].append(node)
-            shards.append(shard)
-        return shards
-
-    # RESP2 – flat list structure; build dicts with string keys.
+        return resp
     shards = []
     for x in resp:
         shard = {"slots": [], "nodes": []}
@@ -187,7 +167,7 @@ def parse_cluster_shards(resp, **options):
         for node in nodes:
             dict_node = {}
             for i in range(0, len(node), 2):
-                dict_node[str_if_bytes(node[i])] = node[i + 1]
+                dict_node[node[i]] = node[i + 1]
             shard["nodes"].append(dict_node)
         shards.append(shard)
 
