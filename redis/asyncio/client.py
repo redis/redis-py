@@ -59,6 +59,7 @@ from redis.commands import (
     AsyncSentinelCommands,
     list_or_args,
 )
+from redis.commands.helpers import partition_pubsub_subscriptions_by_handler
 from redis.credentials import CredentialProvider
 from redis.driver_info import DriverInfo, resolve_driver_info
 from redis.event import (
@@ -1056,54 +1057,29 @@ class PubSub:
         """Alias for aclose(), for backwards compatibility"""
         await self.aclose()
 
+    async def _resubscribe(self, subscribed, subscribe_fn) -> None:
+        subscriptions_without_handlers, subscriptions_with_handlers = (
+            partition_pubsub_subscriptions_by_handler(subscribed, self.encoder)
+        )
+        if subscriptions_without_handlers or subscriptions_with_handlers:
+            await subscribe_fn(
+                *subscriptions_without_handlers, **subscriptions_with_handlers
+            )
+
+    async def _resubscribe_shard_channels(self) -> None:
+        await self._resubscribe(self.shard_channels, self.ssubscribe)
+
     async def on_connect(self, connection: Connection):
         """Re-subscribe to any channels and patterns previously subscribed to"""
-        # NOTE: for python3, we can't pass bytestrings as keyword arguments
-        # so we need to decode channel/pattern names back to unicode strings
-        # before passing them to [p]subscribe.
-        #
-        # However, channels subscribed without a callback (positional args) may
-        # have binary names that are not valid in the current encoding (e.g.
-        # arbitrary bytes that are not valid UTF-8).  These channels are stored
-        # with a ``None`` handler.  We re-subscribe them as positional args so
-        # that no decoding is required.
         self.pending_unsubscribe_channels.clear()
         self.pending_unsubscribe_patterns.clear()
         self.pending_unsubscribe_shard_channels.clear()
         if self.channels:
-            channels_with_handlers = {}
-            channels_without_handlers = []
-            for k, v in self.channels.items():
-                if v is not None:
-                    channels_with_handlers[self.encoder.decode(k, force=True)] = v
-                else:
-                    channels_without_handlers.append(k)
-            if channels_with_handlers or channels_without_handlers:
-                await self.subscribe(
-                    *channels_without_handlers, **channels_with_handlers
-                )
+            await self._resubscribe(self.channels, self.subscribe)
         if self.patterns:
-            patterns_with_handlers = {}
-            patterns_without_handlers = []
-            for k, v in self.patterns.items():
-                if v is not None:
-                    patterns_with_handlers[self.encoder.decode(k, force=True)] = v
-                else:
-                    patterns_without_handlers.append(k)
-            if patterns_with_handlers or patterns_without_handlers:
-                await self.psubscribe(
-                    *patterns_without_handlers, **patterns_with_handlers
-                )
+            await self._resubscribe(self.patterns, self.psubscribe)
         if self.shard_channels:
-            shard_with_handlers = {}
-            shard_without_handlers = []
-            for k, v in self.shard_channels.items():
-                if v is not None:
-                    shard_with_handlers[self.encoder.decode(k, force=True)] = v
-                else:
-                    shard_without_handlers.append(k)
-            if shard_with_handlers or shard_without_handlers:
-                await self.ssubscribe(*shard_without_handlers, **shard_with_handlers)
+            await self._resubscribe_shard_channels()
 
     @property
     def subscribed(self):
