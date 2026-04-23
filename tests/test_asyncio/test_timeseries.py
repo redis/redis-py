@@ -1184,9 +1184,6 @@ async def test_mrevrange_with_count_nan_count_all_aggregators(decoded_r: redis.R
         bucket_size_msec=1000,
         filters=["type=temperature"],
     )
-    assert 2 == len(data_points)
-    assert [[1000, 2.0]] == data_points["temperature:A"][2]
-    assert [[1000, 2.0]] == data_points["temperature:B"][2]
     assert_resp_response(
         decoded_r,
         data_points,
@@ -1262,8 +1259,13 @@ async def test_mrange_multiple_aggregators(decoded_r: redis.Redis):
         aggregation_type=["min", "max"],
         bucket_size_msec=10,
     )
-    assert "ts:multi_agg_a" in result
-    samples = result["ts:multi_agg_a"][2]
+    if is_resp2_connection(decoded_r):
+        assert len(result) == 1
+        assert "ts:multi_agg_a" in result[0]
+        samples = result[0]["ts:multi_agg_a"][1]
+    else:
+        assert "ts:multi_agg_a" in result
+        samples = result["ts:multi_agg_a"][2]
     assert len(samples) == 1
     assert samples[0][0] == 1000  # timestamp
     assert samples[0][1] == 10.0  # min
@@ -1285,8 +1287,13 @@ async def test_mrevrange_multiple_aggregators(decoded_r: redis.Redis):
         aggregation_type=["min", "max"],
         bucket_size_msec=10,
     )
-    assert "ts:multi_agg_b" in result
-    samples = result["ts:multi_agg_b"][2]
+    if is_resp2_connection(decoded_r):
+        assert len(result) == 1
+        assert "ts:multi_agg_b" in result[0]
+        samples = result[0]["ts:multi_agg_b"][1]
+    else:
+        assert "ts:multi_agg_b" in result
+        samples = result["ts:multi_agg_b"][2]
     assert len(samples) == 1
     assert samples[0][0] == 1000  # timestamp
     assert samples[0][1] == 10.0  # min

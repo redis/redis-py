@@ -2920,7 +2920,9 @@ class TestRedisCommands:
         await r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert await r.zinterstore("d", ["a", "b", "c"], aggregate="COUNT") == 2
         response = await r.zrange("d", 0, -1, withscores=True)
-        assert response == [[b"a1", 3.0], [b"a3", 3.0]]
+        assert_resp_response(
+            r, response, [(b"a1", 3), (b"a3", 3)], [[b"a1", 3.0], [b"a3", 3.0]]
+        )
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.7.0")
@@ -2932,7 +2934,9 @@ class TestRedisCommands:
             await r.zinterstore("d", {"a": 1, "b": 2, "c": 3}, aggregate="COUNT") == 2
         )
         response = await r.zrange("d", 0, -1, withscores=True)
-        assert response == [[b"a1", 6.0], [b"a3", 6.0]]
+        assert_resp_response(
+            r, response, [(b"a1", 6), (b"a3", 6)], [[b"a1", 6.0], [b"a3", 6.0]]
+        )
 
     @skip_if_server_version_lt("4.9.0")
     async def test_zpopmax(self, r: redis.Redis):
@@ -3315,12 +3319,12 @@ class TestRedisCommands:
         await r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert await r.zunionstore("d", ["a", "b", "c"], aggregate="COUNT") == 4
         response = await r.zrange("d", 0, -1, withscores=True)
-        assert response == [
-            [b"a4", 1.0],
-            [b"a2", 2.0],
-            [b"a1", 3.0],
-            [b"a3", 3.0],
-        ]
+        assert_resp_response(
+            r,
+            response,
+            [(b"a4", 1), (b"a2", 2), (b"a1", 3), (b"a3", 3)],
+            [[b"a4", 1.0], [b"a2", 2.0], [b"a1", 3.0], [b"a3", 3.0]],
+        )
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.7.0")
@@ -3332,12 +3336,12 @@ class TestRedisCommands:
             await r.zunionstore("d", {"a": 1, "b": 2, "c": 3}, aggregate="COUNT") == 4
         )
         response = await r.zrange("d", 0, -1, withscores=True)
-        assert response == [
-            [b"a2", 3.0],
-            [b"a4", 3.0],
-            [b"a1", 6.0],
-            [b"a3", 6.0],
-        ]
+        assert_resp_response(
+            r,
+            response,
+            [(b"a2", 3), (b"a4", 3), (b"a1", 6), (b"a3", 6)],
+            [[b"a2", 3.0], [b"a4", 3.0], [b"a1", 6.0], [b"a3", 6.0]],
+        )
 
     # HYPERLOGLOG TESTS
     @skip_if_server_version_lt("2.8.9")
