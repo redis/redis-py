@@ -9,7 +9,10 @@ from unittest.mock import patch
 
 import pytest
 import redis
+from redis._parsers import Encoder
 from redis.client import PubSub
+from redis.cluster import ClusterPubSub
+from redis.crc import key_slot
 from redis.event import EventDispatcher
 from redis.exceptions import ConnectionError
 from redis.observability import recorder
@@ -250,6 +253,93 @@ class TestPubSubSubscribeUnsubscribe:
         assert len(messages) == 1
         assert messages[0]["type"] == "psubscribe"
         assert messages[0]["channel"] == binary_pattern
+
+    @pytest.mark.fixed_client
+    def test_cluster_pubsub_resubscribe_shard_channels_groups_by_slot(self):
+        """The cluster-aware ``_resubscribe_shard_channels`` must group shard
+        channels by hash slot on reconnect. A cluster node can own multiple
+        slot ranges, so a single batched SSUBSCRIBE across different slots
+        would be rejected by Redis with CROSSSLOT and resubscription would
+        fail silently. The same method is bound to the per-node PubSub
+        instances managed by ``ClusterPubSub``.
+        """
+        # Pure client-side logic: mock the pool, use a real encoder, no
+        # server needed. ``key_slot`` is client-side CRC16, so slot
+        # assignments are deterministic without a cluster.
+        pool = mock.MagicMock()
+        encoder = Encoder(
+            encoding="utf-8", encoding_errors="strict", decode_responses=False
+        )
+        p = PubSub(connection_pool=pool, encoder=encoder)
+
+        # Two channels share a hash tag (same slot); a third hashes to a
+        # different slot.
+        ch_a1 = b"{slot-a}-one"
+        ch_a2 = b"{slot-a}-two"
+        ch_b = b"{slot-b}-one"
+        assert key_slot(ch_a1) == key_slot(ch_a2)
+        assert key_slot(ch_a1) != key_slot(ch_b)
+
+        # Populate state as if previously subscribed, without going to the wire.
+        p.shard_channels = {ch_a1: None, ch_a2: None, ch_b: None}
+
+        calls = []
+        with mock.patch.object(
+            p,
+            "ssubscribe",
+            side_effect=lambda *a, **kw: calls.append((tuple(a), dict(kw))),
+        ):
+            ClusterPubSub._resubscribe_shard_channels(p)
+
+        # Every ssubscribe call must target exactly one slot.
+        slots_per_call = []
+        all_channels = set()
+        for args, kwargs in calls:
+            channels = set(args) | set(
+                k.encode() if isinstance(k, str) else k for k in kwargs
+            )
+            assert channels, "ssubscribe called with no channels"
+            call_slots = {key_slot(c) for c in channels}
+            assert len(call_slots) == 1, (
+                f"ssubscribe grouped channels from multiple slots: {call_slots}"
+            )
+            slots_per_call.append(next(iter(call_slots)))
+            all_channels.update(channels)
+
+        # All original channels must be resubscribed, across exactly two
+        # distinct slot groups.
+        assert all_channels == {ch_a1, ch_a2, ch_b}
+        assert set(slots_per_call) == {key_slot(ch_a1), key_slot(ch_b)}
+        # Channels sharing a slot are batched: two unique slots => two calls.
+        assert len(calls) == 2
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_standalone_pubsub_on_connect_batches_shard_channels(self, r):
+        """The standalone PubSub has no notion of slots and must keep
+        batching every tracked shard channel into a single SSUBSCRIBE call
+        on reconnect, as it did before cluster-aware resubscription existed.
+        """
+        p = r.pubsub()
+        ch_a = b"{slot-a}-one"
+        ch_b = b"{slot-b}-one"
+        assert key_slot(ch_a) != key_slot(ch_b)
+
+        p.shard_channels = {ch_a: None, ch_b: None}
+
+        calls = []
+        with mock.patch.object(
+            p,
+            "ssubscribe",
+            side_effect=lambda *a, **kw: calls.append((tuple(a), dict(kw))),
+        ):
+            p.on_connect(connection=None)
+
+        assert len(calls) == 1
+        args, kwargs = calls[0]
+        assert set(args) == {ch_a, ch_b}
+        assert kwargs == {}
+        p.close()
 
     def _test_subscribed_property(
         self, p, sub_type, unsub_type, sub_func, unsub_func, keys
@@ -2109,3 +2199,61 @@ class TestClusterPubSubTimeoutPropagation:
 
         assert len(messages) == 2
         pubsub.close()
+
+
+class TestClusterPubSubResubscribe:
+    """
+    Cluster-only tests verifying that sharded pubsub resubscription after a
+    reconnect groups channels by slot and does not trigger CROSSSLOT errors
+    on nodes that own multiple slots.
+    """
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_resubscribe_shard_channels_different_slots_same_node(self, r):
+        """After a reconnect, shard channels on the same node but different
+        slots must be resubscribed without raising CROSSSLOT.
+        """
+        # Hardcoded for the project's default 3-master test cluster; both
+        # channels hash to slots owned by the first master.
+        ch_a, ch_b = "resub-a-0", "resub-b-0"
+        assert r.keyslot(ch_a) != r.keyslot(ch_b)
+        assert r.get_node_from_key(ch_a).name == r.get_node_from_key(ch_b).name
+
+        p = r.pubsub()
+        try:
+            p.ssubscribe(ch_a)
+            assert (
+                wait_for_message(p, timeout=2.0, func=p.get_sharded_message) is not None
+            )
+            p.ssubscribe(ch_b)
+            assert (
+                wait_for_message(p, timeout=2.0, func=p.get_sharded_message) is not None
+            )
+
+            # Force reconnect of the per-node subscriber connection.
+            node = r.get_node_from_key(ch_a)
+            per_node_pubsub = p.node_pubsub_mapping[node.name]
+            assert per_node_pubsub.connection is not None
+            per_node_pubsub.connection.disconnect()
+
+            # Trigger reconnect + resubscription. With batched resubscription
+            # this would raise a CROSSSLOT ResponseError; with per-slot
+            # grouping it must succeed and deliver fresh ssubscribe acks.
+            acks = {}
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline and len(acks) < 2:
+                msg = p.get_sharded_message(timeout=0.5)
+                if msg is None:
+                    continue
+                if msg["type"] == "ssubscribe":
+                    acks[msg["channel"]] = msg
+
+            assert ch_a.encode() in acks
+            assert ch_b.encode() in acks
+
+            # Both channels must still be tracked in the aggregate state.
+            assert ch_a.encode() in p.shard_channels
+            assert ch_b.encode() in p.shard_channels
+        finally:
+            p.close()

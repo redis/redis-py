@@ -1,10 +1,13 @@
 import copy
 import random
 import string
-from typing import Any, Iterable, List, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Iterable, List, Mapping, Tuple
 
 import redis
-from redis.typing import KeysT, KeyT
+from redis.typing import ChannelT, KeysT, KeyT
+
+if TYPE_CHECKING:
+    from redis._parsers import Encoder
 
 
 def list_or_args(keys: KeysT, args: Tuple[KeyT, ...]) -> List[KeyT]:
@@ -115,3 +118,27 @@ def at_most_one_value_set(iterable: Iterable[Any]):
     """
     values = (bool(x) for x in iterable)
     return sum(values) <= 1
+
+
+def partition_pubsub_subscriptions_by_handler(
+    subscriptions: Mapping[ChannelT, Callable | None],
+    encoder: "Encoder",
+) -> tuple[list[ChannelT], dict[str, Callable]]:
+    """Partition a PubSub ``{name: handler|None}`` mapping into the positional
+    and keyword arguments expected by ``[s|p]subscribe``.
+
+    For python3, we can't pass bytestrings as keyword arguments, so names
+    with a handler are decoded (keyword args). Names subscribed without a
+    callback are stored with a ``None`` handler and may have binary values
+    that are not valid in the current encoding (e.g. arbitrary bytes that
+    are not valid UTF-8); they are returned as raw keys (positional args)
+    so that no decoding is required.
+    """
+    subscriptions_without_handlers: list[ChannelT] = []
+    subscriptions_with_handlers: dict[str, Callable] = {}
+    for k, v in subscriptions.items():
+        if v is not None:
+            subscriptions_with_handlers[encoder.decode(k, force=True)] = v
+        else:
+            subscriptions_without_handlers.append(k)
+    return subscriptions_without_handlers, subscriptions_with_handlers
