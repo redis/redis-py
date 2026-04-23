@@ -97,9 +97,7 @@ from redis.exceptions import (
 )
 from redis.typing import AnyKeyT, EncodableT, KeyT
 from redis.utils import (
-    DEFAULT_RESP_VERSION,
     SSL_AVAILABLE,
-    check_protocol_version,
     deprecated_args,
     deprecated_function,
     safe_str,
@@ -338,7 +336,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_keyfile: Optional[str] = None,
         ssl_min_version: Optional[TLSVersion] = None,
         ssl_ciphers: Optional[str] = None,
-        protocol: Optional[int] = 3,
+        protocol: Optional[int] = 2,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
         policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver(),
@@ -419,7 +417,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             self.retry.update_supported_errors(retry_on_error)
 
         kwargs["response_callbacks"] = _RedisCallbacks.copy()
-        if check_protocol_version(kwargs.get("protocol", DEFAULT_RESP_VERSION), 3):
+        if kwargs.get("protocol") in ["3", 3]:
             kwargs["response_callbacks"].update(_RedisCallbacksRESP3)
         else:
             kwargs["response_callbacks"].update(_RedisCallbacksRESP2)

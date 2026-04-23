@@ -101,7 +101,7 @@ def deployed_sentinel(request):
     sentinel_kwargs = {"decode_responses": decode_responses}
     force_master_ip = "localhost"
 
-    protocol = request.config.getoption("--protocol", 3)
+    protocol = request.config.getoption("--protocol", 2)
 
     sentinel = Sentinel(
         sentinel_endpoints,
@@ -350,7 +350,7 @@ def test_redis_master_usage(deployed_sentinel):
 def test_sentinel_commands_with_strict_redis_client(request):
     sentinel_ips = request.config.getoption("--sentinels")
     sentinel_host, sentinel_port = sentinel_ips.split(",")[0].split(":")
-    protocol = request.config.getoption("--protocol", 3)
+    protocol = request.config.getoption("--protocol", 2)
 
     client = StrictRedis(
         host=sentinel_host, port=sentinel_port, decode_responses=True, protocol=protocol

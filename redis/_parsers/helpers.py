@@ -154,22 +154,12 @@ def parse_sentinel_state_resp3(response, **options):
     result = {}
     for key in response:
         try:
-            value = SENTINEL_STATE_TYPES[str_if_bytes(key)](str_if_bytes(response[key]))
+            value = SENTINEL_STATE_TYPES[key](str_if_bytes(response[key]))
             result[str_if_bytes(key)] = value
         except Exception:
-            result[str_if_bytes(key)] = str_if_bytes(response[key])
+            result[str_if_bytes(key)] = response[str_if_bytes(key)]
     flags = set(result["flags"].split(","))
     result["flags"] = flags
-    for name, flag in (
-        ("is_master", "master"),
-        ("is_slave", "slave"),
-        ("is_sdown", "s_down"),
-        ("is_odown", "o_down"),
-        ("is_sentinel", "sentinel"),
-        ("is_disconnected", "disconnected"),
-        ("is_master_down", "master_down"),
-    ):
-        result[name] = flag in flags
     return result
 
 

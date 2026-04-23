@@ -72,7 +72,6 @@ from redis.observability.recorder import (
 )
 from redis.retry import Retry
 from redis.utils import (
-    DEFAULT_RESP_VERSION,
     _set_info_logger,
     check_protocol_version,
     deprecated_args,
@@ -282,7 +281,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         username: Optional[str] = None,
         redis_connect_func: Optional[Callable[[], None]] = None,
         credential_provider: Optional[CredentialProvider] = None,
-        protocol: Optional[int] = 3,
+        protocol: Optional[int] = 2,
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
@@ -481,12 +480,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         self.response_callbacks = CaseInsensitiveDict(_RedisCallbacks)
 
-        if check_protocol_version(
-            self.connection_pool.connection_kwargs.get(
-                "protocol", DEFAULT_RESP_VERSION
-            ),
-            3,
-        ):
+        if self.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
             self.response_callbacks.update(_RedisCallbacksRESP3)
         else:
             self.response_callbacks.update(_RedisCallbacksRESP2)

@@ -79,10 +79,8 @@ from redis.exceptions import (
 from redis.observability.attributes import PubSubDirection
 from redis.typing import ChannelT, EncodableT, KeyT
 from redis.utils import (
-    DEFAULT_RESP_VERSION,
     SSL_AVAILABLE,
     _set_info_logger,
-    check_protocol_version,
     deprecated_args,
     deprecated_function,
     safe_str,
@@ -278,7 +276,7 @@ class Redis(
         auto_close_connection_pool: Optional[bool] = None,
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
-        protocol: Optional[int] = 3,
+        protocol: Optional[int] = 2,
         event_dispatcher: Optional[EventDispatcher] = None,
     ):
         """
@@ -411,12 +409,7 @@ class Redis(
 
         self.response_callbacks = CaseInsensitiveDict(_RedisCallbacks)
 
-        if check_protocol_version(
-            self.connection_pool.connection_kwargs.get(
-                "protocol", DEFAULT_RESP_VERSION
-            ),
-            3,
-        ):
+        if self.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
             self.response_callbacks.update(_RedisCallbacksRESP3)
         else:
             self.response_callbacks.update(_RedisCallbacksRESP2)
