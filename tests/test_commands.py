@@ -3874,17 +3874,19 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         # aggregate with COUNT (scores ignored, counts membership)
-        assert r.zinter(["a", "b", "c"], aggregate="COUNT", withscores=True) == [
-            [b"a1", 3],
-            [b"a3", 3],
-        ]
+        assert_resp_response(
+            r,
+            r.zinter(["a", "b", "c"], aggregate="COUNT", withscores=True),
+            [(b"a1", 3), (b"a3", 3)],
+            [[b"a1", 3], [b"a3", 3]],
+        )
         # COUNT with weights
-        assert r.zinter(
-            {"a": 1, "b": 2, "c": 3}, aggregate="COUNT", withscores=True
-        ) == [
-            [b"a1", 6],
-            [b"a3", 6],
-        ]
+        assert_resp_response(
+            r,
+            r.zinter({"a": 1, "b": 2, "c": 3}, aggregate="COUNT", withscores=True),
+            [(b"a1", 6), (b"a3", 6)],
+            [[b"a1", 6], [b"a3", 6]],
+        )
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
@@ -3954,10 +3956,12 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zinterstore("d", ["a", "b", "c"], aggregate="COUNT") == 2
-        assert r.zrange("d", 0, -1, withscores=True) == [
-            [b"a1", 3],
-            [b"a3", 3],
-        ]
+        assert_resp_response(
+            r,
+            r.zrange("d", 0, -1, withscores=True),
+            [(b"a1", 3), (b"a3", 3)],
+            [[b"a1", 3], [b"a3", 3]],
+        )
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.7.0")
@@ -3966,10 +3970,12 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zinterstore("d", {"a": 1, "b": 2, "c": 3}, aggregate="COUNT") == 2
-        assert r.zrange("d", 0, -1, withscores=True) == [
-            [b"a1", 6],
-            [b"a3", 6],
-        ]
+        assert_resp_response(
+            r,
+            r.zrange("d", 0, -1, withscores=True),
+            [(b"a1", 6), (b"a3", 6)],
+            [[b"a1", 6], [b"a3", 6]],
+        )
 
     @skip_if_server_version_lt("4.9.0")
     def test_zpopmax(self, r):
@@ -4467,21 +4473,19 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         # aggregate with COUNT (scores ignored, counts membership)
-        assert r.zunion(["a", "b", "c"], aggregate="COUNT", withscores=True) == [
-            [b"a4", 1],
-            [b"a2", 2],
-            [b"a1", 3],
-            [b"a3", 3],
-        ]
+        assert_resp_response(
+            r,
+            r.zunion(["a", "b", "c"], aggregate="COUNT", withscores=True),
+            [(b"a4", 1), (b"a2", 2), (b"a1", 3), (b"a3", 3)],
+            [[b"a4", 1], [b"a2", 2], [b"a1", 3], [b"a3", 3]],
+        )
         # COUNT with weights
-        assert r.zunion(
-            {"a": 1, "b": 2, "c": 3}, aggregate="COUNT", withscores=True
-        ) == [
-            [b"a2", 3],
-            [b"a4", 3],
-            [b"a1", 6],
-            [b"a3", 6],
-        ]
+        assert_resp_response(
+            r,
+            r.zunion({"a": 1, "b": 2, "c": 3}, aggregate="COUNT", withscores=True),
+            [(b"a2", 3), (b"a4", 3), (b"a1", 6), (b"a3", 6)],
+            [[b"a2", 3], [b"a4", 3], [b"a1", 6], [b"a3", 6]],
+        )
 
     @pytest.mark.onlynoncluster
     def test_zunionstore_sum(self, r):
@@ -4542,12 +4546,12 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zunionstore("d", ["a", "b", "c"], aggregate="COUNT") == 4
-        assert r.zrange("d", 0, -1, withscores=True) == [
-            [b"a4", 1],
-            [b"a2", 2],
-            [b"a1", 3],
-            [b"a3", 3],
-        ]
+        assert_resp_response(
+            r,
+            r.zrange("d", 0, -1, withscores=True),
+            [(b"a4", 1), (b"a2", 2), (b"a1", 3), (b"a3", 3)],
+            [[b"a4", 1], [b"a2", 2], [b"a1", 3], [b"a3", 3]],
+        )
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.7.0")
@@ -4556,12 +4560,12 @@ class TestRedisCommands:
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert r.zunionstore("d", {"a": 1, "b": 2, "c": 3}, aggregate="COUNT") == 4
-        assert r.zrange("d", 0, -1, withscores=True) == [
-            [b"a2", 3],
-            [b"a4", 3],
-            [b"a1", 6],
-            [b"a3", 6],
-        ]
+        assert_resp_response(
+            r,
+            r.zrange("d", 0, -1, withscores=True),
+            [(b"a2", 3), (b"a4", 3), (b"a1", 6), (b"a3", 6)],
+            [[b"a2", 3], [b"a4", 3], [b"a1", 6], [b"a3", 6]],
+        )
 
     @skip_if_server_version_lt("6.1.240")
     def test_zmscore(self, r):
