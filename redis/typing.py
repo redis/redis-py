@@ -68,8 +68,7 @@ ACLLogEntry = dict[str, str | float | dict[str, str | int]]
 ACLLogData = list[ACLLogEntry]
 CommandGetKeysAndFlagsEntry = list[bytes | str | list[bytes | str]]
 CommandGetKeysAndFlagsResponse = list[CommandGetKeysAndFlagsEntry]
-BlockingListPopResponse = list[bytes | str] | None
-HRandFieldResponse = bytes | str | list[bytes | str] | list[list[bytes | str]] | None
+BlockingListPopResponse = tuple[bytes | str, bytes | str] | list[bytes | str] | None
 HScanPayload = dict[bytes | str, bytes | str] | list[bytes | str]
 HScanResponse = tuple[int, HScanPayload]
 ListMultiPopResponse = list[bytes | str | list[bytes | str]] | None
@@ -80,21 +79,25 @@ StreamRangeResponse = list[StreamEntry]
 XClaimResponse = StreamRangeResponse | list[bytes | str]
 XPendingRangeEntry = dict[str, bytes | str | int]
 XPendingRangeResponse = list[XPendingRangeEntry]
-XReadResponse = dict[bytes | str, list[StreamRangeResponse]]
+XReadResponse = list[list[Any]] | dict[bytes | str, list[StreamRangeResponse]]
 ClusterNodeDetail = dict[str, str | bool | list[list[str]] | list[dict[str, str]]]
 SentinelMasterAddress = tuple[bytes | str, int] | None
-SentinelMastersResponse = dict[str, dict[str, Any]]
-TimeSeriesSample = list[int | float]
+SentinelMastersResponse = dict[str, dict[str, Any]] | list[dict[str, Any]]
+TimeSeriesSample = tuple[int, float] | list[int | float]
 TimeSeriesRangeResponse = list[TimeSeriesSample]
 BloomScanDumpResponse = tuple[int, bytes | None]
 ModuleListResponse = list[int | float | str | None]
-BlockingZSetPopResponse = list[bytes | str | float] | None
+BlockingZSetPopResponse = (
+    tuple[bytes | str, bytes | str, float] | list[bytes | str | float] | None
+)
 ZMPopResponse = list[bytes | str | list[list[Any]]] | None
-ZRandMemberResponse = bytes | str | None | list[bytes | str] | list[list[Any]]
-ZSetScoredMembers = list[list[Any]]
+ZRandMemberResponse = (
+    bytes | str | None | list[bytes | str] | list[bytes | str | float] | list[list[Any]]
+)
+ZSetScoredMembers = list[tuple[bytes | str, Any]] | list[list[Any]]
 ZSetRangeResponse = list[bytes | str] | ZSetScoredMembers
-ZScanResponse = tuple[int, list[list[bytes | str | float]]]
-LCSMatch = list[int | list[int]]
+ZScanResponse = tuple[int, list[tuple[bytes | str, float]]]
+LCSMatch = list[int | tuple[int, int]]
 LCSResult = dict[str, int | list[LCSMatch]]
 StralgoResponse = str | int | LCSResult
 
