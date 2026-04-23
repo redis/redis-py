@@ -1603,7 +1603,7 @@ class ClusterNode:
         await self.disconnect_if_needed(connection)
 
         # Execute command
-        await connection.send_packed_command(connection.pack_command(*args), True)
+        await connection.send_packed_command(connection.pack_command(*args))
 
         # Read response
         try:
@@ -1621,7 +1621,7 @@ class ClusterNode:
 
         # Execute command
         await connection.send_packed_command(
-            connection.pack_commands(cmd.args for cmd in commands), True
+            connection.pack_commands(cmd.args for cmd in commands)
         )
 
         # Read responses
