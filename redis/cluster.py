@@ -2898,6 +2898,8 @@ class ClusterPubSub(PubSub):
         s_channels.update(kwargs)
         for s_channel, handler in s_channels.items():
             node = self.cluster.get_node_from_key(s_channel)
+            if not node:
+                continue
             # Lazy re-route: if this channel is already tracked against a
             # different node (e.g. after a slot migration), migrate it now so
             # the caller's intent is applied on the current owner.

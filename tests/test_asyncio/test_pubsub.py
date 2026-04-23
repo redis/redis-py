@@ -1842,6 +1842,26 @@ class TestClusterPubSubSlotMigration:
         old_ps.sunsubscribe.assert_awaited_once_with(channel)
         new_ps.ssubscribe.assert_awaited_once_with(foo=new_handler)
 
+    async def test_ssubscribe_skips_channel_when_node_resolution_returns_none(self):
+        """
+        Regression: cluster.get_node_from_key may return None for channels
+        whose slot is transiently uncovered. ssubscribe must skip such
+        channels rather than dereference None (which would crash on
+        ``node.name`` either in the reverse-index comparison or inside
+        ``_get_node_pubsub``). Mirrors the sync counterpart's guard.
+        """
+        pubsub = self._make_cluster_pubsub()
+        pubsub.cluster.get_node_from_key.return_value = None
+        # Stale reverse-index entry also present to exercise both crash paths:
+        # the old_name != node.name comparison and the downstream fallthrough.
+        pubsub._shard_channel_to_node = {b"foo": "127.0.0.1:7000"}
+
+        await pubsub.ssubscribe(b"foo")
+
+        # No migration, no per-node pubsub creation, no mapping mutation.
+        assert pubsub.node_pubsub_mapping == {}
+        assert pubsub._shard_channel_to_node == {b"foo": "127.0.0.1:7000"}
+
     async def test_aclose_clears_state_and_cancels_reconcile_tasks(self):
         """
         Regression: aclose() must clear the ``_shard_channel_to_node`` reverse
