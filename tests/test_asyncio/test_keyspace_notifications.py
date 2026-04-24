@@ -724,6 +724,27 @@ class TestAsyncSubkeyNotifications:
     Works for both standalone Redis and RedisCluster.
     """
 
+    @staticmethod
+    async def _drain_subscribe_messages(notifications):
+        """Drain subscribe/psubscribe confirmation messages so the next
+        ``get_message`` call returns a real notification.
+
+        Works for both standalone (``_pubsub``) and cluster
+        (``_node_pubsubs``) notification managers.
+        """
+        pubsubs = (
+            list(notifications._node_pubsubs.values())
+            if hasattr(notifications, "_node_pubsubs")
+            else [notifications._pubsub]
+        )
+        for pubsub in pubsubs:
+            while True:
+                msg = await pubsub.get_message(timeout=0.05)
+                if msg is None:
+                    break
+                if msg["type"] not in ("subscribe", "psubscribe"):
+                    break
+
     @pytest.mark.asyncio
     async def test_create_hash_field_subkeyspace_notification(
         self, async_r_with_subkey_notifications
@@ -733,6 +754,7 @@ class TestAsyncSubkeyNotifications:
         r = async_r_with_subkey_notifications
         notifications = r.keyspace_notifications()
         await notifications.subscribe_subkeyspace("test:hash1")
+        await self._drain_subscribe_messages(notifications)
 
         await r.hset("test:hash1", "field1", "value1")
 
@@ -755,6 +777,7 @@ class TestAsyncSubkeyNotifications:
 
         notifications = r.keyspace_notifications()
         await notifications.subscribe_subkeyspace("test:hash2")
+        await self._drain_subscribe_messages(notifications)
 
         await r.hset("test:hash2", "field1", "updated")
 
@@ -778,6 +801,7 @@ class TestAsyncSubkeyNotifications:
 
         notifications = r.keyspace_notifications()
         await notifications.subscribe_subkeyspaceitem("test:hash3", "myfield")
+        await self._drain_subscribe_messages(notifications)
 
         await r.hset("test:hash3", "myfield", "updated")
 
@@ -801,6 +825,7 @@ class TestAsyncSubkeyNotifications:
 
         notifications = r.keyspace_notifications()
         await notifications.subscribe_subkeyevent("hdel")
+        await self._drain_subscribe_messages(notifications)
 
         await r.hdel("test:hash4", "field1")
 
@@ -824,6 +849,7 @@ class TestAsyncSubkeyNotifications:
 
         notifications = r.keyspace_notifications()
         await notifications.subscribe_subkeyspaceevent("hdel", "test:hash5")
+        await self._drain_subscribe_messages(notifications)
 
         await r.hdel("test:hash5", "field1")
 
@@ -845,6 +871,7 @@ class TestAsyncSubkeyNotifications:
         r = async_r_with_subkey_notifications
         notifications = r.keyspace_notifications()
         await notifications.subscribe_keyspace("test:simple1")
+        await self._drain_subscribe_messages(notifications)
 
         await r.set("test:simple1", "value1")
 
@@ -867,6 +894,7 @@ class TestAsyncSubkeyNotifications:
 
         notifications = r.keyspace_notifications()
         await notifications.subscribe_keyspace("test:simple2")
+        await self._drain_subscribe_messages(notifications)
 
         await r.set("test:simple2", "updated")
 
@@ -888,6 +916,7 @@ class TestAsyncSubkeyNotifications:
 
         notifications = r.keyspace_notifications()
         await notifications.subscribe_keyspace("test:simple3")
+        await self._drain_subscribe_messages(notifications)
 
         await r.delete("test:simple3")
 
@@ -907,6 +936,7 @@ class TestAsyncSubkeyNotifications:
         r = async_r_with_subkey_notifications
         notifications = r.keyspace_notifications()
         await notifications.subscribe_subkeyspace("test:hash6")
+        await self._drain_subscribe_messages(notifications)
 
         await r.hset("test:hash6", mapping={"f1": "v1", "f2": "v2", "f3": "v3"})
 
@@ -929,6 +959,7 @@ class TestAsyncSubkeyNotifications:
         r = async_r_with_subkey_notifications
         notifications = r.keyspace_notifications()
         await notifications.subscribe_subkeyspace("test:pattern:*")
+        await self._drain_subscribe_messages(notifications)
 
         await r.hset("test:pattern:hash1", "field1", "value1")
         await r.hset("test:pattern:hash2", "field2", "value2")
@@ -955,6 +986,7 @@ class TestAsyncSubkeyNotifications:
         r = async_r_with_subkey_notifications
         notifications = r.keyspace_notifications()
         await notifications.subscribe_subkeyevent("h*")
+        await self._drain_subscribe_messages(notifications)
 
         await r.hset("test:hash7", "field1", "value1")
         await r.hdel("test:hash7", "field1")
@@ -983,6 +1015,7 @@ class TestAsyncSubkeyNotifications:
 
         notifications = r.keyspace_notifications()
         await notifications.subscribe_subkeyspaceitem("test:hash8", "watched_field")
+        await self._drain_subscribe_messages(notifications)
 
         # Modify a different field — should NOT trigger a notification
         await r.hset("test:hash8", "other_field", "value")
@@ -1009,6 +1042,7 @@ class TestAsyncSubkeyNotifications:
         notifications = r.keyspace_notifications()
         await notifications.subscribe_keyspace("test:hash9")
         await notifications.subscribe_subkeyspace("test:hash9")
+        await self._drain_subscribe_messages(notifications)
 
         await r.hset("test:hash9", "field1", "value1")
 
@@ -1040,6 +1074,7 @@ class TestAsyncSubkeyNotifications:
 
         notifications = r.keyspace_notifications()
         await notifications.subscribe_subkeyspaceitem("test:hash10", "field*")
+        await self._drain_subscribe_messages(notifications)
 
         # These should all match the pattern
         await r.hset("test:hash10", "field1", "value1")
