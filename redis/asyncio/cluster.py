@@ -78,7 +78,12 @@ from redis.commands.policies import AsyncPolicyResolver, AsyncStaticPolicyResolv
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.credentials import CredentialProvider
 from redis.driver_info import DriverInfo, resolve_driver_info
-from redis.event import AfterAsyncClusterInstantiationEvent, EventDispatcher
+from redis.event import (
+    AfterAsyncClusterInstantiationEvent,
+    AsyncAfterSlotsCacheRefreshEvent,
+    AsyncEventListenerInterface,
+    EventDispatcher,
+)
 from redis.exceptions import (
     AskError,
     BusyLoadingError,
@@ -1161,7 +1166,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     # Reset the counter
                     self.reinitialize_counter = 0
                 else:
-                    self.nodes_manager.move_slot(e)
+                    await self.nodes_manager.move_slot(e)
                 moved = True
                 await self._record_command_metric(
                     command_name=command,
@@ -1680,7 +1685,6 @@ class NodesManager:
         "_dynamic_startup_nodes",
         "_event_dispatcher",
         "_background_tasks",
-        "_pubsub_observers",
         "connection_kwargs",
         "default_node",
         "nodes_cache",
@@ -1715,9 +1719,6 @@ class NodesManager:
         self._initialize_lock: asyncio.Lock = asyncio.Lock()
 
         self._background_tasks: Set[asyncio.Task] = set()
-        # Observers notified after slots_cache is refreshed (e.g. ClusterPubSub
-        # instances that need to reconcile per-node shard subscriptions).
-        self._pubsub_observers: "weakref.WeakSet[ClusterPubSub]" = weakref.WeakSet()
         self._dynamic_startup_nodes: bool = dynamic_startup_nodes
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -1799,7 +1800,7 @@ class NodesManager:
             node = self.nodes_cache.pop(node_name)
             self.nodes_cache[node_name] = node  # Re-insert at end
 
-    def move_slot(self, e: AskError | MovedError):
+    async def move_slot(self, e: AskError | MovedError):
         node_changed = False
         redirected_node = self.get_node(host=e.host, port=e.port)
         if redirected_node:
@@ -1838,10 +1839,21 @@ class NodesManager:
                 self.default_node = redirected_node
             node_changed = True
         # else: circular MOVED to current primary -> no-op
-        # Notify observers so shard-pubsub reconciliation can run; skipped on
-        # the no-op branch to avoid needless walks under MOVED storms.
+        # Dispatch so listeners can run shard-pubsub reconciliation; skipped on
+        # the no-op branch to avoid needless walks under MOVED storms. A
+        # listener must not break slots-cache refresh; log and continue so a
+        # single buggy listener cannot starve the rest.
         if node_changed:
-            self._notify_pubsub_observers()
+            try:
+                await self._event_dispatcher.dispatch_async(
+                    AsyncAfterSlotsCacheRefreshEvent()
+                )
+            except Exception as e:
+                logger.exception(
+                    "listener raised during slots-cache refresh: %s: %s",
+                    type(e).__name__,
+                    e,
+                )
 
     def get_node_from_slot(
         self,
@@ -2023,38 +2035,20 @@ class NodesManager:
             # Set the default node
             self.default_node = self.get_nodes_by_server_type(PRIMARY)[0]
             self._epoch += 1
-        # Notify observers (e.g. ClusterPubSub) that slot ownership may have
-        # changed so they can reconcile per-node subscriptions.
-        self._notify_pubsub_observers()
-
-    def register_pubsub_observer(self, observer: "ClusterPubSub") -> None:
-        """
-        Register a pubsub observer to be notified after slots-cache changes.
-        The async event loop guarantees single-threaded access, so no lock
-        is required; the method exists for API parity with the sync variant.
-        """
-        self._pubsub_observers.add(observer)
-
-    def unregister_pubsub_observer(self, observer: "ClusterPubSub") -> None:
-        """
-        Remove a pubsub observer. Silently ignored if not registered.
-        """
-        self._pubsub_observers.discard(observer)
-
-    def _notify_pubsub_observers(self) -> None:
-        # Snapshot the set before iterating in case an observer callback ends
-        # up mutating the registration set (e.g. via aclose). Safe without a
-        # lock because asyncio ensures single-threaded access.
-        for observer in list(self._pubsub_observers):
-            try:
-                observer._on_slots_changed()
-            except Exception:
-                # Observers must not break slots-cache refresh; log and
-                # continue so a single buggy observer cannot starve the rest.
-                logger.exception(
-                    "pubsub observer %r raised during slots-cache change",
-                    observer,
-                )
+        # Dispatch so listeners (e.g. ClusterPubSub) can reconcile per-node
+        # state after slot ownership may have changed. A listener must not
+        # break slots-cache refresh; log and continue so a single buggy
+        # listener cannot starve the rest.
+        try:
+            await self._event_dispatcher.dispatch_async(
+                AsyncAfterSlotsCacheRefreshEvent()
+            )
+        except Exception as e:
+            logger.exception(
+                "listener raised during slots-cache refresh: %s: %s",
+                type(e).__name__,
+                e,
+            )
 
     async def aclose(self, attr: str = "nodes_cache") -> None:
         self.default_node = None
@@ -2876,7 +2870,7 @@ class TransactionStrategy(AbstractStrategy):
                 self.reinitialize_counter = 0
             else:
                 if isinstance(error, AskError):
-                    self._pipe.cluster_client.nodes_manager.move_slot(error)
+                    await self._pipe.cluster_client.nodes_manager.move_slot(error)
 
         self._executing = False
 
@@ -3179,6 +3173,52 @@ class _ClusterNodePoolAdapter(ConnectionPoolInterface):
         return []
 
 
+def _unregister_slots_cache_listener(
+    dispatcher_ref: "weakref.ref[EventDispatcher]",
+    listener: AsyncEventListenerInterface,
+    event_type: Type[object],
+) -> None:
+    # Module-level finalizer callback. Kept free of strong references to the
+    # owning ClusterPubSub so attaching it via weakref.finalize does not
+    # extend the pubsub's lifetime.
+    dispatcher = dispatcher_ref()
+    if dispatcher is not None:
+        dispatcher.unregister_listeners({event_type: [listener]})
+
+
+class ClusterPubSubSlotsCacheListener(AsyncEventListenerInterface):
+    """
+    Async listener that forwards AsyncAfterSlotsCacheRefreshEvent to a
+    ClusterPubSub.
+
+    Holds a weak reference to the pubsub so it does not keep the instance
+    alive. Deterministic cleanup of the dispatcher's strong reference to this
+    listener is performed by a ``weakref.finalize`` attached to the owning
+    ClusterPubSub in ``ClusterPubSub.__init__``.
+    """
+
+    def __init__(self, pubsub: "ClusterPubSub") -> None:
+        self._pubsub_ref: "weakref.ref[ClusterPubSub]" = weakref.ref(pubsub)
+
+    async def listen(self, event: object) -> None:
+        pubsub = self._pubsub_ref()
+        if pubsub is None:
+            # Race window between pubsub GC and the finalizer running; safe
+            # no-op, finalizer will remove this listener shortly.
+            return
+        try:
+            await pubsub.on_slots_changed()
+        except Exception as e:
+            # Listeners must not break slots-cache refresh; log and continue so
+            # a single buggy pubsub cannot starve the rest.
+            logger.exception(
+                "pubsub %r raised during slots-cache change: %s: %s",
+                pubsub,
+                type(e).__name__,
+                e,
+            )
+
+
 class ClusterPubSub(PubSub):
     """
     Async cluster implementation for pub/sub.
@@ -3230,7 +3270,7 @@ class ClusterPubSub(PubSub):
         # route sunsubscribe calls and reconcile subscriptions after slot
         # migration / failover.
         self._shard_channel_to_node: Dict[Any, str] = {}
-        # Background tasks created by _on_slots_changed; kept to prevent GC.
+        # Background tasks created by on_slots_changed; kept to prevent GC.
         self._reconcile_tasks: Set[asyncio.Task] = set()
         self._pubsubs_generator = self._pubsubs_generator()
         if event_dispatcher is None:
@@ -3244,12 +3284,22 @@ class ClusterPubSub(PubSub):
             event_dispatcher=self._event_dispatcher,
             **kwargs,
         )
-        # Register for slots-cache change notifications so shard subscriptions
+        # Subscribe to slots-cache change notifications so shard subscriptions
         # can be reconciled automatically after topology refreshes.
-        try:
-            redis_cluster.nodes_manager.register_pubsub_observer(self)
-        except AttributeError:
-            pass
+        nm_dispatcher = redis_cluster.nodes_manager._event_dispatcher
+        self._slots_cache_listener = ClusterPubSubSlotsCacheListener(self)
+        nm_dispatcher.register_listeners(
+            {AsyncAfterSlotsCacheRefreshEvent: [self._slots_cache_listener]}
+        )
+        # Deterministic GC-time cleanup so short-lived pubsubs do not leak
+        # listeners in the dispatcher when no slots-refresh event ever fires.
+        weakref.finalize(
+            self,
+            _unregister_slots_cache_listener,
+            weakref.ref(nm_dispatcher),
+            self._slots_cache_listener,
+            AsyncAfterSlotsCacheRefreshEvent,
+        )
 
     def set_pubsub_node(
         self,
@@ -3586,24 +3636,23 @@ class ClusterPubSub(PubSub):
             self._normalize_keys({channel: None})
         )
 
-    def _on_slots_changed(self) -> None:
+    async def on_slots_changed(self) -> None:
         # Observer hook invoked by NodesManager after a slots-cache refresh.
-        # Schedule reconciliation on the running loop. No-op when no shard
-        # subscriptions exist or no loop is running.
+        # Schedule reconciliation as a separate task so the caller's code
+        # path (typically MovedError handling in _execute_command) is not
+        # blocked on the network I/O performed by reinitialize_shard_
+        # subscriptions. No-op when there are no shard subscriptions to
+        # reconcile.
         if not self.shard_channels:
             return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return
-        task = loop.create_task(self.reinitialize_shard_subscriptions())
+        task = asyncio.create_task(self.reinitialize_shard_subscriptions())
         self._reconcile_tasks.add(task)
         task.add_done_callback(self._reconcile_tasks.discard)
         # Consume the task's exception (if any) so Python does not emit a
         # "Task exception was never retrieved" warning. reinitialize_shard_
         # subscriptions surfaces SlotNotCoveredError when a slot is still
         # transiently uncovered; route it through the same logger channel
-        # as sync _notify_pubsub_observers for consistent observability.
+        # as sync ClusterPubSubSlotsCacheListener for consistent observability.
         task.add_done_callback(self._log_reconcile_task_exception)
 
     @staticmethod

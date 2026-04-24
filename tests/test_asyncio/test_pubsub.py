@@ -2016,17 +2016,17 @@ class TestClusterPubSubSlotMigration:
 
     async def test_on_slots_changed_consumes_and_logs_task_exception(self, caplog):
         """
-        Regression: _on_slots_changed schedules reinitialize_shard_subscriptions
+        Regression: on_slots_changed schedules reinitialize_shard_subscriptions
         as a fire-and-forget task. When that coroutine raises (e.g. the Option D
         SlotNotCoveredError signalling an incomplete reconcile pass), the
         exception must be consumed and logged so Python does not emit a noisy
         "Task exception was never retrieved" warning at GC time, and so the
         incomplete-reconcile signal flows through the library logger — matching
-        the sync path, where _notify_pubsub_observers already logs via
+        the sync path, where ClusterPubSubSlotsCacheListener already logs via
         logger.exception.
         """
         pubsub = self._make_cluster_pubsub()
-        # Has at least one shard subscription so _on_slots_changed actually
+        # Has at least one shard subscription so on_slots_changed actually
         # schedules a task (the method short-circuits when shard_channels is
         # empty).
         pubsub.shard_channels = {b"foo": None}
@@ -2039,7 +2039,7 @@ class TestClusterPubSubSlotMigration:
             pubsub, "reinitialize_shard_subscriptions", side_effect=_raise
         ):
             with caplog.at_level(logging.ERROR, logger="redis.asyncio.cluster"):
-                pubsub._on_slots_changed()
+                await pubsub.on_slots_changed()
                 # Await the scheduled task directly so both its done-callbacks
                 # run (exception consumption + set discard). Suppress here so
                 # the test itself does not re-raise what the callback already

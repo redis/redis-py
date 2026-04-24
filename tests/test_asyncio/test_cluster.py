@@ -28,7 +28,11 @@ from redis.cluster import (
 )
 from redis.commands.core import HotkeysMetricsTypes
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
-from redis.event import EventDispatcher
+from redis.event import (
+    AsyncAfterSlotsCacheRefreshEvent,
+    AsyncEventListenerInterface,
+    EventDispatcher,
+)
 from redis.exceptions import (
     AskError,
     ClusterDownError,
@@ -2927,95 +2931,80 @@ class TestNodesManager:
         assert startup_node_names == [node1.name]
         assert nodes_cache_names == [node1.name]
 
-    def _register_observer(self, nm):
+    def _register_listener(self, nm):
         """
-        Register a tracking observer via the public ``register_pubsub_observer``
-        API. A plain class (not MagicMock) is used so the WeakSet can hold a
-        reference. The returned instance must be kept alive by the caller for
-        the duration of the test.
+        Register a tracking async listener on the nodes manager's event
+        dispatcher for ``AsyncAfterSlotsCacheRefreshEvent``. The returned
+        instance must be kept alive by the caller for the duration of the
+        test.
         """
 
-        class _TrackingObserver:
-            def __init__(self):
-                self._on_slots_changed = Mock()
+        class _TrackingListener(AsyncEventListenerInterface):
+            async def listen(self, event: object) -> None:  # pragma: no cover
+                pass
 
-        observer = _TrackingObserver()
-        nm.register_pubsub_observer(observer)
-        return observer
+        listener = _TrackingListener()
+        listener.listen = mock.AsyncMock()
+        nm._event_dispatcher.register_listeners(
+            {AsyncAfterSlotsCacheRefreshEvent: [listener]}
+        )
+        return listener
 
     @pytest.mark.fixed_client
-    async def test_register_and_unregister_pubsub_observer(self) -> None:
-        """
-        register_pubsub_observer / unregister_pubsub_observer must correctly
-        add and remove observers from the notification set. Parity with the
-        sync variant; async version needs no lock because asyncio guarantees
-        single-threaded access.
-        """
-        r = await get_mocked_redis_client(host=default_host, port=default_port)
-        nm = r.nodes_manager
-        observer = self._register_observer(nm)
-
-        # Registered observer receives notifications.
-        nm._notify_pubsub_observers()
-        observer._on_slots_changed.assert_called_once_with()
-
-        # After unregister, further notifications are not delivered.
-        observer._on_slots_changed.reset_mock()
-        nm.unregister_pubsub_observer(observer)
-        nm._notify_pubsub_observers()
-        observer._on_slots_changed.assert_not_called()
-
-        # Unregister a second time is a silent no-op.
-        nm.unregister_pubsub_observer(observer)
-        await r.aclose()
-
-    @pytest.mark.fixed_client
-    async def test_move_slot_notifies_observers_when_slot_moves_to_new_node(
+    async def test_move_slot_dispatches_event_when_slot_moves_to_new_node(
         self,
     ) -> None:
         """
-        move_slot() must notify slot-cache observers when the redirected node
-        is not currently serving the slot (new primary from a different shard).
+        move_slot() must dispatch AsyncAfterSlotsCacheRefreshEvent when the
+        redirected node is not currently serving the slot (new primary from a
+        different shard).
         """
         r = await get_mocked_redis_client(host=default_host, port=default_port)
         nm = r.nodes_manager
-        observer = self._register_observer(nm)
+        listener = self._register_listener(nm)
         # Default layout: slot 0 is served by 127.0.0.1:7000; redirect it to
         # 127.0.0.1:7001, which is the primary for a different shard.
-        nm.move_slot(MovedError("0 127.0.0.1:7001"))
+        await nm.move_slot(MovedError("0 127.0.0.1:7001"))
 
-        observer._on_slots_changed.assert_called_once_with()
+        listener.listen.assert_called_once()
+        assert isinstance(
+            listener.listen.call_args[0][0], AsyncAfterSlotsCacheRefreshEvent
+        )
         await r.aclose()
 
     @pytest.mark.fixed_client
-    async def test_move_slot_notifies_observers_on_failover(self) -> None:
+    async def test_move_slot_dispatches_event_on_failover(self) -> None:
         """
-        move_slot() must notify observers when the redirected node was a
-        replica of the same slot and is being promoted (failover case).
+        move_slot() must dispatch AsyncAfterSlotsCacheRefreshEvent when the
+        redirected node was a replica of the same slot and is being promoted
+        (failover case).
         """
         r = await get_mocked_redis_client(host=default_host, port=default_port)
         nm = r.nodes_manager
-        observer = self._register_observer(nm)
+        listener = self._register_listener(nm)
         # Default layout: slot 0 -> [7000 (primary), 7003 (replica)].
         # Redirect to the replica, triggering the failover branch.
-        nm.move_slot(MovedError("0 127.0.0.1:7003"))
+        await nm.move_slot(MovedError("0 127.0.0.1:7003"))
 
-        observer._on_slots_changed.assert_called_once_with()
+        listener.listen.assert_called_once()
+        assert isinstance(
+            listener.listen.call_args[0][0], AsyncAfterSlotsCacheRefreshEvent
+        )
         await r.aclose()
 
     @pytest.mark.fixed_client
-    async def test_move_slot_skips_notify_on_circular_redirect(self) -> None:
+    async def test_move_slot_skips_dispatch_on_circular_redirect(self) -> None:
         """
-        move_slot() must not notify observers when the redirect points to
-        the slot's current primary (no-op branch).
+        move_slot() must not dispatch AsyncAfterSlotsCacheRefreshEvent when
+        the redirect points to the slot's current primary (no-op branch).
         """
         r = await get_mocked_redis_client(host=default_host, port=default_port)
         nm = r.nodes_manager
-        observer = self._register_observer(nm)
+        listener = self._register_listener(nm)
         # Slot 0's current primary is 127.0.0.1:7000 -> no-op redirect.
-        nm.move_slot(MovedError("0 127.0.0.1:7000"))
+        await nm.move_slot(MovedError("0 127.0.0.1:7000"))
 
-        observer._on_slots_changed.assert_not_called()
+        listener.listen.assert_not_called()
         await r.aclose()
 
 

@@ -21,6 +21,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    Type,
     Union,
 )
 
@@ -45,8 +46,10 @@ from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.event import (
     AfterPooledConnectionsInstantiationEvent,
     AfterPubSubConnectionInstantiationEvent,
+    AfterSlotsCacheRefreshEvent,
     ClientType,
     EventDispatcher,
+    EventListenerInterface,
 )
 from redis.exceptions import (
     AskError,
@@ -2059,9 +2062,6 @@ class NodesManager:
         self.startup_nodes: dict[str, ClusterNode] = {n.name: n for n in startup_nodes}
         self.default_node: Optional[ClusterNode] = None
         self._epoch: int = 0
-        # Observers notified after slots_cache is refreshed (e.g. ClusterPubSub
-        # instances that need to reconcile per-node shard subscriptions).
-        self._pubsub_observers: "weakref.WeakSet[ClusterPubSub]" = weakref.WeakSet()
         self.from_url = from_url
         self._require_full_coverage = require_full_coverage
         self._dynamic_startup_nodes = dynamic_startup_nodes
@@ -2164,11 +2164,20 @@ class NodesManager:
                     self.default_node = redirected_node
                 node_changed = True
             # else: circular MOVED to current primary -> no-op
-        # Notify observers outside the lock so reconciliation can acquire its
-        # own locks without risk of deadlock. Skipped on the no-op branch to
-        # avoid needless reconciliation walks under MOVED storms.
+        # Dispatch outside the lock so listeners can acquire their own locks
+        # without risk of deadlock. Skipped on the no-op branch to avoid
+        # needless reconciliation walks under MOVED storms. A listener must
+        # not break slots-cache refresh; log and continue so a single buggy
+        # listener cannot starve the rest.
         if node_changed:
-            self._notify_pubsub_observers()
+            try:
+                self._event_dispatcher.dispatch(AfterSlotsCacheRefreshEvent())
+            except Exception as e:
+                logger.exception(
+                    "listener raised during slots-cache refresh: %s: %s",
+                    type(e).__name__,
+                    e,
+                )
 
     @deprecated_args(
         args_to_warn=["server_type"],
@@ -2560,41 +2569,17 @@ class NodesManager:
                     self.startup_nodes = tmp_nodes_cache
                 # Increment the epoch to signal that initialization has completed
                 self._epoch += 1
-            # Notify observers (e.g. ClusterPubSub) that slot ownership may
-            # have changed so they can reconcile per-node subscriptions.
-            self._notify_pubsub_observers()
-
-    def register_pubsub_observer(self, observer: "ClusterPubSub") -> None:
-        """
-        Register a pubsub observer to be notified after slots-cache changes.
-        Thread-safe; safe to call concurrently with slots-cache refreshes.
-        """
-        with self._lock:
-            self._pubsub_observers.add(observer)
-
-    def unregister_pubsub_observer(self, observer: "ClusterPubSub") -> None:
-        """
-        Remove a pubsub observer. Thread-safe; silently ignored if missing.
-        """
-        with self._lock:
-            self._pubsub_observers.discard(observer)
-
-    def _notify_pubsub_observers(self) -> None:
-        # Snapshot the observer set under the lock because WeakSet is not
-        # thread-safe for concurrent mutation + iteration. Callbacks are
-        # invoked outside the lock to avoid holding it across code that may
-        # re-enter the NodesManager (e.g. cluster.get_node_from_key).
-        with self._lock:
-            observers = list(self._pubsub_observers)
-        for observer in observers:
+            # Dispatch so listeners (e.g. ClusterPubSub) can reconcile per-node
+            # state after slot ownership may have changed. A listener must not
+            # break slots-cache refresh; log and continue so a single buggy
+            # listener cannot starve the rest.
             try:
-                observer._on_slots_changed()
-            except Exception:
-                # Observers must not break slots-cache refresh; log and
-                # continue so a single buggy observer cannot starve the rest.
+                self._event_dispatcher.dispatch(AfterSlotsCacheRefreshEvent())
+            except Exception as e:
                 logger.exception(
-                    "pubsub observer %r raised during slots-cache change",
-                    observer,
+                    "listener raised during slots-cache refresh: %s: %s",
+                    type(e).__name__,
+                    e,
                 )
 
     def close(self) -> None:
@@ -2633,6 +2618,51 @@ class NodesManager:
                     ):
                         return node
         return None
+
+
+def _unregister_slots_cache_listener(
+    dispatcher_ref: "weakref.ref[EventDispatcher]",
+    listener: EventListenerInterface,
+    event_type: Type[object],
+) -> None:
+    # Module-level finalizer callback. Kept free of strong references to the
+    # owning ClusterPubSub so attaching it via weakref.finalize does not
+    # extend the pubsub's lifetime.
+    dispatcher = dispatcher_ref()
+    if dispatcher is not None:
+        dispatcher.unregister_listeners({event_type: [listener]})
+
+
+class ClusterPubSubSlotsCacheListener(EventListenerInterface):
+    """
+    Listener that forwards AfterSlotsCacheRefreshEvent to a ClusterPubSub.
+
+    Holds a weak reference to the pubsub so it does not keep the instance
+    alive. Deterministic cleanup of the dispatcher's strong reference to this
+    listener is performed by a ``weakref.finalize`` attached to the owning
+    ClusterPubSub in ``ClusterPubSub.__init__``.
+    """
+
+    def __init__(self, pubsub: "ClusterPubSub") -> None:
+        self._pubsub_ref: "weakref.ref[ClusterPubSub]" = weakref.ref(pubsub)
+
+    def listen(self, event: object) -> None:
+        pubsub = self._pubsub_ref()
+        if pubsub is None:
+            # Race window between pubsub GC and the finalizer running; safe
+            # no-op, finalizer will remove this listener shortly.
+            return
+        try:
+            pubsub.on_slots_changed()
+        except Exception as e:
+            # Listeners must not break slots-cache refresh; log and continue so
+            # a single buggy pubsub cannot starve the rest.
+            logger.exception(
+                "pubsub %r raised during slots-cache change: %s: %s",
+                pubsub,
+                type(e).__name__,
+                e,
+            )
 
 
 class ClusterPubSub(PubSub):
@@ -2692,12 +2722,22 @@ class ClusterPubSub(PubSub):
             event_dispatcher=self._event_dispatcher,
             **kwargs,
         )
-        # Register for slots-cache change notifications so shard subscriptions
+        # Subscribe to slots-cache change notifications so shard subscriptions
         # can be reconciled automatically after topology refreshes.
-        try:
-            redis_cluster.nodes_manager.register_pubsub_observer(self)
-        except AttributeError:
-            pass
+        nm_dispatcher = redis_cluster.nodes_manager._event_dispatcher
+        self._slots_cache_listener = ClusterPubSubSlotsCacheListener(self)
+        nm_dispatcher.register_listeners(
+            {AfterSlotsCacheRefreshEvent: [self._slots_cache_listener]}
+        )
+        # Deterministic GC-time cleanup so short-lived pubsubs do not leak
+        # listeners in the dispatcher when no slots-refresh event ever fires.
+        weakref.finalize(
+            self,
+            _unregister_slots_cache_listener,
+            weakref.ref(nm_dispatcher),
+            self._slots_cache_listener,
+            AfterSlotsCacheRefreshEvent,
+        )
 
     def set_pubsub_node(self, cluster, node=None, host=None, port=None):
         """
@@ -3049,7 +3089,7 @@ class ClusterPubSub(PubSub):
             self.subscribed_event.set()
             self.health_check_response_counter = 0
 
-    def _on_slots_changed(self):
+    def on_slots_changed(self):
         # Observer hook invoked by NodesManager after a slots-cache refresh.
         # Avoid work when there are no shard subscriptions to reconcile.
         if not self.shard_channels:
