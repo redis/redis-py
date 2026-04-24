@@ -1038,9 +1038,8 @@ class TestAsyncSubkeyNotifications:
         but not for unrelated fields."""
         r = async_r_with_subkey_notifications
 
-        notifications = AsyncKeyspaceNotifications(r)
+        notifications = r.keyspace_notifications()
         await notifications.subscribe_subkeyspaceitem("test:hash10", "field*")
-        await self._drain_subscribe_messages(notifications)
 
         # These should all match the pattern
         await r.hset("test:hash10", "field1", "value1")
