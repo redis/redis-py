@@ -7,6 +7,7 @@ import time
 import weakref
 from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
+from concurrent.futures import Future, ThreadPoolExecutor
 from copy import copy
 from enum import Enum
 from itertools import chain
@@ -2710,6 +2711,19 @@ class ClusterPubSub(PubSub):
         # route sunsubscribe calls and reconcile subscriptions after slot
         # migration / failover.
         self._shard_channel_to_node: dict = {}
+        # Worker executor for off-loading slot-migration reconciliation from
+        # the dispatch call site (mirrors async's asyncio.create_task model so
+        # the thread that triggered MovedError / topology refresh is not
+        # blocked on per-channel sunsubscribe / ssubscribe network I/O).
+        # Lazy-created on first on_slots_changed() to avoid a persistent
+        # worker thread for pubsubs that never see a slot migration.
+        # Initialized before super().__init__() because PubSub.__init__ calls
+        # self.reset(), which resolves to ClusterPubSub.reset() and reads
+        # these attributes.
+        self._reconcile_executor: Optional[ThreadPoolExecutor] = None
+        # In-flight reconciliation futures; tracked so reset() can cancel
+        # pending work and so exceptions surface via a done-callback.
+        self._reconcile_futures: Set[Future] = set()
         self._pubsubs_generator = self._pubsubs_generator()
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -2986,7 +3000,9 @@ class ClusterPubSub(PubSub):
                 p = self.node_pubsub_mapping[name]
             else:
                 node = self.cluster.get_node_from_key(s_channel)
-                p = self._get_node_pubsub(node)
+                if not node or node.name not in self.node_pubsub_mapping:
+                    continue
+                p = self.node_pubsub_mapping[node.name]
             p.sunsubscribe(s_channel)
             self.pending_unsubscribe_shard_channels.update(
                 p.pending_unsubscribe_shard_channels
@@ -3091,15 +3107,49 @@ class ClusterPubSub(PubSub):
 
     def on_slots_changed(self):
         # Observer hook invoked by NodesManager after a slots-cache refresh.
-        # Avoid work when there are no shard subscriptions to reconcile.
+        # Schedule reconciliation on a dedicated worker thread so the caller
+        # (typically MovedError handling in _execute_command or the topology
+        # refresh thread in initialize()) is not blocked on the network I/O
+        # performed by reinitialize_shard_subscriptions. Mirrors the async
+        # path's asyncio.create_task model. No-op when there are no shard
+        # subscriptions to reconcile.
         if not self.shard_channels:
             return
-        self.reinitialize_shard_subscriptions()
+        if self._reconcile_executor is None:
+            self._reconcile_executor = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="redis-cluster-pubsub-reconcile",
+            )
+        future = self._reconcile_executor.submit(self.reinitialize_shard_subscriptions)
+        self._reconcile_futures.add(future)
+        future.add_done_callback(self._reconcile_futures.discard)
+        # Consume the future's exception (if any) so it is not silently lost.
+        # reinitialize_shard_subscriptions surfaces SlotNotCoveredError when
+        # a slot is still transiently uncovered; route it through the same
+        # logger channel as the async path for consistent observability.
+        future.add_done_callback(self._log_reconcile_future_exception)
+
+    @staticmethod
+    def _log_reconcile_future_exception(future: "Future") -> None:
+        if future.cancelled():
+            return
+        exc = future.exception()
+        if exc is not None:
+            logger.error(
+                "shard subscription reconciliation failed: %r", exc, exc_info=exc
+            )
 
     def reset(self) -> None:
+        # Tear down the reconciliation worker first so it does not race with
+        # the per-node pubsub teardown in super().reset() below. cancel_futures
+        # drops queued work; the currently-running task (if any) finishes on
+        # its worker thread. wait=False avoids blocking callers of close() /
+        # __del__ on a possibly slow in-flight reconciliation.
+        if self._reconcile_executor is not None:
+            self._reconcile_executor.shutdown(wait=False, cancel_futures=True)
+            self._reconcile_executor = None
+        self._reconcile_futures.clear()
         super().reset()
-        # _shard_channel_to_node may not exist yet on the very first call that
-        # happens from super().__init__() -> self.reset().
         self._shard_channel_to_node = {}
 
     def get_redis_connection(self):

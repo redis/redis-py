@@ -1,3 +1,4 @@
+import logging
 import platform
 import queue
 import socket
@@ -2279,16 +2280,22 @@ class TestClusterPubSubSlotMigration:
         pubsub._lock = threading.RLock()
         pubsub.subscribed_event = threading.Event()
         pubsub.health_check_response_counter = 0
+        pubsub.connection = None
         pubsub.channels = {}
+        pubsub.pending_unsubscribe_channels = set()
         pubsub.shard_channels = {}
         pubsub.pending_unsubscribe_shard_channels = set()
         pubsub.patterns = {}
+        pubsub.pending_unsubscribe_patterns = set()
         pubsub.ignore_subscribe_messages = False
         # ClusterPubSub-specific state.
         pubsub.cluster = mock.MagicMock()
         pubsub.node_pubsub_mapping = {}
         pubsub._shard_channel_to_node = {}
         pubsub.push_handler_func = None
+        # Reconciliation worker state (lazy-created by on_slots_changed).
+        pubsub._reconcile_executor = None
+        pubsub._reconcile_futures = set()
         return pubsub
 
     def _make_node(self, name):
@@ -2550,3 +2557,91 @@ class TestClusterPubSubSlotMigration:
         old_ps.sunsubscribe.assert_called_once_with(covered_channel)
         assert pubsub._shard_channel_to_node[covered_channel] == new_node.name
         assert pubsub._shard_channel_to_node[uncovered_channel] == old_node.name
+
+    def test_on_slots_changed_schedules_reconcile_off_caller_thread(self):
+        """
+        on_slots_changed must offload reinitialize_shard_subscriptions to a
+        worker thread so the dispatch call site (MovedError handling in
+        _execute_command / topology refresh in initialize) is not blocked on
+        per-channel network I/O. Mirrors the async path's create_task model.
+        """
+        pubsub = self._make_cluster_pubsub()
+        pubsub.shard_channels = {b"foo": None}
+        caller_thread = threading.get_ident()
+        worker_thread = {}
+        release = threading.Event()
+
+        def _record_and_wait():
+            worker_thread["id"] = threading.get_ident()
+            # Block so the test can assert caller-thread non-blocking
+            # behavior while reconciliation is still in flight.
+            release.wait(timeout=5.0)
+
+        with mock.patch.object(
+            pubsub, "reinitialize_shard_subscriptions", side_effect=_record_and_wait
+        ):
+            try:
+                pubsub.on_slots_changed()
+                # Submit returned without executing the work on our thread.
+                assert len(pubsub._reconcile_futures) == 1
+                (future,) = list(pubsub._reconcile_futures)
+                assert not future.done()
+                release.set()
+                future.result(timeout=5.0)
+                assert worker_thread["id"] != caller_thread
+                # Done-callback cleared the tracking set.
+                assert pubsub._reconcile_futures == set()
+            finally:
+                release.set()
+                pubsub.reset()
+
+    def test_on_slots_changed_consumes_and_logs_future_exception(self, caplog):
+        """
+        Regression: on_slots_changed schedules reinitialize_shard_subscriptions
+        on a worker thread; when that raises (e.g. SlotNotCoveredError for a
+        transient uncovered slot), the exception must be consumed and logged
+        via the library logger so it is not silently lost.
+        """
+        pubsub = self._make_cluster_pubsub()
+        pubsub.shard_channels = {b"foo": None}
+        boom = SlotNotCoveredError("simulated transient uncovered slot")
+        # Hold the worker inside the side-effect until the test has captured
+        # the scheduled future, so the done-callback cannot discard it before
+        # we observe it.
+        release = threading.Event()
+
+        def _raise():
+            release.wait(timeout=5.0)
+            raise boom
+
+        with mock.patch.object(
+            pubsub, "reinitialize_shard_subscriptions", side_effect=_raise
+        ):
+            with caplog.at_level(logging.ERROR, logger="redis.cluster"):
+                try:
+                    pubsub.on_slots_changed()
+                    (future,) = list(pubsub._reconcile_futures)
+                    # Register a sentinel done-callback after the two set by
+                    # on_slots_changed. Since callbacks run in registration
+                    # order, waiting on this Event guarantees both the
+                    # discard-from-set and log-exception callbacks have run
+                    # before the test assertions execute (future.result()
+                    # alone can return before callbacks complete).
+                    callbacks_done = threading.Event()
+                    future.add_done_callback(lambda _f: callbacks_done.set())
+                    release.set()
+                    try:
+                        future.result(timeout=5.0)
+                    except SlotNotCoveredError:
+                        pass
+                    assert callbacks_done.wait(timeout=5.0)
+                finally:
+                    release.set()
+                    pubsub.reset()
+
+        assert pubsub._reconcile_futures == set()
+        assert any(
+            "shard subscription reconciliation failed" in rec.message
+            and rec.levelno == logging.ERROR
+            for rec in caplog.records
+        )
