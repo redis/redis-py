@@ -1543,24 +1543,14 @@ class TestSubkeyNotificationParsing:
 @skip_if_server_version_lt("8.7.2")
 class TestSubkeyNotifications:
     """
-    Integration tests for subkey keyspace notifications with a standalone
-    Redis client.
+    Integration tests for subkey keyspace notifications.
 
     These tests require a Redis server with subkey notification support
-    (Redis >= 8.x) and keyspace/subkey notifications enabled via the
+    (Redis >= 8.7.2) and keyspace/subkey notifications enabled via the
     ``r_with_subkey_notifications`` fixture.
-    """
 
-    @staticmethod
-    def _drain_subscribe_messages(notifications):
-        """Drain subscribe/psubscribe confirmation messages so the next
-        ``get_message`` call returns a real notification."""
-        while True:
-            msg = notifications._pubsub.get_message(timeout=0.01)
-            if msg is None:
-                break
-            if msg["type"] not in ("subscribe", "psubscribe"):
-                break
+    Works for both standalone Redis and RedisCluster.
+    """
 
     def test_create_hash_field_subkeyspace_notification(
         self, r_with_subkey_notifications
@@ -1568,9 +1558,8 @@ class TestSubkeyNotifications:
         """Create a hash field and verify that the Subkeyspace notification
         contains the field that was created."""
         r = r_with_subkey_notifications
-        notifications = KeyspaceNotifications(r)
+        notifications = r.keyspace_notifications()
         notifications.subscribe_subkeyspace("test:hash1")
-        self._drain_subscribe_messages(notifications)
 
         r.hset("test:hash1", "field1", "value1")
 
@@ -1590,9 +1579,8 @@ class TestSubkeyNotifications:
         r = r_with_subkey_notifications
         r.hset("test:hash2", "field1", "initial")
 
-        notifications = KeyspaceNotifications(r)
+        notifications = r.keyspace_notifications()
         notifications.subscribe_subkeyspace("test:hash2")
-        self._drain_subscribe_messages(notifications)
 
         r.hset("test:hash2", "field1", "updated")
 
@@ -1613,9 +1601,8 @@ class TestSubkeyNotifications:
         r = r_with_subkey_notifications
         r.hset("test:hash3", "myfield", "initial")
 
-        notifications = KeyspaceNotifications(r)
+        notifications = r.keyspace_notifications()
         notifications.subscribe_subkeyspaceitem("test:hash3", "myfield")
-        self._drain_subscribe_messages(notifications)
 
         r.hset("test:hash3", "myfield", "updated")
 
@@ -1636,9 +1623,8 @@ class TestSubkeyNotifications:
         r = r_with_subkey_notifications
         r.hset("test:hash4", "field1", "value1")
 
-        notifications = KeyspaceNotifications(r)
+        notifications = r.keyspace_notifications()
         notifications.subscribe_subkeyevent("hdel")
-        self._drain_subscribe_messages(notifications)
 
         r.hdel("test:hash4", "field1")
 
@@ -1659,9 +1645,8 @@ class TestSubkeyNotifications:
         r = r_with_subkey_notifications
         r.hset("test:hash5", "field1", "value1")
 
-        notifications = KeyspaceNotifications(r)
+        notifications = r.keyspace_notifications()
         notifications.subscribe_subkeyspaceevent("hdel", "test:hash5")
-        self._drain_subscribe_messages(notifications)
 
         r.hdel("test:hash5", "field1")
 
@@ -1680,9 +1665,8 @@ class TestSubkeyNotifications:
         """Create multiple hash fields at once and verify subkeyspace
         notification contains all affected fields."""
         r = r_with_subkey_notifications
-        notifications = KeyspaceNotifications(r)
+        notifications = r.keyspace_notifications()
         notifications.subscribe_subkeyspace("test:hash6")
-        self._drain_subscribe_messages(notifications)
 
         r.hset("test:hash6", mapping={"f1": "v1", "f2": "v2", "f3": "v3"})
 
@@ -1700,9 +1684,8 @@ class TestSubkeyNotifications:
         """Subscribe to a subkeyspace pattern and verify notifications are
         received for matching keys."""
         r = r_with_subkey_notifications
-        notifications = KeyspaceNotifications(r)
+        notifications = r.keyspace_notifications()
         notifications.subscribe_subkeyspace("test:pattern:*")
-        self._drain_subscribe_messages(notifications)
 
         r.hset("test:pattern:hash1", "field1", "value1")
         r.hset("test:pattern:hash2", "field2", "value2")
@@ -1724,9 +1707,8 @@ class TestSubkeyNotifications:
         """Subscribe to a subkeyevent pattern for all hash events and
         verify notifications are received."""
         r = r_with_subkey_notifications
-        notifications = KeyspaceNotifications(r)
+        notifications = r.keyspace_notifications()
         notifications.subscribe_subkeyevent("h*")
-        self._drain_subscribe_messages(notifications)
 
         r.hset("test:hash7", "field1", "value1")
         r.hdel("test:hash7", "field1")
@@ -1752,9 +1734,8 @@ class TestSubkeyNotifications:
         r = r_with_subkey_notifications
         r.hset("test:hash8", "watched_field", "initial")
 
-        notifications = KeyspaceNotifications(r)
+        notifications = r.keyspace_notifications()
         notifications.subscribe_subkeyspaceitem("test:hash8", "watched_field")
-        self._drain_subscribe_messages(notifications)
 
         # Modify a different field — should NOT trigger a notification
         r.hset("test:hash8", "other_field", "value")
@@ -1775,10 +1756,9 @@ class TestSubkeyNotifications:
         verify that both types of notifications are received."""
         r = r_with_subkey_notifications
 
-        notifications = KeyspaceNotifications(r)
+        notifications = r.keyspace_notifications()
         notifications.subscribe_keyspace("test:hash9")
         notifications.subscribe_subkeyspace("test:hash9")
-        self._drain_subscribe_messages(notifications)
 
         r.hset("test:hash9", "field1", "value1")
 
@@ -1807,9 +1787,8 @@ class TestSubkeyNotifications:
         but not for unrelated fields."""
         r = r_with_subkey_notifications
 
-        notifications = KeyspaceNotifications(r)
+        notifications = r.keyspace_notifications()
         notifications.subscribe_subkeyspaceitem("test:hash10", "field*")
-        self._drain_subscribe_messages(notifications)
 
         # These should all match the pattern
         r.hset("test:hash10", "field1", "value1")
