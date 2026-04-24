@@ -56,9 +56,6 @@ from redis.observability.metrics import RedisMetricsCollector
 from ..ssl_utils import get_tls_certificates
 from .compat import aclosing
 
-pytestmark = pytest.mark.onlycluster
-
-
 default_host = "127.0.0.1"
 default_port = 7000
 default_cluster_slots = [
@@ -306,6 +303,7 @@ async def moved_redirection_helper(
             assert fetched_node.server_type == PRIMARY
 
 
+@pytest.mark.onlycluster
 class TestRedisClusterObj:
     """
     Tests for the RedisCluster class
@@ -1093,6 +1091,7 @@ class TestRedisClusterObj:
         assert n_used > 1
 
 
+@pytest.mark.onlycluster
 class TestClusterRedisCommands:
     """
     Tests for RedisCluster unique commands
@@ -2010,6 +2009,40 @@ class TestClusterRedisCommands:
             [b"a1", 23.0],
         ]
 
+    @skip_if_server_version_lt("8.7.0")
+    async def test_cluster_zinterstore_count(self, r: RedisCluster) -> None:
+        await r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
+        await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
+        await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
+        assert (
+            await r.zinterstore(
+                "{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="COUNT"
+            )
+            == 2
+        )
+        assert await r.zrange("{foo}d", 0, -1, withscores=True) == [
+            [b"a1", 3.0],
+            [b"a3", 3.0],
+        ]
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_cluster_zinterstore_count_with_weight(self, r: RedisCluster) -> None:
+        await r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
+        await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
+        await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
+        assert (
+            await r.zinterstore(
+                "{foo}d",
+                {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3},
+                aggregate="COUNT",
+            )
+            == 2
+        )
+        assert await r.zrange("{foo}d", 0, -1, withscores=True) == [
+            [b"a1", 6.0],
+            [b"a3", 6.0],
+        ]
+
     @skip_if_server_version_lt("4.9.0")
     async def test_cluster_bzpopmax(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 2})
@@ -2180,6 +2213,44 @@ class TestClusterRedisCommands:
             [b"a4", 12.0],
             [b"a3", 20.0],
             [b"a1", 23.0],
+        ]
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_cluster_zunionstore_count(self, r: RedisCluster) -> None:
+        await r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
+        await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
+        await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
+        assert (
+            await r.zunionstore(
+                "{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="COUNT"
+            )
+            == 4
+        )
+        assert await r.zrange("{foo}d", 0, -1, withscores=True) == [
+            [b"a4", 1.0],
+            [b"a2", 2.0],
+            [b"a1", 3.0],
+            [b"a3", 3.0],
+        ]
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_cluster_zunionstore_count_with_weight(self, r: RedisCluster) -> None:
+        await r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
+        await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
+        await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
+        assert (
+            await r.zunionstore(
+                "{foo}d",
+                {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3},
+                aggregate="COUNT",
+            )
+            == 4
+        )
+        assert await r.zrange("{foo}d", 0, -1, withscores=True) == [
+            [b"a2", 3.0],
+            [b"a4", 3.0],
+            [b"a1", 6.0],
+            [b"a3", 6.0],
         ]
 
     @skip_if_server_version_lt("2.8.9")
@@ -2430,6 +2501,7 @@ class TestClusterRedisCommands:
             await r.hotkeys_stop()
 
 
+@pytest.mark.onlycluster
 class TestNodesManager:
     """
     Tests for the NodesManager class
@@ -2843,6 +2915,7 @@ class TestNodesManager:
         assert nodes_cache_names == [node1.name]
 
 
+@pytest.mark.fixed_client
 class TestClusterNodeConnectionHandling:
     """Tests for ClusterNode connection handling methods."""
 
@@ -2986,6 +3059,7 @@ class TestClusterNodeConnectionHandling:
         conn.disconnect.assert_not_called()
 
 
+@pytest.mark.fixed_client
 class TestClusterConnectionErrorHandling:
     """Tests for cluster connection error handling behavior."""
 
@@ -3103,6 +3177,7 @@ class TestClusterConnectionErrorHandling:
                         disconnect_free.assert_called()
 
 
+@pytest.mark.onlycluster
 class TestClusterPipeline:
     """Tests for the ClusterPipeline class."""
 
@@ -3458,6 +3533,7 @@ class TestClusterPipeline:
             assert result[0] == cmd_count
 
 
+@pytest.mark.onlycluster
 @pytest.mark.ssl
 class TestSSL:
     """
@@ -4533,3 +4609,74 @@ class TestClusterPubSub:
             assert received_messages[0]["data"] == b"test message"
         finally:
             await pubsub.aclose()
+
+
+@pytest.mark.fixed_client
+class TestClusterPubSubWithMocks:
+    """
+    Unit tests for async ClusterPubSub that do not require a running cluster.
+    """
+
+    def _make_pubsub(self, cluster_mock, node=None):
+        """Create a ClusterPubSub with the provided cluster mock."""
+        from redis._parsers import Encoder
+        from redis.asyncio.cluster import ClusterPubSub
+
+        cluster_mock.encoder = Encoder("utf-8", "strict", False)
+        return ClusterPubSub(cluster_mock, node=node)
+
+    async def test_init_with_node_uses_adapter(self) -> None:
+        """
+        __init__ with a node must wrap it in _ClusterNodePoolAdapter instead
+        of creating a detached ConnectionPool.
+        """
+        from redis.asyncio.cluster import _ClusterNodePoolAdapter
+
+        node = ClusterNode("127.0.0.1", 7000)
+        cluster = Mock()
+        cluster.get_node.return_value = node
+
+        pubsub = self._make_pubsub(cluster, node=node)
+
+        assert isinstance(pubsub.connection_pool, _ClusterNodePoolAdapter)
+        assert pubsub.connection_pool._node is node
+        assert pubsub.connection_pool.connection_kwargs is node.connection_kwargs
+
+    async def test_init_without_node_has_no_connection_pool(self) -> None:
+        """
+        __init__ without a node must defer connection_pool creation until
+        the first command selects a node.
+        """
+        cluster = Mock()
+        pubsub = self._make_pubsub(cluster)
+
+        assert pubsub.node is None
+        assert pubsub.connection_pool is None
+
+    async def test_get_node_pubsub_uses_adapter(self) -> None:
+        """
+        _get_node_pubsub must build a PubSub backed by a
+        _ClusterNodePoolAdapter wrapping the ClusterNode.
+        """
+        from redis.asyncio.cluster import _ClusterNodePoolAdapter
+
+        cluster = Mock()
+        pubsub = self._make_pubsub(cluster)
+        node = ClusterNode("127.0.0.1", 7000)
+
+        shard_pubsub = pubsub._get_node_pubsub(node)
+
+        assert isinstance(shard_pubsub.connection_pool, _ClusterNodePoolAdapter)
+        assert shard_pubsub.connection_pool._node is node
+        assert pubsub.node_pubsub_mapping[node.name] is shard_pubsub
+
+    async def test_get_node_pubsub_caches_by_node_name(self) -> None:
+        """Repeated calls must not re-materialise the shard PubSub."""
+        cluster = Mock()
+        pubsub = self._make_pubsub(cluster)
+        node = ClusterNode("127.0.0.1", 7000)
+
+        first = pubsub._get_node_pubsub(node)
+        second = pubsub._get_node_pubsub(node)
+
+        assert first is second

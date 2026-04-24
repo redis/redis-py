@@ -3,7 +3,7 @@ import logging
 import threading
 import uuid
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Awaitable, Optional, Union
+from typing import TYPE_CHECKING, Awaitable, Literal, Optional, Union
 
 from redis.exceptions import LockError, LockNotOwnedError
 from redis.typing import Number
@@ -295,7 +295,7 @@ class Lock:
 
     def extend(
         self, additional_time: Number, replace_ttl: bool = False
-    ) -> Awaitable[bool]:
+    ) -> Awaitable[Literal[True]]:
         """
         Adds more time to an already acquired lock.
 
@@ -312,7 +312,7 @@ class Lock:
             raise LockError("Cannot extend a lock with no timeout")
         return self.do_extend(additional_time, replace_ttl)
 
-    async def do_extend(self, additional_time, replace_ttl) -> bool:
+    async def do_extend(self, additional_time, replace_ttl) -> Literal[True]:
         additional_time = int(additional_time * 1000)
         if not bool(
             await self.lua_extend(
@@ -324,7 +324,7 @@ class Lock:
             raise LockNotOwnedError("Cannot extend a lock that's no longer owned")
         return True
 
-    def reacquire(self) -> Awaitable[bool]:
+    def reacquire(self) -> Awaitable[Literal[True]]:
         """
         Resets a TTL of an already acquired lock back to a timeout value.
         """
@@ -334,7 +334,7 @@ class Lock:
             raise LockError("Cannot reacquire a lock with no timeout")
         return self.do_reacquire()
 
-    async def do_reacquire(self) -> bool:
+    async def do_reacquire(self) -> Literal[True]:
         timeout = int(self.timeout * 1000)
         if not bool(
             await self.lua_reacquire(

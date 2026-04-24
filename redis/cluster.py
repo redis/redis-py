@@ -5,10 +5,11 @@ import sys
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from copy import copy
 from enum import Enum
 from itertools import chain
+from types import MethodType
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -2731,12 +2732,30 @@ class ClusterPubSub(PubSub):
         connection = self.connection
         self._execute(connection, connection.send_command, *args)
 
+    def _resubscribe_shard_channels(self) -> None:
+        # A single node can own multiple slot ranges, so a batched
+        # ``SSUBSCRIBE`` covering every tracked channel would be rejected by
+        # Redis with a ``CROSSSLOT`` error. Group by hash slot and emit one
+        # ``SSUBSCRIBE`` per slot.
+        by_slot: defaultdict[int, dict] = defaultdict(dict)
+        for k, v in self.shard_channels.items():
+            by_slot[key_slot(self.encoder.encode(k))][k] = v
+        for subscriptions in by_slot.values():
+            self._resubscribe(subscriptions, self.ssubscribe)
+
     def _get_node_pubsub(self, node):
         try:
             return self.node_pubsub_mapping[node.name]
         except KeyError:
-            pubsub = node.redis_connection.pubsub(
-                push_handler_func=self.push_handler_func
+            redis_connection = self.cluster.get_redis_connection(node)
+            pubsub = redis_connection.pubsub(
+                push_handler_func=self.push_handler_func,
+            )
+            # Replay shard subscriptions on reconnect with slot-aware grouping
+            # so that channels spanning multiple slots owned by this node do
+            # not trigger a CROSSSLOT error.
+            pubsub._resubscribe_shard_channels = MethodType(
+                ClusterPubSub._resubscribe_shard_channels, pubsub
             )
             self.node_pubsub_mapping[node.name] = pubsub
             return pubsub

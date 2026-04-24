@@ -45,9 +45,8 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
-from redis._parsers.encoders import Encoder
 from redis.asyncio.client import PubSub, Redis
-from redis.asyncio.cluster import ClusterNode, RedisCluster
+from redis.asyncio.cluster import ClusterNode, RedisCluster, _ClusterNodePoolAdapter
 from redis.exceptions import (
     ConnectionError,
     RedisError,
@@ -67,43 +66,6 @@ from redis.keyspace_notifications import (
 from redis.utils import safe_str
 
 logger = logging.getLogger(__name__)
-
-
-class _ClusterNodePoolAdapter:
-    """Thin adapter exposing the :class:`ConnectionPool` interface that
-    :class:`PubSub` requires, backed by a :class:`ClusterNode`'s own
-    connection pool.
-
-    Connections are acquired from the node via
-    :meth:`ClusterNode.acquire_connection` and returned via
-    :meth:`ClusterNode.release`.  :meth:`PubSub.aclose` already
-    disconnects the connection *before* calling :meth:`release`, so the
-    connection is returned to the node's free-queue in a disconnected
-    state — guaranteeing that a subscribed socket is never silently
-    reused for regular commands.
-    """
-
-    def __init__(self, node: ClusterNode) -> None:
-        self._node = node
-        self.connection_kwargs = node.connection_kwargs
-
-    # -- methods used by PubSub ------------------------------------------------
-
-    def get_encoder(self) -> Encoder:
-        return self._node.get_encoder()
-
-    async def get_connection(
-        self, command_name: str | None = None, *keys: Any, **options: Any
-    ) -> Any:
-        connection = self._node.acquire_connection()
-        await connection.connect()
-        return connection
-
-    async def release(self, connection: Any) -> None:
-        # PubSub.aclose() disconnects the connection before calling
-        # release(), so it is safe to put it back in the node's free
-        # queue – it will reconnect lazily on next use.
-        self._node.release(connection)
 
 
 # Type alias for handlers that can be sync or async
