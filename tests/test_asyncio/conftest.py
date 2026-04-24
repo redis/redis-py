@@ -287,14 +287,12 @@ def connect_args(request):
     return parse_url(url)
 
 
-@pytest_asyncio.fixture()
-async def async_r_with_keyspace_notifications(create_redis):
-    """An async Redis client with keyspace notifications enabled.
-
-    Works for both standalone Redis and RedisCluster.
-    In cluster mode, keyspace notifications are enabled on all primary nodes.
+async def _async_enable_keyspace_notifications(client, flags="KEA"):
     """
-    client = await create_redis()
+    Enable keyspace notifications on an async Redis server (standalone or cluster).
+
+    Returns a dict mapping a label to (connection, original_value, owns_conn).
+    """
     cluster_mode = REDIS_INFO.get("cluster_enabled", False)
 
     original_configs = {}
@@ -306,22 +304,62 @@ async def async_r_with_keyspace_notifications(create_redis):
                 node_conn,
                 original.get("notify-keyspace-events", ""),
             )
-            await node_conn.config_set("notify-keyspace-events", "KEASTIV")
+            await node_conn.config_set("notify-keyspace-events", flags)
     else:
         original = await client.config_get("notify-keyspace-events")
         original_configs["standalone"] = (
             client,
             original.get("notify-keyspace-events", ""),
         )
-        await client.config_set("notify-keyspace-events", "KEASTIV")
+        await client.config_set("notify-keyspace-events", flags)
 
+    return original_configs, cluster_mode
+
+
+async def _async_restore_keyspace_notifications(original_configs, cluster_mode):
+    for _name, (conn, original_value) in original_configs.items():
+        try:
+            await conn.config_set("notify-keyspace-events", original_value)
+        except Exception:
+            pass
+        if cluster_mode:
+            await conn.aclose()
+
+
+@pytest_asyncio.fixture()
+async def async_r_with_keyspace_notifications(create_redis):
+    """An async Redis client with keyspace notifications enabled.
+
+    Uses notify-keyspace-events=KEA, supported on all Redis versions.
+
+    Works for both standalone Redis and RedisCluster.
+    In cluster mode, keyspace notifications are enabled on all primary nodes.
+    """
+    client = await create_redis()
+    original_configs, cluster_mode = await _async_enable_keyspace_notifications(
+        client, flags="KEA"
+    )
     try:
         yield client
     finally:
-        for _name, (conn, original_value) in original_configs.items():
-            try:
-                await conn.config_set("notify-keyspace-events", original_value)
-            except Exception:
-                pass
-            if cluster_mode:
-                await conn.aclose()
+        await _async_restore_keyspace_notifications(original_configs, cluster_mode)
+
+
+@pytest_asyncio.fixture()
+async def async_r_with_subkey_notifications(create_redis):
+    """An async Redis client with keyspace and subkey notifications enabled.
+
+    Uses notify-keyspace-events=KEASTIV, which enables subkey notification
+    flags (S, T, I, V). These flags are only available in Redis >= 8.7.2;
+    tests using this fixture must be guarded accordingly.
+
+    Works for both standalone Redis and RedisCluster.
+    """
+    client = await create_redis()
+    original_configs, cluster_mode = await _async_enable_keyspace_notifications(
+        client, flags="KEASTIV"
+    )
+    try:
+        yield client
+    finally:
+        await _async_restore_keyspace_notifications(original_configs, cluster_mode)

@@ -1540,15 +1540,15 @@ class TestSubkeyNotificationParsing:
         assert n.subkeys == ["myfield"]
 
 
-@skip_if_server_version_lt("8.7.3")
+@skip_if_server_version_lt("8.7.2")
 class TestSubkeyNotifications:
     """
     Integration tests for subkey keyspace notifications with a standalone
     Redis client.
 
     These tests require a Redis server with subkey notification support
-    (Redis >= 8.x) and keyspace notifications enabled via the
-    ``r_with_keyspace_notifications`` fixture.
+    (Redis >= 8.x) and keyspace/subkey notifications enabled via the
+    ``r_with_subkey_notifications`` fixture.
     """
 
     @staticmethod
@@ -1563,11 +1563,11 @@ class TestSubkeyNotifications:
                 break
 
     def test_create_hash_field_subkeyspace_notification(
-        self, r_with_keyspace_notifications
+        self, r_with_subkey_notifications
     ):
         """Create a hash field and verify that the Subkeyspace notification
         contains the field that was created."""
-        r = r_with_keyspace_notifications
+        r = r_with_subkey_notifications
         notifications = KeyspaceNotifications(r)
         notifications.subscribe_subkeyspace("test:hash1")
         self._drain_subscribe_messages(notifications)
@@ -1584,10 +1584,10 @@ class TestSubkeyNotifications:
         r.delete("test:hash1")
 
     def test_update_hash_field_subkeyspace_notification(
-        self, r_with_keyspace_notifications
+        self, r_with_subkey_notifications
     ):
         """Update an existing hash field and verify the Subkeyspace notification."""
-        r = r_with_keyspace_notifications
+        r = r_with_subkey_notifications
         r.hset("test:hash2", "field1", "initial")
 
         notifications = KeyspaceNotifications(r)
@@ -1606,11 +1606,11 @@ class TestSubkeyNotifications:
         r.delete("test:hash2")
 
     def test_update_hash_field_subkeyspaceitem_notification(
-        self, r_with_keyspace_notifications
+        self, r_with_subkey_notifications
     ):
         """Update a hash field and verify the Subkeyspaceitem notification
         is received for the specific field."""
-        r = r_with_keyspace_notifications
+        r = r_with_subkey_notifications
         r.hset("test:hash3", "myfield", "initial")
 
         notifications = KeyspaceNotifications(r)
@@ -1629,11 +1629,11 @@ class TestSubkeyNotifications:
         r.delete("test:hash3")
 
     def test_delete_hash_field_subkeyevent_notification(
-        self, r_with_keyspace_notifications
+        self, r_with_subkey_notifications
     ):
         """Delete a hash field and verify the Subkeyevent notification
         is received for the hdel event."""
-        r = r_with_keyspace_notifications
+        r = r_with_subkey_notifications
         r.hset("test:hash4", "field1", "value1")
 
         notifications = KeyspaceNotifications(r)
@@ -1652,11 +1652,11 @@ class TestSubkeyNotifications:
         r.delete("test:hash4")
 
     def test_delete_hash_field_subkeyspaceevent_notification(
-        self, r_with_keyspace_notifications
+        self, r_with_subkey_notifications
     ):
         """Delete a hash field and verify the Subkeyspaceevent notification
         is received for the specific key and event."""
-        r = r_with_keyspace_notifications
+        r = r_with_subkey_notifications
         r.hset("test:hash5", "field1", "value1")
 
         notifications = KeyspaceNotifications(r)
@@ -1675,11 +1675,11 @@ class TestSubkeyNotifications:
         r.delete("test:hash5")
 
     def test_multiple_hash_fields_subkeyspace_notification(
-        self, r_with_keyspace_notifications
+        self, r_with_subkey_notifications
     ):
         """Create multiple hash fields at once and verify subkeyspace
         notification contains all affected fields."""
-        r = r_with_keyspace_notifications
+        r = r_with_subkey_notifications
         notifications = KeyspaceNotifications(r)
         notifications.subscribe_subkeyspace("test:hash6")
         self._drain_subscribe_messages(notifications)
@@ -1696,10 +1696,10 @@ class TestSubkeyNotifications:
         notifications.close()
         r.delete("test:hash6")
 
-    def test_subkeyspace_pattern_subscription(self, r_with_keyspace_notifications):
+    def test_subkeyspace_pattern_subscription(self, r_with_subkey_notifications):
         """Subscribe to a subkeyspace pattern and verify notifications are
         received for matching keys."""
-        r = r_with_keyspace_notifications
+        r = r_with_subkey_notifications
         notifications = KeyspaceNotifications(r)
         notifications.subscribe_subkeyspace("test:pattern:*")
         self._drain_subscribe_messages(notifications)
@@ -1720,10 +1720,10 @@ class TestSubkeyNotifications:
         notifications.close()
         r.delete("test:pattern:hash1", "test:pattern:hash2")
 
-    def test_subkeyevent_pattern_subscription(self, r_with_keyspace_notifications):
+    def test_subkeyevent_pattern_subscription(self, r_with_subkey_notifications):
         """Subscribe to a subkeyevent pattern for all hash events and
         verify notifications are received."""
-        r = r_with_keyspace_notifications
+        r = r_with_subkey_notifications
         notifications = KeyspaceNotifications(r)
         notifications.subscribe_subkeyevent("h*")
         self._drain_subscribe_messages(notifications)
@@ -1745,11 +1745,11 @@ class TestSubkeyNotifications:
         r.delete("test:hash7")
 
     def test_subkeyspaceitem_does_not_receive_other_fields(
-        self, r_with_keyspace_notifications
+        self, r_with_subkey_notifications
     ):
         """Subscribe to a specific subkeyspaceitem and verify that
         modifications to other fields do not trigger notifications."""
-        r = r_with_keyspace_notifications
+        r = r_with_subkey_notifications
         r.hset("test:hash8", "watched_field", "initial")
 
         notifications = KeyspaceNotifications(r)
@@ -1770,10 +1770,10 @@ class TestSubkeyNotifications:
         notifications.close()
         r.delete("test:hash8")
 
-    def test_combined_keyspace_and_subkeyspace(self, r_with_keyspace_notifications):
+    def test_combined_keyspace_and_subkeyspace(self, r_with_subkey_notifications):
         """Subscribe to both keyspace and subkeyspace on the same key and
         verify that both types of notifications are received."""
-        r = r_with_keyspace_notifications
+        r = r_with_subkey_notifications
 
         notifications = KeyspaceNotifications(r)
         notifications.subscribe_keyspace("test:hash9")
@@ -1800,12 +1800,12 @@ class TestSubkeyNotifications:
         r.delete("test:hash9")
 
     def test_subkeyspaceitem_pattern_receives_matching_fields(
-        self, r_with_keyspace_notifications
+        self, r_with_subkey_notifications
     ):
         """Subscribe to subkeyspaceitem with a pattern subkey (field*) and
         verify that notifications are received for field1, field2, and field3
         but not for unrelated fields."""
-        r = r_with_keyspace_notifications
+        r = r_with_subkey_notifications
 
         notifications = KeyspaceNotifications(r)
         notifications.subscribe_subkeyspaceitem("test:hash10", "field*")
