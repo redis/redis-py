@@ -2809,3 +2809,37 @@ class TestClusterPubSubSlotMigration:
         ps_good.reset.assert_called_once()
         assert pubsub._shard_channel_to_node == {}
         assert pubsub.node_pubsub_mapping == {}
+
+    def test_reset_recreates_pubsubs_generator(self):
+        """
+        Regression: _pubsubs_generator captures node_pubsub_mapping.values()
+        into a local list inside ``yield from``; clearing the mapping does
+        not reach references already held by that captured snapshot. A
+        generator suspended mid-yield-from would surface stale (now reset())
+        per-node pubsubs after re-subscription unless reset() also rebinds
+        _pubsubs_generator to a fresh generator instance.
+        """
+        from redis.cluster import ClusterPubSub
+
+        pubsub = self._make_cluster_pubsub()
+        pubsub._pubsubs_generator = ClusterPubSub._pubsubs_generator(pubsub)
+        ps_a = self._make_node_pubsub({b"foo": None})
+        ps_b = self._make_node_pubsub({b"bar": None})
+        pubsub.node_pubsub_mapping = {
+            "127.0.0.1:7000": ps_a,
+            "127.0.0.1:7001": ps_b,
+        }
+        # Advance into yield-from so the generator's frame holds a
+        # captured list referencing both stale pubsubs.
+        first = next(pubsub._pubsubs_generator)
+        assert first in (ps_a, ps_b)
+        old_generator = pubsub._pubsubs_generator
+
+        pubsub.reset()
+
+        assert pubsub._pubsubs_generator is not old_generator
+        # After re-subscription the fresh generator must yield the new
+        # entry rather than draining the old captured list first.
+        fresh_ps = self._make_node_pubsub({b"baz": None})
+        pubsub.node_pubsub_mapping["127.0.0.1:7002"] = fresh_ps
+        assert next(pubsub._pubsubs_generator) is fresh_ps

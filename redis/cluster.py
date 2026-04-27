@@ -3214,6 +3214,15 @@ class ClusterPubSub(PubSub):
             # round-robin in _pubsubs_generator / _sharded_message_generator
             # cannot yield them between teardown and re-subscription.
             self.node_pubsub_mapping.clear()
+            # _pubsubs_generator captures node_pubsub_mapping.values() into
+            # a local list inside ``yield from``; clearing the mapping does
+            # not reach references already held by that captured snapshot,
+            # so a generator suspended mid-yield-from would still surface
+            # the now-reset() per-node pubsubs after re-subscription.
+            # Recreate it to drop the captured list. type(self) bypasses
+            # the instance-level self-shadow established at __init__
+            # (self._pubsubs_generator = self._pubsubs_generator()).
+            self._pubsubs_generator = type(self)._pubsubs_generator(self)
             super().reset()
             self._shard_channel_to_node = {}
 
