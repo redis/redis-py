@@ -57,6 +57,10 @@ from redis.keyspace_notifications import (
     KeyeventChannel,
     KeyNotification,
     KeyspaceChannel,
+    SubkeyeventChannel,
+    SubkeyspaceChannel,
+    SubkeyspaceeventChannel,
+    SubkeyspaceitemChannel,
     _is_pattern,
 )
 from redis.utils import safe_str
@@ -114,6 +118,48 @@ class AsyncKeyspaceNotificationsInterface(ABC):
         handler: AsyncHandlerT | None = None,
     ):
         """Subscribe to keyevent notifications for specific event types."""
+        pass
+
+    @abstractmethod
+    async def subscribe_subkeyspace(
+        self,
+        key_or_pattern: str,
+        db: int = 0,
+        handler: AsyncHandlerT | None = None,
+    ):
+        """Subscribe to subkeyspace notifications for specific keys."""
+        pass
+
+    @abstractmethod
+    async def subscribe_subkeyevent(
+        self,
+        event: str,
+        db: int = 0,
+        handler: AsyncHandlerT | None = None,
+    ):
+        """Subscribe to subkeyevent notifications for specific event types."""
+        pass
+
+    @abstractmethod
+    async def subscribe_subkeyspaceitem(
+        self,
+        key_or_pattern: str,
+        subkey_or_pattern: str,
+        db: int = 0,
+        handler: AsyncHandlerT | None = None,
+    ):
+        """Subscribe to subkeyspaceitem notifications for a specific subkey."""
+        pass
+
+    @abstractmethod
+    async def subscribe_subkeyspaceevent(
+        self,
+        event: str,
+        key_or_pattern: str,
+        db: int = 0,
+        handler: AsyncHandlerT | None = None,
+    ):
+        """Subscribe to subkeyspaceevent notifications for an event on a key."""
         pass
 
     @abstractmethod
@@ -347,6 +393,48 @@ class AbstractAsyncKeyspaceNotifications(AsyncKeyspaceNotificationsInterface):
     ):
         """Subscribe to keyevent notifications for specific event types."""
         channel = KeyeventChannel(event, db=db)
+        await self.subscribe(channel, handler=handler)
+
+    async def subscribe_subkeyspace(
+        self,
+        key_or_pattern: str,
+        db: int = 0,
+        handler: AsyncHandlerT | None = None,
+    ):
+        """Subscribe to subkeyspace notifications for specific keys."""
+        channel = SubkeyspaceChannel(key_or_pattern, db=db)
+        await self.subscribe(channel, handler=handler)
+
+    async def subscribe_subkeyevent(
+        self,
+        event: str,
+        db: int = 0,
+        handler: AsyncHandlerT | None = None,
+    ):
+        """Subscribe to subkeyevent notifications for specific event types."""
+        channel = SubkeyeventChannel(event, db=db)
+        await self.subscribe(channel, handler=handler)
+
+    async def subscribe_subkeyspaceitem(
+        self,
+        key_or_pattern: str,
+        subkey_or_pattern: str,
+        db: int = 0,
+        handler: AsyncHandlerT | None = None,
+    ):
+        """Subscribe to subkeyspaceitem notifications for a specific subkey."""
+        channel = SubkeyspaceitemChannel(key_or_pattern, subkey_or_pattern, db=db)
+        await self.subscribe(channel, handler=handler)
+
+    async def subscribe_subkeyspaceevent(
+        self,
+        event: str,
+        key_or_pattern: str,
+        db: int = 0,
+        handler: AsyncHandlerT | None = None,
+    ):
+        """Subscribe to subkeyspaceevent notifications for an event on a key."""
+        channel = SubkeyspaceeventChannel(event, key_or_pattern, db=db)
         await self.subscribe(channel, handler=handler)
 
     async def __aenter__(self):

@@ -429,7 +429,7 @@ def r(request):
         yield client
 
 
-def _enable_keyspace_notifications(client):
+def _enable_keyspace_notifications(client, flags="KEA"):
     """
     Enable keyspace notifications on a Redis server (standalone or cluster).
 
@@ -447,7 +447,7 @@ def _enable_keyspace_notifications(client):
             original = node_client.config_get("notify-keyspace-events")
             original_configs[node.name] = original.get("notify-keyspace-events", "")
             node_connections[node.name] = node_client
-            node_client.config_set("notify-keyspace-events", "KEA")
+            node_client.config_set("notify-keyspace-events", flags)
 
         def restore():
             # Restore configuration on all nodes that were originally configured
@@ -481,7 +481,7 @@ def _enable_keyspace_notifications(client):
         # For standalone, configure the single server
         original_config = client.config_get("notify-keyspace-events")
         original_value = original_config.get("notify-keyspace-events", "")
-        client.config_set("notify-keyspace-events", "KEA")
+        client.config_set("notify-keyspace-events", flags)
 
         def restore():
             try:
@@ -507,6 +507,25 @@ def r_with_keyspace_notifications(request):
     """
     with _get_client(redis.Redis, request) as client:
         restore = _enable_keyspace_notifications(client)
+        try:
+            yield client
+        finally:
+            restore()
+
+
+@pytest.fixture()
+def r_with_subkey_notifications(request):
+    """
+    A Redis client with keyspace and subkey notifications enabled.
+
+    Uses notify-keyspace-events=KEASTIV, which enables subkey notification
+    flags (S, T, I, V). These flags are only available in Redis >= 8.7.2;
+    tests using this fixture must be guarded accordingly.
+
+    Works for both standalone Redis and RedisCluster.
+    """
+    with _get_client(redis.Redis, request) as client:
+        restore = _enable_keyspace_notifications(client, flags="KEASTIV")
         try:
             yield client
         finally:

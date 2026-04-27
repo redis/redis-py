@@ -31,7 +31,7 @@ env:
   # for example after 8.2.1 is published, 8.2 image contains 8.2.1 content
   CURRENT_REDIS_VERSION: '8.6.1'
   REDIS_VERSION_CUSTOM_MAP: >-
-    8.8:8.8-m02
+    8.8:unstable-24805570909-debian
 
 jobs:
   dependency-audit:
