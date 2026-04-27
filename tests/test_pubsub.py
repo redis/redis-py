@@ -2783,6 +2783,10 @@ class TestClusterPubSubSlotMigration:
         # Cluster-level shard state cleared by super().reset() and our hook.
         assert pubsub.shard_channels == {}
         assert pubsub._shard_channel_to_node == {}
+        # Mapping itself must also be cleared so the round-robin in
+        # _pubsubs_generator can't yield dead per-node pubsubs between
+        # teardown and re-subscription.
+        assert pubsub.node_pubsub_mapping == {}
 
     def test_reset_swallows_per_node_teardown_errors(self):
         """
@@ -2804,3 +2808,4 @@ class TestClusterPubSubSlotMigration:
         ps_bad.reset.assert_called_once()
         ps_good.reset.assert_called_once()
         assert pubsub._shard_channel_to_node == {}
+        assert pubsub.node_pubsub_mapping == {}

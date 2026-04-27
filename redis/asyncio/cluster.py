@@ -3439,12 +3439,15 @@ class ClusterPubSub(PubSub):
 
         if message is None:
             return None
-        # Serialize state mutation against reinitialize_shard_subscriptions
-        # (background task). The blocking get_message above intentionally
-        # runs outside the lock so reconciliation is not stalled by long
-        # polls.
-        async with self._shard_state_lock:
-            if str_if_bytes(message["type"]) == "sunsubscribe":
+        # Only sunsubscribe mutates cluster-level shard state; bypassing the
+        # lock on the data-message hot path keeps smessage delivery from
+        # competing with the reconciliation task for _shard_state_lock.
+        if str_if_bytes(message["type"]) == "sunsubscribe":
+            # Serialize state mutation against reinitialize_shard_subscriptions
+            # (background task). The blocking get_message above intentionally
+            # runs outside the lock so reconciliation is not stalled by long
+            # polls.
+            async with self._shard_state_lock:
                 if message["channel"] in self.pending_unsubscribe_shard_channels:
                     # User-initiated sunsubscribe: drop from cluster-level tracking.
                     self.pending_unsubscribe_shard_channels.remove(message["channel"])
@@ -3730,6 +3733,10 @@ class ClusterPubSub(PubSub):
             # Close all shard pubsub instances first
             for pubsub in self.node_pubsub_mapping.values():
                 await pubsub.aclose()
+            # Drop the now-dead per-node pubsubs from the mapping so the
+            # round-robin in _pubsubs_generator / _sharded_message_generator
+            # cannot yield them between teardown and re-subscription.
+            self.node_pubsub_mapping.clear()
             # Let parent handle self.connection disconnect under the lock
             # (includes disconnect, release to pool, and clearing
             # self.connection)

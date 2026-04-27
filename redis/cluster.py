@@ -2917,11 +2917,15 @@ class ClusterPubSub(PubSub):
             pubsub, message = self._sharded_message_generator(timeout=timeout)
         if message is None:
             return None
-        # Serialize state mutation against reinitialize_shard_subscriptions
-        # (worker thread). The blocking get_message above intentionally runs
-        # outside the lock so reconciliation is not stalled by long polls.
-        with self._shard_state_lock:
-            if str_if_bytes(message["type"]) == "sunsubscribe":
+        # Only sunsubscribe mutates cluster-level shard state; bypassing the
+        # lock on the data-message hot path keeps smessage delivery from
+        # competing with the reconciliation worker for _shard_state_lock.
+        if str_if_bytes(message["type"]) == "sunsubscribe":
+            # Serialize state mutation against reinitialize_shard_subscriptions
+            # (worker thread). The blocking get_message above intentionally
+            # runs outside the lock so reconciliation is not stalled by long
+            # polls.
+            with self._shard_state_lock:
                 if message["channel"] in self.pending_unsubscribe_shard_channels:
                     # User-initiated sunsubscribe: drop from cluster-level tracking.
                     self.pending_unsubscribe_shard_channels.remove(message["channel"])
@@ -2946,10 +2950,11 @@ class ClusterPubSub(PubSub):
                         except Exception:
                             pass
                         self.node_pubsub_mapping.pop(name, None)
-            if not self.channels and not self.patterns and not self.shard_channels:
-                # There are no subscriptions anymore, set subscribed_event flag
-                # to false
-                self.subscribed_event.clear()
+                # Mirror PubSub.handle_message: the empty-check belongs in the
+                # unsubscribe branch since that is the only path that can
+                # reduce shard_channels here.
+                if not self.channels and not self.patterns and not self.shard_channels:
+                    self.subscribed_event.clear()
         # Only suppress subscribe/unsubscribe messages, not data messages (smessage)
         if str_if_bytes(message["type"]) in ("ssubscribe", "sunsubscribe"):
             if self.ignore_subscribe_messages or ignore_subscribe_messages:
@@ -3205,6 +3210,10 @@ class ClusterPubSub(PubSub):
                     pubsub.reset()
                 except Exception:
                     pass
+            # Drop the now-dead per-node pubsubs from the mapping so the
+            # round-robin in _pubsubs_generator / _sharded_message_generator
+            # cannot yield them between teardown and re-subscription.
+            self.node_pubsub_mapping.clear()
             super().reset()
             self._shard_channel_to_node = {}
 
