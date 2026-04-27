@@ -2699,3 +2699,58 @@ class TestClusterPubSubSlotMigration:
         finally:
             release_holder.set()
             holder.join(timeout=2.0)
+
+    def test_on_slots_changed_concurrent_calls_create_single_executor(self):
+        """
+        Regression: EventDispatcher.dispatch() releases its lock before
+        invoking listeners, so concurrent MovedError-handling threads can
+        all reach on_slots_changed at the same time. The lazy creation of
+        _reconcile_executor must be serialized so exactly one executor is
+        constructed; otherwise orphaned ThreadPoolExecutors leak their
+        worker threads.
+        """
+        from redis import cluster as cluster_module
+
+        pubsub = self._make_cluster_pubsub()
+        pubsub.shard_channels = {b"foo": None}
+
+        constructed: list = []
+        real_executor_cls = cluster_module.ThreadPoolExecutor
+        # Block the constructor briefly so multiple threads pile up on the
+        # _shard_state_lock; without serialization each waiting thread would
+        # also see _reconcile_executor is None and construct its own.
+        construct_gate = threading.Event()
+
+        def _counting_executor(*args, **kwargs):
+            construct_gate.wait(timeout=2.0)
+            instance = real_executor_cls(*args, **kwargs)
+            constructed.append(instance)
+            return instance
+
+        start_barrier = threading.Barrier(8)
+
+        def _worker():
+            start_barrier.wait(timeout=2.0)
+            pubsub.on_slots_changed()
+
+        with mock.patch.object(
+            cluster_module, "ThreadPoolExecutor", side_effect=_counting_executor
+        ):
+            with mock.patch.object(
+                pubsub, "reinitialize_shard_subscriptions", return_value=None
+            ):
+                threads = [threading.Thread(target=_worker) for _ in range(8)]
+                try:
+                    for t in threads:
+                        t.start()
+                    construct_gate.set()
+                    for t in threads:
+                        t.join(timeout=5.0)
+                        assert not t.is_alive()
+                finally:
+                    construct_gate.set()
+                    pubsub.reset()
+
+        assert len(constructed) == 1
+        # All callers observe the same executor instance.
+        assert pubsub._reconcile_executor is None  # cleared by reset() above

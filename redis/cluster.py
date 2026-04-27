@@ -3134,13 +3134,24 @@ class ClusterPubSub(PubSub):
         # subscriptions to reconcile.
         if not self.shard_channels:
             return
-        if self._reconcile_executor is None:
-            self._reconcile_executor = ThreadPoolExecutor(
-                max_workers=1,
-                thread_name_prefix="redis-cluster-pubsub-reconcile",
+        # Serialize lazy executor creation and submission against concurrent
+        # on_slots_changed calls (EventDispatcher releases its lock before
+        # invoking listeners, so two MovedError-handling threads can land
+        # here at once) and against reset() which tears the executor down.
+        # Without this, two threads could each create a ThreadPoolExecutor
+        # and one would be orphaned (leaking its worker thread); a reset()
+        # interleaved between create and submit() could also raise
+        # RuntimeError("cannot schedule new futures after shutdown").
+        with self._shard_state_lock:
+            if self._reconcile_executor is None:
+                self._reconcile_executor = ThreadPoolExecutor(
+                    max_workers=1,
+                    thread_name_prefix="redis-cluster-pubsub-reconcile",
+                )
+            future = self._reconcile_executor.submit(
+                self.reinitialize_shard_subscriptions
             )
-        future = self._reconcile_executor.submit(self.reinitialize_shard_subscriptions)
-        self._reconcile_futures.add(future)
+            self._reconcile_futures.add(future)
         future.add_done_callback(self._reconcile_futures.discard)
         # Consume the future's exception (if any) so it is not silently lost.
         # reinitialize_shard_subscriptions surfaces SlotNotCoveredError when
@@ -3163,11 +3174,14 @@ class ClusterPubSub(PubSub):
         # the per-node pubsub teardown in super().reset() below. cancel_futures
         # drops queued work; the currently-running task (if any) finishes on
         # its worker thread. wait=False avoids blocking callers of close() /
-        # __del__ on a possibly slow in-flight reconciliation.
-        if self._reconcile_executor is not None:
-            self._reconcile_executor.shutdown(wait=False, cancel_futures=True)
-            self._reconcile_executor = None
-        self._reconcile_futures.clear()
+        # __del__ on a possibly slow in-flight reconciliation. The lifecycle
+        # is serialized under _shard_state_lock so a concurrent
+        # on_slots_changed cannot submit to a half-shutdown executor.
+        with self._shard_state_lock:
+            if self._reconcile_executor is not None:
+                self._reconcile_executor.shutdown(wait=False, cancel_futures=True)
+                self._reconcile_executor = None
+            self._reconcile_futures.clear()
         super().reset()
         self._shard_channel_to_node = {}
 
