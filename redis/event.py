@@ -111,7 +111,11 @@ class EventDispatcher(EventDispatcherInterface):
             ],
         }
 
-        self._lock = threading.Lock()
+        # Reentrant so a finalizer/listener that runs on the same thread
+        # while the lock is held (e.g. a weakref.finalize callback fired
+        # from cyclic GC during an allocation inside register_listeners /
+        # unregister_listeners) can re-enter without deadlocking.
+        self._lock = threading.RLock()
         self._async_lock = None
 
         if event_listeners:
