@@ -3152,12 +3152,20 @@ class ClusterPubSub(PubSub):
                 self.reinitialize_shard_subscriptions
             )
             self._reconcile_futures.add(future)
-        future.add_done_callback(self._reconcile_futures.discard)
+        future.add_done_callback(self._discard_reconcile_future)
         # Consume the future's exception (if any) so it is not silently lost.
         # reinitialize_shard_subscriptions surfaces SlotNotCoveredError when
         # a slot is still transiently uncovered; route it through the same
         # logger channel as the async path for consistent observability.
         future.add_done_callback(self._log_reconcile_future_exception)
+
+    def _discard_reconcile_future(self, future: "Future") -> None:
+        # Done-callback fires on the worker thread. Take _shard_state_lock so
+        # the discard observes the same mutual-exclusion discipline as the
+        # add() / clear() sites; without it the set mutation is correct only
+        # because of CPython's GIL and would race under free-threaded builds.
+        with self._shard_state_lock:
+            self._reconcile_futures.discard(future)
 
     @staticmethod
     def _log_reconcile_future_exception(future: "Future") -> None:
@@ -3170,20 +3178,24 @@ class ClusterPubSub(PubSub):
             )
 
     def reset(self) -> None:
-        # Tear down the reconciliation worker first so it does not race with
-        # the per-node pubsub teardown in super().reset() below. cancel_futures
-        # drops queued work; the currently-running task (if any) finishes on
-        # its worker thread. wait=False avoids blocking callers of close() /
-        # __del__ on a possibly slow in-flight reconciliation. The lifecycle
-        # is serialized under _shard_state_lock so a concurrent
-        # on_slots_changed cannot submit to a half-shutdown executor.
+        # Hold _shard_state_lock across the entire teardown so it observes
+        # the same mutual-exclusion discipline as ssubscribe / sunsubscribe /
+        # get_sharded_message / reinitialize_shard_subscriptions, which all
+        # mutate shard_channels, _shard_channel_to_node, and
+        # node_pubsub_mapping under this lock. Without it, super().reset()
+        # rebinds shard_channels and pending_unsubscribe_shard_channels in
+        # parallel with a concurrent user-thread mutation, silently dropping
+        # subscription intent. cancel_futures drops queued reconciliation
+        # work; the currently-running task (if any) is already serialized
+        # against us by this same lock - shutdown(wait=False) avoids waiting
+        # on the worker thread's join, not on its critical section.
         with self._shard_state_lock:
             if self._reconcile_executor is not None:
                 self._reconcile_executor.shutdown(wait=False, cancel_futures=True)
                 self._reconcile_executor = None
             self._reconcile_futures.clear()
-        super().reset()
-        self._shard_channel_to_node = {}
+            super().reset()
+            self._shard_channel_to_node = {}
 
     def get_redis_connection(self):
         """

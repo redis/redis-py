@@ -3705,25 +3705,39 @@ class ClusterPubSub(PubSub):
         """
         Disconnect the pubsub connection.
         """
-        # Cancel any in-flight reconciliation tasks first so they don't race
-        # with the teardown of per-node pubsubs below. Awaiting each task with
-        # suppressed CancelledError also avoids unhandled-exception warnings
-        # if the task was created but not yet scheduled.
+        # Cancel and gather in-flight reconciliation tasks BEFORE acquiring
+        # _shard_state_lock. The tasks themselves take that lock inside
+        # reinitialize_shard_subscriptions; since asyncio.Lock is non-
+        # reentrant, gathering while holding it would deadlock. Awaiting
+        # each task with suppressed CancelledError also avoids unhandled-
+        # exception warnings if the task was created but not yet scheduled.
         if self._reconcile_tasks:
             tasks = list(self._reconcile_tasks)
-            self._reconcile_tasks.clear()
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
-        # Close all shard pubsub instances first
-        for pubsub in self.node_pubsub_mapping.values():
-            await pubsub.aclose()
-        # Let parent handle self.connection disconnect under the lock
-        # (includes disconnect, release to pool, and clearing self.connection)
-        await super().aclose()
-        # Clear the reverse index so a reused instance doesn't route against
-        # stale mappings. super().aclose() has already cleared shard_channels.
-        self._shard_channel_to_node.clear()
+        # Hold _shard_state_lock across the rest of the teardown so it
+        # observes the same mutual-exclusion discipline as ssubscribe /
+        # sunsubscribe / get_sharded_message / reinitialize_shard_
+        # subscriptions, which all mutate shard_channels,
+        # _shard_channel_to_node, and node_pubsub_mapping under this lock.
+        # Without it, super().aclose() rebinds shard_channels and
+        # pending_unsubscribe_shard_channels in parallel with a concurrent
+        # user-coroutine mutation that resumes during one of the awaits
+        # below, silently dropping subscription intent.
+        async with self._shard_state_lock:
+            self._reconcile_tasks.clear()
+            # Close all shard pubsub instances first
+            for pubsub in self.node_pubsub_mapping.values():
+                await pubsub.aclose()
+            # Let parent handle self.connection disconnect under the lock
+            # (includes disconnect, release to pool, and clearing
+            # self.connection)
+            await super().aclose()
+            # Clear the reverse index so a reused instance doesn't route
+            # against stale mappings. super().aclose() has already cleared
+            # shard_channels.
+            self._shard_channel_to_node.clear()
 
     def _raise_on_invalid_node(
         self,
