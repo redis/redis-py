@@ -2754,3 +2754,53 @@ class TestClusterPubSubSlotMigration:
         assert len(constructed) == 1
         # All callers observe the same executor instance.
         assert pubsub._reconcile_executor is None  # cleared by reset() above
+
+    def test_reset_tears_down_per_node_pubsubs(self):
+        """
+        Regression: reset() must close every per-node pubsub so its dedicated
+        connection is released and its (now stale) shard_channels cannot be
+        replayed by PubSub.on_connect on a subsequent reconnect. Mirrors the
+        async aclose() path which calls aclose() on each per-node pubsub
+        before clearing cluster-level state.
+        """
+        pubsub = self._make_cluster_pubsub()
+        ps_a = self._make_node_pubsub({b"foo": None})
+        ps_b = self._make_node_pubsub({b"bar": None})
+        pubsub.node_pubsub_mapping = {
+            "127.0.0.1:7000": ps_a,
+            "127.0.0.1:7001": ps_b,
+        }
+        pubsub.shard_channels = {b"foo": None, b"bar": None}
+        pubsub._shard_channel_to_node = {
+            b"foo": "127.0.0.1:7000",
+            b"bar": "127.0.0.1:7001",
+        }
+
+        pubsub.reset()
+
+        ps_a.reset.assert_called_once()
+        ps_b.reset.assert_called_once()
+        # Cluster-level shard state cleared by super().reset() and our hook.
+        assert pubsub.shard_channels == {}
+        assert pubsub._shard_channel_to_node == {}
+
+    def test_reset_swallows_per_node_teardown_errors(self):
+        """
+        reset() is also a fallback path from __del__; one buggy per-node
+        pubsub raising must not mask teardown of the others or of the
+        cluster-level state.
+        """
+        pubsub = self._make_cluster_pubsub()
+        ps_bad = self._make_node_pubsub()
+        ps_bad.reset.side_effect = RuntimeError("boom")
+        ps_good = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping = {
+            "127.0.0.1:7000": ps_bad,
+            "127.0.0.1:7001": ps_good,
+        }
+
+        pubsub.reset()
+
+        ps_bad.reset.assert_called_once()
+        ps_good.reset.assert_called_once()
+        assert pubsub._shard_channel_to_node == {}

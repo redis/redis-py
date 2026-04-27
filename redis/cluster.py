@@ -3194,6 +3194,17 @@ class ClusterPubSub(PubSub):
                 self._reconcile_executor.shutdown(wait=False, cancel_futures=True)
                 self._reconcile_executor = None
             self._reconcile_futures.clear()
+            # Tear down per-node pubsubs (parity with async aclose) so they
+            # don't leak their dedicated connections and don't replay stale
+            # shard_channels via PubSub.on_connect on a subsequent reconnect.
+            # Errors are swallowed because reset() is also a fallback path
+            # from __del__; we cannot let one buggy per-node pubsub mask the
+            # rest of the teardown.
+            for pubsub in self.node_pubsub_mapping.values():
+                try:
+                    pubsub.reset()
+                except Exception:
+                    pass
             super().reset()
             self._shard_channel_to_node = {}
 
