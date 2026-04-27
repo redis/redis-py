@@ -1,5 +1,6 @@
 import asyncio
 import socket
+import ssl
 import types
 from unittest import mock
 from errno import ECONNREFUSED
@@ -442,6 +443,14 @@ async def test_redis_from_pool(request, from_url):
 
     assert called == 1
     await pool.disconnect()
+
+
+@pytest.mark.fixed_client
+def test_create_secure_client_from_url_with_minimum_ssl_version():
+    client = Redis.from_url(
+        "rediss://localhost:6379/0?ssl_cert_reqs=none&ssl_min_version={}".format(ssl.TLSVersion.TLSv1_3)
+    )
+    assert client.connection_pool.connection_kwargs["ssl_min_version"] == ssl.TLSVersion.TLSv1_3
 
 
 @pytest.mark.parametrize("auto_close", (True, False))
