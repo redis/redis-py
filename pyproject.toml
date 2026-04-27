@@ -43,6 +43,7 @@ xxhash = [
 
 ocsp = [
     "cryptography>=36.0.1",
+    'cryptography<46; implementation_name == "pypy" and python_version == "3.10"',
     "pyopenssl>=20.0.1",
     "requests>=2.31.0",
 ]
