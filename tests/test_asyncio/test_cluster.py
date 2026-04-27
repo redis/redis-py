@@ -28,7 +28,11 @@ from redis.cluster import (
 )
 from redis.commands.core import HotkeysMetricsTypes
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
-from redis.event import EventDispatcher
+from redis.event import (
+    AsyncAfterSlotsCacheRefreshEvent,
+    AsyncEventListenerInterface,
+    EventDispatcher,
+)
 from redis.exceptions import (
     AskError,
     ClusterDownError,
@@ -2501,12 +2505,12 @@ class TestClusterRedisCommands:
             await r.hotkeys_stop()
 
 
-@pytest.mark.onlycluster
 class TestNodesManager:
     """
     Tests for the NodesManager class
     """
 
+    @pytest.mark.onlycluster
     async def test_load_balancer(self, r: RedisCluster) -> None:
         n_manager = r.nodes_manager
         lb = n_manager.read_load_balancer
@@ -2565,6 +2569,7 @@ class TestNodesManager:
 
             assert srv_index > 0 and srv_index <= 2
 
+    @pytest.mark.fixed_client
     async def test_init_slots_cache_not_all_slots_covered(self) -> None:
         """
         Test that if not all slots are covered it should raise an exception
@@ -2587,6 +2592,7 @@ class TestNodesManager:
             "All slots are not covered after query all startup_nodes."
         )
 
+    @pytest.mark.fixed_client
     async def test_init_slots_cache_not_require_full_coverage_success(self) -> None:
         """
         When require_full_coverage is set to False and not all slots are
@@ -2610,6 +2616,7 @@ class TestNodesManager:
 
         await rc.aclose()
 
+    @pytest.mark.fixed_client
     async def test_init_slots_cache(self) -> None:
         """
         Test that slots cache can in initialized and all slots are covered
@@ -2641,6 +2648,7 @@ class TestNodesManager:
 
         await rc.aclose()
 
+    @pytest.mark.fixed_client
     async def test_init_slots_cache_cluster_mode_disabled(self) -> None:
         """
         Test that creating a RedisCluster failes if one of the startup nodes
@@ -2656,6 +2664,7 @@ class TestNodesManager:
             await rc.aclose()
         assert "Cluster mode is not enabled on this node" in str(e.value)
 
+    @pytest.mark.fixed_client
     async def test_empty_startup_nodes(self) -> None:
         """
         It should not be possible to create a node manager with no nodes
@@ -2664,6 +2673,7 @@ class TestNodesManager:
         with pytest.raises(RedisClusterException):
             await NodesManager([], False, {}).initialize()
 
+    @pytest.mark.fixed_client
     async def test_wrong_startup_nodes_type(self) -> None:
         """
         If something other then a list type itteratable is provided it should
@@ -2672,6 +2682,7 @@ class TestNodesManager:
         with pytest.raises(RedisClusterException):
             await NodesManager({}, False, {}).initialize()
 
+    @pytest.mark.fixed_client
     async def test_init_slots_cache_slots_collision(self) -> None:
         """
         Test that if 2 nodes do not agree on the same slots setup it should
@@ -2719,6 +2730,7 @@ class TestNodesManager:
                 "startup_nodes could not agree on a valid slots cache"
             ), str(ex.value)
 
+    @pytest.mark.fixed_client
     async def test_cluster_one_instance(self) -> None:
         """
         If the cluster exists of only 1 node then there is some hacks that must
@@ -2742,6 +2754,7 @@ class TestNodesManager:
 
         await rc.aclose()
 
+    @pytest.mark.fixed_client
     async def test_init_with_down_node(self) -> None:
         """
         If I can't connect to one of the nodes, everything should still work.
@@ -2800,6 +2813,7 @@ class TestNodesManager:
                     assert rc.get_node(host=default_host, port=7001) is not None
                     assert rc.get_node(host=default_host, port=7002) is not None
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize("dynamic_startup_nodes", [True, False])
     async def test_init_slots_dynamic_startup_nodes(self, dynamic_startup_nodes):
         rc = await get_mocked_redis_client(
@@ -2821,6 +2835,7 @@ class TestNodesManager:
         else:
             assert startup_nodes == ["my@DNS.com:7000"]
 
+    @pytest.mark.fixed_client
     async def test_move_node_to_end_of_cached_nodes(self) -> None:
         """
         Test that move_node_to_end_of_cached_nodes moves a node to the end of
@@ -2869,6 +2884,7 @@ class TestNodesManager:
         assert startup_node_names == [node2.name, node1.name, node3.name]
         assert nodes_cache_names == [node2.name, node1.name, node3.name]
 
+    @pytest.mark.fixed_client
     async def test_move_node_to_end_of_cached_nodes_nonexistent(self) -> None:
         """
         Test that move_node_to_end_of_cached_nodes does nothing for a
@@ -2892,6 +2908,7 @@ class TestNodesManager:
         assert startup_node_names == [node1.name, node2.name]
         assert nodes_cache_names == [node1.name, node2.name]
 
+    @pytest.mark.fixed_client
     async def test_move_node_to_end_of_cached_nodes_single_node(self) -> None:
         """
         Test that move_node_to_end_of_cached_nodes does nothing when there's
@@ -2913,6 +2930,82 @@ class TestNodesManager:
         nodes_cache_names = list(nodes_manager.nodes_cache.keys())
         assert startup_node_names == [node1.name]
         assert nodes_cache_names == [node1.name]
+
+    def _register_listener(self, nm):
+        """
+        Register a tracking async listener on the nodes manager's event
+        dispatcher for ``AsyncAfterSlotsCacheRefreshEvent``. The returned
+        instance must be kept alive by the caller for the duration of the
+        test.
+        """
+
+        class _TrackingListener(AsyncEventListenerInterface):
+            async def listen(self, event: object) -> None:  # pragma: no cover
+                pass
+
+        listener = _TrackingListener()
+        listener.listen = mock.AsyncMock()
+        nm._event_dispatcher.register_listeners(
+            {AsyncAfterSlotsCacheRefreshEvent: [listener]}
+        )
+        return listener
+
+    @pytest.mark.fixed_client
+    async def test_move_slot_dispatches_event_when_slot_moves_to_new_node(
+        self,
+    ) -> None:
+        """
+        move_slot() must dispatch AsyncAfterSlotsCacheRefreshEvent when the
+        redirected node is not currently serving the slot (new primary from a
+        different shard).
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        nm = r.nodes_manager
+        listener = self._register_listener(nm)
+        # Default layout: slot 0 is served by 127.0.0.1:7000; redirect it to
+        # 127.0.0.1:7001, which is the primary for a different shard.
+        await nm.move_slot(MovedError("0 127.0.0.1:7001"))
+
+        listener.listen.assert_called_once()
+        assert isinstance(
+            listener.listen.call_args[0][0], AsyncAfterSlotsCacheRefreshEvent
+        )
+        await r.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_move_slot_dispatches_event_on_failover(self) -> None:
+        """
+        move_slot() must dispatch AsyncAfterSlotsCacheRefreshEvent when the
+        redirected node was a replica of the same slot and is being promoted
+        (failover case).
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        nm = r.nodes_manager
+        listener = self._register_listener(nm)
+        # Default layout: slot 0 -> [7000 (primary), 7003 (replica)].
+        # Redirect to the replica, triggering the failover branch.
+        await nm.move_slot(MovedError("0 127.0.0.1:7003"))
+
+        listener.listen.assert_called_once()
+        assert isinstance(
+            listener.listen.call_args[0][0], AsyncAfterSlotsCacheRefreshEvent
+        )
+        await r.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_move_slot_skips_dispatch_on_circular_redirect(self) -> None:
+        """
+        move_slot() must not dispatch AsyncAfterSlotsCacheRefreshEvent when
+        the redirect points to the slot's current primary (no-op branch).
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        nm = r.nodes_manager
+        listener = self._register_listener(nm)
+        # Slot 0's current primary is 127.0.0.1:7000 -> no-op redirect.
+        await nm.move_slot(MovedError("0 127.0.0.1:7000"))
+
+        listener.listen.assert_not_called()
+        await r.aclose()
 
 
 @pytest.mark.fixed_client
