@@ -3072,9 +3072,7 @@ class ClusterPubSub(PubSub):
                 if old_name == new_node.name:
                     continue
                 try:
-                    self._migrate_shard_channel(
-                        channel, handler, old_name, new_node
-                    )
+                    self._migrate_shard_channel(channel, handler, old_name, new_node)
                     made_progress = True
                 except (ConnectionError, TimeoutError, OSError) as e:
                     # Transient connectivity error while subscribing on the
