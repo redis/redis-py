@@ -3053,6 +3053,8 @@ class ClusterPubSub(PubSub):
         preserving any registered handler.
         """
         uncovered: list = []
+        made_progress = False
+        first_migrate_error: Optional[BaseException] = None
         with self._shard_state_lock:
             for channel, handler in list(self.shard_channels.items()):
                 try:
@@ -3069,7 +3071,27 @@ class ClusterPubSub(PubSub):
                 old_name = self._shard_channel_to_node.get(channel)
                 if old_name == new_node.name:
                     continue
-                self._migrate_shard_channel(channel, handler, old_name, new_node)
+                try:
+                    self._migrate_shard_channel(
+                        channel, handler, old_name, new_node
+                    )
+                    made_progress = True
+                except (ConnectionError, TimeoutError, OSError) as e:
+                    # Transient connectivity error while subscribing on the
+                    # new owner (or unsubscribing on the old owner if its
+                    # handler chose to re-raise). Do not abort reconciliation
+                    # for sibling channels: _shard_channel_to_node was not
+                    # advanced for this channel, so the next slots-cache
+                    # change notification will retry it.
+                    logger.warning(
+                        "shard channel %r migration deferred: %s: %s",
+                        channel,
+                        type(e).__name__,
+                        e,
+                    )
+                    if first_migrate_error is None:
+                        first_migrate_error = e
+                    continue
             # Garbage-collect per-node pubsubs that no longer hold any
             # subscription so their connections are released.
             for name, pubsub in list(self.node_pubsub_mapping.items()):
@@ -3087,6 +3109,15 @@ class ClusterPubSub(PubSub):
                 f"{len(uncovered)} shard channel(s) left unreconciled; "
                 f"slot(s) not covered by the cluster: {uncovered!r}"
             )
+        if first_migrate_error is not None and not made_progress:
+            # Every migration attempted in this pass failed transiently and
+            # nothing else made progress. Re-raise the first caught error
+            # (typically the root cause; later failures are often downstream
+            # symptoms of the same unreachable node) so the worker's done-
+            # callback surfaces a single representative failure through the
+            # same logger channel used for SlotNotCoveredError. Per-channel
+            # WARNINGs above preserve the full forensic detail.
+            raise first_migrate_error
 
     def _migrate_shard_channel(self, channel, handler, old_name, new_node):
         # Detach from the old per-node pubsub, best-effort: the old node may
