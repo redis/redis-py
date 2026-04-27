@@ -3270,6 +3270,12 @@ class ClusterPubSub(PubSub):
         # route sunsubscribe calls and reconcile subscriptions after slot
         # migration / failover.
         self._shard_channel_to_node: Dict[Any, str] = {}
+        # Dedicated lock for shard-subscription bookkeeping. Distinct from
+        # PubSub.self._lock (which serializes wire I/O on the cluster-level
+        # connection used by aclose / send_command / regular subscribe) so
+        # that reconciliation cannot starve those unrelated coroutines
+        # during long per-channel migrations.
+        self._shard_state_lock: asyncio.Lock = asyncio.Lock()
         # Background tasks created by on_slots_changed; kept to prevent GC.
         self._reconcile_tasks: Set[asyncio.Task] = set()
         self._pubsubs_generator = self._pubsubs_generator()
@@ -3433,30 +3439,36 @@ class ClusterPubSub(PubSub):
 
         if message is None:
             return None
-        elif str_if_bytes(message["type"]) == "sunsubscribe":
-            if message["channel"] in self.pending_unsubscribe_shard_channels:
-                # User-initiated sunsubscribe: drop from cluster-level tracking.
-                self.pending_unsubscribe_shard_channels.remove(message["channel"])
-                self.shard_channels.pop(message["channel"], None)
-                self._shard_channel_to_node.pop(message["channel"], None)
-            # Drop the per-node pubsub that delivered the confirmation once it
-            # no longer holds any shard subscriptions, regardless of whether
-            # the sunsubscribe was user-initiated or driven by slot-migration
-            # reconciliation (_migrate_shard_channel, which intentionally does
-            # not add the channel to pending_unsubscribe_shard_channels). This
-            # releases the dedicated connection that would otherwise linger.
-            # Identifying the receiving pubsub directly (rather than via the
-            # cluster's current slot map) is required after slot migration,
-            # where the channel's owner is no longer the node that received
-            # our original SSUBSCRIBE.
-            if pubsub is not None and not pubsub.subscribed:
-                name = self._find_node_name_for_pubsub(pubsub)
-                if name is not None:
-                    try:
-                        await pubsub.aclose()
-                    except Exception:
-                        pass
-                    self.node_pubsub_mapping.pop(name, None)
+        # Serialize state mutation against reinitialize_shard_subscriptions
+        # (background task). The blocking get_message above intentionally
+        # runs outside the lock so reconciliation is not stalled by long
+        # polls.
+        async with self._shard_state_lock:
+            if str_if_bytes(message["type"]) == "sunsubscribe":
+                if message["channel"] in self.pending_unsubscribe_shard_channels:
+                    # User-initiated sunsubscribe: drop from cluster-level tracking.
+                    self.pending_unsubscribe_shard_channels.remove(message["channel"])
+                    self.shard_channels.pop(message["channel"], None)
+                    self._shard_channel_to_node.pop(message["channel"], None)
+                # Drop the per-node pubsub that delivered the confirmation once
+                # it no longer holds any shard subscriptions, regardless of
+                # whether the sunsubscribe was user-initiated or driven by
+                # slot-migration reconciliation (_migrate_shard_channel, which
+                # intentionally does not add the channel to
+                # pending_unsubscribe_shard_channels). This releases the
+                # dedicated connection that would otherwise linger.
+                # Identifying the receiving pubsub directly (rather than via
+                # the cluster's current slot map) is required after slot
+                # migration, where the channel's owner is no longer the node
+                # that received our original SSUBSCRIBE.
+                if pubsub is not None and not pubsub.subscribed:
+                    name = self._find_node_name_for_pubsub(pubsub)
+                    if name is not None:
+                        try:
+                            await pubsub.aclose()
+                        except Exception:
+                            pass
+                        self.node_pubsub_mapping.pop(name, None)
 
         # Only suppress subscribe/unsubscribe messages, not data messages (smessage)
         if str_if_bytes(message["type"]) in ("ssubscribe", "sunsubscribe"):
@@ -3476,36 +3488,41 @@ class ClusterPubSub(PubSub):
         s_channels = dict.fromkeys(args)
         s_channels.update(kwargs)
 
-        for s_channel, handler in s_channels.items():
-            node = self.cluster.get_node_from_key(s_channel)
-            if not node:
-                continue
-            # Lazy re-route: if this channel is already tracked against a
-            # different node (e.g. after a slot migration), migrate it now so
-            # the caller's intent is applied on the current owner.
-            normalized_key = next(iter(self._normalize_keys({s_channel: None})))
-            old_name = self._shard_channel_to_node.get(normalized_key)
-            if old_name and old_name != node.name:
-                # Match PubSub.ssubscribe() dict.update() semantics: the
-                # caller's newly supplied handler (including None) always
-                # overrides any previously registered handler.
-                await self._migrate_shard_channel(
-                    normalized_key,
-                    handler,
-                    old_name,
-                    node,
+        # Serialize against reinitialize_shard_subscriptions (background
+        # task) so the reverse index, shard_channels, and node_pubsub_mapping
+        # are not mutated concurrently. _migrate_shard_channel below does not
+        # re-acquire this lock (asyncio.Lock is non-reentrant).
+        async with self._shard_state_lock:
+            for s_channel, handler in s_channels.items():
+                node = self.cluster.get_node_from_key(s_channel)
+                if not node:
+                    continue
+                # Lazy re-route: if this channel is already tracked against a
+                # different node (e.g. after a slot migration), migrate it now
+                # so the caller's intent is applied on the current owner.
+                normalized_key = next(iter(self._normalize_keys({s_channel: None})))
+                old_name = self._shard_channel_to_node.get(normalized_key)
+                if old_name and old_name != node.name:
+                    # Match PubSub.ssubscribe() dict.update() semantics: the
+                    # caller's newly supplied handler (including None) always
+                    # overrides any previously registered handler.
+                    await self._migrate_shard_channel(
+                        normalized_key,
+                        handler,
+                        old_name,
+                        node,
+                    )
+                    continue
+                pubsub = self._get_node_pubsub(node)
+                if handler:
+                    await pubsub.ssubscribe(**{s_channel: handler})
+                else:
+                    await pubsub.ssubscribe(s_channel)
+                self.shard_channels.update(pubsub.shard_channels)
+                self._shard_channel_to_node[normalized_key] = node.name
+                self.pending_unsubscribe_shard_channels.difference_update(
+                    self._normalize_keys({s_channel: None})
                 )
-                continue
-            pubsub = self._get_node_pubsub(node)
-            if handler:
-                await pubsub.ssubscribe(**{s_channel: handler})
-            else:
-                await pubsub.ssubscribe(s_channel)
-            self.shard_channels.update(pubsub.shard_channels)
-            self._shard_channel_to_node[normalized_key] = node.name
-            self.pending_unsubscribe_shard_channels.difference_update(
-                self._normalize_keys({s_channel: None})
-            )
 
     async def sunsubscribe(self, *args: Any) -> None:
         """
@@ -3518,23 +3535,27 @@ class ClusterPubSub(PubSub):
         else:
             args = list(self.shard_channels.keys())
 
-        for s_channel in args:
-            normalized_key = next(iter(self._normalize_keys({s_channel: None})))
-            # Route via the reverse index so we unsubscribe on the node that
-            # actually holds the subscription. After a slot migration the
-            # cluster's current owner may no longer be that node.
-            name = self._shard_channel_to_node.get(normalized_key)
-            if name and name in self.node_pubsub_mapping:
-                pubsub = self.node_pubsub_mapping[name]
-            else:
-                node = self.cluster.get_node_from_key(s_channel)
-                if not node or node.name not in self.node_pubsub_mapping:
-                    continue
-                pubsub = self.node_pubsub_mapping[node.name]
-            await pubsub.sunsubscribe(s_channel)
-            self.pending_unsubscribe_shard_channels.update(
-                pubsub.pending_unsubscribe_shard_channels
-            )
+        # Serialize against reinitialize_shard_subscriptions: the reverse
+        # index and node_pubsub_mapping must not change between the lookup
+        # and the per-node sunsubscribe call below.
+        async with self._shard_state_lock:
+            for s_channel in args:
+                normalized_key = next(iter(self._normalize_keys({s_channel: None})))
+                # Route via the reverse index so we unsubscribe on the node
+                # that actually holds the subscription. After a slot migration
+                # the cluster's current owner may no longer be that node.
+                name = self._shard_channel_to_node.get(normalized_key)
+                if name and name in self.node_pubsub_mapping:
+                    pubsub = self.node_pubsub_mapping[name]
+                else:
+                    node = self.cluster.get_node_from_key(s_channel)
+                    if not node or node.name not in self.node_pubsub_mapping:
+                        continue
+                    pubsub = self.node_pubsub_mapping[node.name]
+                await pubsub.sunsubscribe(s_channel)
+                self.pending_unsubscribe_shard_channels.update(
+                    pubsub.pending_unsubscribe_shard_channels
+                )
 
     async def reinitialize_shard_subscriptions(self) -> None:
         """
@@ -3545,7 +3566,7 @@ class ClusterPubSub(PubSub):
         preserving any registered handler.
         """
         uncovered: list = []
-        async with self._lock:
+        async with self._shard_state_lock:
             for channel, handler in list(self.shard_channels.items()):
                 try:
                     new_node = self.cluster.get_node_from_key(channel)

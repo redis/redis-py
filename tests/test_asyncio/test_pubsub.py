@@ -1717,6 +1717,7 @@ class TestClusterPubSubSlotMigration:
         pubsub.cluster = MagicMock()
         pubsub.node_pubsub_mapping = {}
         pubsub._shard_channel_to_node = {}
+        pubsub._shard_state_lock = asyncio.Lock()
         pubsub._reconcile_tasks = set()
         pubsub.push_handler_func = None
         return pubsub

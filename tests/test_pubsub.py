@@ -2292,6 +2292,7 @@ class TestClusterPubSubSlotMigration:
         pubsub.cluster = mock.MagicMock()
         pubsub.node_pubsub_mapping = {}
         pubsub._shard_channel_to_node = {}
+        pubsub._shard_state_lock = threading.RLock()
         pubsub.push_handler_func = None
         # Reconciliation worker state (lazy-created by on_slots_changed).
         pubsub._reconcile_executor = None
@@ -2645,3 +2646,56 @@ class TestClusterPubSubSlotMigration:
             and rec.levelno == logging.ERROR
             for rec in caplog.records
         )
+
+    def test_ssubscribe_serializes_against_reconcile_lock(self):
+        """
+        Regression: ssubscribe / sunsubscribe / get_sharded_message must
+        acquire self._shard_state_lock so they are mutually exclusive with
+        the worker thread running reinitialize_shard_subscriptions. Without
+        this serialization, the reverse index, shard_channels, and
+        node_pubsub_mapping can be mutated concurrently and the user's
+        subscription intent can be overwritten by the reconciliation pass.
+        The lock is dedicated to shard-state bookkeeping (separate from
+        PubSub.self._lock) so reconciliation does not starve aclose /
+        send_command on the cluster-level connection.
+        """
+        pubsub = self._make_cluster_pubsub()
+        node = self._make_node("127.0.0.1:7000")
+        node_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[node.name] = node_ps
+        pubsub.cluster.get_node_from_key.return_value = node
+
+        holder_acquired = threading.Event()
+        release_holder = threading.Event()
+        user_done = threading.Event()
+
+        def _hold_lock():
+            with pubsub._shard_state_lock:
+                holder_acquired.set()
+                release_holder.wait(timeout=5.0)
+
+        holder = threading.Thread(target=_hold_lock)
+        holder.start()
+        try:
+            assert holder_acquired.wait(timeout=2.0)
+
+            def _user_ssubscribe():
+                pubsub.ssubscribe(b"foo")
+                user_done.set()
+
+            user = threading.Thread(target=_user_ssubscribe)
+            user.start()
+            try:
+                # Holder still owns the lock: ssubscribe must be blocked and
+                # cannot have produced any side effect on the per-node pubsub.
+                assert not user_done.wait(timeout=0.1)
+                node_ps.ssubscribe.assert_not_called()
+
+                release_holder.set()
+                assert user_done.wait(timeout=2.0)
+                node_ps.ssubscribe.assert_called_once_with(b"foo")
+            finally:
+                user.join(timeout=2.0)
+        finally:
+            release_holder.set()
+            holder.join(timeout=2.0)
