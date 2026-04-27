@@ -2907,12 +2907,20 @@ class ClusterPubSub(PubSub):
         self, ignore_subscribe_messages=False, timeout=0.0, target_node=None
     ):
         if target_node:
-            # Don't pass ignore_subscribe_messages here - let get_sharded_message
-            # handle the filtering after processing subscription state changes
-            pubsub = self.node_pubsub_mapping[target_node.name]
-            message = pubsub.get_message(
-                ignore_subscribe_messages=False, timeout=timeout
-            )
+            # Use .get(): migration-driven cleanup in the sunsubscribe branch
+            # below and reset() both remove entries from node_pubsub_mapping,
+            # so a caller polling with target_node may race the cleanup. Match
+            # the async counterpart's None-handling rather than raising
+            # KeyError. None pubsub falls through to "no message available".
+            pubsub = self.node_pubsub_mapping.get(target_node.name)
+            if pubsub is not None:
+                # Don't pass ignore_subscribe_messages here - let get_sharded_message
+                # handle the filtering after processing subscription state changes
+                message = pubsub.get_message(
+                    ignore_subscribe_messages=False, timeout=timeout
+                )
+            else:
+                message = None
         else:
             pubsub, message = self._sharded_message_generator(timeout=timeout)
         if message is None:

@@ -2810,6 +2810,24 @@ class TestClusterPubSubSlotMigration:
         assert pubsub._shard_channel_to_node == {}
         assert pubsub.node_pubsub_mapping == {}
 
+    def test_get_sharded_message_with_missing_target_node_returns_none(self):
+        """
+        Regression: get_sharded_message(target_node=...) must not raise
+        KeyError when the per-node pubsub has been removed from
+        node_pubsub_mapping. Migration-driven cleanup in the sunsubscribe
+        branch and reset() both remove entries, so a caller polling with
+        target_node can race the cleanup. Mirrors the async counterpart's
+        .get()/None-fallthrough behavior.
+        """
+        pubsub = self._make_cluster_pubsub()
+        # node_pubsub_mapping is empty - the entry was already cleaned up
+        # (e.g. by a migration-driven sunsubscribe pop or by reset()).
+        evicted_node = self._make_node("127.0.0.1:7000")
+
+        message = pubsub.get_sharded_message(target_node=evicted_node)
+
+        assert message is None
+
     def test_reset_recreates_pubsubs_generator(self):
         """
         Regression: _pubsubs_generator captures node_pubsub_mapping.values()
