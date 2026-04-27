@@ -13,6 +13,7 @@ from redis.asyncio.keyspace_notifications import (
     _ClusterNodePoolAdapter,
 )
 from redis.exceptions import ConnectionError
+from tests.conftest import skip_if_server_version_lt
 from redis.keyspace_notifications import (
     EventType,
     KeyspaceChannel,
@@ -709,3 +710,396 @@ class TestAsyncClusterKeyspaceNotificationsMocked:
         assert "__keyspace@0__:mykey" in notifications._subscribed_channels
 
         await notifications.aclose()
+
+
+@skip_if_server_version_lt("8.7.2")
+class TestAsyncSubkeyNotifications:
+    """
+    Integration tests for subkey keyspace notifications with an async
+    Redis client.
+
+    These tests require a Redis server with subkey notification support
+    (Redis >= 8.7.2) and keyspace notifications enabled.
+
+    Works for both standalone Redis and RedisCluster.
+    """
+
+    @staticmethod
+    async def _drain_subscribe_messages(notifications):
+        """Drain subscribe/psubscribe confirmation messages so the next
+        ``get_message`` call returns a real notification.
+
+        Works for both standalone (``_pubsub``) and cluster
+        (``_node_pubsubs``) notification managers.
+        """
+        pubsubs = (
+            list(notifications._node_pubsubs.values())
+            if hasattr(notifications, "_node_pubsubs")
+            else [notifications._pubsub]
+        )
+        for pubsub in pubsubs:
+            while True:
+                msg = await pubsub.get_message(timeout=0.05)
+                if msg is None:
+                    break
+                if msg["type"] not in ("subscribe", "psubscribe"):
+                    break
+
+    @pytest.mark.asyncio
+    async def test_create_hash_field_subkeyspace_notification(
+        self, async_r_with_subkey_notifications
+    ):
+        """Create a hash field and verify that the Subkeyspace notification
+        contains the field that was created."""
+        r = async_r_with_subkey_notifications
+        notifications = r.keyspace_notifications()
+        await notifications.subscribe_subkeyspace("test:hash1")
+        await self._drain_subscribe_messages(notifications)
+
+        await r.hset("test:hash1", "field1", "value1")
+
+        msg = await notifications.get_message(timeout=2.0)
+        assert msg is not None
+        assert msg.key == "test:hash1"
+        assert msg.event_type == "hset"
+        assert "field1" in msg.subkeys
+
+        await notifications.aclose()
+        await r.delete("test:hash1")
+
+    @pytest.mark.asyncio
+    async def test_update_hash_field_subkeyspace_notification(
+        self, async_r_with_subkey_notifications
+    ):
+        """Update an existing hash field and verify the Subkeyspace notification."""
+        r = async_r_with_subkey_notifications
+        await r.hset("test:hash2", "field1", "initial")
+
+        notifications = r.keyspace_notifications()
+        await notifications.subscribe_subkeyspace("test:hash2")
+        await self._drain_subscribe_messages(notifications)
+
+        await r.hset("test:hash2", "field1", "updated")
+
+        msg = await notifications.get_message(timeout=2.0)
+        assert msg is not None
+        assert msg.key == "test:hash2"
+        assert msg.event_type == "hset"
+        assert "field1" in msg.subkeys
+
+        await notifications.aclose()
+        await r.delete("test:hash2")
+
+    @pytest.mark.asyncio
+    async def test_update_hash_field_subkeyspaceitem_notification(
+        self, async_r_with_subkey_notifications
+    ):
+        """Update a hash field and verify the Subkeyspaceitem notification
+        is received for the specific field."""
+        r = async_r_with_subkey_notifications
+        await r.hset("test:hash3", "myfield", "initial")
+
+        notifications = r.keyspace_notifications()
+        await notifications.subscribe_subkeyspaceitem("test:hash3", "myfield")
+        await self._drain_subscribe_messages(notifications)
+
+        await r.hset("test:hash3", "myfield", "updated")
+
+        msg = await notifications.get_message(timeout=2.0)
+        assert msg is not None
+        assert msg.key == "test:hash3"
+        assert msg.event_type == "hset"
+        assert msg.subkeys == ["myfield"]
+
+        await notifications.aclose()
+        await r.delete("test:hash3")
+
+    @pytest.mark.asyncio
+    async def test_delete_hash_field_subkeyevent_notification(
+        self, async_r_with_subkey_notifications
+    ):
+        """Delete a hash field and verify the Subkeyevent notification
+        is received for the hdel event."""
+        r = async_r_with_subkey_notifications
+        await r.hset("test:hash4", "field1", "value1")
+
+        notifications = r.keyspace_notifications()
+        await notifications.subscribe_subkeyevent("hdel")
+        await self._drain_subscribe_messages(notifications)
+
+        await r.hdel("test:hash4", "field1")
+
+        msg = await notifications.get_message(timeout=2.0)
+        assert msg is not None
+        assert msg.key == "test:hash4"
+        assert msg.event_type == "hdel"
+        assert "field1" in msg.subkeys
+
+        await notifications.aclose()
+        await r.delete("test:hash4")
+
+    @pytest.mark.asyncio
+    async def test_delete_hash_field_subkeyspaceevent_notification(
+        self, async_r_with_subkey_notifications
+    ):
+        """Delete a hash field and verify the Subkeyspaceevent notification
+        is received for the specific key and event."""
+        r = async_r_with_subkey_notifications
+        await r.hset("test:hash5", "field1", "value1")
+
+        notifications = r.keyspace_notifications()
+        await notifications.subscribe_subkeyspaceevent("hdel", "test:hash5")
+        await self._drain_subscribe_messages(notifications)
+
+        await r.hdel("test:hash5", "field1")
+
+        msg = await notifications.get_message(timeout=2.0)
+        assert msg is not None
+        assert msg.key == "test:hash5"
+        assert msg.event_type == "hdel"
+        assert "field1" in msg.subkeys
+
+        await notifications.aclose()
+        await r.delete("test:hash5")
+
+    @pytest.mark.asyncio
+    async def test_create_key_keyspace_notification_still_works(
+        self, async_r_with_subkey_notifications
+    ):
+        """Create a key and verify that a regular keyspace notification
+        is received (backward compatibility)."""
+        r = async_r_with_subkey_notifications
+        notifications = r.keyspace_notifications()
+        await notifications.subscribe_keyspace("test:simple1")
+        await self._drain_subscribe_messages(notifications)
+
+        await r.set("test:simple1", "value1")
+
+        msg = await notifications.get_message(timeout=2.0)
+        assert msg is not None
+        assert msg.key == "test:simple1"
+        assert msg.event_type == "set"
+        assert msg.subkeys == []
+
+        await notifications.aclose()
+        await r.delete("test:simple1")
+
+    @pytest.mark.asyncio
+    async def test_update_key_keyspace_notification(
+        self, async_r_with_subkey_notifications
+    ):
+        """Update a key and verify the keyspace notification is received."""
+        r = async_r_with_subkey_notifications
+        await r.set("test:simple2", "initial")
+
+        notifications = r.keyspace_notifications()
+        await notifications.subscribe_keyspace("test:simple2")
+        await self._drain_subscribe_messages(notifications)
+
+        await r.set("test:simple2", "updated")
+
+        msg = await notifications.get_message(timeout=2.0)
+        assert msg is not None
+        assert msg.key == "test:simple2"
+        assert msg.event_type == "set"
+
+        await notifications.aclose()
+        await r.delete("test:simple2")
+
+    @pytest.mark.asyncio
+    async def test_delete_key_keyspace_notification(
+        self, async_r_with_subkey_notifications
+    ):
+        """Delete a key and verify that the deletion notification is received."""
+        r = async_r_with_subkey_notifications
+        await r.set("test:simple3", "value")
+
+        notifications = r.keyspace_notifications()
+        await notifications.subscribe_keyspace("test:simple3")
+        await self._drain_subscribe_messages(notifications)
+
+        await r.delete("test:simple3")
+
+        msg = await notifications.get_message(timeout=2.0)
+        assert msg is not None
+        assert msg.key == "test:simple3"
+        assert msg.event_type == "del"
+
+        await notifications.aclose()
+
+    @pytest.mark.asyncio
+    async def test_multiple_hash_fields_subkeyspace_notification(
+        self, async_r_with_subkey_notifications
+    ):
+        """Create multiple hash fields at once and verify subkeyspace
+        notification contains all affected fields."""
+        r = async_r_with_subkey_notifications
+        notifications = r.keyspace_notifications()
+        await notifications.subscribe_subkeyspace("test:hash6")
+        await self._drain_subscribe_messages(notifications)
+
+        await r.hset("test:hash6", mapping={"f1": "v1", "f2": "v2", "f3": "v3"})
+
+        msg = await notifications.get_message(timeout=2.0)
+        assert msg is not None
+        assert msg.key == "test:hash6"
+        assert msg.event_type == "hset"
+        assert len(msg.subkeys) == 3
+        assert set(msg.subkeys) == {"f1", "f2", "f3"}
+
+        await notifications.aclose()
+        await r.delete("test:hash6")
+
+    @pytest.mark.asyncio
+    async def test_subkeyspace_pattern_subscription(
+        self, async_r_with_subkey_notifications
+    ):
+        """Subscribe to a subkeyspace pattern and verify notifications are
+        received for matching keys."""
+        r = async_r_with_subkey_notifications
+        notifications = r.keyspace_notifications()
+        await notifications.subscribe_subkeyspace("test:pattern:*")
+        await self._drain_subscribe_messages(notifications)
+
+        await r.hset("test:pattern:hash1", "field1", "value1")
+        await r.hset("test:pattern:hash2", "field2", "value2")
+
+        messages = []
+        for _ in range(2):
+            msg = await notifications.get_message(timeout=2.0)
+            assert msg is not None
+            messages.append(msg)
+
+        keys = {m.key for m in messages}
+        assert "test:pattern:hash1" in keys
+        assert "test:pattern:hash2" in keys
+
+        await notifications.aclose()
+        await r.delete("test:pattern:hash1", "test:pattern:hash2")
+
+    @pytest.mark.asyncio
+    async def test_subkeyevent_pattern_subscription(
+        self, async_r_with_subkey_notifications
+    ):
+        """Subscribe to a subkeyevent pattern for all hash events and
+        verify notifications are received."""
+        r = async_r_with_subkey_notifications
+        notifications = r.keyspace_notifications()
+        await notifications.subscribe_subkeyevent("h*")
+        await self._drain_subscribe_messages(notifications)
+
+        await r.hset("test:hash7", "field1", "value1")
+        await r.hdel("test:hash7", "field1")
+
+        messages = []
+        for _ in range(2):
+            msg = await notifications.get_message(timeout=2.0)
+            assert msg is not None
+            messages.append(msg)
+
+        event_types = {m.event_type for m in messages}
+        assert "hset" in event_types
+        assert "hdel" in event_types
+
+        await notifications.aclose()
+        await r.delete("test:hash7")
+
+    @pytest.mark.asyncio
+    async def test_subkeyspaceitem_does_not_receive_other_fields(
+        self, async_r_with_subkey_notifications
+    ):
+        """Subscribe to a specific subkeyspaceitem and verify that
+        modifications to other fields do not trigger notifications."""
+        r = async_r_with_subkey_notifications
+        await r.hset("test:hash8", "watched_field", "initial")
+
+        notifications = r.keyspace_notifications()
+        await notifications.subscribe_subkeyspaceitem("test:hash8", "watched_field")
+        await self._drain_subscribe_messages(notifications)
+
+        # Modify a different field — should NOT trigger a notification
+        await r.hset("test:hash8", "other_field", "value")
+        msg = await notifications.get_message(timeout=1.0)
+        assert msg is None
+
+        # Modify the watched field — should trigger a notification
+        await r.hset("test:hash8", "watched_field", "updated")
+        msg = await notifications.get_message(timeout=2.0)
+        assert msg is not None
+        assert msg.subkeys == ["watched_field"]
+
+        await notifications.aclose()
+        await r.delete("test:hash8")
+
+    @pytest.mark.asyncio
+    async def test_combined_keyspace_and_subkeyspace(
+        self, async_r_with_subkey_notifications
+    ):
+        """Subscribe to both keyspace and subkeyspace on the same key and
+        verify that both types of notifications are received."""
+        r = async_r_with_subkey_notifications
+
+        notifications = r.keyspace_notifications()
+        await notifications.subscribe_keyspace("test:hash9")
+        await notifications.subscribe_subkeyspace("test:hash9")
+        await self._drain_subscribe_messages(notifications)
+
+        await r.hset("test:hash9", "field1", "value1")
+
+        messages = []
+        for _ in range(2):
+            msg = await notifications.get_message(timeout=2.0)
+            if msg is not None:
+                messages.append(msg)
+
+        # Should receive both keyspace (hset event, no subkeys) and
+        # subkeyspace (hset event, with subkeys) notifications
+        assert len(messages) == 2
+        has_subkeys = any(len(m.subkeys) > 0 for m in messages)
+        has_no_subkeys = any(len(m.subkeys) == 0 for m in messages)
+        assert has_subkeys
+        assert has_no_subkeys
+
+        await notifications.aclose()
+        await r.delete("test:hash9")
+
+    @pytest.mark.asyncio
+    async def test_subkeyspaceitem_pattern_receives_matching_fields(
+        self, async_r_with_subkey_notifications
+    ):
+        """Subscribe to subkeyspaceitem with a pattern subkey (field*) and
+        verify that notifications are received for field1, field2, and field3
+        but not for unrelated fields."""
+        r = async_r_with_subkey_notifications
+
+        notifications = r.keyspace_notifications()
+        await notifications.subscribe_subkeyspaceitem("test:hash10", "field*")
+        await self._drain_subscribe_messages(notifications)
+
+        # These should all match the pattern
+        await r.hset("test:hash10", "field1", "value1")
+        await r.hset("test:hash10", "field2", "value2")
+        await r.hset("test:hash10", "field3", "value3")
+
+        messages = []
+        for _ in range(3):
+            msg = await notifications.get_message(timeout=2.0)
+            assert msg is not None
+            messages.append(msg)
+
+        received_subkeys = [m.subkeys[0] for m in messages]
+        assert "field1" in received_subkeys
+        assert "field2" in received_subkeys
+        assert "field3" in received_subkeys
+
+        for msg in messages:
+            assert msg.key == "test:hash10"
+            assert msg.event_type == "hset"
+
+        # A non-matching field should NOT produce a notification
+        await r.hset("test:hash10", "other", "value")
+        msg = await notifications.get_message(timeout=1.0)
+        assert msg is None
+
+        await notifications.aclose()
+        await r.delete("test:hash10")
