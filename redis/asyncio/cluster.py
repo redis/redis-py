@@ -1848,11 +1848,15 @@ class NodesManager:
                 await self._event_dispatcher.dispatch_async(
                     AsyncAfterSlotsCacheRefreshEvent()
                 )
-            except Exception as e:
+            except Exception as exc:
+                # Don't shadow the method parameter ``e``: ``except as`` binds
+                # the listener exception in the function scope and ``del``s
+                # the name on block exit (PEP 3134), which would also wipe
+                # out the original AskError/MovedError parameter.
                 logger.exception(
                     "listener raised during slots-cache refresh: %s: %s",
-                    type(e).__name__,
-                    e,
+                    type(exc).__name__,
+                    exc,
                 )
 
     def get_node_from_slot(
