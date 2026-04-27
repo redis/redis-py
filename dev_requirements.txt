@@ -34,3 +34,5 @@ xxhash==3.6.0
 opentelemetry-api>=1.30.0
 opentelemetry-sdk>=1.30.0
 opentelemetry-exporter-otlp>=1.30.0
+
+cryptography<46; implementation_name == "pypy" and python_version == "3.10"
