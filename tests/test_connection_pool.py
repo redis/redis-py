@@ -501,6 +501,10 @@ class TestConnectionPoolURLParsing:
         pool = redis.ConnectionPool.from_url("redis://localhost")
         kwargs = pool.connection_kwargs
         assert kwargs.get("host") == "localhost"
+        # ``protocol=None`` (i.e., absent from the URL) must be preserved on
+        # the pool kwargs so higher layers can distinguish "empty" from an
+        # explicit user choice.
+        assert kwargs.get("protocol") is None
         assert isinstance(
             kwargs.get("maint_notifications_config"), MaintNotificationsConfig
         )
@@ -518,9 +522,20 @@ class TestConnectionPoolURLParsing:
         pool = redis.ConnectionPool.from_url("redis://localhost?protocol=2")
         kwargs = pool.connection_kwargs
         assert kwargs.get("host") == "localhost"
+        assert kwargs.get("protocol") == 2
         assert "maint_notifications_config" not in kwargs
         assert "maint_notifications_pool_handler" not in kwargs
         assert "orig_host_address" not in kwargs
+
+    def test_explicit_resp3_enables_maint_notifications(self):
+        """Pinning ``protocol=3`` enables maintenance notifications in the
+        same way as the default (unspecified) case."""
+        pool = redis.ConnectionPool.from_url("redis://localhost?protocol=3")
+        kwargs = pool.connection_kwargs
+        assert kwargs.get("protocol") == 3
+        assert isinstance(
+            kwargs.get("maint_notifications_config"), MaintNotificationsConfig
+        )
 
     def test_invalid_scheme_raises_error(self):
         with pytest.raises(ValueError) as cm:

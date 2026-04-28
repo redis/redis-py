@@ -527,6 +527,82 @@ def bzpop_score_resp3_to_resp2_legacy(response, **options):
     return (response[0], response[1], float(response[2]))
 
 
+def parse_geopos_unified(response, **options):
+    """GEOPOS → unified ``list[list[float, float] | None]``.
+
+    Used for the ``legacy_responses=False`` overlay on RESP2 wire to mirror
+    RESP3's native ``list[list]`` shape.
+    """
+    return [
+        [float(ll[0]), float(ll[1])] if ll is not None else None for ll in response
+    ]
+
+
+def parse_geopos_resp3_to_resp2_legacy(response, **options):
+    """RESP3-wire GEOPOS → legacy RESP2 ``list[tuple(float, float) | None]``.
+
+    Matches today's RESP2-wire callback shape (tuple coordinates).
+    """
+    return [
+        (float(ll[0]), float(ll[1])) if ll is not None else None for ll in response
+    ]
+
+
+def parse_lcs_idx_unified(response, **options):
+    """LCS with IDX → unified ``dict``.
+
+    Used for the ``legacy_responses=False`` overlay on RESP2 wire to mirror
+    RESP3's native ``dict`` shape. Non-IDX responses (``bytes`` / ``int``)
+    pass through unchanged.
+    """
+    if not isinstance(response, list):
+        return response
+    return dict(zip(response[::2], response[1::2]))
+
+
+def parse_lcs_idx_resp3_to_resp2_legacy(response, **options):
+    """RESP3-wire LCS with IDX → legacy RESP2 flat list shape.
+
+    Reproduces today's RESP2 raw output (``[b"matches", [...], b"len", n]``).
+    Non-IDX responses pass through unchanged.
+    """
+    if not isinstance(response, dict):
+        return response
+    out: list = []
+    for key, value in response.items():
+        out.append(key)
+        out.append(value)
+    return out
+
+
+def parse_client_trackinginfo_unified(response, **options):
+    """CLIENT TRACKINGINFO → unified ``dict[str, Any]``.
+
+    Accepts either RESP2's flat ``[label, value, ...]`` list or RESP3's
+    native ``dict`` and returns a ``dict`` with ``str`` keys.
+    """
+    if isinstance(response, dict):
+        return {str_if_bytes(key): value for key, value in response.items()}
+    return {
+        str_if_bytes(key): value for key, value in zip(response[::2], response[1::2])
+    }
+
+
+def parse_client_trackinginfo_resp3_to_resp2_legacy(response, **options):
+    """RESP3-wire CLIENT TRACKINGINFO → legacy RESP2 flat ``list``.
+
+    Mirrors today's RESP2-wire callback (``list(map(str_if_bytes, r))``):
+    labels are decoded to ``str`` while values are preserved as-is.
+    """
+    if not isinstance(response, dict):
+        return list(map(str_if_bytes, response))
+    out: list = []
+    for key, value in response.items():
+        out.append(str_if_bytes(key))
+        out.append(value)
+    return out
+
+
 def sort_return_tuples(response, **options):
     """
     If ``groups`` is specified, return the response as a list of
