@@ -14,8 +14,7 @@ import redis
 from redis import exceptions
 from redis._parsers.helpers import (
     _RedisCallbacks,
-    _RedisCallbacksRESP2,
-    _RedisCallbacksRESP3,
+    get_response_callbacks,
     parse_info,
     parse_zscan,
     zset_score_for_rank,
@@ -33,7 +32,7 @@ from .conftest import (
     _get_client,
     assert_resp_response,
     assert_resp_response_in,
-    is_resp2_connection,
+    expected_response_shape,
     skip_if_redis_enterprise,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
@@ -70,11 +69,10 @@ class TestResponseCallbacks:
     "Tests for the response callback system"
 
     def test_response_callbacks(self, r):
-        callbacks = _RedisCallbacks
-        if is_resp2_connection(r):
-            callbacks.update(_RedisCallbacksRESP2)
-        else:
-            callbacks.update(_RedisCallbacksRESP3)
+        kwargs = r.connection_pool.connection_kwargs
+        callbacks = get_response_callbacks(
+            kwargs.get("protocol"), kwargs.get("legacy_responses", True)
+        )
         assert r.response_callbacks == callbacks
         assert id(r.response_callbacks) != id(_RedisCallbacks)
         r.set_response_callback("GET", lambda x: "static")
@@ -730,7 +728,9 @@ class TestRedisCommands:
     @skip_if_server_version_lt("2.6.9")
     def test_client_setname(self, r):
         assert r.client_setname("redis_py_test")
-        assert_resp_response(r, r.client_getname(), "redis_py_test", b"redis_py_test")
+        assert_resp_response(
+            r, r.client_getname(), "redis_py_test", b"redis_py_test", "redis_py_test"
+        )
 
     @skip_if_server_version_lt("7.2.0")
     def test_client_setinfo(self, r: redis.Redis):
@@ -1128,7 +1128,7 @@ class TestRedisCommands:
     @skip_if_server_version_lt("6.2.0")
     @skip_if_redis_enterprise()
     def test_reset(self, r):
-        assert_resp_response(r, r.reset(), "RESET", b"RESET")
+        assert_resp_response(r, r.reset(), "RESET", b"RESET", "RESET")
 
     def test_object(self, r):
         r["a"] = "foo"
@@ -5092,6 +5092,7 @@ class TestRedisCommands:
             r.geohash("barcelona", "place1", "place2", "place3"),
             ["sp3e9yg3kd0", "sp3e9cbc3t0", None],
             [b"sp3e9yg3kd0", b"sp3e9cbc3t0", None],
+            ["sp3e9yg3kd0", "sp3e9cbc3t0", None],
         )
 
     @skip_unless_arch_bits(64)
@@ -6352,6 +6353,7 @@ class TestRedisCommands:
             r.xread(streams={stream: 0}),
             [[stream_name, expected_entries]],
             {stream_name: [expected_entries]},
+            {stream_name: expected_entries},
         )
 
         expected_entries = [get_stream_message(r, stream, m1)]
@@ -6361,6 +6363,7 @@ class TestRedisCommands:
             r.xread(streams={stream: 0}, count=1),
             [[stream_name, expected_entries]],
             {stream_name: [expected_entries]},
+            {stream_name: expected_entries},
         )
 
         expected_entries = [get_stream_message(r, stream, m2)]
@@ -6370,6 +6373,7 @@ class TestRedisCommands:
             r.xread(streams={stream: m1}),
             [[stream_name, expected_entries]],
             {stream_name: [expected_entries]},
+            {stream_name: expected_entries},
         )
 
         # xread starting at the last message returns an empty list
@@ -6396,6 +6400,7 @@ class TestRedisCommands:
             r.xreadgroup(group, consumer, streams={stream: ">"}),
             [[stream_name, expected_entries]],
             {stream_name: [expected_entries]},
+            {stream_name: expected_entries},
         )
 
         r.xgroup_destroy(stream, group)
@@ -6409,6 +6414,7 @@ class TestRedisCommands:
             r.xreadgroup(group, consumer, streams={stream: ">"}, count=1),
             [[stream_name, expected_entries]],
             {stream_name: [expected_entries]},
+            {stream_name: expected_entries},
         )
 
         r.xgroup_destroy(stream, group)
@@ -6427,14 +6433,19 @@ class TestRedisCommands:
         r.xgroup_create(stream, group, "0")
         res = r.xreadgroup(group, consumer, streams={stream: ">"}, noack=True)
         empty_res = r.xreadgroup(group, consumer, streams={stream: "0"})
-        if is_resp2_connection(r):
+        shape = expected_response_shape(r)
+        if shape == "legacy_resp2":
             assert len(res[0][1]) == 2
             # now there should be nothing pending
             assert len(empty_res[0][1]) == 0
-        else:
+        elif shape == "legacy_resp3":
             assert len(res[stream_name][0]) == 2
             # now there should be nothing pending
             assert len(empty_res[stream_name][0]) == 0
+        else:
+            assert len(res[stream_name]) == 2
+            # now there should be nothing pending
+            assert len(empty_res[stream_name]) == 0
 
         r.xgroup_destroy(stream, group)
         r.xgroup_create(stream, group, "0")
@@ -6447,6 +6458,7 @@ class TestRedisCommands:
             r.xreadgroup(group, consumer, streams={stream: "0"}),
             [[stream_name, expected_entries]],
             {stream_name: [expected_entries]},
+            {stream_name: expected_entries},
         )
 
     def _validate_xreadgroup_with_claim_min_idle_time_response(
@@ -6459,12 +6471,15 @@ class TestRedisCommands:
         for str_index, expected_stream in enumerate(expected_streams):
             expected_entries_per_stream = expected_entries[expected_stream]
 
-            if is_resp2_connection(r):
+            shape = expected_response_shape(r)
+            if shape == "legacy_resp2":
                 actual_entries_per_stream = response[str_index][1]
                 actual_stream = response[str_index][0]
                 assert actual_stream == expected_stream
-            else:
+            elif shape == "legacy_resp3":
                 actual_entries_per_stream = response[expected_stream][0]
+            else:
+                actual_entries_per_stream = response[expected_stream]
 
             # validate the number of entries
             assert len(actual_entries_per_stream) == len(expected_entries_per_stream)
@@ -6547,6 +6562,7 @@ class TestRedisCommands:
             res,
             [[stream_name, expected_entries]],
             {stream_name: [expected_entries]},
+            {stream_name: expected_entries},
         )
 
         # add 2 more messages

@@ -95,6 +95,31 @@ def parse_memory_stats(response, **kwargs):
     return stats
 
 
+def parse_memory_stats_resp3(response, **kwargs):
+    """Parse the results of MEMORY STATS on RESP3 wire.
+
+    Each entry arrives as a top-level ``dict`` instead of a flat list of
+    pairs; decode the keys to ``str`` and recurse into the per-database
+    ``db.*`` sub-dicts so the Python shape matches what
+    :func:`parse_memory_stats` produces from RESP2 wire.
+    """
+    stats = {str_if_bytes(key): value for key, value in response.items()}
+    for key, value in stats.items():
+        if key.startswith("db.") and isinstance(value, dict):
+            stats[key] = {str_if_bytes(k): v for k, v in value.items()}
+    return stats
+
+
+def parse_list_of_dicts_resp3(response, **kwargs):
+    """Parse list-of-maps responses on RESP3 wire (e.g. ``XINFO`` family).
+
+    Each list entry arrives as a ``dict`` with bytes keys; decode the
+    keys to ``str`` so the Python shape matches what
+    :func:`parse_list_of_dicts` produces from RESP2 wire.
+    """
+    return [{str_if_bytes(key): value for key, value in x.items()} for x in response]
+
+
 SENTINEL_STATE_TYPES = {
     "can-failover-its-master": int,
     "config-epoch": int,
@@ -527,15 +552,72 @@ def bzpop_score_resp3_to_resp2_legacy(response, **options):
     return (response[0], response[1], float(response[2]))
 
 
+def zmpop_resp3_to_resp2_legacy(response, **options):
+    """RESP3-wire ZMPOP/BZMPOP → legacy RESP2 ``[name, [[member, b"score"], ...]]``.
+
+    Re-encodes RESP3 native float scores back to the bytes form Redis
+    returns on the RESP2 wire so callers observe today's RESP2 raw shape.
+    """
+    if not response:
+        return response
+    return [
+        response[0],
+        [[member, _score_to_resp2_bytes(score)] for member, score in response[1]],
+    ]
+
+
+def zmpop_unified(response, **options):
+    """ZMPOP/BZMPOP → unified ``[name, [[member, float_score], ...]]``.
+
+    Used for the ``legacy_responses=False`` overlay on RESP2 wire to mirror
+    RESP3's native float-score shape.
+    """
+    if not response:
+        return response
+    return [
+        response[0],
+        [[member, float(score)] for member, score in response[1]],
+    ]
+
+
+def hrandfield_unified(response, **options):
+    """RESP2-wire HRANDFIELD WITHVALUES → unified ``list[[field, value], ...]``.
+
+    Plain (no-values) responses — flat list of fields — pass through.
+    The ``withvalues`` option (forwarded by the command method) selects the
+    pairing branch so the no-values flat result is never misread.
+    """
+    if not response or not options.get("withvalues"):
+        return response
+    if isinstance(response[0], list):
+        return response
+    it = iter(response)
+    return [[field, value] for field, value in zip(it, it)]
+
+
+def hrandfield_resp3_to_resp2_legacy(response, **options):
+    """RESP3-wire HRANDFIELD WITHVALUES → legacy RESP2 flat ``[field, value, ...]``.
+
+    Plain (no-values) responses — flat list of fields — pass through.
+    """
+    if not response or not options.get("withvalues"):
+        return response
+    if not isinstance(response[0], list):
+        return response
+    flat = []
+    for field, value in response:
+        flat.append(field)
+        flat.append(value)
+    return flat
+
+
 def parse_geopos_unified(response, **options):
     """GEOPOS → unified ``list[list[float, float] | None]``.
 
     Used for the ``legacy_responses=False`` overlay on RESP2 wire to mirror
     RESP3's native ``list[list]`` shape.
     """
-    return [
-        [float(ll[0]), float(ll[1])] if ll is not None else None for ll in response
-    ]
+    return [[float(ll[0]), float(ll[1])] if ll is not None else None for ll in response]
 
 
 def parse_geopos_resp3_to_resp2_legacy(response, **options):
@@ -543,9 +625,7 @@ def parse_geopos_resp3_to_resp2_legacy(response, **options):
 
     Matches today's RESP2-wire callback shape (tuple coordinates).
     """
-    return [
-        (float(ll[0]), float(ll[1])) if ll is not None else None for ll in response
-    ]
+    return [(float(ll[0]), float(ll[1])) if ll is not None else None for ll in response]
 
 
 def parse_lcs_idx_unified(response, **options):
@@ -693,6 +773,35 @@ def parse_xread_resp3(response, **options):
     return {
         key: [parse_stream_list(value, **options)] for key, value in response.items()
     }
+
+
+def parse_xread_unified(response, **options):
+    """XREAD/XREADGROUP → unified ``dict[stream, list[tuple[id, dict]]]``.
+
+    Accepts either RESP2 (``list[[stream, entries]]``) or RESP3
+    (``dict[stream, entries]``) wire shape. Empty result is ``{}``.
+    """
+    if not response:
+        return {}
+    if isinstance(response, dict):
+        return {
+            key: parse_stream_list(value, **options) for key, value in response.items()
+        }
+    return {
+        stream: parse_stream_list(entries, **options) for stream, entries in response
+    }
+
+
+def parse_xread_resp3_to_resp2_legacy(response, **options):
+    """RESP3-wire XREAD/XREADGROUP → legacy RESP2 ``list[[stream, entries]]``.
+
+    Empty result ``{}`` is converted to ``[]`` to match today's RESP2 shape.
+    """
+    if not response:
+        return []
+    return [
+        [key, parse_stream_list(value, **options)] for key, value in response.items()
+    ]
 
 
 def parse_xpending(response, **options):
@@ -1047,6 +1156,68 @@ def parse_acl_log(response, **options):
     return data
 
 
+def parse_acl_log_resp3_to_resp2_legacy(response, **options):
+    """RESP3-wire ACL LOG → today's RESP2 parsed shape.
+
+    Each log entry arrives as a ``dict`` on RESP3 wire instead of a flat
+    list of pairs; convert ``client-info`` from a string blob into the
+    parsed ``dict`` and ``age-seconds`` to ``float`` so the Python shape
+    matches what :func:`parse_acl_log` produces from RESP2 wire.
+
+    Also used as the unified callback (Set D): the legacy and unified
+    shapes coincide for ACL LOG.
+    """
+    if response is None:
+        return None
+    if not isinstance(response, list):
+        return bool_ok(response)
+    data = []
+    for log in response:
+        if isinstance(log, dict):
+            log_data = {str_if_bytes(k): v for k, v in log.items()}
+        else:
+            log_data = pairs_to_dict(log, True, True)
+        client_info = log_data.get("client-info", "")
+        log_data["client-info"] = parse_client_info(client_info)
+        log_data["age-seconds"] = float(log_data["age-seconds"])
+        data.append(log_data)
+    return data
+
+
+def parse_acl_getuser_unified(response, **options):
+    """ACL GETUSER → unified shape with selectors as ``list[dict]``.
+
+    On RESP2 wire each selector arrives as a flat ``[k, v, k, v, …]``
+    list; pair them into dicts to match the RESP3 wire shape.
+    """
+    data = parse_acl_getuser(response, **options)
+    if data is None:
+        return data
+    selectors = data.get("selectors")
+    if selectors and isinstance(selectors[0], list):
+        data["selectors"] = [
+            dict(zip(selector[0::2], selector[1::2])) for selector in selectors
+        ]
+    return data
+
+
+def parse_acl_getuser_resp3_to_resp2_legacy(response, **options):
+    """RESP3-wire ACL GETUSER → today's RESP2 selectors as flat lists.
+
+    Each selector arrives as a ``dict`` on RESP3 wire; flatten back to
+    the interleaved ``[k, v, k, v, …]`` form produced by RESP2 wire.
+    """
+    data = parse_acl_getuser(response, **options)
+    if data is None:
+        return data
+    selectors = data.get("selectors")
+    if selectors and isinstance(selectors[0], dict):
+        data["selectors"] = [
+            [item for kv in selector.items() for item in kv] for selector in selectors
+        ]
+    return data
+
+
 def parse_client_info(value):
     """
     Parsing client-info in ACL Log in following format.
@@ -1106,6 +1277,93 @@ def parse_gcra(response, **options):
         retry_after=int(response[3]),
         full_burst_after=int(response[4]),
     )
+
+
+def parse_function_list_unified(response, **options):
+    """FUNCTION LIST → unified ``list[dict]`` with bytes keys.
+
+    Accepts either RESP2 wire (``list[list]`` of flat ``[k, v, k, v, …]``
+    pairs, with the nested ``b"functions"`` value also a flat list of
+    flat lists) or RESP3 wire (``list[dict]`` already in nested-map
+    form). Both are normalised to ``list[dict]``.
+    """
+    if response is None:
+        return None
+    result = []
+    for lib in response:
+        if isinstance(lib, dict):
+            result.append(lib)
+            continue
+        lib_dict = pairs_to_dict(lib)
+        func_key = b"functions" if b"functions" in lib_dict else "functions"
+        if func_key in lib_dict:
+            functions = lib_dict[func_key]
+            lib_dict[func_key] = [
+                func if isinstance(func, dict) else pairs_to_dict(func)
+                for func in functions
+            ]
+        result.append(lib_dict)
+    return result
+
+
+def parse_function_list_resp3_to_resp2_legacy(response, **options):
+    """RESP3-wire FUNCTION LIST → today's RESP2 ``list[list]`` shape.
+
+    Each library and each nested function arrives as a ``dict``; flatten
+    them back to interleaved ``[k, v, k, v, …]`` lists so the Python
+    shape matches what RESP2 wire produces natively.
+    """
+    if response is None:
+        return None
+    result = []
+    for lib in response:
+        if not isinstance(lib, dict):
+            result.append(lib)
+            continue
+        flat = []
+        for key, value in lib.items():
+            flat.append(key)
+            if key == b"functions" or key == "functions":
+                flat.append(
+                    [
+                        [item for kv in func.items() for item in kv]
+                        if isinstance(func, dict)
+                        else func
+                        for func in value
+                    ]
+                )
+            else:
+                flat.append(value)
+        result.append(flat)
+    return result
+
+
+def parse_cluster_links_unified(response, **options):
+    """CLUSTER LINKS → unified ``list[dict]`` with bytes keys.
+
+    Accepts either RESP2 wire (``list[list]`` of flat pairs) or RESP3
+    wire (``list[dict]``). Both are normalised to ``list[dict]``.
+    """
+    if response is None:
+        return None
+    return [
+        item if isinstance(item, dict) else pairs_to_dict(item) for item in response
+    ]
+
+
+def parse_cluster_links_resp3_to_resp2_legacy(response, **options):
+    """RESP3-wire CLUSTER LINKS → today's RESP2 ``list[list]`` shape.
+
+    Each link arrives as a ``dict`` with bytes keys; flatten back to
+    interleaved ``[k, v, k, v, …]`` lists so the Python shape matches
+    what RESP2 wire produces natively.
+    """
+    if response is None:
+        return None
+    return [
+        [item for kv in link.items() for item in kv] if isinstance(link, dict) else link
+        for link in response
+    ]
 
 
 def string_keys_to_dict(key_string, callback):

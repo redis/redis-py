@@ -3967,7 +3967,7 @@ class BasicKeyCommands(CommandsProtocol):
         if withvalues:
             params.append("WITHVALUES")
 
-        return self.execute_command("HRANDFIELD", key, *params)
+        return self.execute_command("HRANDFIELD", key, *params, withvalues=withvalues)
 
     @overload
     def randomkey(self: SyncClientProtocol, **kwargs) -> bytes | str | None: ...

@@ -13,7 +13,7 @@ from redis.asyncio.sentinel import (
     SentinelConnectionPool,
     SlaveNotFoundError,
 )
-from tests.conftest import is_resp2_connection
+from tests.conftest import get_legacy_responses
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
@@ -382,7 +382,7 @@ async def test_sentinel_commands_with_strict_redis_client(request):
         await client.sentinel_get_master_addr_by_name("redis-py-test"), tuple
     )
     assert isinstance(await client.sentinel_master("redis-py-test"), dict)
-    if is_resp2_connection(client):
+    if get_legacy_responses(client):
         assert isinstance(await client.sentinel_masters(), dict)
     else:
         masters = await client.sentinel_masters()
