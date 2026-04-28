@@ -83,7 +83,6 @@ from redis.observability.recorder import (
 )
 from redis.retry import Retry
 from redis.utils import (
-    DEFAULT_RESP_VERSION,
     check_protocol_version,
     deprecated_args,
     deprecated_function,
@@ -162,29 +161,9 @@ def parse_cluster_slots(
 def parse_cluster_shards(resp, **options):
     """
     Parse CLUSTER SHARDS response.
-
-    Normalises the output so that all dictionary keys are strings regardless
-    of protocol version (RESP2 returns bytes keys for node attributes,
-    RESP3 returns bytes keys at every level).
     """
     if isinstance(resp[0], dict):
-        # RESP3 – native dicts with bytes keys; decode them.
-        shards = []
-        for item in resp:
-            shard = {
-                "slots": item.get("slots") or item.get(b"slots", []),
-                "nodes": [],
-            }
-            raw_nodes = item.get("nodes") or item.get(b"nodes", [])
-            for node in raw_nodes:
-                if isinstance(node, dict):
-                    shard["nodes"].append({str_if_bytes(k): v for k, v in node.items()})
-                else:
-                    shard["nodes"].append(node)
-            shards.append(shard)
-        return shards
-
-    # RESP2 – flat list structure; build dicts with string keys.
+        return resp
     shards = []
     for x in resp:
         shard = {"slots": [], "nodes": []}
@@ -194,7 +173,7 @@ def parse_cluster_shards(resp, **options):
         for node in nodes:
             dict_node = {}
             for i in range(0, len(node), 2):
-                dict_node[str_if_bytes(node[i])] = node[i + 1]
+                dict_node[node[i]] = node[i + 1]
             shard["nodes"].append(dict_node)
         shards.append(shard)
 
@@ -288,9 +267,7 @@ class MaintNotificationsAbstractRedisCluster:
         **kwargs,
     ):
         # Initialize maintenance notifications
-        is_protocol_supported = check_protocol_version(
-            kwargs.get("protocol", DEFAULT_RESP_VERSION), 3
-        )
+        is_protocol_supported = check_protocol_version(kwargs.get("protocol"), 3)
 
         if (
             maint_notifications_config
@@ -823,7 +800,7 @@ class RedisCluster(
             kwargs.get("encoding_errors", "strict"),
             kwargs.get("decode_responses", False),
         )
-        protocol = kwargs.get("protocol", DEFAULT_RESP_VERSION)
+        protocol = kwargs.get("protocol", None)
         if (cache_config or cache) and not check_protocol_version(protocol, 3):
             raise RedisError("Client caching is only supported with RESP version 3")
 

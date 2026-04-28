@@ -99,12 +99,21 @@ class _CMSBloomBase(CMSCommands, AbstractBloom):
             # CMS_INCRBY: spaceHolder,
             # CMS_QUERY: spaceHolder,
             CMS_MERGE: bool_ok,
+        }
+
+        _RESP2_MODULE_CALLBACKS = {
             CMS_INFO: CMSInfo,
         }
+        _RESP3_MODULE_CALLBACKS = {}
 
         self.client = client
         self.commandmixin = CMSCommands
         self.execute_command = client.execute_command
+
+        if get_protocol_version(self.client) in ["3", 3]:
+            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
+        else:
+            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
 
         for k, v in _MODULE_CALLBACKS.items():
             self.client.set_response_callback(k, v)
@@ -118,12 +127,24 @@ class _TOPKBloomBase(TOPKCommands, AbstractBloom):
             TOPK_RESERVE: bool_ok,
             # TOPK_QUERY: spaceHolder,
             # TOPK_COUNT: spaceHolder,
-            TOPK_INFO: TopKInfo,
         }
+
+        _RESP2_MODULE_CALLBACKS = {
+            TOPK_ADD: parse_to_list,
+            TOPK_INCRBY: parse_to_list,
+            TOPK_INFO: TopKInfo,
+            TOPK_LIST: parse_to_list,
+        }
+        _RESP3_MODULE_CALLBACKS = {}
 
         self.client = client
         self.commandmixin = TOPKCommands
         self.execute_command = client.execute_command
+
+        if get_protocol_version(self.client) in ["3", 3]:
+            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
+        else:
+            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
 
         for k, v in _MODULE_CALLBACKS.items():
             self.client.set_response_callback(k, v)
@@ -144,12 +165,21 @@ class _CFBloomBase(CFCommands, AbstractBloom):
             # CF_COUNT: spaceHolder,
             # CF_SCANDUMP: spaceHolder,
             # CF_LOADCHUNK: spaceHolder,
+        }
+
+        _RESP2_MODULE_CALLBACKS = {
             CF_INFO: CFInfo,
         }
+        _RESP3_MODULE_CALLBACKS = {}
 
         self.client = client
         self.commandmixin = CFCommands
         self.execute_command = client.execute_command
+
+        if get_protocol_version(self.client) in ["3", 3]:
+            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
+        else:
+            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
 
         for k, v in _MODULE_CALLBACKS.items():
             self.client.set_response_callback(k, v)
@@ -164,16 +194,16 @@ class _TDigestBloomBase(TDigestCommands, AbstractBloom):
             # TDIGEST_RESET: bool_ok,
             # TDIGEST_ADD: spaceHolder,
             # TDIGEST_MERGE: spaceHolder,
-            TDIGEST_INFO: TDigestInfo,
-            TDIGEST_MIN: float,
-            TDIGEST_MAX: float,
-            TDIGEST_TRIMMED_MEAN: float,
         }
 
         _RESP2_MODULE_CALLBACKS = {
             TDIGEST_BYRANK: parse_to_list,
             TDIGEST_BYREVRANK: parse_to_list,
             TDIGEST_CDF: parse_to_list,
+            TDIGEST_INFO: TDigestInfo,
+            TDIGEST_MIN: float,
+            TDIGEST_MAX: float,
+            TDIGEST_TRIMMED_MEAN: float,
             TDIGEST_QUANTILE: parse_to_list,
         }
         _RESP3_MODULE_CALLBACKS = {}
@@ -205,12 +235,21 @@ class _BFBloomBase(BFCommands, AbstractBloom):
             # BF_SCANDUMP: spaceHolder,
             # BF_LOADCHUNK: spaceHolder,
             # BF_CARD: spaceHolder,
+        }
+
+        _RESP2_MODULE_CALLBACKS = {
             BF_INFO: BFInfo,
         }
+        _RESP3_MODULE_CALLBACKS = {}
 
         self.client = client
         self.commandmixin = BFCommands
         self.execute_command = client.execute_command
+
+        if get_protocol_version(self.client) in ["3", 3]:
+            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
+        else:
+            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
 
         for k, v in _MODULE_CALLBACKS.items():
             self.client.set_response_callback(k, v)

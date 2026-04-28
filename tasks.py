@@ -45,7 +45,7 @@ def all_tests(c):
 
 
 @task
-def tests(c, uvloop=False, protocol=3, profile=False):
+def tests(c, uvloop=False, protocol=2, profile=False):
     """Run the redis-py test suite against the current python."""
     print("Starting Redis tests")
     fixed_client_tests(c, uvloop=uvloop, profile=profile)
@@ -67,7 +67,7 @@ def fixed_client_tests(c, uvloop=False, profile=False):
 
 @task
 def standalone_tests(
-    c, uvloop=False, protocol=3, profile=False, redis_mod_url=None, extra_markers=""
+    c, uvloop=False, protocol=2, profile=False, redis_mod_url=None, extra_markers=""
 ):
     """Run tests against a standalone redis instance"""
     profile_arg = "--profile" if profile else ""
@@ -85,7 +85,7 @@ def standalone_tests(
 
 
 @task
-def cluster_tests(c, uvloop=False, protocol=3, profile=False):
+def cluster_tests(c, uvloop=False, protocol=2, profile=False):
     """Run tests against a redis cluster"""
     profile_arg = "--profile" if profile else ""
     cluster_url = "redis://localhost:16379/0"

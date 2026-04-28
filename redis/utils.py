@@ -6,13 +6,10 @@ import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
 from functools import wraps
-from importlib import metadata
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, TypeVar, Union
 
 from redis.exceptions import DataError
 from redis.typing import AbsExpiryT, EncodableT, ExpiryT
-
-DEFAULT_RESP_VERSION = 3
 
 if TYPE_CHECKING:
     from redis.client import Redis
@@ -44,6 +41,8 @@ try:
 except ImportError:
     CRYPTOGRAPHY_AVAILABLE = False
 
+from importlib import metadata
+
 
 def from_url(url: str, **kwargs: Any) -> "Redis":
     """
@@ -72,23 +71,6 @@ def str_if_bytes(value: Union[str, bytes]) -> str:
 
 def safe_str(value):
     return str(str_if_bytes(value))
-
-
-def decode_field_value(value, key=None, field_encodings=None):
-    """Decode a field value respecting optional per-field encoding overrides.
-
-    - If *field_encodings* is provided and *key* is in it, the corresponding
-      encoding is used (``None`` means keep raw bytes).
-    - Otherwise falls back to :func:`str_if_bytes`.
-    """
-    if not isinstance(value, bytes):
-        return value
-    if field_encodings and key is not None and key in field_encodings:
-        encoding = field_encodings[key]
-        if encoding is None:
-            return value
-        return value.decode(encoding, "replace")
-    return str_if_bytes(value)
 
 
 def dict_merge(*dicts: Mapping[str, Any]) -> Dict[str, Any]:

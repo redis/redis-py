@@ -1,5 +1,5 @@
 from ..helpers import nativestr
-from .utils import _pairs_to_dict
+from .utils import list_to_dict
 
 
 class TSInfo:
@@ -7,8 +7,6 @@ class TSInfo:
     Hold information and statistics on the time-series.
     Can be created using ``tsinfo`` command
     https://redis.io/docs/latest/commands/ts.info/
-
-    Handles both RESP2 (flat list) and RESP3 (dict) responses.
     """
 
     rules = []
@@ -61,30 +59,13 @@ class TSInfo:
         Can read more about on
         https://redis.io/docs/latest/develop/data-types/timeseries/configuration/#duplicate_policy
         """
-        if isinstance(args, dict):
-            # RESP3: response is already a dict
-            response = args
-        else:
-            # RESP2: response is a flat list of alternating key-value pairs
-            response = dict(zip(map(nativestr, args[::2]), args[1::2]))
-        rules = response.get("rules")
-        if isinstance(rules, list):
-            # RESP2: [[dest_key, bucket_ms, agg_type], ...] → dict format
-            self.rules = {r[0]: list(r[1:]) for r in rules} if rules else {}
-        else:
-            # RESP3: already a dict {dest_key: [bucket_ms, agg_type], ...}
-            self.rules = rules if rules else {}
+        response = dict(zip(map(nativestr, args[::2]), args[1::2]))
+        self.rules = response.get("rules")
         self.source_key = response.get("sourceKey")
         self.chunk_count = response.get("chunkCount")
         self.memory_usage = response.get("memoryUsage")
         self.total_samples = response.get("totalSamples")
-        labels = response.get("labels")
-        if isinstance(labels, dict):
-            # RESP3: labels already a dict
-            self.labels = labels
-        else:
-            # RESP2: labels is a list of [key, value] pairs
-            self.labels = _pairs_to_dict(labels) if labels else {}
+        self.labels = list_to_dict(response.get("labels"))
         self.retention_msecs = response.get("retentionTime")
         self.last_timestamp = response.get("lastTimestamp")
         self.first_timestamp = response.get("firstTimestamp")

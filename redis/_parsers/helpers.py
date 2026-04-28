@@ -86,19 +86,12 @@ def parse_info(response):
 
 def parse_memory_stats(response, **kwargs):
     """Parse the results of MEMORY STATS"""
-    stats = pairs_to_dict(response, decode_keys=True)
+    stats = pairs_to_dict(response, decode_keys=True, decode_string_values=True)
     for key, value in stats.items():
         if key.startswith("db.") and isinstance(value, list):
-            stats[key] = pairs_to_dict(value, decode_keys=True)
-    return stats
-
-
-def parse_memory_stats_resp3(response, **kwargs):
-    """Parse MEMORY STATS for RESP3 — decode keys to str, preserve native values."""
-    stats = {str_if_bytes(key): value for key, value in response.items()}
-    for key, value in stats.items():
-        if key.startswith("db.") and isinstance(value, dict):
-            stats[key] = {str_if_bytes(k): v for k, v in value.items()}
+            stats[key] = pairs_to_dict(
+                value, decode_keys=True, decode_string_values=True
+            )
     return stats
 
 
@@ -132,7 +125,6 @@ SENTINEL_STATE_TYPES = {
 def parse_sentinel_state(item):
     result = pairs_to_dict_typed(item, SENTINEL_STATE_TYPES)
     flags = set(result["flags"].split(","))
-    result["flags"] = flags
     for name, flag in (
         ("is_master", "master"),
         ("is_slave", "slave"),
@@ -154,22 +146,12 @@ def parse_sentinel_state_resp3(response, **options):
     result = {}
     for key in response:
         try:
-            value = SENTINEL_STATE_TYPES[str_if_bytes(key)](str_if_bytes(response[key]))
+            value = SENTINEL_STATE_TYPES[key](str_if_bytes(response[key]))
             result[str_if_bytes(key)] = value
         except Exception:
-            result[str_if_bytes(key)] = str_if_bytes(response[key])
+            result[str_if_bytes(key)] = response[str_if_bytes(key)]
     flags = set(result["flags"].split(","))
     result["flags"] = flags
-    for name, flag in (
-        ("is_master", "master"),
-        ("is_slave", "slave"),
-        ("is_sdown", "s_down"),
-        ("is_odown", "o_down"),
-        ("is_sentinel", "sentinel"),
-        ("is_disconnected", "disconnected"),
-        ("is_master_down", "master_down"),
-    ):
-        result[name] = flag in flags
     return result
 
 
@@ -182,11 +164,7 @@ def parse_sentinel_masters(response, **options):
 
 
 def parse_sentinel_masters_resp3(response, **options):
-    result = {}
-    for master in response:
-        state = parse_sentinel_state_resp3(master)
-        result[state["name"]] = state
-    return result
+    return [parse_sentinel_state_resp3(master) for master in response]
 
 
 def parse_sentinel_slaves_and_sentinels(response, **options):
@@ -260,15 +238,13 @@ def _wrap_score_cast_func(score_cast_func):
 def zset_score_pairs(response, **options):
     """
     If ``withscores`` is specified in the options, return the response as
-    a list of [value, score] pairs
+    a list of (value, score) pairs
     """
     if not response or not options.get("withscores"):
         return response
     score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
     it = iter(response)
-    # Normalise RESP2 byte-string scores to float before applying the cast
-    # so that score_cast_func receives the same type as in RESP3.
-    return [[val, score_cast_func(float(score))] for val, score in zip(it, it)]
+    return list(zip(it, map(score_cast_func, it)))
 
 
 def zset_score_for_rank(response, **options):
@@ -279,9 +255,7 @@ def zset_score_for_rank(response, **options):
     if not response or not options.get("withscore"):
         return response
     score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
-    # Normalise RESP2 byte-string scores to float before applying the cast
-    # so that score_cast_func receives the same type as in RESP3.
-    return [response[0], score_cast_func(float(response[1]))]
+    return [response[0], score_cast_func(response[1])]
 
 
 def zset_score_pairs_resp3(response, **options):
@@ -293,82 +267,6 @@ def zset_score_pairs_resp3(response, **options):
         return response
     score_cast_func = options.get("score_cast_func", float)
     return [[name, score_cast_func(val)] for name, val in response]
-
-
-def hrandfield_pairs(response, **options):
-    """
-    If ``withvalues`` is specified in the options, return the response as
-    a list of [field, value] pairs (pairing flat interleaved list).
-    """
-    if not response or not options.get("withvalues"):
-        return response
-    it = iter(response)
-    return [[field, val] for field, val in zip(it, it)]
-
-
-def parse_zmpop(response, **options):
-    """
-    Parse ZMPOP/BZMPOP response, casting scores to float.
-    Response format: [key, [[member, score], ...]] or None.
-    """
-    if response is None:
-        return None
-    key, members = response
-    return [
-        key,
-        [
-            [member, score if isinstance(score, float) else float(score)]
-            for member, score in members
-        ],
-    ]
-
-
-def parse_lcs(response, **options):
-    """
-    Parse LCS response. Without modifiers returns the raw string.
-    With LEN returns an integer. With IDX returns a dict with string keys.
-    RESP2 with IDX returns a flat list [key, val, key, val, ...]
-    which we convert to a dict. RESP3 returns a native dict.
-    Both have keys normalized to strings.
-    """
-    if isinstance(response, list):
-        it = iter(response)
-        return {str_if_bytes(k): v for k, v in zip(it, it)}
-    if isinstance(response, dict):
-        return {str_if_bytes(k): v for k, v in response.items()}
-    return response
-
-
-def zpop_score_pairs(response, **options):
-    """
-    Handle ZPOPMAX/ZPOPMIN RESP2 responses.
-    RESP2 always returns a flat array: [member1, score1, member2, score2, ...]
-    Scores are byte strings that need to be cast to float.
-    Always pairs and casts scores — no ``withscores`` gate required because
-    ZPOPMAX/ZPOPMIN always include scores in their response.
-    """
-    if not response:
-        return response
-    score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
-    it = iter(response)
-    return [[val, score_cast_func(float(score))] for val, score in zip(it, it)]
-
-
-def zpop_score_pairs_resp3(response, **options):
-    """
-    Handle ZPOPMAX/ZPOPMIN RESP3 responses which differ based on count:
-    - Without count: flat [member, score]
-    - With count: nested [[member, score], ...]
-    Normalizes both to list of [member, score] pairs with score_cast_func applied.
-    """
-    if not response:
-        return response
-    score_cast_func = options.get("score_cast_func", float)
-    # Detect flat vs nested: if first element is a list, it's nested (with count)
-    if isinstance(response[0], list):
-        return [[name, score_cast_func(val)] for name, val in response]
-    else:
-        return [[response[0], score_cast_func(response[1])]]
 
 
 def zset_score_for_rank_resp3(response, **options):
@@ -462,14 +360,16 @@ def parse_xinfo_stream(response, **options):
 
 def parse_xread(response, **options):
     if response is None:
-        return {}
-    return {r[0]: parse_stream_list(r[1], **options) for r in response}
+        return []
+    return [[r[0], parse_stream_list(r[1], **options)] for r in response]
 
 
 def parse_xread_resp3(response, **options):
     if response is None:
         return {}
-    return {key: parse_stream_list(value, **options) for key, value in response.items()}
+    return {
+        key: [parse_stream_list(value, **options)] for key, value in response.items()
+    }
 
 
 def parse_xpending(response, **options):
@@ -553,11 +453,7 @@ def parse_zscan(response, **options):
     score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
     cursor, r = response
     it = iter(r)
-    # Normalise scores to float before applying the cast so that
-    # score_cast_func receives the same type regardless of protocol.
-    return int(cursor), [
-        [val, score_cast_func(float(score))] for val, score in zip(it, it)
-    ]
+    return int(cursor), list(zip(it, map(score_cast_func, it)))
 
 
 def parse_zmscore(response, **options):
@@ -594,23 +490,6 @@ def parse_slowlog_get(response, **options):
     return [parse_item(item) for item in response]
 
 
-def parse_client_trackinginfo(response, **kwargs):
-    """
-    Parse CLIENT TRACKINGINFO response into a dict with str keys.
-    RESP2: flat list [key, val, key, val, ...] → dict
-    RESP3: native dict with bytes keys → dict with str keys
-    """
-    if isinstance(response, list):
-        data = pairs_to_dict(response, decode_keys=True)
-    else:
-        data = {str_if_bytes(k): v for k, v in response.items()}
-    if "flags" in data:
-        data["flags"] = [str_if_bytes(f) for f in data["flags"]]
-    if "prefixes" in data:
-        data["prefixes"] = [str_if_bytes(p) for p in data["prefixes"]]
-    return data
-
-
 def parse_stralgo(response, **options):
     """
     Parse the response from `STRALGO` command.
@@ -628,62 +507,16 @@ def parse_stralgo(response, **options):
     if options.get("idx", False):
         if options.get("withmatchlen", False):
             matches = [
-                [(int(match[-1]))] + [list(m) for m in match[:-1]]
+                [(int(match[-1]))] + list(map(tuple, match[:-1]))
                 for match in response[1]
             ]
         else:
-            matches = [[list(m) for m in match] for match in response[1]]
+            matches = [list(map(tuple, match)) for match in response[1]]
         return {
             str_if_bytes(response[0]): matches,
             str_if_bytes(response[2]): int(response[3]),
         }
     return str_if_bytes(response)
-
-
-def parse_stralgo_resp3(response, **options):
-    """Parse RESP3 ``STRALGO`` response to match RESP2 ``parse_stralgo`` output.
-
-    RESP3 returns a dict ``{b"matches": [...], b"len": N}`` for ``idx=True``,
-    an int for ``len=True``, or a plain string otherwise.  The match
-    restructuring mirrors :func:`parse_stralgo` exactly so both protocols
-    produce identical results.
-    """
-    if options.get("len", False):
-        return int(response)
-    if options.get("idx", False):
-        if isinstance(response, dict):
-            raw_matches = response.get("matches", response.get(b"matches", []))
-            raw_len = response.get("len", response.get(b"len", 0))
-        else:
-            return str_if_bytes(response)
-        if options.get("withmatchlen", False):
-            matches = [
-                [int(match[-1])] + [list(m) for m in match[:-1]]
-                for match in raw_matches
-            ]
-        else:
-            matches = [[list(m) for m in match] for match in raw_matches]
-        return {
-            "matches": matches,
-            "len": int(raw_len),
-        }
-    return str_if_bytes(response)
-
-
-def parse_cluster_links(response, **options):
-    """Parse CLUSTER LINKS into a list of dicts with str keys.
-
-    RESP2 returns a list of flat lists ``[key, val, key, val, ...]``.
-    RESP3 returns a list of dicts with bytes keys.
-    Both are normalised to ``[{"direction": ..., "node": ..., ...}, ...]``.
-    """
-    result = []
-    for item in response:
-        if isinstance(item, dict):
-            result.append({str_if_bytes(k): v for k, v in item.items()})
-        else:
-            result.append(pairs_to_dict(item, decode_keys=True))
-    return result
 
 
 def parse_cluster_info(response, **options):
@@ -769,7 +602,7 @@ def parse_geosearch_generic(response, **options):
 
     cast = {
         "withdist": float,
-        "withcoord": lambda ll: [float(ll[0]), float(ll[1])],
+        "withcoord": lambda ll: (float(ll[0]), float(ll[1])),
         "withhash": int,
     }
 
@@ -787,12 +620,10 @@ def parse_command(response, **options):
         cmd_name = str_if_bytes(command[0])
         cmd_dict["name"] = cmd_name
         cmd_dict["arity"] = int(command[1])
-        cmd_dict["flags"] = {str_if_bytes(flag) for flag in command[2]}
+        cmd_dict["flags"] = [str_if_bytes(flag) for flag in command[2]]
         cmd_dict["first_key_pos"] = command[3]
         cmd_dict["last_key_pos"] = command[4]
         cmd_dict["step_count"] = command[5]
-        if len(command) > 6:
-            cmd_dict["acl_categories"] = {str_if_bytes(c) for c in command[6]}
         if len(command) > 7:
             cmd_dict["tips"] = command[7]
             cmd_dict["key_specifications"] = command[8]
@@ -812,7 +643,7 @@ def parse_command_resp3(response, **options):
         cmd_dict["first_key_pos"] = command[3]
         cmd_dict["last_key_pos"] = command[4]
         cmd_dict["step_count"] = command[5]
-        cmd_dict["acl_categories"] = {str_if_bytes(c) for c in command[6]}
+        cmd_dict["acl_categories"] = command[6]
         if len(command) > 7:
             cmd_dict["tips"] = command[7]
             cmd_dict["key_specifications"] = command[8]
@@ -855,10 +686,8 @@ def parse_acl_getuser(response, **options):
             data["channels"] = []
     if "selectors" in data:
         if data["selectors"] != [] and isinstance(data["selectors"][0], list):
-            # RESP2: flat list [key, val, key, val] → convert to dict
             data["selectors"] = [
-                pairs_to_dict(selector, decode_keys=True, decode_string_values=True)
-                for selector in data["selectors"]
+                list(map(str_if_bytes, selector)) for selector in data["selectors"]
             ]
         elif data["selectors"] != []:
             data["selectors"] = [
@@ -892,28 +721,6 @@ def parse_acl_log(response, **options):
             data.append(log_data)
     else:
         data = bool_ok(response)
-    return data
-
-
-def parse_acl_log_resp3(response, **options):
-    """Parse ACL LOG for RESP3 — normalize to match RESP2 semantic richness.
-    Converts age-seconds to float and client-info to parsed dict."""
-    if not isinstance(response, list):
-        return bool_ok(response)
-    data = []
-    for entry in response:
-        log_data = {str_if_bytes(k): v for k, v in entry.items()}
-        # Ensure age-seconds is float
-        if "age-seconds" in log_data:
-            log_data["age-seconds"] = float(log_data["age-seconds"])
-        # Parse client-info string into dict
-        if "client-info" in log_data:
-            log_data["client-info"] = parse_client_info(log_data["client-info"])
-        # Decode remaining string values
-        for key in log_data:
-            if key not in ("age-seconds", "client-info"):
-                log_data[key] = str_if_bytes(log_data[key])
-        data.append(log_data)
     return data
 
 
@@ -978,26 +785,6 @@ def parse_gcra(response, **options):
     )
 
 
-def parse_function_list(response):
-    """Parse FUNCTION LIST response from RESP2 flat lists into nested dicts.
-
-    RESP2 returns: [[key, val, key, val, ...], ...]
-    where nested 'functions' values are also flat lists.
-    Converts to match RESP3's native dict format.
-    """
-    result = []
-    for lib_flat in response:
-        lib_dict = pairs_to_dict(lib_flat)
-        # Convert each function's flat list to a dict.
-        # The key is b"functions" normally, but "functions" when
-        # decode_responses=True.
-        func_key = "functions" if "functions" in lib_dict else b"functions"
-        if func_key in lib_dict:
-            lib_dict[func_key] = [pairs_to_dict(func) for func in lib_dict[func_key]]
-        result.append(lib_dict)
-    return result
-
-
 def string_keys_to_dict(key_string, callback):
     return dict.fromkeys(key_string.split(), callback)
 
@@ -1030,7 +817,6 @@ _RedisCallbacks = {
     "CLIENT LIST": parse_client_list,
     "CLIENT PAUSE": bool_ok,
     "CLIENT SETINFO": bool_ok,
-    "CLIENT TRACKINGINFO": parse_client_trackinginfo,
     "CLIENT SETNAME": bool_ok,
     "CLIENT UNBLOCK": bool,
     "CLUSTER ADDSLOTS": bool_ok,
@@ -1040,7 +826,6 @@ _RedisCallbacks = {
     "CLUSTER FAILOVER": bool_ok,
     "CLUSTER FORGET": bool_ok,
     "CLUSTER INFO": parse_cluster_info,
-    "CLUSTER LINKS": parse_cluster_links,
     "CLUSTER MEET": bool_ok,
     "CLUSTER NODES": parse_cluster_nodes,
     "CLUSTER REPLICAS": parse_cluster_nodes,
@@ -1095,7 +880,6 @@ _RedisCallbacks = {
     "XINFO STREAM": parse_xinfo_stream,
     "XPENDING": parse_xpending,
     "ZSCAN": parse_zscan,
-    "LCS": parse_lcs,
 }
 
 
@@ -1104,12 +888,9 @@ _RedisCallbacksRESP2 = {
         "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
     ),
     **string_keys_to_dict(
-        "ZDIFF ZINTER ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE ZUNION",
+        "ZDIFF ZINTER ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZREVRANGE "
+        "ZREVRANGEBYSCORE ZUNION",
         zset_score_pairs,
-    ),
-    **string_keys_to_dict(
-        "ZPOPMAX ZPOPMIN",
-        zpop_score_pairs,
     ),
     **string_keys_to_dict(
         "ZREVRANK ZRANK",
@@ -1117,10 +898,9 @@ _RedisCallbacksRESP2 = {
     ),
     **string_keys_to_dict("ZINCRBY ZSCORE", float_or_none),
     **string_keys_to_dict("BGREWRITEAOF BGSAVE", lambda r: True),
-    **string_keys_to_dict("BLPOP BRPOP", lambda r: r and list(r) or None),
+    **string_keys_to_dict("BLPOP BRPOP", lambda r: r and tuple(r) or None),
     **string_keys_to_dict(
-        "BZPOPMAX BZPOPMIN",
-        lambda r: r and [r[0], r[1], float(r[2])] or None,
+        "BZPOPMAX BZPOPMIN", lambda r: r and (r[0], r[1], float(r[2])) or None
     ),
     "ACL CAT": lambda r: list(map(str_if_bytes, r)),
     "ACL GENPASS": str_if_bytes,
@@ -1129,11 +909,14 @@ _RedisCallbacksRESP2 = {
     "ACL USERS": lambda r: list(map(str_if_bytes, r)),
     "ACL WHOAMI": str_if_bytes,
     "CLIENT GETNAME": str_if_bytes,
+    "CLIENT TRACKINGINFO": lambda r: list(map(str_if_bytes, r)),
+    "CLUSTER GETKEYSINSLOT": lambda r: list(map(str_if_bytes, r)),
+    "COMMAND GETKEYS": lambda r: list(map(str_if_bytes, r)),
     "CONFIG GET": parse_config_get,
     "DEBUG OBJECT": parse_debug_object,
     "GEOHASH": lambda r: list(map(str_if_bytes, r)),
     "GEOPOS": lambda r: list(
-        map(lambda ll: [float(ll[0]), float(ll[1])] if ll is not None else None, r)
+        map(lambda ll: (float(ll[0]), float(ll[1])) if ll is not None else None, r)
     ),
     "HGETALL": lambda r: r and pairs_to_dict(r) or {},
     "HOTKEYS GET": lambda r: [pairs_to_dict(m) for m in r],
@@ -1145,15 +928,10 @@ _RedisCallbacksRESP2 = {
     "SENTINEL SENTINELS": parse_sentinel_slaves_and_sentinels,
     "SENTINEL SLAVES": parse_sentinel_slaves_and_sentinels,
     "STRALGO": parse_stralgo,
-    "FUNCTION LIST": parse_function_list,
     "XINFO CONSUMERS": parse_list_of_dicts,
     "XINFO GROUPS": parse_list_of_dicts,
-    "HRANDFIELD": hrandfield_pairs,
     "ZADD": parse_zadd,
-    "ZMPOP": parse_zmpop,
-    "BZMPOP": parse_zmpop,
     "ZMSCORE": parse_zmscore,
-    "ZRANDMEMBER": zset_score_pairs,
 }
 
 
@@ -1162,40 +940,26 @@ _RedisCallbacksRESP3 = {
         "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
     ),
     **string_keys_to_dict(
-        "HGETALL",
+        "ZRANGE ZINTER ZPOPMAX ZPOPMIN HGETALL XREADGROUP",
         lambda r, **kwargs: r,
     ),
     **string_keys_to_dict(
-        "ZDIFF ZINTER ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE ZUNION",
+        "ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE ZUNION",
         zset_score_pairs_resp3,
-    ),
-    **string_keys_to_dict(
-        "ZPOPMAX ZPOPMIN",
-        zpop_score_pairs_resp3,
     ),
     **string_keys_to_dict(
         "ZREVRANK ZRANK",
         zset_score_for_rank_resp3,
     ),
-    **string_keys_to_dict(
-        "BZPOPMAX BZPOPMIN",
-        lambda r: r
-        and [r[0], r[1], r[2] if isinstance(r[2], float) else float(r[2])]
-        or None,
-    ),
     **string_keys_to_dict("XREAD XREADGROUP", parse_xread_resp3),
-    **string_keys_to_dict("ZMPOP BZMPOP", parse_zmpop),
-    "ZRANDMEMBER": zset_score_pairs_resp3,
-    "ACL CAT": lambda r: list(map(str_if_bytes, r)),
-    "ACL GENPASS": str_if_bytes,
-    "ACL HELP": lambda r: list(map(str_if_bytes, r)),
-    "ACL LIST": lambda r: list(map(str_if_bytes, r)),
-    "ACL USERS": lambda r: list(map(str_if_bytes, r)),
-    "ACL WHOAMI": str_if_bytes,
-    "CLIENT GETNAME": str_if_bytes,
-    "GEOHASH": lambda r: list(map(str_if_bytes, r)),
-    "RESET": str_if_bytes,
-    "ACL LOG": parse_acl_log_resp3,
+    "ACL LOG": lambda r: (
+        [
+            {str_if_bytes(key): str_if_bytes(value) for key, value in x.items()}
+            for x in r
+        ]
+        if isinstance(r, list)
+        else bool_ok(r)
+    ),
     "COMMAND": parse_command_resp3,
     "CONFIG GET": lambda r: {
         str_if_bytes(key) if key is not None else None: (
@@ -1203,14 +967,16 @@ _RedisCallbacksRESP3 = {
         )
         for key, value in r.items()
     },
-    **string_keys_to_dict("BGREWRITEAOF BGSAVE", lambda r: True),
-    "DEBUG OBJECT": parse_debug_object,
-    "MEMORY STATS": parse_memory_stats_resp3,
+    "MEMORY STATS": lambda r: {str_if_bytes(key): value for key, value in r.items()},
     "SENTINEL MASTER": parse_sentinel_state_resp3,
     "SENTINEL MASTERS": parse_sentinel_masters_resp3,
     "SENTINEL SENTINELS": parse_sentinel_slaves_and_sentinels_resp3,
     "SENTINEL SLAVES": parse_sentinel_slaves_and_sentinels_resp3,
-    "STRALGO": lambda r, **options: parse_stralgo_resp3(r, **options),
+    "STRALGO": lambda r, **options: (
+        {str_if_bytes(key): str_if_bytes(value) for key, value in r.items()}
+        if isinstance(r, dict)
+        else str_if_bytes(r)
+    ),
     "XINFO CONSUMERS": lambda r: [
         {str_if_bytes(key): value for key, value in x.items()} for x in r
     ],

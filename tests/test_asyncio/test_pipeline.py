@@ -524,7 +524,7 @@ class TestAsyncPipelineOperationDurationMetricsRecording:
         pool.get_connection = AsyncMock(return_value=mock_async_connection)
         pool.release = AsyncMock()
         pool.get_encoder.return_value = MagicMock()
-        pool.get_protocol.return_value = 3
+        pool.get_protocol.return_value = 2
         return pool
 
     @pytest.fixture

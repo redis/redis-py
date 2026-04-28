@@ -13,6 +13,7 @@ from redis.asyncio.sentinel import (
     SentinelConnectionPool,
     SlaveNotFoundError,
 )
+from tests.conftest import is_resp2_connection
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
@@ -99,7 +100,7 @@ async def deployed_sentinel(request):
     sentinel_kwargs = {"decode_responses": decode_responses}
     force_master_ip = "localhost"
 
-    protocol = request.config.getoption("--protocol", 3)
+    protocol = request.config.getoption("--protocol", 2)
 
     sentinel = Sentinel(
         sentinel_endpoints,
@@ -371,7 +372,7 @@ async def test_redis_master_usage(deployed_sentinel):
 async def test_sentinel_commands_with_strict_redis_client(request):
     sentinel_ips = request.config.getoption("--sentinels")
     sentinel_host, sentinel_port = sentinel_ips.split(",")[0].split(":")
-    protocol = request.config.getoption("--protocol", 3)
+    protocol = request.config.getoption("--protocol", 2)
 
     client = StrictRedis(
         host=sentinel_host, port=sentinel_port, decode_responses=True, protocol=protocol
@@ -381,7 +382,13 @@ async def test_sentinel_commands_with_strict_redis_client(request):
         await client.sentinel_get_master_addr_by_name("redis-py-test"), tuple
     )
     assert isinstance(await client.sentinel_master("redis-py-test"), dict)
-    assert isinstance(await client.sentinel_masters(), dict)
+    if is_resp2_connection(client):
+        assert isinstance(await client.sentinel_masters(), dict)
+    else:
+        masters = await client.sentinel_masters()
+        assert isinstance(masters, list)
+        for master in masters:
+            assert isinstance(master, dict)
 
     assert isinstance(await client.sentinel_sentinels("redis-py-test"), list)
     assert isinstance(await client.sentinel_slaves("redis-py-test"), list)

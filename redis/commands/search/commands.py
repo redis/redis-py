@@ -11,15 +11,10 @@ from redis.commands.search.hybrid_query import (
     HybridQuery,
 )
 from redis.commands.search.hybrid_result import HybridCursorResult, HybridResult
-from redis.utils import (
-    check_protocol_version,
-    decode_field_value,
-    deprecated_function,
-    experimental_method,
-    str_if_bytes,
-)
+from redis.utils import deprecated_function, experimental_method
 
 from ..helpers import get_protocol_version
+from ._util import to_string
 from .aggregation import (
     AggregateRequest,
     AggregateResult,
@@ -82,104 +77,21 @@ WITHPAYLOADS = "WITHPAYLOADS"
 class SearchCommands:
     """Search commands."""
 
-    def _init_module_callbacks(self):
-        """Build the RESP2/RESP3 module callback maps.
-
-        Called from ``Search.__init__``, ``Pipeline.__init__`` and
-        ``AsyncPipeline.__init__`` so that the mapping is defined in a
-        single place rather than duplicated across all three classes.
-        """
-        self._RESP2_MODULE_CALLBACKS = {
-            INFO_CMD: self._parse_info,
-            SEARCH_CMD: self._parse_search,
-            HYBRID_CMD: self._parse_hybrid_search,
-            AGGREGATE_CMD: self._parse_aggregate,
-            PROFILE_CMD: self._parse_profile,
-            SPELLCHECK_CMD: self._parse_spellcheck,
-            CONFIG_CMD: self._parse_config_get,
-            SYNDUMP_CMD: self._parse_syndump,
-        }
-        self._RESP3_MODULE_CALLBACKS = {
-            INFO_CMD: self._parse_info_resp3,
-            SEARCH_CMD: self._parse_search_resp3,
-            HYBRID_CMD: self._parse_hybrid_search_resp3,
-            AGGREGATE_CMD: self._parse_aggregate_resp3,
-            PROFILE_CMD: self._parse_profile_resp3,
-            SPELLCHECK_CMD: self._parse_spellcheck_resp3,
-            CONFIG_CMD: self._parse_config_get_resp3,
-            SYNDUMP_CMD: self._parse_syndump_resp3,
-        }
-
-    # Commands whose parsers require a ``query`` kwarg.  When invoked as a
-    # pipeline response-callback the kwarg is carried inside the options dict
-    # that ``execute_command`` stored earlier.  If the key is absent (e.g. a
-    # raw ``execute_command("FT.SEARCH", ...)`` call), return the response
-    # unparsed so we don't crash.
-    _QUERY_REQUIRED_CMDS = frozenset(
-        {SEARCH_CMD, AGGREGATE_CMD, CURSOR_CMD, HYBRID_CMD, PROFILE_CMD}
-    )
-
     def _parse_results(self, cmd, res, **kwargs):
-        if cmd in self._QUERY_REQUIRED_CMDS and "query" not in kwargs:
-            return res
-        if check_protocol_version(get_protocol_version(self.client), 3):
-            cb = self._RESP3_MODULE_CALLBACKS.get(cmd)
+        if get_protocol_version(self.client) in ["3", 3]:
+            return ProfileInformation(res) if cmd == "FT.PROFILE" else res
         else:
-            cb = self._RESP2_MODULE_CALLBACKS.get(cmd)
-        if cb:
-            return cb(res, **kwargs)
-        return res
-
-    # ---- RESP2 parsers ----
-
-    # Known FT.INFO attribute keys that are followed by a value (key-value pairs)
-    _INFO_ATTR_PAIR_KEYS = frozenset(
-        {"identifier", "attribute", "type", "WEIGHT", "SEPARATOR", "PHONETIC"}
-    )
+            return self._RESP2_MODULE_CALLBACKS[cmd](res, **kwargs)
 
     def _parse_info(self, res, **kwargs):
-        it = map(str_if_bytes, res)
-        info = dict(zip(it, it))
-
-        # Normalize RESP2 attributes from flat sublists to nested dicts
-        # to match RESP3 format: [{"identifier": ..., "type": ..., "flags": [...]}]
-        if "attributes" in info and isinstance(info["attributes"], list):
-            info["attributes"] = [
-                self._normalize_info_attribute(attr) if isinstance(attr, list) else attr
-                for attr in info["attributes"]
-            ]
-
-        return info
-
-    @staticmethod
-    def _normalize_info_attribute(attr_list):
-        """Convert a RESP2 flat attribute list to a RESP3-style dict.
-
-        RESP2 format: [identifier, name, attribute, alias, type, TEXT, WEIGHT, 1,
-                        SORTABLE, NOSTEM]
-        RESP3 format: {"identifier": name, "attribute": alias, "type": "TEXT",
-                        "WEIGHT": "1", "flags": ["SORTABLE", "NOSTEM"]}
-        """
-        result = {}
-        flags = []
-        pair_keys = SearchCommands._INFO_ATTR_PAIR_KEYS
-        i = 0
-        while i < len(attr_list):
-            key = str_if_bytes(attr_list[i])
-            if key in pair_keys and i + 1 < len(attr_list):
-                result[key] = str_if_bytes(attr_list[i + 1])
-                i += 2
-            else:
-                flags.append(key)
-                i += 1
-        result["flags"] = flags
-        return result
+        it = map(to_string, res)
+        return dict(zip(it, it))
 
     def _parse_search(self, res, **kwargs):
         return Result(
             res,
             not kwargs["query"]._no_content,
-            duration=kwargs.get("duration", 0),
+            duration=kwargs["duration"],
             has_payload=kwargs["query"]._with_payloads,
             with_scores=kwargs["query"]._with_scores,
             field_encodings=kwargs["query"]._return_fields_decode_as,
@@ -193,27 +105,17 @@ class SearchCommands:
                 vsim_cursor_id=int(res_dict["VSIM"]),
             )
 
-        query = kwargs.get("query")
-        field_encodings = (
-            getattr(query, "_return_fields_decode_as", None) if query else None
-        )
-
         results: List[Dict[str, Any]] = []
         # the original results are a list of lists
         # we convert them to a list of dicts
         for res_item in res_dict["results"]:
             item_dict = pairs_to_dict(res_item, decode_keys=True)
-            results.append(
-                {
-                    k: decode_field_value(v, k, field_encodings)
-                    for k, v in item_dict.items()
-                }
-            )
+            results.append(item_dict)
 
         return HybridResult(
             total_results=int(res_dict["total_results"]),
             results=results,
-            warnings=[str_if_bytes(w) for w in res_dict["warnings"]],
+            warnings=res_dict["warnings"],
             execution_time=float(res_dict["execution_time"]),
         )
 
@@ -233,19 +135,7 @@ class SearchCommands:
                 with_scores=query._with_scores,
             )
 
-        profile_data = res[1]
-        # >= 7.9.0 returns a flat key-value list ["Shards", [...], ...]
-        # Convert to dict to match RESP3 format.
-        # < 7.9.0 returns a list-of-pairs [[k, v], ...] where first element
-        # is a list — leave as-is.
-        if (
-            isinstance(profile_data, list)
-            and profile_data
-            and isinstance(profile_data[0], (str, bytes))
-        ):
-            profile_data = pairs_to_dict(profile_data, decode_keys=True)
-
-        return result, ProfileInformation(profile_data)
+        return result, ProfileInformation(res[1])
 
     def _parse_spellcheck(self, res, **kwargs):
         corrections = {}
@@ -285,305 +175,10 @@ class SearchCommands:
         return corrections
 
     def _parse_config_get(self, res, **kwargs):
-        if not res:
-            return {}
-        return {str_if_bytes(kvs[0]): str_if_bytes(kvs[1]) for kvs in res}
+        return {kvs[0]: kvs[1] for kvs in res} if res else {}
 
     def _parse_syndump(self, res, **kwargs):
-        if not res:
-            return {}
-        return {
-            str_if_bytes(res[i]): [str_if_bytes(s) for s in res[i + 1]]
-            if isinstance(res[i + 1], list)
-            else str_if_bytes(res[i + 1])
-            for i in range(0, len(res), 2)
-        }
-
-    # ---- RESP3 parsers ----
-
-    def _parse_search_resp3(self, res, **kwargs):
-        """Parse RESP3 FT.SEARCH response into a Result object."""
-        query = kwargs.get("query")
-        return Result.from_resp3(
-            res,
-            duration=kwargs.get("duration", 0),
-            with_scores=getattr(query, "_with_scores", False),
-            field_encodings=getattr(query, "_return_fields_decode_as", None),
-        )
-
-    def _parse_aggregate_resp3(self, res, **kwargs):
-        """Parse RESP3 FT.AGGREGATE response into an AggregateResult object."""
-        query = kwargs.get("query")
-        has_cursor = kwargs.get("has_cursor", False)
-
-        # When has_cursor is True, RESP3 returns [data_dict, cursor_id]
-        cursor_id = 0
-        if has_cursor and isinstance(res, list):
-            data = res[0]
-            cursor_id = res[1] if len(res) > 1 else 0
-        else:
-            data = res
-
-        warnings = [str_if_bytes(w) for w in data.get("warning", [])]
-        total = data.get("total_results", 0)
-
-        rows = []
-        for result_item in data.get("results", []):
-            extra_attrs = result_item.get("extra_attributes", {})
-            # Convert dict to flat list [key, value, key, value, ...]
-            # to match RESP2 row format
-            flat = []
-            for k, v in extra_attrs.items():
-                flat.append(k)
-                flat.append(v)
-            rows.append(flat)
-
-        cursor = None
-        if has_cursor:
-            if isinstance(query, Cursor):
-                query.cid = cursor_id
-                cursor = query
-            else:
-                cursor = Cursor(cursor_id)
-
-        return AggregateResult(rows, cursor, None, total=total, warnings=warnings)
-
-    def _parse_hybrid_search_resp3(self, res, **kwargs):
-        """Parse RESP3 FT.HYBRID response into HybridResult/HybridCursorResult."""
-        if "cursor" in kwargs:
-            return HybridCursorResult(
-                search_cursor_id=int(res["SEARCH"]),
-                vsim_cursor_id=int(res["VSIM"]),
-            )
-
-        query = kwargs.get("query")
-        field_encodings = (
-            getattr(query, "_return_fields_decode_as", None) if query else None
-        )
-
-        results: List[Dict[str, Any]] = []
-        for res_item in res.get("results", []):
-            if isinstance(res_item, dict):
-                results.append(
-                    {
-                        str_if_bytes(k): decode_field_value(
-                            v, str_if_bytes(k), field_encodings
-                        )
-                        for k, v in res_item.items()
-                    }
-                )
-            else:
-                item_dict = pairs_to_dict(res_item, decode_keys=True)
-                results.append(
-                    {
-                        k: decode_field_value(v, k, field_encodings)
-                        for k, v in item_dict.items()
-                    }
-                )
-
-        return HybridResult(
-            total_results=int(res.get("total_results", 0)),
-            results=results,
-            warnings=[str_if_bytes(w) for w in res.get("warnings", [])],
-            execution_time=float(res.get("execution_time", 0)),
-        )
-
-    def _parse_spellcheck_resp3(self, res, **kwargs):
-        """Parse RESP3 FT.SPELLCHECK response into unified format.
-
-        RESP3 format:
-            {"results": {"term": [{"suggestion": score}, ...], ...}}
-        Unified format (matches RESP2 parsed output):
-            {"term": [{"score": score_str, "suggestion": suggestion}, ...], ...}
-        """
-        corrections = {}
-        if not isinstance(res, dict):
-            return self._parse_spellcheck(res, **kwargs)
-        results = res.get("results", {})
-        for term, suggestions in results.items():
-            if not suggestions:
-                continue
-            term_corrections = []
-            for suggestion_dict in suggestions:
-                for suggestion, score in suggestion_dict.items():
-                    # Normalize score string to match RESP2 format:
-                    # RESP3 returns float 0.0 → "0.0", but RESP2 returns "0"
-                    score_str = str(score)
-                    if score_str.endswith(".0"):
-                        score_str = score_str[:-2]
-                    term_corrections.append(
-                        {"score": score_str, "suggestion": str(suggestion)}
-                    )
-            if term_corrections:
-                corrections[term] = term_corrections
-        return corrections
-
-    def _parse_profile_resp3(self, res, **kwargs):
-        """Parse RESP3 FT.PROFILE response into (result, ProfileInformation) tuple.
-
-        RESP3 format (aligned, RediSearch >= MOD-6816):
-            {"Results": {search/aggregate result dict},
-             "Profile": {profile information dict}}
-
-        Older RediSearch versions may return a list (same as RESP2) even
-        when the connection uses RESP3.  In that case we delegate to the
-        RESP2 ``_parse_profile`` parser.
-        """
-        # Older RediSearch returns a list even in RESP3 mode – fall back
-        # to the RESP2 parser which already handles that format.
-        if isinstance(res, list):
-            return self._parse_profile(res, **kwargs)
-
-        query = kwargs["query"]
-        # RESP3 returns a dict with "Results" and "Profile" keys.
-        # Handle both decoded (str) and raw (bytes) keys.
-        # Use `is not None` instead of truthiness to avoid dropping falsy
-        # values such as empty dicts/lists.
-        results_data = res.get("Results")
-        if results_data is None:
-            results_data = res.get(b"Results")
-        if results_data is None:
-            results_data = res.get("results")
-        if results_data is None:
-            results_data = res.get(b"results")
-        if results_data is None:
-            results_data = res.get(0)
-        profile_data = res.get("Profile")
-        if profile_data is None:
-            profile_data = res.get(b"Profile")
-        if profile_data is None:
-            profile_data = res.get("profile")
-        if profile_data is None:
-            profile_data = res.get(b"profile")
-        if profile_data is None:
-            profile_data = res.get(1)
-        # On older servers (pre MOD-6816, e.g. Redis 7.2/7.4) the "Results"
-        # value is a bare list of result-item dicts, not the wrapper dict
-        # ``{"total_results": N, "results": [...], "warning": [...]}``.
-        # Wrap the list so downstream parsers receive the expected format.
-        if isinstance(results_data, list):
-            results_data = {
-                "total_results": len(results_data),
-                "results": results_data,
-            }
-        if isinstance(query, AggregateRequest):
-            result = self._parse_aggregate_resp3(
-                results_data, query=query, has_cursor=bool(query._cursor)
-            )
-        else:
-            result = Result.from_resp3(
-                results_data,
-                duration=kwargs.get("duration", 0),
-                with_scores=getattr(query, "_with_scores", False),
-            )
-        # Normalize profile data keys/values to strings
-        profile_data = self._to_string_recursive(profile_data)
-        # On pre-7.9.0 servers, convert RESP3 profile dict to the RESP2
-        # list-of-pairs format so consumers see a consistent structure
-        # regardless of protocol.  Post-7.9.0 responses contain a "Shards"
-        # key and are already handled uniformly by both parsers as dicts.
-        if isinstance(profile_data, dict) and "Shards" not in profile_data:
-            profile_data = self._resp3_profile_dict_to_list(profile_data)
-        return result, ProfileInformation(profile_data)
-
-    @staticmethod
-    def _resp3_profile_dict_to_list(data):
-        """Convert RESP3 profile dict into RESP2-style list-of-pairs.
-
-        On pre-7.9.0 servers, RESP2 returns profile data as a list of
-        ``[key, value]`` pairs where nested structures are flat alternating
-        key-value lists.  RESP3 returns the same data as nested dicts.
-        This converts the RESP3 dict back to the RESP2 list format so
-        consumers see a consistent structure regardless of protocol.
-
-        Key structural difference: when a dict value is a list of dicts
-        (e.g. ``"Child iterators": [{...}, {...}]``), RESP2 expands each
-        dict as a separate sibling element in the parent flat list rather
-        than keeping them nested inside a single value.
-        """
-
-        def _is_list_of_dicts(obj):
-            return isinstance(obj, list) and obj and isinstance(obj[0], dict)
-
-        def _convert(obj, top_level=False):
-            if isinstance(obj, dict):
-                if top_level:
-                    # Top-level: list of [key, ...values] entries
-                    result = []
-                    for k, v in obj.items():
-                        entry = [k]
-                        if _is_list_of_dicts(v):
-                            for item in v:
-                                entry.append(_convert(item))
-                        else:
-                            entry.append(_convert(v))
-                        result.append(entry)
-                    return result
-                else:
-                    # Nested: flat alternating key-value list
-                    result = []
-                    for k, v in obj.items():
-                        result.append(k)
-                        if _is_list_of_dicts(v):
-                            for item in v:
-                                result.append(_convert(item))
-                        else:
-                            result.append(_convert(v))
-                    return result
-            elif isinstance(obj, list):
-                return [_convert(item) for item in obj]
-            return obj
-
-        return _convert(data, top_level=True)
-
-    @staticmethod
-    def _to_string_recursive(obj):
-        """Recursively convert bytes keys/values to strings in nested structures.
-
-        Handles dicts, lists, and scalar values. Non-bytes, non-container
-        values (int, float, None, bool) are left unchanged.
-        """
-        if isinstance(obj, bytes):
-            return str_if_bytes(obj)
-        if isinstance(obj, dict):
-            return {
-                str_if_bytes(k) if isinstance(k, bytes) else k: (
-                    SearchCommands._to_string_recursive(v)
-                )
-                for k, v in obj.items()
-            }
-        if isinstance(obj, list):
-            return [SearchCommands._to_string_recursive(item) for item in obj]
-        return obj
-
-    def _parse_info_resp3(self, res, **kwargs):
-        """Parse RESP3 FT.INFO response, normalising bytes to strings.
-
-        RESP3 returns a native dict with bytes keys/values. This converts
-        all keys and string-like values to ``str`` so that the returned
-        dict has the same shape as the RESP2 parser output.
-        """
-        return self._to_string_recursive(res)
-
-    def _parse_config_get_resp3(self, res, **kwargs):
-        """Parse RESP3 FT.CONFIG GET response, normalising bytes to strings.
-
-        RESP3 already returns a dict, but keys and values are bytes.
-        Convert them to match the RESP2 output format.
-        """
-        if not res:
-            return {}
-        return {str_if_bytes(k): str_if_bytes(v) for k, v in res.items()}
-
-    def _parse_syndump_resp3(self, res, **kwargs):
-        """Parse RESP3 FT.SYNDUMP response, normalising bytes to strings.
-
-        RESP3 already returns a dict, but keys and values are bytes.
-        Convert them to match the RESP2 output format.
-        """
-        if not res:
-            return {}
-        return self._to_string_recursive(res)
+        return {res[i]: res[i + 1] for i in range(0, len(res), 2)}
 
     def batch_indexer(self, chunk_size=100):
         """
@@ -864,19 +459,13 @@ class SearchCommands:
 
         return self.execute_command(*args)
 
-    def load_document(self, id, field_encodings=None):
+    def load_document(self, id):
         """
         Load a single document by id
-
-        - **field_encodings**: optional dict mapping field names to encodings.
-          If a field's encoding is ``None`` the raw bytes value is preserved
-          (useful for binary data such as vectors).
         """
         fields = self.client.hgetall(id)
-        fields = {
-            str_if_bytes(k): decode_field_value(v, str_if_bytes(k), field_encodings)
-            for k, v in fields.items()
-        }
+        f2 = {to_string(k): to_string(v) for k, v in fields.items()}
+        fields = f2
 
         try:
             del fields["id"]
@@ -961,7 +550,6 @@ class SearchCommands:
         options = {}
         if get_protocol_version(self.client) not in ["3", 3]:
             options[NEVER_DECODE] = True
-        options["query"] = query
 
         res = self.execute_command(SEARCH_CMD, *args, **options)
 
@@ -1018,7 +606,6 @@ class SearchCommands:
 
         if get_protocol_version(self.client) not in ["3", 3]:
             options[NEVER_DECODE] = True
-        options["query"] = query
 
         res = self.execute_command(*pieces, **options)
 
@@ -1069,11 +656,7 @@ class SearchCommands:
             raise ValueError("Bad query", query)
         cmd += self.get_params_args(query_params)
 
-        raw = self.execute_command(*cmd, query=query, has_cursor=has_cursor)
-
-        if isinstance(raw, Pipeline):
-            return raw
-
+        raw = self.execute_command(*cmd)
         return self._parse_results(
             AGGREGATE_CMD, raw, query=query, has_cursor=has_cursor
         )
@@ -1134,10 +717,7 @@ class SearchCommands:
         else:
             raise ValueError("Must provide AggregateRequest object or Query object.")
 
-        res = self.execute_command(*cmd, query=query)
-
-        if isinstance(res, Pipeline):
-            return res
+        res = self.execute_command(*cmd)
 
         return self._parse_results(
             PROFILE_CMD, res, query=query, duration=(time.monotonic() - st) * 1000.0
@@ -1464,7 +1044,6 @@ class AsyncSearchCommands(SearchCommands):
         options = {}
         if get_protocol_version(self.client) not in ["3", 3]:
             options[NEVER_DECODE] = True
-        options["query"] = query
 
         res = await self.execute_command(SEARCH_CMD, *args, **options)
 
@@ -1521,7 +1100,6 @@ class AsyncSearchCommands(SearchCommands):
 
         if get_protocol_version(self.client) not in ["3", 3]:
             options[NEVER_DECODE] = True
-        options["query"] = query
 
         res = await self.execute_command(*pieces, **options)
 
@@ -1557,56 +1135,9 @@ class AsyncSearchCommands(SearchCommands):
             raise ValueError("Bad query", query)
         cmd += self.get_params_args(query_params)
 
-        raw = await self.execute_command(*cmd, query=query, has_cursor=has_cursor)
-
-        if isinstance(raw, Pipeline):
-            return raw
-
+        raw = await self.execute_command(*cmd)
         return self._parse_results(
             AGGREGATE_CMD, raw, query=query, has_cursor=has_cursor
-        )
-
-    async def profile(
-        self,
-        query: Union[Query, AggregateRequest],
-        limited: bool = False,
-        query_params: Optional[Dict[str, Union[str, int, float, bytes]]] = None,
-    ):
-        """
-        Performs a search or aggregate command and collects performance
-        information.
-
-        ### Parameters
-
-        **query**: This can be either an `AggregateRequest` or `Query`.
-        **limited**: If set to True, removes details of reader iterator.
-        **query_params**: Define one or more value parameters.
-        Each parameter has a name and a value.
-
-        """
-        st = time.monotonic()
-        cmd = [PROFILE_CMD, self.index_name, ""]
-        if limited:
-            cmd.append("LIMITED")
-        cmd.append("QUERY")
-
-        if isinstance(query, AggregateRequest):
-            cmd[2] = "AGGREGATE"
-            cmd += query.build_args()
-        elif isinstance(query, Query):
-            cmd[2] = "SEARCH"
-            cmd += query.get_args()
-            cmd += self.get_params_args(query_params)
-        else:
-            raise ValueError("Must provide AggregateRequest object or Query object.")
-
-        res = await self.execute_command(*cmd, query=query)
-
-        if isinstance(res, Pipeline):
-            return res
-
-        return self._parse_results(
-            PROFILE_CMD, res, query=query, duration=(time.monotonic() - st) * 1000.0
         )
 
     async def spellcheck(self, query, distance=None, include=None, exclude=None):
@@ -1673,19 +1204,13 @@ class AsyncSearchCommands(SearchCommands):
         res = await self.execute_command(*cmd)
         return self._parse_results(CONFIG_CMD, res)
 
-    async def load_document(self, id, field_encodings=None):
+    async def load_document(self, id):
         """
         Load a single document by id
-
-        - **field_encodings**: optional dict mapping field names to encodings.
-          If a field's encoding is ``None`` the raw bytes value is preserved
-          (useful for binary data such as vectors).
         """
         fields = await self.client.hgetall(id)
-        fields = {
-            str_if_bytes(k): decode_field_value(v, str_if_bytes(k), field_encodings)
-            for k, v in fields.items()
-        }
+        f2 = {to_string(k): to_string(v) for k, v in fields.items()}
+        fields = f2
 
         try:
             del fields["id"]
