@@ -66,7 +66,6 @@ from redis.asyncio.observability.recorder import (
 )
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from redis.connection import DEFAULT_RESP_VERSION
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import (
     AuthenticationError,
@@ -80,7 +79,7 @@ from redis.exceptions import (
 )
 from redis.observability.metrics import CloseReason
 from redis.typing import EncodableT
-from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
+from redis.utils import DEFAULT_RESP_VERSION, HIREDIS_AVAILABLE, str_if_bytes
 
 from .._parsers import (
     BaseParser,
@@ -183,7 +182,8 @@ class AbstractConnection:
         redis_connect_func: Optional[ConnectCallbackT] = None,
         encoder_class: Type[Encoder] = Encoder,
         credential_provider: Optional[CredentialProvider] = None,
-        protocol: Optional[int] = 2,
+        protocol: Optional[int] = None,
+        legacy_responses: bool = True,
         event_dispatcher: Optional[EventDispatcher] = None,
     ):
         """
@@ -265,6 +265,7 @@ class AbstractConnection:
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
         self.protocol = p
+        self.legacy_responses = legacy_responses
 
     def __del__(self, _warnings: Any = warnings):
         # For some reason, the individual streams don't get properly garbage
@@ -1165,6 +1166,8 @@ URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyTy
         "ssl_include_verify_flags": parse_ssl_verify_flags,
         "ssl_exclude_verify_flags": parse_ssl_verify_flags,
         "timeout": float,
+        "protocol": int,
+        "legacy_responses": to_bool,
     }
 )
 

@@ -3,6 +3,11 @@ from typing import Literal
 from redis.client import Pipeline as RedisPipeline
 
 from ...asyncio.client import Pipeline as AsyncioPipeline
+from ..helpers import (
+    apply_module_callbacks,
+    get_legacy_responses,
+    get_protocol_version,
+)
 from .commands import (
     AGGREGATE_CMD,
     CONFIG_CMD,
@@ -15,6 +20,7 @@ from .commands import (
     AsyncSearchCommands,
     SearchCommands,
 )
+from .profile_information import ProfileInformation
 
 
 class Search(SearchCommands):
@@ -97,7 +103,6 @@ class Search(SearchCommands):
 
         If conn is not None, we employ an already existing redis connection
         """
-        self._MODULE_CALLBACKS = {}
         self.client = client
         self.index_name = index_name
         self.execute_command = client.execute_command
@@ -112,6 +117,23 @@ class Search(SearchCommands):
             CONFIG_CMD: self._parse_config_get,
             SYNDUMP_CMD: self._parse_syndump,
         }
+        self._RESP3_MODULE_CALLBACKS = {
+            PROFILE_CMD: lambda r, **kwargs: ProfileInformation(r),
+        }
+        self._RESP2_UNIFIED_MODULE_CALLBACKS = dict(self._RESP2_MODULE_CALLBACKS)
+        self._RESP3_UNIFIED_MODULE_CALLBACKS = dict(self._RESP3_MODULE_CALLBACKS)
+        self._RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {}
+
+        self._MODULE_CALLBACKS = apply_module_callbacks(
+            get_protocol_version(self.client),
+            get_legacy_responses(self.client),
+            common={},
+            resp2=self._RESP2_MODULE_CALLBACKS,
+            resp3=self._RESP3_MODULE_CALLBACKS,
+            resp2_unified=self._RESP2_UNIFIED_MODULE_CALLBACKS,
+            resp3_unified=self._RESP3_UNIFIED_MODULE_CALLBACKS,
+            resp3_to_resp2_legacy=self._RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS,
+        )
 
     def pipeline(self, transaction=True, shard_hint=None):
         """Creates a pipeline for the SEARCH module, that can be used for executing

@@ -280,6 +280,36 @@ def zset_score_for_rank_resp3(response, **options):
     return [response[0], score_cast_func(response[1])]
 
 
+def _score_to_resp2_bytes(value):
+    """Re-encode a score back to the bytes form Redis returns on the RESP2
+    wire so that custom ``score_cast_func`` callables observe the same
+    input type they would receive on a RESP2 connection when the wire
+    protocol is RESP3 but legacy response shapes are requested.
+    """
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, str):
+        return value.encode()
+    if isinstance(value, bool):
+        return b"1" if value else b"0"
+    return format(float(value), ".17g").encode()
+
+
+def zset_score_pairs_resp3_to_resp2_legacy(response, **options):
+    """Convert RESP3 nested ``[[member, score], ...]`` to today's RESP2
+    ``list[(member, score)]`` shape: tuples instead of lists, scores
+    re-encoded to bytes before being passed to ``score_cast_func`` so the
+    cast receives the same input as on a RESP2 connection.
+    """
+    if not response or not options.get("withscores"):
+        return response
+    score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
+    return [
+        (member, score_cast_func(_score_to_resp2_bytes(score)))
+        for member, score in response
+    ]
+
+
 def sort_return_tuples(response, **options):
     """
     If ``groups`` is specified, return the response as a list of
@@ -789,198 +819,22 @@ def string_keys_to_dict(key_string, callback):
     return dict.fromkeys(key_string.split(), callback)
 
 
-_RedisCallbacks = {
-    **string_keys_to_dict(
-        "AUTH COPY EXPIRE EXPIREAT HEXISTS HMSET MOVE MSETNX PERSIST PSETEX "
-        "PEXPIRE PEXPIREAT RENAMENX SETEX SETNX SMOVE",
-        bool,
-    ),
-    **string_keys_to_dict("HINCRBYFLOAT INCRBYFLOAT", float),
-    **string_keys_to_dict(
-        "ASKING FLUSHALL FLUSHDB LSET LTRIM MSET PFMERGE READONLY READWRITE "
-        "RENAME SAVE SELECT SHUTDOWN SLAVEOF SWAPDB WATCH UNWATCH",
-        bool_ok,
-    ),
-    **string_keys_to_dict("XREAD XREADGROUP", parse_xread),
-    **string_keys_to_dict(
-        "GEORADIUS GEORADIUSBYMEMBER GEOSEARCH",
-        parse_geosearch_generic,
-    ),
-    **string_keys_to_dict("XRANGE XREVRANGE", parse_stream_list),
-    "ACL GETUSER": parse_acl_getuser,
-    "ACL LOAD": bool_ok,
-    "ACL LOG": parse_acl_log,
-    "ACL SETUSER": bool_ok,
-    "ACL SAVE": bool_ok,
-    "CLIENT INFO": parse_client_info,
-    "CLIENT KILL": parse_client_kill,
-    "CLIENT LIST": parse_client_list,
-    "CLIENT PAUSE": bool_ok,
-    "CLIENT SETINFO": bool_ok,
-    "CLIENT SETNAME": bool_ok,
-    "CLIENT UNBLOCK": bool,
-    "CLUSTER ADDSLOTS": bool_ok,
-    "CLUSTER ADDSLOTSRANGE": bool_ok,
-    "CLUSTER DELSLOTS": bool_ok,
-    "CLUSTER DELSLOTSRANGE": bool_ok,
-    "CLUSTER FAILOVER": bool_ok,
-    "CLUSTER FORGET": bool_ok,
-    "CLUSTER INFO": parse_cluster_info,
-    "CLUSTER MEET": bool_ok,
-    "CLUSTER NODES": parse_cluster_nodes,
-    "CLUSTER REPLICAS": parse_cluster_nodes,
-    "CLUSTER REPLICATE": bool_ok,
-    "CLUSTER RESET": bool_ok,
-    "CLUSTER SAVECONFIG": bool_ok,
-    "CLUSTER SET-CONFIG-EPOCH": bool_ok,
-    "CLUSTER SETSLOT": bool_ok,
-    "CLUSTER SLAVES": parse_cluster_nodes,
-    "COMMAND": parse_command,
-    "CONFIG RESETSTAT": bool_ok,
-    "CONFIG SET": bool_ok,
-    "FUNCTION DELETE": bool_ok,
-    "FUNCTION FLUSH": bool_ok,
-    "FUNCTION RESTORE": bool_ok,
-    "GCRA": parse_gcra,
-    "GEODIST": float_or_none,
-    "HSCAN": parse_hscan,
-    "INFO": parse_info,
-    "LASTSAVE": timestamp_to_datetime,
-    "MEMORY PURGE": bool_ok,
-    "MODULE LOAD": bool,
-    "MODULE UNLOAD": bool,
-    "PING": lambda r: str_if_bytes(r) == "PONG",
-    "PUBSUB NUMSUB": parse_pubsub_numsub,
-    "PUBSUB SHARDNUMSUB": parse_pubsub_numsub,
-    "QUIT": bool_ok,
-    "SET": parse_set_result,
-    "SCAN": parse_scan,
-    "SCRIPT EXISTS": lambda r: list(map(bool, r)),
-    "SCRIPT FLUSH": bool_ok,
-    "SCRIPT KILL": bool_ok,
-    "SCRIPT LOAD": str_if_bytes,
-    "SENTINEL CKQUORUM": bool_ok,
-    "SENTINEL FAILOVER": bool_ok,
-    "SENTINEL FLUSHCONFIG": bool_ok,
-    "SENTINEL GET-MASTER-ADDR-BY-NAME": parse_sentinel_get_master,
-    "SENTINEL MONITOR": bool_ok,
-    "SENTINEL RESET": bool_ok,
-    "SENTINEL REMOVE": bool_ok,
-    "SENTINEL SET": bool_ok,
-    "SLOWLOG GET": parse_slowlog_get,
-    "SLOWLOG RESET": bool_ok,
-    "SORT": sort_return_tuples,
-    "SSCAN": parse_scan,
-    "TIME": lambda x: (int(x[0]), int(x[1])),
-    "XAUTOCLAIM": parse_xautoclaim,
-    "XCLAIM": parse_xclaim,
-    "XGROUP CREATE": bool_ok,
-    "XGROUP DESTROY": bool,
-    "XGROUP SETID": bool_ok,
-    "XINFO STREAM": parse_xinfo_stream,
-    "XPENDING": parse_xpending,
-    "ZSCAN": parse_zscan,
-}
-
-
-_RedisCallbacksRESP2 = {
-    **string_keys_to_dict(
-        "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
-    ),
-    **string_keys_to_dict(
-        "ZDIFF ZINTER ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZREVRANGE "
-        "ZREVRANGEBYSCORE ZUNION",
-        zset_score_pairs,
-    ),
-    **string_keys_to_dict(
-        "ZREVRANK ZRANK",
-        zset_score_for_rank,
-    ),
-    **string_keys_to_dict("ZINCRBY ZSCORE", float_or_none),
-    **string_keys_to_dict("BGREWRITEAOF BGSAVE", lambda r: True),
-    **string_keys_to_dict("BLPOP BRPOP", lambda r: r and tuple(r) or None),
-    **string_keys_to_dict(
-        "BZPOPMAX BZPOPMIN", lambda r: r and (r[0], r[1], float(r[2])) or None
-    ),
-    "ACL CAT": lambda r: list(map(str_if_bytes, r)),
-    "ACL GENPASS": str_if_bytes,
-    "ACL HELP": lambda r: list(map(str_if_bytes, r)),
-    "ACL LIST": lambda r: list(map(str_if_bytes, r)),
-    "ACL USERS": lambda r: list(map(str_if_bytes, r)),
-    "ACL WHOAMI": str_if_bytes,
-    "CLIENT GETNAME": str_if_bytes,
-    "CLIENT TRACKINGINFO": lambda r: list(map(str_if_bytes, r)),
-    "CLUSTER GETKEYSINSLOT": lambda r: list(map(str_if_bytes, r)),
-    "COMMAND GETKEYS": lambda r: list(map(str_if_bytes, r)),
-    "CONFIG GET": parse_config_get,
-    "DEBUG OBJECT": parse_debug_object,
-    "GEOHASH": lambda r: list(map(str_if_bytes, r)),
-    "GEOPOS": lambda r: list(
-        map(lambda ll: (float(ll[0]), float(ll[1])) if ll is not None else None, r)
-    ),
-    "HGETALL": lambda r: r and pairs_to_dict(r) or {},
-    "HOTKEYS GET": lambda r: [pairs_to_dict(m) for m in r],
-    "MEMORY STATS": parse_memory_stats,
-    "MODULE LIST": lambda r: [pairs_to_dict(m) for m in r],
-    "RESET": str_if_bytes,
-    "SENTINEL MASTER": parse_sentinel_master,
-    "SENTINEL MASTERS": parse_sentinel_masters,
-    "SENTINEL SENTINELS": parse_sentinel_slaves_and_sentinels,
-    "SENTINEL SLAVES": parse_sentinel_slaves_and_sentinels,
-    "STRALGO": parse_stralgo,
-    "XINFO CONSUMERS": parse_list_of_dicts,
-    "XINFO GROUPS": parse_list_of_dicts,
-    "ZADD": parse_zadd,
-    "ZMSCORE": parse_zmscore,
-}
-
-
-_RedisCallbacksRESP3 = {
-    **string_keys_to_dict(
-        "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
-    ),
-    **string_keys_to_dict(
-        "ZRANGE ZINTER ZPOPMAX ZPOPMIN HGETALL XREADGROUP",
-        lambda r, **kwargs: r,
-    ),
-    **string_keys_to_dict(
-        "ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE ZUNION",
-        zset_score_pairs_resp3,
-    ),
-    **string_keys_to_dict(
-        "ZREVRANK ZRANK",
-        zset_score_for_rank_resp3,
-    ),
-    **string_keys_to_dict("XREAD XREADGROUP", parse_xread_resp3),
-    "ACL LOG": lambda r: (
-        [
-            {str_if_bytes(key): str_if_bytes(value) for key, value in x.items()}
-            for x in r
-        ]
-        if isinstance(r, list)
-        else bool_ok(r)
-    ),
-    "COMMAND": parse_command_resp3,
-    "CONFIG GET": lambda r: {
-        str_if_bytes(key) if key is not None else None: (
-            str_if_bytes(value) if value is not None else None
-        )
-        for key, value in r.items()
-    },
-    "MEMORY STATS": lambda r: {str_if_bytes(key): value for key, value in r.items()},
-    "SENTINEL MASTER": parse_sentinel_state_resp3,
-    "SENTINEL MASTERS": parse_sentinel_masters_resp3,
-    "SENTINEL SENTINELS": parse_sentinel_slaves_and_sentinels_resp3,
-    "SENTINEL SLAVES": parse_sentinel_slaves_and_sentinels_resp3,
-    "STRALGO": lambda r, **options: (
-        {str_if_bytes(key): str_if_bytes(value) for key, value in r.items()}
-        if isinstance(r, dict)
-        else str_if_bytes(r)
-    ),
-    "XINFO CONSUMERS": lambda r: [
-        {str_if_bytes(key): value for key, value in x.items()} for x in r
-    ],
-    "XINFO GROUPS": lambda r: [
-        {str_if_bytes(key): value for key, value in d.items()} for d in r
-    ],
-}
+# The command-to-callback mapping dictionaries (``_RedisCallbacks``,
+# ``_RedisCallbacksRESP2``, ``_RedisCallbacksRESP3``, …) and the
+# ``get_response_callbacks`` selector live in
+# ``redis/_parsers/response_callbacks.py``. They are re-exported below for
+# backward compatibility so existing imports of the form
+# ``from redis._parsers.helpers import _RedisCallbacks`` keep working. The
+# import is placed at module bottom to avoid a circular import (the
+# response_callbacks module imports parser helpers defined above).
+# isort: off
+from .response_callbacks import (  # noqa: E402, F401
+    _RedisCallbacks,
+    _RedisCallbacksRESP2,
+    _RedisCallbacksRESP2Unified,
+    _RedisCallbacksRESP3,
+    _RedisCallbacksRESP3Unified,
+    _RedisCallbacksRESP3toRESP2Legacy,
+    get_response_callbacks,
+)
+# isort: on

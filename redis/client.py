@@ -19,12 +19,7 @@ from typing import (
 )
 
 from redis._parsers.encoders import Encoder
-from redis._parsers.helpers import (
-    _RedisCallbacks,
-    _RedisCallbacksRESP2,
-    _RedisCallbacksRESP3,
-    bool_ok,
-)
+from redis._parsers.helpers import bool_ok, get_response_callbacks
 from redis._parsers.socket import SENTINEL
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.cache import CacheConfig, CacheInterface
@@ -282,7 +277,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         username: Optional[str] = None,
         redis_connect_func: Optional[Callable[[], None]] = None,
         credential_provider: Optional[CredentialProvider] = None,
-        protocol: Optional[int] = 2,
+        protocol: Optional[int] = None,
+        legacy_responses: bool = True,
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
@@ -373,6 +369,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "redis_connect_func": redis_connect_func,
                 "credential_provider": credential_provider,
                 "protocol": protocol,
+                "legacy_responses": legacy_responses,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -426,10 +423,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 maint_notifications_enabled = (
                     maint_notifications_config and maint_notifications_config.enabled
                 )
-                if maint_notifications_enabled and protocol not in [
-                    3,
-                    "3",
-                ]:
+                if maint_notifications_enabled and not check_protocol_version(
+                    protocol, 3
+                ):
                     raise RedisError(
                         "Maintenance notifications handlers on connection are only supported with RESP version 3"
                     )
@@ -462,10 +458,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         self.connection_pool = connection_pool
 
-        if (cache_config or cache) and self.connection_pool.get_protocol() not in [
-            3,
-            "3",
-        ]:
+        if (cache_config or cache) and not check_protocol_version(
+            self.connection_pool.get_protocol(), 3
+        ):
             raise RedisError("Client caching is only supported with RESP version 3")
 
         self.single_connection_lock = threading.RLock()
@@ -479,12 +474,13 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 )
             )
 
-        self.response_callbacks = CaseInsensitiveDict(_RedisCallbacks)
-
-        if self.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
-            self.response_callbacks.update(_RedisCallbacksRESP3)
-        else:
-            self.response_callbacks.update(_RedisCallbacksRESP2)
+        connection_kwargs = self.connection_pool.connection_kwargs
+        self.response_callbacks = CaseInsensitiveDict(
+            get_response_callbacks(
+                user_protocol=connection_kwargs.get("protocol"),
+                legacy_responses=connection_kwargs.get("legacy_responses", True),
+            )
+        )
 
     def __repr__(self) -> str:
         return (

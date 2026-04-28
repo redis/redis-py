@@ -38,11 +38,7 @@ if TYPE_CHECKING:
 
 from redis._parsers import AsyncCommandsParser, Encoder
 from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
-from redis._parsers.helpers import (
-    _RedisCallbacks,
-    _RedisCallbacksRESP2,
-    _RedisCallbacksRESP3,
-)
+from redis._parsers.helpers import get_response_callbacks
 from redis.asyncio.client import PubSub, ResponseCallbackT
 from redis.asyncio.connection import (
     AbstractConnection,
@@ -347,7 +343,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_keyfile: Optional[str] = None,
         ssl_min_version: Optional[TLSVersion] = None,
         ssl_ciphers: Optional[str] = None,
-        protocol: Optional[int] = 2,
+        protocol: Optional[int] = None,
+        legacy_responses: bool = True,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
         policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver(),
@@ -393,6 +390,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "socket_keepalive_options": socket_keepalive_options,
             "socket_timeout": socket_timeout,
             "protocol": protocol,
+            "legacy_responses": legacy_responses,
         }
 
         if ssl:
@@ -427,11 +425,10 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         if retry_on_error:
             self.retry.update_supported_errors(retry_on_error)
 
-        kwargs["response_callbacks"] = _RedisCallbacks.copy()
-        if kwargs.get("protocol") in ["3", 3]:
-            kwargs["response_callbacks"].update(_RedisCallbacksRESP3)
-        else:
-            kwargs["response_callbacks"].update(_RedisCallbacksRESP2)
+        kwargs["response_callbacks"] = get_response_callbacks(
+            user_protocol=kwargs.get("protocol"),
+            legacy_responses=kwargs.get("legacy_responses", True),
+        )
         self.connection_kwargs = kwargs
 
         if startup_nodes:

@@ -11,7 +11,7 @@ from redis.commands.search.hybrid_query import (
     HybridQuery,
 )
 from redis.commands.search.hybrid_result import HybridCursorResult, HybridResult
-from redis.utils import deprecated_function, experimental_method
+from redis.utils import check_protocol_version, deprecated_function, experimental_method
 
 from ..helpers import get_protocol_version
 from ._util import to_string
@@ -78,10 +78,10 @@ class SearchCommands:
     """Search commands."""
 
     def _parse_results(self, cmd, res, **kwargs):
-        if get_protocol_version(self.client) in ["3", 3]:
-            return ProfileInformation(res) if cmd == "FT.PROFILE" else res
-        else:
-            return self._RESP2_MODULE_CALLBACKS[cmd](res, **kwargs)
+        callback = self._MODULE_CALLBACKS.get(cmd)
+        if callback is None:
+            return res
+        return callback(res, **kwargs)
 
     def _parse_info(self, res, **kwargs):
         it = map(to_string, res)
@@ -548,7 +548,7 @@ class SearchCommands:
         st = time.monotonic()
 
         options = {}
-        if get_protocol_version(self.client) not in ["3", 3]:
+        if not check_protocol_version(get_protocol_version(self.client), 3):
             options[NEVER_DECODE] = True
 
         res = self.execute_command(SEARCH_CMD, *args, **options)
@@ -604,7 +604,7 @@ class SearchCommands:
             options["cursor"] = True
             pieces.extend(cursor.build_args())
 
-        if get_protocol_version(self.client) not in ["3", 3]:
+        if not check_protocol_version(get_protocol_version(self.client), 3):
             options[NEVER_DECODE] = True
 
         res = self.execute_command(*pieces, **options)
@@ -1042,7 +1042,7 @@ class AsyncSearchCommands(SearchCommands):
         st = time.monotonic()
 
         options = {}
-        if get_protocol_version(self.client) not in ["3", 3]:
+        if not check_protocol_version(get_protocol_version(self.client), 3):
             options[NEVER_DECODE] = True
 
         res = await self.execute_command(SEARCH_CMD, *args, **options)
@@ -1098,7 +1098,7 @@ class AsyncSearchCommands(SearchCommands):
             options["cursor"] = True
             pieces.extend(cursor.build_args())
 
-        if get_protocol_version(self.client) not in ["3", 3]:
+        if not check_protocol_version(get_protocol_version(self.client), 3):
             options[NEVER_DECODE] = True
 
         res = await self.execute_command(*pieces, **options)

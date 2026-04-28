@@ -82,6 +82,7 @@ from .observability.recorder import (
 from .retry import Retry
 from .utils import (
     CRYPTOGRAPHY_AVAILABLE,
+    DEFAULT_RESP_VERSION,
     HIREDIS_AVAILABLE,
     SSL_AVAILABLE,
     check_protocol_version,
@@ -106,8 +107,6 @@ SYM_STAR = b"*"
 SYM_DOLLAR = b"$"
 SYM_CRLF = b"\r\n"
 SYM_EMPTY = b""
-
-DEFAULT_RESP_VERSION = 2
 
 DefaultParser: Type[Union[_RESP2Parser, _RESP3Parser, _HiredisParser]]
 if HIREDIS_AVAILABLE:
@@ -799,7 +798,8 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         retry: Union[Any, None] = None,
         redis_connect_func: Optional[Callable[[], None]] = None,
         credential_provider: Optional[CredentialProvider] = None,
-        protocol: Optional[int] = 2,
+        protocol: Optional[int] = None,
+        legacy_responses: bool = True,
         command_packer: Optional[Callable[[], None]] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
@@ -899,6 +899,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
         self.protocol = p
+        self.legacy_responses = legacy_responses
         if self.protocol == 3 and parser_class == _RESP2Parser:
             # If the protocol is 3 but the parser is RESP2, change it to RESP3
             # This is needed because the parser might be set before the protocol
@@ -2208,6 +2209,8 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "ssl_include_verify_flags": parse_ssl_verify_flags,
     "ssl_exclude_verify_flags": parse_ssl_verify_flags,
     "timeout": float,
+    "protocol": int,
+    "legacy_responses": to_bool,
 }
 
 

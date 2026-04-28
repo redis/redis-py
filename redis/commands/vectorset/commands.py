@@ -15,6 +15,7 @@ from redis.typing import (
     Number,
     SyncClientProtocol,
 )
+from redis.utils import check_protocol_version
 
 VADD_CMD = "VADD"
 VSIM_CMD = "VSIM"
@@ -263,7 +264,7 @@ class VectorSetCommands(CommandsProtocol):
             pieces.extend(["ELE", input])
 
         if with_scores or with_attribs:
-            if get_protocol_version(self.client) in ["3", 3]:
+            if check_protocol_version(get_protocol_version(self.client), 3):
                 options[CallbacksOptions.RESP3.value] = True
 
             if with_scores:
@@ -379,7 +380,7 @@ class VectorSetCommands(CommandsProtocol):
         pieces = []
         pieces.extend([key, element])
 
-        if get_protocol_version(self.client) in ["3", 3]:
+        if check_protocol_version(get_protocol_version(self.client), 3):
             options[CallbacksOptions.RESP3.value] = True
 
         if raw:

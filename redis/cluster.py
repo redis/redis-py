@@ -214,6 +214,7 @@ REDIS_ALLOWED_KEYS = (
     "retry",
     "retry_on_timeout",
     "protocol",
+    "legacy_responses",
     "socket_connect_timeout",
     "socket_keepalive",
     "socket_keepalive_options",

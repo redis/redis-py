@@ -5,7 +5,12 @@ from typing import Literal
 
 import redis
 
-from ..helpers import get_protocol_version, nativestr
+from ..helpers import (
+    apply_module_callbacks,
+    get_legacy_responses,
+    get_protocol_version,
+    nativestr,
+)
 from .commands import FPHAType, JSONCommands
 from .decoders import bulk_of_jsons, decode_list
 
@@ -34,7 +39,7 @@ class _JSONBase(JSONCommands):
         :type json.JSONEncoder: An instance of json.JSONEncoder
         """
         # Set the module commands' callbacks
-        self._MODULE_CALLBACKS = {
+        _MODULE_CALLBACKS = {
             "JSON.ARRPOP": self._decode,
             "JSON.DEBUG": self._decode,
             "JSON.GET": self._decode,
@@ -66,15 +71,24 @@ class _JSONBase(JSONCommands):
         }
 
         _RESP3_MODULE_CALLBACKS = {}
+        _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
+        _RESP3_UNIFIED_MODULE_CALLBACKS = dict(_RESP3_MODULE_CALLBACKS)
+        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {}
 
         self.client = client
         self.execute_command = client.execute_command
         self.MODULE_VERSION = version
 
-        if get_protocol_version(self.client) in ["3", 3]:
-            self._MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
-        else:
-            self._MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
+        self._MODULE_CALLBACKS = apply_module_callbacks(
+            get_protocol_version(self.client),
+            get_legacy_responses(self.client),
+            common=_MODULE_CALLBACKS,
+            resp2=_RESP2_MODULE_CALLBACKS,
+            resp3=_RESP3_MODULE_CALLBACKS,
+            resp2_unified=_RESP2_UNIFIED_MODULE_CALLBACKS,
+            resp3_unified=_RESP3_UNIFIED_MODULE_CALLBACKS,
+            resp3_to_resp2_legacy=_RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS,
+        )
 
         for key, value in self._MODULE_CALLBACKS.items():
             self.client.set_response_callback(key, value)
