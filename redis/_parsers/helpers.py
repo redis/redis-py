@@ -122,19 +122,30 @@ SENTINEL_STATE_TYPES = {
 }
 
 
+_SENTINEL_DERIVED_BOOLEANS = (
+    ("is_master", "master"),
+    ("is_slave", "slave"),
+    ("is_sdown", "s_down"),
+    ("is_odown", "o_down"),
+    ("is_sentinel", "sentinel"),
+    ("is_disconnected", "disconnected"),
+    ("is_master_down", "master_down"),
+)
+
+
+def _add_derived_sentinel_booleans(result, flags):
+    """Set ``is_master`` / ``is_slave`` / ``is_sdown`` / ``is_odown`` /
+    ``is_sentinel`` / ``is_disconnected`` / ``is_master_down`` on
+    ``result`` based on membership in the ``flags`` set.
+    """
+    for name, flag in _SENTINEL_DERIVED_BOOLEANS:
+        result[name] = flag in flags
+
+
 def parse_sentinel_state(item):
     result = pairs_to_dict_typed(item, SENTINEL_STATE_TYPES)
     flags = set(result["flags"].split(","))
-    for name, flag in (
-        ("is_master", "master"),
-        ("is_slave", "slave"),
-        ("is_sdown", "s_down"),
-        ("is_odown", "o_down"),
-        ("is_sentinel", "sentinel"),
-        ("is_disconnected", "disconnected"),
-        ("is_master_down", "master_down"),
-    ):
-        result[name] = flag in flags
+    _add_derived_sentinel_booleans(result, flags)
     return result
 
 
@@ -173,6 +184,84 @@ def parse_sentinel_slaves_and_sentinels(response, **options):
 
 def parse_sentinel_slaves_and_sentinels_resp3(response, **options):
     return [parse_sentinel_state_resp3(item, **options) for item in response]
+
+
+def _flatten_resp3_state_pairs(state):
+    """Yield key/value pairs from a RESP3 sentinel-state map as a flat
+    iterable suitable for ``parse_sentinel_state``.
+    """
+    for key, value in state.items():
+        yield key
+        yield value
+
+
+def parse_sentinel_master_resp3_to_resp2_legacy(response, **options):
+    return parse_sentinel_state(map(str_if_bytes, _flatten_resp3_state_pairs(response)))
+
+
+def parse_sentinel_masters_resp3_to_resp2_legacy(response, **options):
+    result = {}
+    for master in response:
+        state = parse_sentinel_state(
+            map(str_if_bytes, _flatten_resp3_state_pairs(master))
+        )
+        result[state["name"]] = state
+    return result
+
+
+def parse_sentinel_slaves_and_sentinels_resp3_to_resp2_legacy(response, **options):
+    return [
+        parse_sentinel_state(map(str_if_bytes, _flatten_resp3_state_pairs(item)))
+        for item in response
+    ]
+
+
+def parse_sentinel_master_unified(response, **options):
+    state = parse_sentinel_state(map(str_if_bytes, response))
+    state["flags"] = set(state["flags"].split(","))
+    return state
+
+
+def parse_sentinel_masters_unified(response, **options):
+    result = {}
+    for item in response:
+        state = parse_sentinel_state(map(str_if_bytes, item))
+        state["flags"] = set(state["flags"].split(","))
+        result[state["name"]] = state
+    return result
+
+
+def parse_sentinel_slaves_and_sentinels_unified(response, **options):
+    out = []
+    for item in response:
+        state = parse_sentinel_state(map(str_if_bytes, item))
+        state["flags"] = set(state["flags"].split(","))
+        out.append(state)
+    return out
+
+
+def parse_sentinel_master_unified_resp3(response, **options):
+    state = parse_sentinel_state_resp3(response, **options)
+    _add_derived_sentinel_booleans(state, state["flags"])
+    return state
+
+
+def parse_sentinel_masters_unified_resp3(response, **options):
+    result = {}
+    for master in response:
+        state = parse_sentinel_state_resp3(master)
+        _add_derived_sentinel_booleans(state, state["flags"])
+        result[state["name"]] = state
+    return result
+
+
+def parse_sentinel_slaves_and_sentinels_unified_resp3(response, **options):
+    out = []
+    for item in response:
+        state = parse_sentinel_state_resp3(item, **options)
+        _add_derived_sentinel_booleans(state, state["flags"])
+        out.append(state)
+    return out
 
 
 def parse_sentinel_get_master(response, **options):
@@ -308,6 +397,134 @@ def zset_score_pairs_resp3_to_resp2_legacy(response, **options):
         (member, score_cast_func(_score_to_resp2_bytes(score)))
         for member, score in response
     ]
+
+
+def zset_score_pairs_resp3_to_resp2_legacy_flat(response, **options):
+    """Convert RESP3 nested ``[[member, score], ...]`` to the flat raw RESP2
+    wire shape ``[member, score_bytes, ...]`` used by ZDIFF in v8.0.0b1.
+
+    ZDIFF historically did not propagate ``withscores`` to the response
+    callback, so the legacy RESP2 callback was a no-op and the raw flat
+    wire response was returned to the user. This helper reproduces that
+    shape on RESP3 wires so ``legacy_responses=True`` keeps emitting the
+    same Python value regardless of the underlying protocol.
+    """
+    if not response or not options.get("withscores"):
+        return response
+    flat = []
+    for member, score in response:
+        flat.append(member)
+        flat.append(_score_to_resp2_bytes(score))
+    return flat
+
+
+def zset_score_for_rank_resp3_to_resp2_legacy(response, **options):
+    """RESP3-wire ZRANK/ZREVRANK WITHSCORE → legacy RESP2 ``[rank, score]``.
+
+    The shape ``[rank, score]`` is identical between RESP2 and RESP3; only
+    the score is re-encoded to bytes before being passed to
+    ``score_cast_func`` so the cast observes the same input type it would
+    on a RESP2 connection.
+    """
+    if not response or not options.get("withscore"):
+        return response
+    score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
+    return [response[0], score_cast_func(_score_to_resp2_bytes(response[1]))]
+
+
+def zset_score_pairs_unified(response, **options):
+    """RESP2-wire WITHSCORES → unified ``list[[member, score], ...]``.
+
+    Normalises RESP2 byte-string scores through ``float`` before applying
+    ``score_cast_func`` so the cast receives the same input type as on a
+    RESP3 connection.
+    """
+    if not response or not options.get("withscores"):
+        return response
+    score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
+    it = iter(response)
+    return [[val, score_cast_func(float(score))] for val, score in zip(it, it)]
+
+
+def zset_score_for_rank_unified(response, **options):
+    """RESP2-wire ZRANK/ZREVRANK WITHSCORE → unified ``[rank, score]``.
+
+    Normalises the RESP2 byte-string score through ``float`` before
+    applying ``score_cast_func`` so the cast receives the same input type
+    as on a RESP3 connection.
+    """
+    if not response or not options.get("withscore"):
+        return response
+    score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
+    return [response[0], score_cast_func(float(response[1]))]
+
+
+def zpop_score_pairs_unified(response, **options):
+    """RESP2-wire ZPOPMAX/ZPOPMIN → unified ``list[[member, score], ...]``.
+
+    ZPOPMAX/ZPOPMIN always include scores; no ``withscores`` gate is
+    required. Scores are normalised through ``float`` before applying
+    ``score_cast_func`` for parity with RESP3.
+    """
+    if not response:
+        return response
+    score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
+    it = iter(response)
+    return [[val, score_cast_func(float(score))] for val, score in zip(it, it)]
+
+
+def zpop_score_pairs_resp3_unified(response, **options):
+    """RESP3-wire ZPOPMAX/ZPOPMIN → unified ``list[[member, score], ...]``.
+
+    Without ``count`` RESP3 returns a flat ``[member, score]``; with
+    ``count`` it returns a nested ``[[member, score], ...]``. Both shapes
+    are normalised to a nested list with ``score_cast_func`` applied.
+    """
+    if not response:
+        return response
+    score_cast_func = options.get("score_cast_func", float)
+    if isinstance(response[0], list):
+        return [[name, score_cast_func(val)] for name, val in response]
+    return [[response[0], score_cast_func(response[1])]]
+
+
+def zpop_score_pairs_resp3_to_resp2_legacy(response, **options):
+    """RESP3-wire ZPOPMAX/ZPOPMIN → legacy RESP2 ``list[(member, score), ...]``.
+
+    Both RESP3 shapes (flat without ``count``; nested with ``count``) are
+    converted to a list of tuples. Scores are re-encoded to bytes before
+    being passed to ``score_cast_func`` so the cast observes the same
+    input type it would on a RESP2 connection.
+    """
+    if not response:
+        return response
+    score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
+    if isinstance(response[0], list):
+        return [
+            (member, score_cast_func(_score_to_resp2_bytes(score)))
+            for member, score in response
+        ]
+    return [(response[0], score_cast_func(_score_to_resp2_bytes(response[1])))]
+
+
+def bzpop_score_unified(response, **options):
+    """BZPOPMAX/BZPOPMIN → unified ``[key, member, score]``.
+
+    Works for both RESP2 (bytes score) and RESP3 (float score) wire shapes.
+    """
+    if not response:
+        return None
+    return [response[0], response[1], float(response[2])]
+
+
+def bzpop_score_resp3_to_resp2_legacy(response, **options):
+    """RESP3-wire BZPOPMAX/BZPOPMIN → legacy RESP2 ``(key, member, score)``.
+
+    Matches the v8.0.0b1 RESP2-wire callback shape (tuple, ``float`` score).
+    """
+    if not response:
+        return None
+    return (response[0], response[1], float(response[2]))
 
 
 def sort_return_tuples(response, **options):

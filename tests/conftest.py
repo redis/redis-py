@@ -28,11 +28,14 @@ from redis.credentials import CredentialProvider
 from redis.event import EventDispatcherInterface
 from redis.exceptions import RedisClusterException
 from redis.retry import Retry
+from redis.utils import DEFAULT_RESP_VERSION
 from tests.ssl_utils import get_tls_certificates
 
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/0"
-default_protocol = "2"
+# Empty string means "do not override": clients fall back to the library
+# default (which is RESP3 on the wire as of the RESP3-default change).
+default_protocol = ""
 default_redismod_url = "redis://localhost:6479"
 
 # default ssl client ignores verification for the purpose of testing
@@ -124,6 +127,16 @@ def pytest_addoption(parser):
         help="Protocol version, defaults to `%(default)s`",
     )
     parser.addoption(
+        "--legacy-responses",
+        default="default",
+        action="store",
+        help=(
+            "Override the ``legacy_responses`` argument on test clients. "
+            "Use 'true' or 'false' to force the value; 'default' leaves it "
+            "unset so the client constructor's default applies."
+        ),
+    )
+    parser.addoption(
         "--redis-ssl-url",
         default=default_redis_ssl_url,
         action="store",
@@ -187,7 +200,10 @@ def pytest_sessionstart(session):
     # during test discovery, e.g. with VS Code, we may not
     # have a server running.
     protocol = session.config.getoption("--protocol")
-    REDIS_INFO["resp_version"] = int(protocol) if protocol else None
+    # When ``--protocol`` is not provided (or is empty), resolve to the
+    # library default so RESP-version-gated decorators reflect the wire
+    # protocol that clients will actually negotiate.
+    REDIS_INFO["resp_version"] = int(protocol) if protocol else DEFAULT_RESP_VERSION
     redis_url = session.config.getoption("--redis-url")
     try:
         info = _get_info(redis_url)
@@ -368,7 +384,14 @@ def _get_client(
     redis_tls_url = request.config.getoption("--redis-ssl-url")
 
     if "protocol" not in redis_url and kwargs.get("protocol") is None:
-        kwargs["protocol"] = request.config.getoption("--protocol")
+        protocol_opt = request.config.getoption("--protocol")
+        if protocol_opt:
+            kwargs["protocol"] = protocol_opt
+
+    if "legacy_responses" not in kwargs:
+        legacy_opt = request.config.getoption("--legacy-responses")
+        if legacy_opt and legacy_opt != "default":
+            kwargs["legacy_responses"] = legacy_opt.lower() == "true"
 
     cluster_mode = REDIS_INFO["cluster_enabled"]
     ssl = kwargs.pop("ssl", False)
@@ -790,31 +813,99 @@ def wait_for_command(client, monitor, command, key=None):
 
 
 def is_resp2_connection(r):
-    if isinstance(r, redis.Redis) or isinstance(r, redis.asyncio.Redis):
-        protocol = r.connection_pool.connection_kwargs.get("protocol")
-    elif isinstance(r, redis.cluster.AbstractRedisCluster):
-        protocol = r.nodes_manager.connection_kwargs.get("protocol")
-    return protocol in ["2", 2, None]
+    return get_protocol_version(r) in ["2", 2]
 
 
-def get_protocol_version(r):
+def _get_raw_protocol(r):
+    """Return the raw ``protocol`` from ``connection_kwargs`` (no default).
+
+    Returns ``None`` when the caller did not pin a protocol value, which
+    is distinct from the wire version the connection eventually
+    negotiates (see :func:`get_protocol_version`).
+    """
     if isinstance(r, redis.Redis) or isinstance(r, redis.asyncio.Redis):
         return r.connection_pool.connection_kwargs.get("protocol")
     elif isinstance(r, redis.cluster.AbstractRedisCluster):
         return r.nodes_manager.connection_kwargs.get("protocol")
+    return None
 
 
-def assert_resp_response(r, response, resp2_expected, resp3_expected):
-    protocol = get_protocol_version(r)
-    if protocol in [2, "2", None]:
-        assert response == resp2_expected
-    else:
-        assert response == resp3_expected
+def get_protocol_version(r):
+    protocol = _get_raw_protocol(r)
+    # ``protocol is None`` means the caller did not specify one, so the
+    # connection negotiates the library default on the wire.
+    if protocol is None:
+        return DEFAULT_RESP_VERSION
+    return protocol
 
 
-def assert_resp_response_in(r, response, resp2_expected, resp3_expected):
-    protocol = get_protocol_version(r)
-    if protocol in [2, "2", None]:
-        assert response in resp2_expected
-    else:
-        assert response in resp3_expected
+def get_legacy_responses(r):
+    """Return the ``legacy_responses`` setting on the client.
+
+    Defaults to ``True`` (matching the client constructor) when absent
+    from ``connection_kwargs``.
+    """
+    if isinstance(r, redis.Redis) or isinstance(r, redis.asyncio.Redis):
+        return r.connection_pool.connection_kwargs.get("legacy_responses", True)
+    elif isinstance(r, redis.cluster.AbstractRedisCluster):
+        return r.nodes_manager.connection_kwargs.get("legacy_responses", True)
+    return True
+
+
+def expected_response_shape(r):
+    """Return the expected Python response shape for ``r``.
+
+    One of:
+
+    * ``"legacy_resp2"`` — native RESP2 wire, or RESP3 wire normalised by
+      the legacy adapters back to RESP2 Python shapes.
+    * ``"legacy_resp3"`` — native RESP3 Python shapes, produced when the
+      caller pinned ``protocol=3`` with ``legacy_responses=True``.
+    * ``"unified"`` — protocol-agnostic unified Python shapes selected by
+      ``legacy_responses=False``.
+    """
+    if not get_legacy_responses(r):
+        return "unified"
+    raw_protocol = _get_raw_protocol(r)
+    if raw_protocol is None or raw_protocol in ("2", 2):
+        return "legacy_resp2"
+    return "legacy_resp3"
+
+
+def expects_resp2_shape(r):
+    """Return ``True`` when Python responses on ``r`` use RESP2 shapes."""
+    return expected_response_shape(r) == "legacy_resp2"
+
+
+_UNSET = object()
+
+
+def _select_expected(r, resp2_expected, resp3_expected, unified_expected):
+    match expected_response_shape(r):
+        case "legacy_resp2":
+            return resp2_expected
+        case "legacy_resp3":
+            return resp3_expected
+        case "unified":
+            # Fall back to ``resp3_expected`` when no dedicated
+            # ``unified_expected`` is supplied, since unified shapes are
+            # typically RESP3-style with only a few divergences.
+            if unified_expected is _UNSET:
+                return resp3_expected
+            return unified_expected
+        case other:
+            raise ValueError(f"unknown response shape: {other!r}")
+
+
+def assert_resp_response(
+    r, response, resp2_expected, resp3_expected, unified_expected=_UNSET
+):
+    expected = _select_expected(r, resp2_expected, resp3_expected, unified_expected)
+    assert response == expected
+
+
+def assert_resp_response_in(
+    r, response, resp2_expected, resp3_expected, unified_expected=_UNSET
+):
+    expected = _select_expected(r, resp2_expected, resp3_expected, unified_expected)
+    assert response in expected

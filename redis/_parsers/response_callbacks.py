@@ -29,6 +29,8 @@ from redis.utils import str_if_bytes
 
 from .helpers import (
     bool_ok,
+    bzpop_score_resp3_to_resp2_legacy,
+    bzpop_score_unified,
     float_or_none,
     pairs_to_dict,
     parse_acl_getuser,
@@ -52,10 +54,19 @@ from .helpers import (
     parse_scan,
     parse_sentinel_get_master,
     parse_sentinel_master,
+    parse_sentinel_master_resp3_to_resp2_legacy,
+    parse_sentinel_master_unified,
+    parse_sentinel_master_unified_resp3,
     parse_sentinel_masters,
     parse_sentinel_masters_resp3,
+    parse_sentinel_masters_resp3_to_resp2_legacy,
+    parse_sentinel_masters_unified,
+    parse_sentinel_masters_unified_resp3,
     parse_sentinel_slaves_and_sentinels,
     parse_sentinel_slaves_and_sentinels_resp3,
+    parse_sentinel_slaves_and_sentinels_resp3_to_resp2_legacy,
+    parse_sentinel_slaves_and_sentinels_unified,
+    parse_sentinel_slaves_and_sentinels_unified_resp3,
     parse_sentinel_state_resp3,
     parse_set_result,
     parse_slowlog_get,
@@ -73,11 +84,18 @@ from .helpers import (
     sort_return_tuples,
     string_keys_to_dict,
     timestamp_to_datetime,
+    zpop_score_pairs_resp3_to_resp2_legacy,
+    zpop_score_pairs_resp3_unified,
+    zpop_score_pairs_unified,
     zset_score_for_rank,
     zset_score_for_rank_resp3,
+    zset_score_for_rank_resp3_to_resp2_legacy,
+    zset_score_for_rank_unified,
     zset_score_pairs,
     zset_score_pairs_resp3,
     zset_score_pairs_resp3_to_resp2_legacy,
+    zset_score_pairs_resp3_to_resp2_legacy_flat,
+    zset_score_pairs_unified,
 )
 
 _RedisCallbacks = {
@@ -179,8 +197,7 @@ _RedisCallbacksRESP2 = {
         "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
     ),
     **string_keys_to_dict(
-        "ZDIFF ZINTER ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZREVRANGE "
-        "ZREVRANGEBYSCORE ZUNION",
+        "ZINTER ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE ZUNION",
         zset_score_pairs,
     ),
     **string_keys_to_dict(
@@ -278,11 +295,53 @@ _RedisCallbacksRESP3 = {
 
 
 # RESP2 wire, unified response shapes (``legacy_responses=False``).
-_RedisCallbacksRESP2Unified: dict[str, Callable[..., Any]] = dict(_RedisCallbacksRESP2)
+_RedisCallbacksRESP2Unified: dict[str, Callable[..., Any]] = {
+    **_RedisCallbacksRESP2,
+    **string_keys_to_dict(
+        "ZDIFF ZINTER ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE ZUNION",
+        zset_score_pairs_unified,
+    ),
+    **string_keys_to_dict(
+        "ZPOPMAX ZPOPMIN",
+        zpop_score_pairs_unified,
+    ),
+    **string_keys_to_dict(
+        "ZREVRANK ZRANK",
+        zset_score_for_rank_unified,
+    ),
+    **string_keys_to_dict(
+        "BZPOPMAX BZPOPMIN",
+        bzpop_score_unified,
+    ),
+    "ZRANDMEMBER": zset_score_pairs_unified,
+    "SENTINEL MASTER": parse_sentinel_master_unified,
+    "SENTINEL MASTERS": parse_sentinel_masters_unified,
+    "SENTINEL SENTINELS": parse_sentinel_slaves_and_sentinels_unified,
+    "SENTINEL SLAVES": parse_sentinel_slaves_and_sentinels_unified,
+}
 
 
 # RESP3 wire, unified response shapes (``legacy_responses=False``).
-_RedisCallbacksRESP3Unified: dict[str, Callable[..., Any]] = dict(_RedisCallbacksRESP3)
+_RedisCallbacksRESP3Unified: dict[str, Callable[..., Any]] = {
+    **_RedisCallbacksRESP3,
+    **string_keys_to_dict(
+        "ZDIFF ZINTER ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE ZUNION",
+        zset_score_pairs_resp3,
+    ),
+    **string_keys_to_dict(
+        "ZPOPMAX ZPOPMIN",
+        zpop_score_pairs_resp3_unified,
+    ),
+    **string_keys_to_dict(
+        "BZPOPMAX BZPOPMIN",
+        bzpop_score_unified,
+    ),
+    "ZRANDMEMBER": zset_score_pairs_resp3,
+    "SENTINEL MASTER": parse_sentinel_master_unified_resp3,
+    "SENTINEL MASTERS": parse_sentinel_masters_unified_resp3,
+    "SENTINEL SENTINELS": parse_sentinel_slaves_and_sentinels_unified_resp3,
+    "SENTINEL SLAVES": parse_sentinel_slaves_and_sentinels_unified_resp3,
+}
 
 
 # RESP3 wire converted back to the legacy RESP2 Python shapes. Only the
@@ -292,9 +351,27 @@ _RedisCallbacksRESP3Unified: dict[str, Callable[..., Any]] = dict(_RedisCallback
 # same input type it would on a RESP2 connection.
 _RedisCallbacksRESP3toRESP2Legacy: dict[str, Callable[..., Any]] = {
     **string_keys_to_dict(
-        "ZDIFF ZINTER ZRANGE ZRANGEBYSCORE ZREVRANGE",
+        "ZINTER ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE ZUNION",
         zset_score_pairs_resp3_to_resp2_legacy,
     ),
+    "ZDIFF": zset_score_pairs_resp3_to_resp2_legacy_flat,
+    "ZRANDMEMBER": zset_score_pairs_resp3_to_resp2_legacy_flat,
+    **string_keys_to_dict(
+        "ZPOPMAX ZPOPMIN",
+        zpop_score_pairs_resp3_to_resp2_legacy,
+    ),
+    **string_keys_to_dict(
+        "BZPOPMAX BZPOPMIN",
+        bzpop_score_resp3_to_resp2_legacy,
+    ),
+    **string_keys_to_dict(
+        "ZREVRANK ZRANK",
+        zset_score_for_rank_resp3_to_resp2_legacy,
+    ),
+    "SENTINEL MASTER": parse_sentinel_master_resp3_to_resp2_legacy,
+    "SENTINEL MASTERS": parse_sentinel_masters_resp3_to_resp2_legacy,
+    "SENTINEL SENTINELS": parse_sentinel_slaves_and_sentinels_resp3_to_resp2_legacy,
+    "SENTINEL SLAVES": parse_sentinel_slaves_and_sentinels_resp3_to_resp2_legacy,
 }
 
 
@@ -321,7 +398,7 @@ def get_response_callbacks(
         else:
             callbacks.update(_RedisCallbacksRESP2)
     else:
-        if user_protocol in (3, "3"):
+        if user_protocol is None or user_protocol in (3, "3"):
             callbacks.update(_RedisCallbacksRESP3Unified)
         else:
             callbacks.update(_RedisCallbacksRESP2Unified)
