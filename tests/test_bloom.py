@@ -7,7 +7,7 @@ from redis.exceptions import RedisError
 from .conftest import (
     _get_client,
     assert_resp_response,
-    is_resp2_connection,
+    expected_response_shape,
     skip_ifmodversion_lt,
 )
 
@@ -101,18 +101,21 @@ def test_bf_insert(client):
         2,
         info.get("insertedNum"),
         info.get("Number of items inserted"),
+        info.get("insertedNum"),
     )
     assert_resp_response(
         client,
         1000,
         info.get("capacity"),
         info.get("Capacity"),
+        info.get("capacity"),
     )
     assert_resp_response(
         client,
         1,
         info.get("filterNum"),
         info.get("Number of filters"),
+        info.get("filterNum"),
     )
 
 
@@ -175,6 +178,7 @@ def test_bf_info(client):
         None,
         info.get("expansionRate"),
         info.get("Expansion rate"),
+        info.get("expansionRate"),
     )
 
     client.bf().create("expanding", "0.0001", "1000", expansion=expansion)
@@ -184,6 +188,7 @@ def test_bf_info(client):
         4,
         info.get("expansionRate"),
         info.get("Expansion rate"),
+        info.get("expansionRate"),
     )
 
     try:
@@ -227,13 +232,25 @@ def test_cf_add_and_insert(client):
     assert [1] == client.cf().insertnx("empty2", ["bar"], capacity=1000)
     info = client.cf().info("captest")
     assert_resp_response(
-        client, 5, info.get("insertedNum"), info.get("Number of items inserted")
+        client,
+        5,
+        info.get("insertedNum"),
+        info.get("Number of items inserted"),
+        info.get("insertedNum"),
     )
     assert_resp_response(
-        client, 0, info.get("deletedNum"), info.get("Number of items deleted")
+        client,
+        0,
+        info.get("deletedNum"),
+        info.get("Number of items deleted"),
+        info.get("deletedNum"),
     )
     assert_resp_response(
-        client, 1, info.get("filterNum"), info.get("Number of filters")
+        client,
+        1,
+        info.get("filterNum"),
+        info.get("Number of filters"),
+        info.get("filterNum"),
     )
 
 
@@ -419,7 +436,11 @@ def test_tdigest_reset(client):
     # assert we have 0 unmerged
     info = client.tdigest().info("tDigest")
     assert_resp_response(
-        client, 0, info.get("unmerged_nodes"), info.get("Unmerged nodes")
+        client,
+        0,
+        info.get("unmerged_nodes"),
+        info.get("Unmerged nodes"),
+        info.get("unmerged_nodes"),
     )
 
 
@@ -435,10 +456,14 @@ def test_tdigest_merge(client):
     assert client.tdigest().merge("to-tDigest", 1, "from-tDigest")
     # we should now have 110 weight on to-histogram
     info = client.tdigest().info("to-tDigest")
-    if is_resp2_connection(client):
-        assert 20 == float(info["merged_weight"]) + float(info["unmerged_weight"])
-    else:
+    if expected_response_shape(client) == "legacy_resp3":
+        # Native RESP3 map from the server (no module callback registered for
+        # ``protocol=3`` with ``legacy_responses=True``); keys are title-case.
         assert 20 == float(info["Merged weight"]) + float(info["Unmerged weight"])
+    else:
+        # ``TDigestInfo`` wrapper exposes snake_case keys for both the
+        # ``legacy_resp2`` and ``unified`` shapes.
+        assert 20 == float(info["merged_weight"]) + float(info["unmerged_weight"])
     # test override
     assert client.tdigest().create("from-override", 10)
     assert client.tdigest().create("from-override-2", 10)

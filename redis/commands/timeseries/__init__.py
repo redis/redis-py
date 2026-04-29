@@ -26,7 +26,18 @@ from .commands import (
     TimeSeriesCommands,
 )
 from .info import TSInfo
-from .utils import parse_get, parse_m_get, parse_m_range, parse_range
+from .utils import (
+    parse_get,
+    parse_get_unified,
+    parse_m_get,
+    parse_m_get_resp3_to_resp2_legacy,
+    parse_m_get_unified,
+    parse_m_range,
+    parse_m_range_resp3_to_resp2_legacy,
+    parse_m_range_unified,
+    parse_range,
+    parse_range_unified,
+)
 
 
 class _TimeSeriesBase(TimeSeriesCommands):
@@ -54,14 +65,42 @@ class _TimeSeriesBase(TimeSeriesCommands):
             MGET_CMD: parse_m_get,
             MRANGE_CMD: parse_m_range,
             MREVRANGE_CMD: parse_m_range,
+            QUERYINDEX_CMD: parse_to_list,
             RANGE_CMD: parse_range,
             REVRANGE_CMD: parse_range,
-            QUERYINDEX_CMD: parse_to_list,
         }
         _RESP3_MODULE_CALLBACKS = {}
-        _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
-        _RESP3_UNIFIED_MODULE_CALLBACKS = dict(_RESP3_MODULE_CALLBACKS)
-        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {}
+        _RESP2_UNIFIED_MODULE_CALLBACKS = {
+            DEL_CMD: int,
+            GET_CMD: parse_get_unified,
+            INFO_CMD: TSInfo,
+            MGET_CMD: parse_m_get_unified,
+            MRANGE_CMD: parse_m_range_unified,
+            MREVRANGE_CMD: parse_m_range_unified,
+            RANGE_CMD: parse_range_unified,
+            REVRANGE_CMD: parse_range_unified,
+        }
+        _RESP3_UNIFIED_MODULE_CALLBACKS = {
+            DEL_CMD: int,
+            GET_CMD: parse_get_unified,
+            INFO_CMD: TSInfo,
+            MGET_CMD: parse_m_get_unified,
+            MRANGE_CMD: parse_m_range_unified,
+            MREVRANGE_CMD: parse_m_range_unified,
+            RANGE_CMD: parse_range_unified,
+            REVRANGE_CMD: parse_range_unified,
+        }
+        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
+            DEL_CMD: int,
+            GET_CMD: parse_get,
+            INFO_CMD: TSInfo,
+            MGET_CMD: parse_m_get_resp3_to_resp2_legacy,
+            MRANGE_CMD: parse_m_range_resp3_to_resp2_legacy,
+            MREVRANGE_CMD: parse_m_range_resp3_to_resp2_legacy,
+            QUERYINDEX_CMD: parse_to_list,
+            RANGE_CMD: parse_range,
+            REVRANGE_CMD: parse_range,
+        }
 
         self.client = client
         self.execute_command = client.execute_command

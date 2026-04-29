@@ -8,6 +8,8 @@ import redis
 from .conftest import (
     _get_client,
     assert_resp_response,
+    expected_response_shape,
+    expects_resp2_shape,
     is_resp2_connection,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
@@ -560,7 +562,7 @@ def test_mrange(client):
 
     res = client.ts().mrange(0, 200, filters=["Test=This"])
     assert 2 == len(res)
-    if is_resp2_connection(client):
+    if expects_resp2_shape(client):
         assert 100 == len(res[0]["1"][1])
 
         res = client.ts().mrange(0, 200, filters=["Test=This"], count=10)
@@ -610,7 +612,7 @@ def test_multi_range_advanced(client):
 
     # test with selected labels
     res = client.ts().mrange(0, 200, filters=["Test=This"], select_labels=["team"])
-    if is_resp2_connection(client):
+    if expects_resp2_shape(client):
         assert {"team": "ny"} == res[0]["1"][0]
         assert {"team": "sf"} == res[1]["2"][0]
 
@@ -661,6 +663,13 @@ def test_multi_range_advanced(client):
         )
         assert [(0, 5.0), (5, 6.0)] == res[0]["1"][1]
     else:
+        # ``expected_response_shape`` is ``"unified"`` for
+        # ``legacy_responses=False`` (any protocol) and ``"legacy_resp3"``
+        # for ``protocol=3`` with ``legacy_responses=True``. The unified
+        # shape always emits ``[labels, [], samples]`` (samples at index
+        # 2); legacy RESP3 preserves the wire layout, appending an extra
+        # ``sources`` element under GROUPBY which pushes samples to index 3.
+        groupby_samples_idx = 2 if expected_response_shape(client) == "unified" else 3
         assert {"team": "ny"} == res["1"][0]
         assert {"team": "sf"} == res["2"][0]
 
@@ -679,17 +688,25 @@ def test_multi_range_advanced(client):
         res = client.ts().mrange(
             0, 3, filters=["Test=This"], groupby="Test", reduce="sum"
         )
-        assert [[0, 0.0], [1, 2.0], [2, 4.0], [3, 6.0]] == res["Test=This"][3]
+        assert [[0, 0.0], [1, 2.0], [2, 4.0], [3, 6.0]] == res["Test=This"][
+            groupby_samples_idx
+        ]
         res = client.ts().mrange(
             0, 3, filters=["Test=This"], groupby="Test", reduce="max"
         )
-        assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["Test=This"][3]
+        assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["Test=This"][
+            groupby_samples_idx
+        ]
         res = client.ts().mrange(
             0, 3, filters=["Test=This"], groupby="team", reduce="min"
         )
         assert 2 == len(res)
-        assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["team=ny"][3]
-        assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["team=sf"][3]
+        assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["team=ny"][
+            groupby_samples_idx
+        ]
+        assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["team=sf"][
+            groupby_samples_idx
+        ]
 
         # test align
         res = client.ts().mrange(
@@ -739,6 +756,10 @@ def test_mrange_latest(client: redis.Redis):
             "t2": [{}, {"aggregators": []}, [[0, 4.0], [10, 8.0]]],
             "t4": [{}, {"aggregators": []}, [[0, 4.0], [10, 8.0]]],
         },
+        unified_expected={
+            "t2": [{}, [], [[0, 4.0], [10, 8.0]]],
+            "t4": [{}, [], [[0, 4.0], [10, 8.0]]],
+        },
     )
 
 
@@ -752,15 +773,23 @@ def test_multi_reverse_range(client):
         client.ts().add(1, i, i % 7)
         client.ts().add(2, i, i % 11)
 
+    # ``expected_response_shape`` is ``"unified"`` for
+    # ``legacy_responses=False`` (any protocol) and ``"legacy_resp3"`` for
+    # ``protocol=3`` with ``legacy_responses=True``. The unified shape
+    # always emits ``[labels, [], samples]`` (samples at index 2); legacy
+    # RESP3 preserves the wire layout, appending an extra ``sources``
+    # element under GROUPBY which pushes samples to index 3.
+    groupby_samples_idx = 2 if expected_response_shape(client) == "unified" else 3
+
     res = client.ts().mrange(0, 200, filters=["Test=This"])
     assert 2 == len(res)
-    if is_resp2_connection(client):
+    if expects_resp2_shape(client):
         assert 100 == len(res[0]["1"][1])
     else:
         assert 100 == len(res["1"][2])
 
     res = client.ts().mrange(0, 200, filters=["Test=This"], count=10)
-    if is_resp2_connection(client):
+    if expects_resp2_shape(client):
         assert 10 == len(res[0]["1"][1])
     else:
         assert 10 == len(res["1"][2])
@@ -771,7 +800,7 @@ def test_multi_reverse_range(client):
         0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
     )
     assert 2 == len(res)
-    if is_resp2_connection(client):
+    if expects_resp2_shape(client):
         assert 20 == len(res[0]["1"][1])
         assert {} == res[0]["1"][0]
     else:
@@ -780,14 +809,14 @@ def test_multi_reverse_range(client):
 
     # test withlabels
     res = client.ts().mrevrange(0, 200, filters=["Test=This"], with_labels=True)
-    if is_resp2_connection(client):
+    if expects_resp2_shape(client):
         assert {"Test": "This", "team": "ny"} == res[0]["1"][0]
     else:
         assert {"Test": "This", "team": "ny"} == res["1"][0]
 
     # test with selected labels
     res = client.ts().mrevrange(0, 200, filters=["Test=This"], select_labels=["team"])
-    if is_resp2_connection(client):
+    if expects_resp2_shape(client):
         assert {"team": "ny"} == res[0]["1"][0]
         assert {"team": "sf"} == res[1]["2"][0]
     else:
@@ -803,7 +832,7 @@ def test_multi_reverse_range(client):
         filter_by_min_value=1,
         filter_by_max_value=2,
     )
-    if is_resp2_connection(client):
+    if expects_resp2_shape(client):
         assert [(16, 2.0), (15, 1.0)] == res[0]["1"][1]
     else:
         assert [[16, 2.0], [15, 1.0]] == res["1"][2]
@@ -812,27 +841,35 @@ def test_multi_reverse_range(client):
     res = client.ts().mrevrange(
         0, 3, filters=["Test=This"], groupby="Test", reduce="sum"
     )
-    if is_resp2_connection(client):
+    if expects_resp2_shape(client):
         assert [(3, 6.0), (2, 4.0), (1, 2.0), (0, 0.0)] == res[0]["Test=This"][1]
     else:
-        assert [[3, 6.0], [2, 4.0], [1, 2.0], [0, 0.0]] == res["Test=This"][3]
+        assert [[3, 6.0], [2, 4.0], [1, 2.0], [0, 0.0]] == res["Test=This"][
+            groupby_samples_idx
+        ]
     res = client.ts().mrevrange(
         0, 3, filters=["Test=This"], groupby="Test", reduce="max"
     )
-    if is_resp2_connection(client):
+    if expects_resp2_shape(client):
         assert [(3, 3.0), (2, 2.0), (1, 1.0), (0, 0.0)] == res[0]["Test=This"][1]
     else:
-        assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["Test=This"][3]
+        assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["Test=This"][
+            groupby_samples_idx
+        ]
     res = client.ts().mrevrange(
         0, 3, filters=["Test=This"], groupby="team", reduce="min"
     )
     assert 2 == len(res)
-    if is_resp2_connection(client):
+    if expects_resp2_shape(client):
         assert [(3, 3.0), (2, 2.0), (1, 1.0), (0, 0.0)] == res[0]["team=ny"][1]
         assert [(3, 3.0), (2, 2.0), (1, 1.0), (0, 0.0)] == res[1]["team=sf"][1]
     else:
-        assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["team=ny"][3]
-        assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["team=sf"][3]
+        assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["team=ny"][
+            groupby_samples_idx
+        ]
+        assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["team=sf"][
+            groupby_samples_idx
+        ]
 
     # test align
     res = client.ts().mrevrange(
@@ -843,7 +880,7 @@ def test_multi_reverse_range(client):
         bucket_size_msec=10,
         align="-",
     )
-    if is_resp2_connection(client):
+    if expects_resp2_shape(client):
         assert [(10, 1.0), (0, 10.0)] == res[0]["1"][1]
     else:
         assert [[10, 1.0], [0, 10.0]] == res["1"][2]
@@ -855,7 +892,7 @@ def test_multi_reverse_range(client):
         bucket_size_msec=10,
         align=1,
     )
-    if is_resp2_connection(client):
+    if expects_resp2_shape(client):
         assert [(1, 10.0), (0, 1.0)] == res[0]["1"][1]
     else:
         assert [[1, 10.0], [0, 1.0]] == res["1"][2]
@@ -887,6 +924,10 @@ def test_mrevrange_latest(client: redis.Redis):
         {
             "t2": [{}, {"aggregators": []}, [[10, 8.0], [0, 4.0]]],
             "t4": [{}, {"aggregators": []}, [[10, 8.0], [0, 4.0]]],
+        },
+        unified_expected={
+            "t2": [{}, [], [[10, 8.0], [0, 4.0]]],
+            "t4": [{}, [], [[10, 8.0], [0, 4.0]]],
         },
     )
 
@@ -932,25 +973,25 @@ def test_mget(client):
     client.ts().add(1, "*", 15)
     client.ts().add(2, "*", 25)
     res = client.ts().mget(["Test=This"])
-    if is_resp2_connection(client):
+    if expects_resp2_shape(client):
         assert 15 == res[0]["1"][2]
         assert 25 == res[1]["2"][2]
     else:
         assert 15 == res["1"][1][1]
         assert 25 == res["2"][1][1]
     res = client.ts().mget(["Taste=That"])
-    if is_resp2_connection(client):
+    if expects_resp2_shape(client):
         assert 25 == res[0]["2"][2]
     else:
         assert 25 == res["2"][1][1]
 
     # test with_labels
-    if is_resp2_connection(client):
+    if expects_resp2_shape(client):
         assert {} == res[0]["2"][0]
     else:
         assert {} == res["2"][0]
     res = client.ts().mget(["Taste=That"], with_labels=True)
-    if is_resp2_connection(client):
+    if expects_resp2_shape(client):
         assert {"Taste": "That", "Test": "This"} == res[0]["2"][0]
     else:
         assert {"Taste": "That", "Test": "This"} == res["2"][0]
@@ -1351,6 +1392,10 @@ def test_mrange_with_count_nan_count_all_aggregators(client):
             "temperature:A": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
             "temperature:B": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
         },
+        unified_expected={
+            "temperature:A": [{}, [], [[1000, 1.0]]],
+            "temperature:B": [{}, [], [[1000, 1.0]]],
+        },
     )
 
     # Ensure we count ALL values
@@ -1371,6 +1416,10 @@ def test_mrange_with_count_nan_count_all_aggregators(client):
         {
             "temperature:A": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
             "temperature:B": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
+        },
+        unified_expected={
+            "temperature:A": [{}, [], [[1000, 2.0]]],
+            "temperature:B": [{}, [], [[1000, 2.0]]],
         },
     )
 
@@ -1414,6 +1463,10 @@ def test_mrevrange_with_count_nan_count_all_aggregators(client):
             "temperature:A": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
             "temperature:B": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
         },
+        unified_expected={
+            "temperature:A": [{}, [], [[1000, 1.0]]],
+            "temperature:B": [{}, [], [[1000, 1.0]]],
+        },
     )
 
     # Ensure we count ALL values
@@ -1434,6 +1487,10 @@ def test_mrevrange_with_count_nan_count_all_aggregators(client):
         {
             "temperature:A": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
             "temperature:B": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
+        },
+        unified_expected={
+            "temperature:A": [{}, [], [[1000, 2.0]]],
+            "temperature:B": [{}, [], [[1000, 2.0]]],
         },
     )
 
@@ -1499,7 +1556,7 @@ def test_mrange_multiple_aggregators(client):
         aggregation_type=["min", "max"],
         bucket_size_msec=10,
     )
-    if is_resp2_connection(client):
+    if expects_resp2_shape(client):
         assert len(result) == 1
         assert "ts:multi_agg_a" in result[0]
         samples = result[0]["ts:multi_agg_a"][1]
@@ -1527,7 +1584,7 @@ def test_mrevrange_multiple_aggregators(client):
         aggregation_type=["min", "max"],
         bucket_size_msec=10,
     )
-    if is_resp2_connection(client):
+    if expects_resp2_shape(client):
         assert len(result) == 1
         assert "ts:multi_agg_b" in result[0]
         samples = result[0]["ts:multi_agg_b"][1]

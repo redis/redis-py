@@ -52,6 +52,7 @@ from .helpers import (
     parse_command,
     parse_command_resp3,
     parse_config_get,
+    parse_config_get_resp3_to_resp2_legacy,
     parse_debug_object,
     parse_function_list_resp3_to_resp2_legacy,
     parse_function_list_unified,
@@ -287,12 +288,7 @@ _RedisCallbacksRESP3 = {
         else bool_ok(r)
     ),
     "COMMAND": parse_command_resp3,
-    "CONFIG GET": lambda r: {
-        str_if_bytes(key) if key is not None else None: (
-            str_if_bytes(value) if value is not None else None
-        )
-        for key, value in r.items()
-    },
+    "CONFIG GET": parse_config_get_resp3_to_resp2_legacy,
     "MEMORY STATS": parse_memory_stats_resp3,
     # SENTINEL: keep the legacy RESP2 Python shape on RESP3 wire so callers
     # using Sentinel-related ``state["is_master"]`` etc. continue to work
@@ -395,6 +391,9 @@ _RedisCallbacksRESP3Unified: dict[str, Callable[..., Any]] = {
 # same input type it would on a RESP2 connection.
 _RedisCallbacksRESP3toRESP2Legacy: dict[str, Callable[..., Any]] = {
     **string_keys_to_dict(
+        "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
+    ),
+    **string_keys_to_dict(
         "ZINTER ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE ZUNION",
         zset_score_pairs_resp3_to_resp2_legacy,
     ),
@@ -429,6 +428,7 @@ _RedisCallbacksRESP3toRESP2Legacy: dict[str, Callable[..., Any]] = {
     "CLUSTER GETKEYSINSLOT": lambda r: list(map(str_if_bytes, r)),
     "CLUSTER LINKS": parse_cluster_links_resp3_to_resp2_legacy,
     "COMMAND GETKEYS": lambda r: list(map(str_if_bytes, r)),
+    "CONFIG GET": parse_config_get_resp3_to_resp2_legacy,
     "FUNCTION LIST": parse_function_list_resp3_to_resp2_legacy,
     "GEOHASH": lambda r: list(map(str_if_bytes, r)),
     "GEOPOS": parse_geopos_resp3_to_resp2_legacy,

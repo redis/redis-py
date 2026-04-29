@@ -111,8 +111,12 @@ class _CMSBloomBase(CMSCommands, AbstractBloom):
         }
         _RESP3_MODULE_CALLBACKS = {}
         _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
-        _RESP3_UNIFIED_MODULE_CALLBACKS = dict(_RESP3_MODULE_CALLBACKS)
-        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {}
+        _RESP3_UNIFIED_MODULE_CALLBACKS = {
+            CMS_INFO: CMSInfo,
+        }
+        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
+            CMS_INFO: CMSInfo,
+        }
 
         self.client = client
         self.commandmixin = CMSCommands
@@ -151,8 +155,15 @@ class _TOPKBloomBase(TOPKCommands, AbstractBloom):
         }
         _RESP3_MODULE_CALLBACKS = {}
         _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
-        _RESP3_UNIFIED_MODULE_CALLBACKS = dict(_RESP3_MODULE_CALLBACKS)
-        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {}
+        _RESP3_UNIFIED_MODULE_CALLBACKS = {
+            TOPK_INFO: TopKInfo,
+        }
+        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
+            TOPK_ADD: parse_to_list,
+            TOPK_INCRBY: parse_to_list,
+            TOPK_INFO: TopKInfo,
+            TOPK_LIST: parse_to_list,
+        }
 
         self.client = client
         self.commandmixin = TOPKCommands
@@ -195,8 +206,12 @@ class _CFBloomBase(CFCommands, AbstractBloom):
         }
         _RESP3_MODULE_CALLBACKS = {}
         _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
-        _RESP3_UNIFIED_MODULE_CALLBACKS = dict(_RESP3_MODULE_CALLBACKS)
-        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {}
+        _RESP3_UNIFIED_MODULE_CALLBACKS = {
+            CF_INFO: CFInfo,
+        }
+        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
+            CF_INFO: CFInfo,
+        }
 
         self.client = client
         self.commandmixin = CFCommands
@@ -240,8 +255,18 @@ class _TDigestBloomBase(TDigestCommands, AbstractBloom):
         }
         _RESP3_MODULE_CALLBACKS = {}
         _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
-        _RESP3_UNIFIED_MODULE_CALLBACKS = dict(_RESP3_MODULE_CALLBACKS)
-        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {}
+        _RESP3_UNIFIED_MODULE_CALLBACKS = {
+            TDIGEST_INFO: TDigestInfo,
+            TDIGEST_MIN: float,
+            TDIGEST_MAX: float,
+            TDIGEST_TRIMMED_MEAN: float,
+        }
+        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
+            TDIGEST_INFO: TDigestInfo,
+            TDIGEST_MIN: float,
+            TDIGEST_MAX: float,
+            TDIGEST_TRIMMED_MEAN: float,
+        }
 
         self.client = client
         self.commandmixin = TDigestCommands
@@ -283,8 +308,12 @@ class _BFBloomBase(BFCommands, AbstractBloom):
         }
         _RESP3_MODULE_CALLBACKS = {}
         _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
-        _RESP3_UNIFIED_MODULE_CALLBACKS = dict(_RESP3_MODULE_CALLBACKS)
-        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {}
+        _RESP3_UNIFIED_MODULE_CALLBACKS = {
+            BF_INFO: BFInfo,
+        }
+        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
+            BF_INFO: BFInfo,
+        }
 
         self.client = client
         self.commandmixin = BFCommands

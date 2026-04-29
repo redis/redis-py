@@ -5,8 +5,25 @@ def list_to_dict(aList):
     return {nativestr(aList[i][0]): nativestr(aList[i][1]) for i in range(len(aList))}
 
 
+def _pairs_to_dict(pairs):
+    """Convert a list of [key, value] pairs to a dict without forcing str."""
+    return {pairs[i][0]: pairs[i][1] for i in range(len(pairs))}
+
+
+def _nativestr_dict(d):
+    """Apply ``nativestr`` to every key and string-typed value of ``d``.
+
+    Used by the RESP3-to-RESP2-legacy adapters so labels coming from a
+    RESP3 native map match today's RESP2 ``list_to_dict`` semantics.
+    """
+    return {
+        nativestr(k): nativestr(v) if isinstance(v, (bytes, str)) else v
+        for k, v in d.items()
+    }
+
+
 def parse_range(response, **kwargs):
-    """Parse range response. Used by TS.RANGE and TS.REVRANGE."""
+    """Parse range response. Used by TS.RANGE and TS.REVRANGE (Sets A, E)."""
     if not response:
         return []
     # Multi-aggregator: samples have >2 elements [timestamp, val1, val2, ...]
@@ -15,23 +32,35 @@ def parse_range(response, **kwargs):
     return [tuple((r[0], float(r[1]))) for r in response]
 
 
-def parse_m_range(response):
-    """Parse multi range response. Used by TS.MRANGE and TS.MREVRANGE."""
-    res = []
-    for item in response:
-        res.append({nativestr(item[0]): [list_to_dict(item[1]), parse_range(item[2])]})
-    return sorted(res, key=lambda d: list(d.keys()))
+def parse_range_unified(response, **kwargs):
+    """Unified parser for TS.RANGE / TS.REVRANGE (Sets C, D).
+
+    Returns ``list[list]`` rather than ``list[tuple]`` so the unified
+    shape is symmetric with the RESP3 wire format.
+    """
+    if not response:
+        return []
+    if len(response[0]) > 2:
+        return [[r[0]] + [float(v) for v in r[1:]] for r in response]
+    return [[r[0], float(r[1])] for r in response]
 
 
 def parse_get(response):
-    """Parse get response. Used by TS.GET."""
+    """Parse get response. Used by TS.GET (Sets A, E)."""
     if not response:
         return None
     return int(response[0]), float(response[1])
 
 
+def parse_get_unified(response, **kwargs):
+    """Unified parser for TS.GET (Sets C, D). Returns ``[int, float]``."""
+    if not response:
+        return None
+    return [int(response[0]), float(response[1])]
+
+
 def parse_m_get(response):
-    """Parse multi get response. Used by TS.MGET."""
+    """Parse multi get response (Set A — RESP2 wire)."""
     res = []
     for item in response:
         if not item[2]:
@@ -46,4 +75,82 @@ def parse_m_get(response):
                     ]
                 }
             )
+    return sorted(res, key=lambda d: list(d.keys()))
+
+
+def parse_m_get_unified(response, **kwargs):
+    """Unified parser for TS.MGET (Sets C, D).
+
+    Emits ``{key: [labels_dict, sample]}`` where ``sample`` is
+    ``[int, float]`` or ``[]`` when no sample exists. Handles both wire
+    formats: the RESP2 wire arrives as a list of ``[key, label_pairs,
+    sample]`` triples; the RESP3 wire is already keyed by name.
+    """
+    if isinstance(response, dict):
+        res = {}
+        for key, item in response.items():
+            sample = item[1] if len(item) > 1 else []
+            if not sample:
+                res[key] = [item[0], []]
+            else:
+                res[key] = [item[0], [int(sample[0]), float(sample[1])]]
+        return res
+    res = {}
+    for item in response:
+        if not item[2]:
+            res[item[0]] = [_pairs_to_dict(item[1]), []]
+        else:
+            res[item[0]] = [
+                _pairs_to_dict(item[1]),
+                [int(item[2][0]), float(item[2][1])],
+            ]
+    return res
+
+
+def parse_m_get_resp3_to_resp2_legacy(response, **kwargs):
+    """RESP3 wire → today's RESP2 legacy shape for TS.MGET (Set E)."""
+    res = []
+    for key, item in response.items():
+        labels = _nativestr_dict(item[0]) if item[0] else {}
+        sample = item[1] if len(item) > 1 else []
+        if not sample:
+            res.append({nativestr(key): [labels, None, None]})
+        else:
+            res.append({nativestr(key): [labels, int(sample[0]), float(sample[1])]})
+    return sorted(res, key=lambda d: list(d.keys()))
+
+
+def parse_m_range(response):
+    """Parse multi range response (Set A — RESP2 wire)."""
+    res = []
+    for item in response:
+        res.append({nativestr(item[0]): [list_to_dict(item[1]), parse_range(item[2])]})
+    return sorted(res, key=lambda d: list(d.keys()))
+
+
+def parse_m_range_unified(response, **kwargs):
+    """Unified parser for TS.MRANGE / TS.MREVRANGE (Sets C, D).
+
+    Emits ``{key: [labels_dict, [], samples]}`` regardless of wire format.
+    The middle element (RESP3's reducers/aggregators metadata) is dropped
+    so the unified shape is symmetric across protocols.
+    """
+    if isinstance(response, dict):
+        res = {}
+        for key, item in response.items():
+            res[key] = [item[0], [], parse_range_unified(item[-1])]
+        return res
+    res = {}
+    for item in response:
+        res[item[0]] = [_pairs_to_dict(item[1]), [], parse_range_unified(item[2])]
+    return res
+
+
+def parse_m_range_resp3_to_resp2_legacy(response, **kwargs):
+    """RESP3 wire → today's RESP2 legacy shape for TS.MRANGE / TS.MREVRANGE (Set E)."""
+    res = []
+    for key, item in response.items():
+        labels = _nativestr_dict(item[0]) if item[0] else {}
+        samples = item[-1]
+        res.append({nativestr(key): [labels, parse_range(samples)]})
     return sorted(res, key=lambda d: list(d.keys()))

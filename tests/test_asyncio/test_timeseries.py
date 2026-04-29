@@ -6,6 +6,8 @@ import pytest_asyncio
 import redis.asyncio as redis
 from tests.conftest import (
     assert_resp_response,
+    expected_response_shape,
+    expects_resp2_shape,
     is_resp2_connection,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
@@ -376,7 +378,7 @@ async def test_multi_range(decoded_r: redis.Redis):
     res = await decoded_r.ts().mrange(0, 200, filters=["Test=This"])
     assert res is not None
     assert 2 == len(res)
-    if is_resp2_connection(decoded_r):
+    if expects_resp2_shape(decoded_r):
         assert 100 == len(res[0][KEY1][1])
 
         res = await decoded_r.ts().mrange(0, 200, filters=["Test=This"], count=10)
@@ -441,7 +443,7 @@ async def test_multi_range_advanced(decoded_r: redis.Redis):
         0, 200, filters=["Test=This"], select_labels=["team"]
     )
     assert res is not None
-    if is_resp2_connection(decoded_r):
+    if expects_resp2_shape(decoded_r):
         assert {"team": "ny"} == res[0][KEY1][0]
         assert {"team": "sf"} == res[1][KEY2][0]
 
@@ -498,6 +500,15 @@ async def test_multi_range_advanced(decoded_r: redis.Redis):
         assert res is not None
         assert [(0, 5.0), (5, 6.0)] == res[0][KEY1][1]
     else:
+        # ``expected_response_shape`` is ``"unified"`` for
+        # ``legacy_responses=False`` (any protocol) and ``"legacy_resp3"``
+        # for ``protocol=3`` with ``legacy_responses=True``. The unified
+        # shape always emits ``[labels, [], samples]`` (samples at index
+        # 2); legacy RESP3 preserves the wire layout, appending an extra
+        # ``sources`` element under GROUPBY which pushes samples to index 3.
+        groupby_samples_idx = (
+            2 if expected_response_shape(decoded_r) == "unified" else 3
+        )
         assert {"team": "ny"} == res[KEY1][0]
         assert {"team": "sf"} == res[KEY2][0]
 
@@ -518,20 +529,28 @@ async def test_multi_range_advanced(decoded_r: redis.Redis):
             0, 3, filters=["Test=This"], groupby="Test", reduce="sum"
         )
         assert res is not None
-        assert [[0, 0.0], [1, 2.0], [2, 4.0], [3, 6.0]] == res["Test=This"][3]
+        assert [[0, 0.0], [1, 2.0], [2, 4.0], [3, 6.0]] == res["Test=This"][
+            groupby_samples_idx
+        ]
         res = await decoded_r.ts().mrange(
             0, 3, filters=["Test=This"], groupby="Test", reduce="max"
         )
         assert res is not None
-        assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["Test=This"][3]
+        assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["Test=This"][
+            groupby_samples_idx
+        ]
         res = await decoded_r.ts().mrange(
             0, 3, filters=["Test=This"], groupby="team", reduce="min"
         )
         assert res is not None
         assert 2 == len(res)
 
-        assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["team=ny"][3]
-        assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["team=sf"][3]
+        assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["team=ny"][
+            groupby_samples_idx
+        ]
+        assert [[0, 0.0], [1, 1.0], [2, 2.0], [3, 3.0]] == res["team=sf"][
+            groupby_samples_idx
+        ]
 
         # test align
         res = await decoded_r.ts().mrange(
@@ -568,10 +587,18 @@ async def test_multi_reverse_range(decoded_r: redis.Redis):
         await decoded_r.ts().add(KEY1, i, i % 7)
         await decoded_r.ts().add(KEY2, i, i % 11)
 
+    # ``expected_response_shape`` is ``"unified"`` for
+    # ``legacy_responses=False`` (any protocol) and ``"legacy_resp3"`` for
+    # ``protocol=3`` with ``legacy_responses=True``. The unified shape
+    # always emits ``[labels, [], samples]`` (samples at index 2); legacy
+    # RESP3 preserves the wire layout, appending an extra ``sources``
+    # element under GROUPBY which pushes samples to index 3.
+    groupby_samples_idx = 2 if expected_response_shape(decoded_r) == "unified" else 3
+
     res = await decoded_r.ts().mrange(0, 200, filters=["Test=This"])
     assert res is not None
     assert 2 == len(res)
-    if is_resp2_connection(decoded_r):
+    if expects_resp2_shape(decoded_r):
         assert 100 == len(res[0][KEY1][1])
 
         res = await decoded_r.ts().mrange(0, 200, filters=["Test=This"], count=10)
@@ -704,19 +731,27 @@ async def test_multi_reverse_range(decoded_r: redis.Redis):
             0, 3, filters=["Test=This"], groupby="Test", reduce="sum"
         )
         assert res is not None
-        assert [[3, 6.0], [2, 4.0], [1, 2.0], [0, 0.0]] == res["Test=This"][3]
+        assert [[3, 6.0], [2, 4.0], [1, 2.0], [0, 0.0]] == res["Test=This"][
+            groupby_samples_idx
+        ]
         res = await decoded_r.ts().mrevrange(
             0, 3, filters=["Test=This"], groupby="Test", reduce="max"
         )
         assert res is not None
-        assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["Test=This"][3]
+        assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["Test=This"][
+            groupby_samples_idx
+        ]
         res = await decoded_r.ts().mrevrange(
             0, 3, filters=["Test=This"], groupby="team", reduce="min"
         )
         assert res is not None
         assert 2 == len(res)
-        assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["team=ny"][3]
-        assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["team=sf"][3]
+        assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["team=ny"][
+            groupby_samples_idx
+        ]
+        assert [[3, 3.0], [2, 2.0], [1, 1.0], [0, 0.0]] == res["team=sf"][
+            groupby_samples_idx
+        ]
 
         # test align
         res = await decoded_r.ts().mrevrange(
@@ -765,7 +800,7 @@ async def test_mget(decoded_r: redis.Redis):
     await decoded_r.ts().add(KEY2, "*", 25)
     res = await decoded_r.ts().mget(["Test=This"])
     assert res is not None
-    if is_resp2_connection(decoded_r):
+    if expects_resp2_shape(decoded_r):
         assert 15 == res[0][KEY1][2]
         assert 25 == res[1][KEY2][2]
     else:
@@ -773,19 +808,19 @@ async def test_mget(decoded_r: redis.Redis):
         assert 25 == res[KEY2][1][1]
     res = await decoded_r.ts().mget(["Taste=That"])
     assert res is not None
-    if is_resp2_connection(decoded_r):
+    if expects_resp2_shape(decoded_r):
         assert 25 == res[0][KEY2][2]
     else:
         assert 25 == res[KEY2][1][1]
 
     # test with_labels
-    if is_resp2_connection(decoded_r):
+    if expects_resp2_shape(decoded_r):
         assert {} == res[0][KEY2][0]
     else:
         assert {} == res[KEY2][0]
     res = await decoded_r.ts().mget(["Taste=That"], with_labels=True)
     assert res is not None
-    if is_resp2_connection(decoded_r):
+    if expects_resp2_shape(decoded_r):
         assert {"Taste": "That", "Test": "This"} == res[0][KEY2][0]
     else:
         assert {"Taste": "That", "Test": "This"} == res[KEY2][0]
@@ -1111,6 +1146,10 @@ async def test_mrange_with_count_nan_count_all_aggregators(decoded_r: redis.Redi
             "temperature:A": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
             "temperature:B": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
         },
+        unified_expected={
+            "temperature:A": [{}, [], [[1000, 1.0]]],
+            "temperature:B": [{}, [], [[1000, 1.0]]],
+        },
     )
 
     # Ensure we count ALL values
@@ -1131,6 +1170,10 @@ async def test_mrange_with_count_nan_count_all_aggregators(decoded_r: redis.Redi
         {
             "temperature:A": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
             "temperature:B": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
+        },
+        unified_expected={
+            "temperature:A": [{}, [], [[1000, 2.0]]],
+            "temperature:B": [{}, [], [[1000, 2.0]]],
         },
     )
 
@@ -1174,6 +1217,10 @@ async def test_mrevrange_with_count_nan_count_all_aggregators(decoded_r: redis.R
             "temperature:A": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
             "temperature:B": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
         },
+        unified_expected={
+            "temperature:A": [{}, [], [[1000, 1.0]]],
+            "temperature:B": [{}, [], [[1000, 1.0]]],
+        },
     )
 
     # Ensure we count ALL values
@@ -1194,6 +1241,10 @@ async def test_mrevrange_with_count_nan_count_all_aggregators(decoded_r: redis.R
         {
             "temperature:A": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
             "temperature:B": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
+        },
+        unified_expected={
+            "temperature:A": [{}, [], [[1000, 2.0]]],
+            "temperature:B": [{}, [], [[1000, 2.0]]],
         },
     )
 
@@ -1259,7 +1310,7 @@ async def test_mrange_multiple_aggregators(decoded_r: redis.Redis):
         aggregation_type=["min", "max"],
         bucket_size_msec=10,
     )
-    if is_resp2_connection(decoded_r):
+    if expects_resp2_shape(decoded_r):
         assert len(result) == 1
         assert "ts:multi_agg_a" in result[0]
         samples = result[0]["ts:multi_agg_a"][1]
@@ -1287,7 +1338,7 @@ async def test_mrevrange_multiple_aggregators(decoded_r: redis.Redis):
         aggregation_type=["min", "max"],
         bucket_size_msec=10,
     )
-    if is_resp2_connection(decoded_r):
+    if expects_resp2_shape(decoded_r):
         assert len(result) == 1
         assert "ts:multi_agg_b" in result[0]
         samples = result[0]["ts:multi_agg_b"][1]

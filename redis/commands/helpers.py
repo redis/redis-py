@@ -156,7 +156,7 @@ def apply_module_callbacks(
         else:
             callbacks.update(resp2)
     else:
-        if user_protocol in (3, "3"):
+        if user_protocol is None or user_protocol in (3, "3"):
             callbacks.update(resp3_unified if resp3_unified is not None else resp3)
         else:
             callbacks.update(resp2_unified if resp2_unified is not None else resp2)
