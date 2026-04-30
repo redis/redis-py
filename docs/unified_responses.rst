@@ -14,7 +14,7 @@ Enable Unified Responses
 
 Use ``legacy_responses=False`` when constructing a client.
 
-.. code-block:: python
+.. code:: python
 
    import redis
 
@@ -29,17 +29,17 @@ Use ``legacy_responses=False`` when constructing a client.
 
 The same option is available for asyncio and cluster clients.
 
-.. code-block:: python
+.. code:: python
 
    import redis.asyncio as redis_async
    from redis.cluster import RedisCluster
 
-   ar = redis_async.Redis(legacy_responses=False)
+   async_r = redis_async.Redis(legacy_responses=False)
    cluster = RedisCluster(host="localhost", port=6379, legacy_responses=False)
 
 Connection URLs can also select unified responses.
 
-.. code-block:: python
+.. code:: python
 
    r = redis.from_url("redis://localhost:6379?legacy_responses=false")
    r = redis.from_url(
@@ -465,7 +465,7 @@ vector fields, intact.
 
 Use ``decode_field=True`` only for fields that are known text values.
 
-.. code-block:: python
+.. code:: python
 
    post = HybridPostProcessingConfig()
    post.load("@title", decode_field=True)

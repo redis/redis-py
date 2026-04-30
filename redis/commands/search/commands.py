@@ -743,13 +743,21 @@ class SearchCommands:
     def _parse_profile_resp3_unified(self, res, **kwargs):
         """Parse RESP3 FT.PROFILE for the unified shape.
 
-        Keeps ``profile_data`` as a native dict, mirroring the dict
-        produced by ``_parse_profile_unified`` on the RESP2 wire.
+        Redis < 7.9.0 returns RESP2 profile data as nested list-of-pairs,
+        while RESP3 returns the same data as a dict.  Convert that pre-7.9
+        RESP3 dict back to the RESP2 list shape so the unified surface is
+        protocol-independent.  Redis >= 7.9.0 coordinator profiles contain
+        ``Shards``/``Coordinator`` keys and stay as dicts, matching the
+        RESP2 unified parser.
         """
         if isinstance(res, list):
             return self._parse_profile_unified(res, **kwargs)
 
         result, profile_data = self._extract_resp3_profile_parts(res, **kwargs)
+        if isinstance(profile_data, dict) and not (
+            "Shards" in profile_data or "Coordinator" in profile_data
+        ):
+            profile_data = self._resp3_profile_dict_to_list(profile_data)
         return result, ProfileInformation(profile_data)
 
     @staticmethod
