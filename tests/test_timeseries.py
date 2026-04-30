@@ -665,10 +665,10 @@ def test_multi_range_advanced(client):
     else:
         # ``expected_response_shape`` is ``"unified"`` for
         # ``legacy_responses=False`` (any protocol) and ``"legacy_resp3"``
-        # for ``protocol=3`` with ``legacy_responses=True``. The unified
-        # shape always emits ``[labels, [], samples]`` (samples at index
-        # 2); legacy RESP3 preserves the wire layout, appending an extra
-        # ``sources`` element under GROUPBY which pushes samples to index 3.
+        # for ``protocol=3`` with ``legacy_responses=True``. Unified parsers
+        # keep samples at index 2; legacy RESP3 preserves the wire layout,
+        # appending an extra ``sources`` element under GROUPBY which pushes
+        # samples to index 3.
         groupby_samples_idx = 2 if expected_response_shape(client) == "unified" else 3
         assert {"team": "ny"} == res["1"][0]
         assert {"team": "sf"} == res["2"][0]
@@ -756,9 +756,9 @@ def test_mrange_latest(client: redis.Redis):
             "t2": [{}, {"aggregators": []}, [[0, 4.0], [10, 8.0]]],
             "t4": [{}, {"aggregators": []}, [[0, 4.0], [10, 8.0]]],
         },
-        unified_expected={
-            "t2": [{}, [], [[0, 4.0], [10, 8.0]]],
-            "t4": [{}, [], [[0, 4.0], [10, 8.0]]],
+        {
+            "t2": [{}, {"aggregators": []}, [[0, 4.0], [10, 8.0]]],
+            "t4": [{}, {"aggregators": []}, [[0, 4.0], [10, 8.0]]],
         },
     )
 
@@ -925,9 +925,9 @@ def test_mrevrange_latest(client: redis.Redis):
             "t2": [{}, {"aggregators": []}, [[10, 8.0], [0, 4.0]]],
             "t4": [{}, {"aggregators": []}, [[10, 8.0], [0, 4.0]]],
         },
-        unified_expected={
-            "t2": [{}, [], [[10, 8.0], [0, 4.0]]],
-            "t4": [{}, [], [[10, 8.0], [0, 4.0]]],
+        {
+            "t2": [{}, {"aggregators": []}, [[10, 8.0], [0, 4.0]]],
+            "t4": [{}, {"aggregators": []}, [[10, 8.0], [0, 4.0]]],
         },
     )
 
@@ -1392,9 +1392,17 @@ def test_mrange_with_count_nan_count_all_aggregators(client):
             "temperature:A": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
             "temperature:B": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
         },
-        unified_expected={
-            "temperature:A": [{}, [], [[1000, 1.0]]],
-            "temperature:B": [{}, [], [[1000, 1.0]]],
+        {
+            "temperature:A": [
+                {},
+                {"aggregators": ["countnan"]},
+                [[1000, 1.0]],
+            ],
+            "temperature:B": [
+                {},
+                {"aggregators": ["countnan"]},
+                [[1000, 1.0]],
+            ],
         },
     )
 
@@ -1417,9 +1425,17 @@ def test_mrange_with_count_nan_count_all_aggregators(client):
             "temperature:A": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
             "temperature:B": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
         },
-        unified_expected={
-            "temperature:A": [{}, [], [[1000, 2.0]]],
-            "temperature:B": [{}, [], [[1000, 2.0]]],
+        {
+            "temperature:A": [
+                {},
+                {"aggregators": ["countall"]},
+                [[1000, 2.0]],
+            ],
+            "temperature:B": [
+                {},
+                {"aggregators": ["countall"]},
+                [[1000, 2.0]],
+            ],
         },
     )
 
@@ -1463,9 +1479,17 @@ def test_mrevrange_with_count_nan_count_all_aggregators(client):
             "temperature:A": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
             "temperature:B": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
         },
-        unified_expected={
-            "temperature:A": [{}, [], [[1000, 1.0]]],
-            "temperature:B": [{}, [], [[1000, 1.0]]],
+        {
+            "temperature:A": [
+                {},
+                {"aggregators": ["countnan"]},
+                [[1000, 1.0]],
+            ],
+            "temperature:B": [
+                {},
+                {"aggregators": ["countnan"]},
+                [[1000, 1.0]],
+            ],
         },
     )
 
@@ -1488,9 +1512,17 @@ def test_mrevrange_with_count_nan_count_all_aggregators(client):
             "temperature:A": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
             "temperature:B": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
         },
-        unified_expected={
-            "temperature:A": [{}, [], [[1000, 2.0]]],
-            "temperature:B": [{}, [], [[1000, 2.0]]],
+        {
+            "temperature:A": [
+                {},
+                {"aggregators": ["countall"]},
+                [[1000, 2.0]],
+            ],
+            "temperature:B": [
+                {},
+                {"aggregators": ["countall"]},
+                [[1000, 2.0]],
+            ],
         },
     )
 

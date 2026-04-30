@@ -269,7 +269,10 @@ def test_nummultby(client):
             client, client.json().nummultby("num", Path.root_path(), 2.5), 5, [5]
         )
         assert_resp_response(
-            client, client.json().nummultby("num", Path.root_path(), 0.5), 2.5, [2.5]
+            client,
+            client.json().nummultby("num", Path.root_path(), 0.5),
+            2.5,
+            [2.5],
         )
 
 
@@ -610,7 +613,6 @@ def test_numby_commands_dollar(client):
         client.json().numincrby("non_existing_doc", "$..a", 2)
         client.json().nummultby("non_existing_doc", "$..a", 2)
 
-    # Test legacy NUMINCRBY
     client.json().set("doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]})
     assert_resp_response(client, client.json().numincrby("doc1", ".b[0].a", 3), 5, [5])
 
@@ -1032,7 +1034,7 @@ def test_type_dollar(client):
 
     # Test missing key
     assert_resp_response(
-        client, client.json().type("non_existing_doc", "..a"), None, [None]
+        client, client.json().type("non_existing_doc", "..a"), None, [None], None
     )
 
 

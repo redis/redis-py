@@ -48,7 +48,8 @@ from redis.exceptions import (
 from redis.utils import str_if_bytes
 from tests.conftest import (
     assert_resp_response,
-    is_resp2_connection,
+    expects_resp2_shape,
+    expects_unified_shape,
     skip_if_redis_enterprise,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
@@ -1185,7 +1186,9 @@ class TestClusterRedisCommands:
         node = r.get_random_node()
         await r.client_setname("redis_py_test", target_nodes=node)
         client_name = await r.client_getname(target_nodes=node)
-        assert_resp_response(r, client_name, "redis_py_test", b"redis_py_test")
+        assert_resp_response(
+            r, client_name, "redis_py_test", b"redis_py_test", "redis_py_test"
+        )
 
     async def test_exists(self, r: RedisCluster) -> None:
         d = {"a": b"1", "b": b"2", "c": b"3", "d": b"4"}
@@ -1479,12 +1482,22 @@ class TestClusterRedisCommands:
     async def test_cluster_links(self, r: RedisCluster):
         node = r.get_random_node()
         res = await r.cluster_links(node)
-        if is_resp2_connection(r):
+        if expects_resp2_shape(r):
             links_to = sum(x.count(b"to") for x in res)
             links_for = sum(x.count(b"from") for x in res)
             assert links_to == links_for
             for i in range(0, len(res) - 1, 2):
                 assert res[i][3] == res[i + 1][3]
+        elif expects_unified_shape(r):
+            links_to = len(
+                list(filter(lambda x: str_if_bytes(x["direction"]) == "to", res))
+            )
+            links_for = len(
+                list(filter(lambda x: str_if_bytes(x["direction"]) == "from", res))
+            )
+            assert links_to == links_for
+            for i in range(0, len(res) - 1, 2):
+                assert res[i]["node"] == res[i + 1]["node"]
         else:
             links_to = len(list(filter(lambda x: x[b"direction"] == b"to", res)))
             links_for = len(list(filter(lambda x: x[b"direction"] == b"from", res)))

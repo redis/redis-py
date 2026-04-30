@@ -95,6 +95,19 @@ def parse_memory_stats(response, **kwargs):
     return stats
 
 
+def parse_memory_stats_unified(response, **kwargs):
+    """Parse MEMORY STATS for unified RESP2 output.
+
+    Unified responses decode structural keys while preserving string-like
+    values as delivered, matching the approved RESP2/RESP3 unification shape.
+    """
+    stats = pairs_to_dict(response, decode_keys=True)
+    for key, value in stats.items():
+        if key.startswith("db.") and isinstance(value, list):
+            stats[key] = pairs_to_dict(value, decode_keys=True)
+    return stats
+
+
 def parse_memory_stats_resp3(response, **kwargs):
     """Parse the results of MEMORY STATS on RESP3 wire.
 
@@ -181,11 +194,12 @@ def parse_sentinel_master(response, **options):
 def parse_sentinel_state_resp3(response, **options):
     result = {}
     for key in response:
+        str_key = str_if_bytes(key)
         try:
-            value = SENTINEL_STATE_TYPES[key](str_if_bytes(response[key]))
-            result[str_if_bytes(key)] = value
+            value = SENTINEL_STATE_TYPES[str_key](str_if_bytes(response[key]))
+            result[str_key] = value
         except Exception:
-            result[str_if_bytes(key)] = response[str_if_bytes(key)]
+            result[str_key] = str_if_bytes(response[key])
     flags = set(result["flags"].split(","))
     result["flags"] = flags
     return result
@@ -635,9 +649,12 @@ def parse_lcs_idx_unified(response, **options):
     RESP3's native ``dict`` shape. Non-IDX responses (``bytes`` / ``int``)
     pass through unchanged.
     """
-    if not isinstance(response, list):
-        return response
-    return dict(zip(response[::2], response[1::2]))
+    if isinstance(response, list):
+        it = iter(response)
+        return {str_if_bytes(key): value for key, value in zip(it, it)}
+    if isinstance(response, dict):
+        return {str_if_bytes(key): value for key, value in response.items()}
+    return response
 
 
 def parse_lcs_idx_resp3_to_resp2_legacy(response, **options):
@@ -662,10 +679,17 @@ def parse_client_trackinginfo_unified(response, **options):
     native ``dict`` and returns a ``dict`` with ``str`` keys.
     """
     if isinstance(response, dict):
-        return {str_if_bytes(key): value for key, value in response.items()}
-    return {
-        str_if_bytes(key): value for key, value in zip(response[::2], response[1::2])
-    }
+        data = {str_if_bytes(key): value for key, value in response.items()}
+    else:
+        data = {
+            str_if_bytes(key): value
+            for key, value in zip(response[::2], response[1::2])
+        }
+    if "flags" in data:
+        data["flags"] = [str_if_bytes(flag) for flag in data["flags"]]
+    if "prefixes" in data:
+        data["prefixes"] = [str_if_bytes(prefix) for prefix in data["prefixes"]]
+    return data
 
 
 def parse_client_trackinginfo_resp3_to_resp2_legacy(response, **options):
@@ -905,6 +929,15 @@ def parse_zscan(response, **options):
     return int(cursor), list(zip(it, map(score_cast_func, it)))
 
 
+def parse_zscan_unified(response, **options):
+    score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
+    cursor, r = response
+    it = iter(r)
+    return int(cursor), [
+        [value, score_cast_func(float(score))] for value, score in zip(it, it)
+    ]
+
+
 def parse_zmscore(response, **options):
     # zmscore: list of scores (double precision floating point number) or nil
     return [float(score) if score is not None else None for score in response]
@@ -965,6 +998,50 @@ def parse_stralgo(response, **options):
             str_if_bytes(response[0]): matches,
             str_if_bytes(response[2]): int(response[3]),
         }
+    return str_if_bytes(response)
+
+
+def parse_stralgo_unified(response, **options):
+    """
+    Parse STRALGO into the approved unified shape.
+
+    The legacy parser returns tuple ranges for IDX responses. Unified
+    responses use list ranges so RESP2 and RESP3 produce the same value.
+    """
+    if options.get("len", False):
+        return int(response)
+    if options.get("idx", False):
+        if options.get("withmatchlen", False):
+            matches = [
+                [int(match[-1])] + [list(m) for m in match[:-1]]
+                for match in response[1]
+            ]
+        else:
+            matches = [[list(m) for m in match] for match in response[1]]
+        return {
+            str_if_bytes(response[0]): matches,
+            str_if_bytes(response[2]): int(response[3]),
+        }
+    return str_if_bytes(response)
+
+
+def parse_stralgo_resp3_unified(response, **options):
+    """Parse RESP3 STRALGO into the same value as ``parse_stralgo_unified``."""
+    if options.get("len", False):
+        return int(response)
+    if options.get("idx", False):
+        if not isinstance(response, dict):
+            return str_if_bytes(response)
+        raw_matches = response.get("matches", response.get(b"matches", []))
+        raw_len = response.get("len", response.get(b"len", 0))
+        if options.get("withmatchlen", False):
+            matches = [
+                [int(match[-1])] + [list(m) for m in match[:-1]]
+                for match in raw_matches
+            ]
+        else:
+            matches = [[list(m) for m in match] for match in raw_matches]
+        return {"matches": matches, "len": int(raw_len)}
     return str_if_bytes(response)
 
 
@@ -1062,6 +1139,31 @@ def parse_geosearch_generic(response, **options):
     return [list(map(lambda fv: fv[0](fv[1]), zip(f, r))) for r in response_list]
 
 
+def parse_geosearch_generic_unified(response, **options):
+    """
+    Parse GEOSEARCH/GEORADIUS responses using tuple coordinates.
+    """
+    try:
+        if options["store"] or options["store_dist"]:
+            return response
+    except KeyError:
+        return response
+
+    response_list = response if isinstance(response, list) else [response]
+
+    if not options["withdist"] and not options["withcoord"] and not options["withhash"]:
+        return response_list
+
+    cast = {
+        "withdist": float,
+        "withcoord": lambda ll: (float(ll[0]), float(ll[1])),
+        "withhash": int,
+    }
+    funcs = [lambda x: x]
+    funcs += [cast[o] for o in ["withdist", "withhash", "withcoord"] if options[o]]
+    return [list(map(lambda fv: fv[0](fv[1]), zip(funcs, r))) for r in response_list]
+
+
 def parse_command(response, **options):
     commands = {}
     for command in response:
@@ -1073,6 +1175,27 @@ def parse_command(response, **options):
         cmd_dict["first_key_pos"] = command[3]
         cmd_dict["last_key_pos"] = command[4]
         cmd_dict["step_count"] = command[5]
+        if len(command) > 7:
+            cmd_dict["tips"] = command[7]
+            cmd_dict["key_specifications"] = command[8]
+            cmd_dict["subcommands"] = command[9]
+        commands[cmd_name] = cmd_dict
+    return commands
+
+
+def parse_command_unified(response, **options):
+    commands = {}
+    for command in response:
+        cmd_dict = {}
+        cmd_name = str_if_bytes(command[0])
+        cmd_dict["name"] = cmd_name
+        cmd_dict["arity"] = int(command[1])
+        cmd_dict["flags"] = {str_if_bytes(flag) for flag in command[2]}
+        cmd_dict["first_key_pos"] = command[3]
+        cmd_dict["last_key_pos"] = command[4]
+        cmd_dict["step_count"] = command[5]
+        if len(command) > 6:
+            cmd_dict["acl_categories"] = {str_if_bytes(c) for c in command[6]}
         if len(command) > 7:
             cmd_dict["tips"] = command[7]
             cmd_dict["key_specifications"] = command[8]
@@ -1197,6 +1320,29 @@ def parse_acl_log_resp3_to_resp2_legacy(response, **options):
         client_info = log_data.get("client-info", "")
         log_data["client-info"] = parse_client_info(client_info)
         log_data["age-seconds"] = float(log_data["age-seconds"])
+        data.append(log_data)
+    return data
+
+
+def parse_acl_log_resp3_unified(response, **options):
+    """Parse RESP3 ACL LOG into the approved unified shape."""
+    if response is None:
+        return None
+    if not isinstance(response, list):
+        return bool_ok(response)
+    data = []
+    for entry in response:
+        if isinstance(entry, dict):
+            log_data = {str_if_bytes(k): v for k, v in entry.items()}
+        else:
+            log_data = pairs_to_dict(entry, True, True)
+        if "age-seconds" in log_data:
+            log_data["age-seconds"] = float(log_data["age-seconds"])
+        if "client-info" in log_data:
+            log_data["client-info"] = parse_client_info(log_data["client-info"])
+        for key, value in list(log_data.items()):
+            if key not in ("age-seconds", "client-info"):
+                log_data[key] = str_if_bytes(value)
         data.append(log_data)
     return data
 
@@ -1356,7 +1502,7 @@ def parse_function_list_resp3_to_resp2_legacy(response, **options):
 
 
 def parse_cluster_links_unified(response, **options):
-    """CLUSTER LINKS → unified ``list[dict]`` with bytes keys.
+    """CLUSTER LINKS → unified ``list[dict]`` with string keys.
 
     Accepts either RESP2 wire (``list[list]`` of flat pairs) or RESP3
     wire (``list[dict]``). Both are normalised to ``list[dict]``.
@@ -1364,7 +1510,10 @@ def parse_cluster_links_unified(response, **options):
     if response is None:
         return None
     return [
-        item if isinstance(item, dict) else pairs_to_dict(item) for item in response
+        {str_if_bytes(k): v for k, v in item.items()}
+        if isinstance(item, dict)
+        else pairs_to_dict(item, decode_keys=True)
+        for item in response
     ]
 
 

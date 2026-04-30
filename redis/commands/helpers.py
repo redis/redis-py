@@ -65,6 +65,9 @@ def parse_to_list(response):
         if item is None:
             res.append(None)
             continue
+        if isinstance(item, float):
+            res.append(item)
+            continue
         try:
             item_str = nativestr(item)
         except TypeError:
@@ -76,10 +79,10 @@ def parse_to_list(response):
         else:
             try:
                 res.append(int(item))
-            except ValueError:
+            except (ValueError, OverflowError, TypeError):
                 try:
                     res.append(float(item))
-                except ValueError:
+                except (ValueError, TypeError):
                     res.append(item_str)
 
     return res

@@ -266,9 +266,8 @@ async def test_type(decoded_r: redis.Redis):
 @pytest.mark.redismod
 async def test_numincrby(decoded_r):
     await decoded_r.json().set("num", Path.root_path(), 1)
-    assert_resp_response(
-        decoded_r, await decoded_r.json().numincrby("num", Path.root_path(), 1), 2, [2]
-    )
+    res = await decoded_r.json().numincrby("num", Path.root_path(), 1)
+    assert_resp_response(decoded_r, res, 2, [2])
     res = await decoded_r.json().numincrby("num", Path.root_path(), 0.5)
     assert_resp_response(decoded_r, res, 2.5, [2.5])
     res = await decoded_r.json().numincrby("num", Path.root_path(), -1.25)
@@ -634,13 +633,11 @@ async def test_numby_commands_dollar(decoded_r: redis.Redis):
         await decoded_r.json().numincrby("non_existing_doc", "$..a", 2)
         await decoded_r.json().nummultby("non_existing_doc", "$..a", 2)
 
-    # Test legacy NUMINCRBY
     await decoded_r.json().set(
         "doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]}
     )
-    assert_resp_response(
-        decoded_r, await decoded_r.json().numincrby("doc1", ".b[0].a", 3), 5, [5]
-    )
+    res = await decoded_r.json().numincrby("doc1", ".b[0].a", 3)
+    assert_resp_response(decoded_r, res, 5, [5])
 
     # Test legacy NUMMULTBY
     await decoded_r.json().set(
@@ -648,9 +645,8 @@ async def test_numby_commands_dollar(decoded_r: redis.Redis):
     )
 
     with pytest.deprecated_call():
-        assert_resp_response(
-            decoded_r, await decoded_r.json().nummultby("doc1", ".b[0].a", 3), 6, [6]
-        )
+        res = await decoded_r.json().nummultby("doc1", ".b[0].a", 3)
+        assert_resp_response(decoded_r, res, 6, [6])
 
 
 @pytest.mark.redismod
@@ -1059,7 +1055,11 @@ async def test_type_dollar(decoded_r: redis.Redis):
 
     # Test missing key
     assert_resp_response(
-        decoded_r, await decoded_r.json().type("non_existing_doc", "..a"), None, [None]
+        decoded_r,
+        await decoded_r.json().type("non_existing_doc", "..a"),
+        None,
+        [None],
+        None,
     )
 
 

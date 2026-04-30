@@ -59,7 +59,8 @@ from tests.test_pubsub import wait_for_message
 from .conftest import (
     _get_client,
     assert_resp_response,
-    is_resp2_connection,
+    expects_resp2_shape,
+    expects_unified_shape,
     skip_if_redis_enterprise,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
@@ -1183,7 +1184,9 @@ class TestClusterRedisCommands:
         node = r.get_random_node()
         r.client_setname("redis_py_test", target_nodes=node)
         client_name = r.client_getname(target_nodes=node)
-        assert_resp_response(r, client_name, "redis_py_test", b"redis_py_test")
+        assert_resp_response(
+            r, client_name, "redis_py_test", b"redis_py_test", "redis_py_test"
+        )
 
     def test_exists(self, r):
         d = {"a": b"1", "b": b"2", "c": b"3", "d": b"4"}
@@ -1339,9 +1342,15 @@ class TestClusterRedisCommands:
             b"replication-offset",
             b"health",
         ]
+        if expects_unified_shape(r):
+            attributes = [str_if_bytes(attribute) for attribute in attributes]
         for x in cluster_shards:
             assert_resp_response(
-                r, list(x.keys()), ["slots", "nodes"], [b"slots", b"nodes"]
+                r,
+                list(x.keys()),
+                ["slots", "nodes"],
+                [b"slots", b"nodes"],
+                ["slots", "nodes"],
             )
             try:
                 x["nodes"]
@@ -1605,12 +1614,22 @@ class TestClusterRedisCommands:
     def test_cluster_links(self, r):
         node = r.get_random_node()
         res = r.cluster_links(node)
-        if is_resp2_connection(r):
+        if expects_resp2_shape(r):
             links_to = sum(x.count(b"to") for x in res)
             links_for = sum(x.count(b"from") for x in res)
             assert links_to == links_for
             for i in range(0, len(res) - 1, 2):
                 assert res[i][3] == res[i + 1][3]
+        elif expects_unified_shape(r):
+            links_to = len(
+                list(filter(lambda x: str_if_bytes(x["direction"]) == "to", res))
+            )
+            links_for = len(
+                list(filter(lambda x: str_if_bytes(x["direction"]) == "from", res))
+            )
+            assert links_to == links_for
+            for i in range(0, len(res) - 1, 2):
+                assert res[i]["node"] == res[i + 1]["node"]
         else:
             links_to = len(list(filter(lambda x: x[b"direction"] == b"to", res)))
             links_for = len(list(filter(lambda x: x[b"direction"] == b"from", res)))

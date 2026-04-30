@@ -48,16 +48,21 @@ from redis.typing import (
     BlockingListPopResponse,
     BlockingZSetPopResponse,
     ChannelT,
+    ClientTrackingInfoResponse,
     CommandGetKeysAndFlagsResponse,
     CommandsProtocol,
     ConsumerT,
     EncodableT,
     ExpiryT,
     FieldT,
+    GeoCoordinate,
+    GeoRadiusResponse,
+    GeoSearchResponse,
     GroupT,
     HScanResponse,
     KeysT,
     KeyT,
+    LCSCommandResponse,
     ListMultiPopResponse,
     Number,
     PatternT,
@@ -1126,16 +1131,16 @@ class ManagementCommands(CommandsProtocol):
     @overload
     def client_trackinginfo(
         self: SyncClientProtocol, **kwargs
-    ) -> list[bytes | str]: ...
+    ) -> ClientTrackingInfoResponse: ...
 
     @overload
     def client_trackinginfo(
         self: AsyncClientProtocol, **kwargs
-    ) -> Awaitable[list[bytes | str]]: ...
+    ) -> Awaitable[ClientTrackingInfoResponse]: ...
 
     def client_trackinginfo(
         self, **kwargs
-    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+    ) -> ClientTrackingInfoResponse | Awaitable[ClientTrackingInfoResponse]:
         """
         Returns the information about the current client connection's
         use of the server assisted client side cache.
@@ -4539,7 +4544,7 @@ class BasicKeyCommands(CommandsProtocol):
         idx: bool | None = False,
         minmatchlen: int | None = 0,
         withmatchlen: bool | None = False,
-    ) -> bytes | str | int | list[Any] | dict[Any, Any]: ...
+    ) -> LCSCommandResponse: ...
 
     @overload
     def lcs(
@@ -4550,7 +4555,7 @@ class BasicKeyCommands(CommandsProtocol):
         idx: bool | None = False,
         minmatchlen: int | None = 0,
         withmatchlen: bool | None = False,
-    ) -> Awaitable[bytes | str | int | list[Any] | dict[Any, Any]]: ...
+    ) -> Awaitable[LCSCommandResponse]: ...
 
     def lcs(
         self,
@@ -4560,9 +4565,7 @@ class BasicKeyCommands(CommandsProtocol):
         idx: bool | None = False,
         minmatchlen: int | None = 0,
         withmatchlen: bool | None = False,
-    ) -> (bytes | str | int | list[Any] | dict[Any, Any]) | Awaitable[
-        bytes | str | int | list[Any] | dict[Any, Any]
-    ]:
+    ) -> LCSCommandResponse | Awaitable[LCSCommandResponse]:
         """
         Find the longest common subsequence between ``key1`` and ``key2``.
         If ``len`` is true the length of the match will be returned.
@@ -10496,16 +10499,16 @@ class GeoCommands(CommandsProtocol):
     @overload
     def geopos(
         self: SyncClientProtocol, name: KeyT, *values: FieldT
-    ) -> list[tuple[float, float] | None]: ...
+    ) -> list[GeoCoordinate | None]: ...
 
     @overload
     def geopos(
         self: AsyncClientProtocol, name: KeyT, *values: FieldT
-    ) -> Awaitable[list[tuple[float, float] | None]]: ...
+    ) -> Awaitable[list[GeoCoordinate | None]]: ...
 
     def geopos(
         self, name: KeyT, *values: FieldT
-    ) -> list[tuple[float, float] | None] | Awaitable[list[tuple[float, float] | None]]:
+    ) -> list[GeoCoordinate | None] | Awaitable[list[GeoCoordinate | None]]:
         """
         Return the positions of each item of ``values`` as members of
         the specified key identified by the ``name`` argument. Each position
@@ -10531,7 +10534,7 @@ class GeoCommands(CommandsProtocol):
         store: KeyT | None = None,
         store_dist: KeyT | None = None,
         any: bool = False,
-    ) -> list[Any] | int: ...
+    ) -> GeoRadiusResponse: ...
 
     @overload
     def georadius(
@@ -10549,7 +10552,7 @@ class GeoCommands(CommandsProtocol):
         store: KeyT | None = None,
         store_dist: KeyT | None = None,
         any: bool = False,
-    ) -> Awaitable[list[Any] | int]: ...
+    ) -> Awaitable[GeoRadiusResponse]: ...
 
     def georadius(
         self,
@@ -10566,7 +10569,7 @@ class GeoCommands(CommandsProtocol):
         store: KeyT | None = None,
         store_dist: KeyT | None = None,
         any: bool = False,
-    ) -> (list[Any] | int) | Awaitable[list[Any] | int]:
+    ) -> GeoRadiusResponse | Awaitable[GeoRadiusResponse]:
         """
         Return the members of the specified key identified by the
         ``name`` argument which are within the borders of the area specified
@@ -10629,7 +10632,7 @@ class GeoCommands(CommandsProtocol):
         store: KeyT | None = None,
         store_dist: KeyT | None = None,
         any: bool = False,
-    ) -> list[Any] | int: ...
+    ) -> GeoRadiusResponse: ...
 
     @overload
     def georadiusbymember(
@@ -10646,7 +10649,7 @@ class GeoCommands(CommandsProtocol):
         store: KeyT | None = None,
         store_dist: KeyT | None = None,
         any: bool = False,
-    ) -> Awaitable[list[Any] | int]: ...
+    ) -> Awaitable[GeoRadiusResponse]: ...
 
     def georadiusbymember(
         self,
@@ -10662,7 +10665,7 @@ class GeoCommands(CommandsProtocol):
         store: Union[KeyT, None] = None,
         store_dist: Union[KeyT, None] = None,
         any: bool = False,
-    ) -> (list[Any] | int) | Awaitable[list[Any] | int]:
+    ) -> GeoRadiusResponse | Awaitable[GeoRadiusResponse]:
         """
         This command is exactly like ``georadius`` with the sole difference
         that instead of taking, as the center of the area to query, a longitude
@@ -10750,7 +10753,7 @@ class GeoCommands(CommandsProtocol):
         withcoord: bool = False,
         withdist: bool = False,
         withhash: bool = False,
-    ) -> list[Any]: ...
+    ) -> GeoSearchResponse: ...
 
     @overload
     def geosearch(
@@ -10769,7 +10772,7 @@ class GeoCommands(CommandsProtocol):
         withcoord: bool = False,
         withdist: bool = False,
         withhash: bool = False,
-    ) -> Awaitable[list[Any]]: ...
+    ) -> Awaitable[GeoSearchResponse]: ...
 
     def geosearch(
         self,
@@ -10787,7 +10790,7 @@ class GeoCommands(CommandsProtocol):
         withcoord: bool = False,
         withdist: bool = False,
         withhash: bool = False,
-    ) -> list[Any] | Awaitable[list[Any]]:
+    ) -> GeoSearchResponse | Awaitable[GeoSearchResponse]:
         """
         Return the members of specified key identified by the
         ``name`` argument, which are within the borders of the

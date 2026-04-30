@@ -61,8 +61,8 @@ class _JSONBase(JSONCommands):
             "JSON.DEL": int,
             "JSON.FORGET": int,
             "JSON.GET": self._decode,
-            "JSON.NUMINCRBY": self._decode,
-            "JSON.NUMMULTBY": self._decode,
+            "JSON.NUMINCRBY": lambda r, **kwargs: self._decode(r),
+            "JSON.NUMMULTBY": lambda r, **kwargs: self._decode(r),
             "JSON.OBJKEYS": self._decode,
             "JSON.STRAPPEND": self._decode,
             "JSON.OBJLEN": self._decode,
@@ -71,9 +71,35 @@ class _JSONBase(JSONCommands):
         }
 
         _RESP3_MODULE_CALLBACKS = {}
-        _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
-        _RESP3_UNIFIED_MODULE_CALLBACKS = dict(_RESP3_MODULE_CALLBACKS)
-        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {}
+        # RESP2 wire normalised to the unified shape from the reverted
+        # unification PR: NUMINCRBY/NUMMULTBY are always arrays,
+        # JSON.RESP uses native floats, and missing JSON.TYPE keys stay
+        # ``None`` instead of becoming ``[None]``.
+        _RESP2_UNIFIED_MODULE_CALLBACKS = {
+            "JSON.CLEAR": int,
+            "JSON.DEL": int,
+            "JSON.FORGET": int,
+            "JSON.NUMINCRBY": self._decode_json_numop,
+            "JSON.NUMMULTBY": self._decode_json_numop,
+            "JSON.RESP": self._decode_resp_command_unified,
+            "JSON.TYPE": lambda r: [r] if r is not None else r,
+        }
+        _RESP3_UNIFIED_MODULE_CALLBACKS = {
+            "JSON.TYPE": lambda r: None if r == [None] else r,
+        }
+        # RESP3 wire normalised back to today's RESP2 Python shapes:
+        # keep ``nativestr`` for OBJKEYS, unwrap JSON.TYPE one level so
+        # legacy paths return scalars and missing keys return ``None``,
+        # and re-encode native floats inside JSON.RESP back to string
+        # form. NUMINCRBY/NUMMULTBY use the command path captured at the
+        # call site to unwrap legacy paths while preserving JSONPath arrays.
+        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
+            "JSON.NUMINCRBY": self._decode_resp3_legacy_numop,
+            "JSON.NUMMULTBY": self._decode_resp3_legacy_numop,
+            "JSON.OBJKEYS": self._decode,
+            "JSON.RESP": self._resp_floats_to_str_command,
+            "JSON.TYPE": lambda r: r[0] if isinstance(r, list) and len(r) == 1 else r,
+        }
 
         self.client = client
         self.execute_command = client.execute_command
@@ -114,6 +140,90 @@ class _JSONBase(JSONCommands):
         except (AttributeError, JSONDecodeError):
             return decode_list(obj)
 
+    def _decode_json_numop(self, obj, **kwargs):
+        """Decode a JSON.NUMINCRBY / JSON.NUMMULTBY result and normalise
+        it to the unified array form.
+
+        RESP2 wire returns a JSON bulk string — a scalar for legacy
+        paths and a JSON-encoded list for dollar paths. RESP3 wire
+        returns a native list. The unified shape is always a list.
+        """
+        if obj is None:
+            return obj
+        try:
+            result = self.__decoder__.decode(
+                obj if isinstance(obj, str) else obj.decode()
+            )
+        except (AttributeError, JSONDecodeError):
+            return obj
+        if not isinstance(result, list):
+            result = [result]
+        return result
+
+    def _decode_resp3_legacy_numop(self, obj, **kwargs):
+        """Decode RESP3 JSON numeric operations back to legacy RESP2 shape.
+
+        RedisJSON returns a RESP3 array for both legacy paths (``.foo``)
+        and JSONPath paths (``$.foo``). The command builder records the
+        path so default RESP3-wire legacy clients can keep v8 scalar
+        results for legacy paths while leaving JSONPath results as lists.
+        """
+        result = self._decode(obj)
+        path = kwargs.get("_json_path")
+        if (
+            isinstance(path, str)
+            and not path.startswith("$")
+            and isinstance(result, list)
+            and len(result) == 1
+        ):
+            return result[0]
+        return result
+
+    def _decode_resp_command_unified(self, obj):
+        """Decode JSON.RESP and lift string-encoded floats inside the
+        nested response to native ``float`` values so the unified shape
+        matches the RESP3 wire.
+        """
+        return self._convert_resp_floats(self._decode(obj))
+
+    def _resp_floats_to_str_command(self, obj):
+        """Decode JSON.RESP and re-encode native ``float`` values back
+        to their string form so the legacy RESP2 shape is preserved
+        when the wire is RESP3.
+        """
+        return self._resp_floats_to_str(self._decode(obj))
+
+    @staticmethod
+    def _convert_resp_floats(obj):
+        """Recursively convert string-encoded JSON floats.
+
+        RESP2 has no native double type, so JSON.RESP returns JSON floats as
+        bulk strings. Any string/bytes leaf that parses as ``float`` is the
+        unified representation of such a value; non-numeric strings are left
+        untouched.
+        """
+        if isinstance(obj, list):
+            return [_JSONBase._convert_resp_floats(item) for item in obj]
+        if isinstance(obj, (str, bytes)):
+            value = obj.decode() if isinstance(obj, bytes) else obj
+            try:
+                return float(value)
+            except (ValueError, OverflowError):
+                return obj
+        return obj
+
+    @staticmethod
+    def _resp_floats_to_str(obj):
+        """Recursively walk ``obj`` and convert native ``float`` values
+        back to their string-encoded form. Lists are walked
+        element-wise; non-float leaves are returned unchanged.
+        """
+        if isinstance(obj, list):
+            return [_JSONBase._resp_floats_to_str(item) for item in obj]
+        if isinstance(obj, float):
+            return str(obj)
+        return obj
+
     def _encode(self, obj):
         """Get the encoder."""
         return self.__encoder__.encode(obj)
@@ -146,7 +256,7 @@ class _JSONBase(JSONCommands):
         else:
             p = Pipeline(
                 connection_pool=self.client.connection_pool,
-                response_callbacks=self._MODULE_CALLBACKS,
+                response_callbacks=dict(self.client.response_callbacks),
                 transaction=transaction,
                 shard_hint=shard_hint,
             )

@@ -89,7 +89,14 @@ The above code connects to localhost on port 6379, sets a value in Redis, and re
 
 
 #### RESP3 Support
-To enable support for RESP3, ensure you have at least version 5.0 of the client, and change your connection object to include *protocol=3*
+redis-py supports RESP3 starting with version 5.0. Starting with redis-py 8.0,
+clients use RESP3 on the wire by default while preserving legacy
+RESP2-compatible Python response shapes for existing applications.
+
+To make RESP3 explicit, or to receive native RESP3 response shapes, set
+*protocol=3* on the connection object. To force RESP2 on the wire, set
+*protocol=2*. To opt in to protocol-independent response shapes, set
+*legacy_responses=False*.
 
 ``` python
 >>> import redis

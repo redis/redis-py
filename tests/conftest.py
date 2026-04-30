@@ -877,6 +877,18 @@ def expects_resp2_shape(r):
     return expected_response_shape(r) == "legacy_resp2"
 
 
+def expects_resp3_shape(r):
+    """Return ``True`` when Python responses on ``r`` use native RESP3 shapes
+    (``protocol=3`` with ``legacy_responses=True``)."""
+    return expected_response_shape(r) == "legacy_resp3"
+
+
+def expects_unified_shape(r):
+    """Return ``True`` when Python responses on ``r`` use the unified shape
+    (``legacy_responses=False``)."""
+    return expected_response_shape(r) == "unified"
+
+
 _UNSET = object()
 
 

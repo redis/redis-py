@@ -320,8 +320,9 @@ class JSONCommands:
 
         For more information see `JSON.NUMINCRBY <https://redis.io/commands/json.numincrby>`_.
         """  # noqa
+        path = str(path)
         return self.execute_command(
-            "JSON.NUMINCRBY", name, str(path), self._encode(number)
+            "JSON.NUMINCRBY", name, path, self._encode(number), _json_path=path
         )
 
     @overload
@@ -343,8 +344,9 @@ class JSONCommands:
 
         For more information see `JSON.NUMMULTBY <https://redis.io/commands/json.nummultby>`_.
         """  # noqa
+        path = str(path)
         return self.execute_command(
-            "JSON.NUMMULTBY", name, str(path), self._encode(number)
+            "JSON.NUMMULTBY", name, path, self._encode(number), _json_path=path
         )
 
     @overload

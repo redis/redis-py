@@ -32,6 +32,9 @@ from .conftest import (
     _get_client,
     assert_resp_response,
     assert_resp_response_in,
+    expects_resp2_shape,
+    expects_resp3_shape,
+    expects_unified_shape,
     expected_response_shape,
     skip_if_redis_enterprise,
     skip_if_server_version_gte,
@@ -1038,10 +1041,12 @@ class TestRedisCommands:
             default_dialect_new = "3"
             assert r.config_set("search-default-dialect", default_dialect_new)
             assert r.config_get("*")["search-default-dialect"] == default_dialect_new
-            assert (
-                (r.ft().config_get("*")[b"DEFAULT_DIALECT"]).decode()
-                == default_dialect_new
-            )
+            search_config = r.ft().config_get("*")
+            if expects_resp2_shape(r) or expects_resp3_shape(r):
+                dialect = search_config[b"DEFAULT_DIALECT"].decode()
+            elif expects_unified_shape(r):
+                dialect = search_config["DEFAULT_DIALECT"]
+            assert dialect == default_dialect_new
         except AssertionError as ex:
             raise ex
         finally:
@@ -1959,6 +1964,7 @@ class TestRedisCommands:
             r.lcs("foo", "bar", idx=True, minmatchlen=3),
             [b"matches", [[[4, 7], [5, 8]]], b"len", 6],
             {b"matches": [[[4, 7], [5, 8]]], b"len": 6},
+            {"matches": [[[4, 7], [5, 8]]], "len": 6},
         )
         with pytest.raises(redis.ResponseError):
             assert r.lcs("foo", "bar", len=True, idx=True)
@@ -3032,12 +3038,14 @@ class TestRedisCommands:
             r.stralgo("LCS", value1, value2, idx=True),
             {"len": len(res), "matches": [[(4, 7), (5, 8)], [(2, 3), (0, 1)]]},
             {"len": len(res), "matches": [[[4, 7], [5, 8]], [[2, 3], [0, 1]]]},
+            {"len": len(res), "matches": [[[4, 7], [5, 8]], [[2, 3], [0, 1]]]},
         )
         assert_resp_response(
             r,
             r.stralgo("LCS", value1, value2, idx=True, withmatchlen=True),
             {"len": len(res), "matches": [[4, (4, 7), (5, 8)], [2, (2, 3), (0, 1)]]},
             {"len": len(res), "matches": [[[4, 7], [5, 8], 4], [[2, 3], [0, 1], 2]]},
+            {"len": len(res), "matches": [[4, [4, 7], [5, 8]], [2, [2, 3], [0, 1]]]},
         )
         assert_resp_response(
             r,
@@ -3046,6 +3054,7 @@ class TestRedisCommands:
             ),
             {"len": len(res), "matches": [[4, (4, 7), (5, 8)]]},
             {"len": len(res), "matches": [[[4, 7], [5, 8], 4]]},
+            {"len": len(res), "matches": [[4, [4, 7], [5, 8]]]},
         )
 
     @skip_if_server_version_lt("6.0.0")
@@ -3536,9 +3545,15 @@ class TestRedisCommands:
         r.zadd("a", {"a": 1, "b": 2, "c": 3})
         cursor, pairs = r.zscan("a")
         assert cursor == 0
-        assert set(pairs) == {(b"a", 1), (b"b", 2), (b"c", 3)}
+        if expects_unified_shape(r):
+            assert sorted(pairs) == [[b"a", 1.0], [b"b", 2.0], [b"c", 3.0]]
+        else:
+            assert set(pairs) == {(b"a", 1), (b"b", 2), (b"c", 3)}
         _, pairs = r.zscan("a", match="a")
-        assert set(pairs) == {(b"a", 1)}
+        if expects_unified_shape(r):
+            assert pairs == [[b"a", 1.0]]
+        else:
+            assert set(pairs) == {(b"a", 1)}
 
     def test_zscan_score_cast_scientific_notation(self):
         """score_cast_func=int handles scientific notation scores (issue #4000)."""
@@ -3551,9 +3566,15 @@ class TestRedisCommands:
     def test_zscan_iter(self, r):
         r.zadd("a", {"a": 1, "b": 2, "c": 3})
         pairs = list(r.zscan_iter("a"))
-        assert set(pairs) == {(b"a", 1), (b"b", 2), (b"c", 3)}
+        if expects_unified_shape(r):
+            assert sorted(pairs) == [[b"a", 1.0], [b"b", 2.0], [b"c", 3.0]]
+        else:
+            assert set(pairs) == {(b"a", 1), (b"b", 2), (b"c", 3)}
         pairs = list(r.zscan_iter("a", match="a"))
-        assert set(pairs) == {(b"a", 1)}
+        if expects_unified_shape(r):
+            assert pairs == [[b"a", 1.0]]
+        else:
+            assert set(pairs) == {(b"a", 1)}
 
     # SET COMMANDS
     def test_sadd(self, r):
@@ -5219,6 +5240,7 @@ class TestRedisCommands:
             "place2",
         )
         r.geoadd("barcelona", values)
+        coord_tuple = (2.19093829393386841, 41.43379028184083523)
 
         # test a bunch of combinations to test the parse response
         # function.
@@ -5231,14 +5253,7 @@ class TestRedisCommands:
             withdist=True,
             withcoord=True,
             withhash=True,
-        ) == [
-            [
-                b"place1",
-                0.0881,
-                3471609698139488,
-                (2.19093829393386841, 41.43379028184083523),
-            ]
-        ]
+        ) == [[b"place1", 0.0881, 3471609698139488, coord_tuple]]
         assert r.geosearch(
             "barcelona",
             longitude=2.191,
@@ -5247,7 +5262,7 @@ class TestRedisCommands:
             unit="km",
             withdist=True,
             withcoord=True,
-        ) == [[b"place1", 0.0881, (2.19093829393386841, 41.43379028184083523)]]
+        ) == [[b"place1", 0.0881, coord_tuple]]
         assert r.geosearch(
             "barcelona",
             longitude=2.191,
@@ -5256,9 +5271,7 @@ class TestRedisCommands:
             unit="km",
             withhash=True,
             withcoord=True,
-        ) == [
-            [b"place1", 3471609698139488, (2.19093829393386841, 41.43379028184083523)]
-        ]
+        ) == [[b"place1", 3471609698139488, coord_tuple]]
         # test no values.
         assert (
             r.geosearch(

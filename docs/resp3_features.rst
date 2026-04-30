@@ -1,14 +1,23 @@
 RESP 3 Features
 ===============
 
-As of version 5.0, redis-py supports the `RESP 3 standard <https://github.com/redis/redis-specifications/blob/master/protocol/RESP3.md>`_. Practically, this means that client using RESP 3 will be faster and more performant as fewer type translations occur in the client. It also means new response types like doubles, true simple strings, maps, and booleans are available.
+As of version 5.0, redis-py supports the `RESP 3 standard <https://github.com/redis/redis-specifications/blob/master/protocol/RESP3.md>`_. Starting with redis-py 8.0, clients use RESP3 on the wire by default.
+
+By default, redis-py keeps legacy RESP2-compatible Python response shapes for
+existing applications. Set ``protocol=3`` explicitly when you want to make the
+wire protocol choice visible in your code or receive native RESP3 Python
+response shapes. Set ``protocol=2`` to force RESP2 on the wire. Set
+``legacy_responses=False`` to opt in to protocol-independent unified response
+shapes; see :doc:`unified_responses`.
 
 Connecting
 -----------
 
-Enabling RESP3 is no different than other connections in redis-py. In all cases, the connection type must be extending by setting `protocol=3`. The following are some base examples illustrating how to enable a RESP 3 connection.
+The default connection already uses RESP3 on the wire in redis-py 8.0 and
+later. The following examples show how to make RESP3 explicit for standard,
+async, and cluster clients.
 
-Connect with a standard connection, but specifying resp 3:
+Connect with a standard connection, explicitly specifying RESP3:
 
 .. code:: python
 
@@ -24,7 +33,7 @@ Or using the URL scheme:
     >>> r = redis.from_url("redis://localhost:6379?protocol=3")
     >>> r.ping()
 
-Connect with async, specifying resp 3:
+Connect with async, explicitly specifying RESP3:
 
 .. code:: python
 
@@ -73,8 +82,11 @@ Client-side caching
 
 Client-side caching is a technique used to create high performance services.
 It utilizes the memory on application servers, typically separate from the database nodes, to cache a subset of the data directly on the application side.
-For more information please check `official Redis documentation <https://redis.io/docs/latest/develop/use/client-side-caching/>`_.
-Please notice that this feature only available with RESP3 protocol enabled in sync client only. Supported in standalone, Cluster and Sentinel clients.
+For more information please check the `Redis client-side caching documentation <https://redis.io/docs/latest/develop/use/client-side-caching/>`_.
+Please notice that this feature is available only with RESP3 protocol enabled
+in sync clients. redis-py 8.0 and later use RESP3 on the wire by default, and
+the examples below pass ``protocol=3`` explicitly to make the requirement clear.
+Supported in standalone, Cluster, and Sentinel clients.
 
 Basic usage:
 
@@ -98,4 +110,4 @@ Enable caching with custom cache implementation:
 
 CacheImpl should implement a `CacheInterface` specified in `redis.cache` package.
 
-More comprehensive documentation soon will be available at `official Redis documentation <https://redis.io/docs/latest/>`_.
+More comprehensive documentation soon will be available at the `Redis documentation site <https://redis.io/docs/latest/>`_.

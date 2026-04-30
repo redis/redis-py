@@ -23,7 +23,9 @@ from redis.typing import (
     AnyKeyT,
     AsyncClientProtocol,
     ClusterCommandsProtocol,
+    ClusterLinksResponse,
     ClusterNodeDetail,
+    ClusterShardsResponse,
     EncodableT,
     KeysT,
     KeyT,
@@ -951,16 +953,16 @@ class ClusterManagementCommands(ManagementCommands):
     @overload
     def cluster_shards(
         self: SyncClientProtocol, target_nodes: "TargetNodesT" | None = None
-    ) -> list[Any]: ...
+    ) -> ClusterShardsResponse: ...
 
     @overload
     def cluster_shards(
         self: AsyncClientProtocol, target_nodes: "TargetNodesT" | None = None
-    ) -> Awaitable[list[Any]]: ...
+    ) -> Awaitable[ClusterShardsResponse]: ...
 
     def cluster_shards(
         self, target_nodes: "TargetNodesT" | None = None
-    ) -> list[Any] | Awaitable[list[Any]]:
+    ) -> ClusterShardsResponse | Awaitable[ClusterShardsResponse]:
         """
         Returns details about the shards of the cluster.
 
@@ -991,16 +993,16 @@ class ClusterManagementCommands(ManagementCommands):
     @overload
     def cluster_links(
         self: SyncClientProtocol, target_node: "TargetNodesT"
-    ) -> list[Any]: ...
+    ) -> ClusterLinksResponse: ...
 
     @overload
     def cluster_links(
         self: AsyncClientProtocol, target_node: "TargetNodesT"
-    ) -> Awaitable[list[Any]]: ...
+    ) -> Awaitable[ClusterLinksResponse]: ...
 
     def cluster_links(
         self, target_node: "TargetNodesT"
-    ) -> list[Any] | Awaitable[list[Any]]:
+    ) -> ClusterLinksResponse | Awaitable[ClusterLinksResponse]:
         """
         Each node in a Redis Cluster maintains a pair of long-lived TCP link with each
         peer in the cluster: One for sending outbound messages towards the peer and one

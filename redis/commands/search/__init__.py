@@ -3,24 +3,14 @@ from typing import Literal
 from redis.client import Pipeline as RedisPipeline
 
 from ...asyncio.client import Pipeline as AsyncioPipeline
-from ..helpers import (
-    apply_module_callbacks,
-    get_legacy_responses,
-    get_protocol_version,
-)
+from ...utils import check_protocol_version
+from ..helpers import get_legacy_responses, get_protocol_version
 from .commands import (
     AGGREGATE_CMD,
-    CONFIG_CMD,
-    HYBRID_CMD,
-    INFO_CMD,
-    PROFILE_CMD,
-    SEARCH_CMD,
-    SPELLCHECK_CMD,
-    SYNDUMP_CMD,
+    CURSOR_CMD,
     AsyncSearchCommands,
     SearchCommands,
 )
-from .profile_information import ProfileInformation
 
 
 class Search(SearchCommands):
@@ -107,33 +97,7 @@ class Search(SearchCommands):
         self.index_name = index_name
         self.execute_command = client.execute_command
         self._pipeline = client.pipeline
-        self._RESP2_MODULE_CALLBACKS = {
-            INFO_CMD: self._parse_info,
-            SEARCH_CMD: self._parse_search,
-            HYBRID_CMD: self._parse_hybrid_search,
-            AGGREGATE_CMD: self._parse_aggregate,
-            PROFILE_CMD: self._parse_profile,
-            SPELLCHECK_CMD: self._parse_spellcheck,
-            CONFIG_CMD: self._parse_config_get,
-            SYNDUMP_CMD: self._parse_syndump,
-        }
-        self._RESP3_MODULE_CALLBACKS = {
-            PROFILE_CMD: lambda r, **kwargs: ProfileInformation(r),
-        }
-        self._RESP2_UNIFIED_MODULE_CALLBACKS = dict(self._RESP2_MODULE_CALLBACKS)
-        self._RESP3_UNIFIED_MODULE_CALLBACKS = dict(self._RESP3_MODULE_CALLBACKS)
-        self._RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {}
-
-        self._MODULE_CALLBACKS = apply_module_callbacks(
-            get_protocol_version(self.client),
-            get_legacy_responses(self.client),
-            common={},
-            resp2=self._RESP2_MODULE_CALLBACKS,
-            resp3=self._RESP3_MODULE_CALLBACKS,
-            resp2_unified=self._RESP2_UNIFIED_MODULE_CALLBACKS,
-            resp3_unified=self._RESP3_UNIFIED_MODULE_CALLBACKS,
-            resp3_to_resp2_legacy=self._RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS,
-        )
+        self._init_module_callbacks()
 
     def pipeline(self, transaction=True, shard_hint=None):
         """Creates a pipeline for the SEARCH module, that can be used for executing
@@ -141,7 +105,7 @@ class Search(SearchCommands):
         """
         p = Pipeline(
             connection_pool=self.client.connection_pool,
-            response_callbacks=self._MODULE_CALLBACKS,
+            response_callbacks=self.client.response_callbacks,
             transaction=transaction,
             shard_hint=shard_hint,
         )
@@ -199,7 +163,7 @@ class AsyncSearch(Search, AsyncSearchCommands):
         """
         p = AsyncPipeline(
             connection_pool=self.client.connection_pool,
-            response_callbacks=self._MODULE_CALLBACKS,
+            response_callbacks=self.client.response_callbacks,
             transaction=transaction,
             shard_hint=shard_hint,
         )
@@ -212,8 +176,65 @@ class Pipeline(SearchCommands, RedisPipeline):
 
     _is_async_client: Literal[False] = False
 
+    def __init__(self, connection_pool, response_callbacks, transaction, shard_hint):
+        # Copy the client's response_callbacks so search-specific entries
+        # don't pollute the shared dict.
+        super().__init__(
+            connection_pool, dict(response_callbacks), transaction, shard_hint
+        )
+        self._init_module_callbacks()
+        self._register_module_callbacks()
+
+    def _register_module_callbacks(self):
+        # Pipeline post-processing matches the pre-migration behavior:
+        # legacy mode uses native wire callbacks (RESP2 parsers on RESP2,
+        # no FT.PROFILE callback on explicit RESP3).  HYBRID is experimental
+        # and keeps its native RESP3 normalizer.  Only ``legacy_responses=False``
+        # registers the unified parsers that post-process every response.
+        protocol = get_protocol_version(self)
+        if get_legacy_responses(self):
+            if check_protocol_version(protocol, 3):
+                cmd_callbacks = self._RESP3_MODULE_CALLBACKS
+            else:
+                cmd_callbacks = self._RESP2_MODULE_CALLBACKS
+        else:
+            if check_protocol_version(protocol, 3):
+                cmd_callbacks = self._RESP3_UNIFIED_MODULE_CALLBACKS
+            else:
+                cmd_callbacks = self._RESP2_UNIFIED_MODULE_CALLBACKS
+        for cmd, cb in cmd_callbacks.items():
+            self.response_callbacks[cmd] = cb
+        # ``FT.CURSOR`` shares the AGGREGATE parser but isn't in the maps.
+        agg_cb = cmd_callbacks.get(AGGREGATE_CMD)
+        if agg_cb is not None:
+            self.response_callbacks[CURSOR_CMD] = agg_cb
+
+    @property
+    def client(self):
+        """Return self so ``get_protocol_version`` can read connection_pool."""
+        return self
+
 
 class AsyncPipeline(AsyncSearchCommands, AsyncioPipeline, Pipeline):
     """AsyncPipeline for the module."""
 
     _is_async_client: Literal[True] = True
+
+    def __init__(self, connection_pool, response_callbacks, transaction, shard_hint):
+        # ``AsyncioPipeline.__init__`` is next in MRO and won't chain to
+        # the sync ``Pipeline.__init__``, so we set up callbacks here.
+        super().__init__(
+            connection_pool, dict(response_callbacks), transaction, shard_hint
+        )
+        self._init_module_callbacks()
+        self._register_module_callbacks()
+
+    @property
+    def client(self):
+        """Return self so ``get_protocol_version`` can read connection_pool.
+
+        Redefined here because ``redis.asyncio.client.Redis.client`` (a
+        plain method) appears earlier in the MRO than ``Pipeline.client``
+        (a property) and would otherwise shadow it.
+        """
+        return self

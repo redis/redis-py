@@ -154,7 +154,9 @@ class _TOPKBloomBase(TOPKCommands, AbstractBloom):
             TOPK_LIST: parse_to_list,
         }
         _RESP3_MODULE_CALLBACKS = {}
-        _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
+        _RESP2_UNIFIED_MODULE_CALLBACKS = {
+            TOPK_INFO: TopKInfo,
+        }
         _RESP3_UNIFIED_MODULE_CALLBACKS = {
             TOPK_INFO: TopKInfo,
         }
@@ -256,10 +258,14 @@ class _TDigestBloomBase(TDigestCommands, AbstractBloom):
         _RESP3_MODULE_CALLBACKS = {}
         _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
         _RESP3_UNIFIED_MODULE_CALLBACKS = {
+            TDIGEST_BYRANK: parse_to_list,
+            TDIGEST_BYREVRANK: parse_to_list,
+            TDIGEST_CDF: parse_to_list,
             TDIGEST_INFO: TDigestInfo,
             TDIGEST_MIN: float,
             TDIGEST_MAX: float,
             TDIGEST_TRIMMED_MEAN: float,
+            TDIGEST_QUANTILE: parse_to_list,
         }
         _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
             TDIGEST_INFO: TDigestInfo,

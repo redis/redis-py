@@ -502,10 +502,10 @@ async def test_multi_range_advanced(decoded_r: redis.Redis):
     else:
         # ``expected_response_shape`` is ``"unified"`` for
         # ``legacy_responses=False`` (any protocol) and ``"legacy_resp3"``
-        # for ``protocol=3`` with ``legacy_responses=True``. The unified
-        # shape always emits ``[labels, [], samples]`` (samples at index
-        # 2); legacy RESP3 preserves the wire layout, appending an extra
-        # ``sources`` element under GROUPBY which pushes samples to index 3.
+        # for ``protocol=3`` with ``legacy_responses=True``. Unified parsers
+        # keep samples at index 2; legacy RESP3 preserves the wire layout,
+        # appending an extra ``sources`` element under GROUPBY which pushes
+        # samples to index 3.
         groupby_samples_idx = (
             2 if expected_response_shape(decoded_r) == "unified" else 3
         )
@@ -1146,9 +1146,17 @@ async def test_mrange_with_count_nan_count_all_aggregators(decoded_r: redis.Redi
             "temperature:A": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
             "temperature:B": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
         },
-        unified_expected={
-            "temperature:A": [{}, [], [[1000, 1.0]]],
-            "temperature:B": [{}, [], [[1000, 1.0]]],
+        {
+            "temperature:A": [
+                {},
+                {"aggregators": ["countnan"]},
+                [[1000, 1.0]],
+            ],
+            "temperature:B": [
+                {},
+                {"aggregators": ["countnan"]},
+                [[1000, 1.0]],
+            ],
         },
     )
 
@@ -1171,9 +1179,17 @@ async def test_mrange_with_count_nan_count_all_aggregators(decoded_r: redis.Redi
             "temperature:A": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
             "temperature:B": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
         },
-        unified_expected={
-            "temperature:A": [{}, [], [[1000, 2.0]]],
-            "temperature:B": [{}, [], [[1000, 2.0]]],
+        {
+            "temperature:A": [
+                {},
+                {"aggregators": ["countall"]},
+                [[1000, 2.0]],
+            ],
+            "temperature:B": [
+                {},
+                {"aggregators": ["countall"]},
+                [[1000, 2.0]],
+            ],
         },
     )
 
@@ -1217,9 +1233,17 @@ async def test_mrevrange_with_count_nan_count_all_aggregators(decoded_r: redis.R
             "temperature:A": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
             "temperature:B": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
         },
-        unified_expected={
-            "temperature:A": [{}, [], [[1000, 1.0]]],
-            "temperature:B": [{}, [], [[1000, 1.0]]],
+        {
+            "temperature:A": [
+                {},
+                {"aggregators": ["countnan"]},
+                [[1000, 1.0]],
+            ],
+            "temperature:B": [
+                {},
+                {"aggregators": ["countnan"]},
+                [[1000, 1.0]],
+            ],
         },
     )
 
@@ -1242,9 +1266,17 @@ async def test_mrevrange_with_count_nan_count_all_aggregators(decoded_r: redis.R
             "temperature:A": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
             "temperature:B": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
         },
-        unified_expected={
-            "temperature:A": [{}, [], [[1000, 2.0]]],
-            "temperature:B": [{}, [], [[1000, 2.0]]],
+        {
+            "temperature:A": [
+                {},
+                {"aggregators": ["countall"]},
+                [[1000, 2.0]],
+            ],
+            "temperature:B": [
+                {},
+                {"aggregators": ["countall"]},
+                [[1000, 2.0]],
+            ],
         },
     )
 

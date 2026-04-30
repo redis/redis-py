@@ -23,7 +23,7 @@ def _nativestr_dict(d):
 
 
 def parse_range(response, **kwargs):
-    """Parse range response. Used by TS.RANGE and TS.REVRANGE (Sets A, E)."""
+    """Parse range response. Used by TS.RANGE and TS.REVRANGE (legacy shape)."""
     if not response:
         return []
     # Multi-aggregator: samples have >2 elements [timestamp, val1, val2, ...]
@@ -33,7 +33,7 @@ def parse_range(response, **kwargs):
 
 
 def parse_range_unified(response, **kwargs):
-    """Unified parser for TS.RANGE / TS.REVRANGE (Sets C, D).
+    """Unified parser for TS.RANGE / TS.REVRANGE.
 
     Returns ``list[list]`` rather than ``list[tuple]`` so the unified
     shape is symmetric with the RESP3 wire format.
@@ -46,21 +46,21 @@ def parse_range_unified(response, **kwargs):
 
 
 def parse_get(response):
-    """Parse get response. Used by TS.GET (Sets A, E)."""
+    """Parse get response. Used by TS.GET (legacy shape)."""
     if not response:
         return None
     return int(response[0]), float(response[1])
 
 
 def parse_get_unified(response, **kwargs):
-    """Unified parser for TS.GET (Sets C, D). Returns ``[int, float]``."""
+    """Unified parser for TS.GET. Returns ``[int, float]``."""
     if not response:
         return None
     return [int(response[0]), float(response[1])]
 
 
 def parse_m_get(response):
-    """Parse multi get response (Set A — RESP2 wire)."""
+    """Parse multi get response (RESP2 wire)."""
     res = []
     for item in response:
         if not item[2]:
@@ -79,7 +79,7 @@ def parse_m_get(response):
 
 
 def parse_m_get_unified(response, **kwargs):
-    """Unified parser for TS.MGET (Sets C, D).
+    """Unified parser for TS.MGET.
 
     Emits ``{key: [labels_dict, sample]}`` where ``sample`` is
     ``[int, float]`` or ``[]`` when no sample exists. Handles both wire
@@ -108,7 +108,7 @@ def parse_m_get_unified(response, **kwargs):
 
 
 def parse_m_get_resp3_to_resp2_legacy(response, **kwargs):
-    """RESP3 wire → today's RESP2 legacy shape for TS.MGET (Set E)."""
+    """RESP3 wire → today's RESP2 legacy shape for TS.MGET."""
     res = []
     for key, item in response.items():
         labels = _nativestr_dict(item[0]) if item[0] else {}
@@ -120,34 +120,53 @@ def parse_m_get_resp3_to_resp2_legacy(response, **kwargs):
     return sorted(res, key=lambda d: list(d.keys()))
 
 
-def parse_m_range(response):
-    """Parse multi range response (Set A — RESP2 wire)."""
+def parse_m_range(response, **kwargs):
+    """Parse multi range response (RESP2 wire)."""
     res = []
     for item in response:
         res.append({nativestr(item[0]): [list_to_dict(item[1]), parse_range(item[2])]})
     return sorted(res, key=lambda d: list(d.keys()))
 
 
-def parse_m_range_unified(response, **kwargs):
-    """Unified parser for TS.MRANGE / TS.MREVRANGE (Sets C, D).
+def _m_range_metadata(aggregation_type=None):
+    if aggregation_type is None:
+        # Aggregators are empty when TS.MRANGE/TS.MREVRANGE is called without
+        # AGGREGATION; this mirrors RESP3 metadata such as {"aggregators": []}.
+        return {"aggregators": []}
+    if isinstance(aggregation_type, list):
+        aggregators = aggregation_type
+    else:
+        aggregators = [aggregation_type]
+    return {"aggregators": [nativestr(agg).lower() for agg in aggregators]}
 
-    Emits ``{key: [labels_dict, [], samples]}`` regardless of wire format.
-    The middle element (RESP3's reducers/aggregators metadata) is dropped
-    so the unified shape is symmetric across protocols.
+
+def parse_m_range_unified(response, **kwargs):
+    """Unified parser for TS.MRANGE / TS.MREVRANGE.
+
+    Emits ``{key: [labels_dict, metadata, samples]}`` regardless of wire
+    format. RESP2 has no metadata element on the wire, so the command options
+    are used to synthesize the same ``{"aggregators": ...}`` structure that
+    RESP3 returns.
     """
     if isinstance(response, dict):
         res = {}
         for key, item in response.items():
-            res[key] = [item[0], [], parse_range_unified(item[-1])]
+            metadata = item[1] if len(item) > 2 else []
+            res[key] = [item[0], metadata, parse_range_unified(item[-1])]
         return res
     res = {}
+    metadata = _m_range_metadata(kwargs.get("aggregation_type"))
     for item in response:
-        res[item[0]] = [_pairs_to_dict(item[1]), [], parse_range_unified(item[2])]
+        res[item[0]] = [
+            _pairs_to_dict(item[1]),
+            metadata,
+            parse_range_unified(item[2]),
+        ]
     return res
 
 
 def parse_m_range_resp3_to_resp2_legacy(response, **kwargs):
-    """RESP3 wire → today's RESP2 legacy shape for TS.MRANGE / TS.MREVRANGE (Set E)."""
+    """RESP3 wire → today's RESP2 legacy shape for TS.MRANGE / TS.MREVRANGE."""
     res = []
     for key, item in response.items():
         labels = _nativestr_dict(item[0]) if item[0] else {}

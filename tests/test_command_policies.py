@@ -10,7 +10,11 @@ from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePoli
 from redis.commands.policies import DynamicPolicyResolver, StaticPolicyResolver
 from redis.commands.search.aggregation import AggregateRequest, Cursor
 from redis.commands.search.field import TextField, NumericField
-from tests.conftest import skip_if_server_version_lt, is_resp2_connection
+from tests.conftest import (
+    expects_resp2_shape,
+    expects_unified_shape,
+    skip_if_server_version_lt,
+)
 
 
 @pytest.mark.fixed_client
@@ -117,7 +121,7 @@ class TestClusterWithPolicies:
 
             # Routed to another random primary node
             info = r.ft().info()
-            if is_resp2_connection(r):
+            if expects_resp2_shape(r) or expects_unified_shape(r):
                 assert info["index_name"] == "idx"
             else:
                 assert info[b"index_name"] == b"idx"
@@ -159,7 +163,7 @@ class TestClusterWithPolicies:
 
             req = AggregateRequest("redis").group_by("@parent").cursor(1)
 
-            if is_resp2_connection(r):
+            if expects_resp2_shape(r) or expects_unified_shape(r):
                 cursor = r.ft().aggregate(req).cursor
             else:
                 cursor = Cursor(r.ft().aggregate(req)[1])
