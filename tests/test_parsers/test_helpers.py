@@ -5,6 +5,7 @@ from redis._parsers.helpers import (
     parse_command,
     parse_info,
     parse_sentinel_masters_resp3,
+    zpop_score_pairs,
 )
 
 
@@ -115,6 +116,13 @@ def test_parse_command_preserves_acl_categories():
 
     assert command["flags"] == ["readonly", "fast"]
     assert command["acl_categories"] == ["@read", "@string", "@fast"]
+
+
+@pytest.mark.fixed_client
+def test_zpop_score_pairs_resp2_always_pairs_scores():
+    response = [b"member1", b"1", b"member2", b"2.5"]
+
+    assert zpop_score_pairs(response) == [(b"member1", 1.0), (b"member2", 2.5)]
 
 
 @pytest.mark.fixed_client

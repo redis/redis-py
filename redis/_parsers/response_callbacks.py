@@ -114,6 +114,7 @@ from .helpers import (
     timestamp_to_datetime,
     zmpop_resp3_to_resp2_legacy,
     zmpop_unified,
+    zpop_score_pairs,
     zpop_score_pairs_resp3_to_resp2_legacy,
     zpop_score_pairs_resp3_unified,
     zpop_score_pairs_unified,
@@ -227,9 +228,10 @@ _RedisCallbacksRESP2 = {
         "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
     ),
     **string_keys_to_dict(
-        "ZINTER ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE ZUNION",
+        "ZINTER ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE ZUNION",
         zset_score_pairs,
     ),
+    **string_keys_to_dict("ZPOPMAX ZPOPMIN", zpop_score_pairs),
     **string_keys_to_dict(
         "ZREVRANK ZRANK",
         zset_score_for_rank,

@@ -1,3 +1,4 @@
+ACL
 APM
 ARGV
 BFCommands
@@ -29,11 +30,13 @@ Healthcheck
 HealthCheckPolicies
 healthcheck
 healthchecks
+HybridPostProcessingConfig
 INCR
 init
 IOError
 Instrumentations
 JSONCommands
+JSONPath
 Jaeger
 Ludovico
 Magnocavallo
@@ -105,6 +108,7 @@ bysource
 charset
 del
 dev
+dicts
 docstring
 docstrings
 eg
@@ -163,7 +167,9 @@ ssl
 str
 stunnel
 subcommands
+sublists
 thevalueofmykey
+TimeSeries
 timeseries
 toctree
 topk

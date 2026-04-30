@@ -132,6 +132,14 @@ class SearchCommands:
             CONFIG_CMD: self._parse_config_get_resp3_to_legacy,
             SYNDUMP_CMD: self._parse_syndump_resp3,
         }
+        # Search pipelines historically returned raw wire responses in
+        # legacy mode.  The default connection now uses RESP3 on the wire,
+        # so these callbacks adapt only the default legacy pipeline case
+        # back to the raw RESP2 pipeline shapes users saw prior v8.0.
+        self._RESP3_TO_RESP2_LEGACY_PIPELINE_CALLBACKS = {
+            SEARCH_CMD: self._pipeline_parse_search_resp3_to_legacy,
+            HYBRID_CMD: self._pipeline_parse_hybrid_search_resp3_to_legacy,
+        }
         # ``legacy_responses=False`` + RESP2 wire: enhanced RESP2 parsers
         # producing the unified shape (``attributes`` as list of dicts,
         # command-specific value normalisation where the approved shape
@@ -184,6 +192,66 @@ class SearchCommands:
         if cb is None:
             return res
         return cb(res, **kwargs)
+
+    @staticmethod
+    def _resp3_get(mapping, key, default=None):
+        if not isinstance(mapping, dict):
+            return default
+        return mapping.get(key, mapping.get(key.encode(), default))
+
+    @staticmethod
+    def _flatten_resp3_mapping(mapping):
+        if not isinstance(mapping, dict):
+            return mapping
+        flat = []
+        for key, value in mapping.items():
+            flat.append(str_if_bytes(key))
+            flat.append(value)
+        return flat
+
+    def _pipeline_parse_search_resp3_to_legacy(self, res, **kwargs):
+        """Convert RESP3 FT.SEARCH pipeline output to raw RESP2 pipeline shape."""
+        query = kwargs.get("query")
+        if query is None or not isinstance(res, dict):
+            return res
+
+        output = [self._resp3_get(res, "total_results", 0)]
+        for item in self._resp3_get(res, "results", []):
+            output.append(self._resp3_get(item, "id"))
+            if query._with_scores:
+                output.append(self._resp3_get(item, "score"))
+            if query._with_payloads:
+                output.append(self._resp3_get(item, "payload"))
+            if not query._no_content:
+                output.append(
+                    self._flatten_resp3_mapping(
+                        self._resp3_get(item, "extra_attributes", {})
+                    )
+                )
+        return output
+
+    def _pipeline_parse_hybrid_search_resp3_to_legacy(self, res, **kwargs):
+        """Convert RESP3 FT.HYBRID pipeline output to raw RESP2 pipeline shape."""
+        if not isinstance(res, dict):
+            return res
+        res = {str_if_bytes(key): value for key, value in res.items()}
+        if "cursor" in kwargs:
+            return ["SEARCH", res.get("SEARCH"), "VSIM", res.get("VSIM")]
+
+        results = [
+            self._flatten_resp3_mapping(item) if isinstance(item, dict) else item
+            for item in res.get("results", [])
+        ]
+        return [
+            "total_results",
+            res.get("total_results", 0),
+            "results",
+            results,
+            "warnings",
+            res.get("warnings", []),
+            "execution_time",
+            res.get("execution_time", 0),
+        ]
 
     # ---- RESP2 legacy parsers ----
 
@@ -1179,6 +1247,9 @@ class SearchCommands:
         options = {}
         if not check_protocol_version(get_protocol_version(self.client), 3):
             options[NEVER_DECODE] = True
+        if isinstance(self, Pipeline):
+            options["query"] = query
+            options["duration"] = 0
 
         res = self.execute_command(SEARCH_CMD, *args, **options)
 
@@ -1680,6 +1751,9 @@ class AsyncSearchCommands(SearchCommands):
         options = {}
         if not check_protocol_version(get_protocol_version(self.client), 3):
             options[NEVER_DECODE] = True
+        if isinstance(self, Pipeline):
+            options["query"] = query
+            options["duration"] = 0
 
         res = await self.execute_command(SEARCH_CMD, *args, **options)
 

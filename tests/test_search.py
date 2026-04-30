@@ -3021,13 +3021,21 @@ class TestPipeline(SearchTestsBase):
         q = Query("foo bar").with_payloads()
         p.search(q)
         res = p.execute()
-        if expects_resp2_shape(client) or expects_unified_shape(client):
+        if expects_resp2_shape(client):
             assert res[:3] == ["OK", True, True]
             assert 2 == res[3][0]
             assert "doc1" == res[3][1]
             assert "doc2" == res[3][4]
             assert res[3][5] is None
             assert res[3][3] == res[3][6] == ["txt", "foo bar"]
+        elif expects_unified_shape(client):
+            assert res[:3] == ["OK", True, True]
+            assert isinstance(res[3], Result)
+            assert 2 == res[3].total
+            assert "doc1" == res[3].docs[0].id
+            assert "doc2" == res[3].docs[1].id
+            assert res[3].docs[0].payload is None
+            assert res[3].docs[0].txt == res[3].docs[1].txt == "foo bar"
         elif expects_resp3_shape(client):
             assert res[:3] == ["OK", True, True]
             assert 2 == res[3]["total_results"]
@@ -3095,7 +3103,7 @@ class TestPipeline(SearchTestsBase):
         # the default results count limit is 10
         assert res[:3] == ["OK", 2, 2]
         hybrid_search_res = res[3]
-        if expects_resp2_shape(client) or expects_unified_shape(client):
+        if expects_resp2_shape(client):
             # it doesn't get parsed to object in pipeline
             assert hybrid_search_res[0] == "total_results"
             assert hybrid_search_res[1] == 2
@@ -3105,6 +3113,11 @@ class TestPipeline(SearchTestsBase):
             assert hybrid_search_res[5] == []
             assert hybrid_search_res[6] == "execution_time"
             assert float(hybrid_search_res[7]) > 0
+        elif expects_unified_shape(client):
+            assert hybrid_search_res.total_results == 2
+            assert len(hybrid_search_res.results) == 2
+            assert hybrid_search_res.warnings == []
+            assert hybrid_search_res.execution_time > 0
         elif expects_resp3_shape(client):
             assert hybrid_search_res["total_results"] == 2
             assert len(hybrid_search_res["results"]) == 2

@@ -187,16 +187,20 @@ class Pipeline(SearchCommands, RedisPipeline):
 
     def _register_module_callbacks(self):
         # Pipeline post-processing matches the pre-migration behavior:
-        # legacy mode uses native wire callbacks (RESP2 parsers on RESP2,
-        # no FT.PROFILE callback on explicit RESP3).  HYBRID is experimental
-        # and keeps its native RESP3 normalizer.  Only ``legacy_responses=False``
-        # registers the unified parsers that post-process every response.
+        # legacy mode returns raw pipeline responses like v8.0.0b1.  The
+        # default connection now uses RESP3 on the wire, so it gets a small
+        # adapter for the old raw RESP2 pipeline shape; explicit RESP3 keeps
+        # the previous native shape, with HYBRID's experimental normalizer.
+        # Only ``legacy_responses=False`` registers the unified parsers that
+        # post-process every response.
         protocol = get_protocol_version(self)
         if get_legacy_responses(self):
-            if check_protocol_version(protocol, 3):
+            if protocol is None:
+                cmd_callbacks = self._RESP3_TO_RESP2_LEGACY_PIPELINE_CALLBACKS
+            elif check_protocol_version(protocol, 3):
                 cmd_callbacks = self._RESP3_MODULE_CALLBACKS
             else:
-                cmd_callbacks = self._RESP2_MODULE_CALLBACKS
+                cmd_callbacks = {}
         else:
             if check_protocol_version(protocol, 3):
                 cmd_callbacks = self._RESP3_UNIFIED_MODULE_CALLBACKS
