@@ -202,6 +202,7 @@ def parse_sentinel_state_resp3(response, **options):
             result[str_key] = str_if_bytes(response[key])
     flags = set(result["flags"].split(","))
     result["flags"] = flags
+    _add_derived_sentinel_booleans(result, flags)
     return result
 
 
@@ -214,7 +215,11 @@ def parse_sentinel_masters(response, **options):
 
 
 def parse_sentinel_masters_resp3(response, **options):
-    return [parse_sentinel_state_resp3(master) for master in response]
+    result = {}
+    for master in response:
+        state = parse_sentinel_state_resp3(master)
+        result[state["name"]] = state
+    return result
 
 
 def parse_sentinel_slaves_and_sentinels(response, **options):
@@ -1175,6 +1180,10 @@ def parse_command(response, **options):
         cmd_dict["first_key_pos"] = command[3]
         cmd_dict["last_key_pos"] = command[4]
         cmd_dict["step_count"] = command[5]
+        if len(command) > 6:
+            cmd_dict["acl_categories"] = [
+                str_if_bytes(category) for category in command[6]
+            ]
         if len(command) > 7:
             cmd_dict["tips"] = command[7]
             cmd_dict["key_specifications"] = command[8]
