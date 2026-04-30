@@ -5,7 +5,7 @@ As of version 5.0, redis-py supports the `RESP 3 standard <https://github.com/re
 
 By default, redis-py keeps legacy RESP2-compatible Python response shapes for
 existing applications. Set ``protocol=3`` explicitly when you want to make the
-wire protocol choice visible in your code or receive native RESP3 Python
+wire protocol choice visible in your code or receive RESP3-specific Python
 response shapes. Set ``protocol=2`` to force RESP2 on the wire. Set
 ``legacy_responses=False`` to opt in to protocol-independent unified response
 shapes; see :doc:`unified_responses`.

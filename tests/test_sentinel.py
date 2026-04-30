@@ -12,7 +12,7 @@ from redis.sentinel import (
     SentinelConnectionPool,
     SlaveNotFoundError,
 )
-from tests.conftest import get_legacy_responses
+from tests.conftest import expects_resp3_shape
 
 
 @pytest.fixture(scope="module")
@@ -363,13 +363,13 @@ def test_sentinel_commands_with_strict_redis_client(request):
     # skipping commands that change the state of the sentinel setup
     assert isinstance(client.sentinel_get_master_addr_by_name("redis-py-test"), tuple)
     assert isinstance(client.sentinel_master("redis-py-test"), dict)
-    if get_legacy_responses(client):
-        assert isinstance(client.sentinel_masters(), dict)
-    else:
+    if expects_resp3_shape(client):
         masters = client.sentinel_masters()
         assert isinstance(masters, list)
         for master in masters:
             assert isinstance(master, dict)
+    else:
+        assert isinstance(client.sentinel_masters(), dict)
 
     assert isinstance(client.sentinel_sentinels("redis-py-test"), list)
     assert isinstance(client.sentinel_slaves("redis-py-test"), list)

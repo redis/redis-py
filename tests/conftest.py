@@ -859,8 +859,9 @@ def expected_response_shape(r):
 
     * ``"legacy_resp2"`` — native RESP2 wire, or RESP3 wire normalised by
       the legacy adapters back to RESP2 Python shapes.
-    * ``"legacy_resp3"`` — native RESP3 Python shapes, produced when the
-      caller pinned ``protocol=3`` with ``legacy_responses=True``.
+    * ``"legacy_resp3"`` — Python shapes from the previous RESP3 callbacks,
+      produced when the caller pinned ``protocol=3`` with
+      ``legacy_responses=True``.
     * ``"unified"`` — protocol-agnostic unified Python shapes selected by
       ``legacy_responses=False``.
     """
@@ -878,8 +879,8 @@ def expects_resp2_shape(r):
 
 
 def expects_resp3_shape(r):
-    """Return ``True`` when Python responses on ``r`` use native RESP3 shapes
-    (``protocol=3`` with ``legacy_responses=True``)."""
+    """Return ``True`` when Python responses on ``r`` use the previous RESP3
+    callback shapes (``protocol=3`` with ``legacy_responses=True``)."""
     return expected_response_shape(r) == "legacy_resp3"
 
 

@@ -9,7 +9,8 @@ Six dictionaries are defined:
 * ``_RedisCallbacks`` — entries that produce the same Python value
   regardless of wire protocol or legacy-response selection.
 * ``_RedisCallbacksRESP2`` — RESP2 wire, legacy Python shapes.
-* ``_RedisCallbacksRESP3`` — RESP3 wire, legacy Python shapes.
+* ``_RedisCallbacksRESP3`` — RESP3 wire, Python shapes from the previous
+  RESP3 callbacks.
 * ``_RedisCallbacksRESP2Unified`` — RESP2 wire, unified Python shapes
   (``legacy_responses=False``).
 * ``_RedisCallbacksRESP3Unified`` — RESP3 wire, unified Python shapes
@@ -80,13 +81,16 @@ from .helpers import (
     parse_sentinel_master_unified,
     parse_sentinel_master_unified_resp3,
     parse_sentinel_masters,
+    parse_sentinel_masters_resp3,
     parse_sentinel_masters_resp3_to_resp2_legacy,
     parse_sentinel_masters_unified,
     parse_sentinel_masters_unified_resp3,
     parse_sentinel_slaves_and_sentinels,
+    parse_sentinel_slaves_and_sentinels_resp3,
     parse_sentinel_slaves_and_sentinels_resp3_to_resp2_legacy,
     parse_sentinel_slaves_and_sentinels_unified,
     parse_sentinel_slaves_and_sentinels_unified_resp3,
+    parse_sentinel_state_resp3,
     parse_set_result,
     parse_slowlog_get,
     parse_stralgo,
@@ -297,13 +301,10 @@ _RedisCallbacksRESP3 = {
     "COMMAND": parse_command_resp3,
     "CONFIG GET": parse_config_get_resp3_to_resp2_legacy,
     "MEMORY STATS": parse_memory_stats_resp3,
-    # SENTINEL: keep the legacy RESP2 Python shape on RESP3 wire so callers
-    # using Sentinel-related ``state["is_master"]`` etc. continue to work
-    # when ``protocol=3`` is set explicitly with ``legacy_responses=True``.
-    "SENTINEL MASTER": parse_sentinel_master_resp3_to_resp2_legacy,
-    "SENTINEL MASTERS": parse_sentinel_masters_resp3_to_resp2_legacy,
-    "SENTINEL SENTINELS": parse_sentinel_slaves_and_sentinels_resp3_to_resp2_legacy,
-    "SENTINEL SLAVES": parse_sentinel_slaves_and_sentinels_resp3_to_resp2_legacy,
+    "SENTINEL MASTER": parse_sentinel_state_resp3,
+    "SENTINEL MASTERS": parse_sentinel_masters_resp3,
+    "SENTINEL SENTINELS": parse_sentinel_slaves_and_sentinels_resp3,
+    "SENTINEL SLAVES": parse_sentinel_slaves_and_sentinels_resp3,
     "STRALGO": lambda r, **options: (
         {str_if_bytes(key): str_if_bytes(value) for key, value in r.items()}
         if isinstance(r, dict)
@@ -433,6 +434,7 @@ _RedisCallbacksRESP3toRESP2Legacy: dict[str, Callable[..., Any]] = {
         "ZREVRANK ZRANK",
         zset_score_for_rank_resp3_to_resp2_legacy,
     ),
+    **string_keys_to_dict("BGREWRITEAOF BGSAVE", lambda r: True),
     **string_keys_to_dict("XREAD XREADGROUP", parse_xread_resp3_to_resp2_legacy),
     **string_keys_to_dict("BLPOP BRPOP", lambda r: r and tuple(r) or None),
     **string_keys_to_dict("ZMPOP BZMPOP", zmpop_resp3_to_resp2_legacy),
@@ -451,6 +453,7 @@ _RedisCallbacksRESP3toRESP2Legacy: dict[str, Callable[..., Any]] = {
     "CLUSTER LINKS": parse_cluster_links_resp3_to_resp2_legacy,
     "COMMAND GETKEYS": lambda r: list(map(str_if_bytes, r)),
     "CONFIG GET": parse_config_get_resp3_to_resp2_legacy,
+    "DEBUG OBJECT": parse_debug_object,
     "FUNCTION LIST": parse_function_list_resp3_to_resp2_legacy,
     "GEOHASH": lambda r: list(map(str_if_bytes, r)),
     "GEOPOS": parse_geopos_resp3_to_resp2_legacy,
