@@ -68,8 +68,13 @@ def _legacy_arg(legacy_responses):
 def _legacy_tag(legacy_responses):
     """Return artifact filename suffix for the ``legacy_responses`` axis."""
     if isinstance(legacy_responses, bool):
-        return "_legacytrue" if legacy_responses else "_legacyfalse"
-    return f"_legacy{legacy_responses}"
+        return "_legacy_responses" if legacy_responses else "_unified_responses"
+    value = str(legacy_responses).lower()
+    if value == "true":
+        return "_legacy_responses"
+    if value == "false":
+        return "_unified_responses"
+    return f"_{value}"
 
 
 @task

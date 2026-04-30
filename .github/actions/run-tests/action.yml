@@ -25,9 +25,10 @@ inputs:
   test-config:
     description: |
       Test configuration to run. Can be "all", "fixed-clients",
-      "2-standalone", "2-cluster", "3-standalone" or "3-cluster",
-      where the number is the RESP protocol version to test with,
-      the word describes the topology to test.
+      or "<protocol>-<response-shape>-<topology>", where protocol is
+      "default", "2", or "3", response-shape is "legacy_responses" or
+      "unified_responses", and topology is "standalone" or "cluster".
+      Legacy aliases like "2-standalone" are also accepted.
     required: false
     default: 'all'
   repository:
@@ -157,6 +158,14 @@ runs:
         run_tests() {
           local test_config=$1
           local eventloop=""
+          local protocol_label=""
+          local response_shape_label=""
+          local test_type=""
+          local extra=""
+          local protocol_arg=""
+          local legacy_arg=""
+          local protocol_group=""
+          local response_group=""
 
           if [ "${{inputs.event-loop}}" == "uvloop" ]; then
             eventloop="--uvloop"
@@ -170,28 +179,74 @@ runs:
             invoke fixed-client-tests $eventloop
             echo "::endgroup::"
           else
-            protocol="${test_config%%-*}"
-            test_type="${test_config#*-}"
+            IFS='-' read -r protocol_label response_shape_label test_type extra <<< "$test_config"
+            if [ -n "$extra" ]; then
+              echo "Invalid test configuration: ${test_config}"
+              exit 1
+            fi
+            if [ -z "$test_type" ]; then
+              # Backward-compatible support for old labels such as
+              # "2-standalone"; they always meant legacy responses.
+              test_type="$response_shape_label"
+              response_shape_label="legacy_responses"
+            fi
+
+            if [ "$protocol_label" == "default" ]; then
+              protocol_group="default RESP"
+            elif [ "$protocol_label" == "2" ] || [ "$protocol_label" == "3" ]; then
+              protocol_arg="--protocol=${protocol_label}"
+              protocol_group="RESP${protocol_label}"
+            else
+              echo "Unknown protocol label: ${protocol_label}"
+              exit 1
+            fi
+
+            if [ "$response_shape_label" == "legacy_responses" ]; then
+              legacy_arg="--legacy-responses"
+              response_group="legacy responses"
+            elif [ "$response_shape_label" == "unified_responses" ]; then
+              legacy_arg="--no-legacy-responses"
+              response_group="unified responses"
+            else
+              echo "Unknown response-shape label: ${response_shape_label}"
+              exit 1
+            fi
+
             if [ "$test_type" == "standalone" ]; then
-              echo "::group::RESP${protocol} standalone tests"
-              invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop --protocol="${protocol}"
+              echo "::group::${protocol_group} standalone tests (${response_group})"
+              invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop ${protocol_arg} ${legacy_arg}
               echo "::endgroup::"
             elif [ "$test_type" == "cluster" ]; then
-              echo "::group::RESP${protocol} cluster tests"
-              invoke cluster-tests $eventloop --protocol=${protocol}
+              echo "::group::${protocol_group} cluster tests (${response_group})"
+              invoke cluster-tests $eventloop ${protocol_arg} ${legacy_arg}
               echo "::endgroup::"
+            else
+              echo "Unknown test type: ${test_type}"
+              exit 1
             fi
           fi
         }
 
         if [ "${{inputs.test-config}}" == "all" ]; then
-          run_tests fixed-clients "${{inputs.event-loop}}"
-          run_tests 2-standalone "${{inputs.event-loop}}"
-          run_tests 2-cluster "${{inputs.event-loop}}"
-          run_tests 3-standalone "${{inputs.event-loop}}"
-          run_tests 3-cluster "${{inputs.event-loop}}"
+          for test_config in \
+            fixed-clients \
+            default-legacy_responses-standalone \
+            default-legacy_responses-cluster \
+            default-unified_responses-standalone \
+            default-unified_responses-cluster \
+            2-legacy_responses-standalone \
+            2-legacy_responses-cluster \
+            2-unified_responses-standalone \
+            2-unified_responses-cluster \
+            3-legacy_responses-standalone \
+            3-legacy_responses-cluster \
+            3-unified_responses-standalone \
+            3-unified_responses-cluster
+          do
+            run_tests "${test_config}"
+          done
         else
-          run_tests "${{inputs.test-config}}" "${{inputs.event-loop}}"
+          run_tests "${{inputs.test-config}}"
         fi
       shell: bash
 
