@@ -4811,9 +4811,8 @@ class TestRedisCommands:
         # add 2 more messages
         m7 = await r.xadd(stream, {"key_m7": "val_m7"})
         m8 = await r.xadd(stream, {"key_m8": "val_m8"})
-        # read the messages with claim_min_idle_time=1000
-        # only m7 and m8 should be returned
-        # because the other messages have not been in the PEL for long enough
+        # Use a threshold safely above this test's elapsed time so only
+        # newly-delivered messages are returned.
         expected_entries = {
             stream_name: [
                 {"msg": await get_stream_message(r, stream, m7), "min_idle_time": 0},
@@ -4821,7 +4820,7 @@ class TestRedisCommands:
             ]
         }
         res = await r.xreadgroup(
-            group, consumer_1, streams={stream: ">"}, claim_min_idle_time=100
+            group, consumer_1, streams={stream: ">"}, claim_min_idle_time=60_000
         )
         self._validate_xreadgroup_with_claim_min_idle_time_response(
             r, res, expected_entries
@@ -4924,9 +4923,8 @@ class TestRedisCommands:
         # add 2 more messages
         m7 = await r.xadd(stream_1, {"key_m7": "val_m7"})
         m8 = await r.xadd(stream_2, {"key_m8": "val_m8"})
-        # read the messages with claim_min_idle_time=1000
-        # only m7 and m8 should be returned
-        # because the other messages have not been in the PEL for long enough
+        # Use a threshold safely above this test's elapsed time so only
+        # newly-delivered messages are returned.
         expected_entries = {
             stream_1_name: [
                 {"msg": await get_stream_message(r, stream_1, m7), "min_idle_time": 0}
@@ -4939,7 +4937,7 @@ class TestRedisCommands:
             group,
             consumer_1,
             streams={stream_1: ">", stream_2: ">"},
-            claim_min_idle_time=100,
+            claim_min_idle_time=60_000,
         )
         self._validate_xreadgroup_with_claim_min_idle_time_response(
             r, res, expected_entries
@@ -5041,9 +5039,8 @@ class TestRedisCommands:
         # add 2 more messages
         m7 = await r.xadd(stream_1, {"key_m7": "val_m7"})
         m8 = await r.xadd(stream_2, {"key_m8": "val_m8"})
-        # read the messages with claim_min_idle_time=1000
-        # only m7 and m8 should be returned
-        # because the other messages have not been in the PEL for long enough
+        # Use a threshold safely above this test's elapsed time so only
+        # newly-delivered messages are returned.
         expected_entries = {
             stream_1_name: [
                 {"msg": await get_stream_message(r, stream_1, m7), "min_idle_time": 0}
@@ -5056,7 +5053,7 @@ class TestRedisCommands:
             group,
             consumer_1,
             streams={stream_1: ">", stream_2: ">"},
-            claim_min_idle_time=100,
+            claim_min_idle_time=60_000,
         )
         self._validate_xreadgroup_with_claim_min_idle_time_response(
             r, res, expected_entries
