@@ -5270,6 +5270,7 @@ class TestHybridSearch(SearchTestsBase):
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.timeout(120)
     def test_hybrid_search_query_with_timeout(self, client):
         dim = 128
         # Create index and add data

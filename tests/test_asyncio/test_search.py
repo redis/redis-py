@@ -3236,6 +3236,7 @@ class TestHybridSearch(AsyncSearchTestsBase):
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.timeout(120)
     async def test_hybrid_search_query_with_timeout(self, decoded_r):
         dim = 128
         # Create index and add data
