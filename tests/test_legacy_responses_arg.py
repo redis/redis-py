@@ -12,6 +12,11 @@ public client constructor must:
 import pytest
 
 import redis
+from redis.cluster import (
+    parse_cluster_shards,
+    parse_cluster_shards_unified,
+    parse_cluster_shards_with_str_keys,
+)
 from redis._parsers.response_callbacks import (
     _RedisCallbacks,
     _RedisCallbacksRESP2,
@@ -67,6 +72,14 @@ def _assert_callbacks_match(actual_callbacks, protocol, legacy_responses):
         )
 
 
+def _expected_cluster_shards_callback(protocol, legacy_responses):
+    if not legacy_responses:
+        return parse_cluster_shards_unified
+    if protocol is None:
+        return parse_cluster_shards_with_str_keys
+    return parse_cluster_shards
+
+
 @pytest.mark.fixed_client
 @pytest.mark.parametrize("legacy_responses", _LEGACY_VARIANTS)
 @pytest.mark.parametrize("protocol", _PROTOCOL_VARIANTS)
@@ -91,5 +104,22 @@ async def test_async_client_protocol_legacy_matrix(protocol, legacy_responses):
         assert kwargs.get("protocol") == protocol
         assert kwargs.get("legacy_responses") == legacy_responses
         _assert_callbacks_match(client.response_callbacks, protocol, legacy_responses)
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize("legacy_responses", _LEGACY_VARIANTS)
+@pytest.mark.parametrize("protocol", _PROTOCOL_VARIANTS)
+async def test_async_cluster_client_cluster_shards_callback(protocol, legacy_responses):
+    client = redis.asyncio.RedisCluster(
+        host="localhost",
+        port=6379,
+        **_make_client_kwargs(protocol, legacy_responses),
+    )
+    try:
+        assert client.response_callbacks["CLUSTER SHARDS"] is (
+            _expected_cluster_shards_callback(protocol, legacy_responses)
+        )
     finally:
         await client.aclose()

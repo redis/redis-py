@@ -9,6 +9,11 @@ Unified responses are selected with ``legacy_responses=False``. The protocol
 still controls the wire format; ``legacy_responses`` controls the Python shape
 returned by redis-py.
 
+Unified responses are the recommended mode for new projects and for
+applications that can update their response handling. They provide the most
+portable application-facing API because command results keep the same Python
+shape when you change the Redis serialization protocol.
+
 Enable Unified Responses
 ------------------------
 
@@ -89,9 +94,10 @@ Migration Checklist
 2. Enable ``legacy_responses=False`` for one environment or service path first.
    The server protocol can stay unchanged unless you also want to pin
    ``protocol=2`` or ``protocol=3``.
-3. Check the commands your application reads from the tables below. Update code
-   that indexes into tuples, expects flat lists, compares exact response
-   containers, or serializes command responses directly.
+3. Check the Redis commands and ``execute_command()`` calls your application
+   depends on against the tables below. Update application API type hints,
+   response models, serializers, and assertions to reflect the unified
+   response shapes.
 4. Review module command responses such as JSON, TimeSeries, RediSearch, and
    probabilistic commands separately; several of them return richer objects or
    nested containers in unified mode.

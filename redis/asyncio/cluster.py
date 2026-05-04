@@ -66,6 +66,9 @@ from redis.cluster import (
     LoadBalancingStrategy,
     block_pipeline_command,
     get_node_name,
+    parse_cluster_shards,
+    parse_cluster_shards_unified,
+    parse_cluster_shards_with_str_keys,
     parse_cluster_slots,
 )
 from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
@@ -429,6 +432,14 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             user_protocol=kwargs.get("protocol"),
             legacy_responses=kwargs.get("legacy_responses", True),
         )
+        if not kwargs.get("legacy_responses", True):
+            kwargs["response_callbacks"]["CLUSTER SHARDS"] = parse_cluster_shards_unified
+        elif kwargs.get("protocol") is None:
+            kwargs["response_callbacks"]["CLUSTER SHARDS"] = (
+                parse_cluster_shards_with_str_keys
+            )
+        else:
+            kwargs["response_callbacks"]["CLUSTER SHARDS"] = parse_cluster_shards
         self.connection_kwargs = kwargs
 
         if startup_nodes:

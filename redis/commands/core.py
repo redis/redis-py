@@ -59,6 +59,7 @@ from redis.typing import (
     GeoRadiusResponse,
     GeoSearchResponse,
     GroupT,
+    HRandFieldResponse,
     HScanResponse,
     KeysT,
     KeyT,
@@ -3938,7 +3939,7 @@ class BasicKeyCommands(CommandsProtocol):
         key: str,
         count: int | None = None,
         withvalues: bool = False,
-    ) -> bytes | str | list[bytes | str] | None: ...
+    ) -> HRandFieldResponse: ...
 
     @overload
     def hrandfield(
@@ -3946,13 +3947,11 @@ class BasicKeyCommands(CommandsProtocol):
         key: str,
         count: int | None = None,
         withvalues: bool = False,
-    ) -> Awaitable[bytes | str | list[bytes | str] | None]: ...
+    ) -> Awaitable[HRandFieldResponse]: ...
 
     def hrandfield(
         self, key: str, count: int | None = None, withvalues: bool = False
-    ) -> (bytes | str | list[bytes | str] | None) | Awaitable[
-        bytes | str | list[bytes | str] | None
-    ]:
+    ) -> HRandFieldResponse | Awaitable[HRandFieldResponse]:
         """
         Return a random field from the hash value stored at key.
 

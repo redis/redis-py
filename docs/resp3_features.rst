@@ -4,9 +4,10 @@ RESP 3 Features
 As of version 5.0, redis-py supports the `RESP 3 standard <https://github.com/redis/redis-specifications/blob/master/protocol/RESP3.md>`_. Starting with redis-py 8.0, clients use RESP3 on the wire by default.
 
 By default, redis-py keeps legacy RESP2-compatible Python response shapes for
-existing applications. Set ``protocol=3`` explicitly when you want to make the
-wire protocol choice visible in your code or receive RESP3-specific Python
-response shapes. Set ``protocol=2`` to force RESP2 on the wire. Set
+existing applications. Set ``protocol=3`` explicitly when your application
+should receive RESP3-specific Python response shapes or when you want the wire
+protocol choice to be visible in code. Set ``protocol=2`` to force RESP2 on the
+wire. Set
 ``legacy_responses=False`` to opt in to protocol-independent unified response
 shapes; see :doc:`unified_responses`.
 
@@ -14,7 +15,9 @@ Connecting
 -----------
 
 The default connection already uses RESP3 on the wire in redis-py 8.0 and
-later. The following examples show how to make RESP3 explicit for standard,
+later while preserving legacy RESP2-compatible Python response shapes. The
+following examples show how to set ``protocol=3`` explicitly when you want
+RESP3-specific response shapes or visible protocol configuration for standard,
 async, and cluster clients.
 
 Connect with a standard connection, explicitly specifying RESP3:

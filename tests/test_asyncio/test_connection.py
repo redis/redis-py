@@ -29,6 +29,35 @@ from tests.conftest import skip_if_server_version_lt
 from .mocks import MockStream
 
 
+def test_connection_default_parser_matches_default_protocol():
+    conn = Connection()
+    expected_parser_class = (
+        _AsyncHiredisParser if HIREDIS_AVAILABLE else _AsyncRESP3Parser
+    )
+    assert isinstance(conn._parser, expected_parser_class)
+    assert conn.protocol == 3
+
+
+@pytest.mark.parametrize(
+    ("protocol", "parser_class", "expected_parser_class"),
+    [
+        (None, _AsyncRESP2Parser, _AsyncRESP3Parser),
+        (3, _AsyncRESP2Parser, _AsyncRESP3Parser),
+        (2, _AsyncRESP3Parser, _AsyncRESP2Parser),
+        (2, _AsyncRESP2Parser, _AsyncRESP2Parser),
+        (3, _AsyncRESP3Parser, _AsyncRESP3Parser),
+    ],
+)
+def test_connection_parser_matches_protocol(
+    protocol, parser_class, expected_parser_class
+):
+    kwargs = {"parser_class": parser_class}
+    if protocol is not None:
+        kwargs["protocol"] = protocol
+    conn = Connection(**kwargs)
+    assert isinstance(conn._parser, expected_parser_class)
+
+
 @pytest.mark.onlynoncluster
 async def test_invalid_response(create_redis):
     r = await create_redis(single_connection_client=True)

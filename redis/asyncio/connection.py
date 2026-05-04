@@ -107,7 +107,7 @@ DefaultParser: Type[Union[_AsyncRESP2Parser, _AsyncRESP3Parser, _AsyncHiredisPar
 if HIREDIS_AVAILABLE:
     DefaultParser = _AsyncHiredisParser
 else:
-    DefaultParser = _AsyncRESP2Parser
+    DefaultParser = _AsyncRESP3Parser
 
 
 class ConnectCallbackProtocol(Protocol):
@@ -249,7 +249,6 @@ class AbstractConnection:
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
         self._socket_read_size = socket_read_size
-        self.set_parser(parser_class)
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
         self._buffer_cutoff = 6000
         self._re_auth_token: Optional[TokenInterface] = None
@@ -266,6 +265,13 @@ class AbstractConnection:
                 raise ConnectionError("protocol must be either 2 or 3")
         self.protocol = p
         self.legacy_responses = legacy_responses
+        if parser_class != _AsyncHiredisParser:
+            # The Python parsers are protocol-specific; hiredis supports both.
+            if self.protocol == 3 and parser_class == _AsyncRESP2Parser:
+                parser_class = _AsyncRESP3Parser
+            elif self.protocol == 2 and parser_class == _AsyncRESP3Parser:
+                parser_class = _AsyncRESP2Parser
+        self.set_parser(parser_class)
 
     def __del__(self, _warnings: Any = warnings):
         # For some reason, the individual streams don't get properly garbage
