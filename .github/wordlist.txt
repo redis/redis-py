@@ -161,6 +161,7 @@ replicaof
 repo
 runtime
 sedrik
+serializers
 sharded
 sdk
 ssl

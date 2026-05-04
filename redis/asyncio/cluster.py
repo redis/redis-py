@@ -433,7 +433,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             legacy_responses=kwargs.get("legacy_responses", True),
         )
         if not kwargs.get("legacy_responses", True):
-            kwargs["response_callbacks"]["CLUSTER SHARDS"] = parse_cluster_shards_unified
+            kwargs["response_callbacks"]["CLUSTER SHARDS"] = (
+                parse_cluster_shards_unified
+            )
         elif kwargs.get("protocol") is None:
             kwargs["response_callbacks"]["CLUSTER SHARDS"] = (
                 parse_cluster_shards_with_str_keys
