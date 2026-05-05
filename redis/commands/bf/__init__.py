@@ -2,7 +2,12 @@ from typing import Literal
 
 from redis._parsers.helpers import bool_ok
 
-from ..helpers import get_protocol_version, parse_to_list
+from ..helpers import (
+    apply_module_callbacks,
+    get_legacy_responses,
+    get_protocol_version,
+    parse_to_list,
+)
 from .commands import *  # noqa
 from .info import BFInfo, CFInfo, CMSInfo, TDigestInfo, TopKInfo
 
@@ -99,6 +104,17 @@ class _CMSBloomBase(CMSCommands, AbstractBloom):
             # CMS_INCRBY: spaceHolder,
             # CMS_QUERY: spaceHolder,
             CMS_MERGE: bool_ok,
+        }
+
+        _RESP2_MODULE_CALLBACKS = {
+            CMS_INFO: CMSInfo,
+        }
+        _RESP3_MODULE_CALLBACKS = {}
+        _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
+        _RESP3_UNIFIED_MODULE_CALLBACKS = {
+            CMS_INFO: CMSInfo,
+        }
+        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
             CMS_INFO: CMSInfo,
         }
 
@@ -106,7 +122,18 @@ class _CMSBloomBase(CMSCommands, AbstractBloom):
         self.commandmixin = CMSCommands
         self.execute_command = client.execute_command
 
-        for k, v in _MODULE_CALLBACKS.items():
+        callbacks = apply_module_callbacks(
+            get_protocol_version(self.client),
+            get_legacy_responses(self.client),
+            common=_MODULE_CALLBACKS,
+            resp2=_RESP2_MODULE_CALLBACKS,
+            resp3=_RESP3_MODULE_CALLBACKS,
+            resp2_unified=_RESP2_UNIFIED_MODULE_CALLBACKS,
+            resp3_unified=_RESP3_UNIFIED_MODULE_CALLBACKS,
+            resp3_to_resp2_legacy=_RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS,
+        )
+
+        for k, v in callbacks.items():
             self.client.set_response_callback(k, v)
 
 
@@ -118,14 +145,44 @@ class _TOPKBloomBase(TOPKCommands, AbstractBloom):
             TOPK_RESERVE: bool_ok,
             # TOPK_QUERY: spaceHolder,
             # TOPK_COUNT: spaceHolder,
+        }
+
+        _RESP2_MODULE_CALLBACKS = {
+            TOPK_ADD: parse_to_list,
+            TOPK_INCRBY: parse_to_list,
             TOPK_INFO: TopKInfo,
+            TOPK_LIST: parse_to_list,
+        }
+        _RESP3_MODULE_CALLBACKS = {}
+        _RESP2_UNIFIED_MODULE_CALLBACKS = {
+            TOPK_INFO: TopKInfo,
+        }
+        _RESP3_UNIFIED_MODULE_CALLBACKS = {
+            TOPK_INFO: TopKInfo,
+        }
+        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
+            TOPK_ADD: parse_to_list,
+            TOPK_INCRBY: parse_to_list,
+            TOPK_INFO: TopKInfo,
+            TOPK_LIST: parse_to_list,
         }
 
         self.client = client
         self.commandmixin = TOPKCommands
         self.execute_command = client.execute_command
 
-        for k, v in _MODULE_CALLBACKS.items():
+        callbacks = apply_module_callbacks(
+            get_protocol_version(self.client),
+            get_legacy_responses(self.client),
+            common=_MODULE_CALLBACKS,
+            resp2=_RESP2_MODULE_CALLBACKS,
+            resp3=_RESP3_MODULE_CALLBACKS,
+            resp2_unified=_RESP2_UNIFIED_MODULE_CALLBACKS,
+            resp3_unified=_RESP3_UNIFIED_MODULE_CALLBACKS,
+            resp3_to_resp2_legacy=_RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS,
+        )
+
+        for k, v in callbacks.items():
             self.client.set_response_callback(k, v)
 
 
@@ -144,6 +201,17 @@ class _CFBloomBase(CFCommands, AbstractBloom):
             # CF_COUNT: spaceHolder,
             # CF_SCANDUMP: spaceHolder,
             # CF_LOADCHUNK: spaceHolder,
+        }
+
+        _RESP2_MODULE_CALLBACKS = {
+            CF_INFO: CFInfo,
+        }
+        _RESP3_MODULE_CALLBACKS = {}
+        _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
+        _RESP3_UNIFIED_MODULE_CALLBACKS = {
+            CF_INFO: CFInfo,
+        }
+        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
             CF_INFO: CFInfo,
         }
 
@@ -151,7 +219,18 @@ class _CFBloomBase(CFCommands, AbstractBloom):
         self.commandmixin = CFCommands
         self.execute_command = client.execute_command
 
-        for k, v in _MODULE_CALLBACKS.items():
+        callbacks = apply_module_callbacks(
+            get_protocol_version(self.client),
+            get_legacy_responses(self.client),
+            common=_MODULE_CALLBACKS,
+            resp2=_RESP2_MODULE_CALLBACKS,
+            resp3=_RESP3_MODULE_CALLBACKS,
+            resp2_unified=_RESP2_UNIFIED_MODULE_CALLBACKS,
+            resp3_unified=_RESP3_UNIFIED_MODULE_CALLBACKS,
+            resp3_to_resp2_legacy=_RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS,
+        )
+
+        for k, v in callbacks.items():
             self.client.set_response_callback(k, v)
 
 
@@ -164,30 +243,53 @@ class _TDigestBloomBase(TDigestCommands, AbstractBloom):
             # TDIGEST_RESET: bool_ok,
             # TDIGEST_ADD: spaceHolder,
             # TDIGEST_MERGE: spaceHolder,
-            TDIGEST_INFO: TDigestInfo,
-            TDIGEST_MIN: float,
-            TDIGEST_MAX: float,
-            TDIGEST_TRIMMED_MEAN: float,
         }
 
         _RESP2_MODULE_CALLBACKS = {
             TDIGEST_BYRANK: parse_to_list,
             TDIGEST_BYREVRANK: parse_to_list,
             TDIGEST_CDF: parse_to_list,
+            TDIGEST_INFO: TDigestInfo,
+            TDIGEST_MIN: float,
+            TDIGEST_MAX: float,
+            TDIGEST_TRIMMED_MEAN: float,
             TDIGEST_QUANTILE: parse_to_list,
         }
         _RESP3_MODULE_CALLBACKS = {}
+        _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
+        _RESP3_UNIFIED_MODULE_CALLBACKS = {
+            TDIGEST_BYRANK: parse_to_list,
+            TDIGEST_BYREVRANK: parse_to_list,
+            TDIGEST_CDF: parse_to_list,
+            TDIGEST_INFO: TDigestInfo,
+            TDIGEST_MIN: float,
+            TDIGEST_MAX: float,
+            TDIGEST_TRIMMED_MEAN: float,
+            TDIGEST_QUANTILE: parse_to_list,
+        }
+        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
+            TDIGEST_INFO: TDigestInfo,
+            TDIGEST_MIN: float,
+            TDIGEST_MAX: float,
+            TDIGEST_TRIMMED_MEAN: float,
+        }
 
         self.client = client
         self.commandmixin = TDigestCommands
         self.execute_command = client.execute_command
 
-        if get_protocol_version(self.client) in ["3", 3]:
-            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
-        else:
-            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
+        callbacks = apply_module_callbacks(
+            get_protocol_version(self.client),
+            get_legacy_responses(self.client),
+            common=_MODULE_CALLBACKS,
+            resp2=_RESP2_MODULE_CALLBACKS,
+            resp3=_RESP3_MODULE_CALLBACKS,
+            resp2_unified=_RESP2_UNIFIED_MODULE_CALLBACKS,
+            resp3_unified=_RESP3_UNIFIED_MODULE_CALLBACKS,
+            resp3_to_resp2_legacy=_RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS,
+        )
 
-        for k, v in _MODULE_CALLBACKS.items():
+        for k, v in callbacks.items():
             self.client.set_response_callback(k, v)
 
 
@@ -205,6 +307,17 @@ class _BFBloomBase(BFCommands, AbstractBloom):
             # BF_SCANDUMP: spaceHolder,
             # BF_LOADCHUNK: spaceHolder,
             # BF_CARD: spaceHolder,
+        }
+
+        _RESP2_MODULE_CALLBACKS = {
+            BF_INFO: BFInfo,
+        }
+        _RESP3_MODULE_CALLBACKS = {}
+        _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
+        _RESP3_UNIFIED_MODULE_CALLBACKS = {
+            BF_INFO: BFInfo,
+        }
+        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
             BF_INFO: BFInfo,
         }
 
@@ -212,7 +325,18 @@ class _BFBloomBase(BFCommands, AbstractBloom):
         self.commandmixin = BFCommands
         self.execute_command = client.execute_command
 
-        for k, v in _MODULE_CALLBACKS.items():
+        callbacks = apply_module_callbacks(
+            get_protocol_version(self.client),
+            get_legacy_responses(self.client),
+            common=_MODULE_CALLBACKS,
+            resp2=_RESP2_MODULE_CALLBACKS,
+            resp3=_RESP3_MODULE_CALLBACKS,
+            resp2_unified=_RESP2_UNIFIED_MODULE_CALLBACKS,
+            resp3_unified=_RESP3_UNIFIED_MODULE_CALLBACKS,
+            resp3_to_resp2_legacy=_RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS,
+        )
+
+        for k, v in callbacks.items():
             self.client.set_response_callback(k, v)
 
 

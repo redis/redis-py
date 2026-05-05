@@ -5,7 +5,12 @@ from typing import Literal
 
 import redis
 
-from ..helpers import get_protocol_version, nativestr
+from ..helpers import (
+    apply_module_callbacks,
+    get_legacy_responses,
+    get_protocol_version,
+    nativestr,
+)
 from .commands import FPHAType, JSONCommands
 from .decoders import bulk_of_jsons, decode_list
 
@@ -34,7 +39,7 @@ class _JSONBase(JSONCommands):
         :type json.JSONEncoder: An instance of json.JSONEncoder
         """
         # Set the module commands' callbacks
-        self._MODULE_CALLBACKS = {
+        _MODULE_CALLBACKS = {
             "JSON.ARRPOP": self._decode,
             "JSON.DEBUG": self._decode,
             "JSON.GET": self._decode,
@@ -47,29 +52,69 @@ class _JSONBase(JSONCommands):
         }
 
         _RESP2_MODULE_CALLBACKS = {
+            "JSON.ARRAPPEND": self._decode,
+            "JSON.ARRINDEX": self._decode,
+            "JSON.ARRINSERT": self._decode,
+            "JSON.ARRLEN": self._decode,
+            "JSON.ARRTRIM": self._decode,
+            "JSON.CLEAR": int,
+            "JSON.DEL": int,
+            "JSON.FORGET": int,
+            "JSON.GET": self._decode,
+            "JSON.NUMINCRBY": lambda r, **kwargs: self._decode(r),
+            "JSON.NUMMULTBY": lambda r, **kwargs: self._decode(r),
+            "JSON.OBJKEYS": self._decode,
+            "JSON.STRAPPEND": self._decode,
+            "JSON.OBJLEN": self._decode,
+            "JSON.STRLEN": self._decode,
+            "JSON.TOGGLE": self._decode,
+        }
+
+        _RESP3_MODULE_CALLBACKS = {}
+        # RESP2 wire normalised to the unified shape from the reverted
+        # unification PR: NUMINCRBY/NUMMULTBY are always arrays,
+        # JSON.RESP uses native floats, and missing JSON.TYPE keys stay
+        # ``None`` instead of becoming ``[None]``.
+        _RESP2_UNIFIED_MODULE_CALLBACKS = {
             "JSON.CLEAR": int,
             "JSON.DEL": int,
             "JSON.FORGET": int,
             "JSON.NUMINCRBY": self._decode_json_numop,
             "JSON.NUMMULTBY": self._decode_json_numop,
-            "JSON.RESP": self._decode_resp_command,
+            "JSON.RESP": self._decode_resp_command_unified,
             "JSON.TYPE": lambda r: [r] if r is not None else r,
         }
-
-        _RESP3_MODULE_CALLBACKS = {
-            # RESP3 returns [None] for non-existing keys; normalise to None
-            # to match the RESP2 behaviour.
+        _RESP3_UNIFIED_MODULE_CALLBACKS = {
             "JSON.TYPE": lambda r: None if r == [None] else r,
+        }
+        # RESP3 wire normalised back to today's RESP2 Python shapes:
+        # keep ``nativestr`` for OBJKEYS, unwrap JSON.TYPE one level so
+        # legacy paths return scalars and missing keys return ``None``,
+        # and re-encode native floats inside JSON.RESP back to string
+        # form. NUMINCRBY/NUMMULTBY use the command path captured at the
+        # call site to unwrap legacy paths while preserving JSONPath arrays.
+        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
+            "JSON.NUMINCRBY": self._decode_resp3_legacy_numop,
+            "JSON.NUMMULTBY": self._decode_resp3_legacy_numop,
+            "JSON.OBJKEYS": self._decode,
+            "JSON.RESP": self._resp_floats_to_str_command,
+            "JSON.TYPE": lambda r: r[0] if isinstance(r, list) and len(r) == 1 else r,
         }
 
         self.client = client
         self.execute_command = client.execute_command
         self.MODULE_VERSION = version
 
-        if get_protocol_version(self.client) in ["3", 3]:
-            self._MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
-        else:
-            self._MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
+        self._MODULE_CALLBACKS = apply_module_callbacks(
+            get_protocol_version(self.client),
+            get_legacy_responses(self.client),
+            common=_MODULE_CALLBACKS,
+            resp2=_RESP2_MODULE_CALLBACKS,
+            resp3=_RESP3_MODULE_CALLBACKS,
+            resp2_unified=_RESP2_UNIFIED_MODULE_CALLBACKS,
+            resp3_unified=_RESP3_UNIFIED_MODULE_CALLBACKS,
+            resp3_to_resp2_legacy=_RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS,
+        )
 
         for key, value in self._MODULE_CALLBACKS.items():
             self.client.set_response_callback(key, value)
@@ -95,42 +140,13 @@ class _JSONBase(JSONCommands):
         except (AttributeError, JSONDecodeError):
             return decode_list(obj)
 
-    @staticmethod
-    def _convert_resp_floats(obj):
-        """Recursively convert string-encoded floats in a JSON.RESP response.
+    def _decode_json_numop(self, obj, **kwargs):
+        """Decode a JSON.NUMINCRBY / JSON.NUMMULTBY result and normalise
+        it to the unified array form.
 
-        In RESP2, JSON floats are sent as bulk strings (e.g. "-19.5") because
-        RESP2 has no double type.  Integers are sent as RESP integers (Python
-        int), so any string that parses as a float must be a JSON float.
-        Structure markers ("{", "[") and boolean strings ("true", "false")
-        are not valid float literals and are therefore safely skipped.
-        """
-        if isinstance(obj, list):
-            return [_JSONBase._convert_resp_floats(item) for item in obj]
-        if isinstance(obj, (str, bytes)):
-            s = obj.decode() if isinstance(obj, bytes) else obj
-            try:
-                return float(s)
-            except (ValueError, OverflowError):
-                return obj
-        return obj
-
-    def _decode_resp_command(self, obj):
-        """Decode JSON.RESP response for RESP2.
-
-        First applies the standard _decode logic, then recursively converts
-        string-encoded floats to native floats to match RESP3 output.
-        """
-        decoded = self._decode(obj)
-        return self._convert_resp_floats(decoded)
-
-    def _decode_json_numop(self, obj):
-        """Decode JSON numeric operation result and normalize to array format.
-
-        RESP2 returns a JSON bulk string: scalar for legacy paths (e.g. "5"),
-        array for dollar paths (e.g. "[null,4,7.0]").
-        RESP3 always returns an array. Normalize RESP2 to match RESP3 format
-        by wrapping scalar results in a list.
+        RESP2 wire returns a JSON bulk string — a scalar for legacy
+        paths and a JSON-encoded list for dollar paths. RESP3 wire
+        returns a native list. The unified shape is always a list.
         """
         if obj is None:
             return obj
@@ -143,6 +159,70 @@ class _JSONBase(JSONCommands):
         if not isinstance(result, list):
             result = [result]
         return result
+
+    def _decode_resp3_legacy_numop(self, obj, **kwargs):
+        """Decode RESP3 JSON numeric operations back to legacy RESP2 shape.
+
+        RedisJSON returns a RESP3 array for both legacy paths (``.foo``)
+        and JSONPath paths (``$.foo``). The command builder records the
+        path so default RESP3-wire legacy clients can keep v8 scalar
+        results for legacy paths while leaving JSONPath results as lists.
+        """
+        result = self._decode(obj)
+        path = kwargs.get("_json_path")
+        if (
+            isinstance(path, str)
+            and not path.startswith("$")
+            and isinstance(result, list)
+            and len(result) == 1
+        ):
+            return result[0]
+        return result
+
+    def _decode_resp_command_unified(self, obj):
+        """Decode JSON.RESP and lift string-encoded floats inside the
+        nested response to native ``float`` values so the unified shape
+        matches the RESP3 wire.
+        """
+        return self._convert_resp_floats(self._decode(obj))
+
+    def _resp_floats_to_str_command(self, obj):
+        """Decode JSON.RESP and re-encode native ``float`` values back
+        to their string form so the legacy RESP2 shape is preserved
+        when the wire is RESP3.
+        """
+        return self._resp_floats_to_str(self._decode(obj))
+
+    @staticmethod
+    def _convert_resp_floats(obj):
+        """Recursively convert string-encoded JSON floats.
+
+        RESP2 has no native double type, so JSON.RESP returns JSON floats as
+        bulk strings. Any string/bytes leaf that parses as ``float`` is the
+        unified representation of such a value; non-numeric strings are left
+        untouched.
+        """
+        if isinstance(obj, list):
+            return [_JSONBase._convert_resp_floats(item) for item in obj]
+        if isinstance(obj, (str, bytes)):
+            value = obj.decode() if isinstance(obj, bytes) else obj
+            try:
+                return float(value)
+            except (ValueError, OverflowError):
+                return obj
+        return obj
+
+    @staticmethod
+    def _resp_floats_to_str(obj):
+        """Recursively walk ``obj`` and convert native ``float`` values
+        back to their string-encoded form. Lists are walked
+        element-wise; non-float leaves are returned unchanged.
+        """
+        if isinstance(obj, list):
+            return [_JSONBase._resp_floats_to_str(item) for item in obj]
+        if isinstance(obj, float):
+            return str(obj)
+        return obj
 
     def _encode(self, obj):
         """Get the encoder."""
@@ -176,7 +256,7 @@ class _JSONBase(JSONCommands):
         else:
             p = Pipeline(
                 connection_pool=self.client.connection_pool,
-                response_callbacks=self.client.response_callbacks,
+                response_callbacks=dict(self.client.response_callbacks),
                 transaction=transaction,
                 shard_hint=shard_hint,
             )

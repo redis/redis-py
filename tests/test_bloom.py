@@ -6,6 +6,8 @@ from redis.exceptions import RedisError
 
 from .conftest import (
     _get_client,
+    assert_resp_response,
+    expected_response_shape,
     skip_ifmodversion_lt,
 )
 
@@ -94,9 +96,27 @@ def test_bf_insert(client):
     assert 0 == client.bf().exists("bloom", "noexist")
     assert [1, 0] == intlist(client.bf().mexists("bloom", "foo", "noexist"))
     info = client.bf().info("bloom")
-    assert 2 == info.insertedNum
-    assert 1000 == info.capacity
-    assert 1 == info.filterNum
+    assert_resp_response(
+        client,
+        2,
+        info.get("insertedNum"),
+        info.get("Number of items inserted"),
+        info.get("insertedNum"),
+    )
+    assert_resp_response(
+        client,
+        1000,
+        info.get("capacity"),
+        info.get("Capacity"),
+        info.get("capacity"),
+    )
+    assert_resp_response(
+        client,
+        1,
+        info.get("filterNum"),
+        info.get("Number of filters"),
+        info.get("filterNum"),
+    )
 
 
 @pytest.mark.redismod
@@ -153,11 +173,23 @@ def test_bf_info(client):
     # Store a filter
     client.bf().create("nonscaling", "0.0001", "1000", noScale=True)
     info = client.bf().info("nonscaling")
-    assert info.expansionRate is None
+    assert_resp_response(
+        client,
+        None,
+        info.get("expansionRate"),
+        info.get("Expansion rate"),
+        info.get("expansionRate"),
+    )
 
     client.bf().create("expanding", "0.0001", "1000", expansion=expansion)
     info = client.bf().info("expanding")
-    assert 4 == info.expansionRate
+    assert_resp_response(
+        client,
+        4,
+        info.get("expansionRate"),
+        info.get("Expansion rate"),
+        info.get("expansionRate"),
+    )
 
     try:
         # noScale mean no expansion
@@ -199,9 +231,27 @@ def test_cf_add_and_insert(client):
     assert [1] == client.cf().insert("empty1", ["foo"], capacity=1000)
     assert [1] == client.cf().insertnx("empty2", ["bar"], capacity=1000)
     info = client.cf().info("captest")
-    assert 5 == info.insertedNum
-    assert 0 == info.deletedNum
-    assert 1 == info.filterNum
+    assert_resp_response(
+        client,
+        5,
+        info.get("insertedNum"),
+        info.get("Number of items inserted"),
+        info.get("insertedNum"),
+    )
+    assert_resp_response(
+        client,
+        0,
+        info.get("deletedNum"),
+        info.get("Number of items deleted"),
+        info.get("deletedNum"),
+    )
+    assert_resp_response(
+        client,
+        1,
+        info.get("filterNum"),
+        info.get("Number of filters"),
+        info.get("filterNum"),
+    )
 
 
 @pytest.mark.redismod
@@ -325,10 +375,10 @@ def test_topk(client):
     assert ["A", "B", "E"] == client.topk().list("topklist")
     assert ["A", 4, "B", 3, "E", 3] == client.topk().list("topklist", withcount=True)
     info = client.topk().info("topklist")
-    assert 3 == info.k
-    assert 50 == info.width
-    assert 3 == info.depth
-    assert 0.9 == round(float(info.decay), 1)
+    assert 3 == info["k"]
+    assert 50 == info["width"]
+    assert 3 == info["depth"]
+    assert 0.9 == round(float(info["decay"]), 1)
 
 
 @pytest.mark.redismod
@@ -385,7 +435,13 @@ def test_tdigest_reset(client):
     assert client.tdigest().reset("tDigest")
     # assert we have 0 unmerged
     info = client.tdigest().info("tDigest")
-    assert 0 == info.unmerged_nodes
+    assert_resp_response(
+        client,
+        0,
+        info.get("unmerged_nodes"),
+        info.get("Unmerged nodes"),
+        info.get("unmerged_nodes"),
+    )
 
 
 @pytest.mark.onlynoncluster
@@ -400,7 +456,14 @@ def test_tdigest_merge(client):
     assert client.tdigest().merge("to-tDigest", 1, "from-tDigest")
     # we should now have 110 weight on to-histogram
     info = client.tdigest().info("to-tDigest")
-    assert 20 == float(info.merged_weight) + float(info.unmerged_weight)
+    if expected_response_shape(client) == "legacy_resp3":
+        # Native RESP3 map from the server (no module callback registered for
+        # ``protocol=3`` with ``legacy_responses=True``); keys are title-case.
+        assert 20 == float(info["Merged weight"]) + float(info["Unmerged weight"])
+    else:
+        # ``TDigestInfo`` wrapper exposes snake_case keys for both the
+        # ``legacy_resp2`` and ``unified`` shapes.
+        assert 20 == float(info["merged_weight"]) + float(info["unmerged_weight"])
     # test override
     assert client.tdigest().create("from-override", 10)
     assert client.tdigest().create("from-override-2", 10)

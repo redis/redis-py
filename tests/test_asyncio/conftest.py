@@ -51,7 +51,14 @@ async def create_redis(request):
         **kwargs,
     ):
         if "protocol" not in url and kwargs.get("protocol") is None:
-            kwargs["protocol"] = request.config.getoption("--protocol")
+            protocol_opt = request.config.getoption("--protocol")
+            if protocol_opt:
+                kwargs["protocol"] = protocol_opt
+
+        if "legacy_responses" not in kwargs:
+            legacy_opt = request.config.getoption("--legacy-responses")
+            if legacy_opt and legacy_opt != "default":
+                kwargs["legacy_responses"] = legacy_opt.lower() == "true"
 
         cluster_mode = REDIS_INFO["cluster_enabled"]
         if not cluster_mode:
