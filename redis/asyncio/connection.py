@@ -182,7 +182,8 @@ class AbstractConnection:
         redis_connect_func: Optional[ConnectCallbackT] = None,
         encoder_class: Type[Encoder] = Encoder,
         credential_provider: Optional[CredentialProvider] = None,
-        protocol: Optional[int] = 3,
+        protocol: Optional[int] = None,
+        legacy_responses: bool = True,
         event_dispatcher: Optional[EventDispatcher] = None,
     ):
         """
@@ -263,13 +264,13 @@ class AbstractConnection:
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
         self.protocol = p
-        # Reconcile parser ↔ protocol mismatches.
-        # Hiredis handles both RESP2 and RESP3 natively, so only
-        # pure-Python parsers need to be swapped.
-        if self.protocol == 3 and parser_class == _AsyncRESP2Parser:
-            parser_class = _AsyncRESP3Parser
-        elif self.protocol == 2 and parser_class == _AsyncRESP3Parser:
-            parser_class = _AsyncRESP2Parser
+        self.legacy_responses = legacy_responses
+        if parser_class != _AsyncHiredisParser:
+            # The Python parsers are protocol-specific; hiredis supports both.
+            if self.protocol == 3 and parser_class == _AsyncRESP2Parser:
+                parser_class = _AsyncRESP3Parser
+            elif self.protocol == 2 and parser_class == _AsyncRESP3Parser:
+                parser_class = _AsyncRESP2Parser
         self.set_parser(parser_class)
 
     def __del__(self, _warnings: Any = warnings):
@@ -1171,6 +1172,8 @@ URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyTy
         "ssl_include_verify_flags": parse_ssl_verify_flags,
         "ssl_exclude_verify_flags": parse_ssl_verify_flags,
         "timeout": float,
+        "protocol": int,
+        "legacy_responses": to_bool,
     }
 )
 

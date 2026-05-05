@@ -1040,8 +1040,11 @@ class TestPubSubRun:
         messages = asyncio.Queue()
         p = pubsub
         task = asyncio.get_running_loop().create_task(p.run())
-        # wait until loop gets settled.  Add a subscription
-        await asyncio.sleep(0.1)
+        # Wait until run() has established the PubSub connection. A fixed sleep
+        # can race RESP3 handshakes on slower CI jobs.
+        async with async_timeout(1):
+            while p.connection is None or not p.connection.is_connected:
+                await asyncio.sleep(0)
         await p.subscribe(foo=callback)
         # wait tof the subscribe to finish.  Cannot use _subscribe() because
         # p.run() is already accepting messages
@@ -1050,8 +1053,23 @@ class TestPubSubRun:
             if n == 1:
                 break
             await asyncio.sleep(0.1)
-        async with async_timeout(0.1):
-            message = await messages.get()
+        message_task = asyncio.create_task(messages.get())
+        done, _ = await asyncio.wait(
+            {message_task, task},
+            timeout=1,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if task in done:
+            message_task.cancel()
+            await asyncio.gather(message_task, return_exceptions=True)
+            await task
+            pytest.fail("PubSub run task exited before receiving late subscription")
+        if message_task not in done:
+            message_task.cancel()
+            await asyncio.gather(message_task, return_exceptions=True)
+            pytest.fail("Timed out waiting for late subscription message")
+
+        message = message_task.result()
         task.cancel()
         # we expect a cancelled error, not the Runtime error
         # ("did you forget to call subscribe()"")

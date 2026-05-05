@@ -5,6 +5,8 @@ import pytest_asyncio
 import redis.asyncio as redis
 from redis.exceptions import RedisError
 from tests.conftest import (
+    assert_resp_response,
+    expected_response_shape,
     skip_ifmodversion_lt,
 )
 
@@ -63,9 +65,27 @@ async def test_bf_insert(decoded_r: redis.Redis):
     assert 0 == await decoded_r.bf().exists("bloom", "noexist")
     assert [1, 0] == intlist(await decoded_r.bf().mexists("bloom", "foo", "noexist"))
     info = await decoded_r.bf().info("bloom")
-    assert 2 == info.insertedNum
-    assert 1000 == info.capacity
-    assert 1 == info.filterNum
+    assert_resp_response(
+        decoded_r,
+        2,
+        info.get("insertedNum"),
+        info.get("Number of items inserted"),
+        info.get("insertedNum"),
+    )
+    assert_resp_response(
+        decoded_r,
+        1000,
+        info.get("capacity"),
+        info.get("Capacity"),
+        info.get("capacity"),
+    )
+    assert_resp_response(
+        decoded_r,
+        1,
+        info.get("filterNum"),
+        info.get("Number of filters"),
+        info.get("filterNum"),
+    )
 
 
 @pytest.mark.redismod
@@ -122,11 +142,23 @@ async def test_bf_info(decoded_r: redis.Redis):
     # Store a filter
     await decoded_r.bf().create("nonscaling", "0.0001", "1000", noScale=True)
     info = await decoded_r.bf().info("nonscaling")
-    assert info.expansionRate is None
+    assert_resp_response(
+        decoded_r,
+        None,
+        info.get("expansionRate"),
+        info.get("Expansion rate"),
+        info.get("expansionRate"),
+    )
 
     await decoded_r.bf().create("expanding", "0.0001", "1000", expansion=expansion)
     info = await decoded_r.bf().info("expanding")
-    assert 4 == info.expansionRate
+    assert_resp_response(
+        decoded_r,
+        4,
+        info.get("expansionRate"),
+        info.get("Expansion rate"),
+        info.get("expansionRate"),
+    )
 
     try:
         # noScale mean no expansion
@@ -168,9 +200,27 @@ async def test_cf_add_and_insert(decoded_r: redis.Redis):
     assert [1] == await decoded_r.cf().insert("empty1", ["foo"], capacity=1000)
     assert [1] == await decoded_r.cf().insertnx("empty2", ["bar"], capacity=1000)
     info = await decoded_r.cf().info("captest")
-    assert 5 == info.insertedNum
-    assert 0 == info.deletedNum
-    assert 1 == info.filterNum
+    assert_resp_response(
+        decoded_r,
+        5,
+        info.get("insertedNum"),
+        info.get("Number of items inserted"),
+        info.get("insertedNum"),
+    )
+    assert_resp_response(
+        decoded_r,
+        0,
+        info.get("deletedNum"),
+        info.get("Number of items deleted"),
+        info.get("deletedNum"),
+    )
+    assert_resp_response(
+        decoded_r,
+        1,
+        info.get("filterNum"),
+        info.get("Number of filters"),
+        info.get("filterNum"),
+    )
 
 
 @pytest.mark.redismod
@@ -294,10 +344,10 @@ async def test_topk(decoded_r: redis.Redis):
     res = await decoded_r.topk().list("topklist", withcount=True)
     assert ["A", 4, "B", 3, "E", 3] == res
     info = await decoded_r.topk().info("topklist")
-    assert 3 == info.k
-    assert 50 == info.width
-    assert 3 == info.depth
-    assert 0.9 == round(float(info.decay), 1)
+    assert 3 == info["k"]
+    assert 50 == info["width"]
+    assert 3 == info["depth"]
+    assert 0.9 == round(float(info["decay"]), 1)
 
 
 @pytest.mark.redismod
@@ -355,7 +405,13 @@ async def test_tdigest_reset(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().reset("tDigest")
     # assert we have 0 unmerged nodes
     info = await decoded_r.tdigest().info("tDigest")
-    assert 0 == info.unmerged_nodes
+    assert_resp_response(
+        decoded_r,
+        0,
+        info.get("unmerged_nodes"),
+        info.get("Unmerged nodes"),
+        info.get("unmerged_nodes"),
+    )
 
 
 @pytest.mark.onlynoncluster
@@ -370,7 +426,14 @@ async def test_tdigest_merge(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().merge("to-tDigest", 1, "from-tDigest")
     # we should now have 110 weight on to-histogram
     info = await decoded_r.tdigest().info("to-tDigest")
-    assert 20 == float(info.merged_weight) + float(info.unmerged_weight)
+    if expected_response_shape(decoded_r) == "legacy_resp3":
+        # Native RESP3 map from the server (no module callback registered for
+        # ``protocol=3`` with ``legacy_responses=True``); keys are title-case.
+        assert 20 == float(info["Merged weight"]) + float(info["Unmerged weight"])
+    else:
+        # ``TDigestInfo`` wrapper exposes snake_case keys for both the
+        # ``legacy_resp2`` and ``unified`` shapes.
+        assert 20 == float(info["merged_weight"]) + float(info["unmerged_weight"])
     # test override
     assert await decoded_r.tdigest().create("from-override", 10)
     assert await decoded_r.tdigest().create("from-override-2", 10)
