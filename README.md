@@ -89,21 +89,29 @@ The above code connects to localhost on port 6379, sets a value in Redis, and re
 
 
 #### RESP3 Support
-RESP3 is the default protocol used by the client.
-To use support for RESP3, ensure you have at least version 5.0 of the client.
+redis-py supports RESP3 starting with version 5.0. Starting with redis-py 8.0,
+clients use RESP3 on the wire by default while preserving legacy
+RESP2-compatible Python response shapes for existing applications.
+
+Set *protocol=3* explicitly when your application should receive
+RESP3-specific response shapes or when you want the wire protocol choice to be
+visible in code. To force RESP2 on the wire, set *protocol=2*. To opt in to
+protocol-independent response shapes, set *legacy_responses=False*.
+
+For new projects, we recommend opting out of legacy response compatibility by
+setting *legacy_responses=False*. This makes redis-py return unified Python
+response shapes for affected commands whether the connection uses RESP2 or
+RESP3. Existing applications can keep the default legacy-compatible behavior
+while they migrate response handling at their own pace.
 
 ``` python
 >>> import redis
->>> r = redis.Redis(host='localhost', port=6379, db=0, protocol=3)
+>>> r = redis.Redis(host='localhost', port=6379, db=0, legacy_responses=False)
 ```
 
-#### RESP2 Support
-To use support for RESP2, ensure you provide *protocol=2* when creating the client.
-
-``` python
->>> import redis
->>> r = redis.Redis(host='localhost', port=6379, db=0, protocol=2)
-```
+See the [unified responses migration guide](https://redis.readthedocs.io/en/stable/unified_responses.html)
+for activation instructions and command-by-command response differences. For
+RESP3-specific behavior, see the [RESP3 features guide](https://redis.readthedocs.io/en/stable/resp3_features.html).
 
 ### Connection Pools
 

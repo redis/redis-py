@@ -7,6 +7,7 @@ from redis.typing import (
     KeyT,
     Number,
     SyncClientProtocol,
+    TimeSeriesMRangeResponse,
     TimeSeriesRangeResponse,
     TimeSeriesSample,
 )
@@ -1056,7 +1057,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
-    ) -> list[Any] | dict[str, list[Any]]: ...
+    ) -> TimeSeriesMRangeResponse: ...
 
     @overload
     def mrange(
@@ -1078,7 +1079,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
-    ) -> Awaitable[list[Any] | dict[str, list[Any]]]: ...
+    ) -> Awaitable[TimeSeriesMRangeResponse]: ...
 
     def mrange(
         self,
@@ -1099,9 +1100,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
-    ) -> (list[Any] | dict[str, list[Any]]) | Awaitable[
-        list[Any] | dict[str, list[Any]]
-    ]:
+    ) -> TimeSeriesMRangeResponse | Awaitable[TimeSeriesMRangeResponse]:
         """
         Query a range across multiple time-series by filters in forward direction.
 
@@ -1178,7 +1177,9 @@ class TimeSeriesCommands:
             empty,
         )
 
-        return self.execute_command(MRANGE_CMD, *params)
+        return self.execute_command(
+            MRANGE_CMD, *params, aggregation_type=aggregation_type
+        )
 
     @overload
     def mrevrange(
@@ -1200,7 +1201,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
-    ) -> list[Any] | dict[str, list[Any]]: ...
+    ) -> TimeSeriesMRangeResponse: ...
 
     @overload
     def mrevrange(
@@ -1222,7 +1223,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
-    ) -> Awaitable[list[Any] | dict[str, list[Any]]]: ...
+    ) -> Awaitable[TimeSeriesMRangeResponse]: ...
 
     def mrevrange(
         self,
@@ -1243,9 +1244,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
-    ) -> (list[Any] | dict[str, list[Any]]) | Awaitable[
-        list[Any] | dict[str, list[Any]]
-    ]:
+    ) -> TimeSeriesMRangeResponse | Awaitable[TimeSeriesMRangeResponse]:
         """
         Query a range across multiple time-series by filters in reverse direction.
 
@@ -1322,7 +1321,9 @@ class TimeSeriesCommands:
             empty,
         )
 
-        return self.execute_command(MREVRANGE_CMD, *params)
+        return self.execute_command(
+            MREVRANGE_CMD, *params, aggregation_type=aggregation_type
+        )
 
     @overload
     def get(

@@ -38,11 +38,7 @@ if TYPE_CHECKING:
 
 from redis._parsers import AsyncCommandsParser, Encoder
 from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
-from redis._parsers.helpers import (
-    _RedisCallbacks,
-    _RedisCallbacksRESP2,
-    _RedisCallbacksRESP3,
-)
+from redis._parsers.helpers import get_response_callbacks
 from redis.asyncio.client import PubSub, ResponseCallbackT
 from redis.asyncio.connection import (
     AbstractConnection,
@@ -70,6 +66,9 @@ from redis.cluster import (
     LoadBalancingStrategy,
     block_pipeline_command,
     get_node_name,
+    parse_cluster_shards,
+    parse_cluster_shards_unified,
+    parse_cluster_shards_with_str_keys,
     parse_cluster_slots,
 )
 from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
@@ -106,9 +105,7 @@ from redis.exceptions import (
 )
 from redis.typing import AnyKeyT, EncodableT, KeyT
 from redis.utils import (
-    DEFAULT_RESP_VERSION,
     SSL_AVAILABLE,
-    check_protocol_version,
     deprecated_args,
     deprecated_function,
     safe_str,
@@ -349,7 +346,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_keyfile: Optional[str] = None,
         ssl_min_version: Optional[TLSVersion] = None,
         ssl_ciphers: Optional[str] = None,
-        protocol: Optional[int] = 3,
+        protocol: Optional[int] = None,
+        legacy_responses: bool = True,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
         policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver(),
@@ -395,6 +393,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "socket_keepalive_options": socket_keepalive_options,
             "socket_timeout": socket_timeout,
             "protocol": protocol,
+            "legacy_responses": legacy_responses,
         }
 
         if ssl:
@@ -429,11 +428,20 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         if retry_on_error:
             self.retry.update_supported_errors(retry_on_error)
 
-        kwargs["response_callbacks"] = _RedisCallbacks.copy()
-        if check_protocol_version(kwargs.get("protocol", DEFAULT_RESP_VERSION), 3):
-            kwargs["response_callbacks"].update(_RedisCallbacksRESP3)
+        kwargs["response_callbacks"] = get_response_callbacks(
+            user_protocol=kwargs.get("protocol"),
+            legacy_responses=kwargs.get("legacy_responses", True),
+        )
+        if not kwargs.get("legacy_responses", True):
+            kwargs["response_callbacks"]["CLUSTER SHARDS"] = (
+                parse_cluster_shards_unified
+            )
+        elif kwargs.get("protocol") is None:
+            kwargs["response_callbacks"]["CLUSTER SHARDS"] = (
+                parse_cluster_shards_with_str_keys
+            )
         else:
-            kwargs["response_callbacks"].update(_RedisCallbacksRESP2)
+            kwargs["response_callbacks"]["CLUSTER SHARDS"] = parse_cluster_shards
         self.connection_kwargs = kwargs
 
         if startup_nodes:

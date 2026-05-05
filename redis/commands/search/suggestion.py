@@ -1,6 +1,6 @@
 from typing import Optional
 
-from redis.utils import str_if_bytes
+from ._util import to_string
 
 
 class Suggestion:
@@ -12,8 +12,8 @@ class Suggestion:
     def __init__(
         self, string: str, score: float = 1.0, payload: Optional[str] = None
     ) -> None:
-        self.string = str_if_bytes(string)
-        self.payload = str_if_bytes(payload)
+        self.string = to_string(string)
+        self.payload = to_string(payload)
         self.score = score
 
     def __repr__(self) -> str:

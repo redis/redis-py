@@ -48,17 +48,22 @@ from redis.typing import (
     BlockingListPopResponse,
     BlockingZSetPopResponse,
     ChannelT,
+    ClientTrackingInfoResponse,
     CommandGetKeysAndFlagsResponse,
     CommandsProtocol,
     ConsumerT,
     EncodableT,
     ExpiryT,
     FieldT,
+    GeoCoordinate,
+    GeoRadiusResponse,
+    GeoSearchResponse,
     GroupT,
     HRandFieldResponse,
     HScanResponse,
     KeysT,
     KeyT,
+    LCSCommandResponse,
     ListMultiPopResponse,
     Number,
     PatternT,
@@ -130,16 +135,16 @@ class ACLCommands(CommandsProtocol):
     @overload
     def acl_cat(
         self: SyncClientProtocol, category: str | None = None, **kwargs
-    ) -> list[str]: ...
+    ) -> list[bytes | str]: ...
 
     @overload
     def acl_cat(
         self: AsyncClientProtocol, category: str | None = None, **kwargs
-    ) -> Awaitable[list[str]]: ...
+    ) -> Awaitable[list[bytes | str]]: ...
 
     def acl_cat(
         self, category: str | None = None, **kwargs
-    ) -> list[str] | Awaitable[list[str]]:
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Returns a list of categories or commands within a category.
 
@@ -191,14 +196,16 @@ class ACLCommands(CommandsProtocol):
     @overload
     def acl_genpass(
         self: SyncClientProtocol, bits: int | None = None, **kwargs
-    ) -> str: ...
+    ) -> bytes | str: ...
 
     @overload
     def acl_genpass(
         self: AsyncClientProtocol, bits: int | None = None, **kwargs
-    ) -> Awaitable[str]: ...
+    ) -> Awaitable[bytes | str]: ...
 
-    def acl_genpass(self, bits: int | None = None, **kwargs) -> (str) | Awaitable[str]:
+    def acl_genpass(self, bits: int | None = None, **kwargs) -> (
+        bytes | str
+    ) | Awaitable[bytes | str]:
         """Generate a random password value.
         If ``bits`` is supplied then use this number of bits, rounded to
         the next multiple of 4.
@@ -240,12 +247,14 @@ class ACLCommands(CommandsProtocol):
         return self.execute_command("ACL GETUSER", username, **kwargs)
 
     @overload
-    def acl_help(self: SyncClientProtocol, **kwargs) -> list[str]: ...
+    def acl_help(self: SyncClientProtocol, **kwargs) -> list[bytes | str]: ...
 
     @overload
-    def acl_help(self: AsyncClientProtocol, **kwargs) -> Awaitable[list[str]]: ...
+    def acl_help(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[list[bytes | str]]: ...
 
-    def acl_help(self, **kwargs) -> list[str] | Awaitable[list[str]]:
+    def acl_help(self, **kwargs) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """The ACL HELP command returns helpful text describing
         the different subcommands.
 
@@ -254,12 +263,14 @@ class ACLCommands(CommandsProtocol):
         return self.execute_command("ACL HELP", **kwargs)
 
     @overload
-    def acl_list(self: SyncClientProtocol, **kwargs) -> list[str]: ...
+    def acl_list(self: SyncClientProtocol, **kwargs) -> list[bytes | str]: ...
 
     @overload
-    def acl_list(self: AsyncClientProtocol, **kwargs) -> Awaitable[list[str]]: ...
+    def acl_list(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[list[bytes | str]]: ...
 
-    def acl_list(self, **kwargs) -> list[str] | Awaitable[list[str]]:
+    def acl_list(self, **kwargs) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return a list of all ACLs on the server
 
@@ -577,12 +588,14 @@ class ACLCommands(CommandsProtocol):
         return self.execute_command("ACL SETUSER", *pieces, **kwargs)
 
     @overload
-    def acl_users(self: SyncClientProtocol, **kwargs) -> list[str]: ...
+    def acl_users(self: SyncClientProtocol, **kwargs) -> list[bytes | str]: ...
 
     @overload
-    def acl_users(self: AsyncClientProtocol, **kwargs) -> Awaitable[list[str]]: ...
+    def acl_users(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[list[bytes | str]]: ...
 
-    def acl_users(self, **kwargs) -> list[str] | Awaitable[list[str]]:
+    def acl_users(self, **kwargs) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """Returns a list of all registered users on the server.
 
         For more information, see https://redis.io/commands/acl-users
@@ -590,12 +603,12 @@ class ACLCommands(CommandsProtocol):
         return self.execute_command("ACL USERS", **kwargs)
 
     @overload
-    def acl_whoami(self: SyncClientProtocol, **kwargs) -> str: ...
+    def acl_whoami(self: SyncClientProtocol, **kwargs) -> bytes | str: ...
 
     @overload
-    def acl_whoami(self: AsyncClientProtocol, **kwargs) -> Awaitable[str]: ...
+    def acl_whoami(self: AsyncClientProtocol, **kwargs) -> Awaitable[bytes | str]: ...
 
-    def acl_whoami(self, **kwargs) -> str | Awaitable[str]:
+    def acl_whoami(self, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
         """Get the username for the current connection
 
         For more information, see https://redis.io/commands/acl-whoami
@@ -864,14 +877,16 @@ class ManagementCommands(CommandsProtocol):
         return self.execute_command("CLIENT LIST", *args, **kwargs)
 
     @overload
-    def client_getname(self: SyncClientProtocol, **kwargs) -> str | None: ...
+    def client_getname(self: SyncClientProtocol, **kwargs) -> bytes | str | None: ...
 
     @overload
     def client_getname(
         self: AsyncClientProtocol, **kwargs
-    ) -> Awaitable[str | None]: ...
+    ) -> Awaitable[bytes | str | None]: ...
 
-    def client_getname(self, **kwargs) -> (str | None) | Awaitable[str | None]:
+    def client_getname(self, **kwargs) -> (bytes | str | None) | Awaitable[
+        bytes | str | None
+    ]:
         """
         Returns the current connection name
 
@@ -1115,16 +1130,18 @@ class ManagementCommands(CommandsProtocol):
         return self.execute_command("CLIENT TRACKING", *pieces, **kwargs)
 
     @overload
-    def client_trackinginfo(self: SyncClientProtocol, **kwargs) -> dict[str, Any]: ...
+    def client_trackinginfo(
+        self: SyncClientProtocol, **kwargs
+    ) -> ClientTrackingInfoResponse: ...
 
     @overload
     def client_trackinginfo(
         self: AsyncClientProtocol, **kwargs
-    ) -> Awaitable[dict[str, Any]]: ...
+    ) -> Awaitable[ClientTrackingInfoResponse]: ...
 
     def client_trackinginfo(
         self, **kwargs
-    ) -> dict[str, Any] | Awaitable[dict[str, Any]]:
+    ) -> ClientTrackingInfoResponse | Awaitable[ClientTrackingInfoResponse]:
         """
         Returns the information about the current client connection's
         use of the server assisted client side cache.
@@ -1756,12 +1773,12 @@ class ManagementCommands(CommandsProtocol):
             return self.execute_command("LOLWUT", **kwargs)
 
     @overload
-    def reset(self: SyncClientProtocol) -> str: ...
+    def reset(self: SyncClientProtocol) -> bytes | str: ...
 
     @overload
-    def reset(self: AsyncClientProtocol) -> Awaitable[str]: ...
+    def reset(self: AsyncClientProtocol) -> Awaitable[bytes | str]: ...
 
-    def reset(self) -> str | Awaitable[str]:
+    def reset(self) -> (bytes | str) | Awaitable[bytes | str]:
         """Perform a full reset on the connection's server-side context.
 
         See: https://redis.io/commands/reset
@@ -4526,7 +4543,7 @@ class BasicKeyCommands(CommandsProtocol):
         idx: bool | None = False,
         minmatchlen: int | None = 0,
         withmatchlen: bool | None = False,
-    ) -> bytes | str | int | dict[Any, Any]: ...
+    ) -> LCSCommandResponse: ...
 
     @overload
     def lcs(
@@ -4537,7 +4554,7 @@ class BasicKeyCommands(CommandsProtocol):
         idx: bool | None = False,
         minmatchlen: int | None = 0,
         withmatchlen: bool | None = False,
-    ) -> Awaitable[bytes | str | int | dict[Any, Any]]: ...
+    ) -> Awaitable[LCSCommandResponse]: ...
 
     def lcs(
         self,
@@ -4547,9 +4564,7 @@ class BasicKeyCommands(CommandsProtocol):
         idx: bool | None = False,
         minmatchlen: int | None = 0,
         withmatchlen: bool | None = False,
-    ) -> (bytes | str | int | dict[Any, Any]) | Awaitable[
-        bytes | str | int | dict[Any, Any]
-    ]:
+    ) -> LCSCommandResponse | Awaitable[LCSCommandResponse]:
         """
         Find the longest common subsequence between ``key1`` and ``key2``.
         If ``len`` is true the length of the match will be returned.
@@ -7681,7 +7696,8 @@ class SortedSetCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/zpopmax
         """
         args = (count is not None) and [count] or []
-        return self.execute_command("ZPOPMAX", name, *args)
+        options = {"withscores": True}
+        return self.execute_command("ZPOPMAX", name, *args, **options)
 
     @overload
     def zpopmin(
@@ -7703,7 +7719,8 @@ class SortedSetCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/zpopmin
         """
         args = (count is not None) and [count] or []
-        return self.execute_command("ZPOPMIN", name, *args)
+        options = {"withscores": True}
+        return self.execute_command("ZPOPMIN", name, *args, **options)
 
     @overload
     def zrandmember(
@@ -10460,16 +10477,16 @@ class GeoCommands(CommandsProtocol):
     @overload
     def geohash(
         self: SyncClientProtocol, name: KeyT, *values: FieldT
-    ) -> list[str | None]: ...
+    ) -> list[bytes | str | None]: ...
 
     @overload
     def geohash(
         self: AsyncClientProtocol, name: KeyT, *values: FieldT
-    ) -> Awaitable[list[str | None]]: ...
+    ) -> Awaitable[list[bytes | str | None]]: ...
 
     def geohash(
         self, name: KeyT, *values: FieldT
-    ) -> list[str | None] | Awaitable[list[str | None]]:
+    ) -> list[bytes | str | None] | Awaitable[list[bytes | str | None]]:
         """
         Return the geo hash string for each item of ``values`` members of
         the specified key identified by the ``name`` argument.
@@ -10481,16 +10498,16 @@ class GeoCommands(CommandsProtocol):
     @overload
     def geopos(
         self: SyncClientProtocol, name: KeyT, *values: FieldT
-    ) -> list[list[float] | None]: ...
+    ) -> list[GeoCoordinate | None]: ...
 
     @overload
     def geopos(
         self: AsyncClientProtocol, name: KeyT, *values: FieldT
-    ) -> Awaitable[list[list[float] | None]]: ...
+    ) -> Awaitable[list[GeoCoordinate | None]]: ...
 
     def geopos(
         self, name: KeyT, *values: FieldT
-    ) -> list[list[float] | None] | Awaitable[list[list[float] | None]]:
+    ) -> list[GeoCoordinate | None] | Awaitable[list[GeoCoordinate | None]]:
         """
         Return the positions of each item of ``values`` as members of
         the specified key identified by the ``name`` argument. Each position
@@ -10516,7 +10533,7 @@ class GeoCommands(CommandsProtocol):
         store: KeyT | None = None,
         store_dist: KeyT | None = None,
         any: bool = False,
-    ) -> list[Any] | int: ...
+    ) -> GeoRadiusResponse: ...
 
     @overload
     def georadius(
@@ -10534,7 +10551,7 @@ class GeoCommands(CommandsProtocol):
         store: KeyT | None = None,
         store_dist: KeyT | None = None,
         any: bool = False,
-    ) -> Awaitable[list[Any] | int]: ...
+    ) -> Awaitable[GeoRadiusResponse]: ...
 
     def georadius(
         self,
@@ -10551,7 +10568,7 @@ class GeoCommands(CommandsProtocol):
         store: KeyT | None = None,
         store_dist: KeyT | None = None,
         any: bool = False,
-    ) -> (list[Any] | int) | Awaitable[list[Any] | int]:
+    ) -> GeoRadiusResponse | Awaitable[GeoRadiusResponse]:
         """
         Return the members of the specified key identified by the
         ``name`` argument which are within the borders of the area specified
@@ -10614,7 +10631,7 @@ class GeoCommands(CommandsProtocol):
         store: KeyT | None = None,
         store_dist: KeyT | None = None,
         any: bool = False,
-    ) -> list[Any] | int: ...
+    ) -> GeoRadiusResponse: ...
 
     @overload
     def georadiusbymember(
@@ -10631,7 +10648,7 @@ class GeoCommands(CommandsProtocol):
         store: KeyT | None = None,
         store_dist: KeyT | None = None,
         any: bool = False,
-    ) -> Awaitable[list[Any] | int]: ...
+    ) -> Awaitable[GeoRadiusResponse]: ...
 
     def georadiusbymember(
         self,
@@ -10647,7 +10664,7 @@ class GeoCommands(CommandsProtocol):
         store: Union[KeyT, None] = None,
         store_dist: Union[KeyT, None] = None,
         any: bool = False,
-    ) -> (list[Any] | int) | Awaitable[list[Any] | int]:
+    ) -> GeoRadiusResponse | Awaitable[GeoRadiusResponse]:
         """
         This command is exactly like ``georadius`` with the sole difference
         that instead of taking, as the center of the area to query, a longitude
@@ -10735,7 +10752,7 @@ class GeoCommands(CommandsProtocol):
         withcoord: bool = False,
         withdist: bool = False,
         withhash: bool = False,
-    ) -> list[Any]: ...
+    ) -> GeoSearchResponse: ...
 
     @overload
     def geosearch(
@@ -10754,7 +10771,7 @@ class GeoCommands(CommandsProtocol):
         withcoord: bool = False,
         withdist: bool = False,
         withhash: bool = False,
-    ) -> Awaitable[list[Any]]: ...
+    ) -> Awaitable[GeoSearchResponse]: ...
 
     def geosearch(
         self,
@@ -10772,7 +10789,7 @@ class GeoCommands(CommandsProtocol):
         withcoord: bool = False,
         withdist: bool = False,
         withhash: bool = False,
-    ) -> list[Any] | Awaitable[list[Any]]:
+    ) -> GeoSearchResponse | Awaitable[GeoSearchResponse]:
         """
         Return the members of specified key identified by the
         ``name`` argument, which are within the borders of the

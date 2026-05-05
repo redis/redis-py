@@ -2,6 +2,7 @@ from typing import List, Optional
 
 from redis.utils import decode_field_value, str_if_bytes
 
+from ._util import to_string
 from .document import Document
 
 
@@ -45,19 +46,29 @@ class Result:
         offset = 2 if with_scores else 1
 
         for i in range(1, len(res), step):
-            id = str_if_bytes(res[i])
-            payload = str_if_bytes(res[i + offset]) if has_payload else None
+            id = to_string(res[i])
+            payload = to_string(res[i + offset]) if has_payload else None
             # fields_offset = 2 if has_payload else 1
             fields_offset = offset + 1 if has_payload else offset
             score = float(res[i + 1]) if with_scores else None
 
             fields = {}
             if hascontent and res[i + fields_offset] is not None:
-                keys = map(str_if_bytes, res[i + fields_offset][::2])
+                keys = map(to_string, res[i + fields_offset][::2])
                 values = res[i + fields_offset][1::2]
 
                 for key, value in zip(keys, values):
-                    fields[key] = decode_field_value(value, key, field_encodings)
+                    if field_encodings is None or key not in field_encodings:
+                        fields[key] = to_string(value)
+                        continue
+
+                    encoding = field_encodings[key]
+
+                    # If the encoding is None, we don't need to decode the value
+                    if encoding is None:
+                        fields[key] = value
+                    else:
+                        fields[key] = to_string(value, encoding=encoding)
 
             try:
                 del fields["id"]

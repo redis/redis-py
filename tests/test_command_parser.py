@@ -4,6 +4,7 @@ from redis._parsers.commands import RequestPolicy, ResponsePolicy
 from tests.helpers import get_expected_command_policies
 
 from .conftest import (
+    assert_resp_response,
     skip_if_redis_enterprise,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
@@ -56,21 +57,40 @@ class TestCommandsParser:
         ]
         args7 = ["MIGRATE", "192.168.1.34", 6379, "key1", 0, 5000]
 
-        assert sorted(commands_parser.get_keys(r, *args1)) == [b"key1", b"key2"]
-        assert sorted(commands_parser.get_keys(r, *args2)) == [b"mystream", b"writers"]
-        assert sorted(commands_parser.get_keys(r, *args3)) == [
-            b"out",
-            b"zset1",
-            b"zset2",
-        ]
-        assert sorted(commands_parser.get_keys(r, *args4)) == [b"Sicily", b"out"]
+        assert_resp_response(
+            r,
+            sorted(commands_parser.get_keys(r, *args1)),
+            ["key1", "key2"],
+            [b"key1", b"key2"],
+        )
+        assert_resp_response(
+            r,
+            sorted(commands_parser.get_keys(r, *args2)),
+            ["mystream", "writers"],
+            [b"mystream", b"writers"],
+        )
+        assert_resp_response(
+            r,
+            sorted(commands_parser.get_keys(r, *args3)),
+            ["out", "zset1", "zset2"],
+            [b"out", b"zset1", b"zset2"],
+        )
+        assert_resp_response(
+            r,
+            sorted(commands_parser.get_keys(r, *args4)),
+            ["Sicily", "out"],
+            [b"Sicily", b"out"],
+        )
         assert sorted(commands_parser.get_keys(r, *args5)) in [["foo"], [b"foo"]]
-        assert sorted(commands_parser.get_keys(r, *args6)) == [
-            b"key1",
-            b"key2",
-            b"key3",
-        ]
-        assert sorted(commands_parser.get_keys(r, *args7)) == [b"key1"]
+        assert_resp_response(
+            r,
+            sorted(commands_parser.get_keys(r, *args6)),
+            ["key1", "key2", "key3"],
+            [b"key1", b"key2", b"key3"],
+        )
+        assert_resp_response(
+            r, sorted(commands_parser.get_keys(r, *args7)), ["key1"], [b"key1"]
+        )
 
     # A bug in redis<7.0 causes this to fail: https://github.com/redis/redis/issues/9493
     @skip_if_server_version_lt("7.0.0")

@@ -14,12 +14,13 @@ _CLIENT_NAME = "test-suite-client"
 _CMD_SEP = b"\r\n"
 _SUCCESS_RESP = b"+OK" + _CMD_SEP
 _ERROR_RESP = b"-ERR" + _CMD_SEP
-_HELLO_RESP = (
-    b"%1" + _CMD_SEP + b"$5" + _CMD_SEP + b"proto" + _CMD_SEP + b":3" + _CMD_SEP
-)
+# Minimal RESP3 map response for ``HELLO 3`` containing only ``proto: 3`` —
+# enough to satisfy ``Connection.on_connect`` when the default protocol
+# resolves to RESP3.
+_HELLO_RESP3 = b"%1\r\n$5\r\nproto\r\n:3\r\n"
 _SUPPORTED_CMDS = {
     f"CLIENT SETNAME {_CLIENT_NAME}": _SUCCESS_RESP,
-    "HELLO 3": _HELLO_RESP,
+    "HELLO 3": _HELLO_RESP3,
 }
 
 
