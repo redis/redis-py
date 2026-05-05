@@ -3237,6 +3237,121 @@ class TestRedisCommands:
         assert r.lset("a", 1, "4")
         assert r.lrange("a", 0, 2) == [b"1", b"4", b"3"]
 
+    @skip_if_server_version_lt("8.8.0")
+    def test_arset_at_index_zero(self, r):
+        assert r.arset("a", 0, "v0") == 1
+
+    @skip_if_server_version_lt("8.8.0")
+    def test_arset_at_positive_index(self, r):
+        assert r.arset("a", 1, "v1") == 1
+
+    @skip_if_server_version_lt("8.8.0")
+    def test_arset_multiple_values(self, r):
+        assert r.arset("a", 0, "v0", "v1", "v2") == 3
+
+    @skip_if_server_version_lt("8.8.0")
+    def test_arset_negative_index(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        with pytest.raises(redis.ResponseError):
+            r.arset("a", -1, "vlast")
+
+    @skip_if_server_version_lt("8.8.0")
+    def test_arget_returns_value_at_index(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        assert r.arget("a", 0) == b"v0"
+        assert r.arget("a", 1) == b"v1"
+        assert r.arget("a", 2) == b"v2"
+
+    @skip_if_server_version_lt("8.8.0")
+    def test_arget_missing_key_returns_none(self, r):
+        assert r.arget("a", 0) is None
+
+    @skip_if_server_version_lt("8.8.0")
+    def test_arget_missing_index_returns_none(self, r):
+        r.arset("a", 0, "v0")
+        assert r.arget("a", 5) is None
+
+    @skip_if_server_version_lt("8.8.0")
+    def test_ardel_single_index(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        assert r.ardel("a", 1) == 1
+        assert r.arget("a", 1) is None
+        assert r.arget("a", 0) == b"v0"
+        assert r.arget("a", 2) == b"v2"
+
+    @skip_if_server_version_lt("8.8.0")
+    def test_ardel_multiple_indices(self, r):
+        r.arset("a", 0, "v0", "v1", "v2", "v3")
+        assert r.ardel("a", 0, 2, 3) == 3
+        assert r.arget("a", 0) is None
+        assert r.arget("a", 1) == b"v1"
+        assert r.arget("a", 2) is None
+        assert r.arget("a", 3) is None
+
+    @skip_if_server_version_lt("8.8.0")
+    def test_ardel_non_existing_index(self, r):
+        r.arset("a", 0, "v0", "v1")
+        assert r.ardel("a", 10) == 0
+        assert r.arget("a", 0) == b"v0"
+        assert r.arget("a", 1) == b"v1"
+
+    @skip_if_server_version_lt("8.8.0")
+    def test_ardel_mixed_existing_and_missing(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        assert r.ardel("a", 0, 10, 2) == 2
+        assert r.arget("a", 0) is None
+        assert r.arget("a", 1) == b"v1"
+        assert r.arget("a", 2) is None
+
+    @skip_if_server_version_lt("8.8.0")
+    def test_arcount_missing_key(self, r):
+        assert r.arcount("a") == 0
+
+    @skip_if_server_version_lt("8.8.0")
+    def test_arcount_returns_number_of_elements(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        assert r.arcount("a") == 3
+
+    @skip_if_server_version_lt("8.8.0")
+    def test_arcount_after_delete(self, r):
+        r.arset("a", 0, "v0", "v1", "v2", "v3")
+        r.ardel("a", 1, 3)
+        assert r.arcount("a") == 2
+
+    @skip_if_server_version_lt("8.8.0")
+    def test_arnext_missing_key(self, r):
+        assert r.arnext("a") == 0
+
+    @skip_if_server_version_lt("8.8.0")
+    def test_arnext_returns_next_index(self, r):
+        r.arinsert("a", "v0", "v1", "v2")
+        assert r.arnext("a") == 3
+
+    @skip_if_server_version_lt("8.8.0")
+    def test_arnext_after_delete(self, r):
+        r.arinsert("a", "v0", "v1", "v2")
+        r.ardel("a", 1)
+        assert r.arnext("a") == 3
+
+    @skip_if_server_version_lt("8.8.0")
+    def test_arinsert_single_value(self, r):
+        assert r.arinsert("a", "v0") == 0
+        assert r.arget("a", 0) == b"v0"
+
+    @skip_if_server_version_lt("8.8.0")
+    def test_arinsert_multiple_values(self, r):
+        assert r.arinsert("a", "v0", "v1", "v2") == 2
+        assert r.arget("a", 0) == b"v0"
+        assert r.arget("a", 1) == b"v1"
+        assert r.arget("a", 2) == b"v2"
+
+    @skip_if_server_version_lt("8.8.0")
+    def test_arinsert_advances_cursor(self, r):
+        r.arinsert("a", "v0", "v1")
+        assert r.arnext("a") == 2
+        assert r.arinsert("a", "v2") == 2
+        assert r.arnext("a") == 3
+
     def test_ltrim(self, r):
         r.rpush("a", "1", "2", "3")
         assert r.ltrim("a", 0, 1)

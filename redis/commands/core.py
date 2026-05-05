@@ -5289,6 +5289,144 @@ class ListCommands(CommandsProtocol):
 AsyncListCommands = ListCommands
 
 
+class ArrayCommands(CommandsProtocol):
+    """
+    Redis commands for Array data type.
+    """
+
+    @overload
+    def arset(
+        self: SyncClientProtocol, name: KeyT, index: int, *values: FieldT
+    ) -> int: ...
+
+    @overload
+    def arset(
+        self: AsyncClientProtocol, name: KeyT, index: int, *values: FieldT
+    ) -> Awaitable[int]: ...
+
+    def arset(
+        self, name: KeyT, index: int, *values: FieldT
+    ) -> int | Awaitable[int]:
+        """
+        Set one or more contiguous ``values`` in the array stored at ``name``
+        starting at ``index``. When multiple values are provided, they are
+        stored at consecutive indices beginning at ``index``.
+
+        Returns the number of new slots that were set (previously empty).
+
+        For more information, see https://redis.io/commands/arset
+        """
+        return self.execute_command("ARSET", name, index, *values)
+
+    @overload
+    def arget(
+        self: SyncClientProtocol, name: KeyT, index: int
+    ) -> bytes | str | None: ...
+
+    @overload
+    def arget(
+        self: AsyncClientProtocol, name: KeyT, index: int
+    ) -> Awaitable[bytes | str | None]: ...
+
+    def arget(self, name: KeyT, index: int) -> (bytes | str | None) | Awaitable[
+        bytes | str | None
+    ]:
+        """
+        Return the value at ``index`` in the array stored at ``name``.
+
+        Returns ``None`` if ``name`` does not exist or no value is set at
+        ``index``.
+
+        For more information, see https://redis.io/commands/arget
+        """
+        return self.execute_command("ARGET", name, index)
+
+    @overload
+    def ardel(
+        self: SyncClientProtocol, name: KeyT, *indices: int
+    ) -> int: ...
+
+    @overload
+    def ardel(
+        self: AsyncClientProtocol, name: KeyT, *indices: int
+    ) -> Awaitable[int]: ...
+
+    def ardel(
+        self, name: KeyT, *indices: int
+    ) -> int | Awaitable[int]:
+        """
+        Delete elements at the specified ``indices`` in the array stored at
+        ``name``. Deleting an index that does not exist counts as zero
+        elements deleted and does not modify the array.
+
+        Returns the number of elements deleted.
+
+        For more information, see https://redis.io/commands/ardel
+        """
+        return self.execute_command("ARDEL", name, *indices)
+
+    @overload
+    def arcount(self: SyncClientProtocol, name: KeyT) -> int: ...
+
+    @overload
+    def arcount(self: AsyncClientProtocol, name: KeyT) -> Awaitable[int]: ...
+
+    def arcount(self, name: KeyT) -> int | Awaitable[int]:
+        """
+        Return the number of non-empty elements in the array stored at
+        ``name``. Returns 0 if ``name`` does not exist.
+
+        For more information, see https://redis.io/commands/arcount
+        """
+        return self.execute_command("ARCOUNT", name)
+
+    @overload
+    def arnext(self: SyncClientProtocol, name: KeyT) -> int | None: ...
+
+    @overload
+    def arnext(self: AsyncClientProtocol, name: KeyT) -> Awaitable[int | None]: ...
+
+    def arnext(self, name: KeyT) -> (int | None) | Awaitable[int | None]:
+        """
+        Return the next index ``ARINSERT`` would use for the array stored at
+        ``name``. Returns 0 if ``name`` does not exist or no insert happened
+        yet, and ``None`` when the insertion cursor is exhausted (next insert
+        would overflow).
+
+        For more information, see https://redis.io/commands/arnext
+        """
+        return self.execute_command("ARNEXT", name)
+
+    @overload
+    def arinsert(
+        self: SyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> int: ...
+
+    @overload
+    def arinsert(
+        self: AsyncClientProtocol, name: KeyT, *values: FieldT
+    ) -> Awaitable[int]: ...
+
+    def arinsert(
+        self, name: KeyT, *values: FieldT
+    ) -> int | Awaitable[int]:
+        """
+        Insert one or more ``values`` at consecutive indices in the array
+        stored at ``name``, beginning at the current insert cursor position.
+        The cursor advances by one for each value inserted. Use ``ARNEXT``
+        to inspect the current cursor position and ``ARSEEK`` to reposition
+        it.
+
+        Returns the last index where a value was inserted.
+
+        For more information, see https://redis.io/commands/arinsert
+        """
+        return self.execute_command("ARINSERT", name, *values)
+
+
+AsyncArrayCommands = ArrayCommands
+
+
 class ScanCommands(CommandsProtocol):
     """
     Redis SCAN commands.
@@ -11390,6 +11528,7 @@ class DataAccessCommands(
     HashCommands,
     GeoCommands,
     ListCommands,
+    ArrayCommands,
     ScanCommands,
     SetCommands,
     StreamCommands,
@@ -11407,6 +11546,7 @@ class AsyncDataAccessCommands(
     AsyncHashCommands,
     AsyncGeoCommands,
     AsyncListCommands,
+    AsyncArrayCommands,
     AsyncScanCommands,
     AsyncSetCommands,
     AsyncStreamCommands,
