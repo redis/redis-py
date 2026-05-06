@@ -4287,6 +4287,9 @@ class BasicKeyCommands(CommandsProtocol):
         seconds. ``time`` can be represented by an integer or a Python
         timedelta object.
 
+        As per Redis 2.6.12, SETEX is considered deprecated.
+        Please use SET with EX parameter in new code.
+
         For more information, see https://redis.io/commands/setex
         """
         if isinstance(time, datetime.timedelta):
