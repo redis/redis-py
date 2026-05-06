@@ -1,7 +1,7 @@
 import pytest
 from redis.exceptions import ResponseError
 
-from .conftest import skip_if_server_version_lt
+from .conftest import assert_resp_response, skip_if_server_version_lt
 
 engine = "lua"
 lib = "mylib"
@@ -53,7 +53,17 @@ class TestFunction:
     @pytest.mark.onlynoncluster
     def test_function_list(self, r):
         r.function_load(f"#!{engine} name={lib} \n {function}")
-        expected = [
+        res = [
+            [
+                b"library_name",
+                b"mylib",
+                b"engine",
+                b"LUA",
+                b"functions",
+                [[b"name", b"myfunc", b"description", None, b"flags", [b"no-writes"]]],
+            ]
+        ]
+        resp3_res = [
             {
                 b"library_name": b"mylib",
                 b"engine": b"LUA",
@@ -62,15 +72,28 @@ class TestFunction:
                 ],
             }
         ]
-        assert r.function_list() == expected
-        assert r.function_list(library="*lib") == expected
-        expected[0][b"library_code"] = f"#!{engine} name={lib} \n {function}".encode()
-        assert r.function_list(withcode=True) == expected
+        assert_resp_response(r, r.function_list(), res, resp3_res)
+        assert_resp_response(r, r.function_list(library="*lib"), res, resp3_res)
+        res[0].extend(
+            [b"library_code", f"#!{engine} name={lib} \n {function}".encode()]
+        )
+        resp3_res[0][b"library_code"] = f"#!{engine} name={lib} \n {function}".encode()
+        assert_resp_response(r, r.function_list(withcode=True), res, resp3_res)
 
     @pytest.mark.onlycluster
     def test_function_list_on_cluster(self, r):
         r.function_load(f"#!{engine} name={lib} \n {function}")
         function_list = [
+            [
+                b"library_name",
+                b"mylib",
+                b"engine",
+                b"LUA",
+                b"functions",
+                [[b"name", b"myfunc", b"description", None, b"flags", [b"no-writes"]]],
+            ]
+        ]
+        resp3_function_list = [
             {
                 b"library_name": b"mylib",
                 b"engine": b"LUA",
@@ -80,15 +103,18 @@ class TestFunction:
             }
         ]
         primaries = r.get_primaries()
-        expected = {}
+        res = {}
+        resp3_res = {}
         for node in primaries:
-            expected[node.name] = function_list
-        assert r.function_list() == expected
-        assert r.function_list(library="*lib") == expected
+            res[node.name] = function_list
+            resp3_res[node.name] = resp3_function_list
+        assert_resp_response(r, r.function_list(), res, resp3_res)
+        assert_resp_response(r, r.function_list(library="*lib"), res, resp3_res)
         node = primaries[0].name
         code = f"#!{engine} name={lib} \n {function}".encode()
-        expected[node][0][b"library_code"] = code
-        assert r.function_list(withcode=True) == expected
+        res[node][0].extend([b"library_code", code])
+        resp3_res[node][0][b"library_code"] = code
+        assert_resp_response(r, r.function_list(withcode=True), res, resp3_res)
 
     def test_fcall(self, r):
         r.function_load(f"#!{engine} name={lib} \n {set_function}")

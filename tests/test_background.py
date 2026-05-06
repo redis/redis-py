@@ -1,6 +1,6 @@
 import asyncio
 import threading
-from time import sleep
+from time import monotonic, sleep
 
 import pytest
 
@@ -8,6 +8,27 @@ from redis.background import BackgroundScheduler
 
 
 class TestBackgroundScheduler:
+    @staticmethod
+    def _wait_for_calls(execute_counter, min_call_count, timeout):
+        if min_call_count == 0:
+            sleep(timeout)
+            return
+
+        deadline = monotonic() + max(timeout, 0.2)
+        while len(execute_counter) < min_call_count and monotonic() < deadline:
+            sleep(0.002)
+
+    @staticmethod
+    async def _wait_for_calls_async(execute_counter, min_call_count, timeout):
+        if min_call_count == 0:
+            await asyncio.sleep(timeout)
+            return
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max(timeout, 0.2)
+        while len(execute_counter) < min_call_count and loop.time() < deadline:
+            await asyncio.sleep(0.002)
+
     def test_run_once(self):
         execute_counter = 0
         one = "arg1"
@@ -58,7 +79,7 @@ class TestBackgroundScheduler:
         scheduler.run_recurring(interval, callback, one, two)
         assert len(execute_counter) == 0
 
-        sleep(timeout)
+        self._wait_for_calls(execute_counter, min_call_count, timeout)
 
         # Use >= instead of == to account for timing variations on CI runners
         assert len(execute_counter) >= min_call_count
@@ -91,7 +112,7 @@ class TestBackgroundScheduler:
         await scheduler.run_recurring_async(interval, callback, one, two)
         assert len(execute_counter) == 0
 
-        await asyncio.sleep(timeout)
+        await self._wait_for_calls_async(execute_counter, min_call_count, timeout)
 
         # Use >= instead of == to account for timing variations on CI runners
         assert len(execute_counter) >= min_call_count
@@ -99,9 +120,9 @@ class TestBackgroundScheduler:
     @pytest.mark.parametrize(
         "interval,timeout,min_call_count",
         [
-            (0.012, 0.08, 2),  # At least 2 calls
-            (0.035, 0.08, 1),
-            (0.09, 0.08, 0),
+            (0.012, 0.04, 2),  # At least 2 calls
+            (0.035, 0.04, 1),
+            (0.045, 0.04, 0),
         ],
     )
     def test_run_recurring_coro(self, interval, timeout, min_call_count):
@@ -123,7 +144,7 @@ class TestBackgroundScheduler:
         scheduler.run_recurring_coro(interval, coro_callback, one, two)
         assert len(execute_counter) == 0
 
-        sleep(timeout)
+        self._wait_for_calls(execute_counter, min_call_count, timeout)
 
         # Use >= instead of == to account for timing variations on CI runners
         assert len(execute_counter) >= min_call_count

@@ -108,12 +108,11 @@ SYM_DOLLAR = b"$"
 SYM_CRLF = b"\r\n"
 SYM_EMPTY = b""
 
-
 DefaultParser: Type[Union[_RESP2Parser, _RESP3Parser, _HiredisParser]]
 if HIREDIS_AVAILABLE:
     DefaultParser = _HiredisParser
 else:
-    DefaultParser = _RESP3Parser
+    DefaultParser = _RESP2Parser
 
 
 class HiredisRespSerializer:
@@ -799,7 +798,8 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         retry: Union[Any, None] = None,
         redis_connect_func: Optional[Callable[[], None]] = None,
         credential_provider: Optional[CredentialProvider] = None,
-        protocol: Optional[int] = 3,
+        protocol: Optional[int] = None,
+        legacy_responses: bool = True,
         command_packer: Optional[Callable[[], None]] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
@@ -899,13 +899,14 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
         self.protocol = p
-        # Reconcile parser ↔ protocol mismatches.
-        # Hiredis handles both RESP2 and RESP3 natively, so only
-        # pure-Python parsers need to be swapped.
+        self.legacy_responses = legacy_responses
         if self.protocol == 3 and parser_class == _RESP2Parser:
+            # If the protocol is 3 but the parser is RESP2, change it to RESP3
+            # This is needed because the parser might be set before the protocol
+            # or might be provided as a kwarg to the constructor
+            # We need to react on discrepancy only for RESP2 and RESP3
+            # as hiredis supports both
             parser_class = _RESP3Parser
-        elif self.protocol == 2 and parser_class == _RESP3Parser:
-            parser_class = _RESP2Parser
         self.set_parser(parser_class)
 
         self._command_packer = self._construct_command_packer(command_packer)
@@ -2208,6 +2209,8 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "ssl_include_verify_flags": parse_ssl_verify_flags,
     "ssl_exclude_verify_flags": parse_ssl_verify_flags,
     "timeout": float,
+    "protocol": int,
+    "legacy_responses": to_bool,
 }
 
 
@@ -2343,9 +2346,7 @@ class MaintNotificationsAbstractConnectionPool:
         **kwargs,
     ):
         # Initialize maintenance notifications
-        is_protocol_supported = check_protocol_version(
-            kwargs.get("protocol", DEFAULT_RESP_VERSION), 3
-        )
+        is_protocol_supported = check_protocol_version(kwargs.get("protocol"), 3)
 
         if maint_notifications_config is None and is_protocol_supported:
             maint_notifications_config = MaintNotificationsConfig()
@@ -2846,9 +2847,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             self._event_dispatcher = EventDispatcher()
 
         if connection_kwargs.get("cache_config") or connection_kwargs.get("cache"):
-            if not check_protocol_version(
-                self._connection_kwargs.get("protocol", DEFAULT_RESP_VERSION), 3
-            ):
+            if not check_protocol_version(self._connection_kwargs.get("protocol"), 3):
                 raise RedisError("Client caching is only supported with RESP version 3")
 
             cache = self._connection_kwargs.get("cache")

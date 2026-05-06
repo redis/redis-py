@@ -49,9 +49,23 @@ jobs:
         parser-backend: [ 'hiredis' ]
         hiredis-version: [ 'unstable' ]
         event-loop: [ 'asyncio' ]
+        test-config:
+          - fixed-clients
+          - default-legacy_responses-standalone
+          - default-legacy_responses-cluster
+          - default-unified_responses-standalone
+          - default-unified_responses-cluster
+          - 2-legacy_responses-standalone
+          - 2-legacy_responses-cluster
+          - 2-unified_responses-standalone
+          - 2-unified_responses-cluster
+          - 3-legacy_responses-standalone
+          - 3-legacy_responses-cluster
+          - 3-unified_responses-standalone
+          - 3-unified_responses-cluster
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}} (${{ matrix.hiredis-version }}); EL:${{matrix.event-loop}}
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}} (${{ matrix.hiredis-version }}); EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -64,3 +78,4 @@ jobs:
           redis-version: ${{ matrix.redis-version }}
           hiredis-version: ${{ matrix.hiredis-version }}
           hiredis-branch: ${{ inputs.hiredis-branch }}
+          test-config: ${{ matrix.test-config }}

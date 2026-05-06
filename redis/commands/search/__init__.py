@@ -1,9 +1,10 @@
-from functools import partial
 from typing import Literal
 
 from redis.client import Pipeline as RedisPipeline
 
 from ...asyncio.client import Pipeline as AsyncioPipeline
+from ...utils import check_protocol_version
+from ..helpers import get_legacy_responses, get_protocol_version
 from .commands import (
     AGGREGATE_CMD,
     CURSOR_CMD,
@@ -176,31 +177,45 @@ class Pipeline(SearchCommands, RedisPipeline):
     _is_async_client: Literal[False] = False
 
     def __init__(self, connection_pool, response_callbacks, transaction, shard_hint):
-        # Copy response_callbacks so search-specific entries don't pollute
-        # the shared client dict.
+        # Copy the client's response_callbacks so search-specific entries
+        # don't pollute the shared dict.
         super().__init__(
             connection_pool, dict(response_callbacks), transaction, shard_hint
         )
         self._init_module_callbacks()
-        # Register search-specific response callbacks so that the standard
-        # pipeline callback mechanism (and future cluster pipeline support)
-        # can apply them automatically — no execute() override needed.
-        # Derive the set of commands from the module callback maps built by
-        # _init_module_callbacks() so new commands are picked up automatically.
-        # _parse_results dispatches to the correct protocol-specific callback
-        # at runtime, so we only need the union of command names here.
-        for cmd in (
-            self._RESP2_MODULE_CALLBACKS.keys() | self._RESP3_MODULE_CALLBACKS.keys()
-        ):
-            self.response_callbacks[cmd] = partial(self._parse_results, cmd)
-        # CURSOR_CMD reuses the AGGREGATE parser but isn't in the maps.
-        self.response_callbacks[CURSOR_CMD] = partial(
-            self._parse_results, AGGREGATE_CMD
-        )
+        self._register_module_callbacks()
+
+    def _register_module_callbacks(self):
+        # Pipeline post-processing matches the pre-migration behavior:
+        # legacy mode returns raw pipeline responses like v8.0.0b1.  The
+        # default connection now uses RESP3 on the wire, so it gets a small
+        # adapter for the old raw RESP2 pipeline shape; explicit RESP3 keeps
+        # the previous native shape, with HYBRID's experimental normalizer.
+        # Only ``legacy_responses=False`` registers the unified parsers that
+        # post-process every response.
+        protocol = get_protocol_version(self)
+        if get_legacy_responses(self):
+            if protocol is None:
+                cmd_callbacks = self._RESP3_TO_RESP2_LEGACY_PIPELINE_CALLBACKS
+            elif check_protocol_version(protocol, 3):
+                cmd_callbacks = self._RESP3_MODULE_CALLBACKS
+            else:
+                cmd_callbacks = {}
+        else:
+            if check_protocol_version(protocol, 3):
+                cmd_callbacks = self._RESP3_UNIFIED_MODULE_CALLBACKS
+            else:
+                cmd_callbacks = self._RESP2_UNIFIED_MODULE_CALLBACKS
+        for cmd, cb in cmd_callbacks.items():
+            self.response_callbacks[cmd] = cb
+        # ``FT.CURSOR`` shares the AGGREGATE parser but isn't in the maps.
+        agg_cb = cmd_callbacks.get(AGGREGATE_CMD)
+        if agg_cb is not None:
+            self.response_callbacks[CURSOR_CMD] = agg_cb
 
     @property
     def client(self):
-        """Return self so get_protocol_version() can access connection_pool."""
+        """Return self so ``get_protocol_version`` can read connection_pool."""
         return self
 
 
@@ -210,26 +225,20 @@ class AsyncPipeline(AsyncSearchCommands, AsyncioPipeline, Pipeline):
     _is_async_client: Literal[True] = True
 
     def __init__(self, connection_pool, response_callbacks, transaction, shard_hint):
-        # AsyncioPipeline.__init__ is next in MRO and won't chain to our
-        # sync Pipeline.__init__, so we must set up callbacks here directly.
+        # ``AsyncioPipeline.__init__`` is next in MRO and won't chain to
+        # the sync ``Pipeline.__init__``, so we set up callbacks here.
         super().__init__(
             connection_pool, dict(response_callbacks), transaction, shard_hint
         )
         self._init_module_callbacks()
-        for cmd in (
-            self._RESP2_MODULE_CALLBACKS.keys() | self._RESP3_MODULE_CALLBACKS.keys()
-        ):
-            self.response_callbacks[cmd] = partial(self._parse_results, cmd)
-        self.response_callbacks[CURSOR_CMD] = partial(
-            self._parse_results, AGGREGATE_CMD
-        )
+        self._register_module_callbacks()
 
     @property
     def client(self):
-        """Return self so get_protocol_version() can access connection_pool.
+        """Return self so ``get_protocol_version`` can read connection_pool.
 
-        Must be redefined here because redis.asyncio.client.Redis.client (a plain
-        method) appears earlier in the MRO than Pipeline.client (a property) and
-        would shadow it.
+        Redefined here because ``redis.asyncio.client.Redis.client`` (a
+        plain method) appears earlier in the MRO than ``Pipeline.client``
+        (a property) and would otherwise shadow it.
         """
         return self
