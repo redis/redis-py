@@ -1171,6 +1171,7 @@ URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyTy
         "ssl_check_hostname": to_bool,
         "ssl_include_verify_flags": parse_ssl_verify_flags,
         "ssl_exclude_verify_flags": parse_ssl_verify_flags,
+        "ssl_min_version": int,
         "timeout": float,
         "protocol": int,
         "legacy_responses": to_bool,
