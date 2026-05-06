@@ -56,6 +56,7 @@ from redis.exceptions import (
     WatchError,
 )
 from redis.lock import Lock
+from redis.local_cache import LocalCache
 from redis.maint_notifications import (
     MaintNotificationsConfig,
     OSSMaintNotificationsHandler,
@@ -286,6 +287,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         oss_cluster_maint_notifications_handler: Optional[
             OSSMaintNotificationsHandler
         ] = None,
+        local_cache_ttl: int = 0,
+        local_cache_max_size: int = 0,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -338,6 +341,16 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             `redis.maint_notifications.OSSMaintNotificationsHandler` for details.
             Only supported with RESP3
             Argument is ignored when connection_pool is provided.
+        local_cache_ttl:
+            **Experimental.** Local memory cache TTL in milliseconds.
+            If both `local_cache_ttl` and `local_cache_max_size` are greater than 0,
+            the local memory cache layer will be activated for GET commands.
+            This is an experimental feature for reducing hot key read latency.
+        local_cache_max_size:
+            **Experimental.** Maximum number of keys to store in local memory cache.
+            If both `local_cache_ttl` and `local_cache_max_size` are greater than 0,
+            the local memory cache layer will be activated.
+            LRU eviction is used when cache exceeds this size.
         """
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -481,6 +494,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 legacy_responses=connection_kwargs.get("legacy_responses", True),
             )
         )
+
+        self._local_cache: Optional[LocalCache] = None
+        if local_cache_ttl > 0 and local_cache_max_size > 0:
+            self._local_cache = LocalCache(local_cache_ttl, local_cache_max_size)
 
     def __repr__(self) -> str:
         return (
@@ -765,6 +782,31 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         """Execute a command and return a parsed response"""
         pool = self.connection_pool
         command_name = args[0]
+        conn = None
+
+        if self._local_cache is not None:
+            if isinstance(command_name, bytes):
+                try:
+                    command_upper = command_name.decode('utf-8').upper()
+                except UnicodeDecodeError:
+                    command_upper = command_name.decode('latin-1').upper()
+            else:
+                command_upper = command_name.upper()
+            
+            if command_upper == "GET" and len(args) >= 2:
+                key = args[1]
+                cached_value = self._local_cache.get(key)
+                if cached_value is not None:
+                    return cached_value
+            
+            elif command_upper in ("SET", "SETEX", "DEL") and len(args) >= 2:
+                if command_upper == "DEL":
+                    for key in args[1:]:
+                        self._local_cache.delete(key)
+                else:
+                    key = args[1]
+                    self._local_cache.delete(key)
+
         conn = self.connection or pool.get_connection()
 
         # Start timing for observability
@@ -796,6 +838,19 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
             )
+
+            if self._local_cache is not None:
+                if isinstance(command_name, bytes):
+                    try:
+                        command_upper = command_name.decode('utf-8').upper()
+                    except UnicodeDecodeError:
+                        command_upper = command_name.decode('latin-1').upper()
+                else:
+                    command_upper = command_name.upper()
+                if command_upper == "GET" and len(args) >= 2:
+                    key = args[1]
+                    self._local_cache.set(key, result)
+
             return result
         except Exception as e:
             record_error_count(
@@ -815,7 +870,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 conn.connect()
             if self._single_connection_client:
                 self.single_connection_lock.release()
-            if not self.connection:
+            if not self.connection and conn:
                 pool.release(conn)
 
     def parse_response(self, connection, command_name, **options):
