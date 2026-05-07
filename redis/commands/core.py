@@ -4279,6 +4279,11 @@ class BasicKeyCommands(CommandsProtocol):
         self: AsyncClientProtocol, name: KeyT, time: ExpiryT, value: EncodableT
     ) -> Awaitable[bool]: ...
 
+    @deprecated_function(
+        version="2.6.12",
+        reason="Use 'set' instead.",
+        name="setex",
+    )
     def setex(
         self, name: KeyT, time: ExpiryT, value: EncodableT
     ) -> bool | Awaitable[bool]:
