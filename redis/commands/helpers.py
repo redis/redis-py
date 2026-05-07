@@ -25,7 +25,7 @@ def list_or_args(keys: Any, args: Iterable[Any] | None) -> List[Any]:
         iter(keys)
         # a string or bytes instance can be iterated, but indicates
         # keys wasn't passed as a list
-        if isinstance(keys, (bytes, memoryview, str)):
+        if isinstance(keys, (bytes, bytearray, memoryview, str)):
             keys = [keys]
         else:
             keys = list(keys)

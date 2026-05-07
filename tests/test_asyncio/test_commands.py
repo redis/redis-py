@@ -3433,6 +3433,11 @@ class TestRedisCommands:
         cases = (
             (b"field-bytes", b"value-bytes", b"value-bytes"),
             (
+                bytearray(b"field-bytearray"),
+                bytearray(b"value-bytearray"),
+                b"value-bytearray",
+            ),
+            (
                 memoryview(b"field-memoryview"),
                 memoryview(b"value-memoryview"),
                 b"value-memoryview",
@@ -3446,6 +3451,10 @@ class TestRedisCommands:
             assert await r.hset("encodable-hash", field, value) == 1
             assert await r.hget("encodable-hash", field) == expected
             assert await r.hmget("encodable-hash", field) == [expected]
+
+        assert await r.hmget("encodable-hash", bytearray(b"field-bytes")) == [
+            b"value-bytes"
+        ]
 
     async def test_hset_with_multi_key_values(self, r: redis.Redis):
         await r.hset("a", mapping={"1": 1, "2": 2, "3": 3})
