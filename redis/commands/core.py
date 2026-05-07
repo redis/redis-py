@@ -5289,6 +5289,17 @@ class ListCommands(CommandsProtocol):
 AsyncListCommands = ListCommands
 
 
+class ArrayAggregateOperations(Enum):
+    SUM = "SUM"
+    MIN = "MIN"
+    MAX = "MAX"
+    AND = "AND"
+    OR = "OR"
+    XOR = "XOR"
+    MATCH = "MATCH"
+    USED = "USED"
+
+
 class ArrayCommands(CommandsProtocol):
     """
     Redis commands for Array data type.
@@ -5319,6 +5330,33 @@ class ArrayCommands(CommandsProtocol):
         return self.execute_command("ARSET", name, index, *values)
 
     @overload
+    def armset(
+        self: SyncClientProtocol, name: KeyT, mapping: Mapping[int, FieldT]
+    ) -> int: ...
+
+    @overload
+    def armset(
+        self: AsyncClientProtocol, name: KeyT, mapping: Mapping[int, FieldT]
+    ) -> Awaitable[int]: ...
+
+    def armset(
+        self, name: KeyT, mapping: Mapping[int, FieldT]
+    ) -> int | Awaitable[int]:
+        """
+        Set multiple index/value pairs in the array stored at ``name``.
+        ``mapping`` is a dictionary of zero-based integer indices to values.
+        Pairs may be non-contiguous and in any order.
+
+        Returns the number of new slots that were set (previously empty).
+
+        For more information, see https://redis.io/commands/armset
+        """
+        items: list = []
+        for pair in mapping.items():
+            items.extend(pair)
+        return self.execute_command("ARMSET", name, *items)
+
+    @overload
     def arget(
         self: SyncClientProtocol, name: KeyT, index: int
     ) -> bytes | str | None: ...
@@ -5340,6 +5378,51 @@ class ArrayCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/arget
         """
         return self.execute_command("ARGET", name, index)
+
+    @overload
+    def armget(
+        self: SyncClientProtocol, name: KeyT, *indices: int
+    ) -> list[bytes | str | None]: ...
+
+    @overload
+    def armget(
+        self: AsyncClientProtocol, name: KeyT, *indices: int
+    ) -> Awaitable[list[bytes | str | None]]: ...
+
+    def armget(
+        self, name: KeyT, *indices: int
+    ) -> list[bytes | str | None] | Awaitable[list[bytes | str | None]]:
+        """
+        Return the values at the specified ``indices`` in the array stored at
+        ``name``. The reply preserves the order of the requested indices and
+        returns ``None`` for any index that is not set or when ``name`` does
+        not exist.
+
+        For more information, see https://redis.io/commands/armget
+        """
+        return self.execute_command("ARMGET", name, *indices)
+
+    @overload
+    def argetrange(
+        self: SyncClientProtocol, name: KeyT, start: int, end: int
+    ) -> list[bytes | str | None]: ...
+
+    @overload
+    def argetrange(
+        self: AsyncClientProtocol, name: KeyT, start: int, end: int
+    ) -> Awaitable[list[bytes | str | None]]: ...
+
+    def argetrange(
+        self, name: KeyT, start: int, end: int
+    ) -> list[bytes | str | None] | Awaitable[list[bytes | str | None]]:
+        """
+        Return the values in the inclusive index range [``start``, ``end``]
+        in the array stored at ``name``. If ``start`` is greater than ``end``,
+        elements are returned in reverse index order.
+
+        For more information, see https://redis.io/commands/argetrange
+        """
+        return self.execute_command("ARGETRANGE", name, start, end)
 
     @overload
     def ardel(
@@ -5364,6 +5447,35 @@ class ArrayCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/ardel
         """
         return self.execute_command("ARDEL", name, *indices)
+
+    @overload
+    def ardelrange(
+        self: SyncClientProtocol, name: KeyT, *ranges: tuple[int, int]
+    ) -> int: ...
+
+    @overload
+    def ardelrange(
+        self: AsyncClientProtocol, name: KeyT, *ranges: tuple[int, int]
+    ) -> Awaitable[int]: ...
+
+    def ardelrange(
+        self, name: KeyT, *ranges: tuple[int, int]
+    ) -> int | Awaitable[int]:
+        """
+        Delete elements within one or more inclusive index ranges in the
+        array stored at ``name``. Each range is a ``(start, end)`` tuple.
+        If ``start`` is greater than ``end`` for a given pair, the range is
+        processed in ascending order regardless. Multiple pairs may overlap;
+        each element is counted at most once.
+
+        Returns the number of elements deleted.
+
+        For more information, see https://redis.io/commands/ardelrange
+        """
+        pieces: list = [name]
+        for start, end in ranges:
+            pieces.extend([start, end])
+        return self.execute_command("ARDELRANGE", *pieces)
 
     @overload
     def arcount(self: SyncClientProtocol, name: KeyT) -> int: ...
@@ -5422,6 +5534,85 @@ class ArrayCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/arinsert
         """
         return self.execute_command("ARINSERT", name, *values)
+
+    @overload
+    def arlastitems(
+        self: SyncClientProtocol, name: KeyT, count: int, rev: bool = False
+    ) -> list[bytes | str | None]: ...
+
+    @overload
+    def arlastitems(
+        self: AsyncClientProtocol, name: KeyT, count: int, rev: bool = False
+    ) -> Awaitable[list[bytes | str | None]]: ...
+
+    def arlastitems(
+        self, name: KeyT, count: int, rev: bool = False
+    ) -> list[bytes | str | None] | Awaitable[list[bytes | str | None]]:
+        """
+        Return up to ``count`` most recently inserted elements from the array
+        stored at ``name``. If the array contains fewer elements than
+        ``count``, all elements are returned.
+
+        When ``rev`` is ``True``, elements are returned in reverse
+        chronological order (most recent first) instead of the default
+        oldest-first order.
+
+        For more information, see https://redis.io/commands/arlastitems
+        """
+        pieces: list = [name, count]
+        if rev:
+            pieces.append("REV")
+        return self.execute_command("ARLASTITEMS", *pieces)
+
+    @overload
+    def arop(
+        self: SyncClientProtocol,
+        name: KeyT,
+        start: int,
+        end: int,
+        operation: ArrayAggregateOperations,
+        value: EncodableT | None = None,
+    ) -> bytes | str | int | None: ...
+
+    @overload
+    def arop(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        start: int,
+        end: int,
+        operation: ArrayAggregateOperations,
+        value: EncodableT | None = None,
+    ) -> Awaitable[bytes | str | int | None]: ...
+
+    def arop(
+        self,
+        name: KeyT,
+        start: int,
+        end: int,
+        operation: ArrayAggregateOperations,
+        value: EncodableT | None = None,
+    ) -> (bytes | str | int | None) | Awaitable[bytes | str | int | None]:
+        """
+        Perform an aggregate ``operation`` on elements of the array stored at
+        ``name`` in the inclusive index range [``start``, ``end``]. The range
+        is always scanned from the lower to the higher index regardless of
+        argument order.
+
+        ``operation`` is one of the members of ``ArrayAggregateOperations``.
+        ``value`` is required when ``operation`` is
+        ``ArrayAggregateOperations.MATCH`` and specifies the value to compare
+        against.
+
+        Returns a bulk string for ``SUM``, ``MIN`` and ``MAX``, an integer
+        for ``AND``, ``OR``, ``XOR``, ``MATCH`` and ``USED``, or ``None``
+        when no elements match the operation.
+
+        For more information, see https://redis.io/commands/arop
+        """
+        pieces: list = [name, start, end, operation.value]
+        if value is not None:
+            pieces.append(value)
+        return self.execute_command("AROP", *pieces)
 
 
 AsyncArrayCommands = ArrayCommands
