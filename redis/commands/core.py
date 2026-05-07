@@ -5300,6 +5300,18 @@ class ArrayAggregateOperations(Enum):
     USED = "USED"
 
 
+class ArrayPredicateType(Enum):
+    EXACT = "EXACT"
+    MATCH = "MATCH"
+    GLOB = "GLOB"
+    RE = "RE"
+
+
+class ArrayPredicateCombinator(Enum):
+    AND = "AND"
+    OR = "OR"
+
+
 class ArrayCommands(CommandsProtocol):
     """
     Redis commands for Array data type.
@@ -5425,6 +5437,117 @@ class ArrayCommands(CommandsProtocol):
         return self.execute_command("ARGETRANGE", name, start, end)
 
     @overload
+    def arscan(
+        self: SyncClientProtocol,
+        name: KeyT,
+        start: int,
+        end: int,
+        limit: int | None = None,
+    ) -> list[int | bytes | str]: ...
+
+    @overload
+    def arscan(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        start: int,
+        end: int,
+        limit: int | None = None,
+    ) -> Awaitable[list[int | bytes | str]]: ...
+
+    def arscan(
+        self,
+        name: KeyT,
+        start: int,
+        end: int,
+        limit: int | None = None,
+    ) -> list[int | bytes | str] | Awaitable[list[int | bytes | str]]:
+        """
+        Iterate populated elements of the array stored at ``name`` in the
+        inclusive range [``start``, ``end``] and return alternating
+        index/value pairs as a flat list: ``[idx1, val1, idx2, val2, ...]``.
+        Empty slots are skipped. If ``start`` is greater than ``end``, the
+        iteration is reversed.
+
+        ``limit`` caps the number of populated elements returned. When
+        omitted, all populated elements in range are returned.
+
+        For more information, see https://redis.io/commands/arscan
+        """
+        pieces: list = [name, start, end]
+        if limit is not None:
+            pieces.extend([b"LIMIT", limit])
+        return self.execute_command("ARSCAN", *pieces)
+
+    @overload
+    def argrep(
+        self: SyncClientProtocol,
+        name: KeyT,
+        start: int,
+        end: int,
+        predicates: list[tuple[ArrayPredicateType, EncodableT]],
+        combinator: ArrayPredicateCombinator | None = None,
+        limit: int | None = None,
+        withvalues: bool = False,
+        nocase: bool = False,
+    ) -> list[int | bytes | str]: ...
+
+    @overload
+    def argrep(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        start: int,
+        end: int,
+        predicates: list[tuple[ArrayPredicateType, EncodableT]],
+        combinator: ArrayPredicateCombinator | None = None,
+        limit: int | None = None,
+        withvalues: bool = False,
+        nocase: bool = False,
+    ) -> Awaitable[list[int | bytes | str]]: ...
+
+    def argrep(
+        self,
+        name: KeyT,
+        start: int,
+        end: int,
+        predicates: list[tuple[ArrayPredicateType, EncodableT]],
+        combinator: ArrayPredicateCombinator | None = None,
+        limit: int | None = None,
+        withvalues: bool = False,
+        nocase: bool = False,
+    ) -> list[int | bytes | str] | Awaitable[list[int | bytes | str]]:
+        """
+        Search elements of the array stored at ``name`` within the inclusive
+        index range [``start``, ``end``] using one or more textual
+        ``predicates``. Each predicate is a ``(type, value)`` tuple where
+        ``type`` is a member of ``ArrayPredicateType``
+        (``EXACT``, ``MATCH``, ``GLOB``, ``RE``).
+
+        Multiple predicates are combined via ``combinator``
+        (``ArrayPredicateCombinator.AND`` or ``OR``); the server defaults to
+        OR when omitted. ``limit`` caps the number of matches.
+        ``withvalues=True`` returns alternating ``[idx, val, idx, val, ...]``
+        instead of indices only. ``nocase=True`` makes all comparisons
+        case-insensitive.
+
+        Returns matching indices (or index/value pairs) in traversal order.
+        Empty slots are skipped.
+
+        For more information, see https://redis.io/commands/argrep
+        """
+        pieces: list = [name, start, end]
+        for predicate_type, value in predicates:
+            pieces.extend([predicate_type.value, value])
+        if combinator is not None:
+            pieces.append(combinator.value)
+        if limit is not None:
+            pieces.extend([b"LIMIT", limit])
+        if withvalues:
+            pieces.append(b"WITHVALUES")
+        if nocase:
+            pieces.append(b"NOCASE")
+        return self.execute_command("ARGREP", *pieces)
+
+    @overload
     def ardel(
         self: SyncClientProtocol, name: KeyT, *indices: int
     ) -> int: ...
@@ -5493,6 +5616,49 @@ class ArrayCommands(CommandsProtocol):
         return self.execute_command("ARCOUNT", name)
 
     @overload
+    def arlen(self: SyncClientProtocol, name: KeyT) -> int: ...
+
+    @overload
+    def arlen(self: AsyncClientProtocol, name: KeyT) -> Awaitable[int]: ...
+
+    def arlen(self, name: KeyT) -> int | Awaitable[int]:
+        """
+        Return the length of the array stored at ``name``, defined as the
+        maximum set index plus one. Returns 0 if ``name`` does not exist.
+
+        For more information, see https://redis.io/commands/arlen
+        """
+        return self.execute_command("ARLEN", name)
+
+    @overload
+    def arinfo(
+        self: SyncClientProtocol, name: KeyT, full: bool = False
+    ) -> dict[str, int]: ...
+
+    @overload
+    def arinfo(
+        self: AsyncClientProtocol, name: KeyT, full: bool = False
+    ) -> Awaitable[dict[str, int]]: ...
+
+    def arinfo(
+        self, name: KeyT, full: bool = False
+    ) -> dict[str, int] | Awaitable[dict[str, int]]:
+        """
+        Return metadata about the array stored at ``name`` as a dictionary.
+        When ``full`` is ``True``, additionally include per-slice statistics
+        (dense/sparse slice counts, average sizes, fill rates), which makes
+        the call O(N) instead of O(1).
+
+        Raises ``ResponseError`` when the key does not exist.
+
+        For more information, see https://redis.io/commands/arinfo
+        """
+        pieces: list = [name]
+        if full:
+            pieces.append(b"FULL")
+        return self.execute_command("ARINFO", *pieces)
+
+    @overload
     def arnext(self: SyncClientProtocol, name: KeyT) -> int | None: ...
 
     @overload
@@ -5508,6 +5674,26 @@ class ArrayCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/arnext
         """
         return self.execute_command("ARNEXT", name)
+
+    @overload
+    def arseek(self: SyncClientProtocol, name: KeyT, index: int) -> int: ...
+
+    @overload
+    def arseek(
+        self: AsyncClientProtocol, name: KeyT, index: int
+    ) -> Awaitable[int]: ...
+
+    def arseek(self, name: KeyT, index: int) -> int | Awaitable[int]:
+        """
+        Set the insert cursor of the array stored at ``name`` to ``index``.
+        Subsequent ``ARINSERT`` and ``ARRING`` operations begin inserting at
+        this position.
+
+        Returns 1 if the cursor was set, 0 if ``name`` does not exist.
+
+        For more information, see https://redis.io/commands/arseek
+        """
+        return self.execute_command("ARSEEK", name, index)
 
     @overload
     def arinsert(
@@ -5534,6 +5720,32 @@ class ArrayCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/arinsert
         """
         return self.execute_command("ARINSERT", name, *values)
+
+    @overload
+    def arring(
+        self: SyncClientProtocol, name: KeyT, size: int, *values: FieldT
+    ) -> int: ...
+
+    @overload
+    def arring(
+        self: AsyncClientProtocol, name: KeyT, size: int, *values: FieldT
+    ) -> Awaitable[int]: ...
+
+    def arring(
+        self, name: KeyT, size: int, *values: FieldT
+    ) -> int | Awaitable[int]:
+        """
+        Insert one or more ``values`` into the array stored at ``name`` as a
+        fixed-size ring buffer of ``size`` slots. Each value is placed at
+        ``insert_idx % size``, wrapping back to index 0 once the end is
+        reached and overwriting older values when full. If ``size`` is
+        smaller than the current window, the array is truncated to fit.
+
+        Returns the last index where a value was inserted.
+
+        For more information, see https://redis.io/commands/arring
+        """
+        return self.execute_command("ARRING", name, size, *values)
 
     @overload
     def arlastitems(
