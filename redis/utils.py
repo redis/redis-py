@@ -6,13 +6,10 @@ import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
 from functools import wraps
-from importlib import metadata
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, TypeVar, Union
 
 from redis.exceptions import DataError
 from redis.typing import AbsExpiryT, EncodableT, ExpiryT
-
-DEFAULT_RESP_VERSION = 3
 
 if TYPE_CHECKING:
     from redis.client import Redis
@@ -43,6 +40,8 @@ try:
     CRYPTOGRAPHY_AVAILABLE = True
 except ImportError:
     CRYPTOGRAPHY_AVAILABLE = False
+
+from importlib import metadata
 
 
 def from_url(url: str, **kwargs: Any) -> "Redis":
@@ -271,11 +270,19 @@ def _set_info_logger():
         logger.addHandler(handler)
 
 
+#: Default RESP protocol version used on the wire when the user does not
+#: supply an explicit ``protocol`` to the client / connection / pool. Lives
+#: in ``redis.utils`` so both ``redis.connection`` (for the HELLO handshake)
+#: and ``check_protocol_version`` (for protocol-gated features) can read it
+#: without a circular import.
+DEFAULT_RESP_VERSION = 3
+
+
 def check_protocol_version(
     protocol: Optional[Union[str, int]], expected_version: int = 3
 ) -> bool:
     if protocol is None:
-        return False
+        protocol = DEFAULT_RESP_VERSION
     if isinstance(protocol, str):
         try:
             protocol = int(protocol)

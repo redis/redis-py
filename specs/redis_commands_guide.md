@@ -36,27 +36,42 @@ for more information.
 
 ### Binary representation
 
-Our SDK can be configured with `decode_response=False` option which means that command response will be returned
+Our SDK can be configured with `decode_responses=False` option which means that command response will be returned
 as bytes, as well as we allow to pass bytes arguments instead of strings. For this purpose, we define a custom types
 like `KeyT`, `EncodableT`, etc. in `redis/typing.py`.
 
 ## Protocols compatibility
 
-SDK supports two types of Redis wire protocol: RESP2 and RESP3. And aims to provide a compatibility between them
-for seamless user experience. However, there are some differences in types that are defined by these protocols.
+SDK supports two types of Redis wire protocol: RESP2 and RESP3. Starting with redis-py 8.0, clients use RESP3 on
+the wire by default, while `legacy_responses=True` preserves legacy RESP2-compatible Python response shapes for the
+default configuration.
 
-Because, RESP3 introduce new types that weren't previously supported by RESP2, we're aiming for forward compatibility
-and ensure that all new types supported by RESP3 can be used with RESP2. In most cases the semantic of RESP3 can be
-easily recognized and converting existing RESP2 response in RESP3 is a matter of parsing strategy.
+Wire protocol and Python response shape are selected independently:
 
-All new commands should be added with RESP3 in mind and by default should hide protocol incompatibility from user.
+- `Redis()` uses RESP3 on the wire and legacy RESP2-compatible Python response shapes.
+- `Redis(protocol=2)` uses RESP2 on the wire and legacy RESP2 Python response shapes.
+- `Redis(protocol=3)` uses RESP3 on the wire and legacy RESP3 Python response shapes.
+- `Redis(legacy_responses=False)` enables unified response shapes. Unified shapes must be protocol-independent and
+  should match for RESP2 and RESP3 unless the command has a documented server-side difference.
 
 To understand how does Redis types defined by RESP2 and RESP3 protocol maps to Python types,
 see `redis/_parsers/resp2.py` and `redis/_parsers/resp3.py`.
 
-Parsers are responsible for RESP protocol parsing. However, protocols compatibility is achieved by 2nd layer
-parsing as `response_callbacks` defined in `redis/_parsers/helpers.py` for core or `redis/commands/$module/utils.py` 
-for module commands and can be extended/updated on client level.
+Parsers are responsible for RESP protocol parsing. However, protocol and response-shape compatibility is achieved by
+2nd layer parsing through response callbacks defined in `redis/_parsers/response_callbacks.py` for core commands and
+module-specific callback maps under `redis/commands/$module/`.
+
+When adding or changing a command, identify the expected response shape for every supported mode:
+
+- RESP2 legacy (`protocol=2`, `legacy_responses=True`)
+- RESP3 legacy (`protocol=3`, `legacy_responses=True`)
+- default legacy (`protocol` unset, `legacy_responses=True`; RESP3 wire with RESP2-compatible Python shape)
+- RESP2 unified (`protocol=2`, `legacy_responses=False`)
+- RESP3 unified (`protocol=3`, `legacy_responses=False`)
+
+Legacy response callbacks should preserve existing behavior unless the change intentionally fixes a bug. Unified
+response callbacks should provide the recommended protocol-independent public shape. Public command return type hints
+must include any new structures introduced by unified responses.
 
 ## Arguments definition
 
@@ -90,3 +105,4 @@ commands. So it's important to identify command type upfront to resolve correct 
 
 We usually provide only integration testing for commands with defined version constraint (if required). It's controlled
 by custom annotations `@skip_if_server_version_lt()` and `@skip_if_server_version_gte()` defined in `tests/conftest.py`.
+

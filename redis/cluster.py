@@ -83,7 +83,6 @@ from redis.observability.recorder import (
 )
 from redis.retry import Retry
 from redis.utils import (
-    DEFAULT_RESP_VERSION,
     check_protocol_version,
     deprecated_args,
     deprecated_function,
@@ -162,29 +161,9 @@ def parse_cluster_slots(
 def parse_cluster_shards(resp, **options):
     """
     Parse CLUSTER SHARDS response.
-
-    Normalises the output so that all dictionary keys are strings regardless
-    of protocol version (RESP2 returns bytes keys for node attributes,
-    RESP3 returns bytes keys at every level).
     """
     if isinstance(resp[0], dict):
-        # RESP3 – native dicts with bytes keys; decode them.
-        shards = []
-        for item in resp:
-            shard = {
-                "slots": item.get("slots") or item.get(b"slots", []),
-                "nodes": [],
-            }
-            raw_nodes = item.get("nodes") or item.get(b"nodes", [])
-            for node in raw_nodes:
-                if isinstance(node, dict):
-                    shard["nodes"].append({str_if_bytes(k): v for k, v in node.items()})
-                else:
-                    shard["nodes"].append(node)
-            shards.append(shard)
-        return shards
-
-    # RESP2 – flat list structure; build dicts with string keys.
+        return resp
     shards = []
     for x in resp:
         shard = {"slots": [], "nodes": []}
@@ -194,10 +173,79 @@ def parse_cluster_shards(resp, **options):
         for node in nodes:
             dict_node = {}
             for i in range(0, len(node), 2):
-                dict_node[str_if_bytes(node[i])] = node[i + 1]
+                dict_node[node[i]] = node[i + 1]
             shard["nodes"].append(dict_node)
         shards.append(shard)
 
+    return shards
+
+
+def parse_cluster_shards_with_str_keys(resp, **options):
+    """
+    Parse CLUSTER SHARDS with string top-level structural keys.
+
+    RESP2 parsing exposes top-level shard keys as ``"slots"``/``"nodes"``
+    while node attribute keys keep the connection's decoded/raw form. RESP3 can
+    return top-level shard dictionaries directly, so normalize only the
+    structural shard keys and preserve nested node dictionaries as delivered.
+    """
+    if not resp:
+        return resp
+    if not isinstance(resp[0], dict):
+        return parse_cluster_shards(resp, **options)
+
+    shards = []
+    for shard_resp in resp:
+        slots = shard_resp.get(b"slots", shard_resp.get("slots", []))
+        nodes = shard_resp.get(b"nodes", shard_resp.get("nodes", []))
+        shard = {
+            "slots": [
+                tuple(slot) if isinstance(slot, list) else slot for slot in slots
+            ],
+            "nodes": [dict(node) if isinstance(node, dict) else node for node in nodes],
+        }
+        shards.append(shard)
+    return shards
+
+
+def parse_cluster_shards_unified(resp, **options):
+    """
+    Parse CLUSTER SHARDS into the approved unified shape.
+
+    Top-level shard keys and nested node attribute keys are strings for both
+    RESP2 and RESP3 wire responses.
+    """
+    if not resp:
+        return resp
+    if isinstance(resp[0], dict):
+        shards = []
+        for shard_resp in resp:
+            slots = shard_resp.get(b"slots", shard_resp.get("slots", []))
+            nodes = shard_resp.get(b"nodes", shard_resp.get("nodes", []))
+            shard = {
+                "slots": slots,
+                "nodes": [
+                    {str_if_bytes(k): v for k, v in node.items()}
+                    if isinstance(node, dict)
+                    else node
+                    for node in nodes
+                ],
+            }
+            shards.append(shard)
+        return shards
+
+    shards = []
+    for x in resp:
+        shard = {"slots": [], "nodes": []}
+        for i in range(0, len(x[1]), 2):
+            shard["slots"].append((x[1][i], x[1][i + 1]))
+        nodes = x[3]
+        for node in nodes:
+            dict_node = {}
+            for i in range(0, len(node), 2):
+                dict_node[str_if_bytes(node[i])] = node[i + 1]
+            shard["nodes"].append(dict_node)
+        shards.append(shard)
     return shards
 
 
@@ -235,6 +283,7 @@ REDIS_ALLOWED_KEYS = (
     "retry",
     "retry_on_timeout",
     "protocol",
+    "legacy_responses",
     "socket_connect_timeout",
     "socket_keepalive",
     "socket_keepalive_options",
@@ -288,9 +337,7 @@ class MaintNotificationsAbstractRedisCluster:
         **kwargs,
     ):
         # Initialize maintenance notifications
-        is_protocol_supported = check_protocol_version(
-            kwargs.get("protocol", DEFAULT_RESP_VERSION), 3
-        )
+        is_protocol_supported = check_protocol_version(kwargs.get("protocol"), 3)
 
         if (
             maint_notifications_config
@@ -823,7 +870,7 @@ class RedisCluster(
             kwargs.get("encoding_errors", "strict"),
             kwargs.get("decode_responses", False),
         )
-        protocol = kwargs.get("protocol", DEFAULT_RESP_VERSION)
+        protocol = kwargs.get("protocol", None)
         if (cache_config or cache) and not check_protocol_version(protocol, 3):
             raise RedisError("Client caching is only supported with RESP version 3")
 
@@ -859,8 +906,19 @@ class RedisCluster(
             **kwargs,
         )
 
-        self.cluster_response_callbacks = CaseInsensitiveDict(
+        cluster_response_callbacks = dict(
             self.__class__.CLUSTER_COMMANDS_RESPONSE_CALLBACKS
+        )
+        legacy_responses = kwargs.get("legacy_responses", True)
+        protocol = kwargs.get("protocol")
+        if not legacy_responses:
+            cluster_response_callbacks["CLUSTER SHARDS"] = parse_cluster_shards_unified
+        elif protocol is None:
+            cluster_response_callbacks["CLUSTER SHARDS"] = (
+                parse_cluster_shards_with_str_keys
+            )
+        self.cluster_response_callbacks = CaseInsensitiveDict(
+            cluster_response_callbacks
         )
         self.result_callbacks = CaseInsensitiveDict(self.__class__.RESULT_CALLBACKS)
 

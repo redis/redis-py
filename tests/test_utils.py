@@ -2,6 +2,8 @@ from datetime import datetime
 import warnings
 import pytest
 from redis.utils import (
+    DEFAULT_RESP_VERSION,
+    check_protocol_version,
     compare_versions,
     deprecated_function,
     deprecated_args,
@@ -34,6 +36,35 @@ from redis.utils import (
 )
 def test_compare_versions(version1, version2, expected_res):
     assert compare_versions(version1, version2) == expected_res
+
+
+@pytest.mark.fixed_client
+class TestCheckProtocolVersion:
+    """``check_protocol_version`` underpins protocol-gated features
+    (caching, maintenance notifications, callback selection). It must
+    treat ``None`` as ``DEFAULT_RESP_VERSION`` so callers using the empty
+    default get the same answer as if they had pinned the wire protocol."""
+
+    def test_none_resolves_to_default(self):
+        # ``DEFAULT_RESP_VERSION`` is the wire version selected when the
+        # caller does not pass ``protocol``; ``check_protocol_version``
+        # must therefore treat ``None`` as that version.
+        assert check_protocol_version(None, DEFAULT_RESP_VERSION) is True
+        other = 2 if DEFAULT_RESP_VERSION == 3 else 3
+        assert check_protocol_version(None, other) is False
+
+    @pytest.mark.parametrize("protocol", [3, "3"])
+    def test_resp3_matches(self, protocol):
+        assert check_protocol_version(protocol, 3) is True
+        assert check_protocol_version(protocol, 2) is False
+
+    @pytest.mark.parametrize("protocol", [2, "2"])
+    def test_resp2_matches(self, protocol):
+        assert check_protocol_version(protocol, 2) is True
+        assert check_protocol_version(protocol, 3) is False
+
+    def test_invalid_string_returns_false(self):
+        assert check_protocol_version("not-a-number", 3) is False
 
 
 def redis_server_time(client):

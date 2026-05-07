@@ -101,14 +101,15 @@ def deployed_sentinel(request):
     sentinel_kwargs = {"decode_responses": decode_responses}
     force_master_ip = "localhost"
 
-    protocol = request.config.getoption("--protocol", 3)
+    protocol = request.config.getoption("--protocol")
+    if protocol:
+        kwargs["protocol"] = protocol
 
     sentinel = Sentinel(
         sentinel_endpoints,
         force_master_ip=force_master_ip,
         sentinel_kwargs=sentinel_kwargs,
         socket_timeout=0.1,
-        protocol=protocol,
         decode_responses=decode_responses,
         **kwargs,
     )
@@ -350,10 +351,13 @@ def test_redis_master_usage(deployed_sentinel):
 def test_sentinel_commands_with_strict_redis_client(request):
     sentinel_ips = request.config.getoption("--sentinels")
     sentinel_host, sentinel_port = sentinel_ips.split(",")[0].split(":")
-    protocol = request.config.getoption("--protocol", 3)
+    protocol = request.config.getoption("--protocol")
+    kwargs = {}
+    if protocol:
+        kwargs["protocol"] = protocol
 
     client = StrictRedis(
-        host=sentinel_host, port=sentinel_port, decode_responses=True, protocol=protocol
+        host=sentinel_host, port=sentinel_port, decode_responses=True, **kwargs
     )
     # skipping commands that change the state of the sentinel setup
     assert isinstance(client.sentinel_get_master_addr_by_name("redis-py-test"), tuple)
