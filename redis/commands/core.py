@@ -837,7 +837,7 @@ class ManagementCommands(CommandsProtocol):
     def client_list(
         self: SyncClientProtocol,
         _type: str | None = None,
-        client_id: List[EncodableT] = [],
+        client_id: List[EncodableT] | None = None,
         **kwargs,
     ) -> list[dict[str, str]]: ...
 
@@ -845,12 +845,12 @@ class ManagementCommands(CommandsProtocol):
     def client_list(
         self: AsyncClientProtocol,
         _type: str | None = None,
-        client_id: List[EncodableT] = [],
+        client_id: List[EncodableT] | None = None,
         **kwargs,
     ) -> Awaitable[list[dict[str, str]]]: ...
 
     def client_list(
-        self, _type: str | None = None, client_id: List[EncodableT] = [], **kwargs
+        self, _type: str | None = None, client_id: List[EncodableT] | None = None, **kwargs
     ) -> list[dict[str, str]] | Awaitable[list[dict[str, str]]]:
         """
         Returns a list of currently connected clients.
@@ -965,7 +965,7 @@ class ManagementCommands(CommandsProtocol):
     def client_tracking_on(
         self: SyncClientProtocol,
         clientid: int | None = None,
-        prefix: Sequence[KeyT] = [],
+        prefix: Sequence[KeyT] | None = None,
         bcast: bool = False,
         optin: bool = False,
         optout: bool = False,
@@ -976,7 +976,7 @@ class ManagementCommands(CommandsProtocol):
     def client_tracking_on(
         self: AsyncClientProtocol,
         clientid: int | None = None,
-        prefix: Sequence[KeyT] = [],
+        prefix: Sequence[KeyT] | None = None,
         bcast: bool = False,
         optin: bool = False,
         optout: bool = False,
@@ -986,7 +986,7 @@ class ManagementCommands(CommandsProtocol):
     def client_tracking_on(
         self,
         clientid: int | None = None,
-        prefix: Sequence[KeyT] = [],
+        prefix: Sequence[KeyT] | None = None,
         bcast: bool = False,
         optin: bool = False,
         optout: bool = False,
@@ -1006,7 +1006,7 @@ class ManagementCommands(CommandsProtocol):
     def client_tracking_off(
         self: SyncClientProtocol,
         clientid: int | None = None,
-        prefix: Sequence[KeyT] = [],
+        prefix: Sequence[KeyT] | None = None,
         bcast: bool = False,
         optin: bool = False,
         optout: bool = False,
@@ -1017,7 +1017,7 @@ class ManagementCommands(CommandsProtocol):
     def client_tracking_off(
         self: AsyncClientProtocol,
         clientid: int | None = None,
-        prefix: Sequence[KeyT] = [],
+        prefix: Sequence[KeyT] | None = None,
         bcast: bool = False,
         optin: bool = False,
         optout: bool = False,
@@ -1027,7 +1027,7 @@ class ManagementCommands(CommandsProtocol):
     def client_tracking_off(
         self,
         clientid: int | None = None,
-        prefix: Sequence[KeyT] = [],
+        prefix: Sequence[KeyT] | None = None,
         bcast: bool = False,
         optin: bool = False,
         optout: bool = False,
@@ -1048,7 +1048,7 @@ class ManagementCommands(CommandsProtocol):
         self: SyncClientProtocol,
         on: bool = True,
         clientid: int | None = None,
-        prefix: Sequence[KeyT] = [],
+        prefix: Sequence[KeyT] | None = None,
         bcast: bool = False,
         optin: bool = False,
         optout: bool = False,
@@ -1061,7 +1061,7 @@ class ManagementCommands(CommandsProtocol):
         self: AsyncClientProtocol,
         on: bool = True,
         clientid: int | None = None,
-        prefix: Sequence[KeyT] = [],
+        prefix: Sequence[KeyT] | None = None,
         bcast: bool = False,
         optin: bool = False,
         optout: bool = False,
@@ -1073,7 +1073,7 @@ class ManagementCommands(CommandsProtocol):
         self,
         on: bool = True,
         clientid: int | None = None,
-        prefix: Sequence[KeyT] = [],
+        prefix: Sequence[KeyT] | None = None,
         bcast: bool = False,
         optin: bool = False,
         optout: bool = False,

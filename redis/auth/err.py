@@ -15,7 +15,7 @@ class InvalidTokenSchemaErr(Exception):
     Represents an exception related to invalid token schema.
     """
 
-    def __init__(self, missing_fields: Iterable[str] = []):
+    def __init__(self, missing_fields: Iterable[str] | None = None):
         super().__init__(
             "Unexpected token schema. Following fields are missing: "
             + ", ".join(missing_fields)
