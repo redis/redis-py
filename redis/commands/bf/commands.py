@@ -961,15 +961,15 @@ class CMSCommands:
 
     @overload
     def merge(
-        self: SyncClientProtocol, destKey, numKeys, srcKeys, weights=[]
+        self: SyncClientProtocol, destKey, numKeys, srcKeys, weights=None
     ) -> bool: ...
 
     @overload
     def merge(
-        self: AsyncClientProtocol, destKey, numKeys, srcKeys, weights=[]
+        self: AsyncClientProtocol, destKey, numKeys, srcKeys, weights=None
     ) -> Awaitable[bool]: ...
 
-    def merge(self, destKey, numKeys, srcKeys, weights=[]) -> bool | Awaitable[bool]:
+    def merge(self, destKey, numKeys, srcKeys, weights=None) -> bool | Awaitable[bool]:
         """
         Merge `numKeys` of sketches into `destKey`. Sketches specified in `srcKeys`.
         All sketches must have identical width and depth.
@@ -978,6 +978,8 @@ class CMSCommands:
         For more information see `CMS.MERGE <https://redis.io/commands/cms.merge>`_.
         """  # noqa
         params = [destKey, numKeys]
+        if weights is None:
+            weights = []
         params += srcKeys
         self.append_weights(params, weights)
         return self.execute_command(CMS_MERGE, *params)
