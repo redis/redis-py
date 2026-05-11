@@ -82,6 +82,7 @@ def test_loading_external_modules(r):
     # assert mod.get('fookey') == d
 
 
+@pytest.mark.fixed_client
 class TestConnection:
     def test_disconnect(self):
         conn = Connection()
@@ -214,7 +215,7 @@ def test_connection_parse_response_resume(r: redis.Redis, parser_class):
     assert i > 0
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "Class",
     [
@@ -250,7 +251,7 @@ def test_pack_command(Class):
     assert actual == expected, f"actual = {actual}, expected = {expected}"
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 def test_create_single_connection_client_from_url():
     client = redis.Redis.from_url(
         "redis://localhost:6379/0?", single_connection_client=True
@@ -373,6 +374,7 @@ def test_format_error_message(conn, error, expected_message):
     assert error_message == expected_message
 
 
+@pytest.mark.fixed_client
 def test_network_connection_failure():
     # Match only the stable part of the error message across OS
     exp_err = rf"Error {ECONNREFUSED} connecting to localhost:9999\."
@@ -381,6 +383,7 @@ def test_network_connection_failure():
         redis.set("a", "b")
 
 
+@pytest.mark.fixed_client
 @pytest.mark.skipif(
     not hasattr(socket, "AF_UNIX"),
     reason="Unix domain sockets not supported on this platform",
@@ -392,6 +395,7 @@ def test_unix_socket_connection_failure():
         redis.set("a", "b")
 
 
+@pytest.mark.fixed_client
 class TestUnitConnectionPool:
     @pytest.mark.parametrize(
         "max_conn", (-1, "str"), ids=("non-positive", "wrong type")
@@ -453,6 +457,7 @@ class TestUnitConnectionPool:
         connection_pool.disconnect()
 
 
+@pytest.mark.fixed_client
 class TestUnitCacheProxyConnection:
     def test_clears_cache_on_disconnect(self, mock_connection, cache_conf):
         cache = DefaultCache(CacheConfig(max_size=10))

@@ -194,6 +194,7 @@ def setup_recorder(metrics_collector, mock_instruments):
     recorder.reset_collector()
 
 
+@pytest.mark.fixed_client
 class TestRecordOperationDuration:
     """Tests for record_operation_duration - verifies Histogram.record() calls."""
 
@@ -271,6 +272,7 @@ class TestRecordOperationDuration:
         assert isinstance(attrs[DB_OPERATION_NAME], str)
 
 
+@pytest.mark.fixed_client
 class TestRecordConnectionCreateTime:
     """Tests for record_connection_create_time - verifies Histogram.record() calls."""
 
@@ -302,6 +304,7 @@ class TestRecordConnectionCreateTime:
         assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "localhost:6379_a1b2c3d4"
 
 
+@pytest.mark.fixed_client
 class TestRecordConnectionTimeout:
     """Tests for record_connection_timeout - verifies Counter.add() calls."""
 
@@ -324,6 +327,7 @@ class TestRecordConnectionTimeout:
         assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "ConnectionPool<localhost:6379>"
 
 
+@pytest.mark.fixed_client
 class TestRecordConnectionWaitTime:
     """Tests for record_connection_wait_time - verifies Histogram.record() calls."""
 
@@ -345,6 +349,7 @@ class TestRecordConnectionWaitTime:
         assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "ConnectionPool<localhost:6379>"
 
 
+@pytest.mark.fixed_client
 class TestRecordConnectionClosed:
     """Tests for record_connection_closed - verifies Counter.add() calls."""
 
@@ -384,6 +389,7 @@ class TestRecordConnectionClosed:
         assert attrs[ERROR_TYPE] == "ConnectionResetError"
 
 
+@pytest.mark.fixed_client
 class TestRecordConnectionRelaxedTimeout:
     """Tests for record_connection_relaxed_timeout - verifies UpDownCounter.add() calls."""
 
@@ -427,6 +433,7 @@ class TestRecordConnectionRelaxedTimeout:
         assert attrs[REDIS_CLIENT_CONNECTION_NOTIFICATION] == "MIGRATING"
 
 
+@pytest.mark.fixed_client
 class TestRecordConnectionHandoff:
     """Tests for record_connection_handoff - verifies Counter.add() calls."""
 
@@ -447,6 +454,7 @@ class TestRecordConnectionHandoff:
         assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "ConnectionPool<localhost:6379>"
 
 
+@pytest.mark.fixed_client
 class TestRecordErrorCount:
     """Tests for record_error_count - verifies Counter.add() calls."""
 
@@ -503,6 +511,7 @@ class TestRecordErrorCount:
         assert attrs[REDIS_CLIENT_OPERATION_RETRY_ATTEMPTS] == 2
 
 
+@pytest.mark.fixed_client
 class TestRecordMaintNotificationCount:
     """Tests for record_maint_notification_count - verifies Counter.add() calls."""
 
@@ -553,6 +562,7 @@ class TestRecordMaintNotificationCount:
         assert attrs[REDIS_CLIENT_CONNECTION_NOTIFICATION] == "MIGRATING"
 
 
+@pytest.mark.fixed_client
 class TestRecordGeoFailover:
     """Tests for record_geo_failover - verifies Counter.add() calls."""
 
@@ -624,6 +634,7 @@ class TestRecordGeoFailover:
         assert attrs[DB_CLIENT_GEOFAILOVER_REASON] == "manual"
 
 
+@pytest.mark.fixed_client
 class TestRecordPubsubMessage:
     """Tests for record_pubsub_message - verifies Counter.add() calls."""
 
@@ -671,6 +682,7 @@ class TestRecordPubsubMessage:
         assert attrs[REDIS_CLIENT_PUBSUB_SHARDED] is True
 
 
+@pytest.mark.fixed_client
 class TestRecordStreamingLag:
     """Tests for record_streaming_lag - verifies Histogram.record() calls."""
 
@@ -726,6 +738,7 @@ class TestRecordStreamingLag:
         assert attrs[REDIS_CLIENT_STREAM_NAME] == "events-stream"
 
 
+@pytest.mark.fixed_client
 class TestHidePubSubChannelNames:
     """Tests for hide_pubsub_channel_names configuration option."""
 
@@ -785,6 +798,7 @@ class TestHidePubSubChannelNames:
         assert attrs[REDIS_CLIENT_PUBSUB_CHANNEL] == "visible-channel"
 
 
+@pytest.mark.fixed_client
 class TestHideStreamNames:
     """Tests for hide_stream_names configuration option."""
 
@@ -898,6 +912,7 @@ class TestHideStreamNames:
         assert REDIS_CLIENT_STREAM_NAME not in attrs
 
 
+@pytest.mark.fixed_client
 class TestRecorderDisabled:
     """Tests for recorder behavior when observability is disabled."""
 
@@ -949,6 +964,7 @@ class TestRecorderDisabled:
         recorder.reset_collector()
 
 
+@pytest.mark.fixed_client
 class TestResetCollector:
     """Tests for reset_collector function."""
 
@@ -959,6 +975,7 @@ class TestResetCollector:
         assert recorder._metrics_collector is None
 
 
+@pytest.mark.fixed_client
 class TestMetricGroupsDisabled:
     """Tests for verifying metrics are not sent to Meter when their MetricGroup is disabled.
 
@@ -1279,6 +1296,7 @@ class TestMetricGroupsDisabled:
         instruments.stream_lag.record.assert_not_called()
 
 
+@pytest.mark.fixed_client
 class TestObservablesRegistry:
     """Tests for ObservablesRegistry singleton and callback registration."""
 
@@ -1323,6 +1341,7 @@ class TestObservablesRegistry:
         assert len(registry) == 0
 
 
+@pytest.mark.fixed_client
 class TestRecordConnectionCount:
     """Tests for record_connection_count (UpDownCounter)."""
 
@@ -1494,6 +1513,7 @@ class TestRecordConnectionCount:
         assert calls[5][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "idle"
 
 
+@pytest.mark.fixed_client
 class TestInitCSCItems:
     """Tests for init_csc_items and register_csc_items_callback."""
 
@@ -1624,6 +1644,7 @@ class TestInitCSCItems:
         assert obs2[0].value == 20
 
 
+@pytest.mark.fixed_client
 class TestHistogramBucketBoundaries:
     """Tests for custom histogram bucket boundaries configuration."""
 

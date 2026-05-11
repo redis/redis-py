@@ -189,29 +189,6 @@ class HybridQuery:
         """
         self._search_query = search_query
         self._vector_similarity_query = vector_similarity_query
-        self._return_fields_decode_as: Dict[str, Optional[str]] = {}
-
-    def return_field(
-        self,
-        field: str,
-        decode_field: Optional[bool] = True,
-        encoding: Optional[str] = "utf8",
-    ) -> "HybridQuery":
-        """
-        Add a field to the list of fields with specific decoding preferences.
-
-        - **field**: The field name to configure decoding for
-        - **decode_field**: Whether to decode the field from bytes to string
-        - **encoding**: The encoding to use when decoding the field
-        """
-        self._return_fields_decode_as[field] = encoding if decode_field else None
-        return self
-
-    def return_fields(self, *fields: str) -> "HybridQuery":
-        """Add fields with default decoding preferences."""
-        for field in fields:
-            self.return_field(field)
-        return self
 
     def get_args(self) -> List[str]:
         args = []
@@ -267,21 +244,53 @@ class HybridPostProcessingConfig:
         Create a new hybrid post processing configuration object.
         """
         self._load_statements = []
+        self._return_fields_decode_as: Dict[str, Optional[str]] = {}
         self._apply_statements = []
         self._groupby_statements = []
         self._sortby_fields = []
         self._filter = None
         self._limit = None
 
-    def load(self, *fields: str) -> Self:
+    def load(
+        self,
+        *fields: str,
+        decode_field: Optional[bool] = False,
+        encoding: Optional[str] = "utf8",
+    ) -> Self:
         """
         Add load statement parameters to the query.
+
+        Args:
+            fields: Fields to load.
+            decode_field: Whether to decode loaded field values from bytes to strings.
+                Defaults to False to preserve the legacy RESP2 HYBRID behavior and
+                keep binary fields intact.
+            encoding: The encoding to use when decoding loaded field values.
         """
         if fields:
             fields_str = " ".join(fields)
             fields_list = fields_str.split(" ")
             self._load_statements.extend(("LOAD", len(fields_list), *fields_list))
+            self._set_load_field_encodings(
+                fields_list, encoding if decode_field else None
+            )
         return self
+
+    def _set_load_field_encodings(
+        self, fields: List[str], encoding: Optional[str]
+    ) -> None:
+        i = 0
+        while i < len(fields):
+            field = fields[i]
+            if field.upper() == "AS":
+                i += 2
+                continue
+            if i + 2 < len(fields) and fields[i + 1].upper() == "AS":
+                self._return_fields_decode_as[fields[i + 2]] = encoding
+                i += 3
+                continue
+            self._return_fields_decode_as[field.removeprefix("@")] = encoding
+            i += 1
 
     def group_by(self, fields: List[str], *reducers: Reducer) -> Self:
         """

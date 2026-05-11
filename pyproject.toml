@@ -77,6 +77,7 @@ include = ["/redis"]
 [tool.pytest.ini_options]
 addopts = "-s"
 markers = [
+    "fixed_client: tests, in which client instance and configuration is fixed",
     "redismod: run only the redis module tests",
     "pipeline: pipeline tests",
     "onlycluster: marks tests to be run only with cluster mode redis",

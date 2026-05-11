@@ -15,6 +15,7 @@ from redis.auth.token_manager import (
 )
 
 
+@pytest.mark.fixed_client
 class TestTokenManager:
     @pytest.mark.parametrize(
         "exp_refresh_ratio",

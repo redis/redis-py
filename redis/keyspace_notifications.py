@@ -84,7 +84,16 @@ if TYPE_CHECKING:
 
 # Type alias for channel arguments - can be a string, bytes, or Channel object
 # This is defined here and the actual types are added after class definitions
-ChannelT: TypeAlias = Union[str, bytes, "KeyspaceChannel", "KeyeventChannel"]
+ChannelT: TypeAlias = Union[
+    str,
+    bytes,
+    "KeyspaceChannel",
+    "KeyeventChannel",
+    "SubkeyspaceChannel",
+    "SubkeyeventChannel",
+    "SubkeyspaceitemChannel",
+    "SubkeyspaceeventChannel",
+]
 
 
 # Type alias for sync handlers
@@ -211,13 +220,34 @@ class EventType:
     SETIFNE = "setifne"
 
 
+def _parse_length_prefixed_subkeys(s: str) -> list[str]:
+    """Parse a length-prefixed subkey list.
+
+    The wire format is ``<len>:<subkey>[,<len>:<subkey>...]``.
+
+    Returns:
+        A list of subkey strings.
+    """
+    subkeys: list[str] = []
+    pos = 0
+    while pos < len(s):
+        colon = s.index(":", pos)
+        length = int(s[pos:colon])
+        start = colon + 1
+        subkeys.append(s[start : start + length])
+        pos = start + length
+        if pos < len(s) and s[pos] == ",":
+            pos += 1  # skip comma separator
+    return subkeys
+
+
 @dataclass
 class KeyNotification:
     """
-    Represents a parsed Redis keyspace or keyevent notification.
+    Represents a parsed Redis keyspace, keyevent, or subkey notification.
 
     This class provides convenient access to the notification details
-    like key, event type, and database number.
+    like key, event type, database number, and affected subkeys.
 
     Attributes:
         key: The Redis key that was affected (for keyspace notifications)
@@ -228,6 +258,9 @@ class KeyNotification:
         database: The database number where the event occurred
         channel: The original channel name
         is_keyspace: True if this is a keyspace notification, False for keyevent
+        data: The raw data payload from the notification message.
+        subkeys: List of affected subkeys (fields) for subkey notifications.
+                Empty list for regular keyspace/keyevent notifications.
     """
 
     # Regex patterns for parsing keyspace/keyevent channels
@@ -238,12 +271,30 @@ class KeyNotification:
     _KEYEVENT_PATTERN: ClassVar[re.Pattern] = re.compile(
         r"^__keyevent@(\d+|\*)__:(.+)$"
     )
+    _SUBKEYSPACE_PATTERN: ClassVar[re.Pattern] = re.compile(
+        r"^__subkeyspace@(\d+|\*)__:(.+)$"
+    )
+    _SUBKEYEVENT_PATTERN: ClassVar[re.Pattern] = re.compile(
+        r"^__subkeyevent@(\d+|\*)__:(.+)$"
+    )
+    _SUBKEYSPACEITEM_PATTERN: ClassVar[re.Pattern] = re.compile(
+        r"^__subkeyspaceitem@(\d+|\*)__:(.+)$", re.DOTALL
+    )
+    _SUBKEYSPACEEVENT_PATTERN: ClassVar[re.Pattern] = re.compile(
+        r"^__subkeyspaceevent@(\d+|\*)__:(.+)$"
+    )
 
     key: str
     event_type: str
     database: int
     channel: str
     is_keyspace: bool
+    data: str
+    subkeys: list[str] = None  # type: ignore[assignment]
+
+    def __post_init__(self):
+        if self.subkeys is None:
+            self.subkeys = []
 
     @classmethod
     def from_message(
@@ -349,6 +400,7 @@ class KeyNotification:
                 database=database,
                 channel=channel,
                 is_keyspace=True,
+                data=data,
             )
 
         # Try keyevent pattern: __keyevent@<db>__:<event>
@@ -370,6 +422,114 @@ class KeyNotification:
                 database=database,
                 channel=channel,
                 is_keyspace=False,
+                data=data,
+            )
+
+        # Try subkeyspace: channel=__subkeyspace@<db>__:<key>
+        # data=<event>|<subkey_len>:<subkey>[,<subkey_len>:<subkey>...]
+        match = cls._SUBKEYSPACE_PATTERN.match(channel)
+        if match:
+            db_str, key = match.groups()
+            database = int(db_str) if db_str != "*" else -1
+            pipe_idx = data.index("|")
+            event_type = data[:pipe_idx]
+            subkeys = _parse_length_prefixed_subkeys(data[pipe_idx + 1 :])
+
+            if key_prefix:
+                if not key.startswith(key_prefix):
+                    return None
+                key = key[len(key_prefix) :]
+
+            return cls(
+                key=key,
+                event_type=event_type,
+                database=database,
+                channel=channel,
+                is_keyspace=True,
+                data=data,
+                subkeys=subkeys,
+            )
+
+        # Try subkeyevent: channel=__subkeyevent@<db>__:<event>
+        # data=<key_len>:<key>|<subkey_len>:<subkey>[,...]
+        match = cls._SUBKEYEVENT_PATTERN.match(channel)
+        if match:
+            db_str, event_type = match.groups()
+            database = int(db_str) if db_str != "*" else -1
+            # Parse key by length prefix
+            colon_idx = data.index(":")
+            key_len = int(data[:colon_idx])
+            key_start = colon_idx + 1
+            key = data[key_start : key_start + key_len]
+            # After key, expect '|' then subkeys
+            subkeys_start = key_start + key_len + 1  # +1 for '|'
+            subkeys = _parse_length_prefixed_subkeys(data[subkeys_start:])
+
+            if key_prefix:
+                if not key.startswith(key_prefix):
+                    return None
+                key = key[len(key_prefix) :]
+
+            return cls(
+                key=key,
+                event_type=event_type,
+                database=database,
+                channel=channel,
+                is_keyspace=False,
+                data=data,
+                subkeys=subkeys,
+            )
+
+        # Try subkeyspaceitem: channel=__subkeyspaceitem@<db>__:<key>\n<subkey>
+        # data=<event>
+        match = cls._SUBKEYSPACEITEM_PATTERN.match(channel)
+        if match:
+            db_str, key_and_subkey = match.groups()
+            database = int(db_str) if db_str != "*" else -1
+            newline_idx = key_and_subkey.index("\n")
+            key = key_and_subkey[:newline_idx]
+            subkey = key_and_subkey[newline_idx + 1 :]
+            event_type = data
+
+            if key_prefix:
+                if not key.startswith(key_prefix):
+                    return None
+                key = key[len(key_prefix) :]
+
+            return cls(
+                key=key,
+                event_type=event_type,
+                database=database,
+                channel=channel,
+                is_keyspace=True,
+                data=data,
+                subkeys=[subkey],
+            )
+
+        # Try subkeyspaceevent: channel=__subkeyspaceevent@<db>__:<event>|<key>
+        # data=<subkey_len>:<subkey>[,...]
+        match = cls._SUBKEYSPACEEVENT_PATTERN.match(channel)
+        if match:
+            db_str, event_and_key = match.groups()
+            database = int(db_str) if db_str != "*" else -1
+            pipe_idx = event_and_key.index("|")
+            event_type = event_and_key[:pipe_idx]
+            key = event_and_key[pipe_idx + 1 :]
+            subkeys = _parse_length_prefixed_subkeys(data)
+
+            if key_prefix:
+                if not key.startswith(key_prefix):
+                    return None
+                key = key[len(key_prefix) :]
+
+            return cls(
+                key=key,
+                event_type=event_type,
+                database=database,
+                channel=channel,
+                is_keyspace=False,
+                data=data,
+                subkeys=subkeys,
             )
 
         return None
@@ -542,27 +702,234 @@ class KeyeventChannel:
         return hash(self._channel_str)
 
 
+class SubkeyspaceChannel:
+    """
+    Represents a subkeyspace notification channel for subscribing to
+    subkey-level events on keys (e.g., hash field changes).
+
+    The channel format is ``__subkeyspace@<db>__:<key>``.
+    The message payload is ``<event>|<subkey_len>:<subkey>[,...]``.
+
+    Examples:
+        >>> channel = SubkeyspaceChannel("myhash", db=0)
+        >>> str(channel)
+        '__subkeyspace@0__:myhash'
+    """
+
+    PREFIX: ClassVar[str] = "__subkeyspace@"
+
+    def __init__(self, key_or_pattern: str, db: int = 0):
+        self.key_or_pattern = key_or_pattern
+        self.db = db
+        self._channel_str = self._build_channel_string()
+
+    def _build_channel_string(self) -> str:
+        return f"{self.PREFIX}{self.db}__:{self.key_or_pattern}"
+
+    @property
+    def is_pattern(self) -> bool:
+        return _is_pattern(self.key_or_pattern)
+
+    def __str__(self) -> str:
+        return self._channel_str
+
+    def __repr__(self) -> str:
+        return f"SubkeyspaceChannel({self.key_or_pattern!r}, db={self.db})"
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, SubkeyspaceChannel):
+            return self._channel_str == other._channel_str
+        if isinstance(other, str):
+            return self._channel_str == other
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self._channel_str)
+
+
+class SubkeyeventChannel:
+    """
+    Represents a subkeyevent notification channel for subscribing to
+    specific event types with subkey-level detail.
+
+    The channel format is ``__subkeyevent@<db>__:<event>``.
+    The message payload is ``<key_len>:<key>|<subkey_len>:<subkey>[,...]``.
+
+    Examples:
+        >>> channel = SubkeyeventChannel("hdel", db=0)
+        >>> str(channel)
+        '__subkeyevent@0__:hdel'
+    """
+
+    PREFIX: ClassVar[str] = "__subkeyevent@"
+
+    def __init__(self, event: str, db: int = 0):
+        self.event = event
+        self.db = db
+        self._channel_str = self._build_channel_string()
+
+    def _build_channel_string(self) -> str:
+        return f"{self.PREFIX}{self.db}__:{self.event}"
+
+    @property
+    def is_pattern(self) -> bool:
+        return _is_pattern(self.event)
+
+    @classmethod
+    def all_events(cls, db: int = 0) -> SubkeyeventChannel:
+        """Create a channel for all subkeyevent types."""
+        return cls("*", db=db)
+
+    def __str__(self) -> str:
+        return self._channel_str
+
+    def __repr__(self) -> str:
+        return f"SubkeyeventChannel({self.event!r}, db={self.db})"
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, SubkeyeventChannel):
+            return self._channel_str == other._channel_str
+        if isinstance(other, str):
+            return self._channel_str == other
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self._channel_str)
+
+
+class SubkeyspaceitemChannel:
+    """
+    Represents a subkeyspaceitem notification channel for subscribing to
+    events on a specific subkey (field) of a specific key.
+
+    The channel format is ``__subkeyspaceitem@<db>__:<key>\\n<subkey>``.
+    The message payload is the event type (e.g., ``"hset"``).
+
+    Note:
+        The server only emits this notification when the key does not
+        contain a newline character.
+
+    Examples:
+        >>> channel = SubkeyspaceitemChannel("myhash", "myfield", db=0)
+        >>> str(channel)
+        '__subkeyspaceitem@0__:myhash\\nmyfield'
+    """
+
+    PREFIX: ClassVar[str] = "__subkeyspaceitem@"
+
+    def __init__(self, key_or_pattern: str, subkey_or_pattern: str, db: int = 0):
+        self.key_or_pattern = key_or_pattern
+        self.subkey_or_pattern = subkey_or_pattern
+        self.db = db
+        self._channel_str = self._build_channel_string()
+
+    def _build_channel_string(self) -> str:
+        return (
+            f"{self.PREFIX}{self.db}__:{self.key_or_pattern}\n{self.subkey_or_pattern}"
+        )
+
+    @property
+    def is_pattern(self) -> bool:
+        return _is_pattern(self.key_or_pattern) or _is_pattern(self.subkey_or_pattern)
+
+    def __str__(self) -> str:
+        return self._channel_str
+
+    def __repr__(self) -> str:
+        return (
+            f"SubkeyspaceitemChannel({self.key_or_pattern!r}, "
+            f"{self.subkey_or_pattern!r}, db={self.db})"
+        )
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, SubkeyspaceitemChannel):
+            return self._channel_str == other._channel_str
+        if isinstance(other, str):
+            return self._channel_str == other
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self._channel_str)
+
+
+class SubkeyspaceeventChannel:
+    """
+    Represents a subkeyspaceevent notification channel for subscribing to
+    a specific event on a specific key, receiving affected subkeys.
+
+    The channel format is ``__subkeyspaceevent@<db>__:<event>|<key>``.
+    The message payload is a length-prefixed subkey list.
+
+    Examples:
+        >>> channel = SubkeyspaceeventChannel("hset", "myhash", db=0)
+        >>> str(channel)
+        '__subkeyspaceevent@0__:hset|myhash'
+    """
+
+    PREFIX: ClassVar[str] = "__subkeyspaceevent@"
+
+    def __init__(self, event: str, key_or_pattern: str, db: int = 0):
+        self.event = event
+        self.key_or_pattern = key_or_pattern
+        self.db = db
+        self._channel_str = self._build_channel_string()
+
+    def _build_channel_string(self) -> str:
+        return f"{self.PREFIX}{self.db}__:{self.event}|{self.key_or_pattern}"
+
+    @property
+    def is_pattern(self) -> bool:
+        return _is_pattern(self.event) or _is_pattern(self.key_or_pattern)
+
+    def __str__(self) -> str:
+        return self._channel_str
+
+    def __repr__(self) -> str:
+        return (
+            f"SubkeyspaceeventChannel({self.event!r}, "
+            f"{self.key_or_pattern!r}, db={self.db})"
+        )
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, SubkeyspaceeventChannel):
+            return self._channel_str == other._channel_str
+        if isinstance(other, str):
+            return self._channel_str == other
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self._channel_str)
+
+
 class ChannelType(Enum):
     """
     Enum representing the type of a Redis keyspace notification channel.
 
-    Redis provides two types of keyspace notifications:
-    - KEYSPACE: Notifies about events on specific keys. The channel format is
-      `__keyspace@{db}__:{key}` and the message data contains the event type.
-    - KEYEVENT: Notifies about specific event types. The channel format is
-      `__keyevent@{db}__:{event}` and the message data contains the key name.
+    Redis provides two types of keyspace notifications and four subkey
+    notification types:
+
+    - KEYSPACE: ``__keyspace@{db}__:{key}`` — data is the event type.
+    - KEYEVENT: ``__keyevent@{db}__:{event}`` — data is the key name.
+    - SUBKEYSPACE: ``__subkeyspace@{db}__:{key}`` — data is event + subkeys.
+    - SUBKEYEVENT: ``__subkeyevent@{db}__:{event}`` — data is key + subkeys.
+    - SUBKEYSPACEITEM: ``__subkeyspaceitem@{db}__:{key}\\n{subkey}`` — data
+      is the event type.
+    - SUBKEYSPACEEVENT: ``__subkeyspaceevent@{db}__:{event}|{key}`` — data
+      is a subkey list.
 
     Examples:
         >>> get_channel_type("__keyspace@0__:mykey")
         ChannelType.KEYSPACE
-        >>> get_channel_type("__keyevent@0__:set")
-        ChannelType.KEYEVENT
-        >>> get_channel_type("regular_channel") is None
-        True
+        >>> get_channel_type("__subkeyspace@0__:myhash")
+        ChannelType.SUBKEYSPACE
     """
 
     KEYSPACE = "keyspace"
     KEYEVENT = "keyevent"
+    SUBKEYSPACE = "subkeyspace"
+    SUBKEYEVENT = "subkeyevent"
+    SUBKEYSPACEITEM = "subkeyspaceitem"
+    SUBKEYSPACEEVENT = "subkeyspaceevent"
 
 
 def get_channel_type(channel: str | bytes) -> ChannelType | None:
@@ -588,6 +955,15 @@ def get_channel_type(channel: str | bytes) -> ChannelType | None:
         ChannelType.KEYSPACE
     """
     channel_str = safe_str(channel)
+    # Check subkey prefixes first (they are longer and more specific)
+    if channel_str.startswith(SubkeyspaceitemChannel.PREFIX):
+        return ChannelType.SUBKEYSPACEITEM
+    if channel_str.startswith(SubkeyspaceeventChannel.PREFIX):
+        return ChannelType.SUBKEYSPACEEVENT
+    if channel_str.startswith(SubkeyspaceChannel.PREFIX):
+        return ChannelType.SUBKEYSPACE
+    if channel_str.startswith(SubkeyeventChannel.PREFIX):
+        return ChannelType.SUBKEYEVENT
     if channel_str.startswith(KeyspaceChannel.PREFIX):
         return ChannelType.KEYSPACE
     if channel_str.startswith(KeyeventChannel.PREFIX):
@@ -693,6 +1069,48 @@ class KeyspaceNotificationsInterface(ABC):
         handler: SyncHandlerT | None = None,
     ):
         """Subscribe to keyevent notifications for specific event types."""
+        pass
+
+    @abstractmethod
+    def subscribe_subkeyspace(
+        self,
+        key_or_pattern: str,
+        db: int = 0,
+        handler: SyncHandlerT | None = None,
+    ):
+        """Subscribe to subkeyspace notifications for specific keys."""
+        pass
+
+    @abstractmethod
+    def subscribe_subkeyevent(
+        self,
+        event: str,
+        db: int = 0,
+        handler: SyncHandlerT | None = None,
+    ):
+        """Subscribe to subkeyevent notifications for specific event types."""
+        pass
+
+    @abstractmethod
+    def subscribe_subkeyspaceitem(
+        self,
+        key_or_pattern: str,
+        subkey_or_pattern: str,
+        db: int = 0,
+        handler: SyncHandlerT | None = None,
+    ):
+        """Subscribe to subkeyspaceitem notifications for a specific subkey."""
+        pass
+
+    @abstractmethod
+    def subscribe_subkeyspaceevent(
+        self,
+        event: str,
+        key_or_pattern: str,
+        db: int = 0,
+        handler: SyncHandlerT | None = None,
+    ):
+        """Subscribe to subkeyspaceevent notifications for an event on a key."""
         pass
 
     @abstractmethod
@@ -949,6 +1367,88 @@ class AbstractKeyspaceNotifications(KeyspaceNotificationsInterface):
             >>> ksn.subscribe_keyevent(EventType.EXPIRED, handler=my_handler)
         """
         channel = KeyeventChannel(event, db=db)
+        self.subscribe(channel, handler=handler)
+
+    def subscribe_subkeyspace(
+        self,
+        key_or_pattern: str,
+        db: int = 0,
+        handler: SyncHandlerT | None = None,
+    ):
+        """
+        Subscribe to subkeyspace notifications for specific keys.
+
+        Receives events with affected subkeys (fields) for the given key.
+
+        Args:
+            key_or_pattern: The key or pattern to monitor.
+            db: The database number (default 0).
+            handler: Optional callback for notifications.
+        """
+        channel = SubkeyspaceChannel(key_or_pattern, db=db)
+        self.subscribe(channel, handler=handler)
+
+    def subscribe_subkeyevent(
+        self,
+        event: str,
+        db: int = 0,
+        handler: SyncHandlerT | None = None,
+    ):
+        """
+        Subscribe to subkeyevent notifications for specific event types.
+
+        Receives the affected key and subkeys when the given event occurs.
+
+        Args:
+            event: The event type to monitor (e.g., "hset", "hdel").
+            db: The database number (default 0).
+            handler: Optional callback for notifications.
+        """
+        channel = SubkeyeventChannel(event, db=db)
+        self.subscribe(channel, handler=handler)
+
+    def subscribe_subkeyspaceitem(
+        self,
+        key_or_pattern: str,
+        subkey_or_pattern: str,
+        db: int = 0,
+        handler: SyncHandlerT | None = None,
+    ):
+        """
+        Subscribe to subkeyspaceitem notifications for a specific subkey.
+
+        Receives the event type when the given subkey of the given key is
+        modified.
+
+        Args:
+            key_or_pattern: The key or pattern to monitor.
+            subkey_or_pattern: The subkey (field) or pattern to monitor.
+            db: The database number (default 0).
+            handler: Optional callback for notifications.
+        """
+        channel = SubkeyspaceitemChannel(key_or_pattern, subkey_or_pattern, db=db)
+        self.subscribe(channel, handler=handler)
+
+    def subscribe_subkeyspaceevent(
+        self,
+        event: str,
+        key_or_pattern: str,
+        db: int = 0,
+        handler: SyncHandlerT | None = None,
+    ):
+        """
+        Subscribe to subkeyspaceevent notifications for an event on a key.
+
+        Receives the affected subkeys when the given event occurs on the
+        given key.
+
+        Args:
+            event: The event type to monitor.
+            key_or_pattern: The key or pattern to monitor.
+            db: The database number (default 0).
+            handler: Optional callback for notifications.
+        """
+        channel = SubkeyspaceeventChannel(event, key_or_pattern, db=db)
         self.subscribe(channel, handler=handler)
 
     def __enter__(self):

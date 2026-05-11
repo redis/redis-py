@@ -21,6 +21,7 @@ from redis.maint_notifications import (
 )
 
 
+@pytest.mark.fixed_client
 class TestMaintenanceNotification:
     """Test the base MaintenanceNotification class functionality through concrete subclasses."""
 
@@ -72,6 +73,7 @@ class TestMaintenanceNotification:
             assert notification.is_expired()
 
 
+@pytest.mark.fixed_client
 class TestNodeMovingNotification:
     """Test the NodeMovingNotification class."""
 
@@ -223,6 +225,7 @@ class TestNodeMovingNotification:
         )  # notification1 and notification2 should be considered the same
 
 
+@pytest.mark.fixed_client
 class TestNodeMigratingNotification:
     """Test the NodeMigratingNotification class."""
 
@@ -261,6 +264,7 @@ class TestNodeMigratingNotification:
         assert hash(notification1) != hash(notification3)
 
 
+@pytest.mark.fixed_client
 class TestNodeMigratedNotification:
     """Test the NodeMigratedNotification class."""
 
@@ -303,6 +307,7 @@ class TestNodeMigratedNotification:
         assert hash(notification1) != hash(notification3)
 
 
+@pytest.mark.fixed_client
 class TestNodeFailingOverNotification:
     """Test the NodeFailingOverNotification class."""
 
@@ -341,6 +346,7 @@ class TestNodeFailingOverNotification:
         assert hash(notification1) != hash(notification3)
 
 
+@pytest.mark.fixed_client
 class TestNodeFailedOverNotification:
     """Test the NodeFailedOverNotification class."""
 
@@ -383,6 +389,7 @@ class TestNodeFailedOverNotification:
         assert hash(notification1) != hash(notification3)
 
 
+@pytest.mark.fixed_client
 class TestOSSNodeMigratingNotification:
     """Test the OSSNodeMigratingNotification class."""
 
@@ -487,6 +494,7 @@ class TestOSSNodeMigratingNotification:
         )  # notification1 and notification2 should be the same
 
 
+@pytest.mark.fixed_client
 class TestOSSNodeMigratedNotification:
     """Test the OSSNodeMigratedNotification class."""
 
@@ -630,6 +638,7 @@ class TestOSSNodeMigratedNotification:
         )  # notification1 and notification2 should be the same
 
 
+@pytest.mark.fixed_client
 class TestMaintNotificationsConfig:
     """Test the MaintNotificationsConfig class."""
 
@@ -686,6 +695,7 @@ class TestMaintNotificationsConfig:
         assert config.relaxed_timeout is None
 
 
+@pytest.mark.fixed_client
 class TestMaintNotificationsPoolHandler:
     """Test the MaintNotificationsPoolHandler class."""
 
@@ -852,6 +862,7 @@ class TestMaintNotificationsPoolHandler:
         self.mock_pool.update_connections_settings.assert_called_once()
 
 
+@pytest.mark.fixed_client
 class TestMaintNotificationsConnectionHandler:
     """Test the MaintNotificationsConnectionHandler class."""
 
@@ -990,6 +1001,7 @@ class TestMaintNotificationsConnectionHandler:
         )
 
 
+@pytest.mark.fixed_client
 class TestEndpointType:
     """Test the EndpointType class functionality."""
 
@@ -1002,6 +1014,7 @@ class TestEndpointType:
         assert EndpointType.NONE.value == "none"
 
 
+@pytest.mark.fixed_client
 class TestMaintNotificationsConfigEndpointType:
     """Test MaintNotificationsConfig endpoint type functionality."""
 
@@ -1157,6 +1170,7 @@ class TestMaintNotificationsConfigEndpointType:
         assert config.get_endpoint_type("localhost", conn) == EndpointType.EXTERNAL_IP
 
 
+@pytest.mark.fixed_client
 class TestMaintNotificationsMetricsRecording:
     """
     Tests for metrics recording from maintenance notification handlers.

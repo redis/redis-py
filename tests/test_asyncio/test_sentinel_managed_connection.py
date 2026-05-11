@@ -9,6 +9,7 @@ from redis.backoff import NoBackoff
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.mark.fixed_client
 async def test_connect_retry_on_timeout_error(connect_args):
     """Test that the _connect function is retried in case of a timeout"""
     connection_pool = mock.AsyncMock()

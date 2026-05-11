@@ -7,7 +7,7 @@ import sys
 import time
 import warnings
 import weakref
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from itertools import chain
 from types import MappingProxyType
 from typing import (
@@ -66,7 +66,6 @@ from redis.asyncio.observability.recorder import (
 )
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from redis.connection import DEFAULT_RESP_VERSION
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import (
     AuthenticationError,
@@ -80,7 +79,7 @@ from redis.exceptions import (
 )
 from redis.observability.metrics import CloseReason
 from redis.typing import EncodableT
-from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
+from redis.utils import DEFAULT_RESP_VERSION, HIREDIS_AVAILABLE, str_if_bytes
 
 from .._parsers import (
     BaseParser,
@@ -108,7 +107,7 @@ DefaultParser: Type[Union[_AsyncRESP2Parser, _AsyncRESP3Parser, _AsyncHiredisPar
 if HIREDIS_AVAILABLE:
     DefaultParser = _AsyncHiredisParser
 else:
-    DefaultParser = _AsyncRESP2Parser
+    DefaultParser = _AsyncRESP3Parser
 
 
 class ConnectCallbackProtocol(Protocol):
@@ -183,7 +182,8 @@ class AbstractConnection:
         redis_connect_func: Optional[ConnectCallbackT] = None,
         encoder_class: Type[Encoder] = Encoder,
         credential_provider: Optional[CredentialProvider] = None,
-        protocol: Optional[int] = 2,
+        protocol: Optional[int] = None,
+        legacy_responses: bool = True,
         event_dispatcher: Optional[EventDispatcher] = None,
     ):
         """
@@ -249,7 +249,6 @@ class AbstractConnection:
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
         self._socket_read_size = socket_read_size
-        self.set_parser(parser_class)
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
         self._buffer_cutoff = 6000
         self._re_auth_token: Optional[TokenInterface] = None
@@ -265,6 +264,14 @@ class AbstractConnection:
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
         self.protocol = p
+        self.legacy_responses = legacy_responses
+        if parser_class != _AsyncHiredisParser:
+            # The Python parsers are protocol-specific; hiredis supports both.
+            if self.protocol == 3 and parser_class == _AsyncRESP2Parser:
+                parser_class = _AsyncRESP3Parser
+            elif self.protocol == 2 and parser_class == _AsyncRESP3Parser:
+                parser_class = _AsyncRESP2Parser
+        self.set_parser(parser_class)
 
     def __del__(self, _warnings: Any = warnings):
         # For some reason, the individual streams don't get properly garbage
@@ -1165,6 +1172,8 @@ URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyTy
         "ssl_include_verify_flags": parse_ssl_verify_flags,
         "ssl_exclude_verify_flags": parse_ssl_verify_flags,
         "timeout": float,
+        "protocol": int,
+        "legacy_responses": to_bool,
     }
 )
 
@@ -1235,7 +1244,59 @@ def parse_url(url: str) -> ConnectKwargs:
 _CP = TypeVar("_CP", bound="ConnectionPool")
 
 
-class ConnectionPool:
+class ConnectionPoolInterface(ABC):
+    @abstractmethod
+    def get_protocol(self):
+        pass
+
+    @abstractmethod
+    def reset(self) -> None:
+        pass
+
+    @abstractmethod
+    @deprecated_args(
+        args_to_warn=["*"],
+        reason="Use get_connection() without args instead",
+        version="5.3.0",
+    )
+    async def get_connection(
+        self, command_name: Optional[str] = None, *keys: Any, **options: Any
+    ) -> "AbstractConnection":
+        pass
+
+    @abstractmethod
+    def get_encoder(self) -> "Encoder":
+        pass
+
+    @abstractmethod
+    async def release(self, connection: "AbstractConnection") -> None:
+        pass
+
+    @abstractmethod
+    async def disconnect(self, inuse_connections: bool = True) -> None:
+        pass
+
+    @abstractmethod
+    async def aclose(self) -> None:
+        pass
+
+    @abstractmethod
+    def set_retry(self, retry: "Retry") -> None:
+        pass
+
+    @abstractmethod
+    async def re_auth_callback(self, token: TokenInterface) -> None:
+        pass
+
+    @abstractmethod
+    def get_connection_count(self) -> List[Tuple[int, dict]]:
+        """
+        Returns a connection count (both idle and in use).
+        """
+        pass
+
+
+class ConnectionPool(ConnectionPoolInterface):
     """
     Create a connection pool. ``If max_connections`` is set, then this
     object raises :py:class:`~redis.ConnectionError` when the pool's
@@ -1341,6 +1402,14 @@ class ConnectionPool:
             f"(<{self.connection_class.__module__}.{self.connection_class.__name__}"
             f"({conn_kwargs})>)>"
         )
+
+    def get_protocol(self):
+        """
+        Returns:
+            The RESP protocol version, or ``None`` if the protocol is not specified,
+            in which case the server default will be used.
+        """
+        return self.connection_kwargs.get("protocol", None)
 
     def reset(self):
         # Record metrics for connections being removed before clearing

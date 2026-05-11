@@ -27,12 +27,7 @@ from typing import (
     cast,
 )
 
-from redis._parsers.helpers import (
-    _RedisCallbacks,
-    _RedisCallbacksRESP2,
-    _RedisCallbacksRESP3,
-    bool_ok,
-)
+from redis._parsers.helpers import bool_ok, get_response_callbacks
 from redis.asyncio.connection import (
     Connection,
     ConnectionPool,
@@ -59,6 +54,7 @@ from redis.commands import (
     AsyncSentinelCommands,
     list_or_args,
 )
+from redis.commands.helpers import partition_pubsub_subscriptions_by_handler
 from redis.credentials import CredentialProvider
 from redis.driver_info import DriverInfo, resolve_driver_info
 from redis.event import (
@@ -276,7 +272,8 @@ class Redis(
         auto_close_connection_pool: Optional[bool] = None,
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
-        protocol: Optional[int] = 2,
+        protocol: Optional[int] = None,
+        legacy_responses: bool = True,
         event_dispatcher: Optional[EventDispatcher] = None,
     ):
         """
@@ -347,6 +344,7 @@ class Redis(
                 "driver_info": computed_driver_info,
                 "redis_connect_func": redis_connect_func,
                 "protocol": protocol,
+                "legacy_responses": legacy_responses,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -407,12 +405,13 @@ class Redis(
         self.single_connection_client = single_connection_client
         self.connection: Optional[Connection] = None
 
-        self.response_callbacks = CaseInsensitiveDict(_RedisCallbacks)
-
-        if self.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
-            self.response_callbacks.update(_RedisCallbacksRESP3)
-        else:
-            self.response_callbacks.update(_RedisCallbacksRESP2)
+        connection_kwargs = self.connection_pool.connection_kwargs
+        self.response_callbacks = CaseInsensitiveDict(
+            get_response_callbacks(
+                user_protocol=connection_kwargs.get("protocol"),
+                legacy_responses=connection_kwargs.get("legacy_responses", True),
+            )
+        )
 
         # If using a single connection client, we need to lock creation-of and use-of
         # the client in order to avoid race conditions such as using asyncio.gather
@@ -1031,7 +1030,11 @@ class PubSub:
             return
         async with self._lock:
             if self.connection:
-                await self.connection.disconnect()
+                # Use nowait=True to avoid awaiting StreamWriter.wait_closed(),
+                # which can deadlock when a concurrent reader task (e.g. one
+                # running pubsub.run() or get_message(block=True)) still holds
+                # the transport.  See https://github.com/redis/redis-py/issues/3941
+                await self.connection.disconnect(nowait=True)
                 self.connection.deregister_connect_callback(self.on_connect)
                 await self.connection_pool.release(self.connection)
                 self.connection = None
@@ -1052,54 +1055,29 @@ class PubSub:
         """Alias for aclose(), for backwards compatibility"""
         await self.aclose()
 
+    async def _resubscribe(self, subscribed, subscribe_fn) -> None:
+        subscriptions_without_handlers, subscriptions_with_handlers = (
+            partition_pubsub_subscriptions_by_handler(subscribed, self.encoder)
+        )
+        if subscriptions_without_handlers or subscriptions_with_handlers:
+            await subscribe_fn(
+                *subscriptions_without_handlers, **subscriptions_with_handlers
+            )
+
+    async def _resubscribe_shard_channels(self) -> None:
+        await self._resubscribe(self.shard_channels, self.ssubscribe)
+
     async def on_connect(self, connection: Connection):
         """Re-subscribe to any channels and patterns previously subscribed to"""
-        # NOTE: for python3, we can't pass bytestrings as keyword arguments
-        # so we need to decode channel/pattern names back to unicode strings
-        # before passing them to [p]subscribe.
-        #
-        # However, channels subscribed without a callback (positional args) may
-        # have binary names that are not valid in the current encoding (e.g.
-        # arbitrary bytes that are not valid UTF-8).  These channels are stored
-        # with a ``None`` handler.  We re-subscribe them as positional args so
-        # that no decoding is required.
         self.pending_unsubscribe_channels.clear()
         self.pending_unsubscribe_patterns.clear()
         self.pending_unsubscribe_shard_channels.clear()
         if self.channels:
-            channels_with_handlers = {}
-            channels_without_handlers = []
-            for k, v in self.channels.items():
-                if v is not None:
-                    channels_with_handlers[self.encoder.decode(k, force=True)] = v
-                else:
-                    channels_without_handlers.append(k)
-            if channels_with_handlers or channels_without_handlers:
-                await self.subscribe(
-                    *channels_without_handlers, **channels_with_handlers
-                )
+            await self._resubscribe(self.channels, self.subscribe)
         if self.patterns:
-            patterns_with_handlers = {}
-            patterns_without_handlers = []
-            for k, v in self.patterns.items():
-                if v is not None:
-                    patterns_with_handlers[self.encoder.decode(k, force=True)] = v
-                else:
-                    patterns_without_handlers.append(k)
-            if patterns_with_handlers or patterns_without_handlers:
-                await self.psubscribe(
-                    *patterns_without_handlers, **patterns_with_handlers
-                )
+            await self._resubscribe(self.patterns, self.psubscribe)
         if self.shard_channels:
-            shard_with_handlers = {}
-            shard_without_handlers = []
-            for k, v in self.shard_channels.items():
-                if v is not None:
-                    shard_with_handlers[self.encoder.decode(k, force=True)] = v
-                else:
-                    shard_without_handlers.append(k)
-            if shard_with_handlers or shard_without_handlers:
-                await self.ssubscribe(*shard_without_handlers, **shard_with_handlers)
+            await self._resubscribe_shard_channels()
 
     @property
     def subscribed(self):

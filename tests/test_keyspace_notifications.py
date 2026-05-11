@@ -7,6 +7,14 @@ import time
 from unittest.mock import MagicMock, Mock, PropertyMock
 
 from redis.exceptions import ConnectionError
+from tests.conftest import skip_if_server_version_lt
+from redis.keyspace_notifications import (
+    SubkeyeventChannel,
+    SubkeyspaceChannel,
+    SubkeyspaceeventChannel,
+    SubkeyspaceitemChannel,
+    _parse_length_prefixed_subkeys,
+)
 from redis.keyspace_notifications import (
     ChannelType,
     ClusterKeyspaceNotifications,
@@ -1107,3 +1115,737 @@ class TestStandaloneClientKeyspaceNotificationsMocked:
         assert notification is None
 
         notifications.close()
+
+
+class TestParseLengthPrefixedSubkeys:
+    """Tests for _parse_length_prefixed_subkeys helper."""
+
+    def test_single_subkey(self):
+        assert _parse_length_prefixed_subkeys("5:field") == ["field"]
+
+    def test_multiple_subkeys(self):
+        assert _parse_length_prefixed_subkeys("5:field,6:field2") == [
+            "field",
+            "field2",
+        ]
+
+    def test_subkey_with_special_chars(self):
+        assert _parse_length_prefixed_subkeys("7:foo:bar") == ["foo:bar"]
+
+    def test_subkey_with_comma_in_value(self):
+        assert _parse_length_prefixed_subkeys("5:a,b,c,1:x") == ["a,b,c", "x"]
+
+    def test_empty_subkey(self):
+        assert _parse_length_prefixed_subkeys("0:") == [""]
+
+    def test_multiple_with_varying_lengths(self):
+        assert _parse_length_prefixed_subkeys("1:a,2:bb,3:ccc") == [
+            "a",
+            "bb",
+            "ccc",
+        ]
+
+
+class TestSubkeyspaceChannelClass:
+    """Tests for SubkeyspaceChannel class."""
+
+    def test_basic_channel(self):
+        channel = SubkeyspaceChannel("myhash", db=0)
+        assert str(channel) == "__subkeyspace@0__:myhash"
+        assert channel.key_or_pattern == "myhash"
+        assert channel.db == 0
+
+    def test_channel_default_db(self):
+        channel = SubkeyspaceChannel("myhash")
+        assert str(channel) == "__subkeyspace@0__:myhash"
+        assert channel.db == 0
+
+    def test_pattern_channel(self):
+        channel = SubkeyspaceChannel("hash:*", db=0)
+        assert str(channel) == "__subkeyspace@0__:hash:*"
+        assert channel.is_pattern is True
+
+    def test_exact_channel(self):
+        channel = SubkeyspaceChannel("myhash")
+        assert channel.is_pattern is False
+
+    def test_equality_with_string(self):
+        channel = SubkeyspaceChannel("myhash", db=0)
+        assert channel == "__subkeyspace@0__:myhash"
+        assert channel != "__subkeyspace@1__:myhash"
+
+    def test_equality_with_channel(self):
+        ch1 = SubkeyspaceChannel("myhash", db=0)
+        ch2 = SubkeyspaceChannel("myhash", db=0)
+        ch3 = SubkeyspaceChannel("other", db=0)
+        assert ch1 == ch2
+        assert ch1 != ch3
+
+    def test_hash(self):
+        ch1 = SubkeyspaceChannel("myhash", db=0)
+        ch2 = SubkeyspaceChannel("myhash", db=0)
+        assert hash(ch1) == hash(ch2)
+
+    def test_repr(self):
+        channel = SubkeyspaceChannel("myhash", db=2)
+        assert repr(channel) == "SubkeyspaceChannel('myhash', db=2)"
+
+    def test_different_db(self):
+        channel = SubkeyspaceChannel("myhash", db=5)
+        assert str(channel) == "__subkeyspace@5__:myhash"
+
+
+class TestSubkeyeventChannelClass:
+    """Tests for SubkeyeventChannel class."""
+
+    def test_basic_channel(self):
+        channel = SubkeyeventChannel("hset", db=0)
+        assert str(channel) == "__subkeyevent@0__:hset"
+        assert channel.event == "hset"
+        assert channel.db == 0
+
+    def test_channel_default_db(self):
+        channel = SubkeyeventChannel("hdel")
+        assert str(channel) == "__subkeyevent@0__:hdel"
+
+    def test_pattern_channel(self):
+        channel = SubkeyeventChannel("h*")
+        assert str(channel) == "__subkeyevent@0__:h*"
+        assert channel.is_pattern is True
+
+    def test_exact_channel(self):
+        channel = SubkeyeventChannel("hset")
+        assert channel.is_pattern is False
+
+    def test_all_events_factory(self):
+        channel = SubkeyeventChannel.all_events()
+        assert str(channel) == "__subkeyevent@0__:*"
+        assert channel.is_pattern is True
+
+    def test_all_events_with_db(self):
+        channel = SubkeyeventChannel.all_events(db=3)
+        assert str(channel) == "__subkeyevent@3__:*"
+
+    def test_equality_with_string(self):
+        channel = SubkeyeventChannel("hset", db=0)
+        assert channel == "__subkeyevent@0__:hset"
+
+    def test_equality_with_channel(self):
+        ch1 = SubkeyeventChannel("hset", db=0)
+        ch2 = SubkeyeventChannel("hset", db=0)
+        ch3 = SubkeyeventChannel("hdel", db=0)
+        assert ch1 == ch2
+        assert ch1 != ch3
+
+    def test_repr(self):
+        channel = SubkeyeventChannel("hset", db=1)
+        assert repr(channel) == "SubkeyeventChannel('hset', db=1)"
+
+
+class TestSubkeyspaceitemChannelClass:
+    """Tests for SubkeyspaceitemChannel class."""
+
+    def test_basic_channel(self):
+        channel = SubkeyspaceitemChannel("myhash", "myfield", db=0)
+        assert str(channel) == "__subkeyspaceitem@0__:myhash\nmyfield"
+        assert channel.key_or_pattern == "myhash"
+        assert channel.subkey_or_pattern == "myfield"
+        assert channel.db == 0
+
+    def test_channel_default_db(self):
+        channel = SubkeyspaceitemChannel("myhash", "myfield")
+        assert str(channel) == "__subkeyspaceitem@0__:myhash\nmyfield"
+
+    def test_pattern_in_key(self):
+        channel = SubkeyspaceitemChannel("hash:*", "myfield")
+        assert channel.is_pattern is True
+
+    def test_pattern_in_subkey(self):
+        channel = SubkeyspaceitemChannel("myhash", "field:*")
+        assert channel.is_pattern is True
+
+    def test_exact_channel(self):
+        channel = SubkeyspaceitemChannel("myhash", "myfield")
+        assert channel.is_pattern is False
+
+    def test_equality_with_string(self):
+        channel = SubkeyspaceitemChannel("myhash", "myfield", db=0)
+        assert channel == "__subkeyspaceitem@0__:myhash\nmyfield"
+
+    def test_equality_with_channel(self):
+        ch1 = SubkeyspaceitemChannel("myhash", "myfield", db=0)
+        ch2 = SubkeyspaceitemChannel("myhash", "myfield", db=0)
+        ch3 = SubkeyspaceitemChannel("myhash", "other", db=0)
+        assert ch1 == ch2
+        assert ch1 != ch3
+
+    def test_repr(self):
+        channel = SubkeyspaceitemChannel("myhash", "myfield", db=2)
+        assert repr(channel) == "SubkeyspaceitemChannel('myhash', 'myfield', db=2)"
+
+
+class TestSubkeyspaceeventChannelClass:
+    """Tests for SubkeyspaceeventChannel class."""
+
+    def test_basic_channel(self):
+        channel = SubkeyspaceeventChannel("hset", "myhash", db=0)
+        assert str(channel) == "__subkeyspaceevent@0__:hset|myhash"
+        assert channel.event == "hset"
+        assert channel.key_or_pattern == "myhash"
+        assert channel.db == 0
+
+    def test_channel_default_db(self):
+        channel = SubkeyspaceeventChannel("hset", "myhash")
+        assert str(channel) == "__subkeyspaceevent@0__:hset|myhash"
+
+    def test_pattern_in_event(self):
+        channel = SubkeyspaceeventChannel("h*", "myhash")
+        assert channel.is_pattern is True
+
+    def test_pattern_in_key(self):
+        channel = SubkeyspaceeventChannel("hset", "hash:*")
+        assert channel.is_pattern is True
+
+    def test_exact_channel(self):
+        channel = SubkeyspaceeventChannel("hset", "myhash")
+        assert channel.is_pattern is False
+
+    def test_equality_with_string(self):
+        channel = SubkeyspaceeventChannel("hset", "myhash", db=0)
+        assert channel == "__subkeyspaceevent@0__:hset|myhash"
+
+    def test_equality_with_channel(self):
+        ch1 = SubkeyspaceeventChannel("hset", "myhash", db=0)
+        ch2 = SubkeyspaceeventChannel("hset", "myhash", db=0)
+        ch3 = SubkeyspaceeventChannel("hdel", "myhash", db=0)
+        assert ch1 == ch2
+        assert ch1 != ch3
+
+    def test_repr(self):
+        channel = SubkeyspaceeventChannel("hset", "myhash", db=1)
+        assert repr(channel) == "SubkeyspaceeventChannel('hset', 'myhash', db=1)"
+
+
+class TestSubkeyChannelDetection:
+    """Tests for get_channel_type() with subkey channel types."""
+
+    def test_subkeyspace_detection(self):
+        assert get_channel_type("__subkeyspace@0__:myhash") == ChannelType.SUBKEYSPACE
+
+    def test_subkeyevent_detection(self):
+        assert get_channel_type("__subkeyevent@0__:hset") == ChannelType.SUBKEYEVENT
+
+    def test_subkeyspaceitem_detection(self):
+        channel = "__subkeyspaceitem@0__:myhash\nmyfield"
+        assert get_channel_type(channel) == ChannelType.SUBKEYSPACEITEM
+
+    def test_subkeyspaceevent_detection(self):
+        channel = "__subkeyspaceevent@0__:hset|myhash"
+        assert get_channel_type(channel) == ChannelType.SUBKEYSPACEEVENT
+
+    def test_subkeyspace_does_not_match_subkeyspaceitem(self):
+        """Ensure __subkeyspaceitem@ is not mistakenly detected as SUBKEYSPACE."""
+        channel = "__subkeyspaceitem@0__:myhash\nfield"
+        assert get_channel_type(channel) != ChannelType.SUBKEYSPACE
+
+    def test_subkeyspace_does_not_match_subkeyspaceevent(self):
+        """Ensure __subkeyspaceevent@ is not mistakenly detected as SUBKEYSPACE."""
+        channel = "__subkeyspaceevent@0__:hset|myhash"
+        assert get_channel_type(channel) != ChannelType.SUBKEYSPACE
+
+    def test_bytes_input(self):
+        assert get_channel_type(b"__subkeyspace@0__:myhash") == ChannelType.SUBKEYSPACE
+        assert get_channel_type(b"__subkeyevent@0__:hset") == ChannelType.SUBKEYEVENT
+
+    def test_regular_keyspace_still_works(self):
+        assert get_channel_type("__keyspace@0__:mykey") == ChannelType.KEYSPACE
+        assert get_channel_type("__keyevent@0__:set") == ChannelType.KEYEVENT
+
+
+class TestSubkeyNotificationParsing:
+    """Tests for KeyNotification parsing of subkey channels."""
+
+    # --- subkeyspace ---
+
+    def test_subkeyspace_parse(self):
+        n = KeyNotification.try_parse(
+            "__subkeyspace@0__:myhash", "hset|5:field,6:field2"
+        )
+        assert n is not None
+        assert n.key == "myhash"
+        assert n.event_type == "hset"
+        assert n.database == 0
+        assert n.is_keyspace is True
+        assert n.subkeys == ["field", "field2"]
+
+    def test_subkeyspace_single_subkey(self):
+        n = KeyNotification.try_parse("__subkeyspace@0__:myhash", "hdel|3:foo")
+        assert n.subkeys == ["foo"]
+        assert n.event_type == "hdel"
+
+    def test_subkeyspace_with_key_prefix(self):
+        n = KeyNotification.try_parse(
+            "__subkeyspace@0__:prefix:myhash",
+            "hset|5:field",
+            key_prefix="prefix:",
+        )
+        assert n is not None
+        assert n.key == "myhash"
+        assert n.subkeys == ["field"]
+
+    def test_subkeyspace_filtered_by_key_prefix(self):
+        n = KeyNotification.try_parse(
+            "__subkeyspace@0__:other:myhash",
+            "hset|5:field",
+            key_prefix="prefix:",
+        )
+        assert n is None
+
+    def test_subkeyspace_wildcard_db(self):
+        n = KeyNotification.try_parse("__subkeyspace@*__:myhash", "hset|5:field")
+        assert n is not None
+        assert n.database == -1
+
+    # --- subkeyevent ---
+
+    def test_subkeyevent_parse(self):
+        n = KeyNotification.try_parse(
+            "__subkeyevent@0__:hset", "6:myhash|5:field,6:field2"
+        )
+        assert n is not None
+        assert n.key == "myhash"
+        assert n.event_type == "hset"
+        assert n.database == 0
+        assert n.is_keyspace is False
+        assert n.subkeys == ["field", "field2"]
+
+    def test_subkeyevent_single_subkey(self):
+        n = KeyNotification.try_parse("__subkeyevent@0__:hdel", "6:myhash|3:foo")
+        assert n.key == "myhash"
+        assert n.subkeys == ["foo"]
+
+    def test_subkeyevent_with_key_prefix(self):
+        n = KeyNotification.try_parse(
+            "__subkeyevent@0__:hset",
+            "13:prefix:myhash|5:field",
+            key_prefix="prefix:",
+        )
+        assert n is not None
+        assert n.key == "myhash"
+
+    def test_subkeyevent_filtered_by_key_prefix(self):
+        n = KeyNotification.try_parse(
+            "__subkeyevent@0__:hset",
+            "6:myhash|5:field",
+            key_prefix="prefix:",
+        )
+        assert n is None
+
+    # --- subkeyspaceitem ---
+
+    def test_subkeyspaceitem_parse(self):
+        n = KeyNotification.try_parse("__subkeyspaceitem@0__:myhash\nmyfield", "hset")
+        assert n is not None
+        assert n.key == "myhash"
+        assert n.event_type == "hset"
+        assert n.database == 0
+        assert n.is_keyspace is True
+        assert n.subkeys == ["myfield"]
+
+    def test_subkeyspaceitem_with_key_prefix(self):
+        n = KeyNotification.try_parse(
+            "__subkeyspaceitem@0__:prefix:myhash\nmyfield",
+            "hset",
+            key_prefix="prefix:",
+        )
+        assert n is not None
+        assert n.key == "myhash"
+        assert n.subkeys == ["myfield"]
+
+    def test_subkeyspaceitem_filtered_by_key_prefix(self):
+        n = KeyNotification.try_parse(
+            "__subkeyspaceitem@0__:other:myhash\nmyfield",
+            "hset",
+            key_prefix="prefix:",
+        )
+        assert n is None
+
+    def test_subkeyspaceitem_wildcard_db(self):
+        n = KeyNotification.try_parse("__subkeyspaceitem@*__:myhash\nmyfield", "hset")
+        assert n is not None
+        assert n.database == -1
+
+    # --- subkeyspaceevent ---
+
+    def test_subkeyspaceevent_parse(self):
+        n = KeyNotification.try_parse(
+            "__subkeyspaceevent@0__:hset|myhash", "5:field,6:field2"
+        )
+        assert n is not None
+        assert n.key == "myhash"
+        assert n.event_type == "hset"
+        assert n.database == 0
+        assert n.is_keyspace is False
+        assert n.subkeys == ["field", "field2"]
+
+    def test_subkeyspaceevent_single_subkey(self):
+        n = KeyNotification.try_parse("__subkeyspaceevent@0__:hdel|myhash", "3:foo")
+        assert n.key == "myhash"
+        assert n.event_type == "hdel"
+        assert n.subkeys == ["foo"]
+
+    def test_subkeyspaceevent_with_key_prefix(self):
+        n = KeyNotification.try_parse(
+            "__subkeyspaceevent@0__:hset|prefix:myhash",
+            "5:field",
+            key_prefix="prefix:",
+        )
+        assert n is not None
+        assert n.key == "myhash"
+
+    def test_subkeyspaceevent_filtered_by_key_prefix(self):
+        n = KeyNotification.try_parse(
+            "__subkeyspaceevent@0__:hset|other:myhash",
+            "5:field",
+            key_prefix="prefix:",
+        )
+        assert n is None
+
+    # --- from_message integration ---
+
+    def test_from_message_subkeyspace(self):
+        message = {
+            "type": "message",
+            "pattern": None,
+            "channel": "__subkeyspace@0__:myhash",
+            "data": "hset|5:field",
+        }
+        n = KeyNotification.from_message(message)
+        assert n is not None
+        assert n.key == "myhash"
+        assert n.event_type == "hset"
+        assert n.subkeys == ["field"]
+
+    def test_from_message_subkeyspaceitem(self):
+        message = {
+            "type": "message",
+            "pattern": None,
+            "channel": "__subkeyspaceitem@0__:myhash\nmyfield",
+            "data": "hset",
+        }
+        n = KeyNotification.from_message(message)
+        assert n is not None
+        assert n.key == "myhash"
+        assert n.event_type == "hset"
+        assert n.subkeys == ["myfield"]
+
+
+@skip_if_server_version_lt("8.7.2")
+class TestSubkeyNotifications:
+    """
+    Integration tests for subkey keyspace notifications.
+
+    These tests require a Redis server with subkey notification support
+    (Redis >= 8.7.2) and keyspace/subkey notifications enabled via the
+    ``r_with_subkey_notifications`` fixture.
+
+    Works for both standalone Redis and RedisCluster.
+    """
+
+    @staticmethod
+    def _drain_subscribe_messages(notifications):
+        """Drain subscribe/psubscribe confirmation messages so the next
+        ``get_message`` call returns a real notification.
+
+        Works for both standalone (``_pubsub``) and cluster
+        (``_node_pubsubs``) notification managers.
+        """
+        pubsubs = (
+            list(notifications._node_pubsubs.values())
+            if hasattr(notifications, "_node_pubsubs")
+            else [notifications._pubsub]
+        )
+        for pubsub in pubsubs:
+            while True:
+                msg = pubsub.get_message(timeout=0.01)
+                if msg is None:
+                    break
+                if msg["type"] not in ("subscribe", "psubscribe"):
+                    break
+
+    def test_create_hash_field_subkeyspace_notification(
+        self, r_with_subkey_notifications
+    ):
+        """Create a hash field and verify that the Subkeyspace notification
+        contains the field that was created."""
+        r = r_with_subkey_notifications
+        notifications = r.keyspace_notifications()
+        notifications.subscribe_subkeyspace("test:hash1")
+        self._drain_subscribe_messages(notifications)
+
+        r.hset("test:hash1", "field1", "value1")
+
+        msg = notifications.get_message(timeout=2.0)
+        assert msg is not None
+        assert msg.key == "test:hash1"
+        assert msg.event_type == "hset"
+        assert "field1" in msg.subkeys
+
+        notifications.close()
+        r.delete("test:hash1")
+
+    def test_update_hash_field_subkeyspace_notification(
+        self, r_with_subkey_notifications
+    ):
+        """Update an existing hash field and verify the Subkeyspace notification."""
+        r = r_with_subkey_notifications
+        r.hset("test:hash2", "field1", "initial")
+
+        notifications = r.keyspace_notifications()
+        notifications.subscribe_subkeyspace("test:hash2")
+        self._drain_subscribe_messages(notifications)
+
+        r.hset("test:hash2", "field1", "updated")
+
+        msg = notifications.get_message(timeout=2.0)
+        assert msg is not None
+        assert msg.key == "test:hash2"
+        assert msg.event_type == "hset"
+        assert "field1" in msg.subkeys
+
+        notifications.close()
+        r.delete("test:hash2")
+
+    def test_update_hash_field_subkeyspaceitem_notification(
+        self, r_with_subkey_notifications
+    ):
+        """Update a hash field and verify the Subkeyspaceitem notification
+        is received for the specific field."""
+        r = r_with_subkey_notifications
+        r.hset("test:hash3", "myfield", "initial")
+
+        notifications = r.keyspace_notifications()
+        notifications.subscribe_subkeyspaceitem("test:hash3", "myfield")
+        self._drain_subscribe_messages(notifications)
+
+        r.hset("test:hash3", "myfield", "updated")
+
+        msg = notifications.get_message(timeout=2.0)
+        assert msg is not None
+        assert msg.key == "test:hash3"
+        assert msg.event_type == "hset"
+        assert msg.subkeys == ["myfield"]
+
+        notifications.close()
+        r.delete("test:hash3")
+
+    def test_delete_hash_field_subkeyevent_notification(
+        self, r_with_subkey_notifications
+    ):
+        """Delete a hash field and verify the Subkeyevent notification
+        is received for the hdel event."""
+        r = r_with_subkey_notifications
+        r.hset("test:hash4", "field1", "value1")
+
+        notifications = r.keyspace_notifications()
+        notifications.subscribe_subkeyevent("hdel")
+        self._drain_subscribe_messages(notifications)
+
+        r.hdel("test:hash4", "field1")
+
+        msg = notifications.get_message(timeout=2.0)
+        assert msg is not None
+        assert msg.key == "test:hash4"
+        assert msg.event_type == "hdel"
+        assert "field1" in msg.subkeys
+
+        notifications.close()
+        r.delete("test:hash4")
+
+    def test_delete_hash_field_subkeyspaceevent_notification(
+        self, r_with_subkey_notifications
+    ):
+        """Delete a hash field and verify the Subkeyspaceevent notification
+        is received for the specific key and event."""
+        r = r_with_subkey_notifications
+        r.hset("test:hash5", "field1", "value1")
+
+        notifications = r.keyspace_notifications()
+        notifications.subscribe_subkeyspaceevent("hdel", "test:hash5")
+        self._drain_subscribe_messages(notifications)
+
+        r.hdel("test:hash5", "field1")
+
+        msg = notifications.get_message(timeout=2.0)
+        assert msg is not None
+        assert msg.key == "test:hash5"
+        assert msg.event_type == "hdel"
+        assert "field1" in msg.subkeys
+
+        notifications.close()
+        r.delete("test:hash5")
+
+    def test_multiple_hash_fields_subkeyspace_notification(
+        self, r_with_subkey_notifications
+    ):
+        """Create multiple hash fields at once and verify subkeyspace
+        notification contains all affected fields."""
+        r = r_with_subkey_notifications
+        notifications = r.keyspace_notifications()
+        notifications.subscribe_subkeyspace("test:hash6")
+        self._drain_subscribe_messages(notifications)
+
+        r.hset("test:hash6", mapping={"f1": "v1", "f2": "v2", "f3": "v3"})
+
+        msg = notifications.get_message(timeout=2.0)
+        assert msg is not None
+        assert msg.key == "test:hash6"
+        assert msg.event_type == "hset"
+        assert len(msg.subkeys) == 3
+        assert set(msg.subkeys) == {"f1", "f2", "f3"}
+
+        notifications.close()
+        r.delete("test:hash6")
+
+    def test_subkeyspace_pattern_subscription(self, r_with_subkey_notifications):
+        """Subscribe to a subkeyspace pattern and verify notifications are
+        received for matching keys."""
+        r = r_with_subkey_notifications
+        notifications = r.keyspace_notifications()
+        notifications.subscribe_subkeyspace("test:pattern:*")
+        self._drain_subscribe_messages(notifications)
+
+        r.hset("test:pattern:hash1", "field1", "value1")
+        r.hset("test:pattern:hash2", "field2", "value2")
+
+        messages = []
+        for _ in range(2):
+            msg = notifications.get_message(timeout=2.0)
+            assert msg is not None
+            messages.append(msg)
+
+        keys = {m.key for m in messages}
+        assert "test:pattern:hash1" in keys
+        assert "test:pattern:hash2" in keys
+
+        notifications.close()
+        r.delete("test:pattern:hash1", "test:pattern:hash2")
+
+    def test_subkeyevent_pattern_subscription(self, r_with_subkey_notifications):
+        """Subscribe to a subkeyevent pattern for all hash events and
+        verify notifications are received."""
+        r = r_with_subkey_notifications
+        notifications = r.keyspace_notifications()
+        notifications.subscribe_subkeyevent("h*")
+        self._drain_subscribe_messages(notifications)
+
+        r.hset("test:hash7", "field1", "value1")
+        r.hdel("test:hash7", "field1")
+
+        messages = []
+        for _ in range(2):
+            msg = notifications.get_message(timeout=2.0)
+            assert msg is not None
+            messages.append(msg)
+
+        event_types = {m.event_type for m in messages}
+        assert "hset" in event_types
+        assert "hdel" in event_types
+
+        notifications.close()
+        r.delete("test:hash7")
+
+    def test_subkeyspaceitem_does_not_receive_other_fields(
+        self, r_with_subkey_notifications
+    ):
+        """Subscribe to a specific subkeyspaceitem and verify that
+        modifications to other fields do not trigger notifications."""
+        r = r_with_subkey_notifications
+        r.hset("test:hash8", "watched_field", "initial")
+
+        notifications = r.keyspace_notifications()
+        notifications.subscribe_subkeyspaceitem("test:hash8", "watched_field")
+        self._drain_subscribe_messages(notifications)
+
+        # Modify a different field — should NOT trigger a notification
+        r.hset("test:hash8", "other_field", "value")
+        msg = notifications.get_message(timeout=1.0)
+        assert msg is None
+
+        # Modify the watched field — should trigger a notification
+        r.hset("test:hash8", "watched_field", "updated")
+        msg = notifications.get_message(timeout=2.0)
+        assert msg is not None
+        assert msg.subkeys == ["watched_field"]
+
+        notifications.close()
+        r.delete("test:hash8")
+
+    def test_combined_keyspace_and_subkeyspace(self, r_with_subkey_notifications):
+        """Subscribe to both keyspace and subkeyspace on the same key and
+        verify that both types of notifications are received."""
+        r = r_with_subkey_notifications
+
+        notifications = r.keyspace_notifications()
+        notifications.subscribe_keyspace("test:hash9")
+        notifications.subscribe_subkeyspace("test:hash9")
+        self._drain_subscribe_messages(notifications)
+
+        r.hset("test:hash9", "field1", "value1")
+
+        messages = []
+        for _ in range(2):
+            msg = notifications.get_message(timeout=2.0)
+            if msg is not None:
+                messages.append(msg)
+
+        # Should receive both keyspace (hset event, no subkeys) and
+        # subkeyspace (hset event, with subkeys) notifications
+        assert len(messages) == 2
+        has_subkeys = any(len(m.subkeys) > 0 for m in messages)
+        has_no_subkeys = any(len(m.subkeys) == 0 for m in messages)
+        assert has_subkeys
+        assert has_no_subkeys
+
+        notifications.close()
+        r.delete("test:hash9")
+
+    def test_subkeyspaceitem_pattern_receives_matching_fields(
+        self, r_with_subkey_notifications
+    ):
+        """Subscribe to subkeyspaceitem with a pattern subkey (field*) and
+        verify that notifications are received for field1, field2, and field3
+        but not for unrelated fields."""
+        r = r_with_subkey_notifications
+
+        notifications = r.keyspace_notifications()
+        notifications.subscribe_subkeyspaceitem("test:hash10", "field*")
+        self._drain_subscribe_messages(notifications)
+
+        # These should all match the pattern
+        r.hset("test:hash10", "field1", "value1")
+        r.hset("test:hash10", "field2", "value2")
+        r.hset("test:hash10", "field3", "value3")
+
+        messages = []
+        for _ in range(3):
+            msg = notifications.get_message(timeout=2.0)
+            assert msg is not None
+            messages.append(msg)
+
+        received_subkeys = [m.subkeys[0] for m in messages]
+        assert "field1" in received_subkeys
+        assert "field2" in received_subkeys
+        assert "field3" in received_subkeys
+
+        for msg in messages:
+            assert msg.key == "test:hash10"
+            assert msg.event_type == "hset"
+
+        # A non-matching field should NOT produce a notification
+        r.hset("test:hash10", "other", "value")
+        msg = notifications.get_message(timeout=1.0)
+        assert msg is None
+
+        notifications.close()
+        r.delete("test:hash10")

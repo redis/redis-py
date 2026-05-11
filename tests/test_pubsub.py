@@ -1,3 +1,4 @@
+import logging
 import platform
 import queue
 import socket
@@ -9,9 +10,12 @@ from unittest.mock import patch
 
 import pytest
 import redis
+from redis._parsers import Encoder
 from redis.client import PubSub
+from redis.cluster import ClusterPubSub
+from redis.crc import key_slot
 from redis.event import EventDispatcher
-from redis.exceptions import ConnectionError
+from redis.exceptions import ConnectionError, SlotNotCoveredError, TimeoutError
 from redis.observability import recorder
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
@@ -250,6 +254,93 @@ class TestPubSubSubscribeUnsubscribe:
         assert len(messages) == 1
         assert messages[0]["type"] == "psubscribe"
         assert messages[0]["channel"] == binary_pattern
+
+    @pytest.mark.fixed_client
+    def test_cluster_pubsub_resubscribe_shard_channels_groups_by_slot(self):
+        """The cluster-aware ``_resubscribe_shard_channels`` must group shard
+        channels by hash slot on reconnect. A cluster node can own multiple
+        slot ranges, so a single batched SSUBSCRIBE across different slots
+        would be rejected by Redis with CROSSSLOT and resubscription would
+        fail silently. The same method is bound to the per-node PubSub
+        instances managed by ``ClusterPubSub``.
+        """
+        # Pure client-side logic: mock the pool, use a real encoder, no
+        # server needed. ``key_slot`` is client-side CRC16, so slot
+        # assignments are deterministic without a cluster.
+        pool = mock.MagicMock()
+        encoder = Encoder(
+            encoding="utf-8", encoding_errors="strict", decode_responses=False
+        )
+        p = PubSub(connection_pool=pool, encoder=encoder)
+
+        # Two channels share a hash tag (same slot); a third hashes to a
+        # different slot.
+        ch_a1 = b"{slot-a}-one"
+        ch_a2 = b"{slot-a}-two"
+        ch_b = b"{slot-b}-one"
+        assert key_slot(ch_a1) == key_slot(ch_a2)
+        assert key_slot(ch_a1) != key_slot(ch_b)
+
+        # Populate state as if previously subscribed, without going to the wire.
+        p.shard_channels = {ch_a1: None, ch_a2: None, ch_b: None}
+
+        calls = []
+        with mock.patch.object(
+            p,
+            "ssubscribe",
+            side_effect=lambda *a, **kw: calls.append((tuple(a), dict(kw))),
+        ):
+            ClusterPubSub._resubscribe_shard_channels(p)
+
+        # Every ssubscribe call must target exactly one slot.
+        slots_per_call = []
+        all_channels = set()
+        for args, kwargs in calls:
+            channels = set(args) | set(
+                k.encode() if isinstance(k, str) else k for k in kwargs
+            )
+            assert channels, "ssubscribe called with no channels"
+            call_slots = {key_slot(c) for c in channels}
+            assert len(call_slots) == 1, (
+                f"ssubscribe grouped channels from multiple slots: {call_slots}"
+            )
+            slots_per_call.append(next(iter(call_slots)))
+            all_channels.update(channels)
+
+        # All original channels must be resubscribed, across exactly two
+        # distinct slot groups.
+        assert all_channels == {ch_a1, ch_a2, ch_b}
+        assert set(slots_per_call) == {key_slot(ch_a1), key_slot(ch_b)}
+        # Channels sharing a slot are batched: two unique slots => two calls.
+        assert len(calls) == 2
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_standalone_pubsub_on_connect_batches_shard_channels(self, r):
+        """The standalone PubSub has no notion of slots and must keep
+        batching every tracked shard channel into a single SSUBSCRIBE call
+        on reconnect, as it did before cluster-aware resubscription existed.
+        """
+        p = r.pubsub()
+        ch_a = b"{slot-a}-one"
+        ch_b = b"{slot-b}-one"
+        assert key_slot(ch_a) != key_slot(ch_b)
+
+        p.shard_channels = {ch_a: None, ch_b: None}
+
+        calls = []
+        with mock.patch.object(
+            p,
+            "ssubscribe",
+            side_effect=lambda *a, **kw: calls.append((tuple(a), dict(kw))),
+        ):
+            p.on_connect(connection=None)
+
+        assert len(calls) == 1
+        args, kwargs = calls[0]
+        assert set(args) == {ch_a, ch_b}
+        assert kwargs == {}
+        p.close()
 
     def _test_subscribed_property(
         self, p, sub_type, unsub_type, sub_func, unsub_func, keys
@@ -2109,3 +2200,664 @@ class TestClusterPubSubTimeoutPropagation:
 
         assert len(messages) == 2
         pubsub.close()
+
+
+class TestClusterPubSubResubscribe:
+    """
+    Cluster-only tests verifying that sharded pubsub resubscription after a
+    reconnect groups channels by slot and does not trigger CROSSSLOT errors
+    on nodes that own multiple slots.
+    """
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_resubscribe_shard_channels_different_slots_same_node(self, r):
+        """After a reconnect, shard channels on the same node but different
+        slots must be resubscribed without raising CROSSSLOT.
+        """
+        # Hardcoded for the project's default 3-master test cluster; both
+        # channels hash to slots owned by the first master.
+        ch_a, ch_b = "resub-a-0", "resub-b-0"
+        assert r.keyslot(ch_a) != r.keyslot(ch_b)
+        assert r.get_node_from_key(ch_a).name == r.get_node_from_key(ch_b).name
+
+        p = r.pubsub()
+        try:
+            p.ssubscribe(ch_a)
+            assert (
+                wait_for_message(p, timeout=2.0, func=p.get_sharded_message) is not None
+            )
+            p.ssubscribe(ch_b)
+            assert (
+                wait_for_message(p, timeout=2.0, func=p.get_sharded_message) is not None
+            )
+
+            # Force reconnect of the per-node subscriber connection.
+            node = r.get_node_from_key(ch_a)
+            per_node_pubsub = p.node_pubsub_mapping[node.name]
+            assert per_node_pubsub.connection is not None
+            per_node_pubsub.connection.disconnect()
+
+            # Trigger reconnect + resubscription. With batched resubscription
+            # this would raise a CROSSSLOT ResponseError; with per-slot
+            # grouping it must succeed and deliver fresh ssubscribe acks.
+            acks = {}
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline and len(acks) < 2:
+                msg = p.get_sharded_message(timeout=0.5)
+                if msg is None:
+                    continue
+                if msg["type"] == "ssubscribe":
+                    acks[msg["channel"]] = msg
+
+            assert ch_a.encode() in acks
+            assert ch_b.encode() in acks
+
+            # Both channels must still be tracked in the aggregate state.
+            assert ch_a.encode() in p.shard_channels
+            assert ch_b.encode() in p.shard_channels
+        finally:
+            p.close()
+
+
+@pytest.mark.fixed_client
+class TestClusterPubSubSlotMigration:
+    """
+    Deterministic unit tests for ClusterPubSub shard-channel slot migration
+    handling. These tests bypass all I/O by mocking the per-node PubSub
+    instances and the cluster's node-resolution layer, verifying the
+    reconciler logic and the reverse-index routing in isolation (no live
+    cluster required).
+    """
+
+    def _make_cluster_pubsub(self):
+        from redis._parsers.encoders import Encoder
+        from redis.cluster import ClusterPubSub
+
+        pubsub = ClusterPubSub.__new__(ClusterPubSub)
+        # Base PubSub state normally wired up by PubSub.__init__.
+        pubsub.encoder = Encoder("utf-8", "strict", False)
+        pubsub._lock = threading.RLock()
+        pubsub.subscribed_event = threading.Event()
+        pubsub.health_check_response_counter = 0
+        pubsub.connection = None
+        pubsub.channels = {}
+        pubsub.pending_unsubscribe_channels = set()
+        pubsub.shard_channels = {}
+        pubsub.pending_unsubscribe_shard_channels = set()
+        pubsub.patterns = {}
+        pubsub.pending_unsubscribe_patterns = set()
+        pubsub.ignore_subscribe_messages = False
+        # ClusterPubSub-specific state.
+        pubsub.cluster = mock.MagicMock()
+        pubsub.node_pubsub_mapping = {}
+        pubsub._shard_channel_to_node = {}
+        pubsub._shard_state_lock = threading.RLock()
+        pubsub.push_handler_func = None
+        # Reconciliation worker state (lazy-created by on_slots_changed).
+        pubsub._reconcile_executor = None
+        pubsub._reconcile_futures = set()
+        return pubsub
+
+    def _make_node(self, name):
+        node = mock.MagicMock()
+        node.name = name
+        return node
+
+    def _make_node_pubsub(self, shard_channels=None):
+        p = mock.MagicMock()
+        p.shard_channels = dict(shard_channels or {})
+        p.pending_unsubscribe_shard_channels = set()
+        p.subscribed = True
+        return p
+
+    def test_reinitialize_moves_channel_to_new_owner(self):
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        old_ps = self._make_node_pubsub({channel: None})
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+
+        pubsub.reinitialize_shard_subscriptions()
+
+        old_ps.sunsubscribe.assert_called_once_with(channel)
+        new_ps.ssubscribe.assert_called_once_with(channel)
+        assert pubsub._shard_channel_to_node[channel] == new_node.name
+
+    def test_reinitialize_noop_when_owner_unchanged(self):
+        pubsub = self._make_cluster_pubsub()
+        owner = self._make_node("127.0.0.1:7000")
+        channel = b"foo"
+        owner_ps = self._make_node_pubsub({channel: None})
+        pubsub.node_pubsub_mapping[owner.name] = owner_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub._shard_channel_to_node = {channel: owner.name}
+        pubsub.cluster.get_node_from_key.return_value = owner
+
+        pubsub.reinitialize_shard_subscriptions()
+
+        owner_ps.sunsubscribe.assert_not_called()
+        owner_ps.ssubscribe.assert_not_called()
+        assert pubsub._shard_channel_to_node[channel] == owner.name
+
+    def test_reinitialize_tolerates_old_node_disconnect(self):
+        """
+        When the old node is still part of the cluster topology but just
+        transiently unreachable / slow, the failed sunsubscribe must not
+        abort migration, and the old per-node pubsub must be left in
+        place so ``PubSub._execute`` can auto-reconnect and
+        ``on_connect`` can re-subscribe the remaining channels on the
+        next read.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        old_ps = self._make_node_pubsub({channel: None})
+        old_ps.sunsubscribe.side_effect = TimeoutError("old node is slow")
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+        # Old node is still known to the cluster (transient error).
+        pubsub.cluster.get_node.return_value = old_node
+
+        pubsub.reinitialize_shard_subscriptions()
+
+        old_ps.sunsubscribe.assert_called_once_with(channel)
+        new_ps.ssubscribe.assert_called_once_with(channel)
+        assert pubsub._shard_channel_to_node[channel] == new_node.name
+        # Node still in topology → keep the pubsub so auto-reconnect can
+        # recover it; the dedicated socket was already torn down by
+        # Connection.disconnect() before the exception surfaced.
+        old_ps.reset.assert_not_called()
+        assert old_node.name in pubsub.node_pubsub_mapping
+
+    def test_reinitialize_drops_old_pubsub_when_node_removed_from_topology(self):
+        """
+        When the failed sunsubscribe coincides with the old node being
+        removed from the cluster topology (failover / topology refresh
+        dropped it), the pubsub has nowhere to reconnect to and would
+        stay in ``node_pubsub_mapping`` with ``subscribed=True`` forever
+        (the ACK can never arrive), poisoning the round-robin generator.
+        Drop it eagerly in that case.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        old_ps = self._make_node_pubsub({channel: None})
+        old_ps.sunsubscribe.side_effect = ConnectionError("old node is gone")
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+        # Old node was removed from topology.
+        pubsub.cluster.get_node.return_value = None
+
+        pubsub.reinitialize_shard_subscriptions()
+
+        assert pubsub._shard_channel_to_node[channel] == new_node.name
+        old_ps.reset.assert_called_once()
+        assert old_node.name not in pubsub.node_pubsub_mapping
+
+    def test_sunsubscribe_routes_via_reverse_index_after_migration(self):
+        """
+        After a slot migration, sunsubscribe must hit the node that currently
+        holds the subscription (tracked in ``_shard_channel_to_node``) rather
+        than re-resolving via ``cluster.get_node_from_key``, which by then
+        points to the new owner and would miss the actual subscription.
+        """
+        pubsub = self._make_cluster_pubsub()
+        holding_node_name = "127.0.0.1:7000"
+        new_owner = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        holding_ps = self._make_node_pubsub({channel: None})
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[holding_node_name] = holding_ps
+        pubsub.node_pubsub_mapping[new_owner.name] = new_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub._shard_channel_to_node = {channel: holding_node_name}
+        pubsub.cluster.get_node_from_key.return_value = new_owner
+
+        pubsub.sunsubscribe(channel)
+
+        holding_ps.sunsubscribe.assert_called_once_with(channel)
+        new_ps.sunsubscribe.assert_not_called()
+
+    def test_ssubscribe_migration_applies_newly_supplied_handler(self):
+        """
+        Regression: the lazy-reroute branch in ssubscribe must honour the
+        caller's newly supplied handler, matching PubSub.ssubscribe()'s
+        dict.update() semantics. Previously it fell back to the stale handler
+        tracked in ``shard_channels`` and silently dropped the new one.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        old_ps = self._make_node_pubsub({channel: None})
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        # Channel was previously subscribed with no handler.
+        pubsub.shard_channels = {channel: None}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+
+        new_handler = mock.Mock()
+        pubsub.ssubscribe(foo=new_handler)
+
+        old_ps.sunsubscribe.assert_called_once_with(channel)
+        new_ps.ssubscribe.assert_called_once_with(foo=new_handler)
+
+    def test_ssubscribe_skips_channel_when_node_resolution_returns_none(self):
+        """
+        Regression: cluster.get_node_from_key may return None for channels
+        whose slot is transiently uncovered. ssubscribe must skip such
+        channels rather than dereference None (which would crash on
+        ``node.name`` either in the reverse-index comparison or inside
+        ``_get_node_pubsub``). Mirrors the async counterpart's guard.
+        """
+        pubsub = self._make_cluster_pubsub()
+        pubsub.cluster.get_node_from_key.return_value = None
+        # Stale reverse-index entry also present to exercise both crash paths:
+        # the old_name != node.name comparison and the downstream fallthrough.
+        pubsub._shard_channel_to_node = {b"foo": "127.0.0.1:7000"}
+
+        pubsub.ssubscribe(b"foo")
+
+        # No migration, no per-node pubsub creation, no mapping mutation.
+        assert pubsub.node_pubsub_mapping == {}
+        assert pubsub._shard_channel_to_node == {b"foo": "127.0.0.1:7000"}
+
+    def test_migration_driven_sunsubscribe_drops_empty_pubsub(self):
+        """
+        Regression: when a migration-driven sunsubscribe confirmation arrives
+        (the channel is not in ``pending_unsubscribe_shard_channels`` because
+        migration must not touch cluster-level tracking), the per-node pubsub
+        must still be dropped from ``node_pubsub_mapping`` once it no longer
+        holds any subscriptions. Otherwise long-running clients with slot
+        churn accumulate dead per-node pubsubs and their connections.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        channel = b"foo"
+        # Old per-node pubsub has already processed the sunsubscribe internally
+        # (shard_channels empty, subscribed=False); the message is about to be
+        # surfaced to the cluster-level pubsub.
+        old_ps = self._make_node_pubsub()
+        old_ps.subscribed = False
+        old_ps.get_message.return_value = {"type": "sunsubscribe", "channel": channel}
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        # Migration-driven: channel is already tracked on the new owner, so
+        # cluster-level state does not reference old_node and the channel is
+        # NOT in pending_unsubscribe_shard_channels.
+        pubsub.shard_channels = {}
+        pubsub._shard_channel_to_node = {}
+        pubsub.pending_unsubscribe_shard_channels = set()
+
+        message = pubsub.get_sharded_message(target_node=old_node)
+
+        assert message is not None
+        assert old_node.name not in pubsub.node_pubsub_mapping
+        # The per-node pubsub's dedicated connection must be released back
+        # to its pool before the mapping drop; otherwise the instance is
+        # GC-eligible with no path that closes it (PubSub.__del__ does not
+        # release connections), leaking a pool slot per migration.
+        old_ps.reset.assert_called_once()
+
+    def test_reinitialize_partial_progress_when_slot_uncovered(self):
+        """
+        A SlotNotCoveredError on one channel (slot transiently uncovered
+        mid-migration) must not abort the reconcile pass for coverable
+        siblings, but it MUST be surfaced at the end so the caller knows
+        reconciliation was incomplete and a retry will happen on the next
+        slots-cache change notification.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        covered_channel = b"covered"
+        uncovered_channel = b"uncovered"
+        old_ps = self._make_node_pubsub(
+            {covered_channel: None, uncovered_channel: None}
+        )
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {covered_channel: None, uncovered_channel: None}
+        pubsub._shard_channel_to_node = {
+            covered_channel: old_node.name,
+            uncovered_channel: old_node.name,
+        }
+
+        def _resolve(channel, *args, **kwargs):
+            if channel == uncovered_channel:
+                raise SlotNotCoveredError('Slot "0" is not covered by the cluster.')
+            return new_node
+
+        pubsub.cluster.get_node_from_key.side_effect = _resolve
+
+        with pytest.raises(SlotNotCoveredError):
+            pubsub.reinitialize_shard_subscriptions()
+
+        # covered_channel was migrated before the error surfaced;
+        # uncovered_channel is left in place for the next reconcile pass.
+        new_ps.ssubscribe.assert_called_once_with(covered_channel)
+        old_ps.sunsubscribe.assert_called_once_with(covered_channel)
+        assert pubsub._shard_channel_to_node[covered_channel] == new_node.name
+        assert pubsub._shard_channel_to_node[uncovered_channel] == old_node.name
+
+    def test_on_slots_changed_schedules_reconcile_off_caller_thread(self):
+        """
+        on_slots_changed must offload reinitialize_shard_subscriptions to a
+        worker thread so the dispatch call site (MovedError handling in
+        _execute_command / topology refresh in initialize) is not blocked on
+        per-channel network I/O. Mirrors the async path's create_task model.
+        """
+        pubsub = self._make_cluster_pubsub()
+        pubsub.shard_channels = {b"foo": None}
+        caller_thread = threading.get_ident()
+        worker_thread = {}
+        release = threading.Event()
+
+        def _record_and_wait():
+            worker_thread["id"] = threading.get_ident()
+            # Block so the test can assert caller-thread non-blocking
+            # behavior while reconciliation is still in flight.
+            release.wait(timeout=5.0)
+
+        with mock.patch.object(
+            pubsub, "reinitialize_shard_subscriptions", side_effect=_record_and_wait
+        ):
+            try:
+                pubsub.on_slots_changed()
+                # Submit returned without executing the work on our thread.
+                assert len(pubsub._reconcile_futures) == 1
+                (future,) = list(pubsub._reconcile_futures)
+                assert not future.done()
+                release.set()
+                future.result(timeout=5.0)
+                assert worker_thread["id"] != caller_thread
+                # Done-callback cleared the tracking set.
+                assert pubsub._reconcile_futures == set()
+            finally:
+                release.set()
+                pubsub.reset()
+
+    def test_on_slots_changed_consumes_and_logs_future_exception(self, caplog):
+        """
+        Regression: on_slots_changed schedules reinitialize_shard_subscriptions
+        on a worker thread; when that raises (e.g. SlotNotCoveredError for a
+        transient uncovered slot), the exception must be consumed and logged
+        via the library logger so it is not silently lost.
+        """
+        pubsub = self._make_cluster_pubsub()
+        pubsub.shard_channels = {b"foo": None}
+        boom = SlotNotCoveredError("simulated transient uncovered slot")
+        # Hold the worker inside the side-effect until the test has captured
+        # the scheduled future, so the done-callback cannot discard it before
+        # we observe it.
+        release = threading.Event()
+
+        def _raise():
+            release.wait(timeout=5.0)
+            raise boom
+
+        with mock.patch.object(
+            pubsub, "reinitialize_shard_subscriptions", side_effect=_raise
+        ):
+            with caplog.at_level(logging.ERROR, logger="redis.cluster"):
+                try:
+                    pubsub.on_slots_changed()
+                    (future,) = list(pubsub._reconcile_futures)
+                    # Register a sentinel done-callback after the two set by
+                    # on_slots_changed. Since callbacks run in registration
+                    # order, waiting on this Event guarantees both the
+                    # discard-from-set and log-exception callbacks have run
+                    # before the test assertions execute (future.result()
+                    # alone can return before callbacks complete).
+                    callbacks_done = threading.Event()
+                    future.add_done_callback(lambda _f: callbacks_done.set())
+                    release.set()
+                    try:
+                        future.result(timeout=5.0)
+                    except SlotNotCoveredError:
+                        pass
+                    assert callbacks_done.wait(timeout=5.0)
+                finally:
+                    release.set()
+                    pubsub.reset()
+
+        assert pubsub._reconcile_futures == set()
+        assert any(
+            "shard subscription reconciliation failed" in rec.message
+            and rec.levelno == logging.ERROR
+            for rec in caplog.records
+        )
+
+    def test_ssubscribe_serializes_against_reconcile_lock(self):
+        """
+        Regression: ssubscribe / sunsubscribe / get_sharded_message must
+        acquire self._shard_state_lock so they are mutually exclusive with
+        the worker thread running reinitialize_shard_subscriptions. Without
+        this serialization, the reverse index, shard_channels, and
+        node_pubsub_mapping can be mutated concurrently and the user's
+        subscription intent can be overwritten by the reconciliation pass.
+        The lock is dedicated to shard-state bookkeeping (separate from
+        PubSub.self._lock) so reconciliation does not starve aclose /
+        send_command on the cluster-level connection.
+        """
+        pubsub = self._make_cluster_pubsub()
+        node = self._make_node("127.0.0.1:7000")
+        node_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[node.name] = node_ps
+        pubsub.cluster.get_node_from_key.return_value = node
+
+        holder_acquired = threading.Event()
+        release_holder = threading.Event()
+        user_done = threading.Event()
+
+        def _hold_lock():
+            with pubsub._shard_state_lock:
+                holder_acquired.set()
+                release_holder.wait(timeout=5.0)
+
+        holder = threading.Thread(target=_hold_lock)
+        holder.start()
+        try:
+            assert holder_acquired.wait(timeout=2.0)
+
+            def _user_ssubscribe():
+                pubsub.ssubscribe(b"foo")
+                user_done.set()
+
+            user = threading.Thread(target=_user_ssubscribe)
+            user.start()
+            try:
+                # Holder still owns the lock: ssubscribe must be blocked and
+                # cannot have produced any side effect on the per-node pubsub.
+                assert not user_done.wait(timeout=0.1)
+                node_ps.ssubscribe.assert_not_called()
+
+                release_holder.set()
+                assert user_done.wait(timeout=2.0)
+                node_ps.ssubscribe.assert_called_once_with(b"foo")
+            finally:
+                user.join(timeout=2.0)
+        finally:
+            release_holder.set()
+            holder.join(timeout=2.0)
+
+    def test_on_slots_changed_concurrent_calls_create_single_executor(self):
+        """
+        Regression: EventDispatcher.dispatch() releases its lock before
+        invoking listeners, so concurrent MovedError-handling threads can
+        all reach on_slots_changed at the same time. The lazy creation of
+        _reconcile_executor must be serialized so exactly one executor is
+        constructed; otherwise orphaned ThreadPoolExecutors leak their
+        worker threads.
+        """
+        from redis import cluster as cluster_module
+
+        pubsub = self._make_cluster_pubsub()
+        pubsub.shard_channels = {b"foo": None}
+
+        constructed: list = []
+        real_executor_cls = cluster_module.ThreadPoolExecutor
+        # Block the constructor briefly so multiple threads pile up on the
+        # _shard_state_lock; without serialization each waiting thread would
+        # also see _reconcile_executor is None and construct its own.
+        construct_gate = threading.Event()
+
+        def _counting_executor(*args, **kwargs):
+            construct_gate.wait(timeout=2.0)
+            instance = real_executor_cls(*args, **kwargs)
+            constructed.append(instance)
+            return instance
+
+        start_barrier = threading.Barrier(8)
+
+        def _worker():
+            start_barrier.wait(timeout=2.0)
+            pubsub.on_slots_changed()
+
+        with mock.patch.object(
+            cluster_module, "ThreadPoolExecutor", side_effect=_counting_executor
+        ):
+            with mock.patch.object(
+                pubsub, "reinitialize_shard_subscriptions", return_value=None
+            ):
+                threads = [threading.Thread(target=_worker) for _ in range(8)]
+                try:
+                    for t in threads:
+                        t.start()
+                    construct_gate.set()
+                    for t in threads:
+                        t.join(timeout=5.0)
+                        assert not t.is_alive()
+                finally:
+                    construct_gate.set()
+                    pubsub.reset()
+
+        assert len(constructed) == 1
+        # All callers observe the same executor instance.
+        assert pubsub._reconcile_executor is None  # cleared by reset() above
+
+    def test_reset_tears_down_per_node_pubsubs(self):
+        """
+        Regression: reset() must close every per-node pubsub so its dedicated
+        connection is released and its (now stale) shard_channels cannot be
+        replayed by PubSub.on_connect on a subsequent reconnect. Mirrors the
+        async aclose() path which calls aclose() on each per-node pubsub
+        before clearing cluster-level state.
+        """
+        pubsub = self._make_cluster_pubsub()
+        ps_a = self._make_node_pubsub({b"foo": None})
+        ps_b = self._make_node_pubsub({b"bar": None})
+        pubsub.node_pubsub_mapping = {
+            "127.0.0.1:7000": ps_a,
+            "127.0.0.1:7001": ps_b,
+        }
+        pubsub.shard_channels = {b"foo": None, b"bar": None}
+        pubsub._shard_channel_to_node = {
+            b"foo": "127.0.0.1:7000",
+            b"bar": "127.0.0.1:7001",
+        }
+
+        pubsub.reset()
+
+        ps_a.reset.assert_called_once()
+        ps_b.reset.assert_called_once()
+        # Cluster-level shard state cleared by super().reset() and our hook.
+        assert pubsub.shard_channels == {}
+        assert pubsub._shard_channel_to_node == {}
+        # Mapping itself must also be cleared so the round-robin in
+        # _pubsubs_generator can't yield dead per-node pubsubs between
+        # teardown and re-subscription.
+        assert pubsub.node_pubsub_mapping == {}
+
+    def test_reset_swallows_per_node_teardown_errors(self):
+        """
+        reset() is also a fallback path from __del__; one buggy per-node
+        pubsub raising must not mask teardown of the others or of the
+        cluster-level state.
+        """
+        pubsub = self._make_cluster_pubsub()
+        ps_bad = self._make_node_pubsub()
+        ps_bad.reset.side_effect = RuntimeError("boom")
+        ps_good = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping = {
+            "127.0.0.1:7000": ps_bad,
+            "127.0.0.1:7001": ps_good,
+        }
+
+        pubsub.reset()
+
+        ps_bad.reset.assert_called_once()
+        ps_good.reset.assert_called_once()
+        assert pubsub._shard_channel_to_node == {}
+        assert pubsub.node_pubsub_mapping == {}
+
+    def test_get_sharded_message_with_missing_target_node_returns_none(self):
+        """
+        Regression: get_sharded_message(target_node=...) must not raise
+        KeyError when the per-node pubsub has been removed from
+        node_pubsub_mapping. Migration-driven cleanup in the sunsubscribe
+        branch and reset() both remove entries, so a caller polling with
+        target_node can race the cleanup. Mirrors the async counterpart's
+        .get()/None-fallthrough behavior.
+        """
+        pubsub = self._make_cluster_pubsub()
+        # node_pubsub_mapping is empty - the entry was already cleaned up
+        # (e.g. by a migration-driven sunsubscribe pop or by reset()).
+        evicted_node = self._make_node("127.0.0.1:7000")
+
+        message = pubsub.get_sharded_message(target_node=evicted_node)
+
+        assert message is None
+
+    def test_reset_recreates_pubsubs_generator(self):
+        """
+        Regression: _pubsubs_generator captures node_pubsub_mapping.values()
+        into a local list inside ``yield from``; clearing the mapping does
+        not reach references already held by that captured snapshot. A
+        generator suspended mid-yield-from would surface stale (now reset())
+        per-node pubsubs after re-subscription unless reset() also rebinds
+        _pubsubs_generator to a fresh generator instance.
+        """
+        from redis.cluster import ClusterPubSub
+
+        pubsub = self._make_cluster_pubsub()
+        pubsub._pubsubs_generator = ClusterPubSub._pubsubs_generator(pubsub)
+        ps_a = self._make_node_pubsub({b"foo": None})
+        ps_b = self._make_node_pubsub({b"bar": None})
+        pubsub.node_pubsub_mapping = {
+            "127.0.0.1:7000": ps_a,
+            "127.0.0.1:7001": ps_b,
+        }
+        # Advance into yield-from so the generator's frame holds a
+        # captured list referencing both stale pubsubs.
+        first = next(pubsub._pubsubs_generator)
+        assert first in (ps_a, ps_b)
+        old_generator = pubsub._pubsubs_generator
+
+        pubsub.reset()
+
+        assert pubsub._pubsubs_generator is not old_generator
+        # After re-subscription the fresh generator must yield the new
+        # entry rather than draining the old captured list first.
+        fresh_ps = self._make_node_pubsub({b"baz": None})
+        pubsub.node_pubsub_mapping["127.0.0.1:7002"] = fresh_ps
+        assert next(pubsub._pubsubs_generator) is fresh_ps

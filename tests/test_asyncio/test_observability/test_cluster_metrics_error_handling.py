@@ -19,6 +19,7 @@ from redis.exceptions import (
 )
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestAsyncClusterMetricsRecordingDuringErrorHandling:
     """

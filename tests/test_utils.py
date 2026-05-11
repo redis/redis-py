@@ -2,6 +2,8 @@ from datetime import datetime
 import warnings
 import pytest
 from redis.utils import (
+    DEFAULT_RESP_VERSION,
+    check_protocol_version,
     compare_versions,
     deprecated_function,
     deprecated_args,
@@ -10,6 +12,7 @@ from redis.utils import (
 )
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "version1,version2,expected_res",
     [
@@ -35,6 +38,35 @@ def test_compare_versions(version1, version2, expected_res):
     assert compare_versions(version1, version2) == expected_res
 
 
+@pytest.mark.fixed_client
+class TestCheckProtocolVersion:
+    """``check_protocol_version`` underpins protocol-gated features
+    (caching, maintenance notifications, callback selection). It must
+    treat ``None`` as ``DEFAULT_RESP_VERSION`` so callers using the empty
+    default get the same answer as if they had pinned the wire protocol."""
+
+    def test_none_resolves_to_default(self):
+        # ``DEFAULT_RESP_VERSION`` is the wire version selected when the
+        # caller does not pass ``protocol``; ``check_protocol_version``
+        # must therefore treat ``None`` as that version.
+        assert check_protocol_version(None, DEFAULT_RESP_VERSION) is True
+        other = 2 if DEFAULT_RESP_VERSION == 3 else 3
+        assert check_protocol_version(None, other) is False
+
+    @pytest.mark.parametrize("protocol", [3, "3"])
+    def test_resp3_matches(self, protocol):
+        assert check_protocol_version(protocol, 3) is True
+        assert check_protocol_version(protocol, 2) is False
+
+    @pytest.mark.parametrize("protocol", [2, "2"])
+    def test_resp2_matches(self, protocol):
+        assert check_protocol_version(protocol, 2) is True
+        assert check_protocol_version(protocol, 3) is False
+
+    def test_invalid_string_returns_false(self):
+        assert check_protocol_version("not-a-number", 3) is False
+
+
 def redis_server_time(client):
     seconds, milliseconds = client.time()
     timestamp = float(f"{seconds}.{milliseconds}")
@@ -42,6 +74,7 @@ def redis_server_time(client):
 
 
 # Tests for deprecated_function decorator
+@pytest.mark.fixed_client
 class TestDeprecatedFunction:
     def test_sync_function_warns(self):
         @deprecated_function(reason="use new_func", version="1.0.0")
@@ -69,6 +102,7 @@ class TestDeprecatedFunction:
 
 
 # Tests for deprecated_args decorator
+@pytest.mark.fixed_client
 class TestDeprecatedArgs:
     def test_sync_function_warns_on_deprecated_arg(self):
         @deprecated_args(args_to_warn=["old_param"], reason="use new_param")
@@ -108,6 +142,7 @@ class TestDeprecatedArgs:
 
 
 # Tests for experimental_method decorator
+@pytest.mark.fixed_client
 class TestExperimentalMethod:
     def test_sync_function_warns(self):
         @experimental_method()
@@ -124,6 +159,7 @@ class TestExperimentalMethod:
 
 
 # Tests for experimental_args decorator
+@pytest.mark.fixed_client
 class TestExperimentalArgs:
     def test_sync_function_warns_on_experimental_arg(self):
         @experimental_args(args_to_warn=["beta_param"])

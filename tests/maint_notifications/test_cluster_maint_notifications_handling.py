@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 import logging
+
+import pytest
 from typing import List, Optional, cast
 
 from redis import ConnectionPool, RedisCluster
@@ -36,6 +38,7 @@ PROXY_CLUSTER_NODES = [
 CLUSTER_SLOTS_INTERCEPTOR_NAME = "test_topology"
 
 
+@pytest.mark.fixed_client
 class TestRespTranslatorHelper:
     def test_oss_maint_notification_to_resp(self):
         resp = RespTranslator.oss_maint_notification_to_resp(
@@ -91,6 +94,7 @@ class TestClusterMaintNotificationsBase:
         return test_redis_client
 
 
+@pytest.mark.fixed_client
 class TestClusterMaintNotificationsConfig(TestClusterMaintNotificationsBase):
     """Test the maint_notifications_config parameter of RedisCluster."""
 
@@ -345,6 +349,7 @@ class TestClusterMaintNotificationsConfig(TestClusterMaintNotificationsBase):
             cluster.close()
 
 
+@pytest.mark.fixed_client
 class TestClusterMaintNotificationsHandler(TestClusterMaintNotificationsBase):
     """Test OSSMaintNotificationsHandler propagation with RedisCluster."""
 
@@ -460,6 +465,7 @@ class ConnectionStateExpectation:
     relaxed_timeout: Optional[int] = None
 
 
+@pytest.mark.fixed_client
 class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlingBase):
     """Test maintenance notifications handling with RedisCluster."""
 

@@ -21,6 +21,10 @@ from redis.keyspace_notifications import (
     KeyspaceNotifications,
     KeyspaceNotificationsInterface,
     KeyspaceWorkerThread,
+    SubkeyeventChannel,
+    SubkeyspaceChannel,
+    SubkeyspaceeventChannel,
+    SubkeyspaceitemChannel,
     get_channel_type,
 )
 from redis.exceptions import (
@@ -92,6 +96,10 @@ __all__ = [
     "KeyspaceNotifications",
     "KeyspaceNotificationsInterface",
     "KeyspaceWorkerThread",
+    "SubkeyeventChannel",
+    "SubkeyspaceChannel",
+    "SubkeyspaceeventChannel",
+    "SubkeyspaceitemChannel",
     "get_channel_type",
     "MaxConnectionsError",
     "OutOfMemoryError",

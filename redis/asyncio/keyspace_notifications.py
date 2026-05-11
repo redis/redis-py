@@ -45,9 +45,8 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
-from redis._parsers.encoders import Encoder
 from redis.asyncio.client import PubSub, Redis
-from redis.asyncio.cluster import ClusterNode, RedisCluster
+from redis.asyncio.cluster import ClusterNode, RedisCluster, _ClusterNodePoolAdapter
 from redis.exceptions import (
     ConnectionError,
     RedisError,
@@ -58,48 +57,15 @@ from redis.keyspace_notifications import (
     KeyeventChannel,
     KeyNotification,
     KeyspaceChannel,
+    SubkeyeventChannel,
+    SubkeyspaceChannel,
+    SubkeyspaceeventChannel,
+    SubkeyspaceitemChannel,
     _is_pattern,
 )
 from redis.utils import safe_str
 
 logger = logging.getLogger(__name__)
-
-
-class _ClusterNodePoolAdapter:
-    """Thin adapter exposing the :class:`ConnectionPool` interface that
-    :class:`PubSub` requires, backed by a :class:`ClusterNode`'s own
-    connection pool.
-
-    Connections are acquired from the node via
-    :meth:`ClusterNode.acquire_connection` and returned via
-    :meth:`ClusterNode.release`.  :meth:`PubSub.aclose` already
-    disconnects the connection *before* calling :meth:`release`, so the
-    connection is returned to the node's free-queue in a disconnected
-    state — guaranteeing that a subscribed socket is never silently
-    reused for regular commands.
-    """
-
-    def __init__(self, node: ClusterNode) -> None:
-        self._node = node
-        self.connection_kwargs = node.connection_kwargs
-
-    # -- methods used by PubSub ------------------------------------------------
-
-    def get_encoder(self) -> Encoder:
-        return self._node.get_encoder()
-
-    async def get_connection(
-        self, command_name: str | None = None, *keys: Any, **options: Any
-    ) -> Any:
-        connection = self._node.acquire_connection()
-        await connection.connect()
-        return connection
-
-    async def release(self, connection: Any) -> None:
-        # PubSub.aclose() disconnects the connection before calling
-        # release(), so it is safe to put it back in the node's free
-        # queue – it will reconnect lazily on next use.
-        self._node.release(connection)
 
 
 # Type alias for handlers that can be sync or async
@@ -152,6 +118,48 @@ class AsyncKeyspaceNotificationsInterface(ABC):
         handler: AsyncHandlerT | None = None,
     ):
         """Subscribe to keyevent notifications for specific event types."""
+        pass
+
+    @abstractmethod
+    async def subscribe_subkeyspace(
+        self,
+        key_or_pattern: str,
+        db: int = 0,
+        handler: AsyncHandlerT | None = None,
+    ):
+        """Subscribe to subkeyspace notifications for specific keys."""
+        pass
+
+    @abstractmethod
+    async def subscribe_subkeyevent(
+        self,
+        event: str,
+        db: int = 0,
+        handler: AsyncHandlerT | None = None,
+    ):
+        """Subscribe to subkeyevent notifications for specific event types."""
+        pass
+
+    @abstractmethod
+    async def subscribe_subkeyspaceitem(
+        self,
+        key_or_pattern: str,
+        subkey_or_pattern: str,
+        db: int = 0,
+        handler: AsyncHandlerT | None = None,
+    ):
+        """Subscribe to subkeyspaceitem notifications for a specific subkey."""
+        pass
+
+    @abstractmethod
+    async def subscribe_subkeyspaceevent(
+        self,
+        event: str,
+        key_or_pattern: str,
+        db: int = 0,
+        handler: AsyncHandlerT | None = None,
+    ):
+        """Subscribe to subkeyspaceevent notifications for an event on a key."""
         pass
 
     @abstractmethod
@@ -385,6 +393,48 @@ class AbstractAsyncKeyspaceNotifications(AsyncKeyspaceNotificationsInterface):
     ):
         """Subscribe to keyevent notifications for specific event types."""
         channel = KeyeventChannel(event, db=db)
+        await self.subscribe(channel, handler=handler)
+
+    async def subscribe_subkeyspace(
+        self,
+        key_or_pattern: str,
+        db: int = 0,
+        handler: AsyncHandlerT | None = None,
+    ):
+        """Subscribe to subkeyspace notifications for specific keys."""
+        channel = SubkeyspaceChannel(key_or_pattern, db=db)
+        await self.subscribe(channel, handler=handler)
+
+    async def subscribe_subkeyevent(
+        self,
+        event: str,
+        db: int = 0,
+        handler: AsyncHandlerT | None = None,
+    ):
+        """Subscribe to subkeyevent notifications for specific event types."""
+        channel = SubkeyeventChannel(event, db=db)
+        await self.subscribe(channel, handler=handler)
+
+    async def subscribe_subkeyspaceitem(
+        self,
+        key_or_pattern: str,
+        subkey_or_pattern: str,
+        db: int = 0,
+        handler: AsyncHandlerT | None = None,
+    ):
+        """Subscribe to subkeyspaceitem notifications for a specific subkey."""
+        channel = SubkeyspaceitemChannel(key_or_pattern, subkey_or_pattern, db=db)
+        await self.subscribe(channel, handler=handler)
+
+    async def subscribe_subkeyspaceevent(
+        self,
+        event: str,
+        key_or_pattern: str,
+        db: int = 0,
+        handler: AsyncHandlerT | None = None,
+    ):
+        """Subscribe to subkeyspaceevent notifications for an event on a key."""
+        channel = SubkeyspaceeventChannel(event, key_or_pattern, db=db)
         await self.subscribe(channel, handler=handler)
 
     async def __aenter__(self):

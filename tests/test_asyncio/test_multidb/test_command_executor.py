@@ -15,7 +15,7 @@ from redis.observability.attributes import GeoFailoverReason
 from tests.test_asyncio.test_multidb.conftest import create_weighted_list
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestDefaultCommandExecutor:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

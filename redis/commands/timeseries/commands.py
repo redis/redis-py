@@ -7,6 +7,7 @@ from redis.typing import (
     KeyT,
     Number,
     SyncClientProtocol,
+    TimeSeriesMRangeResponse,
     TimeSeriesRangeResponse,
     TimeSeriesSample,
 )
@@ -741,7 +742,7 @@ class TimeSeriesCommands:
         from_time: int | str,
         to_time: int | str,
         count: int | None,
-        aggregation_type: str | None,
+        aggregation_type: str | list[str] | None,
         bucket_size_msec: int | None,
         filter_by_ts: List[int] | None,
         filter_by_min_value: int | None,
@@ -771,7 +772,7 @@ class TimeSeriesCommands:
         from_time: int | str,
         to_time: int | str,
         count: int | None = None,
-        aggregation_type: str | None = None,
+        aggregation_type: str | list[str] | None = None,
         bucket_size_msec: int | None = 0,
         filter_by_ts: List[int] | None = None,
         filter_by_min_value: int | None = None,
@@ -789,7 +790,7 @@ class TimeSeriesCommands:
         from_time: int | str,
         to_time: int | str,
         count: int | None = None,
-        aggregation_type: str | None = None,
+        aggregation_type: str | list[str] | None = None,
         bucket_size_msec: int | None = 0,
         filter_by_ts: List[int] | None = None,
         filter_by_min_value: int | None = None,
@@ -806,7 +807,7 @@ class TimeSeriesCommands:
         from_time: int | str,
         to_time: int | str,
         count: int | None = None,
-        aggregation_type: str | None = None,
+        aggregation_type: str | list[str] | None = None,
         bucket_size_msec: int | None = 0,
         filter_by_ts: List[int] | None = None,
         filter_by_min_value: int | None = None,
@@ -833,9 +834,12 @@ class TimeSeriesCommands:
             count:
                 Limits the number of returned samples.
             aggregation_type:
-                Optional aggregation type. Can be one of [`avg`, `sum`, `min`, `max`,
-                `range`, `count`, `first`, `last`, `std.p`, `std.s`, `var.p`, `var.s`,
-                `twa`, 'countNaN', 'countAll']
+                Optional aggregation type. Can be a single string or a list of strings
+                for multiple aggregators (requires Redis 8.8+). Valid values:
+                [`avg`, `sum`, `min`, `max`, `range`, `count`, `first`, `last`,
+                `std.p`, `std.s`, `var.p`, `var.s`, `twa`, `countNaN`, `countAll`].
+                When a list is passed, each sample in the response contains values
+                in the same order as the specified aggregators.
             bucket_size_msec:
                 Time bucket for aggregation in milliseconds.
             filter_by_ts:
@@ -881,7 +885,7 @@ class TimeSeriesCommands:
         from_time: int | str,
         to_time: int | str,
         count: int | None = None,
-        aggregation_type: str | None = None,
+        aggregation_type: str | list[str] | None = None,
         bucket_size_msec: int | None = 0,
         filter_by_ts: List[int] | None = None,
         filter_by_min_value: int | None = None,
@@ -899,7 +903,7 @@ class TimeSeriesCommands:
         from_time: int | str,
         to_time: int | str,
         count: int | None = None,
-        aggregation_type: str | None = None,
+        aggregation_type: str | list[str] | None = None,
         bucket_size_msec: int | None = 0,
         filter_by_ts: List[int] | None = None,
         filter_by_min_value: int | None = None,
@@ -916,7 +920,7 @@ class TimeSeriesCommands:
         from_time: int | str,
         to_time: int | str,
         count: int | None = None,
-        aggregation_type: str | None = None,
+        aggregation_type: str | list[str] | None = None,
         bucket_size_msec: int | None = 0,
         filter_by_ts: List[int] | None = None,
         filter_by_min_value: int | None = None,
@@ -945,9 +949,12 @@ class TimeSeriesCommands:
             count:
                 Limits the number of returned samples.
             aggregation_type:
-                Optional aggregation type. Can be one of [`avg`, `sum`, `min`, `max`,
-                `range`, `count`, `first`, `last`, `std.p`, `std.s`, `var.p`, `var.s`,
-                `twa`, 'countNaN', 'countAll']
+                Optional aggregation type. Can be a single string or a list of strings
+                for multiple aggregators (requires Redis 8.8+). Valid values:
+                [`avg`, `sum`, `min`, `max`, `range`, `count`, `first`, `last`,
+                `std.p`, `std.s`, `var.p`, `var.s`, `twa`, `countNaN`, `countAll`].
+                When a list is passed, each sample in the response contains values
+                in the same order as the specified aggregators.
             bucket_size_msec:
                 Time bucket for aggregation in milliseconds.
             filter_by_ts:
@@ -988,7 +995,7 @@ class TimeSeriesCommands:
 
     def __mrange_params(
         self,
-        aggregation_type: str | None,
+        aggregation_type: str | list[str] | None,
         bucket_size_msec: int | None,
         count: int | None,
         filters: List[str],
@@ -1007,6 +1014,14 @@ class TimeSeriesCommands:
         empty: bool | None,
     ):
         """Create TS.MRANGE and TS.MREVRANGE arguments."""
+        if (
+            groupby is not None
+            and isinstance(aggregation_type, list)
+            and len(aggregation_type) > 1
+        ):
+            raise DataError(
+                "GROUPBY is not allowed when multiple aggregators are specified"
+            )
         params: list[EncodableT] = [from_time, to_time]
         self._append_latest(params, latest)
         self._append_filer_by_ts(params, filter_by_ts)
@@ -1029,7 +1044,7 @@ class TimeSeriesCommands:
         to_time: int | str,
         filters: List[str],
         count: int | None = None,
-        aggregation_type: str | None = None,
+        aggregation_type: str | list[str] | None = None,
         bucket_size_msec: int | None = 0,
         with_labels: bool | None = False,
         filter_by_ts: List[int] | None = None,
@@ -1042,7 +1057,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
-    ) -> list[Any] | dict[str, list[Any]]: ...
+    ) -> TimeSeriesMRangeResponse: ...
 
     @overload
     def mrange(
@@ -1051,7 +1066,7 @@ class TimeSeriesCommands:
         to_time: int | str,
         filters: List[str],
         count: int | None = None,
-        aggregation_type: str | None = None,
+        aggregation_type: str | list[str] | None = None,
         bucket_size_msec: int | None = 0,
         with_labels: bool | None = False,
         filter_by_ts: List[int] | None = None,
@@ -1064,7 +1079,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
-    ) -> Awaitable[list[Any] | dict[str, list[Any]]]: ...
+    ) -> Awaitable[TimeSeriesMRangeResponse]: ...
 
     def mrange(
         self,
@@ -1072,7 +1087,7 @@ class TimeSeriesCommands:
         to_time: int | str,
         filters: List[str],
         count: int | None = None,
-        aggregation_type: str | None = None,
+        aggregation_type: str | list[str] | None = None,
         bucket_size_msec: int | None = 0,
         with_labels: bool | None = False,
         filter_by_ts: List[int] | None = None,
@@ -1085,9 +1100,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
-    ) -> (list[Any] | dict[str, list[Any]]) | Awaitable[
-        list[Any] | dict[str, list[Any]]
-    ]:
+    ) -> TimeSeriesMRangeResponse | Awaitable[TimeSeriesMRangeResponse]:
         """
         Query a range across multiple time-series by filters in forward direction.
 
@@ -1105,9 +1118,13 @@ class TimeSeriesCommands:
             count:
                 Limits the number of returned samples.
             aggregation_type:
-                Optional aggregation type. Can be one of [`avg`, `sum`, `min`, `max`,
-                `range`, `count`, `first`, `last`, `std.p`, `std.s`, `var.p`, `var.s`,
-                `twa`, 'countNaN', 'countAll']
+                Optional aggregation type. Can be a single string or a list of strings
+                for multiple aggregators (requires Redis 8.8+). Valid values:
+                [`avg`, `sum`, `min`, `max`, `range`, `count`, `first`, `last`,
+                `std.p`, `std.s`, `var.p`, `var.s`, `twa`, `countNaN`, `countAll`].
+                When a list is passed, each sample in the response contains values
+                in the same order as the specified aggregators.
+                Note: GROUPBY is not allowed when multiple aggregators are specified.
             bucket_size_msec:
                 Time bucket for aggregation in milliseconds.
             with_labels:
@@ -1160,7 +1177,9 @@ class TimeSeriesCommands:
             empty,
         )
 
-        return self.execute_command(MRANGE_CMD, *params)
+        return self.execute_command(
+            MRANGE_CMD, *params, aggregation_type=aggregation_type
+        )
 
     @overload
     def mrevrange(
@@ -1169,7 +1188,7 @@ class TimeSeriesCommands:
         to_time: int | str,
         filters: List[str],
         count: int | None = None,
-        aggregation_type: str | None = None,
+        aggregation_type: str | list[str] | None = None,
         bucket_size_msec: int | None = 0,
         with_labels: bool | None = False,
         filter_by_ts: List[int] | None = None,
@@ -1182,7 +1201,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
-    ) -> list[Any] | dict[str, list[Any]]: ...
+    ) -> TimeSeriesMRangeResponse: ...
 
     @overload
     def mrevrange(
@@ -1191,7 +1210,7 @@ class TimeSeriesCommands:
         to_time: int | str,
         filters: List[str],
         count: int | None = None,
-        aggregation_type: str | None = None,
+        aggregation_type: str | list[str] | None = None,
         bucket_size_msec: int | None = 0,
         with_labels: bool | None = False,
         filter_by_ts: List[int] | None = None,
@@ -1204,7 +1223,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
-    ) -> Awaitable[list[Any] | dict[str, list[Any]]]: ...
+    ) -> Awaitable[TimeSeriesMRangeResponse]: ...
 
     def mrevrange(
         self,
@@ -1212,7 +1231,7 @@ class TimeSeriesCommands:
         to_time: int | str,
         filters: List[str],
         count: int | None = None,
-        aggregation_type: str | None = None,
+        aggregation_type: str | list[str] | None = None,
         bucket_size_msec: int | None = 0,
         with_labels: bool | None = False,
         filter_by_ts: List[int] | None = None,
@@ -1225,9 +1244,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
-    ) -> (list[Any] | dict[str, list[Any]]) | Awaitable[
-        list[Any] | dict[str, list[Any]]
-    ]:
+    ) -> TimeSeriesMRangeResponse | Awaitable[TimeSeriesMRangeResponse]:
         """
         Query a range across multiple time-series by filters in reverse direction.
 
@@ -1245,9 +1262,13 @@ class TimeSeriesCommands:
             count:
                 Limits the number of returned samples.
             aggregation_type:
-                Optional aggregation type. Can be one of [`avg`, `sum`, `min`, `max`,
-                `range`, `count`, `first`, `last`, `std.p`, `std.s`, `var.p`, `var.s`,
-                `twa`, 'countNaN', 'countAll'].
+                Optional aggregation type. Can be a single string or a list of strings
+                for multiple aggregators (requires Redis 8.8+). Valid values:
+                [`avg`, `sum`, `min`, `max`, `range`, `count`, `first`, `last`,
+                `std.p`, `std.s`, `var.p`, `var.s`, `twa`, `countNaN`, `countAll`].
+                When a list is passed, each sample in the response contains values
+                in the same order as the specified aggregators.
+                Note: GROUPBY is not allowed when multiple aggregators are specified.
             bucket_size_msec:
                 Time bucket for aggregation in milliseconds.
             with_labels:
@@ -1300,7 +1321,9 @@ class TimeSeriesCommands:
             empty,
         )
 
-        return self.execute_command(MREVRANGE_CMD, *params)
+        return self.execute_command(
+            MREVRANGE_CMD, *params, aggregation_type=aggregation_type
+        )
 
     @overload
     def get(
@@ -1485,12 +1508,17 @@ class TimeSeriesCommands:
     @staticmethod
     def _append_aggregation(
         params: list[EncodableT],
-        aggregation_type: str | None,
+        aggregation_type: str | list[str] | None,
         bucket_size_msec: int | None,
     ):
         """Append AGGREGATION property to params."""
         if aggregation_type is not None:
-            params.extend(["AGGREGATION", aggregation_type, bucket_size_msec])
+            if isinstance(aggregation_type, list):
+                params.extend(
+                    ["AGGREGATION", ",".join(aggregation_type), bucket_size_msec]
+                )
+            else:
+                params.extend(["AGGREGATION", aggregation_type, bucket_size_msec])
 
     @staticmethod
     def _append_chunk_size(params: list[EncodableT], chunk_size: int | None):

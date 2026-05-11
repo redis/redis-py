@@ -22,7 +22,7 @@ from tests.test_asyncio.helpers import wait_for_condition
 from tests.test_asyncio.test_multidb.conftest import create_weighted_list
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestMultiDbClient:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -763,7 +763,7 @@ class TestMultiDbClient:
                     await client.set_active_database(mock_db1)
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestGeoFailoverMetricRecording:
     """Tests for geo failover metric recording in async MultiDBClient."""
 
@@ -911,7 +911,7 @@ class TestGeoFailoverMetricRecording:
                     mock_record_geo_failover.assert_not_called()
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestInitialHealthCheckPolicy:
     """Tests for initial health check policy evaluation."""
 

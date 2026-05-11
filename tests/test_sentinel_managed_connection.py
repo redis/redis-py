@@ -1,5 +1,7 @@
 import socket
 
+import pytest
+
 from redis._parsers.socket import SENTINEL
 from redis.retry import Retry
 from redis.sentinel import SentinelManagedConnection
@@ -7,6 +9,7 @@ from redis.backoff import NoBackoff
 from unittest import mock
 
 
+@pytest.mark.fixed_client
 def test_connect_retry_on_timeout_error(master_host):
     """Test that the _connect function is retried in case of a timeout"""
     connection_pool = mock.Mock()
@@ -35,6 +38,7 @@ def test_connect_retry_on_timeout_error(master_host):
     conn.disconnect()
 
 
+@pytest.mark.fixed_client
 class TestSentinelManagedConnectionReadResponseTimeout:
     """
     Tests for timeout parameter propagation in SentinelManagedConnection.read_response().
