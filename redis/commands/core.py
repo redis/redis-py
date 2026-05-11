@@ -4279,6 +4279,11 @@ class BasicKeyCommands(CommandsProtocol):
         self: AsyncClientProtocol, name: KeyT, time: ExpiryT, value: EncodableT
     ) -> Awaitable[bool]: ...
 
+    @deprecated_function(
+        version="2.6.12",
+        reason="Use 'set' instead.",
+        name="setex",
+    )
     def setex(
         self, name: KeyT, time: ExpiryT, value: EncodableT
     ) -> bool | Awaitable[bool]:
@@ -4286,6 +4291,9 @@ class BasicKeyCommands(CommandsProtocol):
         Set the value of key ``name`` to ``value`` that expires in ``time``
         seconds. ``time`` can be represented by an integer or a Python
         timedelta object.
+
+        As per Redis 2.6.12, SETEX is considered deprecated.
+        Please use SET with EX parameter in new code.
 
         For more information, see https://redis.io/commands/setex
         """
