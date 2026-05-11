@@ -1,6 +1,7 @@
 import asyncio
 import binascii
 import datetime
+import logging
 import ssl
 import warnings
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, Union
@@ -2804,6 +2805,7 @@ class TestNodesManager:
             await nodes_manager.initialize()
             first_node = nodes_manager.nodes_cache[get_node_name(default_host, 7000)]
             assert nodes_manager.slots_cache[0][0] is first_node
+            assert nodes_manager.slots_cache[0] is nodes_manager.slots_cache[16383]
 
             cluster_slots[0] = second_slots
             await nodes_manager.initialize()
@@ -2813,8 +2815,11 @@ class TestNodesManager:
                 is first_node
             )
             assert nodes_manager.slots_cache[0][0] is first_node
+            assert nodes_manager.slots_cache[0] is nodes_manager.slots_cache[8191]
             second_node = nodes_manager.nodes_cache[get_node_name(default_host, 7001)]
             assert nodes_manager.slots_cache[8192][0] is second_node
+            assert nodes_manager.slots_cache[8192] is nodes_manager.slots_cache[16383]
+            assert nodes_manager.slots_cache[0] is not nodes_manager.slots_cache[8192]
             for nodes in nodes_manager.slots_cache.values():
                 for node in nodes:
                     assert node is nodes_manager.nodes_cache[node.name]
@@ -3391,6 +3396,38 @@ class TestClusterNodeConnectionHandling:
         # Connection should NOT be disconnected but added to _free
         assert conn.disconnect_called is False
         assert conn in node._free
+
+    async def test_release_debug_logs_disconnect_task_exception(self, caplog) -> None:
+        """
+        Test that release() consumes background disconnect errors.
+        """
+
+        class FakeConnection:
+            def should_reconnect(self) -> bool:
+                return True
+
+            async def disconnect(self) -> None:
+                raise RuntimeError("simulated disconnect failure")
+
+        node = ClusterNode(default_host, 7000)
+        conn = FakeConnection()
+        node._connections = [conn]
+
+        with caplog.at_level(logging.DEBUG, logger="redis.asyncio.cluster"):
+            node.release(conn)
+            assert len(node._background_tasks) == 1
+            (task,) = tuple(node._background_tasks)
+            await task
+            await asyncio.sleep(0)
+
+        assert node._background_tasks == set()
+        assert conn not in node._free
+        assert conn not in node._connections
+        assert any(
+            "disconnecting released cluster connection failed" in rec.message
+            and rec.levelno == logging.DEBUG
+            for rec in caplog.records
+        )
 
     async def test_disconnect_if_needed_disconnects_when_reconnect_needed(
         self,

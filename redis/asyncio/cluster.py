@@ -1564,8 +1564,19 @@ class ClusterNode:
     async def _disconnect_and_release(self, connection: Connection) -> None:
         try:
             await connection.disconnect()
-        finally:
-            self._free.append(connection)
+        except Exception as exc:
+            logger.debug(
+                "disconnecting released cluster connection failed: %r",
+                exc,
+                exc_info=True,
+            )
+            try:
+                self._connections.remove(connection)
+            except ValueError:
+                pass
+            return
+
+        self._free.append(connection)
 
     def get_encoder(self) -> Encoder:
         """Return an :class:`Encoder` derived from this node's connection kwargs."""
@@ -2052,10 +2063,22 @@ class NodesManager:
 
             # Set the tmp variables to the real variables
             self.set_nodes(self.nodes_cache, tmp_nodes_cache, remove_old=True)
-            self.slots_cache = {
-                slot: [self.nodes_cache[node.name] for node in nodes]
-                for slot, nodes in tmp_slots.items()
-            }
+            # tmp_slots was built from CLUSTER SLOTS responses and can contain
+            # newly-created ClusterNode objects for nodes we already know about.
+            # Rebuild the slots cache with the preserved nodes_cache instances
+            # so existing per-node connection pools stay in use after refresh.
+            # Keep the shared node-list-per-slot-range shape from tmp_slots to
+            # avoid allocating a separate list for every slot.
+            node_lists_by_id: Dict[int, List["ClusterNode"]] = {}
+            new_slots_cache: Dict[int, List["ClusterNode"]] = {}
+            for slot, nodes in tmp_slots.items():
+                node_list_id = id(nodes)
+                slot_nodes = node_lists_by_id.get(node_list_id)
+                if slot_nodes is None:
+                    slot_nodes = [self.nodes_cache[node.name] for node in nodes]
+                    node_lists_by_id[node_list_id] = slot_nodes
+                new_slots_cache[slot] = slot_nodes
+            self.slots_cache = new_slots_cache
 
             if self._dynamic_startup_nodes:
                 # Populate the startup nodes with all discovered nodes
