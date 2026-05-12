@@ -1,6 +1,5 @@
 import datetime
 
-from redis.commands.core import GCRAResponse
 from redis.utils import str_if_bytes
 
 
@@ -1447,21 +1446,6 @@ def parse_set_result(response, **options):
         # See `setGenericCommand` in t_string.c
         return response
     return response and str_if_bytes(response) == "OK"
-
-
-def parse_gcra(response, **options):
-    """
-    Parse the GCRA rate limiting command response into a GCRAResponse dataclass.
-
-    Response format: [limited, max_req_num, num_avail_req, retry_after, full_burst_after]
-    """
-    return GCRAResponse(
-        limited=bool(response[0]),
-        max_req_num=int(response[1]),
-        num_avail_req=int(response[2]),
-        retry_after=int(response[3]),
-        full_burst_after=int(response[4]),
-    )
 
 
 def parse_function_list_unified(response, **options):
