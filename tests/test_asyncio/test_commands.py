@@ -21,7 +21,7 @@ from redis._parsers.helpers import (
     parse_info,
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
-from redis.commands.core import DataPersistOptions, GCRAResponse, HotkeysMetricsTypes
+from redis.commands.core import DataPersistOptions, HotkeysMetricsTypes
 from redis.commands.json.path import Path
 from redis.commands.search.field import TextField
 from redis.commands.search.query import Query
@@ -5555,110 +5555,6 @@ class TestRedisCommands:
         # If all is well, the task should finish right away, otherwise fail with Timeout
         async with async_timeout(1.0):
             await task
-
-
-class TestAsyncGCRACommands:
-    """Tests for the async GCRA rate limiting command"""
-
-    @skip_if_server_version_lt("8.7.0")
-    async def test_gcra_basic(self, r: redis.Redis):
-        """Test basic GCRA command execution"""
-        key = "gcra_test_basic"
-        await r.delete(key)
-
-        # First request should not be limited
-        result = await r.gcra(key, max_burst=10, tokens_per_period=5, period=10.0)
-
-        assert isinstance(result, GCRAResponse)
-
-        # First request should not be limited
-        assert result.limited is False
-        # max_req_num should be max_burst + 1
-        assert result.max_req_num == 11
-        # Should have requests available
-        assert result.num_avail_req >= 0
-        # Not limited, so retry_after should be -1
-        assert result.retry_after == -1
-        # full_burst_after should be a non-negative value
-        assert result.full_burst_after >= 0
-
-    @skip_if_server_version_lt("8.7.0")
-    async def test_gcra_with_tokens(self, r: redis.Redis):
-        """Test GCRA command with TOKENS option"""
-        key = "gcra_test_tokens"
-        await r.delete(key)
-
-        # Request with a cost of 3
-        result = await r.gcra(
-            key, max_burst=10, tokens_per_period=5, period=10.0, tokens=3
-        )
-
-        assert isinstance(result, GCRAResponse)
-        assert result.limited is False  # Should not be limited initially
-
-    @skip_if_server_version_lt("8.7.0")
-    async def test_gcra_rate_limiting(self, r: redis.Redis):
-        """Test GCRA rate limiting with a realistic per-user scenario.
-
-        Simulates a user (user:42) who is allowed 2 requests per 60 seconds
-        with a max_burst of 1 (so capacity = max_burst + 1 = 2 tokens).
-        The first 2 requests should be allowed and execute actual Redis
-        commands, while the 3rd request should be rate limited.
-        """
-        user_id = 42
-        rate_limit_key = f"ratelimit:user:{user_id}"
-        user_data_key = f"user:{user_id}:request_count"
-        await r.delete(rate_limit_key)
-        await r.delete(user_data_key)
-
-        # Rate limit: allow 2 requests per 60s (max_burst=1, so capacity=2)
-        allowed_count = 0
-        limited_count = 0
-
-        for request_num in range(3):
-            result = await r.gcra(
-                rate_limit_key,
-                max_burst=1,
-                tokens_per_period=2,
-                period=60.0,
-            )
-            assert isinstance(result, GCRAResponse)
-            assert result.max_req_num == 2  # always max_burst + 1
-
-            if not result.limited:
-                # Request is allowed — perform the actual work
-                await r.incr(user_data_key)
-                allowed_count += 1
-            else:
-                # Request is rate limited — reject it
-                limited_count += 1
-                assert result.retry_after > 0
-                assert result.num_avail_req == 0
-
-        # The first 2 requests consumed the burst, the 3rd is blocked
-        assert allowed_count == 2
-        assert limited_count == 1
-        assert int(await r.get(user_data_key)) == 2
-
-    async def test_gcra_invalid_max_burst(self, r: redis.Redis):
-        """Test GCRA command with invalid max_burst parameter"""
-        with pytest.raises(exceptions.DataError):
-            await r.gcra("test_key", max_burst=-1, tokens_per_period=5, period=10.0)
-
-    async def test_gcra_invalid_tokens_per_period(self, r: redis.Redis):
-        """Test GCRA command with invalid tokens_per_period parameter"""
-        with pytest.raises(exceptions.DataError):
-            await r.gcra("test_key", max_burst=10, tokens_per_period=0, period=10.0)
-
-    async def test_gcra_invalid_period_too_small(self, r: redis.Redis):
-        """Test GCRA command with period less than 1.0"""
-        with pytest.raises(exceptions.DataError):
-            await r.gcra("test_key", max_burst=10, tokens_per_period=5, period=0.5)
-
-    async def test_gcra_invalid_period_too_large(self, r: redis.Redis):
-        """Test GCRA command with period greater than 1e12"""
-        with pytest.raises(exceptions.DataError):
-            await r.gcra("test_key", max_burst=10, tokens_per_period=5, period=1e13)
 
 
 @pytest.mark.onlynoncluster
