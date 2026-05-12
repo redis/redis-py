@@ -1423,6 +1423,7 @@ class ClusterNode:
     """
 
     __slots__ = (
+        "_background_tasks",
         "_connections",
         "_free",
         "_lock",
@@ -1464,6 +1465,7 @@ class ClusterNode:
 
         self._connections: List[Connection] = []
         self._free: Deque[Connection] = collections.deque(maxlen=self.max_connections)
+        self._background_tasks: Set[asyncio.Task] = set()
         self._event_dispatcher = self.connection_kwargs.get("event_dispatcher", None)
         if self._event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -1549,9 +1551,31 @@ class ClusterNode:
     def release(self, connection: Connection) -> None:
         """
         Release connection back to free queue.
-        If the connection is marked for reconnect, it will be disconnected
-        lazily when next acquired via disconnect_if_needed().
+        If the connection is marked for reconnect, disconnect it before
+        returning it to the free queue.
         """
+        if connection.should_reconnect():
+            task = asyncio.create_task(self._disconnect_and_release(connection))
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+            return
+        self._free.append(connection)
+
+    async def _disconnect_and_release(self, connection: Connection) -> None:
+        try:
+            await connection.disconnect()
+        except Exception as exc:
+            logger.debug(
+                "disconnecting released cluster connection failed: %r",
+                exc,
+                exc_info=True,
+            )
+            try:
+                self._connections.remove(connection)
+            except ValueError:
+                pass
+            return
+
         self._free.append(connection)
 
     def get_encoder(self) -> Encoder:
@@ -1568,7 +1592,7 @@ class ClusterNode:
         """
         Mark all in-use (active) connections for reconnect.
         In-use connections are those in _connections but not currently in _free.
-        They will be disconnected when released back to the pool.
+        They will be disconnected after their current operation completes.
         """
         free_set = set(self._free)
         for connection in self._connections:
@@ -1630,7 +1654,7 @@ class ClusterNode:
         finally:
             await self.disconnect_if_needed(connection)
             # Release connection
-            self._free.append(connection)
+            self.release(connection)
 
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:
         # Acquire connection
@@ -1656,7 +1680,7 @@ class ClusterNode:
 
         # Release connection
         await self.disconnect_if_needed(connection)
-        self._free.append(connection)
+        self.release(connection)
 
         return ret
 
@@ -1762,10 +1786,10 @@ class NodesManager:
                 if name not in new:
                     # Node is removed from cache before disconnect starts,
                     # so it won't be found in lookups during disconnect
-                    # Mark active connections for reconnect so they get disconnected after current command completes
-                    # and disconnect free connections immediately
-                    # the node is removed from the cache before the connections changes so it won't be used and should be safe
-                    # not to wait for the disconnects
+                    # Mark active connections so in-flight commands can
+                    # finish, then disconnect them when their current
+                    # operation completes. Free connections can be
+                    # disconnected immediately.
                     removed_node = old.pop(name)
                     removed_node.update_active_connections_for_reconnect()
                     task = asyncio.create_task(
@@ -1784,6 +1808,7 @@ class NodesManager:
                 # TODO: Make this method async in the next major release to allow
                 # immediate disconnection of free connections.
                 existing_node = old[name]
+                existing_node.server_type = node.server_type
                 existing_node.update_active_connections_for_reconnect()
                 for conn in existing_node._free:
                     conn.mark_for_reconnect()
@@ -2037,8 +2062,23 @@ class NodesManager:
                 )
 
             # Set the tmp variables to the real variables
-            self.slots_cache = tmp_slots
             self.set_nodes(self.nodes_cache, tmp_nodes_cache, remove_old=True)
+            # tmp_slots was built from CLUSTER SLOTS responses and can contain
+            # newly-created ClusterNode objects for nodes we already know about.
+            # Rebuild the slots cache with the preserved nodes_cache instances
+            # so existing per-node connection pools stay in use after refresh.
+            # Keep the shared node-list-per-slot-range shape from tmp_slots to
+            # avoid allocating a separate list for every slot.
+            node_lists_by_id: Dict[int, List["ClusterNode"]] = {}
+            new_slots_cache: Dict[int, List["ClusterNode"]] = {}
+            for slot, nodes in tmp_slots.items():
+                node_list_id = id(nodes)
+                slot_nodes = node_lists_by_id.get(node_list_id)
+                if slot_nodes is None:
+                    slot_nodes = [self.nodes_cache[node.name] for node in nodes]
+                    node_lists_by_id[node_list_id] = slot_nodes
+                new_slots_cache[slot] = slot_nodes
+            self.slots_cache = new_slots_cache
 
             if self._dynamic_startup_nodes:
                 # Populate the startup nodes with all discovered nodes
@@ -3063,6 +3103,9 @@ class TransactionStrategy(AbstractStrategy):
                     await self._transaction_connection.read_response()
                 # we can safely return the connection to the pool here since we're
                 # sure we're no longer WATCHing anything
+                await self._transaction_node.disconnect_if_needed(
+                    self._transaction_connection
+                )
                 self._transaction_node.release(self._transaction_connection)
                 self._transaction_connection = None
             except self.CONNECTION_ERRORS:
@@ -3155,6 +3198,7 @@ class _ClusterNodePoolAdapter(ConnectionPoolInterface):
         # PubSub.aclose() disconnects the connection before calling
         # release(), so it is safe to put it back in the node's free
         # queue – it will reconnect lazily on next use.
+        await self._node.disconnect_if_needed(connection)
         self._node.release(connection)
 
     # -- no-op stubs for the rest of ConnectionPoolInterface -------------------
