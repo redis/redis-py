@@ -1074,11 +1074,25 @@ class TestBaseSearchFunctionality(SearchTestsBase):
 
         self.createIndex(client.ft(), num_docs=500, definition=definition)
 
-    @pytest.mark.redismod
-    def test_index_definition_prefix_string_raises(self, client):
-        """Passing a string as prefix should raise TypeError."""
-        with pytest.raises(TypeError, match="prefix must be a list of strings"):
-            IndexDefinition(prefix="my:prefix:")
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            "my:prefix:",
+            b"my:prefix:",
+            bytearray(b"my:prefix:"),
+            memoryview(b"my:prefix:"),
+        ],
+    )
+    def test_index_definition_scalar_prefix(self, prefix):
+        definition = IndexDefinition(prefix=prefix, score=None)
+
+        assert ["PREFIX", 1, prefix] == definition.args
+
+    @pytest.mark.parametrize("prefix", [["hset:", "henry"], ("hset:", "henry")])
+    def test_index_definition_prefix_list_or_tuple(self, prefix):
+        definition = IndexDefinition(prefix=prefix, score=None)
+
+        assert ["PREFIX", 2, "hset:", "henry"] == definition.args
 
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster

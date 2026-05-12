@@ -24,9 +24,9 @@ def list_or_args(keys: KeysT, args: Tuple[KeyT, ...]) -> List[KeyT]:
     # returns a single new list combining keys and args
     try:
         iter(keys)
-        # a string or bytes instance can be iterated, but indicates
+        # a string or bytes-like instance can be iterated, but indicates
         # keys wasn't passed as a list
-        if isinstance(keys, (bytes, str)):
+        if isinstance(keys, (bytes, str, bytearray, memoryview)):
             keys = [keys]
         else:
             keys = list(keys)
