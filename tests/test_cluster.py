@@ -2887,6 +2887,28 @@ class TestNodesManager:
 
         assert len(n_manager.nodes_cache) == 6
 
+    @pytest.mark.onlycluster
+    def test_initialize_uses_shuffled_startup_nodes(self, r):
+        startup_nodes = list(r.nodes_manager.startup_nodes.values())
+        first_shuffled_node = startup_nodes[-1]
+        redis_connection = first_shuffled_node.redis_connection
+
+        with (
+            patch(
+                "redis.cluster.random.shuffle",
+                side_effect=lambda nodes: nodes.reverse(),
+            ) as shuffle,
+            patch.object(
+                redis_connection,
+                "execute_command",
+                wraps=redis_connection.execute_command,
+            ) as execute_command,
+        ):
+            r.nodes_manager.initialize(disconnect_startup_nodes_pools=False)
+
+        shuffle.assert_called_once()
+        execute_command.assert_any_call("CLUSTER SLOTS")
+
     @pytest.mark.fixed_client
     def test_init_promote_server_type_for_node_in_cache(self):
         """

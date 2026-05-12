@@ -1940,9 +1940,14 @@ class NodesManager:
                 # we don't need to do it again.
                 return
 
-            # Convert to tuple to prevent RuntimeError if self.startup_nodes
-            # is modified during iteration
-            for startup_node in tuple(self.startup_nodes.values()):
+            # Copy to a list to prevent RuntimeError if self.startup_nodes
+            # is modified during iteration, then shuffle the iteration order.
+            startup_nodes = list(self.startup_nodes.values())
+            if len(startup_nodes) > 1:
+                # Vary which startup node is queried first so clients do not
+                # all reinitialize through the same node.
+                random.shuffle(startup_nodes)
+            for startup_node in startup_nodes:
                 try:
                     # Make sure cluster mode is enabled on this node
                     try:

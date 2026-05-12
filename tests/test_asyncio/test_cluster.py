@@ -2824,6 +2824,29 @@ class TestNodesManager:
                 for node in nodes:
                     assert node is nodes_manager.nodes_cache[node.name]
 
+    @pytest.mark.onlycluster
+    async def test_initialize_uses_shuffled_startup_nodes(
+        self, r: RedisCluster
+    ) -> None:
+        startup_nodes = list(r.nodes_manager.startup_nodes.values())
+        first_shuffled_node = startup_nodes[-1]
+
+        with (
+            mock.patch(
+                "redis.asyncio.cluster.random.shuffle",
+                side_effect=lambda nodes: nodes.reverse(),
+            ) as shuffle,
+            mock.patch.object(
+                first_shuffled_node,
+                "execute_command",
+                wraps=first_shuffled_node.execute_command,
+            ) as execute_command,
+        ):
+            await r.nodes_manager.initialize()
+
+        shuffle.assert_called_once()
+        execute_command.assert_any_await("CLUSTER SLOTS")
+
     @pytest.mark.fixed_client
     async def test_init_slots_cache_cluster_mode_disabled(self) -> None:
         """

@@ -2471,7 +2471,11 @@ class NodesManager:
                     return
 
             with self._lock:
-                startup_nodes = tuple(self.startup_nodes.values())
+                startup_nodes = list(self.startup_nodes.values())
+            if len(startup_nodes) > 1:
+                # Vary which startup node is queried first so clients do not
+                # all reinitialize through the same node.
+                random.shuffle(startup_nodes)
 
             additional_startup_nodes = [
                 ClusterNode(host, port) for host, port in additional_startup_nodes_info
@@ -2482,7 +2486,10 @@ class NodesManager:
                     f"and startup nodes: {[node.name for node in startup_nodes]}"
                 )
 
-            for startup_node in (*startup_nodes, *additional_startup_nodes):
+            for startup_node in chain(
+                startup_nodes,
+                additional_startup_nodes,
+            ):
                 try:
                     if startup_node.redis_connection:
                         r = startup_node.redis_connection
