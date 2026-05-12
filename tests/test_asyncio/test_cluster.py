@@ -1,6 +1,7 @@
 import asyncio
 import binascii
 import datetime
+import logging
 import ssl
 import warnings
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, Union
@@ -218,6 +219,7 @@ async def get_mocked_redis_client(
 def mock_node_resp(node: ClusterNode, response: Any) -> ClusterNode:
     connection = mock.AsyncMock(spec=Connection)
     connection.is_connected = True
+    connection.should_reconnect.return_value = False
     connection.read_response.return_value = response
     while node._free:
         node._free.pop()
@@ -228,6 +230,7 @@ def mock_node_resp(node: ClusterNode, response: Any) -> ClusterNode:
 def mock_node_resp_exc(node: ClusterNode, exc: Exception) -> ClusterNode:
     connection = mock.AsyncMock(spec=Connection)
     connection.is_connected = True
+    connection.should_reconnect.return_value = False
     connection.read_response.side_effect = exc
     while node._free:
         node._free.pop()
@@ -2762,10 +2765,64 @@ class TestNodesManager:
                 assert n_manager.slots_cache[i][1].host in all_hosts
                 assert n_manager.slots_cache[i][0].port in all_ports
                 assert n_manager.slots_cache[i][1].port in all_ports
+                for node in n_manager.slots_cache[i]:
+                    assert node is n_manager.nodes_cache[node.name]
 
         assert len(n_manager.nodes_cache) == 6
 
         await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_initialize_reuses_nodes_cache_nodes_in_slots_cache(
+        self,
+    ) -> None:
+        """
+        Test that a topology refresh keeps slots_cache pointed at nodes_cache
+        nodes instead of temporary nodes built from CLUSTER SLOTS.
+        """
+        first_slots = [[0, 16383, [default_host, 7000, "node_0"]]]
+        second_slots = [
+            [0, 8191, [default_host, 7000, "node_0"]],
+            [8192, 16383, [default_host, 7001, "node_1"]],
+        ]
+        cluster_slots = [first_slots]
+
+        async def mocked_execute_command(self, *args, **kwargs):
+            if args[0] == "CLUSTER SLOTS":
+                return cluster_slots[0]
+            return None
+
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True
+        ) as execute_command:
+            execute_command.side_effect = mocked_execute_command
+            nodes_manager = NodesManager(
+                startup_nodes=[ClusterNode(default_host, 7000)],
+                require_full_coverage=True,
+                connection_kwargs={},
+            )
+
+            await nodes_manager.initialize()
+            first_node = nodes_manager.nodes_cache[get_node_name(default_host, 7000)]
+            assert nodes_manager.slots_cache[0][0] is first_node
+            assert nodes_manager.slots_cache[0] is nodes_manager.slots_cache[16383]
+
+            cluster_slots[0] = second_slots
+            await nodes_manager.initialize()
+
+            assert (
+                nodes_manager.nodes_cache[get_node_name(default_host, 7000)]
+                is first_node
+            )
+            assert nodes_manager.slots_cache[0][0] is first_node
+            assert nodes_manager.slots_cache[0] is nodes_manager.slots_cache[8191]
+            second_node = nodes_manager.nodes_cache[get_node_name(default_host, 7001)]
+            assert nodes_manager.slots_cache[8192][0] is second_node
+            assert nodes_manager.slots_cache[8192] is nodes_manager.slots_cache[16383]
+            assert nodes_manager.slots_cache[0] is not nodes_manager.slots_cache[8192]
+            for nodes in nodes_manager.slots_cache.values():
+                for node in nodes:
+                    assert node is nodes_manager.nodes_cache[node.name]
 
     @pytest.mark.fixed_client
     async def test_init_slots_cache_cluster_mode_disabled(self) -> None:
@@ -3004,6 +3061,81 @@ class TestNodesManager:
         assert nodes_cache_names == [node2.name, node1.name, node3.name]
 
     @pytest.mark.fixed_client
+    async def test_set_nodes_disconnects_removed_node_connections_after_use(
+        self,
+    ) -> None:
+        """
+        Test removed nodes let in-flight commands finish, then disconnect.
+        """
+
+        class FakeConnection:
+            def __init__(self) -> None:
+                self.disconnect_called = False
+                self.is_connected = True
+                self.reconnect = False
+                self.response_ready = asyncio.Event()
+                self.send_called = asyncio.Event()
+
+            def pack_command(self, *args):
+                return b"packed"
+
+            async def send_packed_command(self, *args) -> None:
+                self.send_called.set()
+
+            async def read_response(self, *args, **kwargs):
+                await self.response_ready.wait()
+                return b"OK"
+
+            async def disconnect(self) -> None:
+                self.disconnect_called = True
+                self.is_connected = False
+                self.reconnect = False
+
+            def mark_for_reconnect(self) -> None:
+                self.reconnect = True
+
+            def should_reconnect(self) -> bool:
+                return self.reconnect
+
+        node = ClusterNode(default_host, 7000)
+        active_conn = FakeConnection()
+        free_conn = FakeConnection()
+        node._connections = [active_conn, free_conn]
+        node._free.append(active_conn)
+        node._free.append(free_conn)
+
+        nodes_manager = NodesManager(
+            startup_nodes=[node],
+            require_full_coverage=False,
+            connection_kwargs={},
+        )
+        nodes_manager.nodes_cache = {node.name: node}
+
+        command = asyncio.create_task(node.execute_command("GET", "key"))
+        await active_conn.send_called.wait()
+
+        nodes_manager.set_nodes(nodes_manager.nodes_cache, {}, remove_old=True)
+        tasks = tuple(nodes_manager._background_tasks)
+        assert len(tasks) == 1
+        await asyncio.gather(*tasks)
+
+        assert nodes_manager.nodes_cache == {}
+        assert free_conn.disconnect_called is True
+        assert free_conn.is_connected is False
+        assert active_conn.reconnect is True
+        assert active_conn.disconnect_called is False
+        assert active_conn.is_connected is True
+
+        active_conn.response_ready.set()
+        assert await command == b"OK"
+
+        assert active_conn.disconnect_called is True
+        assert active_conn.is_connected is False
+        assert active_conn in node._free
+        assert free_conn.reconnect is False
+        assert active_conn.reconnect is False
+
+    @pytest.mark.fixed_client
     async def test_move_node_to_end_of_cached_nodes_nonexistent(self) -> None:
         """
         Test that move_node_to_end_of_cached_nodes does nothing for a
@@ -3141,6 +3273,9 @@ class TestClusterNodeConnectionHandling:
         conn1 = mock.AsyncMock(spec=Connection)
         conn2 = mock.AsyncMock(spec=Connection)
         conn3 = mock.AsyncMock(spec=Connection)
+        conn1.is_connected = False
+        conn2.is_connected = False
+        conn3.is_connected = False
 
         # Add all connections to _connections
         node._connections = [conn1, conn2, conn3]
@@ -3166,6 +3301,9 @@ class TestClusterNodeConnectionHandling:
         conn1 = mock.AsyncMock(spec=Connection)
         conn2 = mock.AsyncMock(spec=Connection)
         conn3 = mock.AsyncMock(spec=Connection)
+        conn1.is_connected = False
+        conn2.is_connected = False
+        conn3.is_connected = False
 
         # Add all connections to _connections
         node._connections = [conn1, conn2, conn3]
@@ -3200,33 +3338,55 @@ class TestClusterNodeConnectionHandling:
 
     async def test_release_with_reconnect_flag(self) -> None:
         """
-        Test that release() adds connection to _free even if marked for reconnect.
-        Disconnect happens lazily via disconnect_if_needed() when next acquired.
+        Test that release() disconnects a connection marked for reconnect before
+        adding it to _free.
         """
-        node = ClusterNode(default_host, 7000)
 
-        # Create a mock connection marked for reconnect
-        conn = mock.AsyncMock(spec=Connection)
-        conn.should_reconnect.return_value = True
+        class FakeConnection:
+            def __init__(self) -> None:
+                self.disconnect_called = False
+                self.is_connected = True
+
+            def should_reconnect(self) -> bool:
+                return True
+
+            async def disconnect(self) -> None:
+                self.disconnect_called = True
+                self.is_connected = False
+
+        node = ClusterNode(default_host, 7000)
+        conn = FakeConnection()
 
         node._connections = [conn]
 
-        # Release the connection - sync, just adds to _free
+        # Release schedules disconnect first because release() is synchronous.
         node.release(conn)
 
-        # Connection should be in _free, disconnect happens lazily on acquire
+        assert conn not in node._free
+        await asyncio.gather(*node._background_tasks)
+
+        assert conn.disconnect_called is True
+        assert conn.is_connected is False
         assert conn in node._free
-        conn.disconnect.assert_not_called()
 
     async def test_release_without_reconnect_flag(self) -> None:
         """
         Test that release() adds connection to _free without disconnect.
         """
-        node = ClusterNode(default_host, 7000)
 
-        # Create a mock connection NOT marked for reconnect
-        conn = mock.AsyncMock(spec=Connection)
-        conn.should_reconnect.return_value = False
+        class FakeConnection:
+            def __init__(self) -> None:
+                self.disconnect_called = False
+                self.is_connected = False
+
+            def should_reconnect(self) -> bool:
+                return False
+
+            async def disconnect(self) -> None:
+                self.disconnect_called = True
+
+        node = ClusterNode(default_host, 7000)
+        conn = FakeConnection()
 
         node._connections = [conn]
 
@@ -3234,8 +3394,40 @@ class TestClusterNodeConnectionHandling:
         node.release(conn)
 
         # Connection should NOT be disconnected but added to _free
-        conn.disconnect.assert_not_called()
+        assert conn.disconnect_called is False
         assert conn in node._free
+
+    async def test_release_debug_logs_disconnect_task_exception(self, caplog) -> None:
+        """
+        Test that release() consumes background disconnect errors.
+        """
+
+        class FakeConnection:
+            def should_reconnect(self) -> bool:
+                return True
+
+            async def disconnect(self) -> None:
+                raise RuntimeError("simulated disconnect failure")
+
+        node = ClusterNode(default_host, 7000)
+        conn = FakeConnection()
+        node._connections = [conn]
+
+        with caplog.at_level(logging.DEBUG, logger="redis.asyncio.cluster"):
+            node.release(conn)
+            assert len(node._background_tasks) == 1
+            (task,) = tuple(node._background_tasks)
+            await task
+            await asyncio.sleep(0)
+
+        assert node._background_tasks == set()
+        assert conn not in node._free
+        assert conn not in node._connections
+        assert any(
+            "disconnecting released cluster connection failed" in rec.message
+            and rec.levelno == logging.DEBUG
+            for rec in caplog.records
+        )
 
     async def test_disconnect_if_needed_disconnects_when_reconnect_needed(
         self,
