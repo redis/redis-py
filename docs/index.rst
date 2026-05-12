@@ -74,6 +74,7 @@ Module Documentation
    lua_scripting
    opentelemetry
    resp3_features
+   unified_responses
    advanced_features
    examples
 

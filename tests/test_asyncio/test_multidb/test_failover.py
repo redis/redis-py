@@ -14,7 +14,7 @@ from redis.asyncio.multidb.failover import (
 )
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestAsyncWeightBasedFailoverStrategy:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -69,6 +69,7 @@ class TestAsyncWeightBasedFailoverStrategy:
             assert await failover_strategy.database()
 
 
+@pytest.mark.fixed_client
 class TestDefaultStrategyExecutor:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

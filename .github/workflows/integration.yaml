@@ -29,9 +29,9 @@ env:
   COVERAGE_CORE: sysmon
   # patch releases get included in the base version image when they are published
   # for example after 8.2.1 is published, 8.2 image contains 8.2.1 content
-  CURRENT_CLIENT_LIBS_TEST_STACK_IMAGE_TAG: '8.4.0'
-  CURRENT_REDIS_VERSION: '8.4.0'
-  REDIS_VERSION_CUSTOM_MAP: 'custom-21860421418-debian-amd64:8.6'
+  CURRENT_REDIS_VERSION: '8.6.1'
+  REDIS_VERSION_CUSTOM_MAP: >-
+    8.8:unstable-24805570909-debian
 
 jobs:
   dependency-audit:
@@ -44,7 +44,9 @@ jobs:
           inputs: dev_requirements.txt
           ignore-vulns: |
             GHSA-w596-4wvx-j9j6  # subversion related git pull, dependency for pytest. There is no impact here.
-            CVE-2026-26007 # dependency for entraid tests
+            CVE-2026-34073 # DNS name constraints were validated only against SANs, not against the peer name used in verification
+                           # Update version when msal dependency in entraid is updated
+            CVE-2026-4539  # pygments ReDoS in AdlLexer, local access only, no fix available yet
 
   lint:
     name: Code linters
@@ -78,14 +80,27 @@ jobs:
       max-parallel: 30
       fail-fast: false
       matrix:
-        redis-version: ['custom-21860421418-debian-amd64', '${{ needs.redis_version.outputs.CURRENT }}', '8.2', '8.0.2' ,'7.4.4', '7.2.9']
+        redis-version: ['8.8', '${{ needs.redis_version.outputs.CURRENT }}', '8.4.2', '8.2.5', '8.0.2' ,'7.4.4', '7.2.9']
         python-version: ['3.10', '3.14']
         parser-backend: ['plain']
         event-loop: ['asyncio']
-        protocol: ['2', '3']
+        test-config:
+          - fixed-clients
+          - default-legacy_responses-standalone
+          - default-legacy_responses-cluster
+          - default-unified_responses-standalone
+          - default-unified_responses-cluster
+          - 2-legacy_responses-standalone
+          - 2-legacy_responses-cluster
+          - 2-unified_responses-standalone
+          - 2-unified_responses-cluster
+          - 3-legacy_responses-standalone
+          - 3-legacy_responses-cluster
+          - 3-unified_responses-standalone
+          - 3-unified_responses-cluster
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Protocol:${{matrix.protocol}}
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
     steps:
       - uses: actions/checkout@v6
       - name: Run tests
@@ -94,7 +109,7 @@ jobs:
             python-version: ${{ matrix.python-version }}
             parser-backend: ${{ matrix.parser-backend }}
             redis-version: ${{ matrix.redis-version }}
-            protocol: ${{ matrix.protocol }}
+            test-config: ${{ matrix.test-config }}
 
   python-compatibility-tests:
     runs-on: ubuntu-latest
@@ -108,10 +123,23 @@ jobs:
         python-version: ['3.11', '3.12', '3.13']
         parser-backend: [ 'plain' ]
         event-loop: [ 'asyncio' ]
-        protocol: ['2', '3']
+        test-config:
+          - fixed-clients
+          - default-legacy_responses-standalone
+          - default-legacy_responses-cluster
+          - default-unified_responses-standalone
+          - default-unified_responses-cluster
+          - 2-legacy_responses-standalone
+          - 2-legacy_responses-cluster
+          - 2-unified_responses-standalone
+          - 2-unified_responses-cluster
+          - 3-legacy_responses-standalone
+          - 3-legacy_responses-cluster
+          - 3-unified_responses-standalone
+          - 3-unified_responses-cluster
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Protocol:${{matrix.protocol}}
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
     steps:
       - uses: actions/checkout@v6
       - name: Run tests
@@ -120,7 +148,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           parser-backend: ${{ matrix.parser-backend }}
           redis-version: ${{ matrix.redis-version }}
-          protocol: ${{ matrix.protocol }}
+          test-config: ${{ matrix.test-config }}
 
   pypy-compatibility-tests:
     runs-on: ubuntu-latest
@@ -137,10 +165,23 @@ jobs:
         python-version: ['pypy-3.10', 'pypy-3.11']
         parser-backend: [ 'plain' ]
         event-loop: [ 'asyncio' ]
-        protocol: ['2', '3']
+        test-config:
+          - fixed-clients
+          - default-legacy_responses-standalone
+          - default-legacy_responses-cluster
+          - default-unified_responses-standalone
+          - default-unified_responses-cluster
+          - 2-legacy_responses-standalone
+          - 2-legacy_responses-cluster
+          - 2-unified_responses-standalone
+          - 2-unified_responses-cluster
+          - 3-legacy_responses-standalone
+          - 3-legacy_responses-cluster
+          - 3-unified_responses-standalone
+          - 3-unified_responses-cluster
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: PyPy Redis ${{ matrix.redis-version }}; ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Protocol:${{matrix.protocol}}
+    name: PyPy Redis ${{ matrix.redis-version }}; ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
     steps:
       - uses: actions/checkout@v6
       - name: Run tests
@@ -149,7 +190,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           parser-backend: ${{ matrix.parser-backend }}
           redis-version: ${{ matrix.redis-version }}
-          protocol: ${{ matrix.protocol }}
+          test-config: ${{ matrix.test-config }}
 
   hiredis-tests:
     runs-on: ubuntu-latest
@@ -164,10 +205,23 @@ jobs:
         parser-backend: [ 'hiredis' ]
         hiredis-version: [ '>=3.2.0', '<3.0.0' ]
         event-loop: [ 'asyncio' ]
-        protocol: ['2', '3']
+        test-config:
+          - fixed-clients
+          - default-legacy_responses-standalone
+          - default-legacy_responses-cluster
+          - default-unified_responses-standalone
+          - default-unified_responses-cluster
+          - 2-legacy_responses-standalone
+          - 2-legacy_responses-cluster
+          - 2-unified_responses-standalone
+          - 2-unified_responses-cluster
+          - 3-legacy_responses-standalone
+          - 3-legacy_responses-cluster
+          - 3-unified_responses-standalone
+          - 3-unified_responses-cluster
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}} (${{ matrix.hiredis-version }}); EL:${{matrix.event-loop}}; Protocol:${{matrix.protocol}}
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}} (${{ matrix.hiredis-version }}); EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
     steps:
       - uses: actions/checkout@v6
       - name: Run tests
@@ -177,7 +231,7 @@ jobs:
           parser-backend: ${{ matrix.parser-backend }}
           redis-version: ${{ matrix.redis-version }}
           hiredis-version: ${{ matrix.hiredis-version }}
-          protocol: ${{ matrix.protocol }}
+          test-config: ${{ matrix.test-config }}
 
   uvloop-tests:
     runs-on: ubuntu-latest
@@ -191,10 +245,23 @@ jobs:
         python-version: [ '3.10', '3.14' ]
         parser-backend: [ 'plain' ]
         event-loop: [ 'uvloop' ]
-        protocol: ['2', '3']
+        test-config:
+          - fixed-clients
+          - default-legacy_responses-standalone
+          - default-legacy_responses-cluster
+          - default-unified_responses-standalone
+          - default-unified_responses-cluster
+          - 2-legacy_responses-standalone
+          - 2-legacy_responses-cluster
+          - 2-unified_responses-standalone
+          - 2-unified_responses-cluster
+          - 3-legacy_responses-standalone
+          - 3-legacy_responses-cluster
+          - 3-unified_responses-standalone
+          - 3-unified_responses-cluster
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Protocol:${{matrix.protocol}}
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
     steps:
       - uses: actions/checkout@v6
       - name: Run tests
@@ -204,7 +271,7 @@ jobs:
           parser-backend: ${{ matrix.parser-backend }}
           redis-version: ${{ matrix.redis-version }}
           event-loop: ${{ matrix.event-loop }}
-          protocol: ${{ matrix.protocol }}
+          test-config: ${{ matrix.test-config }}
 
   build-and-test-package:
     name: Validate building and installing the package

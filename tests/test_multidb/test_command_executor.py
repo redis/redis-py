@@ -13,7 +13,7 @@ from redis.retry import Retry
 from tests.test_multidb.conftest import create_weighted_list
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestDefaultCommandExecutor:
     @pytest.mark.parametrize(
         "mock_db,mock_db1,mock_db2",

@@ -100,7 +100,12 @@ class MockConnectionWithoutHostPort(ConnectionInterface):
     def reset_should_reconnect(self):
         pass
 
+    @property
+    def is_connected(self) -> bool:
+        return self._sock is not None
 
+
+@pytest.mark.fixed_client
 class TestConnectionAttributesWithoutHostPort:
     """Tests for metrics recording with connections lacking host/port attributes."""
 

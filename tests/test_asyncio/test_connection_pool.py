@@ -1,11 +1,20 @@
 import asyncio
 import re
 from unittest import mock
+from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
-from redis.asyncio.connection import Connection, to_bool
+from redis.asyncio.connection import (
+    BlockingConnectionPool,
+    Connection,
+    ConnectionPool,
+    to_bool,
+)
+from unittest.mock import AsyncMock, MagicMock
+
+from redis.observability.metrics import CloseReason
 from redis.auth.token import TokenInterface
 from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
@@ -142,6 +151,7 @@ class TestConnectionPool:
         finally:
             await pool.disconnect(inuse_connections=True)
 
+    @pytest.mark.fixed_client
     async def test_connection_creation(self):
         connection_kwargs = {"foo": "bar", "biz": "baz"}
         async with self.get_pool(
@@ -151,6 +161,7 @@ class TestConnectionPool:
             assert isinstance(connection, DummyConnection)
             assert connection.kwargs == connection_kwargs
 
+    @pytest.mark.fixed_client
     async def test_aclosing(self):
         connection_kwargs = {"foo": "bar", "biz": "baz"}
         pool = redis.ConnectionPool(
@@ -186,6 +197,7 @@ class TestConnectionPool:
             c2 = await pool.get_connection()
             assert c1 == c2
 
+    @pytest.mark.fixed_client
     async def test_repr_contains_db_info_tcp(self):
         connection_kwargs = {
             "host": "localhost",
@@ -199,6 +211,7 @@ class TestConnectionPool:
             expected = "host=localhost,port=6379,db=1,client_name=test-client"
             assert expected in repr(pool)
 
+    @pytest.mark.fixed_client
     async def test_repr_contains_db_info_unix(self):
         connection_kwargs = {"path": "/abc", "db": 1, "client_name": "test-client"}
         async with self.get_pool(
@@ -222,6 +235,7 @@ class TestConnectionPool:
             await pool.disconnect(inuse_connections=False)
             assert conn.is_connected
 
+    @pytest.mark.fixed_client
     async def test_lock_not_held_during_connection_establishment(self):
         """
         Test that the connection pool lock is not held during the
@@ -253,6 +267,7 @@ class TestConnectionPool:
 
             await pool.release(connection)
 
+    @pytest.mark.fixed_client
     async def test_concurrent_connection_acquisition_performance(self):
         """
         Test that multiple concurrent connection acquisitions don't block
@@ -392,6 +407,7 @@ class TestBlockingConnectionPool:
             c2 = await pool.get_connection()
             assert c1 == c2
 
+    @pytest.mark.fixed_client
     def test_repr_contains_db_info_tcp(self):
         pool = redis.ConnectionPool(
             host="localhost", port=6379, client_name="test-client"
@@ -399,6 +415,7 @@ class TestBlockingConnectionPool:
         expected = "host=localhost,port=6379,client_name=test-client"
         assert expected in repr(pool)
 
+    @pytest.mark.fixed_client
     def test_repr_contains_db_info_unix(self):
         pool = redis.ConnectionPool(
             connection_class=redis.UnixDomainSocketConnection,
@@ -409,7 +426,34 @@ class TestBlockingConnectionPool:
         expected = "path=abc,db=0,client_name=test-client"
         assert expected in repr(pool)
 
+    @pytest.mark.fixed_client
+    def test_repr_redacts_sensitive_information(self):
+        """Test that __repr__ redacts sensitive values like password and username."""
+        pool = ConnectionPool(
+            host="localhost",
+            port=6379,
+            password="secret_password_123",
+            username="myuser",
+            ssl_password="ssl_secret_456",
+            db=0,
+        )
+        repr_output = repr(pool)
 
+        # Verify sensitive values are redacted
+        assert "secret_password_123" not in repr_output
+        assert "myuser" not in repr_output
+        assert "ssl_secret_456" not in repr_output
+
+        # Verify the REDACTED placeholder is present
+        assert "<REDACTED>" in repr_output
+
+        # Verify non-sensitive values are still visible
+        assert "host=localhost" in repr_output
+        assert "port=6379" in repr_output
+        assert "db=0" in repr_output
+
+
+@pytest.mark.fixed_client
 class TestConnectionPoolURLParsing:
     def test_hostname(self):
         pool = redis.ConnectionPool.from_url("redis://my.host")
@@ -552,6 +596,7 @@ class TestConnectionPoolURLParsing:
         )
 
 
+@pytest.mark.fixed_client
 class TestBlockingConnectionPoolURLParsing:
     def test_extra_typed_querystring_options(self):
         pool = redis.BlockingConnectionPool.from_url(
@@ -577,6 +622,7 @@ class TestBlockingConnectionPoolURLParsing:
             )
 
 
+@pytest.mark.fixed_client
 class TestConnectionPoolUnixSocketURLParsing:
     def test_defaults(self):
         pool = redis.ConnectionPool.from_url("unix:///socket")
@@ -645,6 +691,7 @@ class TestConnectionPoolUnixSocketURLParsing:
         assert pool.connection_kwargs == {"path": "/socket", "a": "1", "b": "2"}
 
 
+@pytest.mark.fixed_client
 class TestSSLConnectionURLParsing:
     def test_host(self):
         pool = redis.ConnectionPool.from_url("rediss://my.host")
@@ -675,6 +722,7 @@ class TestSSLConnectionURLParsing:
 
 
 class TestConnection:
+    @pytest.mark.fixed_client
     async def test_on_connect_error(self):
         """
         An error in Connection.on_connect should disconnect from the server
@@ -753,6 +801,7 @@ class TestConnection:
             # as the db being full
             await r.execute_command("DEBUG", "ERROR", "OOM blah blah")
 
+    @pytest.mark.fixed_client
     def test_connect_from_url_tcp(self):
         connection = redis.Redis.from_url("redis://localhost:6379?db=0")
         pool = connection.connection_pool
@@ -765,6 +814,7 @@ class TestConnection:
             "db=0,host=localhost,port=6379",
         )
 
+    @pytest.mark.fixed_client
     def test_connect_from_url_unix(self):
         connection = redis.Redis.from_url("unix:///path/to/socket")
         pool = connection.connection_pool
@@ -992,3 +1042,203 @@ class TestHealthCheck:
             assert await wait_for_message(p) is None
             m.assert_called_with("PING", p.HEALTH_CHECK_MESSAGE, check_health=False)
             self.assert_interval_advanced(p.connection)
+
+
+@pytest.mark.fixed_client
+@pytest.mark.asyncio
+class TestAsyncConnectionPoolMetricsRecording:
+    """Tests for async ConnectionPool metrics recording (create time and wait time)."""
+
+    async def test_connection_pool_records_create_time_on_new_connection(self):
+        """Test that ConnectionPool.get_connection() records create time when a new connection is created."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        pool = ConnectionPool(max_connections=10)
+
+        # Mock the ensure_connection to avoid actual connection
+        mock_connection = MagicMock()
+        mock_connection.is_connected = False
+        mock_connection.disconnect = AsyncMock()
+
+        # Patch where the functions are used (in redis.asyncio.connection module)
+        with patch.object(pool, "make_connection", return_value=mock_connection):
+            with patch.object(pool, "ensure_connection", new_callable=AsyncMock):
+                with patch(
+                    "redis.asyncio.connection.record_connection_create_time",
+                    new_callable=AsyncMock,
+                ) as mock_record:
+                    await pool.get_connection()
+
+                    # Verify record_connection_create_time was called
+                    mock_record.assert_called_once()
+                    call_kwargs = mock_record.call_args[1]
+                    assert call_kwargs["connection_pool"] is pool
+                    assert call_kwargs["duration_seconds"] > 0
+
+        await pool.disconnect()
+
+    async def test_connection_pool_does_not_record_create_time_for_existing_connection(
+        self,
+    ):
+        """Test that ConnectionPool.get_connection() does not record create time when reusing an existing connection."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        pool = ConnectionPool(max_connections=10)
+
+        # Add a mock connection to available connections
+        mock_connection = MagicMock()
+        mock_connection.disconnect = AsyncMock()
+        pool._available_connections.append(mock_connection)
+
+        with patch.object(pool, "ensure_connection", new_callable=AsyncMock):
+            with patch(
+                "redis.asyncio.connection.record_connection_create_time",
+                new_callable=AsyncMock,
+            ) as mock_record:
+                await pool.get_connection()
+
+                # Verify record_connection_create_time was NOT called
+                mock_record.assert_not_called()
+
+        await pool.disconnect()
+
+    async def test_blocking_connection_pool_records_create_time_and_wait_time(self):
+        """Test that BlockingConnectionPool.get_connection() records both create time and wait time."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        pool = BlockingConnectionPool(max_connections=10, timeout=5)
+
+        # Mock the ensure_connection to avoid actual connection
+        mock_connection = MagicMock()
+        mock_connection.is_connected = False
+        mock_connection.disconnect = AsyncMock()
+
+        # Patch where the functions are used (in redis.asyncio.connection module)
+        with patch.object(pool, "make_connection", return_value=mock_connection):
+            with patch.object(pool, "ensure_connection", new_callable=AsyncMock):
+                with patch(
+                    "redis.asyncio.connection.record_connection_create_time",
+                    new_callable=AsyncMock,
+                ) as mock_create_time:
+                    with patch(
+                        "redis.asyncio.connection.record_connection_wait_time",
+                        new_callable=AsyncMock,
+                    ) as mock_wait_time:
+                        await pool.get_connection()
+
+                        # Verify record_connection_create_time was called
+                        mock_create_time.assert_called_once()
+                        create_kwargs = mock_create_time.call_args[1]
+                        assert create_kwargs["connection_pool"] is pool
+                        assert create_kwargs["duration_seconds"] > 0
+
+                        # Verify record_connection_wait_time was called
+                        mock_wait_time.assert_called_once()
+                        wait_kwargs = mock_wait_time.call_args[1]
+                        assert "pool_name" in wait_kwargs
+                        assert wait_kwargs["duration_seconds"] > 0
+
+        await pool.disconnect()
+
+    async def test_blocking_connection_pool_records_only_wait_time_for_existing_connection(
+        self,
+    ):
+        """Test that BlockingConnectionPool.get_connection() records only wait time when reusing an existing connection."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        pool = BlockingConnectionPool(max_connections=10, timeout=5)
+
+        # Add a mock connection to available connections
+        mock_connection = MagicMock()
+        mock_connection.disconnect = AsyncMock()
+        pool._available_connections.append(mock_connection)
+
+        with patch.object(pool, "ensure_connection", new_callable=AsyncMock):
+            with patch(
+                "redis.asyncio.connection.record_connection_create_time",
+                new_callable=AsyncMock,
+            ) as mock_create_time:
+                with patch(
+                    "redis.asyncio.connection.record_connection_wait_time",
+                    new_callable=AsyncMock,
+                ) as mock_wait_time:
+                    await pool.get_connection()
+
+                    # Verify record_connection_create_time was NOT called
+                    mock_create_time.assert_not_called()
+
+                    # Verify record_connection_wait_time was still called
+                    mock_wait_time.assert_called_once()
+                    wait_kwargs = mock_wait_time.call_args[1]
+                    assert "pool_name" in wait_kwargs
+                    assert wait_kwargs["duration_seconds"] > 0
+
+        await pool.disconnect()
+
+    async def test_connection_disconnect_records_connection_closed_on_error(self):
+        """Test that Connection.disconnect() records connection closed with ERROR reason when error is provided."""
+
+        conn = Connection()
+        conn._writer = MagicMock()
+        conn._writer.close = MagicMock()
+        conn._writer.wait_closed = AsyncMock()
+        conn._reader = MagicMock()
+
+        with patch(
+            "redis.asyncio.connection.record_connection_closed",
+            new_callable=AsyncMock,
+        ) as mock_record:
+            error = ConnectionError("Connection lost")
+            await conn.disconnect(error=error)
+
+            # Verify record_connection_closed was called with ERROR reason
+            mock_record.assert_called_once()
+            call_kwargs = mock_record.call_args[1]
+            assert call_kwargs["close_reason"] == CloseReason.ERROR
+            assert call_kwargs["error_type"] is error
+
+    async def test_connection_disconnect_records_connection_closed_on_healthcheck_failed(
+        self,
+    ):
+        """Test that Connection.disconnect() records connection closed with HEALTHCHECK_FAILED reason."""
+
+        conn = Connection()
+        conn._writer = MagicMock()
+        conn._writer.close = MagicMock()
+        conn._writer.wait_closed = AsyncMock()
+        conn._reader = MagicMock()
+
+        with patch(
+            "redis.asyncio.connection.record_connection_closed",
+            new_callable=AsyncMock,
+        ) as mock_record:
+            error = ConnectionError("Health check failed")
+            await conn.disconnect(error=error, health_check_failed=True)
+
+            # Verify record_connection_closed was called with HEALTHCHECK_FAILED reason
+            mock_record.assert_called_once()
+            call_kwargs = mock_record.call_args[1]
+            assert call_kwargs["close_reason"] == CloseReason.HEALTHCHECK_FAILED
+            assert call_kwargs["error_type"] is error
+
+    async def test_connection_disconnect_records_connection_closed_on_application_close(
+        self,
+    ):
+        """Test that Connection.disconnect() records connection closed with APPLICATION_CLOSE reason for normal close."""
+
+        conn = Connection()
+        conn._writer = MagicMock()
+        conn._writer.close = MagicMock()
+        conn._writer.wait_closed = AsyncMock()
+        conn._reader = MagicMock()
+
+        with patch(
+            "redis.asyncio.connection.record_connection_closed",
+            new_callable=AsyncMock,
+        ) as mock_record:
+            await conn.disconnect()
+
+            # Verify record_connection_closed was called with APPLICATION_CLOSE reason
+            mock_record.assert_called_once()
+            call_kwargs = mock_record.call_args[1]
+            assert call_kwargs["close_reason"] == CloseReason.APPLICATION_CLOSE

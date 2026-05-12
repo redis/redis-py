@@ -10,6 +10,10 @@ class DummyConnection(ConnectionInterface):
     def __init__(self, *args, **kwargs):
         self.connected = False
 
+    @property
+    def is_connected(self) -> bool:
+        return self.connected
+
     def connect(self):
         self.connected = True
 

@@ -45,7 +45,7 @@ try:
     print(res.total)
     # >>> 1
     assert res.total == 1
-except:
+except Exception:
     print("'@price:[270]' syntax not yet supported.")
 
 try:
@@ -53,7 +53,7 @@ try:
     print(res.total)
     # >>> 1
     assert res.total == 1
-except:
+except Exception:
     print("'@price==270' syntax not yet supported.")
 
 query = Query("*").add_filter(NumericFilter("price", 270, 270))
@@ -89,7 +89,7 @@ r.json().set('key:1', Path.root_path(), '{"email": "test@redis.com"}')
 try:
     res = idx_email.search(Query("test@redis.com").dialect(2))
     print(res)
-except:
+except Exception:
     print("'test@redis.com' syntax not yet supported.")
 # REMOVE_START
 r.ft("idx:email").dropindex(delete_documents=True)

@@ -28,6 +28,11 @@ from redis.cluster import (
 )
 from redis.commands.core import HotkeysMetricsTypes
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
+from redis.event import (
+    AsyncAfterSlotsCacheRefreshEvent,
+    AsyncEventListenerInterface,
+    EventDispatcher,
+)
 from redis.exceptions import (
     AskError,
     ClusterDownError,
@@ -43,17 +48,20 @@ from redis.exceptions import (
 from redis.utils import str_if_bytes
 from tests.conftest import (
     assert_resp_response,
-    is_resp2_connection,
+    expects_resp2_shape,
+    expects_unified_shape,
     skip_if_redis_enterprise,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
 )
 
+from unittest.mock import patch, Mock
+from redis.asyncio.observability import recorder as async_recorder
+from redis.observability.config import OTelConfig, MetricGroup
+from redis.observability.metrics import RedisMetricsCollector
+
 from ..ssl_utils import get_tls_certificates
 from .compat import aclosing
-
-pytestmark = pytest.mark.onlycluster
-
 
 default_host = "127.0.0.1"
 default_port = 7000
@@ -302,6 +310,7 @@ async def moved_redirection_helper(
             assert fetched_node.server_type == PRIMARY
 
 
+@pytest.mark.onlycluster
 class TestRedisClusterObj:
     """
     Tests for the RedisCluster class
@@ -458,6 +467,25 @@ class TestRedisClusterObj:
             url, retry=Retry(NoBackoff(), 0)
         ) as rc_no_retries:
             assert rc_no_retries.retry.get_retries() == 0
+
+    async def test_deprecated_lib_name_lib_version(self) -> None:
+        with (
+            pytest.warns(
+                DeprecationWarning,
+                match="deprecated usage of input argument/s 'lib_name'",
+            ),
+            pytest.warns(
+                DeprecationWarning,
+                match="deprecated usage of input argument/s 'lib_version'",
+            ),
+        ):
+            startup_nodes = [ClusterNode("127.0.0.1", 16379)]
+            async with RedisCluster(
+                startup_nodes=startup_nodes, lib_name="test2", lib_version="1234"
+            ) as cluster:
+                info = await cluster.client_info()
+                assert info["lib-ver"] == "1234"
+                assert info["lib-name"] == "test2"
 
     async def test_empty_startup_nodes(self) -> None:
         """
@@ -745,9 +773,11 @@ class TestRedisClusterObj:
             (True, None, [7001, 7002, 7001]),
             (True, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
             (True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
+            (True, LoadBalancingStrategy.RANDOM, [7002, 7001, 7002]),
             (True, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
             (False, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
             (False, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
+            (False, LoadBalancingStrategy.RANDOM, [7002, 7001, 7002]),
             (False, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
         ],
     )
@@ -757,6 +787,27 @@ class TestRedisClusterObj:
         load_balancing_strategy: LoadBalancingStrategy,
         mocks_srv_ports: List[int],
     ) -> None:
+        def _make_mock_randint():
+            _state = (
+                1  # Start with 1 so we have clearly different results from round robin
+            )
+
+            def _mock_randint(lower: int, upper: int) -> int:
+                """
+                Return a controlled sequence of numbers when called repeatedly
+                """
+                if lower == upper:
+                    return lower
+
+                nonlocal _state
+                res = _state + lower
+                _state ^= 1
+                return res
+
+            return _mock_randint
+
+        mock_randint = _make_mock_randint()
+
         with mock.patch.multiple(
             Connection,
             send_command=mock.DEFAULT,
@@ -765,9 +816,12 @@ class TestRedisClusterObj:
             can_read_destructive=mock.DEFAULT,
             on_connect=mock.DEFAULT,
         ) as mocks:
-            with mock.patch.object(
-                ClusterNode, "execute_command", autospec=True
-            ) as execute_command:
+            with (
+                mock.patch.object(
+                    ClusterNode, "execute_command", autospec=True
+                ) as execute_command,
+                patch("random.randint", wraps=mock_randint),
+            ):
 
                 async def execute_command_mock_first(self, *args, **options):
                     await self.connection_class(**self.connection_kwargs).connect()
@@ -1044,6 +1098,7 @@ class TestRedisClusterObj:
         assert n_used > 1
 
 
+@pytest.mark.onlycluster
 class TestClusterRedisCommands:
     """
     Tests for RedisCluster unique commands
@@ -1067,6 +1122,7 @@ class TestClusterRedisCommands:
         [
             LoadBalancingStrategy.ROUND_ROBIN,
             LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+            LoadBalancingStrategy.RANDOM,
             LoadBalancingStrategy.RANDOM_REPLICA,
         ],
     )
@@ -1130,7 +1186,9 @@ class TestClusterRedisCommands:
         node = r.get_random_node()
         await r.client_setname("redis_py_test", target_nodes=node)
         client_name = await r.client_getname(target_nodes=node)
-        assert_resp_response(r, client_name, "redis_py_test", b"redis_py_test")
+        assert_resp_response(
+            r, client_name, "redis_py_test", b"redis_py_test", "redis_py_test"
+        )
 
     async def test_exists(self, r: RedisCluster) -> None:
         d = {"a": b"1", "b": b"2", "c": b"3", "d": b"4"}
@@ -1424,12 +1482,22 @@ class TestClusterRedisCommands:
     async def test_cluster_links(self, r: RedisCluster):
         node = r.get_random_node()
         res = await r.cluster_links(node)
-        if is_resp2_connection(r):
+        if expects_resp2_shape(r):
             links_to = sum(x.count(b"to") for x in res)
             links_for = sum(x.count(b"from") for x in res)
             assert links_to == links_for
             for i in range(0, len(res) - 1, 2):
                 assert res[i][3] == res[i + 1][3]
+        elif expects_unified_shape(r):
+            links_to = len(
+                list(filter(lambda x: str_if_bytes(x["direction"]) == "to", res))
+            )
+            links_for = len(
+                list(filter(lambda x: str_if_bytes(x["direction"]) == "from", res))
+            )
+            assert links_to == links_for
+            for i in range(0, len(res) - 1, 2):
+                assert res[i]["node"] == res[i + 1]["node"]
         else:
             links_to = len(list(filter(lambda x: x[b"direction"] == b"to", res)))
             links_for = len(list(filter(lambda x: x[b"direction"] == b"from", res)))
@@ -2027,6 +2095,44 @@ class TestClusterRedisCommands:
             [[b"a3", 20.0], [b"a1", 23.0]],
         )
 
+    @skip_if_server_version_lt("8.7.0")
+    async def test_cluster_zinterstore_count(self, r: RedisCluster) -> None:
+        await r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
+        await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
+        await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
+        assert (
+            await r.zinterstore(
+                "{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="COUNT"
+            )
+            == 2
+        )
+        assert_resp_response(
+            r,
+            await r.zrange("{foo}d", 0, -1, withscores=True),
+            [(b"a1", 3.0), (b"a3", 3.0)],
+            [[b"a1", 3.0], [b"a3", 3.0]],
+        )
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_cluster_zinterstore_count_with_weight(self, r: RedisCluster) -> None:
+        await r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
+        await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
+        await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
+        assert (
+            await r.zinterstore(
+                "{foo}d",
+                {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3},
+                aggregate="COUNT",
+            )
+            == 2
+        )
+        assert_resp_response(
+            r,
+            await r.zrange("{foo}d", 0, -1, withscores=True),
+            [(b"a1", 6.0), (b"a3", 6.0)],
+            [[b"a1", 6.0], [b"a3", 6.0]],
+        )
+
     @skip_if_server_version_lt("4.9.0")
     async def test_cluster_bzpopmax(self, r: RedisCluster) -> None:
         await r.zadd("{foo}a", {"a1": 1, "a2": 2})
@@ -2230,6 +2336,44 @@ class TestClusterRedisCommands:
             await r.zrange("{foo}d", 0, -1, withscores=True),
             [(b"a2", 5), (b"a4", 12), (b"a3", 20), (b"a1", 23)],
             [[b"a2", 5.0], [b"a4", 12.0], [b"a3", 20.0], [b"a1", 23.0]],
+        )
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_cluster_zunionstore_count(self, r: RedisCluster) -> None:
+        await r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
+        await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
+        await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
+        assert (
+            await r.zunionstore(
+                "{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="COUNT"
+            )
+            == 4
+        )
+        assert_resp_response(
+            r,
+            await r.zrange("{foo}d", 0, -1, withscores=True),
+            [(b"a4", 1.0), (b"a2", 2.0), (b"a1", 3.0), (b"a3", 3.0)],
+            [[b"a4", 1.0], [b"a2", 2.0], [b"a1", 3.0], [b"a3", 3.0]],
+        )
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_cluster_zunionstore_count_with_weight(self, r: RedisCluster) -> None:
+        await r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
+        await r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
+        await r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
+        assert (
+            await r.zunionstore(
+                "{foo}d",
+                {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3},
+                aggregate="COUNT",
+            )
+            == 4
+        )
+        assert_resp_response(
+            r,
+            await r.zrange("{foo}d", 0, -1, withscores=True),
+            [(b"a2", 3.0), (b"a4", 3.0), (b"a1", 6.0), (b"a3", 6.0)],
+            [[b"a2", 3.0], [b"a4", 3.0], [b"a1", 6.0], [b"a3", 6.0]],
         )
 
     @skip_if_server_version_lt("2.8.9")
@@ -2485,6 +2629,7 @@ class TestNodesManager:
     Tests for the NodesManager class
     """
 
+    @pytest.mark.onlycluster
     async def test_load_balancer(self, r: RedisCluster) -> None:
         n_manager = r.nodes_manager
         lb = n_manager.read_load_balancer
@@ -2543,6 +2688,7 @@ class TestNodesManager:
 
             assert srv_index > 0 and srv_index <= 2
 
+    @pytest.mark.fixed_client
     async def test_init_slots_cache_not_all_slots_covered(self) -> None:
         """
         Test that if not all slots are covered it should raise an exception
@@ -2565,6 +2711,7 @@ class TestNodesManager:
             "All slots are not covered after query all startup_nodes."
         )
 
+    @pytest.mark.fixed_client
     async def test_init_slots_cache_not_require_full_coverage_success(self) -> None:
         """
         When require_full_coverage is set to False and not all slots are
@@ -2588,6 +2735,7 @@ class TestNodesManager:
 
         await rc.aclose()
 
+    @pytest.mark.fixed_client
     async def test_init_slots_cache(self) -> None:
         """
         Test that slots cache can in initialized and all slots are covered
@@ -2619,6 +2767,7 @@ class TestNodesManager:
 
         await rc.aclose()
 
+    @pytest.mark.fixed_client
     async def test_init_slots_cache_cluster_mode_disabled(self) -> None:
         """
         Test that creating a RedisCluster failes if one of the startup nodes
@@ -2634,6 +2783,7 @@ class TestNodesManager:
             await rc.aclose()
         assert "Cluster mode is not enabled on this node" in str(e.value)
 
+    @pytest.mark.fixed_client
     async def test_empty_startup_nodes(self) -> None:
         """
         It should not be possible to create a node manager with no nodes
@@ -2642,6 +2792,7 @@ class TestNodesManager:
         with pytest.raises(RedisClusterException):
             await NodesManager([], False, {}).initialize()
 
+    @pytest.mark.fixed_client
     async def test_wrong_startup_nodes_type(self) -> None:
         """
         If something other then a list type itteratable is provided it should
@@ -2650,6 +2801,7 @@ class TestNodesManager:
         with pytest.raises(RedisClusterException):
             await NodesManager({}, False, {}).initialize()
 
+    @pytest.mark.fixed_client
     async def test_init_slots_cache_slots_collision(self) -> None:
         """
         Test that if 2 nodes do not agree on the same slots setup it should
@@ -2697,6 +2849,7 @@ class TestNodesManager:
                 "startup_nodes could not agree on a valid slots cache"
             ), str(ex.value)
 
+    @pytest.mark.fixed_client
     async def test_cluster_one_instance(self) -> None:
         """
         If the cluster exists of only 1 node then there is some hacks that must
@@ -2720,6 +2873,7 @@ class TestNodesManager:
 
         await rc.aclose()
 
+    @pytest.mark.fixed_client
     async def test_init_with_down_node(self) -> None:
         """
         If I can't connect to one of the nodes, everything should still work.
@@ -2778,6 +2932,7 @@ class TestNodesManager:
                     assert rc.get_node(host=default_host, port=7001) is not None
                     assert rc.get_node(host=default_host, port=7002) is not None
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize("dynamic_startup_nodes", [True, False])
     async def test_init_slots_dynamic_startup_nodes(self, dynamic_startup_nodes):
         rc = await get_mocked_redis_client(
@@ -2799,6 +2954,7 @@ class TestNodesManager:
         else:
             assert startup_nodes == ["my@DNS.com:7000"]
 
+    @pytest.mark.fixed_client
     async def test_move_node_to_end_of_cached_nodes(self) -> None:
         """
         Test that move_node_to_end_of_cached_nodes moves a node to the end of
@@ -2847,6 +3003,7 @@ class TestNodesManager:
         assert startup_node_names == [node2.name, node1.name, node3.name]
         assert nodes_cache_names == [node2.name, node1.name, node3.name]
 
+    @pytest.mark.fixed_client
     async def test_move_node_to_end_of_cached_nodes_nonexistent(self) -> None:
         """
         Test that move_node_to_end_of_cached_nodes does nothing for a
@@ -2870,6 +3027,7 @@ class TestNodesManager:
         assert startup_node_names == [node1.name, node2.name]
         assert nodes_cache_names == [node1.name, node2.name]
 
+    @pytest.mark.fixed_client
     async def test_move_node_to_end_of_cached_nodes_single_node(self) -> None:
         """
         Test that move_node_to_end_of_cached_nodes does nothing when there's
@@ -2892,7 +3050,84 @@ class TestNodesManager:
         assert startup_node_names == [node1.name]
         assert nodes_cache_names == [node1.name]
 
+    def _register_listener(self, nm):
+        """
+        Register a tracking async listener on the nodes manager's event
+        dispatcher for ``AsyncAfterSlotsCacheRefreshEvent``. The returned
+        instance must be kept alive by the caller for the duration of the
+        test.
+        """
 
+        class _TrackingListener(AsyncEventListenerInterface):
+            async def listen(self, event: object) -> None:  # pragma: no cover
+                pass
+
+        listener = _TrackingListener()
+        listener.listen = mock.AsyncMock()
+        nm._event_dispatcher.register_listeners(
+            {AsyncAfterSlotsCacheRefreshEvent: [listener]}
+        )
+        return listener
+
+    @pytest.mark.fixed_client
+    async def test_move_slot_dispatches_event_when_slot_moves_to_new_node(
+        self,
+    ) -> None:
+        """
+        move_slot() must dispatch AsyncAfterSlotsCacheRefreshEvent when the
+        redirected node is not currently serving the slot (new primary from a
+        different shard).
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        nm = r.nodes_manager
+        listener = self._register_listener(nm)
+        # Default layout: slot 0 is served by 127.0.0.1:7000; redirect it to
+        # 127.0.0.1:7001, which is the primary for a different shard.
+        await nm.move_slot(MovedError("0 127.0.0.1:7001"))
+
+        listener.listen.assert_called_once()
+        assert isinstance(
+            listener.listen.call_args[0][0], AsyncAfterSlotsCacheRefreshEvent
+        )
+        await r.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_move_slot_dispatches_event_on_failover(self) -> None:
+        """
+        move_slot() must dispatch AsyncAfterSlotsCacheRefreshEvent when the
+        redirected node was a replica of the same slot and is being promoted
+        (failover case).
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        nm = r.nodes_manager
+        listener = self._register_listener(nm)
+        # Default layout: slot 0 -> [7000 (primary), 7003 (replica)].
+        # Redirect to the replica, triggering the failover branch.
+        await nm.move_slot(MovedError("0 127.0.0.1:7003"))
+
+        listener.listen.assert_called_once()
+        assert isinstance(
+            listener.listen.call_args[0][0], AsyncAfterSlotsCacheRefreshEvent
+        )
+        await r.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_move_slot_skips_dispatch_on_circular_redirect(self) -> None:
+        """
+        move_slot() must not dispatch AsyncAfterSlotsCacheRefreshEvent when
+        the redirect points to the slot's current primary (no-op branch).
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        nm = r.nodes_manager
+        listener = self._register_listener(nm)
+        # Slot 0's current primary is 127.0.0.1:7000 -> no-op redirect.
+        await nm.move_slot(MovedError("0 127.0.0.1:7000"))
+
+        listener.listen.assert_not_called()
+        await r.aclose()
+
+
+@pytest.mark.fixed_client
 class TestClusterNodeConnectionHandling:
     """Tests for ClusterNode connection handling methods."""
 
@@ -3036,6 +3271,7 @@ class TestClusterNodeConnectionHandling:
         conn.disconnect.assert_not_called()
 
 
+@pytest.mark.fixed_client
 class TestClusterConnectionErrorHandling:
     """Tests for cluster connection error handling behavior."""
 
@@ -3153,8 +3389,47 @@ class TestClusterConnectionErrorHandling:
                         disconnect_free.assert_called()
 
 
+@pytest.mark.onlycluster
 class TestClusterPipeline:
     """Tests for the ClusterPipeline class."""
+
+    async def test_pipeline_nodes_manager_property(self) -> None:
+        """
+        Test that ClusterPipeline exposes nodes_manager property
+        that delegates to the cluster client's nodes_manager.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            pipeline = r.pipeline()
+            # Verify that nodes_manager property exists and returns the same object
+            # as the cluster client's nodes_manager
+            assert pipeline.nodes_manager is r.nodes_manager
+            # Verify that we can access nodes_manager attributes
+            assert pipeline.nodes_manager.default_node is not None
+        finally:
+            await r.aclose()
+
+    async def test_pipeline_set_response_callback(self) -> None:
+        """
+        Test that ClusterPipeline exposes set_response_callback method
+        that delegates to the cluster client's set_response_callback.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            pipeline = r.pipeline()
+
+            # Define a custom callback
+            def custom_callback(response):
+                return f"custom_{response}"
+
+            # Set the callback via the pipeline
+            pipeline.set_response_callback("CUSTOM_CMD", custom_callback)
+
+            # Verify that the callback was set on the cluster client
+            assert "CUSTOM_CMD" in r.response_callbacks
+            assert r.response_callbacks["CUSTOM_CMD"] is custom_callback
+        finally:
+            await r.aclose()
 
     async def test_blocked_arguments(self, r: RedisCluster) -> None:
         """Test handling for blocked pipeline arguments."""
@@ -3470,6 +3745,7 @@ class TestClusterPipeline:
             assert result[0] == cmd_count
 
 
+@pytest.mark.onlycluster
 @pytest.mark.ssl
 class TestSSL:
     """
@@ -3641,3 +3917,978 @@ class TestSSL:
             ssl_keyfile=self.client_key,
         ) as rc:
             assert await rc.ping()
+
+
+@pytest.mark.onlycluster
+class TestAsyncClusterMetricsRecording:
+    """
+    Integration tests that verify metrics are properly recorded
+    from async RedisCluster and delivered to the Meter through the observability recorder.
+
+    These tests use a real Redis cluster connection but mock the OTel Meter
+    to verify metrics are correctly recorded.
+    """
+
+    @pytest.fixture
+    def mock_meter(self):
+        """Create a mock Meter that tracks all instrument calls."""
+        meter = Mock()
+
+        # Create mock histogram for operation duration
+        self.operation_duration = Mock()
+
+        def create_histogram_side_effect(name, **kwargs):
+            if name == "db.client.operation.duration":
+                return self.operation_duration
+            return Mock()
+
+        meter.create_counter.return_value = Mock()
+        meter.create_up_down_counter.return_value = Mock()
+        meter.create_histogram.side_effect = create_histogram_side_effect
+        meter.create_observable_gauge.return_value = Mock()
+
+        return meter
+
+    @pytest.fixture
+    async def cluster_with_otel(self, r, mock_meter):
+        """
+        Setup a RedisCluster with real connection and mocked OTel collector.
+        Returns tuple of (cluster, operation_duration_mock).
+        """
+
+        # Reset any existing collector state
+        async_recorder.reset_collector()
+
+        # Create config with COMMAND group enabled
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        # Create collector with mocked meter
+        with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        # Patch the recorder to use our collector
+        # Note: _get_or_create_collector is now sync
+        with patch.object(
+            async_recorder,
+            "_get_or_create_collector",
+            return_value=collector,
+        ):
+            # Also set the collector directly to ensure it's used
+            async_recorder._async_metrics_collector = collector
+
+            # Create a new event dispatcher and attach it to the cluster
+            event_dispatcher = EventDispatcher()
+            r._event_dispatcher = event_dispatcher
+
+            yield r, self.operation_duration
+
+        # Cleanup
+        async_recorder.reset_collector()
+
+    async def test_execute_command_records_metric(self, cluster_with_otel):
+        """
+        Test that execute_command records operation duration metric to Meter.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        # Execute a command
+        await cluster.set("test_key", "test_value")
+
+        # Verify the Meter's histogram.record() was called
+        operation_duration_mock.record.assert_called()
+
+        # Get the last call arguments
+        call_args = operation_duration_mock.record.call_args
+
+        # Verify duration was recorded
+        duration = call_args[0][0]
+        assert isinstance(duration, float)
+        assert duration >= 0
+
+        # Verify attributes
+        attrs = call_args[1]["attributes"]
+        assert attrs["db.operation.name"] == "SET"
+        assert "server.address" in attrs
+        assert "server.port" in attrs
+        assert "db.namespace" in attrs
+
+    async def test_get_command_records_metric(self, cluster_with_otel):
+        """
+        Test that GET command records metric with correct command name.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        # Execute GET command
+        await cluster.get("test_key")
+
+        # Verify command name is GET
+        call_args = operation_duration_mock.record.call_args
+        attrs = call_args[1]["attributes"]
+        assert attrs["db.operation.name"] == "GET"
+
+    async def test_multiple_commands_record_multiple_metrics(self, cluster_with_otel):
+        """
+        Test that multiple command executions record multiple metrics.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        # Execute multiple commands
+        await cluster.set("key1", "value1")
+        await cluster.get("key1")
+        await cluster.delete("key1")
+
+        # Verify histogram.record() was called 3 times
+        assert operation_duration_mock.record.call_count == 3
+
+    async def test_server_attributes_recorded(self, cluster_with_otel):
+        """
+        Test that server address, port, and db namespace are recorded.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        await cluster.ping()
+
+        call_args = operation_duration_mock.record.call_args
+        attrs = call_args[1]["attributes"]
+
+        # Verify server attributes are present and have valid values
+        assert "server.address" in attrs
+        assert isinstance(attrs["server.address"], str)
+        assert len(attrs["server.address"]) > 0
+
+        assert "server.port" in attrs
+        assert isinstance(attrs["server.port"], int)
+        assert attrs["server.port"] > 0
+
+        assert "db.namespace" in attrs
+
+    async def test_duration_is_positive(self, cluster_with_otel):
+        """
+        Test that the recorded duration is a positive float.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        await cluster.set("duration_test", "value")
+
+        call_args = operation_duration_mock.record.call_args
+        duration = call_args[0][0]
+
+        assert isinstance(duration, float)
+        assert duration >= 0
+
+    async def test_no_batch_size_for_single_command(self, cluster_with_otel):
+        """
+        Test that single commands don't include batch_size attribute.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        await cluster.get("single_command_key")
+
+        call_args = operation_duration_mock.record.call_args
+        attrs = call_args[1]["attributes"]
+
+        # batch_size should not be present for single commands
+        assert "db.operation.batch.size" not in attrs
+
+    async def test_command_error_records_metric_with_error_type(
+        self, cluster_with_otel
+    ):
+        """
+        Test that when a command fails, the recorded metric includes error.type attribute.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        # Execute a command that will fail (wrong type operation)
+        await cluster.set("error_test_key", "string_value")
+
+        try:
+            # Try to use LPUSH on a string key - this will fail
+            await cluster.lpush("error_test_key", "value")
+        except ResponseError:
+            pass
+
+        # Find the LPUSH event in recorded calls
+        lpush_calls = [
+            call_obj
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "LPUSH"
+        ]
+
+        assert len(lpush_calls) >= 1
+        attrs = lpush_calls[0][1]["attributes"]
+        assert "error.type" in attrs
+
+
+@pytest.mark.onlycluster
+class TestAsyncClusterPipelineMetricsRecording:
+    """
+    Integration tests that verify metrics are properly recorded
+    from async ClusterPipeline and delivered to the Meter through the observability recorder.
+
+    These tests use a real Redis cluster connection but mock the OTel Meter
+    to verify metrics are correctly recorded.
+    """
+
+    @pytest.fixture
+    def mock_meter(self):
+        """Create a mock Meter that tracks all instrument calls."""
+        meter = Mock()
+
+        # Create mock histogram for operation duration
+        self.operation_duration = Mock()
+
+        def create_histogram_side_effect(name, **kwargs):
+            if name == "db.client.operation.duration":
+                return self.operation_duration
+            return Mock()
+
+        meter.create_counter.return_value = Mock()
+        meter.create_up_down_counter.return_value = Mock()
+        meter.create_histogram.side_effect = create_histogram_side_effect
+        meter.create_observable_gauge.return_value = Mock()
+
+        return meter
+
+    @pytest.fixture
+    async def cluster_pipeline_with_otel(self, r, mock_meter):
+        """
+        Setup a ClusterPipeline with real connection and mocked OTel collector.
+        Returns tuple of (cluster, operation_duration_mock).
+        """
+
+        # Reset any existing collector state
+        async_recorder.reset_collector()
+
+        # Create config with COMMAND group enabled
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        # Create collector with mocked meter
+        with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        # Patch the recorder to use our collector
+        # Note: _get_or_create_collector is now sync
+        with patch.object(
+            async_recorder,
+            "_get_or_create_collector",
+            return_value=collector,
+        ):
+            # Also set the collector directly to ensure it's used
+            async_recorder._async_metrics_collector = collector
+
+            # Create a new event dispatcher and attach it to the cluster
+            event_dispatcher = EventDispatcher()
+            r._event_dispatcher = event_dispatcher
+
+            yield r, self.operation_duration
+
+        # Cleanup
+        async_recorder.reset_collector()
+
+    async def test_pipeline_execute_records_metric(self, cluster_pipeline_with_otel):
+        """
+        Test that pipeline execute records operation duration metric to Meter.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        # Execute a pipeline
+        pipe = cluster.pipeline()
+        pipe.set("pipe_key1", "value1")
+        pipe.get("pipe_key1")
+        await pipe.execute()
+
+        # Verify the Meter's histogram.record() was called
+        operation_duration_mock.record.assert_called()
+
+        # Get the last call arguments (pipeline event)
+        call_args = operation_duration_mock.record.call_args
+
+        # Verify duration was recorded
+        duration = call_args[0][0]
+        assert isinstance(duration, float)
+        assert duration >= 0
+
+        # Verify attributes
+        attrs = call_args[1]["attributes"]
+        assert attrs["db.operation.name"] == "PIPELINE"
+
+    async def test_pipeline_server_attributes_recorded(
+        self, cluster_pipeline_with_otel
+    ):
+        """
+        Test that server address, port, and db namespace are recorded for pipeline.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        pipe = cluster.pipeline()
+        pipe.set("server_attr_key", "value")
+        await pipe.execute()
+
+        # Find the PIPELINE event call
+        pipeline_call = None
+        for call_obj in operation_duration_mock.record.call_args_list:
+            attrs = call_obj[1]["attributes"]
+            if attrs.get("db.operation.name") == "PIPELINE":
+                pipeline_call = call_obj
+                break
+
+        assert pipeline_call is not None
+        attrs = pipeline_call[1]["attributes"]
+
+        # Verify server attributes are present
+        assert "server.address" in attrs
+        assert isinstance(attrs["server.address"], str)
+
+        assert "server.port" in attrs
+        assert isinstance(attrs["server.port"], int)
+
+        assert "db.namespace" in attrs
+
+    async def test_pipeline_duration_is_positive(self, cluster_pipeline_with_otel):
+        """
+        Test that the recorded duration for pipeline is a positive float.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        pipe = cluster.pipeline()
+        pipe.set("duration_key", "value")
+        await pipe.execute()
+
+        # Find the PIPELINE event call
+        pipeline_call = None
+        for call_obj in operation_duration_mock.record.call_args_list:
+            attrs = call_obj[1]["attributes"]
+            if attrs.get("db.operation.name") == "PIPELINE":
+                pipeline_call = call_obj
+                break
+
+        assert pipeline_call is not None
+        duration = pipeline_call[0][0]
+
+        assert isinstance(duration, float)
+        assert duration >= 0
+
+    async def test_multiple_pipeline_executions_record_multiple_metrics(
+        self, cluster_pipeline_with_otel
+    ):
+        """
+        Test that multiple pipeline executions record multiple metrics.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        # First pipeline
+        pipe1 = cluster.pipeline()
+        pipe1.set("multi_pipe_key1", "value1")
+        await pipe1.execute()
+
+        # Second pipeline
+        pipe2 = cluster.pipeline()
+        pipe2.set("multi_pipe_key2", "value2")
+        pipe2.get("multi_pipe_key2")
+        await pipe2.execute()
+
+        # Find all PIPELINE event calls
+        pipeline_calls = [
+            call_obj
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "PIPELINE"
+        ]
+
+        # Should have at least 2 pipeline events
+        assert len(pipeline_calls) >= 2
+
+
+@pytest.mark.onlycluster
+@pytest.mark.skipif(
+    'not config.REDIS_INFO.get("cluster_enabled", False)',
+    reason="Requires Redis Cluster",
+)
+class TestClusterPubSub:
+    """
+    Test ClusterPubSub with shard channels functionality
+    """
+
+    async def wait_for_message(
+        self, pubsub, timeout=0.2, ignore_subscribe_messages=False, sharded=False
+    ):
+        """Helper method to wait for a message with timeout.
+
+        Args:
+            pubsub: The PubSub instance
+            timeout: Timeout in seconds
+            ignore_subscribe_messages: Whether to ignore subscribe messages
+            sharded: If True, use get_sharded_message() instead of get_message()
+        """
+        import asyncio
+
+        now = asyncio.get_running_loop().time()
+        end_time = now + timeout
+        while now < end_time:
+            if sharded:
+                message = await pubsub.get_sharded_message(
+                    ignore_subscribe_messages=ignore_subscribe_messages,
+                    timeout=0.01,
+                )
+            else:
+                message = await pubsub.get_message(
+                    ignore_subscribe_messages=ignore_subscribe_messages
+                )
+            if message is not None:
+                return message
+            await asyncio.sleep(0.01)
+            now = asyncio.get_running_loop().time()
+        return None
+
+    def make_message(self, type, channel, data, pattern=None):
+        """Helper method to create expected message format"""
+        return {
+            "type": type,
+            "pattern": pattern and pattern.encode("utf-8") or None,
+            "channel": channel and channel.encode("utf-8") or None,
+            "data": data.encode("utf-8") if isinstance(data, str) else data,
+        }
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_cluster_pubsub_creation(self, r):
+        """Test basic ClusterPubSub creation"""
+        pubsub = r.pubsub()
+        assert pubsub is not None
+        assert hasattr(pubsub, "ssubscribe")
+        assert hasattr(pubsub, "sunsubscribe")
+        assert hasattr(pubsub, "get_sharded_message")
+        await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_cluster_pubsub_with_node(self, r):
+        """Test ClusterPubSub creation with specific node"""
+        nodes = r.get_nodes()
+        if nodes:
+            node = nodes[0]
+            pubsub = r.pubsub(node=node)
+            assert pubsub.node == node
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_cluster_pubsub_with_host_port(self, r):
+        """Test ClusterPubSub creation with host and port"""
+        nodes = r.get_nodes()
+        if nodes:
+            node = nodes[0]
+            pubsub = r.pubsub(host=node.host, port=node.port)
+            assert pubsub.node.host == node.host
+            assert pubsub.node.port == node.port
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_shard_channel_subscribe_unsubscribe(self, r):
+        """Test shard channel subscribe and unsubscribe"""
+        pubsub = r.pubsub()
+
+        try:
+            # Test channels that map to different nodes
+            channels = ["shard_test_1", "shard_test_2", "shard_test_3"]
+
+            # Subscribe to shard channels
+            await pubsub.ssubscribe(*channels)
+
+            # Verify subscription messages - one ssubscribe confirmation per channel
+            received_channels = set()
+            for _ in range(len(channels)):
+                msg = await self.wait_for_message(pubsub, timeout=1.0, sharded=True)
+                assert msg is not None, "Expected subscription confirmation message"
+                assert msg["type"] == "ssubscribe"
+                assert msg["channel"].decode() in channels
+                received_channels.add(msg["channel"].decode())
+
+            # Verify we got confirmations for all channels
+            assert received_channels == set(channels)
+
+            # Unsubscribe from shard channels
+            await pubsub.sunsubscribe(*channels)
+
+        finally:
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_shard_channel_attributes(self, r):
+        """Test shard channel attributes"""
+        pubsub = r.pubsub()
+
+        try:
+            # Initially no shard channels
+            assert not pubsub.shard_channels
+            assert not pubsub.pending_unsubscribe_shard_channels
+
+            # Subscribe to a shard channel
+            await pubsub.ssubscribe("test_shard_attr")
+
+            # Should have shard channel information
+            # Note: The exact behavior may depend on implementation details
+
+        finally:
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_shard_channel_with_handler(self, r):
+        """Test shard channel subscription with message handler"""
+        pubsub = r.pubsub()
+
+        try:
+            received_messages = []
+
+            def message_handler(message):
+                received_messages.append(message)
+
+            # Subscribe with handler
+            await pubsub.ssubscribe(test_handler_channel=message_handler)
+
+            # This test verifies that the handler mechanism is properly set up
+            # Actual message delivery testing would require a live Redis cluster
+
+        finally:
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_invalid_node_raises_exception(self, r):
+        """Test that invalid node raises appropriate exception"""
+        with pytest.raises(RedisClusterException):
+            r.pubsub(host="invalid_host", port=9999)
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_partial_host_port_raises_exception(self, r):
+        """Test that providing only host or port raises DataError"""
+        with pytest.raises(DataError):
+            r.pubsub(host="localhost")  # Missing port
+
+        with pytest.raises(DataError):
+            r.pubsub(port=7000)  # Missing host
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_pubsub_without_specifying_node(self, r):
+        """
+        Test creation of pubsub instance without specifying a node. The node
+        should be determined based on the keyslot of the first command
+        execution.
+        """
+        channel_name = "foo"
+        node = r.get_node_from_key(channel_name)
+        p = r.pubsub()
+        try:
+            assert p.get_pubsub_node() is None
+            await p.subscribe(channel_name)
+            assert p.get_pubsub_node() == node
+        finally:
+            await p.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_get_pubsub_node(self, r):
+        """Test get_pubsub_node returns the correct node"""
+        nodes = r.get_nodes()
+        if nodes:
+            node = nodes[0]
+            p = r.pubsub(node=node)
+            try:
+                assert p.get_pubsub_node() == node
+            finally:
+                await p.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_get_sharded_message_with_publish(self, r):
+        """
+        Test get_sharded_message returns published messages correctly.
+        Validates that sharded message retrieval works end-to-end.
+        """
+        pubsub = r.pubsub()
+        channel = "test-channel:{0}"
+
+        try:
+            # Subscribe to the shard channel
+            await pubsub.ssubscribe(channel)
+
+            # Read subscription confirmation using sharded message retrieval
+            msg = await self.wait_for_message(pubsub, timeout=1.0, sharded=True)
+            assert msg is not None
+            assert msg["type"] == "ssubscribe"
+
+            # Publish a message using execute_command directly (spublish not on RedisCluster)
+            await r.execute_command("SPUBLISH", channel, "test message")
+
+            # Read the published message using get_sharded_message
+            msg = await pubsub.get_sharded_message(timeout=1.0)
+            # May need to retry a few times
+            for _ in range(10):
+                if msg is not None and msg.get("type") == "smessage":
+                    break
+                await asyncio.sleep(0.1)
+                msg = await pubsub.get_sharded_message(timeout=0.1)
+
+            assert msg is not None
+            assert msg["type"] == "smessage"
+            assert msg["channel"] == channel.encode()
+            assert msg["data"] == b"test message"
+        finally:
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_get_sharded_message_multiple_channels(self, r):
+        """
+        Test get_sharded_message with multiple channels on potentially different nodes.
+        Validates round-robin message retrieval across nodes.
+        """
+        pubsub = r.pubsub()
+        channel1 = "test-channel:{0}"
+        channel2 = "test-channel:{6}"
+
+        try:
+            # Subscribe to both channels
+            await pubsub.ssubscribe(channel1, channel2)
+
+            # Read subscription confirmations using sharded retrieval
+            for _ in range(2):
+                msg = await self.wait_for_message(pubsub, timeout=1.0, sharded=True)
+                assert msg is not None
+
+            # Publish messages to both channels using execute_command
+            await r.execute_command("SPUBLISH", channel1, "msg1")
+            await r.execute_command("SPUBLISH", channel2, "msg2")
+
+            # Read messages using get_sharded_message
+            messages = []
+            for _ in range(10):
+                msg = await pubsub.get_sharded_message(timeout=0.2)
+                if msg and msg.get("type") == "smessage":
+                    messages.append(msg)
+                if len(messages) >= 2:
+                    break
+
+            assert len(messages) == 2
+            channels_received = {msg["channel"] for msg in messages}
+            assert channel1.encode() in channels_received
+            assert channel2.encode() in channels_received
+        finally:
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_get_sharded_message_timeout_returns_none(self, r):
+        """
+        Test that get_sharded_message with timeout returns None when no message
+        arrives within the timeout period.
+        """
+        pubsub = r.pubsub()
+        channel = "test-channel:{0}"
+
+        try:
+            await pubsub.ssubscribe(channel)
+            # Read subscription confirmation using sharded retrieval
+            msg = await self.wait_for_message(pubsub, timeout=1.0, sharded=True)
+            assert msg is not None
+
+            # Call get_sharded_message with a short timeout - should return None
+            import time
+
+            start = time.monotonic()
+            msg = await pubsub.get_sharded_message(timeout=0.1)
+            elapsed = time.monotonic() - start
+
+            assert msg is None
+            # Verify timeout was approximately respected (allow some slack)
+            assert elapsed < 0.5
+        finally:
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_get_sharded_message_timeout_zero_returns_immediately(self, r):
+        """
+        Test that get_sharded_message(timeout=0) returns immediately without blocking.
+        """
+        pubsub = r.pubsub()
+        channel = "test-channel:{0}"
+
+        try:
+            await pubsub.ssubscribe(channel)
+            # Read subscription confirmation using sharded retrieval
+            msg = await self.wait_for_message(pubsub, timeout=1.0, sharded=True)
+            assert msg is not None
+
+            # get_sharded_message with timeout=0 should return immediately
+            import time
+
+            start = time.monotonic()
+            msg = await pubsub.get_sharded_message(timeout=0)
+            elapsed = time.monotonic() - start
+
+            assert msg is None
+            assert elapsed < 0.1
+        finally:
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_generator_handles_concurrent_mapping_changes(self, r):
+        """
+        Test that the generator properly handles mapping changes during iteration.
+        This validates the fix for RuntimeError: dictionary changed size during iteration.
+        """
+        pubsub = r.pubsub()
+        channel1 = "test-channel:{0}"
+        channel2 = "test-channel:{6}"
+
+        try:
+            # Subscribe to first channel
+            await pubsub.ssubscribe(channel1)
+            msg = await self.wait_for_message(pubsub, timeout=1.0, sharded=True)
+            assert msg is not None
+
+            # Get initial mapping size (cluster pubsub only)
+            assert hasattr(pubsub, "node_pubsub_mapping"), "Test requires ClusterPubSub"
+            initial_size = len(pubsub.node_pubsub_mapping)
+
+            # Subscribe to second channel (modifies mapping during potential iteration)
+            await pubsub.ssubscribe(channel2)
+            msg = await self.wait_for_message(pubsub, timeout=1.0, sharded=True)
+            assert msg is not None
+
+            # Verify mapping was updated
+            assert len(pubsub.node_pubsub_mapping) >= initial_size
+
+            # Publish and read messages - should not raise RuntimeError
+            await r.execute_command("SPUBLISH", channel1, "msg1")
+            await r.execute_command("SPUBLISH", channel2, "msg2")
+
+            messages_received = 0
+            for _ in range(10):
+                msg = await pubsub.get_sharded_message(timeout=0.2)
+                if msg and msg.get("type") == "smessage":
+                    messages_received += 1
+                if messages_received >= 2:
+                    break
+
+            assert messages_received == 2
+        finally:
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_get_redis_connection(self, r):
+        """
+        Test that get_redis_connection() returns the pubsub's dedicated
+        connection after subscribing to a channel.
+        """
+        node = r.get_default_node()
+        p = r.pubsub(node=node)
+        try:
+            # Before subscribing, connection should be None
+            assert p.get_redis_connection() is None
+
+            # Subscribe to establish the dedicated pubsub connection
+            await p.subscribe("test-channel")
+
+            # Now get_redis_connection() should return the dedicated connection
+            connection = p.get_redis_connection()
+            assert connection is not None
+            # The connection should be from the node
+            assert connection.host == node.host
+            assert connection.port == node.port
+        finally:
+            await p.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_init_pubsub_with_non_existent_node(self, r):
+        """
+        Test creation of pubsub instance with node that doesn't exist in the
+        cluster. RedisClusterException should be raised.
+        """
+        from redis.cluster import ClusterNode
+
+        node = ClusterNode("1.1.1.1", 1111)
+        with pytest.raises(RedisClusterException):
+            r.pubsub(node=node)
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_pubsub_channels_merge_results(self, r):
+        """
+        Test that pubsub_channels merges results from all nodes.
+        """
+        nodes = r.get_nodes()
+        channels = []
+        pubsub_nodes = []
+        i = 0
+        try:
+            for node in nodes:
+                channel = f"foo{i}"
+                # Create pubsub clients connected to different nodes
+                p = r.pubsub(node=node)
+                pubsub_nodes.append(p)
+                await p.subscribe(channel)
+                b_channel = channel.encode("utf-8")
+                channels.append(b_channel)
+                # Read subscription confirmation
+                await self.wait_for_message(p, timeout=1.0)
+                i += 1
+
+            # Assert that the cluster's pubsub_channels function returns ALL channels
+            await asyncio.sleep(0.3)  # Allow time for subscriptions to propagate
+            result = await r.pubsub_channels(target_nodes="all")
+            result.sort()
+            channels.sort()
+            assert result == channels
+        finally:
+            for p in pubsub_nodes:
+                await p.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_pubsub_numsub_merge_results(self, r):
+        """
+        Test that pubsub_numsub merges subscription counts from all nodes.
+        """
+        nodes = r.get_nodes()
+        pubsub_nodes = []
+        channel = "foo"
+        b_channel = channel.encode("utf-8")
+        try:
+            for node in nodes:
+                # Create pubsub clients connected to different nodes
+                p = r.pubsub(node=node)
+                pubsub_nodes.append(p)
+                await p.subscribe(channel)
+                # Read subscription confirmation
+                await self.wait_for_message(p, timeout=1.0)
+
+            # Assert cluster's pubsub_numsub returns ALL clients
+            await asyncio.sleep(0.3)  # Allow time for subscriptions to propagate
+            result = await r.pubsub_numsub(channel, target_nodes="all")
+            assert result == [(b_channel, len(nodes))]
+        finally:
+            for p in pubsub_nodes:
+                await p.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_pubsub_numpat_merge_results(self, r):
+        """
+        Test that pubsub_numpat merges pattern subscription counts from all nodes.
+        """
+        nodes = r.get_nodes()
+        pubsub_nodes = []
+        pattern = "foo*"
+        try:
+            for node in nodes:
+                # Create pubsub clients connected to different nodes
+                p = r.pubsub(node=node)
+                pubsub_nodes.append(p)
+                await p.psubscribe(pattern)
+                # Read subscription confirmation
+                await self.wait_for_message(p, timeout=1.0)
+
+            # Assert cluster's pubsub_numpat returns ALL pattern subscriptions
+            await asyncio.sleep(0.3)  # Allow time for subscriptions to propagate
+            result = await r.pubsub_numpat(target_nodes="all")
+            assert result == len(nodes)
+        finally:
+            for p in pubsub_nodes:
+                await p.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_shard_channel_message_handler_with_message(self, r):
+        """
+        Test shard channel subscription with message handler receives actual messages.
+        This verifies the handler callback is executed when messages arrive.
+        """
+        pubsub = r.pubsub(ignore_subscribe_messages=True)
+        channel = "test-handler-channel:{0}"
+        received_messages = []
+
+        def message_handler(message):
+            received_messages.append(message)
+
+        try:
+            # Subscribe with handler
+            await pubsub.ssubscribe(**{channel: message_handler})
+
+            # Publish a message
+            await r.spublish(channel, "test message")
+
+            # Read message using get_sharded_message - handler should be called
+            for _ in range(10):
+                msg = await pubsub.get_sharded_message(timeout=0.2)
+                # When handler is set, get_sharded_message returns None
+                # but the handler receives the message
+                if received_messages:
+                    break
+
+            # Verify handler received the message
+            assert msg is None
+            assert len(received_messages) == 1
+            assert received_messages[0]["type"] == "smessage"
+            assert received_messages[0]["channel"] == channel.encode()
+            assert received_messages[0]["data"] == b"test message"
+        finally:
+            await pubsub.aclose()
+
+
+@pytest.mark.fixed_client
+class TestClusterPubSubWithMocks:
+    """
+    Unit tests for async ClusterPubSub that do not require a running cluster.
+    """
+
+    def _make_pubsub(self, cluster_mock, node=None):
+        """Create a ClusterPubSub with the provided cluster mock."""
+        from redis._parsers import Encoder
+        from redis.asyncio.cluster import ClusterPubSub
+
+        cluster_mock.encoder = Encoder("utf-8", "strict", False)
+        return ClusterPubSub(cluster_mock, node=node)
+
+    async def test_init_with_node_uses_adapter(self) -> None:
+        """
+        __init__ with a node must wrap it in _ClusterNodePoolAdapter instead
+        of creating a detached ConnectionPool.
+        """
+        from redis.asyncio.cluster import _ClusterNodePoolAdapter
+
+        node = ClusterNode("127.0.0.1", 7000)
+        cluster = Mock()
+        cluster.get_node.return_value = node
+
+        pubsub = self._make_pubsub(cluster, node=node)
+
+        assert isinstance(pubsub.connection_pool, _ClusterNodePoolAdapter)
+        assert pubsub.connection_pool._node is node
+        assert pubsub.connection_pool.connection_kwargs is node.connection_kwargs
+
+    async def test_init_without_node_has_no_connection_pool(self) -> None:
+        """
+        __init__ without a node must defer connection_pool creation until
+        the first command selects a node.
+        """
+        cluster = Mock()
+        pubsub = self._make_pubsub(cluster)
+
+        assert pubsub.node is None
+        assert pubsub.connection_pool is None
+
+    async def test_get_node_pubsub_uses_adapter(self) -> None:
+        """
+        _get_node_pubsub must build a PubSub backed by a
+        _ClusterNodePoolAdapter wrapping the ClusterNode.
+        """
+        from redis.asyncio.cluster import _ClusterNodePoolAdapter
+
+        cluster = Mock()
+        pubsub = self._make_pubsub(cluster)
+        node = ClusterNode("127.0.0.1", 7000)
+
+        shard_pubsub = pubsub._get_node_pubsub(node)
+
+        assert isinstance(shard_pubsub.connection_pool, _ClusterNodePoolAdapter)
+        assert shard_pubsub.connection_pool._node is node
+        assert pubsub.node_pubsub_mapping[node.name] is shard_pubsub
+
+    async def test_get_node_pubsub_caches_by_node_name(self) -> None:
+        """Repeated calls must not re-materialise the shard PubSub."""
+        cluster = Mock()
+        pubsub = self._make_pubsub(cluster)
+        node = ClusterNode("127.0.0.1", 7000)
+
+        first = pubsub._get_node_pubsub(node)
+        second = pubsub._get_node_pubsub(node)
+
+        assert first is second

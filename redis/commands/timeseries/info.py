@@ -1,12 +1,30 @@
 from ..helpers import nativestr
 from .utils import list_to_dict
 
+# Mapping from RESP3 camelCase field names to the legacy snake_case
+# attribute names. Used so callers can fetch the same value with either
+# spelling regardless of which wire format produced the ``TSInfo``.
+_FIELD_ALIASES = {
+    "sourceKey": "source_key",
+    "chunkCount": "chunk_count",
+    "memoryUsage": "memory_usage",
+    "totalSamples": "total_samples",
+    "retentionTime": "retention_msecs",
+    "lastTimestamp": "last_timestamp",
+    "firstTimestamp": "first_timestamp",
+    "maxSamplesPerChunk": "max_samples_per_chunk",
+    "chunkSize": "chunk_size",
+    "duplicatePolicy": "duplicate_policy",
+}
+
 
 class TSInfo:
     """
     Hold information and statistics on the time-series.
     Can be created using ``tsinfo`` command
     https://redis.io/docs/latest/commands/ts.info/
+
+    Handles both RESP2 (flat list) and RESP3 (dict) responses.
     """
 
     rules = []
@@ -59,13 +77,20 @@ class TSInfo:
         Can read more about on
         https://redis.io/docs/latest/develop/data-types/timeseries/configuration/#duplicate_policy
         """
-        response = dict(zip(map(nativestr, args[::2]), args[1::2]))
-        self.rules = response.get("rules")
+        if isinstance(args, dict):
+            # RESP3 wire: response is a native map.
+            response = args
+            self.rules = response.get("rules") or {}
+            self.labels = response.get("labels") or {}
+        else:
+            # RESP2 wire: flat list of alternating key-value pairs.
+            response = dict(zip(map(nativestr, args[::2]), args[1::2]))
+            self.rules = response.get("rules")
+            self.labels = list_to_dict(response.get("labels"))
         self.source_key = response.get("sourceKey")
         self.chunk_count = response.get("chunkCount")
         self.memory_usage = response.get("memoryUsage")
         self.total_samples = response.get("totalSamples")
-        self.labels = list_to_dict(response.get("labels"))
         self.retention_msecs = response.get("retentionTime")
         self.last_timestamp = response.get("lastTimestamp")
         self.first_timestamp = response.get("firstTimestamp")
@@ -88,4 +113,4 @@ class TSInfo:
             return None
 
     def __getitem__(self, item):
-        return getattr(self, item)
+        return getattr(self, _FIELD_ALIASES.get(item, item))

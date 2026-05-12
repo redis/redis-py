@@ -32,7 +32,11 @@ from redis.cluster import (
 from redis.commands.core import HotkeysMetricsTypes
 from redis.connection import BlockingConnectionPool, Connection, ConnectionPool
 from redis.crc import key_slot
-from redis.event import EventDispatcher
+from redis.event import (
+    AfterSlotsCacheRefreshEvent,
+    EventDispatcher,
+    EventListenerInterface,
+)
 from redis.exceptions import (
     AskError,
     ClusterDownError,
@@ -55,7 +59,8 @@ from tests.test_pubsub import wait_for_message
 from .conftest import (
     _get_client,
     assert_resp_response,
-    is_resp2_connection,
+    expects_resp2_shape,
+    expects_unified_shape,
     skip_if_redis_enterprise,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
@@ -660,9 +665,11 @@ class TestRedisClusterObj:
             (True, None, [7001, 7002, 7001]),
             (True, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
             (True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
+            (True, LoadBalancingStrategy.RANDOM, [7002, 7001, 7002]),
             (True, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
             (False, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
             (False, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
+            (False, LoadBalancingStrategy.RANDOM, [7002, 7001, 7002]),
             (False, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
         ],
     )
@@ -672,6 +679,27 @@ class TestRedisClusterObj:
         load_balancing_strategy: LoadBalancingStrategy,
         mocks_srv_ports: List[int],
     ):
+        def _make_mock_randint():
+            _state = (
+                1  # Start with 1 so we have clearly different results from round robin
+            )
+
+            def _mock_randint(lower: int, upper: int) -> int:
+                """
+                Return a controlled sequence of numbers when called repeatedly
+                """
+                if lower == upper:
+                    return lower
+
+                nonlocal _state
+                res = _state + lower
+                _state ^= 1
+                return res
+
+            return _mock_randint
+
+        mock_randint = _make_mock_randint()
+
         with patch.multiple(
             Connection,
             send_command=DEFAULT,
@@ -680,7 +708,10 @@ class TestRedisClusterObj:
             can_read=DEFAULT,
             on_connect=DEFAULT,
         ) as mocks:
-            with patch.object(Redis, "parse_response") as parse_response:
+            with (
+                patch.object(Redis, "parse_response") as parse_response,
+                patch("random.randint", wraps=mock_randint),
+            ):
 
                 def parse_response_mock_first(connection, *args, **options):
                     # Primary
@@ -732,8 +763,9 @@ class TestRedisClusterObj:
                 if (
                     load_balancing_strategy is None
                     or load_balancing_strategy == LoadBalancingStrategy.ROUND_ROBIN
+                    or load_balancing_strategy == LoadBalancingStrategy.RANDOM
                 ):
-                    # in the round robin strategy the primary node can also receive read
+                    # in the round robin and random strategies, the primary node can also receive read
                     # requests and this means that there will be second node connected
                     expected_calls_list.append(call("READONLY"))
 
@@ -1092,6 +1124,7 @@ class TestClusterRedisCommands:
         [
             LoadBalancingStrategy.ROUND_ROBIN,
             LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+            LoadBalancingStrategy.RANDOM,
             LoadBalancingStrategy.RANDOM_REPLICA,
         ],
     )
@@ -1151,7 +1184,9 @@ class TestClusterRedisCommands:
         node = r.get_random_node()
         r.client_setname("redis_py_test", target_nodes=node)
         client_name = r.client_getname(target_nodes=node)
-        assert_resp_response(r, client_name, "redis_py_test", b"redis_py_test")
+        assert_resp_response(
+            r, client_name, "redis_py_test", b"redis_py_test", "redis_py_test"
+        )
 
     def test_exists(self, r):
         d = {"a": b"1", "b": b"2", "c": b"3", "d": b"4"}
@@ -1307,9 +1342,15 @@ class TestClusterRedisCommands:
             b"replication-offset",
             b"health",
         ]
+        if expects_unified_shape(r):
+            attributes = [str_if_bytes(attribute) for attribute in attributes]
         for x in cluster_shards:
             assert_resp_response(
-                r, list(x.keys()), ["slots", "nodes"], [b"slots", b"nodes"]
+                r,
+                list(x.keys()),
+                ["slots", "nodes"],
+                [b"slots", b"nodes"],
+                ["slots", "nodes"],
             )
             try:
                 x["nodes"]
@@ -1573,12 +1614,22 @@ class TestClusterRedisCommands:
     def test_cluster_links(self, r):
         node = r.get_random_node()
         res = r.cluster_links(node)
-        if is_resp2_connection(r):
+        if expects_resp2_shape(r):
             links_to = sum(x.count(b"to") for x in res)
             links_for = sum(x.count(b"from") for x in res)
             assert links_to == links_for
             for i in range(0, len(res) - 1, 2):
                 assert res[i][3] == res[i + 1][3]
+        elif expects_unified_shape(r):
+            links_to = len(
+                list(filter(lambda x: str_if_bytes(x["direction"]) == "to", res))
+            )
+            links_for = len(
+                list(filter(lambda x: str_if_bytes(x["direction"]) == "from", res))
+            )
+            assert links_to == links_for
+            for i in range(0, len(res) - 1, 2):
+                assert res[i]["node"] == res[i + 1]["node"]
         else:
             links_to = len(list(filter(lambda x: x[b"direction"] == b"to", res)))
             links_for = len(list(filter(lambda x: x[b"direction"] == b"from", res)))
@@ -2185,6 +2236,42 @@ class TestClusterRedisCommands:
             [[b"a3", 20.0], [b"a1", 23.0]],
         )
 
+    @skip_if_server_version_lt("8.7.0")
+    def test_cluster_zinterstore_count(self, r):
+        r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
+        r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
+        r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
+        assert (
+            r.zinterstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="COUNT")
+            == 2
+        )
+        assert_resp_response(
+            r,
+            r.zrange("{foo}d", 0, -1, withscores=True),
+            [(b"a1", 3.0), (b"a3", 3.0)],
+            [[b"a1", 3.0], [b"a3", 3.0]],
+        )
+
+    @skip_if_server_version_lt("8.7.0")
+    def test_cluster_zinterstore_count_with_weight(self, r):
+        r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
+        r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
+        r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
+        assert (
+            r.zinterstore(
+                "{foo}d",
+                {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3},
+                aggregate="COUNT",
+            )
+            == 2
+        )
+        assert_resp_response(
+            r,
+            r.zrange("{foo}d", 0, -1, withscores=True),
+            [(b"a1", 6.0), (b"a3", 6.0)],
+            [[b"a1", 6.0], [b"a3", 6.0]],
+        )
+
     @skip_if_server_version_lt("4.9.0")
     def test_cluster_bzpopmax(self, r):
         r.zadd("{foo}a", {"a1": 1, "a2": 2})
@@ -2373,6 +2460,42 @@ class TestClusterRedisCommands:
             r.zrange("{foo}d", 0, -1, withscores=True),
             [(b"a2", 5), (b"a4", 12), (b"a3", 20), (b"a1", 23)],
             [[b"a2", 5.0], [b"a4", 12.0], [b"a3", 20.0], [b"a1", 23.0]],
+        )
+
+    @skip_if_server_version_lt("8.7.0")
+    def test_cluster_zunionstore_count(self, r):
+        r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
+        r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
+        r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
+        assert (
+            r.zunionstore("{foo}d", ["{foo}a", "{foo}b", "{foo}c"], aggregate="COUNT")
+            == 4
+        )
+        assert_resp_response(
+            r,
+            r.zrange("{foo}d", 0, -1, withscores=True),
+            [(b"a4", 1.0), (b"a2", 2.0), (b"a1", 3.0), (b"a3", 3.0)],
+            [[b"a4", 1.0], [b"a2", 2.0], [b"a1", 3.0], [b"a3", 3.0]],
+        )
+
+    @skip_if_server_version_lt("8.7.0")
+    def test_cluster_zunionstore_count_with_weight(self, r):
+        r.zadd("{foo}a", {"a1": 1, "a2": 1, "a3": 1})
+        r.zadd("{foo}b", {"a1": 2, "a2": 2, "a3": 2})
+        r.zadd("{foo}c", {"a1": 6, "a3": 5, "a4": 4})
+        assert (
+            r.zunionstore(
+                "{foo}d",
+                {"{foo}a": 1, "{foo}b": 2, "{foo}c": 3},
+                aggregate="COUNT",
+            )
+            == 4
+        )
+        assert_resp_response(
+            r,
+            r.zrange("{foo}d", 0, -1, withscores=True),
+            [(b"a2", 3.0), (b"a4", 3.0), (b"a1", 6.0), (b"a3", 6.0)],
+            [[b"a2", 3.0], [b"a4", 3.0], [b"a1", 6.0], [b"a3", 6.0]],
         )
 
     @skip_if_server_version_lt("2.8.9")
@@ -2627,12 +2750,12 @@ class TestClusterRedisCommands:
             r.hotkeys_stop()
 
 
-@pytest.mark.onlycluster
 class TestNodesManager:
     """
     Tests for the NodesManager class
     """
 
+    @pytest.mark.onlycluster
     def test_load_balancer(self, r):
         n_manager = r.nodes_manager
         lb = n_manager.read_load_balancer
@@ -2690,6 +2813,7 @@ class TestNodesManager:
 
             assert srv_index > 0 and srv_index <= 2
 
+    @pytest.mark.fixed_client
     def test_init_slots_cache_not_all_slots_covered(self):
         """
         Test that if not all slots are covered it should raise an exception
@@ -2711,6 +2835,7 @@ class TestNodesManager:
             "All slots are not covered after query all startup_nodes."
         )
 
+    @pytest.mark.fixed_client
     def test_init_slots_cache_not_require_full_coverage_success(self):
         """
         When require_full_coverage is set to False and not all slots are
@@ -2732,6 +2857,7 @@ class TestNodesManager:
 
         assert 5460 not in rc.nodes_manager.slots_cache
 
+    @pytest.mark.fixed_client
     def test_init_slots_cache(self):
         """
         Test that slots cache can in initialized and all slots are covered
@@ -2761,6 +2887,7 @@ class TestNodesManager:
 
         assert len(n_manager.nodes_cache) == 6
 
+    @pytest.mark.fixed_client
     def test_init_promote_server_type_for_node_in_cache(self):
         """
         When replica is promoted to master, nodes_cache must change the server type
@@ -2812,6 +2939,7 @@ class TestNodesManager:
             assert nm.default_node.port == 7003
             assert nm.default_node.server_type == PRIMARY
 
+    @pytest.mark.fixed_client
     def test_init_slots_cache_cluster_mode_disabled(self):
         """
         Test that creating a RedisCluster failes if one of the startup nodes
@@ -2826,6 +2954,7 @@ class TestNodesManager:
             )
             assert "Cluster mode is not enabled on this node" in str(e.value)
 
+    @pytest.mark.fixed_client
     def test_empty_startup_nodes(self):
         """
         It should not be possible to create a node manager with no nodes
@@ -2834,6 +2963,7 @@ class TestNodesManager:
         with pytest.raises(RedisClusterException):
             NodesManager([])
 
+    @pytest.mark.fixed_client
     def test_wrong_startup_nodes_type(self):
         """
         If something other then a list type itteratable is provided it should
@@ -2842,6 +2972,7 @@ class TestNodesManager:
         with pytest.raises(RedisClusterException):
             NodesManager({})
 
+    @pytest.mark.fixed_client
     def test_init_slots_cache_slots_collision(self, request):
         """
         Test that if 2 nodes do not agree on the same slots setup it should
@@ -2896,6 +3027,7 @@ class TestNodesManager:
                 "startup_nodes could not agree on a valid slots cache"
             ), str(ex.value)
 
+    @pytest.mark.fixed_client
     def test_cluster_one_instance(self):
         """
         If the cluster exists of only 1 node then there is some hacks that must
@@ -2915,6 +3047,7 @@ class TestNodesManager:
         for i in range(0, REDIS_CLUSTER_HASH_SLOTS):
             assert n.slots_cache[i] == [n_node]
 
+    @pytest.mark.fixed_client
     def test_init_with_down_node(self):
         """
         If I can't connect to one of the nodes, everything should still work.
@@ -2977,6 +3110,7 @@ class TestNodesManager:
                 assert rc.get_node(host=default_host, port=7001) is not None
                 assert rc.get_node(host=default_host, port=7002) is not None
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize("dynamic_startup_nodes", [True, False])
     def test_init_slots_dynamic_startup_nodes(self, dynamic_startup_nodes):
         rc = get_mocked_redis_client(
@@ -2998,6 +3132,7 @@ class TestNodesManager:
         else:
             assert startup_nodes == ["my@DNS.com:7000"]
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize(
         "connection_pool_class", [ConnectionPool, BlockingConnectionPool]
     )
@@ -3013,6 +3148,7 @@ class TestNodesManager:
                 node.redis_connection.connection_pool, connection_pool_class
             )
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize("queue_class", [Queue, LifoQueue])
     def test_allow_custom_queue_class(self, queue_class):
         rc = get_mocked_redis_client(
@@ -3025,6 +3161,7 @@ class TestNodesManager:
         for node in rc.nodes_manager.nodes_cache.values():
             assert node.redis_connection.connection_pool.queue_class == queue_class
 
+    @pytest.mark.fixed_client
     def test_concurrent_initialize_exact_timing(self):
         """
         Test that exactly two concurrent initialize calls result in only
@@ -3109,6 +3246,7 @@ class TestNodesManager:
             assert len(nm.nodes_cache) > 0
             assert len(nm.slots_cache) > 0
 
+    @pytest.mark.fixed_client
     def test_concurrent_slot_moves(self):
         # ensure multiple concurrently moved slots are processed correctly,
         # eg: not dropping updates
@@ -3165,6 +3303,7 @@ class TestNodesManager:
             )
             assert primary_node.server_type == PRIMARY
 
+    @pytest.mark.fixed_client
     def test_concurrent_initialize_and_move_slot(self):
         # race initialize & move slot to ensure that the two operations
         # don't conflict with each other.
@@ -3235,6 +3374,85 @@ class TestNodesManager:
                     # primary should be first
                     assert slot_nodes[0].server_type == PRIMARY
 
+    def _register_listener(self, nm):
+        """
+        Register a tracking listener on the nodes manager's event dispatcher
+        for ``AfterSlotsCacheRefreshEvent``. The returned instance must be
+        kept alive by the caller for the duration of the test.
+        """
+
+        class _TrackingListener(EventListenerInterface):
+            def listen(self, event: object) -> None:  # pragma: no cover
+                pass
+
+        listener = _TrackingListener()
+        listener.listen = Mock()
+        nm._event_dispatcher.register_listeners(
+            {AfterSlotsCacheRefreshEvent: [listener]}
+        )
+        return listener
+
+    @pytest.mark.fixed_client
+    def test_move_slot_dispatches_event_when_slot_moves_to_new_node(self):
+        """
+        move_slot() must dispatch AfterSlotsCacheRefreshEvent when the
+        redirected node is not currently serving the slot (new primary from a
+        different shard).
+        """
+        r = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_enabled=True,
+        )
+        nm = r.nodes_manager
+        listener = self._register_listener(nm)
+        # Default layout: slot 0 is served by 127.0.0.1:7000; redirect it to
+        # 127.0.0.1:7001, which is the primary for a different shard.
+        nm.move_slot(MovedError("0 127.0.0.1:7001"))
+
+        listener.listen.assert_called_once()
+        assert isinstance(listener.listen.call_args[0][0], AfterSlotsCacheRefreshEvent)
+
+    @pytest.mark.fixed_client
+    def test_move_slot_dispatches_event_on_failover(self):
+        """
+        move_slot() must dispatch AfterSlotsCacheRefreshEvent when the
+        redirected node was a replica of the same slot and is being promoted
+        (failover case).
+        """
+        r = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_enabled=True,
+        )
+        nm = r.nodes_manager
+        listener = self._register_listener(nm)
+        # Default layout: slot 0 -> [7000 (primary), 7003 (replica)].
+        # Redirect to the replica, triggering the failover branch.
+        nm.move_slot(MovedError("0 127.0.0.1:7003"))
+
+        listener.listen.assert_called_once()
+        assert isinstance(listener.listen.call_args[0][0], AfterSlotsCacheRefreshEvent)
+
+    @pytest.mark.fixed_client
+    def test_move_slot_skips_dispatch_on_circular_redirect(self):
+        """
+        move_slot() must not dispatch AfterSlotsCacheRefreshEvent when the
+        redirect points to the slot's current primary (no-op branch).
+        """
+        r = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_enabled=True,
+        )
+        nm = r.nodes_manager
+        listener = self._register_listener(nm)
+        # Slot 0's current primary is 127.0.0.1:7000 -> no-op redirect.
+        nm.move_slot(MovedError("0 127.0.0.1:7000"))
+
+        listener.listen.assert_not_called()
+
+    @pytest.mark.fixed_client
     def test_move_node_to_end_of_cached_nodes(self):
         """
         Test that move_node_to_end_of_cached_nodes moves a node to the end of
@@ -3283,6 +3501,7 @@ class TestNodesManager:
             assert startup_node_names == [node2.name, node1.name, node3.name]
             assert nodes_cache_names == [node2.name, node1.name, node3.name]
 
+    @pytest.mark.fixed_client
     def test_move_node_to_end_of_cached_nodes_nonexistent(self):
         """
         Test that move_node_to_end_of_cached_nodes does nothing for a
@@ -3306,6 +3525,7 @@ class TestNodesManager:
             assert startup_node_names == [node1.name, node2.name]
             assert nodes_cache_names == [node1.name, node2.name]
 
+    @pytest.mark.fixed_client
     def test_move_node_to_end_of_cached_nodes_single_node(self):
         """
         Test that move_node_to_end_of_cached_nodes does nothing when there's
@@ -3327,6 +3547,81 @@ class TestNodesManager:
             nodes_cache_names = list(nodes_manager.nodes_cache.keys())
             assert startup_node_names == [node1.name]
             assert nodes_cache_names == [node1.name]
+
+
+@pytest.mark.fixed_client
+class TestClusterPubSubWithMocks:
+    """
+    Unit tests for ClusterPubSub that do not require a running cluster.
+    """
+
+    def _make_pubsub(self, cluster_mock):
+        """Create a ClusterPubSub with no node set, using the provided cluster mock."""
+        from redis._parsers import Encoder
+        from redis.cluster import ClusterPubSub
+
+        cluster_mock.encoder = Encoder("utf-8", "strict", False)
+        return ClusterPubSub(cluster_mock)
+
+    def test_get_node_pubsub_uses_cluster_get_redis_connection(self):
+        """
+        _get_node_pubsub must route through cluster.get_redis_connection(node)
+        so newly-discovered nodes are materialised via NodesManager.
+        """
+        cluster = Mock()
+        redis_conn = Mock()
+        shard_pubsub = Mock()
+        redis_conn.pubsub.return_value = shard_pubsub
+        cluster.get_redis_connection.return_value = redis_conn
+
+        pubsub = self._make_pubsub(cluster)
+        node = ClusterNode("127.0.0.1", 7000)
+
+        result = pubsub._get_node_pubsub(node)
+
+        cluster.get_redis_connection.assert_called_once_with(node)
+        redis_conn.pubsub.assert_called_once_with(push_handler_func=None)
+        assert result is shard_pubsub
+        assert pubsub.node_pubsub_mapping[node.name] is shard_pubsub
+
+    def test_get_node_pubsub_caches_by_node_name(self):
+        """Repeated calls must not re-materialise the shard PubSub."""
+        cluster = Mock()
+        redis_conn = Mock()
+        redis_conn.pubsub.return_value = Mock()
+        cluster.get_redis_connection.return_value = redis_conn
+
+        pubsub = self._make_pubsub(cluster)
+        node = ClusterNode("127.0.0.1", 7000)
+
+        first = pubsub._get_node_pubsub(node)
+        second = pubsub._get_node_pubsub(node)
+
+        assert first is second
+        cluster.get_redis_connection.assert_called_once_with(node)
+        redis_conn.pubsub.assert_called_once()
+
+    def test_disconnect_tolerates_shard_pubsub_with_no_connection(self):
+        """
+        disconnect() must skip shard PubSub entries whose connection has not
+        been materialised yet (pubsub.connection is None).
+        """
+        cluster = Mock()
+        pubsub = self._make_pubsub(cluster)
+
+        pending_pubsub = Mock()
+        pending_pubsub.connection = None
+        active_pubsub = Mock()
+        active_pubsub.connection = Mock()
+
+        pubsub.node_pubsub_mapping = {
+            "127.0.0.1:7000": pending_pubsub,
+            "127.0.0.1:7001": active_pubsub,
+        }
+
+        pubsub.disconnect()
+
+        active_pubsub.connection.disconnect.assert_called_once()
 
 
 @pytest.mark.onlycluster
@@ -3401,6 +3696,48 @@ class TestClusterPubSubObject:
         node = r.get_default_node()
         p = r.pubsub(node=node)
         assert p.get_redis_connection() == node.redis_connection
+
+    def test_disconnect_with_none_connections(self, r):
+        """
+        Test that disconnect() does not raise when pubsub.connection is None,
+        both on the ClusterPubSub itself and on node pubsub instances in
+        node_pubsub_mapping.
+        """
+        node = r.get_default_node()
+        p = r.pubsub(node=node)
+        # Ensure self.connection is None
+        p.connection = None
+
+        # Add a mock pubsub with connection=None into node_pubsub_mapping
+        mock_pubsub = Mock()
+        mock_pubsub.connection = None
+        p.node_pubsub_mapping["fake_node"] = mock_pubsub
+
+        # Should not raise AttributeError
+        p.disconnect()
+
+    def test_disconnect_calls_disconnect_on_existing_connections(self, r):
+        """
+        Test that disconnect() properly disconnects non-None connections
+        on both self and node_pubsub_mapping entries.
+        """
+        node = r.get_default_node()
+        p = r.pubsub(node=node)
+
+        # Mock self.connection
+        mock_conn = Mock()
+        p.connection = mock_conn
+
+        # Add a mock pubsub with a real connection into node_pubsub_mapping
+        mock_node_conn = Mock()
+        mock_node_pubsub = Mock()
+        mock_node_pubsub.connection = mock_node_conn
+        p.node_pubsub_mapping["fake_node"] = mock_node_pubsub
+
+        p.disconnect()
+
+        mock_conn.disconnect.assert_called_once()
+        mock_node_conn.disconnect.assert_called_once()
 
 
 @pytest.mark.onlycluster

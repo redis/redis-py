@@ -23,8 +23,8 @@ env:
   CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
   # this speeds up coverage with Python 3.12: https://github.com/nedbat/coveragepy/issues/1665
   COVERAGE_CORE: sysmon
-  CURRENT_CLIENT_LIBS_TEST_STACK_IMAGE_TAG: '8.4.0'
-  CURRENT_REDIS_VERSION: '8.4.0'
+  CURRENT_CLIENT_LIBS_TEST_STACK_IMAGE_TAG: '8.6.1'
+  CURRENT_REDIS_VERSION: '8.6.1'
 
 jobs:
   redis_version:
@@ -49,9 +49,23 @@ jobs:
         parser-backend: [ 'hiredis' ]
         hiredis-version: [ 'unstable' ]
         event-loop: [ 'asyncio' ]
+        test-config:
+          - fixed-clients
+          - default-legacy_responses-standalone
+          - default-legacy_responses-cluster
+          - default-unified_responses-standalone
+          - default-unified_responses-cluster
+          - 2-legacy_responses-standalone
+          - 2-legacy_responses-cluster
+          - 2-unified_responses-standalone
+          - 2-unified_responses-cluster
+          - 3-legacy_responses-standalone
+          - 3-legacy_responses-cluster
+          - 3-unified_responses-standalone
+          - 3-unified_responses-cluster
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}} (${{ matrix.hiredis-version }}); EL:${{matrix.event-loop}}
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}} (${{ matrix.hiredis-version }}); EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -64,3 +78,4 @@ jobs:
           redis-version: ${{ matrix.redis-version }}
           hiredis-version: ${{ matrix.hiredis-version }}
           hiredis-branch: ${{ inputs.hiredis-branch }}
+          test-config: ${{ matrix.test-config }}

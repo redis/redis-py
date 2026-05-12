@@ -14,12 +14,14 @@ import redis
 from redis import exceptions
 from redis._parsers.helpers import (
     _RedisCallbacks,
-    _RedisCallbacksRESP2,
-    _RedisCallbacksRESP3,
+    get_response_callbacks,
     parse_info,
+    parse_zscan,
+    zset_score_for_rank,
+    zset_score_pairs,
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
-from redis.commands.core import DataPersistOptions, HotkeysMetricsTypes
+from redis.commands.core import DataPersistOptions, GCRAResponse, HotkeysMetricsTypes
 from redis.commands.json.path import Path
 from redis.commands.search.field import TextField
 from redis.commands.search.query import Query
@@ -30,7 +32,10 @@ from .conftest import (
     _get_client,
     assert_resp_response,
     assert_resp_response_in,
-    is_resp2_connection,
+    expects_resp2_shape,
+    expects_resp3_shape,
+    expects_unified_shape,
+    expected_response_shape,
     skip_if_redis_enterprise,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
@@ -67,11 +72,10 @@ class TestResponseCallbacks:
     "Tests for the response callback system"
 
     def test_response_callbacks(self, r):
-        callbacks = _RedisCallbacks
-        if is_resp2_connection(r):
-            callbacks.update(_RedisCallbacksRESP2)
-        else:
-            callbacks.update(_RedisCallbacksRESP3)
+        kwargs = r.connection_pool.connection_kwargs
+        callbacks = get_response_callbacks(
+            kwargs.get("protocol"), kwargs.get("legacy_responses", True)
+        )
         assert r.response_callbacks == callbacks
         assert id(r.response_callbacks) != id(_RedisCallbacks)
         r.set_response_callback("GET", lambda x: "static")
@@ -727,7 +731,9 @@ class TestRedisCommands:
     @skip_if_server_version_lt("2.6.9")
     def test_client_setname(self, r):
         assert r.client_setname("redis_py_test")
-        assert_resp_response(r, r.client_getname(), "redis_py_test", b"redis_py_test")
+        assert_resp_response(
+            r, r.client_getname(), "redis_py_test", b"redis_py_test", "redis_py_test"
+        )
 
     @skip_if_server_version_lt("7.2.0")
     def test_client_setinfo(self, r: redis.Redis):
@@ -1035,10 +1041,12 @@ class TestRedisCommands:
             default_dialect_new = "3"
             assert r.config_set("search-default-dialect", default_dialect_new)
             assert r.config_get("*")["search-default-dialect"] == default_dialect_new
-            assert (
-                (r.ft().config_get("*")[b"DEFAULT_DIALECT"]).decode()
-                == default_dialect_new
-            )
+            search_config = r.ft().config_get("*")
+            if expects_resp2_shape(r) or expects_resp3_shape(r):
+                dialect = search_config[b"DEFAULT_DIALECT"].decode()
+            elif expects_unified_shape(r):
+                dialect = search_config["DEFAULT_DIALECT"]
+            assert dialect == default_dialect_new
         except AssertionError as ex:
             raise ex
         finally:
@@ -1125,7 +1133,7 @@ class TestRedisCommands:
     @skip_if_server_version_lt("6.2.0")
     @skip_if_redis_enterprise()
     def test_reset(self, r):
-        assert_resp_response(r, r.reset(), "RESET", b"RESET")
+        assert_resp_response(r, r.reset(), "RESET", b"RESET", "RESET")
 
     def test_object(self, r):
         r["a"] = "foo"
@@ -1956,6 +1964,7 @@ class TestRedisCommands:
             r.lcs("foo", "bar", idx=True, minmatchlen=3),
             [b"matches", [[[4, 7], [5, 8]]], b"len", 6],
             {b"matches": [[[4, 7], [5, 8]]], b"len": 6},
+            {"matches": [[[4, 7], [5, 8]]], "len": 6},
         )
         with pytest.raises(redis.ResponseError):
             assert r.lcs("foo", "bar", len=True, idx=True)
@@ -3029,12 +3038,14 @@ class TestRedisCommands:
             r.stralgo("LCS", value1, value2, idx=True),
             {"len": len(res), "matches": [[(4, 7), (5, 8)], [(2, 3), (0, 1)]]},
             {"len": len(res), "matches": [[[4, 7], [5, 8]], [[2, 3], [0, 1]]]},
+            {"len": len(res), "matches": [[[4, 7], [5, 8]], [[2, 3], [0, 1]]]},
         )
         assert_resp_response(
             r,
             r.stralgo("LCS", value1, value2, idx=True, withmatchlen=True),
             {"len": len(res), "matches": [[4, (4, 7), (5, 8)], [2, (2, 3), (0, 1)]]},
             {"len": len(res), "matches": [[[4, 7], [5, 8], 4], [[2, 3], [0, 1], 2]]},
+            {"len": len(res), "matches": [[4, [4, 7], [5, 8]], [2, [2, 3], [0, 1]]]},
         )
         assert_resp_response(
             r,
@@ -3043,6 +3054,7 @@ class TestRedisCommands:
             ),
             {"len": len(res), "matches": [[4, (4, 7), (5, 8)]]},
             {"len": len(res), "matches": [[[4, 7], [5, 8], 4]]},
+            {"len": len(res), "matches": [[4, [4, 7], [5, 8]]]},
         )
 
     @skip_if_server_version_lt("6.0.0")
@@ -3533,17 +3545,36 @@ class TestRedisCommands:
         r.zadd("a", {"a": 1, "b": 2, "c": 3})
         cursor, pairs = r.zscan("a")
         assert cursor == 0
-        assert set(pairs) == {(b"a", 1), (b"b", 2), (b"c", 3)}
+        if expects_unified_shape(r):
+            assert sorted(pairs) == [[b"a", 1.0], [b"b", 2.0], [b"c", 3.0]]
+        else:
+            assert set(pairs) == {(b"a", 1), (b"b", 2), (b"c", 3)}
         _, pairs = r.zscan("a", match="a")
-        assert set(pairs) == {(b"a", 1)}
+        if expects_unified_shape(r):
+            assert pairs == [[b"a", 1.0]]
+        else:
+            assert set(pairs) == {(b"a", 1)}
+
+    def test_zscan_score_cast_scientific_notation(self):
+        """score_cast_func=int handles scientific notation scores (issue #4000)."""
+        response = (b"0", [b"member1", b"1.7732526297292595e+18"])
+        cursor, pairs = parse_zscan(response, score_cast_func=int)
+        assert cursor == 0
+        assert pairs == [(b"member1", 1773252629729259520)]
 
     @skip_if_server_version_lt("2.8.0")
     def test_zscan_iter(self, r):
         r.zadd("a", {"a": 1, "b": 2, "c": 3})
         pairs = list(r.zscan_iter("a"))
-        assert set(pairs) == {(b"a", 1), (b"b", 2), (b"c", 3)}
+        if expects_unified_shape(r):
+            assert sorted(pairs) == [[b"a", 1.0], [b"b", 2.0], [b"c", 3.0]]
+        else:
+            assert set(pairs) == {(b"a", 1), (b"b", 2), (b"c", 3)}
         pairs = list(r.zscan_iter("a", match="a"))
-        assert set(pairs) == {(b"a", 1)}
+        if expects_unified_shape(r):
+            assert pairs == [[b"a", 1.0]]
+        else:
+            assert set(pairs) == {(b"a", 1)}
 
     # SET COMMANDS
     def test_sadd(self, r):
@@ -3858,6 +3889,27 @@ class TestRedisCommands:
         )
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.7.0")
+    def test_zinter_count(self, r):
+        r.zadd("a", {"a1": 1, "a2": 2, "a3": 1})
+        r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        # aggregate with COUNT (scores ignored, counts membership)
+        assert_resp_response(
+            r,
+            r.zinter(["a", "b", "c"], aggregate="COUNT", withscores=True),
+            [(b"a1", 3), (b"a3", 3)],
+            [[b"a1", 3], [b"a3", 3]],
+        )
+        # COUNT with weights
+        assert_resp_response(
+            r,
+            r.zinter({"a": 1, "b": 2, "c": 3}, aggregate="COUNT", withscores=True),
+            [(b"a1", 6), (b"a3", 6)],
+            [[b"a1", 6], [b"a3", 6]],
+        )
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
     def test_zintercard(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 1})
@@ -3918,10 +3970,44 @@ class TestRedisCommands:
             [[b"a3", 20], [b"a1", 23]],
         )
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.7.0")
+    def test_zinterstore_count(self, r):
+        r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert r.zinterstore("d", ["a", "b", "c"], aggregate="COUNT") == 2
+        assert_resp_response(
+            r,
+            r.zrange("d", 0, -1, withscores=True),
+            [(b"a1", 3), (b"a3", 3)],
+            [[b"a1", 3], [b"a3", 3]],
+        )
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.7.0")
+    def test_zinterstore_count_with_weight(self, r):
+        r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert r.zinterstore("d", {"a": 1, "b": 2, "c": 3}, aggregate="COUNT") == 2
+        assert_resp_response(
+            r,
+            r.zrange("d", 0, -1, withscores=True),
+            [(b"a1", 6), (b"a3", 6)],
+            [[b"a1", 6], [b"a3", 6]],
+        )
+
     @skip_if_server_version_lt("4.9.0")
     def test_zpopmax(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-        assert_resp_response(r, r.zpopmax("a"), [(b"a3", 3)], [b"a3", 3.0])
+        assert_resp_response(
+            r,
+            r.zpopmax("a"),
+            [(b"a3", 3)],
+            [b"a3", 3.0],
+            unified_expected=[[b"a3", 3.0]],
+        )
         # with count
         assert_resp_response(
             r,
@@ -3933,7 +4019,13 @@ class TestRedisCommands:
     @skip_if_server_version_lt("4.9.0")
     def test_zpopmin(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-        assert_resp_response(r, r.zpopmin("a"), [(b"a1", 1)], [b"a1", 1.0])
+        assert_resp_response(
+            r,
+            r.zpopmin("a"),
+            [(b"a1", 1)],
+            [b"a1", 1.0],
+            unified_expected=[[b"a1", 1.0]],
+        )
         # with count
         assert_resp_response(
             r,
@@ -3947,6 +4039,7 @@ class TestRedisCommands:
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
         assert r.zrandmember("a") is not None
         assert len(r.zrandmember("a", 2)) == 2
+
         # with scores
         assert_resp_response(
             r,
@@ -4075,6 +4168,21 @@ class TestRedisCommands:
             [[b"a1", "1.0"], [b"a2", "2.0"]],
         )
 
+    def test_zrange_score_cast_scientific_notation(self):
+        """score_cast_func=int handles scientific notation scores (issue #4000)."""
+        # Simulates RESP2 response with large score in scientific notation
+        response = [b"member1", b"1.7732526297292595e+18"]
+        result = zset_score_pairs(response, withscores=True, score_cast_func=int)
+        assert result == [(b"member1", 1773252629729259520)]
+        # float cast is unaffected
+        result = zset_score_pairs(response, withscores=True, score_cast_func=float)
+        assert result == [(b"member1", 1.7732526297292595e18)]
+        # safe_str still receives raw bytes, not float (no "1.0" regression)
+        result = zset_score_pairs(
+            [b"a", b"1"], withscores=True, score_cast_func=safe_str
+        )
+        assert result == [(b"a", "1")]
+
     def test_zrange_errors(self, r):
         with pytest.raises(exceptions.DataError):
             r.zrange("a", 0, 1, byscore=True, bylex=True)
@@ -4190,6 +4298,12 @@ class TestRedisCommands:
             [(b"a2", "2"), (b"a3", "3"), (b"a4", "4")],
             [[b"a2", "2.0"], [b"a3", "3.0"], [b"a4", "4.0"]],
         )
+
+    def test_zrangebyscore_score_cast_scientific_notation(self):
+        """score_cast_func=int handles scientific notation scores (issue #4000)."""
+        response = [b"a1", b"1.7732526297292595e+18", b"a2", b"2.5"]
+        result = zset_score_pairs(response, withscores=True, score_cast_func=int)
+        assert result == [(b"a1", 1773252629729259520), (b"a2", 2)]
 
     def test_zrank(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
@@ -4330,6 +4444,12 @@ class TestRedisCommands:
             [2, "3.0"],
         )
 
+    def test_zrevrank_score_cast_scientific_notation(self):
+        """score_cast_func=int handles scientific notation scores (issue #4000)."""
+        response = [2, b"1.7732526297292595e+18"]
+        result = zset_score_for_rank(response, withscore=True, score_cast_func=int)
+        assert result == [2, 1773252629729259520]
+
     def test_zscore(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         assert r.zscore("a", "a1") == 1.0
@@ -4377,6 +4497,27 @@ class TestRedisCommands:
             r.zunion(["a", "b", "c"], withscores=True, score_cast_func=safe_str),
             [(b"a2", "3"), (b"a4", "4"), (b"a3", "8"), (b"a1", "9")],
             [[b"a2", "3.0"], [b"a4", "4.0"], [b"a3", "8.0"], [b"a1", "9.0"]],
+        )
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.7.0")
+    def test_zunion_count(self, r):
+        r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        # aggregate with COUNT (scores ignored, counts membership)
+        assert_resp_response(
+            r,
+            r.zunion(["a", "b", "c"], aggregate="COUNT", withscores=True),
+            [(b"a4", 1), (b"a2", 2), (b"a1", 3), (b"a3", 3)],
+            [[b"a4", 1], [b"a2", 2], [b"a1", 3], [b"a3", 3]],
+        )
+        # COUNT with weights
+        assert_resp_response(
+            r,
+            r.zunion({"a": 1, "b": 2, "c": 3}, aggregate="COUNT", withscores=True),
+            [(b"a2", 3), (b"a4", 3), (b"a1", 6), (b"a3", 6)],
+            [[b"a2", 3], [b"a4", 3], [b"a1", 6], [b"a3", 6]],
         )
 
     @pytest.mark.onlynoncluster
@@ -4429,6 +4570,34 @@ class TestRedisCommands:
             r.zrange("d", 0, -1, withscores=True),
             [(b"a2", 5), (b"a4", 12), (b"a3", 20), (b"a1", 23)],
             [[b"a2", 5], [b"a4", 12], [b"a3", 20], [b"a1", 23]],
+        )
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.7.0")
+    def test_zunionstore_count(self, r):
+        r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert r.zunionstore("d", ["a", "b", "c"], aggregate="COUNT") == 4
+        assert_resp_response(
+            r,
+            r.zrange("d", 0, -1, withscores=True),
+            [(b"a4", 1), (b"a2", 2), (b"a1", 3), (b"a3", 3)],
+            [[b"a4", 1], [b"a2", 2], [b"a1", 3], [b"a3", 3]],
+        )
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.7.0")
+    def test_zunionstore_count_with_weight(self, r):
+        r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert r.zunionstore("d", {"a": 1, "b": 2, "c": 3}, aggregate="COUNT") == 4
+        assert_resp_response(
+            r,
+            r.zrange("d", 0, -1, withscores=True),
+            [(b"a2", 3), (b"a4", 3), (b"a1", 6), (b"a3", 6)],
+            [[b"a2", 3], [b"a4", 3], [b"a1", 6], [b"a3", 6]],
         )
 
     @skip_if_server_version_lt("6.1.240")
@@ -4944,6 +5113,7 @@ class TestRedisCommands:
             r.geohash("barcelona", "place1", "place2", "place3"),
             ["sp3e9yg3kd0", "sp3e9cbc3t0", None],
             [b"sp3e9yg3kd0", b"sp3e9cbc3t0", None],
+            ["sp3e9yg3kd0", "sp3e9cbc3t0", None],
         )
 
     @skip_unless_arch_bits(64)
@@ -5070,6 +5240,7 @@ class TestRedisCommands:
             "place2",
         )
         r.geoadd("barcelona", values)
+        coord_tuple = (2.19093829393386841, 41.43379028184083523)
 
         # test a bunch of combinations to test the parse response
         # function.
@@ -5082,14 +5253,7 @@ class TestRedisCommands:
             withdist=True,
             withcoord=True,
             withhash=True,
-        ) == [
-            [
-                b"place1",
-                0.0881,
-                3471609698139488,
-                (2.19093829393386841, 41.43379028184083523),
-            ]
-        ]
+        ) == [[b"place1", 0.0881, 3471609698139488, coord_tuple]]
         assert r.geosearch(
             "barcelona",
             longitude=2.191,
@@ -5098,7 +5262,7 @@ class TestRedisCommands:
             unit="km",
             withdist=True,
             withcoord=True,
-        ) == [[b"place1", 0.0881, (2.19093829393386841, 41.43379028184083523)]]
+        ) == [[b"place1", 0.0881, coord_tuple]]
         assert r.geosearch(
             "barcelona",
             longitude=2.191,
@@ -5107,9 +5271,7 @@ class TestRedisCommands:
             unit="km",
             withhash=True,
             withcoord=True,
-        ) == [
-            [b"place1", 3471609698139488, (2.19093829393386841, 41.43379028184083523)]
-        ]
+        ) == [[b"place1", 3471609698139488, coord_tuple]]
         # test no values.
         assert (
             r.geosearch(
@@ -5949,6 +6111,120 @@ class TestRedisCommands:
         r.xadd(stream, {"foo": "bar"})
         assert r.xlen(stream) == 2
 
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_silent(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        m2 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        # SILENT mode returns count of NACKed messages
+        result = r.xnack(stream, group, "SILENT", m1, m2)
+        assert result == 2
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_fail(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        # FAIL mode returns count of NACKed messages
+        result = r.xnack(stream, group, "FAIL", m1)
+        assert result == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_fatal(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        # FATAL mode returns count of NACKed messages
+        result = r.xnack(stream, group, "FATAL", m1)
+        assert result == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_multiple_ids(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        m2 = r.xadd(stream, {"foo": "bar"})
+        m3 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        result = r.xnack(stream, group, "FAIL", m1, m2, m3)
+        assert result == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_some_ids_not_in_pel(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        m2 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        # Only m1 and m2 are in PEL; "999999-0" is not
+        result = r.xnack(stream, group, "FAIL", m1, m2, "999999-0")
+        assert result == 2
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_retrycount(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        # Explicit retrycount overrides mode's counter adjustment
+        result = r.xnack(stream, group, "FAIL", m1, retrycount=5)
+        assert result == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_force(self, r):
+        stream = "stream"
+        group = "group"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        # FORCE creates unowned PEL entries for IDs not already in PEL
+        result = r.xnack(stream, group, "FAIL", m1, force=True)
+        assert result == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_invalid_mode(self, r):
+        stream = "stream"
+        group = "group"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        with pytest.raises(redis.DataError):
+            r.xnack(stream, group, "INVALID", m1)
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_no_ids(self, r):
+        stream = "stream"
+        group = "group"
+        r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        with pytest.raises(redis.DataError):
+            r.xnack(stream, group, "FAIL")
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_xnack_negative_retrycount(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+        with pytest.raises(redis.DataError):
+            r.xnack(stream, group, "FAIL", m1, retrycount=-1)
+
     @skip_if_server_version_lt("5.0.0")
     def test_xpending(self, r):
         stream = "stream"
@@ -6090,6 +6366,7 @@ class TestRedisCommands:
             r.xread(streams={stream: 0}),
             [[stream_name, expected_entries]],
             {stream_name: [expected_entries]},
+            {stream_name: expected_entries},
         )
 
         expected_entries = [get_stream_message(r, stream, m1)]
@@ -6099,6 +6376,7 @@ class TestRedisCommands:
             r.xread(streams={stream: 0}, count=1),
             [[stream_name, expected_entries]],
             {stream_name: [expected_entries]},
+            {stream_name: expected_entries},
         )
 
         expected_entries = [get_stream_message(r, stream, m2)]
@@ -6108,6 +6386,7 @@ class TestRedisCommands:
             r.xread(streams={stream: m1}),
             [[stream_name, expected_entries]],
             {stream_name: [expected_entries]},
+            {stream_name: expected_entries},
         )
 
         # xread starting at the last message returns an empty list
@@ -6134,6 +6413,7 @@ class TestRedisCommands:
             r.xreadgroup(group, consumer, streams={stream: ">"}),
             [[stream_name, expected_entries]],
             {stream_name: [expected_entries]},
+            {stream_name: expected_entries},
         )
 
         r.xgroup_destroy(stream, group)
@@ -6147,6 +6427,7 @@ class TestRedisCommands:
             r.xreadgroup(group, consumer, streams={stream: ">"}, count=1),
             [[stream_name, expected_entries]],
             {stream_name: [expected_entries]},
+            {stream_name: expected_entries},
         )
 
         r.xgroup_destroy(stream, group)
@@ -6165,14 +6446,19 @@ class TestRedisCommands:
         r.xgroup_create(stream, group, "0")
         res = r.xreadgroup(group, consumer, streams={stream: ">"}, noack=True)
         empty_res = r.xreadgroup(group, consumer, streams={stream: "0"})
-        if is_resp2_connection(r):
+        shape = expected_response_shape(r)
+        if shape == "legacy_resp2":
             assert len(res[0][1]) == 2
             # now there should be nothing pending
             assert len(empty_res[0][1]) == 0
-        else:
+        elif shape == "legacy_resp3":
             assert len(res[stream_name][0]) == 2
             # now there should be nothing pending
             assert len(empty_res[stream_name][0]) == 0
+        else:
+            assert len(res[stream_name]) == 2
+            # now there should be nothing pending
+            assert len(empty_res[stream_name]) == 0
 
         r.xgroup_destroy(stream, group)
         r.xgroup_create(stream, group, "0")
@@ -6185,6 +6471,7 @@ class TestRedisCommands:
             r.xreadgroup(group, consumer, streams={stream: "0"}),
             [[stream_name, expected_entries]],
             {stream_name: [expected_entries]},
+            {stream_name: expected_entries},
         )
 
     def _validate_xreadgroup_with_claim_min_idle_time_response(
@@ -6197,12 +6484,15 @@ class TestRedisCommands:
         for str_index, expected_stream in enumerate(expected_streams):
             expected_entries_per_stream = expected_entries[expected_stream]
 
-            if is_resp2_connection(r):
+            shape = expected_response_shape(r)
+            if shape == "legacy_resp2":
                 actual_entries_per_stream = response[str_index][1]
                 actual_stream = response[str_index][0]
                 assert actual_stream == expected_stream
-            else:
+            elif shape == "legacy_resp3":
                 actual_entries_per_stream = response[expected_stream][0]
+            else:
+                actual_entries_per_stream = response[expected_stream]
 
             # validate the number of entries
             assert len(actual_entries_per_stream) == len(expected_entries_per_stream)
@@ -6285,14 +6575,14 @@ class TestRedisCommands:
             res,
             [[stream_name, expected_entries]],
             {stream_name: [expected_entries]},
+            {stream_name: expected_entries},
         )
 
         # add 2 more messages
         m7 = r.xadd(stream, {"key_m7": "val_m7"})
         m8 = r.xadd(stream, {"key_m8": "val_m8"})
-        # read the messages with claim_min_idle_time=1000
-        # only m7 and m8 should be returned
-        # because the other messages have not been in the PEL for long enough
+        # Use a threshold safely above this test's elapsed time so only
+        # newly-delivered messages are returned.
         expected_entries = {
             stream_name: [
                 {"msg": get_stream_message(r, stream, m7), "min_idle_time": 0},
@@ -6300,7 +6590,7 @@ class TestRedisCommands:
             ]
         }
         res = r.xreadgroup(
-            group, consumer_1, streams={stream: ">"}, claim_min_idle_time=100
+            group, consumer_1, streams={stream: ">"}, claim_min_idle_time=60_000
         )
         self._validate_xreadgroup_with_claim_min_idle_time_response(
             r, res, expected_entries
@@ -6383,9 +6673,8 @@ class TestRedisCommands:
         # add 2 more messages
         m7 = r.xadd(stream_1, {"key_m7": "val_m7"})
         m8 = r.xadd(stream_2, {"key_m8": "val_m8"})
-        # read the messages with claim_min_idle_time=1000
-        # only m7 and m8 should be returned
-        # because the other messages have not been in the PEL for long enough
+        # Use a threshold safely above this test's elapsed time so only
+        # newly-delivered messages are returned.
         expected_entries = {
             stream_1_name: [
                 {"msg": get_stream_message(r, stream_1, m7), "min_idle_time": 0}
@@ -6398,7 +6687,7 @@ class TestRedisCommands:
             group,
             consumer_1,
             streams={stream_1: ">", stream_2: ">"},
-            claim_min_idle_time=100,
+            claim_min_idle_time=60_000,
         )
         self._validate_xreadgroup_with_claim_min_idle_time_response(
             r, res, expected_entries
@@ -6482,9 +6771,8 @@ class TestRedisCommands:
         # add 2 more messages
         m7 = r.xadd(stream_1, {"key_m7": "val_m7"})
         m8 = r.xadd(stream_2, {"key_m8": "val_m8"})
-        # read the messages with claim_min_idle_time=1000
-        # only m7 and m8 should be returned
-        # because the other messages have not been in the PEL for long enough
+        # Use a threshold safely above this test's elapsed time so only
+        # newly-delivered messages are returned.
         expected_entries = {
             stream_1_name: [
                 {"msg": get_stream_message(r, stream_1, m7), "min_idle_time": 0}
@@ -6497,7 +6785,7 @@ class TestRedisCommands:
             group,
             consumer_1,
             streams={stream_1: ">", stream_2: ">"},
-            claim_min_idle_time=100,
+            claim_min_idle_time=60_000,
         )
         self._validate_xreadgroup_with_claim_min_idle_time_response(
             r, res, expected_entries
@@ -7242,6 +7530,108 @@ class TestRedisCommands:
         finally:
             # disconnect here so that fixture cleanup can proceed
             r.connection.disconnect()
+
+
+class TestGCRACommands:
+    """Tests for the GCRA rate limiting command"""
+
+    @skip_if_server_version_lt("8.7.0")
+    def test_gcra_basic(self, r):
+        """Test basic GCRA command execution"""
+        key = "gcra_test_basic"
+        r.delete(key)
+
+        # First request should not be limited
+        result = r.gcra(key, max_burst=10, tokens_per_period=5, period=10.0)
+
+        assert isinstance(result, GCRAResponse)
+
+        # First request should not be limited
+        assert result.limited is False
+        # max_req_num should be max_burst + 1
+        assert result.max_req_num == 11
+        # Should have requests available
+        assert result.num_avail_req >= 0
+        # Not limited, so retry_after should be -1
+        assert result.retry_after == -1
+        # full_burst_after should be a non-negative value
+        assert result.full_burst_after >= 0
+
+    @skip_if_server_version_lt("8.7.0")
+    def test_gcra_with_tokens(self, r):
+        """Test GCRA command with TOKENS option"""
+        key = "gcra_test_tokens"
+        r.delete(key)
+
+        # Request with a cost of 3
+        result = r.gcra(key, max_burst=10, tokens_per_period=5, period=10.0, tokens=3)
+
+        assert isinstance(result, GCRAResponse)
+        assert result.limited is False  # Should not be limited initially
+
+    @skip_if_server_version_lt("8.7.0")
+    def test_gcra_rate_limiting(self, r):
+        """Test GCRA rate limiting with a realistic per-user scenario.
+
+        Simulates a user (user:42) who is allowed 2 requests per 60 seconds
+        with a max_burst of 1 (so capacity = max_burst + 1 = 2 tokens).
+        The first 2 requests should be allowed and execute actual Redis
+        commands, while the 3rd request should be rate limited.
+        """
+        user_id = 42
+        rate_limit_key = f"ratelimit:user:{user_id}"
+        user_data_key = f"user:{user_id}:request_count"
+        r.delete(rate_limit_key)
+        r.delete(user_data_key)
+
+        # Rate limit: allow 2 requests per 60s (max_burst=1, so capacity=2)
+        allowed_count = 0
+        limited_count = 0
+
+        for request_num in range(3):
+            result = r.gcra(
+                rate_limit_key,
+                max_burst=1,
+                tokens_per_period=2,
+                period=60.0,
+            )
+            assert isinstance(result, GCRAResponse)
+            assert result.max_req_num == 2  # always max_burst + 1
+
+            if not result.limited:
+                # Request is allowed — perform the actual work
+                r.incr(user_data_key)
+                allowed_count += 1
+            else:
+                # Request is rate limited — reject it
+                limited_count += 1
+                assert result.retry_after > 0
+                assert result.num_avail_req == 0
+
+        # The first 2 requests consumed the burst, the 3rd is blocked
+        assert allowed_count == 2
+        assert limited_count == 1
+        assert int(r.get(user_data_key)) == 2
+
+    def test_gcra_invalid_max_burst(self, r):
+        """Test GCRA command with invalid max_burst parameter"""
+        with pytest.raises(exceptions.DataError):
+            r.gcra("test_key", max_burst=-1, tokens_per_period=5, period=10.0)
+
+    def test_gcra_invalid_tokens_per_period(self, r):
+        """Test GCRA command with invalid tokens_per_period parameter"""
+        with pytest.raises(exceptions.DataError):
+            r.gcra("test_key", max_burst=10, tokens_per_period=0, period=10.0)
+
+    def test_gcra_invalid_period_too_small(self, r):
+        """Test GCRA command with period less than 1.0"""
+        with pytest.raises(exceptions.DataError):
+            r.gcra("test_key", max_burst=10, tokens_per_period=5, period=0.5)
+
+    def test_gcra_invalid_period_too_large(self, r):
+        """Test GCRA command with period greater than 1e12"""
+        with pytest.raises(exceptions.DataError):
+            r.gcra("test_key", max_burst=10, tokens_per_period=5, period=1e13)
 
 
 @pytest.mark.onlynoncluster

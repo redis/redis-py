@@ -12,7 +12,7 @@ from redis.backoff import ConstantBackoff
 from redis.client import Pipeline
 from redis.multidb.exception import TemporaryUnavailableException
 from redis.multidb.failover import DEFAULT_FAILOVER_ATTEMPTS, DEFAULT_FAILOVER_DELAY
-from redis.multidb.healthcheck import LagAwareHealthCheck
+from redis.asyncio.multidb.healthcheck import LagAwareHealthCheck
 from redis.retry import Retry
 from redis.utils import dummy_fail
 from tests.test_scenario.fault_injector_client import ActionRequest, ActionType

@@ -8,28 +8,33 @@ import datetime
 import re
 import sys
 from string import ascii_letters
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
 from redis import DataError, RedisClusterException, ResponseError
-import redis
+
 from redis import exceptions
 from redis._parsers.helpers import (
     _RedisCallbacks,
-    _RedisCallbacksRESP2,
-    _RedisCallbacksRESP3,
+    get_response_callbacks,
     parse_info,
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
-from redis.commands.core import DataPersistOptions, HotkeysMetricsTypes
+from redis.commands.core import DataPersistOptions, GCRAResponse, HotkeysMetricsTypes
 from redis.commands.json.path import Path
 from redis.commands.search.field import TextField
 from redis.commands.search.query import Query
 from redis.utils import safe_str
+
+import redis.asyncio as redis
 from tests.conftest import (
     assert_resp_response,
     assert_resp_response_in,
-    is_resp2_connection,
+    expects_resp2_shape,
+    expects_resp3_shape,
+    expects_unified_shape,
+    expected_response_shape,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
@@ -42,6 +47,8 @@ else:
     from async_timeout import timeout as async_timeout
 
 REDIS_6_VERSION = "5.9.0"
+
+ClientT = redis.Redis | redis.RedisCluster
 
 
 @pytest_asyncio.fixture()
@@ -94,11 +101,10 @@ class TestResponseCallbacks:
     """Tests for the response callback system"""
 
     async def test_response_callbacks(self, r: redis.Redis):
-        callbacks = _RedisCallbacks
-        if is_resp2_connection(r):
-            callbacks.update(_RedisCallbacksRESP2)
-        else:
-            callbacks.update(_RedisCallbacksRESP3)
+        kwargs = r.connection_pool.connection_kwargs
+        callbacks = get_response_callbacks(
+            kwargs.get("protocol"), kwargs.get("legacy_responses", True)
+        )
         assert r.response_callbacks == callbacks
         assert id(r.response_callbacks) != id(_RedisCallbacks)
         r.set_response_callback("GET", lambda x: "static")
@@ -523,7 +529,11 @@ class TestRedisCommands:
     async def test_client_setname(self, r: redis.Redis):
         assert await r.client_setname("redis_py_test")
         assert_resp_response(
-            r, await r.client_getname(), "redis_py_test", b"redis_py_test"
+            r,
+            await r.client_getname(),
+            "redis_py_test",
+            b"redis_py_test",
+            "redis_py_test",
         )
 
     @skip_if_server_version_lt("7.2.0")
@@ -542,7 +552,7 @@ class TestRedisCommands:
 
         # Test deprecated lib_name/lib_version parameters
         with pytest.warns(DeprecationWarning):
-            r2 = redis.asyncio.Redis(lib_name="test2", lib_version="1234")
+            r2 = redis.Redis(lib_name="test2", lib_version="1234")
         info = await r2.client_info()
         assert info["lib-name"] == "test2"
         assert info["lib-ver"] == "1234"
@@ -554,7 +564,7 @@ class TestRedisCommands:
         from redis.utils import get_lib_version
 
         info = DriverInfo().add_upstream_driver("celery", "5.4.1")
-        r2 = redis.asyncio.Redis(driver_info=info)
+        r2 = redis.Redis(driver_info=info)
         await r2.ping()
         client_info = await r2.client_info()
         assert client_info["lib-name"] == "redis-py(celery_v5.4.1)"
@@ -721,10 +731,12 @@ class TestRedisCommands:
             assert (await r.config_get("*"))[
                 "search-default-dialect"
             ] == default_dialect_new
-            assert (
-                ((await r.ft().config_get("*"))[b"DEFAULT_DIALECT"]).decode()
-                == default_dialect_new
-            )
+            search_config = await r.ft().config_get("*")
+            if expects_resp2_shape(r) or expects_resp3_shape(r):
+                dialect = search_config[b"DEFAULT_DIALECT"].decode()
+            elif expects_unified_shape(r):
+                dialect = search_config["DEFAULT_DIALECT"]
+            assert dialect == default_dialect_new
         except AssertionError as ex:
             raise ex
         finally:
@@ -2638,17 +2650,29 @@ class TestRedisCommands:
         await r.zadd("a", {"a": 1, "b": 2, "c": 3})
         cursor, pairs = await r.zscan("a")
         assert cursor == 0
-        assert set(pairs) == {(b"a", 1), (b"b", 2), (b"c", 3)}
+        if expects_unified_shape(r):
+            assert sorted(pairs) == [[b"a", 1.0], [b"b", 2.0], [b"c", 3.0]]
+        else:
+            assert set(pairs) == {(b"a", 1), (b"b", 2), (b"c", 3)}
         _, pairs = await r.zscan("a", match="a")
-        assert set(pairs) == {(b"a", 1)}
+        if expects_unified_shape(r):
+            assert pairs == [[b"a", 1.0]]
+        else:
+            assert set(pairs) == {(b"a", 1)}
 
     @skip_if_server_version_lt("2.8.0")
     async def test_zscan_iter(self, r: redis.Redis):
         await r.zadd("a", {"a": 1, "b": 2, "c": 3})
         pairs = [k async for k in r.zscan_iter("a")]
-        assert set(pairs) == {(b"a", 1), (b"b", 2), (b"c", 3)}
+        if expects_unified_shape(r):
+            assert sorted(pairs) == [[b"a", 1.0], [b"b", 2.0], [b"c", 3.0]]
+        else:
+            assert set(pairs) == {(b"a", 1), (b"b", 2), (b"c", 3)}
         pairs = [k async for k in r.zscan_iter("a", match="a")]
-        assert set(pairs) == {(b"a", 1)}
+        if expects_unified_shape(r):
+            assert pairs == [[b"a", 1.0]]
+        else:
+            assert set(pairs) == {(b"a", 1)}
 
     # SET COMMANDS
     async def test_sadd(self, r: redis.Redis):
@@ -2907,11 +2931,43 @@ class TestRedisCommands:
             r, response, [(b"a3", 20), (b"a1", 23)], [[b"a3", 20], [b"a1", 23]]
         )
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.7.0")
+    async def test_zinterstore_count(self, r: redis.Redis):
+        await r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        await r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert await r.zinterstore("d", ["a", "b", "c"], aggregate="COUNT") == 2
+        response = await r.zrange("d", 0, -1, withscores=True)
+        assert_resp_response(
+            r, response, [(b"a1", 3), (b"a3", 3)], [[b"a1", 3.0], [b"a3", 3.0]]
+        )
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.7.0")
+    async def test_zinterstore_count_with_weight(self, r: redis.Redis):
+        await r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        await r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert (
+            await r.zinterstore("d", {"a": 1, "b": 2, "c": 3}, aggregate="COUNT") == 2
+        )
+        response = await r.zrange("d", 0, -1, withscores=True)
+        assert_resp_response(
+            r, response, [(b"a1", 6), (b"a3", 6)], [[b"a1", 6.0], [b"a3", 6.0]]
+        )
+
     @skip_if_server_version_lt("4.9.0")
     async def test_zpopmax(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         response = await r.zpopmax("a")
-        assert_resp_response(r, response, [(b"a3", 3)], [b"a3", 3.0])
+        assert_resp_response(
+            r,
+            response,
+            [(b"a3", 3)],
+            [b"a3", 3.0],
+            unified_expected=[[b"a3", 3.0]],
+        )
 
         # with count
         response = await r.zpopmax("a", count=2)
@@ -2923,7 +2979,13 @@ class TestRedisCommands:
     async def test_zpopmin(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         response = await r.zpopmin("a")
-        assert_resp_response(r, response, [(b"a1", 1)], [b"a1", 1.0])
+        assert_resp_response(
+            r,
+            response,
+            [(b"a1", 1)],
+            [b"a1", 1.0],
+            unified_expected=[[b"a1", 1.0]],
+        )
 
         # with count
         response = await r.zpopmin("a", count=2)
@@ -3278,6 +3340,38 @@ class TestRedisCommands:
             response,
             [(b"a2", 5.0), (b"a4", 12.0), (b"a3", 20.0), (b"a1", 23.0)],
             [[b"a2", 5.0], [b"a4", 12.0], [b"a3", 20.0], [b"a1", 23.0]],
+        )
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.7.0")
+    async def test_zunionstore_count(self, r: redis.Redis):
+        await r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        await r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert await r.zunionstore("d", ["a", "b", "c"], aggregate="COUNT") == 4
+        response = await r.zrange("d", 0, -1, withscores=True)
+        assert_resp_response(
+            r,
+            response,
+            [(b"a4", 1), (b"a2", 2), (b"a1", 3), (b"a3", 3)],
+            [[b"a4", 1.0], [b"a2", 2.0], [b"a1", 3.0], [b"a3", 3.0]],
+        )
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.7.0")
+    async def test_zunionstore_count_with_weight(self, r: redis.Redis):
+        await r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
+        await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
+        await r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
+        assert (
+            await r.zunionstore("d", {"a": 1, "b": 2, "c": 3}, aggregate="COUNT") == 4
+        )
+        response = await r.zrange("d", 0, -1, withscores=True)
+        assert_resp_response(
+            r,
+            response,
+            [(b"a2", 3), (b"a4", 3), (b"a1", 6), (b"a3", 6)],
+            [[b"a2", 3.0], [b"a4", 3.0], [b"a1", 6.0], [b"a3", 6.0]],
         )
 
     # HYPERLOGLOG TESTS
@@ -3720,6 +3814,7 @@ class TestRedisCommands:
             await r.geohash("barcelona", "place1", "place2", "place3"),
             ["sp3e9yg3kd0", "sp3e9cbc3t0", None],
             [b"sp3e9yg3kd0", b"sp3e9cbc3t0", None],
+            ["sp3e9yg3kd0", "sp3e9cbc3t0", None],
         )
 
     @skip_if_server_version_lt("3.2.0")
@@ -4298,6 +4393,114 @@ class TestRedisCommands:
         await r.xadd(stream, {"foo": "bar"})
         assert await r.xlen(stream) == 2
 
+    @skip_if_server_version_lt("8.7.2")
+    async def test_xnack_silent(self, r: ClientT):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        m2 = await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+        await r.xreadgroup(group, consumer, streams={stream: ">"})
+        result = await r.xnack(stream, group, "SILENT", m1, m2)
+        assert result == 2
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_xnack_fail(self, r: ClientT):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+        await r.xreadgroup(group, consumer, streams={stream: ">"})
+        result = await r.xnack(stream, group, "FAIL", m1)
+        assert result == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_xnack_fatal(self, r: ClientT):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+        await r.xreadgroup(group, consumer, streams={stream: ">"})
+        result = await r.xnack(stream, group, "FATAL", m1)
+        assert result == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_xnack_multiple_ids(self, r: ClientT):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        m2 = await r.xadd(stream, {"foo": "bar"})
+        m3 = await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+        await r.xreadgroup(group, consumer, streams={stream: ">"})
+        result = await r.xnack(stream, group, "FAIL", m1, m2, m3)
+        assert result == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_xnack_some_ids_not_in_pel(self, r: ClientT):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        m2 = await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+        await r.xreadgroup(group, consumer, streams={stream: ">"})
+        result = await r.xnack(stream, group, "FAIL", m1, m2, "999999-0")
+        assert result == 2
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_xnack_retrycount(self, r: ClientT):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+        await r.xreadgroup(group, consumer, streams={stream: ">"})
+        result = await r.xnack(stream, group, "FAIL", m1, retrycount=5)
+        assert result == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_xnack_force(self, r: ClientT):
+        stream = "stream"
+        group = "group"
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+        result = await r.xnack(stream, group, "FAIL", m1, force=True)
+        assert result == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_xnack_invalid_mode(self, r: ClientT):
+        stream = "stream"
+        group = "group"
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+        with pytest.raises(redis.DataError):
+            await r.xnack(stream, group, "INVALID", m1)
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_xnack_no_ids(self, r: ClientT):
+        stream = "stream"
+        group = "group"
+        await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+        with pytest.raises(redis.DataError):
+            await r.xnack(stream, group, "FAIL")
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_xnack_negative_retrycount(self, r: ClientT):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+        await r.xreadgroup(group, consumer, streams={stream: ">"})
+        with pytest.raises(redis.DataError):
+            await r.xnack(stream, group, "FAIL", m1, retrycount=-1)
+
     @skip_if_server_version_lt("5.0.0")
     async def test_xpending(self, r: redis.Redis):
         stream = "stream"
@@ -4388,21 +4591,33 @@ class TestRedisCommands:
         # xread starting at 0 returns both messages
         res = await r.xread(streams={stream: 0})
         assert_resp_response(
-            r, res, [[strem_name, expected_entries]], {strem_name: [expected_entries]}
+            r,
+            res,
+            [[strem_name, expected_entries]],
+            {strem_name: [expected_entries]},
+            {strem_name: expected_entries},
         )
 
         expected_entries = [await get_stream_message(r, stream, m1)]
         # xread starting at 0 and count=1 returns only the first message
         res = await r.xread(streams={stream: 0}, count=1)
         assert_resp_response(
-            r, res, [[strem_name, expected_entries]], {strem_name: [expected_entries]}
+            r,
+            res,
+            [[strem_name, expected_entries]],
+            {strem_name: [expected_entries]},
+            {strem_name: expected_entries},
         )
 
         expected_entries = [await get_stream_message(r, stream, m2)]
         # xread starting at m1 returns only the second message
         res = await r.xread(streams={stream: m1})
         assert_resp_response(
-            r, res, [[strem_name, expected_entries]], {strem_name: [expected_entries]}
+            r,
+            res,
+            [[strem_name, expected_entries]],
+            {strem_name: [expected_entries]},
+            {strem_name: expected_entries},
         )
 
     @skip_if_server_version_lt("5.0.0")
@@ -4423,7 +4638,11 @@ class TestRedisCommands:
         # xread starting at 0 returns both messages
         res = await r.xreadgroup(group, consumer, streams={stream: ">"})
         assert_resp_response(
-            r, res, [[strem_name, expected_entries]], {strem_name: [expected_entries]}
+            r,
+            res,
+            [[strem_name, expected_entries]],
+            {strem_name: [expected_entries]},
+            {strem_name: expected_entries},
         )
 
         await r.xgroup_destroy(stream, group)
@@ -4434,7 +4653,11 @@ class TestRedisCommands:
         # xread with count=1 returns only the first message
         res = await r.xreadgroup(group, consumer, streams={stream: ">"}, count=1)
         assert_resp_response(
-            r, res, [[strem_name, expected_entries]], {strem_name: [expected_entries]}
+            r,
+            res,
+            [[strem_name, expected_entries]],
+            {strem_name: [expected_entries]},
+            {strem_name: expected_entries},
         )
 
         await r.xgroup_destroy(stream, group)
@@ -4452,14 +4675,19 @@ class TestRedisCommands:
         await r.xgroup_create(stream, group, "0")
         res = await r.xreadgroup(group, consumer, streams={stream: ">"}, noack=True)
         empty_res = await r.xreadgroup(group, consumer, streams={stream: "0"})
-        if is_resp2_connection(r):
+        shape = expected_response_shape(r)
+        if shape == "legacy_resp2":
             assert len(res[0][1]) == 2
             # now there should be nothing pending
             assert len(empty_res[0][1]) == 0
-        else:
+        elif shape == "legacy_resp3":
             assert len(res[strem_name][0]) == 2
             # now there should be nothing pending
             assert len(empty_res[strem_name][0]) == 0
+        else:
+            assert len(res[strem_name]) == 2
+            # now there should be nothing pending
+            assert len(empty_res[strem_name]) == 0
 
         await r.xgroup_destroy(stream, group)
         await r.xgroup_create(stream, group, "0")
@@ -4469,7 +4697,11 @@ class TestRedisCommands:
         await r.xtrim(stream, 0)
         res = await r.xreadgroup(group, consumer, streams={stream: "0"})
         assert_resp_response(
-            r, res, [[strem_name, expected_entries]], {strem_name: [expected_entries]}
+            r,
+            res,
+            [[strem_name, expected_entries]],
+            {strem_name: [expected_entries]},
+            {strem_name: expected_entries},
         )
 
     def _validate_xreadgroup_with_claim_min_idle_time_response(
@@ -4482,12 +4714,15 @@ class TestRedisCommands:
         for str_index, expected_stream in enumerate(expected_streams):
             expected_entries_per_stream = expected_entries[expected_stream]
 
-            if is_resp2_connection(r):
+            shape = expected_response_shape(r)
+            if shape == "legacy_resp2":
                 actual_entries_per_stream = response[str_index][1]
                 actual_stream = response[str_index][0]
                 assert actual_stream == expected_stream
-            else:
+            elif shape == "legacy_resp3":
                 actual_entries_per_stream = response[expected_stream][0]
+            else:
+                actual_entries_per_stream = response[expected_stream]
 
             # validate the number of entries
             assert len(actual_entries_per_stream) == len(expected_entries_per_stream)
@@ -4570,14 +4805,14 @@ class TestRedisCommands:
             res,
             [[stream_name, expected_entries]],
             {stream_name: [expected_entries]},
+            {stream_name: expected_entries},
         )
 
         # add 2 more messages
         m7 = await r.xadd(stream, {"key_m7": "val_m7"})
         m8 = await r.xadd(stream, {"key_m8": "val_m8"})
-        # read the messages with claim_min_idle_time=1000
-        # only m7 and m8 should be returned
-        # because the other messages have not been in the PEL for long enough
+        # Use a threshold safely above this test's elapsed time so only
+        # newly-delivered messages are returned.
         expected_entries = {
             stream_name: [
                 {"msg": await get_stream_message(r, stream, m7), "min_idle_time": 0},
@@ -4585,7 +4820,7 @@ class TestRedisCommands:
             ]
         }
         res = await r.xreadgroup(
-            group, consumer_1, streams={stream: ">"}, claim_min_idle_time=100
+            group, consumer_1, streams={stream: ">"}, claim_min_idle_time=60_000
         )
         self._validate_xreadgroup_with_claim_min_idle_time_response(
             r, res, expected_entries
@@ -4688,9 +4923,8 @@ class TestRedisCommands:
         # add 2 more messages
         m7 = await r.xadd(stream_1, {"key_m7": "val_m7"})
         m8 = await r.xadd(stream_2, {"key_m8": "val_m8"})
-        # read the messages with claim_min_idle_time=1000
-        # only m7 and m8 should be returned
-        # because the other messages have not been in the PEL for long enough
+        # Use a threshold safely above this test's elapsed time so only
+        # newly-delivered messages are returned.
         expected_entries = {
             stream_1_name: [
                 {"msg": await get_stream_message(r, stream_1, m7), "min_idle_time": 0}
@@ -4703,7 +4937,7 @@ class TestRedisCommands:
             group,
             consumer_1,
             streams={stream_1: ">", stream_2: ">"},
-            claim_min_idle_time=100,
+            claim_min_idle_time=60_000,
         )
         self._validate_xreadgroup_with_claim_min_idle_time_response(
             r, res, expected_entries
@@ -4805,9 +5039,8 @@ class TestRedisCommands:
         # add 2 more messages
         m7 = await r.xadd(stream_1, {"key_m7": "val_m7"})
         m8 = await r.xadd(stream_2, {"key_m8": "val_m8"})
-        # read the messages with claim_min_idle_time=1000
-        # only m7 and m8 should be returned
-        # because the other messages have not been in the PEL for long enough
+        # Use a threshold safely above this test's elapsed time so only
+        # newly-delivered messages are returned.
         expected_entries = {
             stream_1_name: [
                 {"msg": await get_stream_message(r, stream_1, m7), "min_idle_time": 0}
@@ -4820,7 +5053,7 @@ class TestRedisCommands:
             group,
             consumer_1,
             streams={stream_1: ">", stream_2: ">"},
-            claim_min_idle_time=100,
+            claim_min_idle_time=60_000,
         )
         self._validate_xreadgroup_with_claim_min_idle_time_response(
             r, res, expected_entries
@@ -5324,6 +5557,110 @@ class TestRedisCommands:
             await task
 
 
+class TestAsyncGCRACommands:
+    """Tests for the async GCRA rate limiting command"""
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_gcra_basic(self, r: redis.Redis):
+        """Test basic GCRA command execution"""
+        key = "gcra_test_basic"
+        await r.delete(key)
+
+        # First request should not be limited
+        result = await r.gcra(key, max_burst=10, tokens_per_period=5, period=10.0)
+
+        assert isinstance(result, GCRAResponse)
+
+        # First request should not be limited
+        assert result.limited is False
+        # max_req_num should be max_burst + 1
+        assert result.max_req_num == 11
+        # Should have requests available
+        assert result.num_avail_req >= 0
+        # Not limited, so retry_after should be -1
+        assert result.retry_after == -1
+        # full_burst_after should be a non-negative value
+        assert result.full_burst_after >= 0
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_gcra_with_tokens(self, r: redis.Redis):
+        """Test GCRA command with TOKENS option"""
+        key = "gcra_test_tokens"
+        await r.delete(key)
+
+        # Request with a cost of 3
+        result = await r.gcra(
+            key, max_burst=10, tokens_per_period=5, period=10.0, tokens=3
+        )
+
+        assert isinstance(result, GCRAResponse)
+        assert result.limited is False  # Should not be limited initially
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_gcra_rate_limiting(self, r: redis.Redis):
+        """Test GCRA rate limiting with a realistic per-user scenario.
+
+        Simulates a user (user:42) who is allowed 2 requests per 60 seconds
+        with a max_burst of 1 (so capacity = max_burst + 1 = 2 tokens).
+        The first 2 requests should be allowed and execute actual Redis
+        commands, while the 3rd request should be rate limited.
+        """
+        user_id = 42
+        rate_limit_key = f"ratelimit:user:{user_id}"
+        user_data_key = f"user:{user_id}:request_count"
+        await r.delete(rate_limit_key)
+        await r.delete(user_data_key)
+
+        # Rate limit: allow 2 requests per 60s (max_burst=1, so capacity=2)
+        allowed_count = 0
+        limited_count = 0
+
+        for request_num in range(3):
+            result = await r.gcra(
+                rate_limit_key,
+                max_burst=1,
+                tokens_per_period=2,
+                period=60.0,
+            )
+            assert isinstance(result, GCRAResponse)
+            assert result.max_req_num == 2  # always max_burst + 1
+
+            if not result.limited:
+                # Request is allowed — perform the actual work
+                await r.incr(user_data_key)
+                allowed_count += 1
+            else:
+                # Request is rate limited — reject it
+                limited_count += 1
+                assert result.retry_after > 0
+                assert result.num_avail_req == 0
+
+        # The first 2 requests consumed the burst, the 3rd is blocked
+        assert allowed_count == 2
+        assert limited_count == 1
+        assert int(await r.get(user_data_key)) == 2
+
+    async def test_gcra_invalid_max_burst(self, r: redis.Redis):
+        """Test GCRA command with invalid max_burst parameter"""
+        with pytest.raises(exceptions.DataError):
+            await r.gcra("test_key", max_burst=-1, tokens_per_period=5, period=10.0)
+
+    async def test_gcra_invalid_tokens_per_period(self, r: redis.Redis):
+        """Test GCRA command with invalid tokens_per_period parameter"""
+        with pytest.raises(exceptions.DataError):
+            await r.gcra("test_key", max_burst=10, tokens_per_period=0, period=10.0)
+
+    async def test_gcra_invalid_period_too_small(self, r: redis.Redis):
+        """Test GCRA command with period less than 1.0"""
+        with pytest.raises(exceptions.DataError):
+            await r.gcra("test_key", max_burst=10, tokens_per_period=5, period=0.5)
+
+    async def test_gcra_invalid_period_too_large(self, r: redis.Redis):
+        """Test GCRA command with period greater than 1e12"""
+        with pytest.raises(exceptions.DataError):
+            await r.gcra("test_key", max_burst=10, tokens_per_period=5, period=1e13)
+
+
 @pytest.mark.onlynoncluster
 class TestBinarySave:
     async def test_binary_get_set(self, r: redis.Redis):
@@ -5414,3 +5751,98 @@ class TestBinarySave:
         timestamp = 1349673917.939762
         await r.zadd("a", {"a1": timestamp})
         assert await r.zscore("a", "a1") == timestamp
+
+
+@pytest.mark.asyncio
+class TestAsyncXreadXreadgroupMetricsExport:
+    """Tests for xread/xreadgroup async commands to verify streaming lag metrics are exported."""
+
+    @skip_if_server_version_lt("5.0.0")
+    async def test_async_xread_exports_streaming_lag_metric(self, r: redis.Redis):
+        """Test that async xread exports streaming lag metric."""
+        stream = "test-stream-metrics"
+
+        # Add a message to the stream
+        await r.xadd(stream, {"foo": "bar"})
+
+        with patch(
+            "redis.commands.core.async_record_streaming_lag",
+            new_callable=AsyncMock,
+        ) as mock_recorder:
+            # Read from the stream
+            result = await r.xread(streams={stream: "0"})
+
+            # Verify the async recorder was called
+            mock_recorder.assert_awaited_once()
+            call_args = mock_recorder.call_args
+            # Verify response was passed to the recorder
+            assert call_args[1]["response"] is not None
+            # Verify result is returned correctly
+            assert result is not None
+
+        # Cleanup
+        await r.delete(stream)
+
+    @skip_if_server_version_lt("5.0.0")
+    async def test_async_xreadgroup_exports_streaming_lag_metric_with_consumer_group(
+        self, r: redis.Redis
+    ):
+        """Test that async xreadgroup exports streaming lag metric with consumer group."""
+        stream = "test-stream-metrics-group"
+        group = "test-group"
+        consumer = "test-consumer"
+
+        # Add a message and create consumer group
+        await r.xadd(stream, {"foo": "bar"})
+        try:
+            await r.xgroup_create(stream, group, 0)
+        except ResponseError:
+            # Group may already exist
+            pass
+
+        with patch(
+            "redis.commands.core.async_record_streaming_lag",
+            new_callable=AsyncMock,
+        ) as mock_recorder:
+            # Read from the stream via consumer group
+            result = await r.xreadgroup(
+                groupname=group,
+                consumername=consumer,
+                streams={stream: ">"},
+            )
+
+            # Verify the async recorder was called with consumer group
+            mock_recorder.assert_awaited_once()
+            call_args = mock_recorder.call_args
+            assert call_args[1]["response"] is not None
+            assert call_args[1]["consumer_group"] == group
+            # Verify result is returned correctly
+            assert result is not None
+
+        # Cleanup
+        await r.xgroup_destroy(stream, group)
+        await r.delete(stream)
+
+    @skip_if_server_version_lt("5.0.0")
+    async def test_async_xread_handles_empty_response(self, r: redis.Redis):
+        """Test that async xread handles empty response gracefully."""
+        stream = "test-stream-empty"
+
+        # Create an empty stream by adding and deleting a message
+        msg_id = await r.xadd(stream, {"foo": "bar"})
+        await r.xdel(stream, msg_id)
+
+        with patch(
+            "redis.commands.core.async_record_streaming_lag",
+            new_callable=AsyncMock,
+        ) as mock_recorder:
+            # Read from the stream starting after the deleted message
+            result = await r.xread(streams={stream: msg_id})
+
+            # Verify the async recorder was called (even with empty response)
+            mock_recorder.assert_awaited_once()
+            # Result should be None or empty ([] for RESP2, {} for RESP3)
+            assert result is None or result == [] or result == {}
+
+        # Cleanup
+        await r.delete(stream)

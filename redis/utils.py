@@ -73,6 +73,23 @@ def safe_str(value):
     return str(str_if_bytes(value))
 
 
+def decode_field_value(value, key=None, field_encodings=None):
+    """Decode a field value respecting optional per-field encoding overrides.
+
+    - If *field_encodings* is provided and *key* is in it, the corresponding
+      encoding is used (``None`` means keep raw bytes).
+    - Otherwise falls back to :func:`str_if_bytes`.
+    """
+    if not isinstance(value, bytes):
+        return value
+    if field_encodings and key is not None and key in field_encodings:
+        encoding = field_encodings[key]
+        if encoding is None:
+            return value
+        return value.decode(encoding, "replace")
+    return str_if_bytes(value)
+
+
 def dict_merge(*dicts: Mapping[str, Any]) -> Dict[str, Any]:
     """
     Merge all provided dicts into 1 dict.
@@ -253,11 +270,19 @@ def _set_info_logger():
         logger.addHandler(handler)
 
 
+#: Default RESP protocol version used on the wire when the user does not
+#: supply an explicit ``protocol`` to the client / connection / pool. Lives
+#: in ``redis.utils`` so both ``redis.connection`` (for the HELLO handshake)
+#: and ``check_protocol_version`` (for protocol-gated features) can read it
+#: without a circular import.
+DEFAULT_RESP_VERSION = 3
+
+
 def check_protocol_version(
     protocol: Optional[Union[str, int]], expected_version: int = 3
 ) -> bool:
     if protocol is None:
-        return False
+        protocol = DEFAULT_RESP_VERSION
     if isinstance(protocol, str):
         try:
             protocol = int(protocol)

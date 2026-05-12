@@ -13,6 +13,7 @@ import pytest
 import redis
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
+from redis._parsers.socket import SENTINEL
 from redis.backoff import NoBackoff
 from redis.cache import (
     CacheConfig,
@@ -81,6 +82,7 @@ def test_loading_external_modules(r):
     # assert mod.get('fookey') == d
 
 
+@pytest.mark.fixed_client
 class TestConnection:
     def test_disconnect(self):
         conn = Connection()
@@ -213,7 +215,7 @@ def test_connection_parse_response_resume(r: redis.Redis, parser_class):
     assert i > 0
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "Class",
     [
@@ -249,7 +251,7 @@ def test_pack_command(Class):
     assert actual == expected, f"actual = {actual}, expected = {expected}"
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 def test_create_single_connection_client_from_url():
     client = redis.Redis.from_url(
         "redis://localhost:6379/0?", single_connection_client=True
@@ -372,6 +374,7 @@ def test_format_error_message(conn, error, expected_message):
     assert error_message == expected_message
 
 
+@pytest.mark.fixed_client
 def test_network_connection_failure():
     # Match only the stable part of the error message across OS
     exp_err = rf"Error {ECONNREFUSED} connecting to localhost:9999\."
@@ -380,6 +383,7 @@ def test_network_connection_failure():
         redis.set("a", "b")
 
 
+@pytest.mark.fixed_client
 @pytest.mark.skipif(
     not hasattr(socket, "AF_UNIX"),
     reason="Unix domain sockets not supported on this platform",
@@ -391,6 +395,7 @@ def test_unix_socket_connection_failure():
         redis.set("a", "b")
 
 
+@pytest.mark.fixed_client
 class TestUnitConnectionPool:
     @pytest.mark.parametrize(
         "max_conn", (-1, "str"), ids=("non-positive", "wrong type")
@@ -452,6 +457,7 @@ class TestUnitConnectionPool:
         connection_pool.disconnect()
 
 
+@pytest.mark.fixed_client
 class TestUnitCacheProxyConnection:
     def test_clears_cache_on_disconnect(self, mock_connection, cache_conf):
         cache = DefaultCache(CacheConfig(max_size=10))
@@ -598,6 +604,100 @@ class TestUnitCacheProxyConnection:
         platform.python_implementation() == "PyPy",
         reason="Pypy doesn't support side_effect",
     )
+    @pytest.mark.parametrize(
+        "command,redis_keys,redis_args,cached_value",
+        [
+            ("ZCARD", ("myset",), ("ZCARD", "myset"), 2),
+            ("SCARD", ("myset",), ("SCARD", "myset"), 5),
+            ("LLEN", ("mylist",), ("LLEN", "mylist"), 0),
+            (
+                "LRANGE",
+                ("mylist",),
+                ("LRANGE", "mylist", "0", "-1"),
+                [b"a", b"b"],
+            ),
+            ("EXISTS", ("foo",), ("EXISTS", "foo"), True),
+        ],
+        ids=["int-zcard", "int-scard", "int-llen", "list-lrange", "bool-exists"],
+    )
+    def test_read_response_returns_cached_non_bytes_reply(
+        self, mock_cache, mock_connection, command, redis_keys, redis_args, cached_value
+    ):
+        """Test that cached non-bytes responses (int, list, bool) don't crash.
+
+        Regression test for https://github.com/redis/redis-py/issues/4009
+        """
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection._event_dispatcher = EventDispatcher()
+
+        cache_key = CacheKey(
+            command=command, redis_keys=redis_keys, redis_args=redis_args
+        )
+        valid_entry = CacheEntry(
+            cache_key=cache_key,
+            cache_value=cached_value,
+            status=CacheEntryStatus.VALID,
+            connection_ref=mock_connection,
+        )
+        in_progress_entry = CacheEntry(
+            cache_key=cache_key,
+            cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+            status=CacheEntryStatus.IN_PROGRESS,
+            connection_ref=mock_connection,
+        )
+        mock_cache.is_cachable.return_value = True
+        mock_cache.get.side_effect = [
+            # 1st send_command: cache.get(key) → None (cache miss)
+            None,
+            # 1st read_response: cache.get(key) is not None check
+            in_progress_entry,
+            # 1st read_response: cache.get(key).status check
+            in_progress_entry,
+            # 1st read_response: cache.get(key) after wire read (to update entry)
+            in_progress_entry,
+            # 2nd send_command: cache.get(key) → truthy (cache hit, enter branch)
+            valid_entry,
+            # 2nd send_command: entry = cache.get(key)
+            valid_entry,
+            # 2nd send_command: re-check cache.get(key) → truthy (return early)
+            valid_entry,
+            # 2nd read_response: cache.get(key) is not None check
+            valid_entry,
+            # 2nd read_response: cache.get(key).status check (VALID != IN_PROGRESS)
+            valid_entry,
+            # 2nd read_response: cache.get(key).cache_value (deep copy)
+            valid_entry,
+        ]
+        mock_connection.send_command.return_value = Any
+        mock_connection.read_response.return_value = cached_value
+        mock_connection.can_read.return_value = False
+
+        proxy_connection = CacheProxyConnection(
+            mock_connection, mock_cache, threading.RLock()
+        )
+        proxy_connection.send_command(*list(redis_args), **{"keys": list(redis_keys)})
+        # First call: cache miss, reads from connection
+        assert proxy_connection.read_response() == cached_value
+        assert proxy_connection._current_command_cache_key is None
+
+        # Re-issue send_command so _current_command_cache_key is set again;
+        # this time send_command sees a VALID entry and returns early.
+        proxy_connection.send_command(*list(redis_args), **{"keys": list(redis_keys)})
+        # Second call: cache hit — this must not raise TypeError
+        assert proxy_connection.read_response() == cached_value
+        # Verify the second read_response used the cache, not the wire:
+        # mock_connection.read_response should have been called only once
+        # (during the first read_response).
+        mock_connection.read_response.assert_called_once()
+
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Pypy doesn't support side_effect",
+    )
     def test_triggers_invalidation_processing_on_another_connection(
         self, mock_cache, mock_connection
     ):
@@ -631,6 +731,196 @@ class TestUnitCacheProxyConnection:
         assert proxy_connection.read_response() == b"bar"
         assert another_conn.can_read.call_count == 2
         another_conn.read_response.assert_called_once()
+
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Pypy doesn't support side_effect",
+    )
+    def test_sends_command_when_cache_entry_invalidated_during_drain(
+        self, mock_cache, mock_connection
+    ):
+        """Regression test for issue #3600.
+
+        When another connection's invalidation drain removes the cache entry,
+        send_command must fall through and send the command over the wire
+        instead of returning early (which would cause read_response to hang).
+        """
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection._event_dispatcher = Mock(spec=EventDispatcher)
+
+        another_conn = copy.deepcopy(mock_connection)
+        another_conn.can_read.side_effect = [True, False]
+        another_conn.read_response.return_value = None
+
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache_entry = CacheEntry(
+            cache_key=cache_key,
+            cache_value=b"bar",
+            status=CacheEntryStatus.VALID,
+            connection_ref=another_conn,
+        )
+
+        mock_cache.is_cachable.return_value = True
+        # get() call sequence in send_command:
+        #   1st: check if entry exists (truthy → enter branch)
+        #   2nd: fetch the entry
+        #   3rd: re-check after drain (None → entry was invalidated)
+        mock_cache.get.side_effect = [cache_entry, cache_entry, None]
+        mock_connection.can_read.return_value = False
+        mock_connection.send_command.return_value = None
+
+        proxy_connection = CacheProxyConnection(
+            mock_connection, mock_cache, threading.RLock()
+        )
+        proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
+
+        # The drain should have happened on the other connection
+        assert another_conn.can_read.call_count == 2
+        another_conn.read_response.assert_called_once()
+
+        # The command must have been sent over the wire (not returned early)
+        mock_connection.send_command.assert_called_once_with("GET", "foo", keys=["foo"])
+
+        # An IN_PROGRESS entry must have been set for this connection
+        mock_cache.set.assert_called_once_with(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+                status=CacheEntryStatus.IN_PROGRESS,
+                connection_ref=mock_connection,
+            )
+        )
+
+    def test_read_response_propagates_timeout_parameter(self, mock_connection):
+        """Test that timeout parameter is propagated to underlying connection."""
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection._event_dispatcher = EventDispatcher()
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection.read_response.return_value = b"OK"
+
+        cache = DefaultCache(CacheConfig(max_size=10))
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+
+        # Test with specific timeout value
+        proxy_connection.read_response(timeout=0.5)
+        mock_connection.read_response.assert_called_with(
+            disable_decoding=False,
+            timeout=0.5,
+            disconnect_on_error=True,
+            push_request=False,
+        )
+
+    def test_read_response_timeout_default_is_sentinel(self, mock_connection):
+        """Test that default timeout value is SENTINEL."""
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection._event_dispatcher = EventDispatcher()
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection.read_response.return_value = b"OK"
+
+        cache = DefaultCache(CacheConfig(max_size=10))
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+
+        # Test default timeout is SENTINEL
+        proxy_connection.read_response()
+        mock_connection.read_response.assert_called_with(
+            disable_decoding=False,
+            timeout=SENTINEL,
+            disconnect_on_error=True,
+            push_request=False,
+        )
+
+    def test_read_response_timeout_none_passed_through(self, mock_connection):
+        """Test that timeout=None is passed through for blocking behavior."""
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection._event_dispatcher = EventDispatcher()
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection.read_response.return_value = b"OK"
+
+        cache = DefaultCache(CacheConfig(max_size=10))
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+
+        # Test timeout=None is passed through
+        proxy_connection.read_response(timeout=None)
+        mock_connection.read_response.assert_called_with(
+            disable_decoding=False,
+            timeout=None,
+            disconnect_on_error=True,
+            push_request=False,
+        )
+
+    def test_read_response_timeout_zero_passed_through(self, mock_connection):
+        """Test that timeout=0 is passed through for non-blocking behavior."""
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection._event_dispatcher = EventDispatcher()
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection.read_response.return_value = b"OK"
+
+        cache = DefaultCache(CacheConfig(max_size=10))
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+
+        # Test timeout=0 is passed through
+        proxy_connection.read_response(timeout=0)
+        mock_connection.read_response.assert_called_with(
+            disable_decoding=False,
+            timeout=0,
+            disconnect_on_error=True,
+            push_request=False,
+        )
+
+    def test_read_response_all_params_with_timeout(self, mock_connection):
+        """Test that all parameters including timeout are correctly passed."""
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection._event_dispatcher = EventDispatcher()
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection.read_response.return_value = b"OK"
+
+        cache = DefaultCache(CacheConfig(max_size=10))
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+
+        # Test all parameters together
+        proxy_connection.read_response(
+            disable_decoding=True,
+            timeout=1.5,
+            disconnect_on_error=False,
+            push_request=True,
+        )
+        mock_connection.read_response.assert_called_with(
+            disable_decoding=True,
+            timeout=1.5,
+            disconnect_on_error=False,
+            push_request=True,
+        )
 
 
 class TestConnectionPoolGetConnectionCount:

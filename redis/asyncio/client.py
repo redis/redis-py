@@ -2,6 +2,7 @@ import asyncio
 import copy
 import inspect
 import re
+import time
 import warnings
 from typing import (
     TYPE_CHECKING,
@@ -12,6 +13,7 @@ from typing import (
     Dict,
     Iterable,
     List,
+    Literal,
     Mapping,
     MutableMapping,
     Optional,
@@ -25,12 +27,7 @@ from typing import (
     cast,
 )
 
-from redis._parsers.helpers import (
-    _RedisCallbacks,
-    _RedisCallbacksRESP2,
-    _RedisCallbacksRESP3,
-    bool_ok,
-)
+from redis._parsers.helpers import bool_ok, get_response_callbacks
 from redis.asyncio.connection import (
     Connection,
     ConnectionPool,
@@ -38,6 +35,11 @@ from redis.asyncio.connection import (
     UnixDomainSocketConnection,
 )
 from redis.asyncio.lock import Lock
+from redis.asyncio.observability.recorder import (
+    record_error_count,
+    record_operation_duration,
+    record_pubsub_message,
+)
 from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.client import (
@@ -52,6 +54,7 @@ from redis.commands import (
     AsyncSentinelCommands,
     list_or_args,
 )
+from redis.commands.helpers import partition_pubsub_subscriptions_by_handler
 from redis.credentials import CredentialProvider
 from redis.driver_info import DriverInfo, resolve_driver_info
 from redis.event import (
@@ -69,6 +72,7 @@ from redis.exceptions import (
     ResponseError,
     WatchError,
 )
+from redis.observability.attributes import PubSubDirection
 from redis.typing import ChannelT, EncodableT, KeyT
 from redis.utils import (
     SSL_AVAILABLE,
@@ -93,6 +97,7 @@ _ArgT = TypeVar("_ArgT", KeyT, EncodableT)
 _RedisT = TypeVar("_RedisT", bound="Redis")
 _NormalizeKeysT = TypeVar("_NormalizeKeysT", bound=Mapping[ChannelT, object])
 if TYPE_CHECKING:
+    from redis.asyncio.keyspace_notifications import AsyncKeyspaceNotifications
     from redis.commands.core import Script
 
 
@@ -121,6 +126,9 @@ class Redis(
     configuration, an instance will either use a ConnectionPool, or
     Connection object to talk to redis.
     """
+
+    # Type discrimination marker for @overload self-type pattern
+    _is_async_client: Literal[True] = True
 
     response_callbacks: MutableMapping[Union[str, bytes], ResponseCallbackT]
 
@@ -264,7 +272,8 @@ class Redis(
         auto_close_connection_pool: Optional[bool] = None,
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
-        protocol: Optional[int] = 2,
+        protocol: Optional[int] = None,
+        legacy_responses: bool = True,
         event_dispatcher: Optional[EventDispatcher] = None,
     ):
         """
@@ -335,6 +344,7 @@ class Redis(
                 "driver_info": computed_driver_info,
                 "redis_connect_func": redis_connect_func,
                 "protocol": protocol,
+                "legacy_responses": legacy_responses,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -395,12 +405,13 @@ class Redis(
         self.single_connection_client = single_connection_client
         self.connection: Optional[Connection] = None
 
-        self.response_callbacks = CaseInsensitiveDict(_RedisCallbacks)
-
-        if self.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
-            self.response_callbacks.update(_RedisCallbacksRESP3)
-        else:
-            self.response_callbacks.update(_RedisCallbacksRESP2)
+        connection_kwargs = self.connection_pool.connection_kwargs
+        self.response_callbacks = CaseInsensitiveDict(
+            get_response_callbacks(
+                user_protocol=connection_kwargs.get("protocol"),
+                legacy_responses=connection_kwargs.get("legacy_responses", True),
+            )
+        )
 
         # If using a single connection client, we need to lock creation-of and use-of
         # the client in order to avoid race conditions such as using asyncio.gather
@@ -611,6 +622,33 @@ class Redis(
             self.connection_pool, event_dispatcher=self._event_dispatcher, **kwargs
         )
 
+    def keyspace_notifications(
+        self,
+        key_prefix: Union[str, bytes, None] = None,
+        ignore_subscribe_messages: bool = True,
+    ) -> "AsyncKeyspaceNotifications":
+        """
+        Return an :class:`~redis.asyncio.keyspace_notifications.AsyncKeyspaceNotifications`
+        object for subscribing to keyspace and keyevent notifications.
+
+        Note: Keyspace notifications must be enabled on the Redis server via
+        the ``notify-keyspace-events`` configuration option.
+
+        Args:
+            key_prefix: Optional prefix to filter and strip from keys in
+                        notifications.
+            ignore_subscribe_messages: If True, subscribe/unsubscribe
+                                      confirmations are not returned by
+                                      get_message/listen.
+        """
+        from redis.asyncio.keyspace_notifications import AsyncKeyspaceNotifications
+
+        return AsyncKeyspaceNotifications(
+            self,
+            key_prefix=key_prefix,
+            ignore_subscribe_messages=ignore_subscribe_messages,
+        )
+
     def monitor(self) -> "Monitor":
         return Monitor(self.connection_pool)
 
@@ -714,7 +752,14 @@ class Redis(
         await conn.send_command(*args)
         return await self.parse_response(conn, command_name, **options)
 
-    async def _close_connection(self, conn: Connection):
+    async def _close_connection(
+        self,
+        conn: Connection,
+        error: Optional[BaseException] = None,
+        failure_count: Optional[int] = None,
+        start_time: Optional[float] = None,
+        command_name: Optional[str] = None,
+    ):
         """
         Close the connection before retrying.
 
@@ -724,7 +769,22 @@ class Redis(
         After we disconnect the connection, it will try to reconnect and
         do a health check as part of the send_command logic(on connection level).
         """
-        await conn.disconnect()
+        if (
+            error
+            and failure_count is not None
+            and failure_count <= conn.retry.get_retries()
+        ):
+            await record_operation_duration(
+                command_name=command_name,
+                duration_seconds=time.monotonic() - start_time,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
+                db_namespace=str(conn.db),
+                error=error,
+                retry_attempts=failure_count,
+            )
+
+        await conn.disconnect(error=error, failure_count=failure_count)
 
     # COMMAND EXECUTION AND PROTOCOL PARSING
     async def execute_command(self, *args, **options):
@@ -734,15 +794,48 @@ class Redis(
         command_name = args[0]
         conn = self.connection or await pool.get_connection()
 
+        # Start timing for observability
+        start_time = time.monotonic()
+        # Track actual retry attempts for error reporting
+        actual_retry_attempts = 0
+
+        def failure_callback(error, failure_count):
+            nonlocal actual_retry_attempts
+            actual_retry_attempts = failure_count
+            return self._close_connection(
+                conn, error, failure_count, start_time, command_name
+            )
+
         if self.single_connection_client:
             await self._single_conn_lock.acquire()
         try:
-            return await conn.retry.call_with_retry(
+            result = await conn.retry.call_with_retry(
                 lambda: self._send_command_parse_response(
                     conn, command_name, *args, **options
                 ),
-                lambda _: self._close_connection(conn),
+                failure_callback,
+                with_failure_count=True,
             )
+
+            await record_operation_duration(
+                command_name=command_name,
+                duration_seconds=time.monotonic() - start_time,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
+                db_namespace=str(conn.db),
+            )
+            return result
+        except Exception as e:
+            await record_error_count(
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
+                network_peer_address=getattr(conn, "host", None),
+                network_peer_port=getattr(conn, "port", None),
+                error_type=e,
+                retry_attempts=actual_retry_attempts,
+                is_internal=False,
+            )
+            raise
         finally:
             if self.single_connection_client:
                 self._single_conn_lock.release()
@@ -915,6 +1008,8 @@ class PubSub:
         self.pending_unsubscribe_channels = set()
         self.patterns = {}
         self.pending_unsubscribe_patterns = set()
+        self.shard_channels = {}
+        self.pending_unsubscribe_shard_channels = set()
         self._lock = asyncio.Lock()
 
     async def __aenter__(self):
@@ -935,7 +1030,11 @@ class PubSub:
             return
         async with self._lock:
             if self.connection:
-                await self.connection.disconnect()
+                # Use nowait=True to avoid awaiting StreamWriter.wait_closed(),
+                # which can deadlock when a concurrent reader task (e.g. one
+                # running pubsub.run() or get_message(block=True)) still holds
+                # the transport.  See https://github.com/redis/redis-py/issues/3941
+                await self.connection.disconnect(nowait=True)
                 self.connection.deregister_connect_callback(self.on_connect)
                 await self.connection_pool.release(self.connection)
                 self.connection = None
@@ -943,6 +1042,8 @@ class PubSub:
             self.pending_unsubscribe_channels = set()
             self.patterns = {}
             self.pending_unsubscribe_patterns = set()
+            self.shard_channels = {}
+            self.pending_unsubscribe_shard_channels = set()
 
     @deprecated_function(version="5.0.1", reason="Use aclose() instead", name="close")
     async def close(self) -> None:
@@ -954,48 +1055,34 @@ class PubSub:
         """Alias for aclose(), for backwards compatibility"""
         await self.aclose()
 
+    async def _resubscribe(self, subscribed, subscribe_fn) -> None:
+        subscriptions_without_handlers, subscriptions_with_handlers = (
+            partition_pubsub_subscriptions_by_handler(subscribed, self.encoder)
+        )
+        if subscriptions_without_handlers or subscriptions_with_handlers:
+            await subscribe_fn(
+                *subscriptions_without_handlers, **subscriptions_with_handlers
+            )
+
+    async def _resubscribe_shard_channels(self) -> None:
+        await self._resubscribe(self.shard_channels, self.ssubscribe)
+
     async def on_connect(self, connection: Connection):
         """Re-subscribe to any channels and patterns previously subscribed to"""
-        # NOTE: for python3, we can't pass bytestrings as keyword arguments
-        # so we need to decode channel/pattern names back to unicode strings
-        # before passing them to [p]subscribe.
-        #
-        # However, channels subscribed without a callback (positional args) may
-        # have binary names that are not valid in the current encoding (e.g.
-        # arbitrary bytes that are not valid UTF-8).  These channels are stored
-        # with a ``None`` handler.  We re-subscribe them as positional args so
-        # that no decoding is required.
         self.pending_unsubscribe_channels.clear()
         self.pending_unsubscribe_patterns.clear()
+        self.pending_unsubscribe_shard_channels.clear()
         if self.channels:
-            channels_with_handlers = {}
-            channels_without_handlers = []
-            for k, v in self.channels.items():
-                if v is not None:
-                    channels_with_handlers[self.encoder.decode(k, force=True)] = v
-                else:
-                    channels_without_handlers.append(k)
-            if channels_with_handlers or channels_without_handlers:
-                await self.subscribe(
-                    *channels_without_handlers, **channels_with_handlers
-                )
+            await self._resubscribe(self.channels, self.subscribe)
         if self.patterns:
-            patterns_with_handlers = {}
-            patterns_without_handlers = []
-            for k, v in self.patterns.items():
-                if v is not None:
-                    patterns_with_handlers[self.encoder.decode(k, force=True)] = v
-                else:
-                    patterns_without_handlers.append(k)
-            if patterns_with_handlers or patterns_without_handlers:
-                await self.psubscribe(
-                    *patterns_without_handlers, **patterns_with_handlers
-                )
+            await self._resubscribe(self.patterns, self.psubscribe)
+        if self.shard_channels:
+            await self._resubscribe_shard_channels()
 
     @property
     def subscribed(self):
         """Indicates if there are subscriptions to any channels or patterns"""
-        return bool(self.channels or self.patterns)
+        return bool(self.channels or self.patterns or self.shard_channels)
 
     async def execute_command(self, *args: EncodableT):
         """Execute a publish/subscribe command"""
@@ -1029,11 +1116,36 @@ class PubSub:
             )
         )
 
-    async def _reconnect(self, conn):
+    async def _reconnect(
+        self,
+        conn,
+        error: Optional[BaseException] = None,
+        failure_count: Optional[int] = None,
+        start_time: Optional[float] = None,
+        command_name: Optional[str] = None,
+    ):
         """
-        Try to reconnect
+        The supported exceptions are already checked in the
+        retry object so we don't need to do it here.
+
+        In this error handler we are trying to reconnect to the server.
         """
-        await conn.disconnect()
+        if (
+            error
+            and failure_count is not None
+            and failure_count <= conn.retry.get_retries()
+        ):
+            if command_name:
+                await record_operation_duration(
+                    command_name=command_name,
+                    duration_seconds=time.monotonic() - start_time,
+                    server_address=getattr(conn, "host", None),
+                    server_port=getattr(conn, "port", None),
+                    db_namespace=str(conn.db),
+                    error=error,
+                    retry_attempts=failure_count,
+                )
+        await conn.disconnect(error=error, failure_count=failure_count)
         await conn.connect()
 
     async def _execute(self, conn, command, *args, **kwargs):
@@ -1044,13 +1156,89 @@ class PubSub:
         called by the # connection to resubscribe us to any channels and
         patterns we were previously listening to
         """
-        return await conn.retry.call_with_retry(
-            lambda: command(*args, **kwargs),
-            lambda _: self._reconnect(conn),
-        )
+        if not len(args) == 0:
+            command_name = args[0]
+        else:
+            command_name = None
+
+        # Start timing for observability
+        start_time = time.monotonic()
+        # Track actual retry attempts for error reporting
+        actual_retry_attempts = 0
+
+        def failure_callback(error, failure_count):
+            nonlocal actual_retry_attempts
+            actual_retry_attempts = failure_count
+            return self._reconnect(conn, error, failure_count, start_time, command_name)
+
+        try:
+            response = await conn.retry.call_with_retry(
+                lambda: command(*args, **kwargs),
+                failure_callback,
+                with_failure_count=True,
+            )
+
+            if command_name:
+                await record_operation_duration(
+                    command_name=command_name,
+                    duration_seconds=time.monotonic() - start_time,
+                    server_address=getattr(conn, "host", None),
+                    server_port=getattr(conn, "port", None),
+                    db_namespace=str(conn.db),
+                )
+
+            return response
+        except Exception as e:
+            await record_error_count(
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
+                network_peer_address=getattr(conn, "host", None),
+                network_peer_port=getattr(conn, "port", None),
+                error_type=e,
+                retry_attempts=actual_retry_attempts,
+                is_internal=False,
+            )
+            raise
 
     async def parse_response(self, block: bool = True, timeout: float = 0):
-        """Parse the response from a publish/subscribe command"""
+        """
+        Parse the response from a publish/subscribe command.
+
+        Args:
+            block: If True, block indefinitely until a message is available.
+                   If False, return immediately if no message is available.
+                   Default: True
+            timeout: The timeout in seconds for reading a response when block=False.
+                     This parameter is ignored when block=True.
+                     Default: 0 (return immediately if no data available)
+
+        Returns:
+            The parsed response from the server, or None if no message is available
+            within the timeout period (when block=False).
+
+        Important:
+            The block and timeout parameters work together:
+            - When block=True: timeout is IGNORED, method blocks indefinitely
+            - When block=False: timeout is USED, method returns after timeout expires
+
+            Typically, you should use get_message(timeout=X) instead of calling
+            parse_response() directly. The get_message() method automatically sets
+            block=False when a timeout is provided, and block=True when timeout=None.
+
+        Example:
+            # Block indefinitely (timeout is ignored)
+            response = await pubsub.parse_response(block=True, timeout=0.1)
+
+            # Non-blocking with 0.1 second timeout
+            response = await pubsub.parse_response(block=False, timeout=0.1)
+
+            # Non-blocking, return immediately
+            response = await pubsub.parse_response(block=False, timeout=0)
+
+            # Recommended: use get_message() instead
+            msg = await pubsub.get_message(timeout=0.1)  # automatically sets block=False
+            msg = await pubsub.get_message(timeout=None)  # automatically sets block=True
+        """
         conn = self.connection
         if conn is None:
             raise RuntimeError(
@@ -1174,6 +1362,40 @@ class PubSub:
         self.pending_unsubscribe_channels.update(channels)
         return self.execute_command("UNSUBSCRIBE", *parsed_args)
 
+    async def ssubscribe(self, *args, target_node=None, **kwargs):
+        """
+        Subscribes the client to the specified shard channels.
+        Channels supplied as keyword arguments expect a channel name as the key
+        and a callable as the value. A channel's callable will be invoked automatically
+        when a message is received on that channel rather than producing a message via
+        ``listen()`` or ``get_sharded_message()``.
+        """
+        if args:
+            args = list_or_args(args[0], args[1:])
+        new_s_channels = dict.fromkeys(args)
+        new_s_channels.update(kwargs)
+        ret_val = await self.execute_command("SSUBSCRIBE", *new_s_channels.keys())
+        # update the s_channels dict AFTER we send the command. we don't want to
+        # subscribe twice to these channels, once for the command and again
+        # for the reconnection.
+        new_s_channels = self._normalize_keys(new_s_channels)
+        self.shard_channels.update(new_s_channels)
+        self.pending_unsubscribe_shard_channels.difference_update(new_s_channels)
+        return ret_val
+
+    def sunsubscribe(self, *args, target_node=None) -> Awaitable:
+        """
+        Unsubscribe from the supplied shard_channels. If empty, unsubscribe from
+        all shard_channels
+        """
+        if args:
+            args = list_or_args(args[0], args[1:])
+            s_channels = self._normalize_keys(dict.fromkeys(args))
+        else:
+            s_channels = self.shard_channels
+        self.pending_unsubscribe_shard_channels.update(s_channels)
+        return self.execute_command("SUNSUBSCRIBE", *args)
+
     async def listen(self) -> AsyncIterator:
         """Listen for messages on channels this client has been subscribed to"""
         while self.subscribed:
@@ -1239,6 +1461,20 @@ class PubSub:
                 "data": response[2],
             }
 
+        if message_type in ["message", "pmessage"]:
+            channel = str_if_bytes(message["channel"])
+            await record_pubsub_message(
+                direction=PubSubDirection.RECEIVE,
+                channel=channel,
+            )
+        elif message_type == "smessage":
+            channel = str_if_bytes(message["channel"])
+            await record_pubsub_message(
+                direction=PubSubDirection.RECEIVE,
+                channel=channel,
+                sharded=True,
+            )
+
         # if this is an unsubscribe message, remove it from memory
         if message_type in self.UNSUBSCRIBE_MESSAGE_TYPES:
             if message_type == "punsubscribe":
@@ -1246,6 +1482,11 @@ class PubSub:
                 if pattern in self.pending_unsubscribe_patterns:
                     self.pending_unsubscribe_patterns.remove(pattern)
                     self.patterns.pop(pattern, None)
+            elif message_type == "sunsubscribe":
+                s_channel = response[1]
+                if s_channel in self.pending_unsubscribe_shard_channels:
+                    self.pending_unsubscribe_shard_channels.remove(s_channel)
+                    self.shard_channels.pop(s_channel, None)
             else:
                 channel = response[1]
                 if channel in self.pending_unsubscribe_channels:
@@ -1256,6 +1497,8 @@ class PubSub:
             # if there's a message handler, invoke it
             if message_type == "pmessage":
                 handler = self.patterns.get(message["pattern"], None)
+            elif message_type == "smessage":
+                handler = self.shard_channels.get(message["channel"], None)
             else:
                 handler = self.channels.get(message["channel"], None)
             if handler:
@@ -1452,7 +1695,10 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         self,
         conn: Connection,
         error: Exception,
-    ):
+        failure_count: Optional[int] = None,
+        start_time: Optional[float] = None,
+        command_name: Optional[str] = None,
+    ) -> None:
         """
         Close the connection reset watching state and
         raise an exception if we were watching.
@@ -1463,7 +1709,21 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         After we disconnect the connection, it will try to reconnect and
         do a health check as part of the send_command logic(on connection level).
         """
-        await conn.disconnect()
+        if (
+            error
+            and failure_count is not None
+            and failure_count <= conn.retry.get_retries()
+        ):
+            await record_operation_duration(
+                command_name=command_name,
+                duration_seconds=time.monotonic() - start_time,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
+                db_namespace=str(conn.db),
+                error=error,
+                retry_attempts=failure_count,
+            )
+        await conn.disconnect(error=error, failure_count=failure_count)
         # if we were already watching a variable, the watch is no longer
         # valid since this connection has died. raise a WatchError, which
         # indicates the user should retry this transaction.
@@ -1487,12 +1747,47 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             conn = await self.connection_pool.get_connection()
             self.connection = conn
 
-        return await conn.retry.call_with_retry(
-            lambda: self._send_command_parse_response(
-                conn, command_name, *args, **options
-            ),
-            lambda error: self._disconnect_reset_raise_on_watching(conn, error),
-        )
+        # Start timing for observability
+        start_time = time.monotonic()
+        # Track actual retry attempts for error reporting
+        actual_retry_attempts = 0
+
+        def failure_callback(error, failure_count):
+            nonlocal actual_retry_attempts
+            actual_retry_attempts = failure_count
+            return self._disconnect_reset_raise_on_watching(
+                conn, error, failure_count, start_time, command_name
+            )
+
+        try:
+            response = await conn.retry.call_with_retry(
+                lambda: self._send_command_parse_response(
+                    conn, command_name, *args, **options
+                ),
+                failure_callback,
+                with_failure_count=True,
+            )
+
+            await record_operation_duration(
+                command_name=command_name,
+                duration_seconds=time.monotonic() - start_time,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
+                db_namespace=str(conn.db),
+            )
+
+            return response
+        except Exception as e:
+            await record_error_count(
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
+                network_peer_address=getattr(conn, "host", None),
+                network_peer_port=getattr(conn, "port", None),
+                error_type=e,
+                retry_attempts=actual_retry_attempts,
+                is_internal=False,
+            )
+            raise
 
     def pipeline_execute_command(self, *args, **options):
         """
@@ -1646,7 +1941,14 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
                 if not exist:
                     s.sha = await immediate("SCRIPT LOAD", s.script)
 
-    async def _disconnect_raise_on_watching(self, conn: Connection, error: Exception):
+    async def _disconnect_raise_on_watching(
+        self,
+        conn: Connection,
+        error: Exception,
+        failure_count: Optional[int] = None,
+        start_time: Optional[float] = None,
+        command_name: Optional[str] = None,
+    ):
         """
         Close the connection, raise an exception if we were watching.
 
@@ -1656,7 +1958,21 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         After we disconnect the connection, it will try to reconnect and
         do a health check as part of the send_command logic(on connection level).
         """
-        await conn.disconnect()
+        if (
+            error
+            and failure_count is not None
+            and failure_count <= conn.retry.get_retries()
+        ):
+            await record_operation_duration(
+                command_name=command_name,
+                duration_seconds=time.monotonic() - start_time,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
+                db_namespace=str(conn.db),
+                error=error,
+                retry_attempts=failure_count,
+            )
+        await conn.disconnect(error=error, failure_count=failure_count)
         # if we were watching a variable, the watch is no longer valid
         # since this connection has died. raise a WatchError, which
         # indicates the user should retry this transaction.
@@ -1674,8 +1990,10 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             await self.load_scripts()
         if self.is_transaction or self.explicit_transaction:
             execute = self._execute_transaction
+            operation_name = "MULTI"
         else:
             execute = self._execute_pipeline
+            operation_name = "PIPELINE"
 
         conn = self.connection
         if not conn:
@@ -1685,11 +2003,44 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             self.connection = conn
         conn = cast(Connection, conn)
 
-        try:
-            return await conn.retry.call_with_retry(
-                lambda: execute(conn, stack, raise_on_error),
-                lambda error: self._disconnect_raise_on_watching(conn, error),
+        # Start timing for observability
+        start_time = time.monotonic()
+        # Track actual retry attempts for error reporting
+        actual_retry_attempts = 0
+
+        def failure_callback(error, failure_count):
+            nonlocal actual_retry_attempts
+            actual_retry_attempts = failure_count
+            return self._disconnect_raise_on_watching(
+                conn, error, failure_count, start_time, operation_name
             )
+
+        try:
+            response = await conn.retry.call_with_retry(
+                lambda: execute(conn, stack, raise_on_error),
+                failure_callback,
+                with_failure_count=True,
+            )
+
+            await record_operation_duration(
+                command_name=operation_name,
+                duration_seconds=time.monotonic() - start_time,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
+                db_namespace=str(conn.db),
+            )
+            return response
+        except Exception as e:
+            await record_error_count(
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
+                network_peer_address=getattr(conn, "host", None),
+                network_peer_port=getattr(conn, "port", None),
+                error_type=e,
+                retry_attempts=actual_retry_attempts,
+                is_internal=False,
+            )
+            raise
         finally:
             await self.reset()
 

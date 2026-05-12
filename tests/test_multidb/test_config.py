@@ -17,12 +17,12 @@ from redis.multidb.config import (
 )
 from redis.multidb.database import Database
 from redis.multidb.failure_detector import CommandFailureDetector, FailureDetector
-from redis.multidb.healthcheck import PingHealthCheck, HealthCheck
+from redis.asyncio.multidb.healthcheck import PingHealthCheck, HealthCheck
 from redis.multidb.failover import WeightBasedFailoverStrategy, FailoverStrategy
 from redis.retry import Retry
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestMultiDbConfig:
     def test_default_config(self):
         db_configs = [
@@ -196,7 +196,7 @@ class TestMultiDbConfig:
         assert pool._maint_notifications_pool_handler.config.enabled is True
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestDatabaseConfig:
     def test_default_config(self):
         config = DatabaseConfig(

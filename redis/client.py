@@ -1,4 +1,5 @@
 import copy
+import logging
 import re
 import threading
 import time
@@ -9,6 +10,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Literal,
     Mapping,
     Optional,
     Set,
@@ -17,12 +19,8 @@ from typing import (
 )
 
 from redis._parsers.encoders import Encoder
-from redis._parsers.helpers import (
-    _RedisCallbacks,
-    _RedisCallbacksRESP2,
-    _RedisCallbacksRESP3,
-    bool_ok,
-)
+from redis._parsers.helpers import bool_ok, get_response_callbacks
+from redis._parsers.socket import SENTINEL
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.cache import CacheConfig, CacheInterface
 from redis.commands import (
@@ -32,6 +30,7 @@ from redis.commands import (
     list_or_args,
 )
 from redis.commands.core import Script
+from redis.commands.helpers import partition_pubsub_subscriptions_by_handler
 from redis.connection import (
     AbstractConnection,
     Connection,
@@ -82,11 +81,27 @@ if TYPE_CHECKING:
 
     import OpenSSL
 
+    from redis.keyspace_notifications import KeyspaceNotifications
+
 SYM_EMPTY = b""
 EMPTY_RESPONSE = "EMPTY_RESPONSE"
 
 # some responses (ie. dump) are binary, and just meant to never be decoded
 NEVER_DECODE = "NEVER_DECODE"
+
+
+logger = logging.getLogger(__name__)
+
+
+def is_debug_log_enabled():
+    return logger.isEnabledFor(logging.DEBUG)
+
+
+def add_debug_log_for_operation_failure(connection: "AbstractConnection"):
+    logger.debug(
+        f"Operation failed, "
+        f"with connection: {connection}, details: {connection.extract_connection_details() if connection else 'no connection'}",
+    )
 
 
 class CaseInsensitiveDict(dict):
@@ -134,6 +149,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
     It is not safe to pass PubSub or Pipeline objects between threads.
     """
+
+    # Type discrimination marker for @overload self-type pattern
+    _is_async_client: Literal[False] = False
 
     @classmethod
     def from_url(cls, url: str, **kwargs) -> "Redis":
@@ -259,7 +277,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         username: Optional[str] = None,
         redis_connect_func: Optional[Callable[[], None]] = None,
         credential_provider: Optional[CredentialProvider] = None,
-        protocol: Optional[int] = 2,
+        protocol: Optional[int] = None,
+        legacy_responses: bool = True,
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
@@ -350,6 +369,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "redis_connect_func": redis_connect_func,
                 "credential_provider": credential_provider,
                 "protocol": protocol,
+                "legacy_responses": legacy_responses,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -403,10 +423,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 maint_notifications_enabled = (
                     maint_notifications_config and maint_notifications_config.enabled
                 )
-                if maint_notifications_enabled and protocol not in [
-                    3,
-                    "3",
-                ]:
+                if maint_notifications_enabled and not check_protocol_version(
+                    protocol, 3
+                ):
                     raise RedisError(
                         "Maintenance notifications handlers on connection are only supported with RESP version 3"
                     )
@@ -439,10 +458,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         self.connection_pool = connection_pool
 
-        if (cache_config or cache) and self.connection_pool.get_protocol() not in [
-            3,
-            "3",
-        ]:
+        if (cache_config or cache) and not check_protocol_version(
+            self.connection_pool.get_protocol(), 3
+        ):
             raise RedisError("Client caching is only supported with RESP version 3")
 
         self.single_connection_lock = threading.RLock()
@@ -456,12 +474,13 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 )
             )
 
-        self.response_callbacks = CaseInsensitiveDict(_RedisCallbacks)
-
-        if self.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
-            self.response_callbacks.update(_RedisCallbacksRESP3)
-        else:
-            self.response_callbacks.update(_RedisCallbacksRESP2)
+        connection_kwargs = self.connection_pool.connection_kwargs
+        self.response_callbacks = CaseInsensitiveDict(
+            get_response_callbacks(
+                user_protocol=connection_kwargs.get("protocol"),
+                legacy_responses=connection_kwargs.get("legacy_responses", True),
+            )
+        )
 
     def __repr__(self) -> str:
         return (
@@ -638,6 +657,33 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             self.connection_pool, event_dispatcher=self._event_dispatcher, **kwargs
         )
 
+    def keyspace_notifications(
+        self,
+        key_prefix: Union[str, bytes, None] = None,
+        ignore_subscribe_messages: bool = True,
+    ) -> "KeyspaceNotifications":
+        """
+        Return a :class:`~redis.keyspace_notifications.KeyspaceNotifications`
+        object for subscribing to keyspace and keyevent notifications.
+
+        Note: Keyspace notifications must be enabled on the Redis server via
+        the ``notify-keyspace-events`` configuration option.
+
+        Args:
+            key_prefix: Optional prefix to filter and strip from keys in
+                        notifications.
+            ignore_subscribe_messages: If True, subscribe/unsubscribe
+                                      confirmations are not returned by
+                                      get_message/listen.
+        """
+        from redis.keyspace_notifications import KeyspaceNotifications
+
+        return KeyspaceNotifications(
+            self,
+            key_prefix=key_prefix,
+            ignore_subscribe_messages=ignore_subscribe_messages,
+        )
+
     def monitor(self):
         return Monitor(self.connection_pool)
 
@@ -727,6 +773,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         actual_retry_attempts = [0]
 
         def failure_callback(error, failure_count):
+            if is_debug_log_enabled():
+                add_debug_log_for_operation_failure(conn)
             actual_retry_attempts[0] = failure_count
             self._close_connection(conn, error, failure_count, start_time, command_name)
 
@@ -962,50 +1010,27 @@ class PubSub:
     def close(self) -> None:
         self.reset()
 
+    def _resubscribe(self, subscribed, subscribe_fn) -> None:
+        subscriptions_without_handlers, subscriptions_with_handlers = (
+            partition_pubsub_subscriptions_by_handler(subscribed, self.encoder)
+        )
+        if subscriptions_without_handlers or subscriptions_with_handlers:
+            subscribe_fn(*subscriptions_without_handlers, **subscriptions_with_handlers)
+
+    def _resubscribe_shard_channels(self) -> None:
+        self._resubscribe(self.shard_channels, self.ssubscribe)
+
     def on_connect(self, connection) -> None:
         "Re-subscribe to any channels and patterns previously subscribed to"
-        # NOTE: for python3, we can't pass bytestrings as keyword arguments
-        # so we need to decode channel/pattern names back to unicode strings
-        # before passing them to [p]subscribe.
-        #
-        # However, channels subscribed without a callback (positional args) may
-        # have binary names that are not valid in the current encoding (e.g.
-        # arbitrary bytes that are not valid UTF-8).  These channels are stored
-        # with a ``None`` handler.  We re-subscribe them as positional args so
-        # that no decoding is required.
         self.pending_unsubscribe_channels.clear()
         self.pending_unsubscribe_patterns.clear()
         self.pending_unsubscribe_shard_channels.clear()
         if self.channels:
-            channels_with_handlers = {}
-            channels_without_handlers = []
-            for k, v in self.channels.items():
-                if v is not None:
-                    channels_with_handlers[self.encoder.decode(k, force=True)] = v
-                else:
-                    channels_without_handlers.append(k)
-            if channels_with_handlers or channels_without_handlers:
-                self.subscribe(*channels_without_handlers, **channels_with_handlers)
+            self._resubscribe(self.channels, self.subscribe)
         if self.patterns:
-            patterns_with_handlers = {}
-            patterns_without_handlers = []
-            for k, v in self.patterns.items():
-                if v is not None:
-                    patterns_with_handlers[self.encoder.decode(k, force=True)] = v
-                else:
-                    patterns_without_handlers.append(k)
-            if patterns_with_handlers or patterns_without_handlers:
-                self.psubscribe(*patterns_without_handlers, **patterns_with_handlers)
+            self._resubscribe(self.patterns, self.psubscribe)
         if self.shard_channels:
-            shard_with_handlers = {}
-            shard_without_handlers = []
-            for k, v in self.shard_channels.items():
-                if v is not None:
-                    shard_with_handlers[self.encoder.decode(k, force=True)] = v
-                else:
-                    shard_without_handlers.append(k)
-            if shard_with_handlers or shard_without_handlers:
-                self.ssubscribe(*shard_without_handlers, **shard_with_handlers)
+            self._resubscribe_shard_channels()
 
     @property
     def subscribed(self) -> bool:
@@ -1140,7 +1165,44 @@ class PubSub:
             raise
 
     def parse_response(self, block=True, timeout=0):
-        """Parse the response from a publish/subscribe command"""
+        """
+        Parse the response from a publish/subscribe command.
+
+        Args:
+            block: If True, block indefinitely until a message is available.
+                   If False, return immediately if no message is available.
+                   Default: True
+            timeout: The timeout in seconds for reading a response when block=False.
+                     This parameter is ignored when block=True.
+                     Default: 0 (return immediately if no data available)
+
+        Returns:
+            The parsed response from the server, or None if no message is available
+            within the timeout period (when block=False).
+
+        Important:
+            The block and timeout parameters work together:
+            - When block=True: timeout is IGNORED, method blocks indefinitely
+            - When block=False: timeout is USED, method returns after timeout expires
+
+            Typically, you should use get_message(timeout=X) instead of calling
+            parse_response() directly. The get_message() method automatically sets
+            block=False when a timeout is provided, and block=True when timeout=None.
+
+        Example:
+            # Block indefinitely (timeout is ignored)
+            response = pubsub.parse_response(block=True, timeout=0.1)
+
+            # Non-blocking with 0.1 second timeout
+            response = pubsub.parse_response(block=False, timeout=0.1)
+
+            # Non-blocking, return immediately
+            response = pubsub.parse_response(block=False, timeout=0)
+
+            # Recommended: use get_message() instead
+            msg = pubsub.get_message(timeout=0.1)  # automatically sets block=False
+            msg = pubsub.get_message(timeout=None)  # automatically sets block=True
+        """
         conn = self.connection
         if conn is None:
             raise RuntimeError(
@@ -1154,9 +1216,13 @@ class PubSub:
             if not block:
                 if not conn.can_read(timeout=timeout):
                     return None
+                read_timeout = timeout
             else:
                 conn.connect()
-            return conn.read_response(disconnect_on_error=False, push_request=True)
+                read_timeout = SENTINEL  # Use default socket timeout for blocking
+            return conn.read_response(
+                disconnect_on_error=False, push_request=True, timeout=read_timeout
+            )
 
         response = self._execute(conn, try_read)
 
@@ -1709,6 +1775,8 @@ class Pipeline(Redis):
         actual_retry_attempts = [0]
 
         def failure_callback(error, failure_count):
+            if is_debug_log_enabled():
+                add_debug_log_for_operation_failure(conn)
             actual_retry_attempts[0] = failure_count
             self._disconnect_reset_raise_on_watching(
                 conn, error, failure_count, start_time, command_name
@@ -1946,6 +2014,8 @@ class Pipeline(Redis):
         actual_retry_attempts = [0]
 
         def failure_callback(error, failure_count):
+            if is_debug_log_enabled():
+                add_debug_log_for_operation_failure(conn)
             actual_retry_attempts[0] = failure_count
             self._disconnect_raise_on_watching(
                 conn, error, failure_count, start_time, operation_name

@@ -386,10 +386,12 @@ class Cursor:
 
 
 class AggregateResult:
-    def __init__(self, rows, cursor: Cursor, schema) -> None:
+    def __init__(self, rows, cursor: Cursor, schema, total=0, warnings=None) -> None:
         self.rows = rows
         self.cursor = cursor
         self.schema = schema
+        self.total = total
+        self.warnings = warnings or []
 
     def __repr__(self) -> str:
         cid = self.cursor.cid if self.cursor else -1

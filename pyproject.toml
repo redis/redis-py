@@ -47,7 +47,7 @@ ocsp = [
     "requests>=2.31.0",
 ]
 jwt = [
-    "PyJWT>=2.9.0",
+    "PyJWT>=2.12.0",
 ]
 circuit_breaker = [
     "pybreaker>=1.4.0"
@@ -77,6 +77,7 @@ include = ["/redis"]
 [tool.pytest.ini_options]
 addopts = "-s"
 markers = [
+    "fixed_client: tests, in which client instance and configuration is fixed",
     "redismod: run only the redis module tests",
     "pipeline: pipeline tests",
     "onlycluster: marks tests to be run only with cluster mode redis",
@@ -86,6 +87,7 @@ markers = [
     "replica: replica tests",
     "experimental: run only experimental tests",
     "cp_integration: credential provider integration tests",
+    "no_mock_connections: skip the autouse mock_health_check_connections fixture",
 ]
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"

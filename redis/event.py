@@ -10,7 +10,7 @@ from redis.observability.recorder import (
     init_connection_count,
     register_pools_connection_count,
 )
-from redis.utils import check_protocol_version
+from redis.utils import check_protocol_version, deprecated_function
 
 
 class EventListenerInterface(ABC):
@@ -58,6 +58,17 @@ class EventDispatcherInterface(ABC):
         """Register additional listeners."""
         pass
 
+    @abstractmethod
+    def unregister_listeners(
+        self,
+        mappings: Dict[
+            Type[object],
+            List[Union[EventListenerInterface, AsyncEventListenerInterface]],
+        ],
+    ):
+        """Remove previously registered listeners by identity."""
+        pass
+
 
 class EventException(Exception):
     """
@@ -89,7 +100,6 @@ class EventDispatcher(EventDispatcherInterface):
             ],
             AfterPooledConnectionsInstantiationEvent: [
                 RegisterReAuthForPooledConnections(),
-                InitializeConnectionCountObservability(),
             ],
             AfterSingleConnectionInstantiationEvent: [
                 RegisterReAuthForSingleConnection()
@@ -101,28 +111,37 @@ class EventDispatcher(EventDispatcherInterface):
             ],
         }
 
-        self._lock = threading.Lock()
+        # Reentrant so a finalizer/listener that runs on the same thread
+        # while the lock is held (e.g. a weakref.finalize callback fired
+        # from cyclic GC during an allocation inside register_listeners /
+        # unregister_listeners) can re-enter without deadlocking.
+        self._lock = threading.RLock()
         self._async_lock = None
 
         if event_listeners:
             self.register_listeners(event_listeners)
 
     def dispatch(self, event: object):
+        # Snapshot listeners under the lock, then release it before invoking
+        # them. Holding the lock across listener execution would turn any
+        # listener that calls register_listeners / unregister_listeners /
+        # dispatch back into the dispatcher into a deadlock.
         with self._lock:
-            listeners = self._event_listeners_mapping.get(type(event), [])
-
-            for listener in listeners:
-                listener.listen(event)
+            listeners = list(self._event_listeners_mapping.get(type(event), []))
+        for listener in listeners:
+            listener.listen(event)
 
     async def dispatch_async(self, event: object):
         if self._async_lock is None:
             self._async_lock = asyncio.Lock()
 
+        # Snapshot listeners under the lock, then release it before awaiting
+        # them. See the note in dispatch(); the same rationale applies here
+        # for dispatch_async re-entry from within a listener.
         async with self._async_lock:
-            listeners = self._event_listeners_mapping.get(type(event), [])
-
-            for listener in listeners:
-                await listener.listen(event)
+            listeners = list(self._event_listeners_mapping.get(type(event), []))
+        for listener in listeners:
+            await listener.listen(event)
 
     def register_listeners(
         self,
@@ -143,6 +162,26 @@ class EventDispatcher(EventDispatcherInterface):
                 else:
                     self._event_listeners_mapping[event_type] = mappings[event_type]
 
+    def unregister_listeners(
+        self,
+        mappings: Dict[
+            Type[object],
+            List[Union[EventListenerInterface, AsyncEventListenerInterface]],
+        ],
+    ):
+        with self._lock:
+            for event_type, to_remove in mappings.items():
+                current = self._event_listeners_mapping.get(event_type)
+                if not current:
+                    continue
+                # Remove by identity to match register semantics and to avoid
+                # reliance on listener __eq__ implementations.
+                self._event_listeners_mapping[event_type] = [
+                    listener
+                    for listener in current
+                    if all(listener is not target for target in to_remove)
+                ]
+
 
 class AfterConnectionReleasedEvent:
     """
@@ -158,6 +197,21 @@ class AfterConnectionReleasedEvent:
 
 
 class AsyncAfterConnectionReleasedEvent(AfterConnectionReleasedEvent):
+    pass
+
+
+class AfterSlotsCacheRefreshEvent:
+    """
+    Event fired after NodesManager's slots cache is refreshed, either via a
+    full re-initialization or a MOVED-driven slot re-mapping. Signal-only;
+    carries no payload. Listeners typically reconcile per-node bookkeeping
+    (e.g. ClusterPubSub shard subscriptions).
+    """
+
+    pass
+
+
+class AsyncAfterSlotsCacheRefreshEvent(AfterSlotsCacheRefreshEvent):
     pass
 
 
@@ -479,8 +533,15 @@ class InitializeConnectionCountObservability(EventListenerInterface):
     Listener that initializes connection count observability.
     """
 
+    @deprecated_function(
+        reason="Connection count is now tracked via record_connection_count(). "
+        "This functionality will be removed in the next major version",
+        version="7.4.0",
+    )
     def listen(self, event: AfterPooledConnectionsInstantiationEvent):
         # Initialize gauge only once, subsequent calls won't have an affect.
+        # Note: init_connection_count() and register_pools_connection_count()
+        # are deprecated and will emit their own warnings.
         init_connection_count()
 
         # Register pools for connection count observability.

@@ -26,11 +26,15 @@ vulture>=2.3.0
 numpy>=1.24.0 ; platform_python_implementation == "CPython"
 numpy>=1.24.0,<2.0 ; platform_python_implementation == "PyPy"
 
-redis-entraid==1.0.0
+redis-entraid==1.1.2
 pybreaker>=1.4.0
 
 xxhash==3.6.0
 
+cryptography<46; platform_python_implementation == "PyPy" and python_version == "3.10"
+
 opentelemetry-api>=1.30.0
 opentelemetry-sdk>=1.30.0
 opentelemetry-exporter-otlp>=1.30.0
+
+cryptography<46; implementation_name == "pypy" and python_version == "3.10"

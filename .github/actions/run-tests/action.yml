@@ -22,8 +22,13 @@ inputs:
     description: 'Event loop to use'
     required: false
     default: 'asyncio'
-  protocol:
-    description: 'RESP protocol version to use'
+  test-config:
+    description: |
+      Test configuration to run. Can be "all", "fixed-clients",
+      or "<protocol>-<response-shape>-<topology>", where protocol is
+      "default", "2", or "3", response-shape is "legacy_responses" or
+      "unified_responses", and topology is "standalone" or "cluster".
+      Legacy aliases like "2-standalone" are also accepted.
     required: false
     default: 'all'
   repository:
@@ -84,13 +89,18 @@ runs:
         echo "::group::Starting Redis servers"
         # Check if REDIS_VERSION is in the custom map
         mapped_version=""
+        echo "REDIS_VERSION_CUSTOM_MAP: ${REDIS_VERSION_CUSTOM_MAP:-}"
         if [[ -n "${REDIS_VERSION_CUSTOM_MAP:-}" ]]; then
           for mapping in $REDIS_VERSION_CUSTOM_MAP; do
-            tag="${mapping%%:*}"
-            version="${mapping##*:}"
-            if [[ "$REDIS_VERSION" == "$tag" ]]; then
+            echo "Checking mapping: $mapping"
+            version="${mapping%%:*}"
+            tag="${mapping##*:}"
+            echo "Using tag: $tag, version: $version"
+            if [[ "$REDIS_VERSION" == "$version" ]]; then
               mapped_version="$version"
-              echo "Found custom mapping: $REDIS_VERSION -> $mapped_version"
+              echo "Found custom mapping: $REDIS_VERSION -> $mapped_version -> $tag"
+              echo "Updating CLIENT_LIBS_TEST_IMAGE_TAG to $tag"
+              export CLIENT_LIBS_TEST_IMAGE_TAG=${tag}
               break
             fi
           done
@@ -129,9 +139,11 @@ runs:
         else
           echo "Using redis CE for module tests"
           if [[ -z "${CLIENT_LIBS_TEST_STACK_IMAGE_TAG}" ]]; then
-            export CLIENT_LIBS_TEST_STACK_IMAGE_TAG=$REDIS_VERSION
+            export CLIENT_LIBS_TEST_STACK_IMAGE_TAG=$CLIENT_LIBS_TEST_IMAGE_TAG
           fi
           echo "REDIS_MOD_URL=redis://127.0.0.1:6379" >> $GITHUB_ENV
+          echo "Using CLIENT_LIBS_TEST_STACK_IMAGE_TAG=$CLIENT_LIBS_TEST_STACK_IMAGE_TAG"
+          echo "Using CLIENT_LIBS_TEST_IMAGE_TAG=$CLIENT_LIBS_TEST_IMAGE_TAG"
           invoke devenv --endpoints all
         fi
 
@@ -144,35 +156,97 @@ runs:
         set -e
 
         run_tests() {
-          local protocol=$1
+          local test_config=$1
           local eventloop=""
+          local protocol_label=""
+          local response_shape_label=""
+          local test_type=""
+          local extra=""
+          local protocol_arg=""
+          local legacy_arg=""
+          local protocol_group=""
+          local response_group=""
 
           if [ "${{inputs.event-loop}}" == "uvloop" ]; then
             eventloop="--uvloop"
           fi
 
-          echo "::group::RESP${protocol} standalone tests"
           echo "REDIS_MOD_URL=${REDIS_MOD_URL}"
 
-          if (( $REDIS_MAJOR_VERSION < 7 )) && [ "$protocol" == "3" ]; then
-            echo "Skipping module tests: Modules doesn't support RESP3 for Redis versions < 7"
-            invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop --protocol="${protocol}" --extra-markers="not redismod and not cp_integration"
+          if [ "$test_config" == "fixed-clients" ]; then
+            echo "::group::Fixed client tests"
+            echo "Running fixed client tests - in those tests client instance and configuration is fixed and not changed by pytest configuration"
+            invoke fixed-client-tests $eventloop
+            echo "::endgroup::"
           else
-            invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop --protocol="${protocol}"
+            IFS='-' read -r protocol_label response_shape_label test_type extra <<< "$test_config"
+            if [ -n "$extra" ]; then
+              echo "Invalid test configuration: ${test_config}"
+              exit 1
+            fi
+            if [ -z "$test_type" ]; then
+              # Backward-compatible support for old labels such as
+              # "2-standalone"; they always meant legacy responses.
+              test_type="$response_shape_label"
+              response_shape_label="legacy_responses"
+            fi
+
+            if [ "$protocol_label" == "default" ]; then
+              protocol_group="default RESP"
+            elif [ "$protocol_label" == "2" ] || [ "$protocol_label" == "3" ]; then
+              protocol_arg="--protocol=${protocol_label}"
+              protocol_group="RESP${protocol_label}"
+            else
+              echo "Unknown protocol label: ${protocol_label}"
+              exit 1
+            fi
+
+            if [ "$response_shape_label" == "legacy_responses" ]; then
+              legacy_arg="--legacy-responses"
+              response_group="legacy responses"
+            elif [ "$response_shape_label" == "unified_responses" ]; then
+              legacy_arg="--no-legacy-responses"
+              response_group="unified responses"
+            else
+              echo "Unknown response-shape label: ${response_shape_label}"
+              exit 1
+            fi
+
+            if [ "$test_type" == "standalone" ]; then
+              echo "::group::${protocol_group} standalone tests (${response_group})"
+              invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop ${protocol_arg} ${legacy_arg}
+              echo "::endgroup::"
+            elif [ "$test_type" == "cluster" ]; then
+              echo "::group::${protocol_group} cluster tests (${response_group})"
+              invoke cluster-tests $eventloop ${protocol_arg} ${legacy_arg}
+              echo "::endgroup::"
+            else
+              echo "Unknown test type: ${test_type}"
+              exit 1
+            fi
           fi
-
-          echo "::endgroup::"
-
-          echo "::group::RESP${protocol} cluster tests"
-          invoke cluster-tests $eventloop --protocol=${protocol}
-          echo "::endgroup::"
         }
 
-        if [ "${{inputs.protocol}}" == "all" ]; then
-          run_tests 2 "${{inputs.event-loop}}"
-          run_tests 3 "${{inputs.event-loop}}"
+        if [ "${{inputs.test-config}}" == "all" ]; then
+          for test_config in \
+            fixed-clients \
+            default-legacy_responses-standalone \
+            default-legacy_responses-cluster \
+            default-unified_responses-standalone \
+            default-unified_responses-cluster \
+            2-legacy_responses-standalone \
+            2-legacy_responses-cluster \
+            2-unified_responses-standalone \
+            2-unified_responses-cluster \
+            3-legacy_responses-standalone \
+            3-legacy_responses-cluster \
+            3-unified_responses-standalone \
+            3-unified_responses-cluster
+          do
+            run_tests "${test_config}"
+          done
         else
-          run_tests "${{inputs.protocol}}" "${{inputs.event-loop}}"
+          run_tests "${{inputs.test-config}}"
         fi
       shell: bash
 
@@ -189,7 +263,7 @@ runs:
     - name: Upload test results and profiling data
       uses: actions/upload-artifact@v4
       with:
-        name: pytest-results-redis_${{inputs.redis-version}}-python_${{inputs.python-version}}-parser_${{env.PARSER_BACKEND}}-el_${{inputs.event-loop}}-protocol_${{inputs.protocol}}
+        name: pytest-results-redis_${{inputs.redis-version}}-python_${{inputs.python-version}}-parser_${{env.PARSER_BACKEND}}-el_${{inputs.event-loop}}-config_${{inputs.test-config}}
         path: |
           *-results.xml
           prof/**

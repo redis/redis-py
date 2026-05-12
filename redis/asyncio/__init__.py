@@ -7,6 +7,11 @@ from redis.asyncio.connection import (
     SSLConnection,
     UnixDomainSocketConnection,
 )
+from redis.asyncio.keyspace_notifications import (
+    AsyncClusterKeyspaceNotifications,
+    AsyncKeyspaceNotifications,
+    AsyncKeyspaceNotificationsInterface,
+)
 from redis.asyncio.sentinel import (
     Sentinel,
     SentinelConnectionPool,
@@ -33,6 +38,9 @@ from redis.exceptions import (
 )
 
 __all__ = [
+    "AsyncClusterKeyspaceNotifications",
+    "AsyncKeyspaceNotifications",
+    "AsyncKeyspaceNotificationsInterface",
     "AuthenticationError",
     "AuthenticationWrongNumberOfArgsError",
     "BlockingConnectionPool",

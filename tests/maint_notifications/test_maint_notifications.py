@@ -21,6 +21,7 @@ from redis.maint_notifications import (
 )
 
 
+@pytest.mark.fixed_client
 class TestMaintenanceNotification:
     """Test the base MaintenanceNotification class functionality through concrete subclasses."""
 
@@ -72,6 +73,7 @@ class TestMaintenanceNotification:
             assert notification.is_expired()
 
 
+@pytest.mark.fixed_client
 class TestNodeMovingNotification:
     """Test the NodeMovingNotification class."""
 
@@ -223,6 +225,7 @@ class TestNodeMovingNotification:
         )  # notification1 and notification2 should be considered the same
 
 
+@pytest.mark.fixed_client
 class TestNodeMigratingNotification:
     """Test the NodeMigratingNotification class."""
 
@@ -261,6 +264,7 @@ class TestNodeMigratingNotification:
         assert hash(notification1) != hash(notification3)
 
 
+@pytest.mark.fixed_client
 class TestNodeMigratedNotification:
     """Test the NodeMigratedNotification class."""
 
@@ -303,6 +307,7 @@ class TestNodeMigratedNotification:
         assert hash(notification1) != hash(notification3)
 
 
+@pytest.mark.fixed_client
 class TestNodeFailingOverNotification:
     """Test the NodeFailingOverNotification class."""
 
@@ -341,6 +346,7 @@ class TestNodeFailingOverNotification:
         assert hash(notification1) != hash(notification3)
 
 
+@pytest.mark.fixed_client
 class TestNodeFailedOverNotification:
     """Test the NodeFailedOverNotification class."""
 
@@ -383,6 +389,7 @@ class TestNodeFailedOverNotification:
         assert hash(notification1) != hash(notification3)
 
 
+@pytest.mark.fixed_client
 class TestOSSNodeMigratingNotification:
     """Test the OSSNodeMigratingNotification class."""
 
@@ -487,6 +494,7 @@ class TestOSSNodeMigratingNotification:
         )  # notification1 and notification2 should be the same
 
 
+@pytest.mark.fixed_client
 class TestOSSNodeMigratedNotification:
     """Test the OSSNodeMigratedNotification class."""
 
@@ -630,6 +638,7 @@ class TestOSSNodeMigratedNotification:
         )  # notification1 and notification2 should be the same
 
 
+@pytest.mark.fixed_client
 class TestMaintNotificationsConfig:
     """Test the MaintNotificationsConfig class."""
 
@@ -686,6 +695,7 @@ class TestMaintNotificationsConfig:
         assert config.relaxed_timeout is None
 
 
+@pytest.mark.fixed_client
 class TestMaintNotificationsPoolHandler:
     """Test the MaintNotificationsPoolHandler class."""
 
@@ -852,6 +862,7 @@ class TestMaintNotificationsPoolHandler:
         self.mock_pool.update_connections_settings.assert_called_once()
 
 
+@pytest.mark.fixed_client
 class TestMaintNotificationsConnectionHandler:
     """Test the MaintNotificationsConnectionHandler class."""
 
@@ -990,6 +1001,7 @@ class TestMaintNotificationsConnectionHandler:
         )
 
 
+@pytest.mark.fixed_client
 class TestEndpointType:
     """Test the EndpointType class functionality."""
 
@@ -1002,6 +1014,7 @@ class TestEndpointType:
         assert EndpointType.NONE.value == "none"
 
 
+@pytest.mark.fixed_client
 class TestMaintNotificationsConfigEndpointType:
     """Test MaintNotificationsConfig endpoint type functionality."""
 
@@ -1021,6 +1034,10 @@ class TestMaintNotificationsConfigEndpointType:
                 self.port = 6379
                 self._sock = MockSocket(resolved_ip) if resolved_ip else None
                 self.__class__.__name__ = "SSLConnection" if is_ssl else "Connection"
+
+            @property
+            def is_connected(self):
+                return self._sock is not None
 
             def _get_socket(self):
                 return self._sock
@@ -1153,6 +1170,7 @@ class TestMaintNotificationsConfigEndpointType:
         assert config.get_endpoint_type("localhost", conn) == EndpointType.EXTERNAL_IP
 
 
+@pytest.mark.fixed_client
 class TestMaintNotificationsMetricsRecording:
     """
     Tests for metrics recording from maintenance notification handlers.
@@ -1168,6 +1186,7 @@ class TestMaintNotificationsMetricsRecording:
         mock_connection.maintenance_state = MaintenanceState.NONE
         mock_connection.host = "localhost"
         mock_connection.port = 6379
+        mock_connection._sock.getsockname.return_value = ("127.0.0.1", 12345)
 
         config = MaintNotificationsConfig(enabled=True, relaxed_timeout=20)
         handler = MaintNotificationsConnectionHandler(mock_connection, config)
@@ -1180,16 +1199,21 @@ class TestMaintNotificationsMetricsRecording:
             server_port=6379,
             network_peer_address="localhost",
             network_peer_port=6379,
-            maint_notification=notification.__class__.__name__,
+            maint_notification="MIGRATING",
         )
 
     @patch("redis.maint_notifications.record_connection_relaxed_timeout")
+    @patch("redis.maint_notifications.get_pool_name")
     def test_connection_handler_calls_record_connection_relaxed_timeout_on_start(
-        self, mock_record_connection_relaxed_timeout
+        self, mock_get_pool_name, mock_record_connection_relaxed_timeout
     ):
         """Test that handle_notification calls record_connection_relaxed_timeout with relaxed=True."""
         mock_connection = Mock()
         mock_connection.maintenance_state = MaintenanceState.NONE
+        mock_connection._maint_notifications_pool_handler = Mock()
+        mock_connection._maint_notifications_pool_handler.pool = Mock()
+        mock_connection._sock.getsockname.return_value = ("127.0.0.1", 12345)
+        mock_get_pool_name.return_value = "localhost:6379_abc123"
 
         config = MaintNotificationsConfig(enabled=True, relaxed_timeout=20)
         handler = MaintNotificationsConnectionHandler(mock_connection, config)
@@ -1198,18 +1222,23 @@ class TestMaintNotificationsMetricsRecording:
         handler.handle_notification(notification)
 
         mock_record_connection_relaxed_timeout.assert_called_once_with(
-            connection_name=repr(mock_connection),
-            maint_notification=notification.__class__.__name__,
+            connection_name="localhost:6379_abc123",
+            maint_notification="MIGRATING",
             relaxed=True,
         )
 
     @patch("redis.maint_notifications.record_connection_relaxed_timeout")
+    @patch("redis.maint_notifications.get_pool_name")
     def test_connection_handler_calls_record_connection_relaxed_timeout_on_complete(
-        self, mock_record_connection_relaxed_timeout
+        self, mock_get_pool_name, mock_record_connection_relaxed_timeout
     ):
         """Test that handle_notification calls record_connection_relaxed_timeout with relaxed=False."""
         mock_connection = Mock()
         mock_connection.maintenance_state = MaintenanceState.MAINTENANCE
+        mock_connection._maint_notifications_pool_handler = Mock()
+        mock_connection._maint_notifications_pool_handler.pool = Mock()
+        mock_connection._sock.getsockname.return_value = ("127.0.0.1", 12345)
+        mock_get_pool_name.return_value = "localhost:6379_abc123"
 
         config = MaintNotificationsConfig(relaxed_timeout=20)
         handler = MaintNotificationsConnectionHandler(mock_connection, config)
@@ -1218,8 +1247,8 @@ class TestMaintNotificationsMetricsRecording:
         handler.handle_notification(notification)
 
         mock_record_connection_relaxed_timeout.assert_called_once_with(
-            connection_name=repr(mock_connection),
-            maint_notification=notification.__class__.__name__,
+            connection_name="localhost:6379_abc123",
+            maint_notification="MIGRATED",
             relaxed=False,
         )
 
@@ -1232,6 +1261,7 @@ class TestMaintNotificationsMetricsRecording:
         mock_connection.maintenance_state = MaintenanceState.NONE
         mock_connection.host = "localhost"
         mock_connection.port = 6379
+        mock_connection._sock.getsockname.return_value = ("127.0.0.1", 12345)
 
         config = MaintNotificationsConfig(enabled=True, relaxed_timeout=-1)
         handler = MaintNotificationsConnectionHandler(mock_connection, config)

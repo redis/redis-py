@@ -17,6 +17,7 @@ async def redis_server_time(client: redis.Redis):
 
 
 # Async tests for deprecated_function decorator
+@pytest.mark.fixed_client
 class TestDeprecatedFunctionAsync:
     @pytest.mark.asyncio
     async def test_async_function_warns(self):
@@ -44,6 +45,7 @@ class TestDeprecatedFunctionAsync:
 
 
 # Async tests for deprecated_args decorator
+@pytest.mark.fixed_client
 class TestDeprecatedArgsAsync:
     @pytest.mark.asyncio
     async def test_async_function_warns_on_deprecated_arg(self):
@@ -86,6 +88,7 @@ class TestDeprecatedArgsAsync:
 
 
 # Async tests for experimental_method decorator
+@pytest.mark.fixed_client
 class TestExperimentalMethodAsync:
     @pytest.mark.asyncio
     async def test_async_function_warns(self):
@@ -113,6 +116,7 @@ class TestExperimentalMethodAsync:
 
 
 # Async tests for experimental_args decorator
+@pytest.mark.fixed_client
 class TestExperimentalArgsAsync:
     @pytest.mark.asyncio
     async def test_async_function_warns_on_experimental_arg(self):

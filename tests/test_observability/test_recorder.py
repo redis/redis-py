@@ -10,16 +10,20 @@ metrics are exported to OTel.
 import pytest
 from unittest.mock import MagicMock, patch
 
+from opentelemetry.metrics import Observation
+
 from redis.observability import recorder
 from redis.observability.registry import (
     ObservablesRegistry,
     get_observables_registry_instance,
 )
 from redis.observability.attributes import (
+    ConnectionState,
     GeoFailoverReason,
     PubSubDirection,
     # Connection pool attributes
     DB_CLIENT_CONNECTION_POOL_NAME,
+    DB_CLIENT_CONNECTION_STATE,
     SERVER_ADDRESS,
     SERVER_PORT,
     # Database attributes
@@ -41,8 +45,6 @@ from redis.observability.attributes import (
     # Streaming attributes
     REDIS_CLIENT_STREAM_NAME,
     REDIS_CLIENT_CONSUMER_GROUP,
-    DB_CLIENT_CONNECTION_NAME,
-    # Geo failover attributes
     DB_CLIENT_GEOFAILOVER_FAIL_FROM,
     DB_CLIENT_GEOFAILOVER_FAIL_TO,
     DB_CLIENT_GEOFAILOVER_REASON,
@@ -192,6 +194,7 @@ def setup_recorder(metrics_collector, mock_instruments):
     recorder.reset_collector()
 
 
+@pytest.mark.fixed_client
 class TestRecordOperationDuration:
     """Tests for record_operation_duration - verifies Histogram.record() calls."""
 
@@ -245,7 +248,31 @@ class TestRecordOperationDuration:
         assert attrs[DB_RESPONSE_STATUS_CODE] == "error"
         assert attrs[ERROR_TYPE] == "ConnectionError"
 
+    def test_record_operation_duration_with_bytes_command_name(self, setup_recorder):
+        """Test that bytes command names are converted to strings for OTel exporters."""
 
+        instruments = setup_recorder
+
+        # Pass command_name as bytes (as it can come from args[0])
+        record_operation_duration(
+            command_name=b"SET",
+            duration_seconds=0.005,
+            server_address="localhost",
+            server_port=6379,
+            db_namespace="0",
+            error=None,
+        )
+
+        instruments.operation_duration.record.assert_called_once()
+        call_args = instruments.operation_duration.record.call_args
+
+        attrs = call_args[1]["attributes"]
+        # Verify command_name is converted to uppercase string, not bytes
+        assert attrs[DB_OPERATION_NAME] == "SET"
+        assert isinstance(attrs[DB_OPERATION_NAME], str)
+
+
+@pytest.mark.fixed_client
 class TestRecordConnectionCreateTime:
     """Tests for record_connection_create_time - verifies Histogram.record() calls."""
 
@@ -277,6 +304,7 @@ class TestRecordConnectionCreateTime:
         assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "localhost:6379_a1b2c3d4"
 
 
+@pytest.mark.fixed_client
 class TestRecordConnectionTimeout:
     """Tests for record_connection_timeout - verifies Counter.add() calls."""
 
@@ -299,6 +327,7 @@ class TestRecordConnectionTimeout:
         assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "ConnectionPool<localhost:6379>"
 
 
+@pytest.mark.fixed_client
 class TestRecordConnectionWaitTime:
     """Tests for record_connection_wait_time - verifies Histogram.record() calls."""
 
@@ -320,6 +349,7 @@ class TestRecordConnectionWaitTime:
         assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "ConnectionPool<localhost:6379>"
 
 
+@pytest.mark.fixed_client
 class TestRecordConnectionClosed:
     """Tests for record_connection_closed - verifies Counter.add() calls."""
 
@@ -359,6 +389,7 @@ class TestRecordConnectionClosed:
         assert attrs[ERROR_TYPE] == "ConnectionResetError"
 
 
+@pytest.mark.fixed_client
 class TestRecordConnectionRelaxedTimeout:
     """Tests for record_connection_relaxed_timeout - verifies UpDownCounter.add() calls."""
 
@@ -368,7 +399,7 @@ class TestRecordConnectionRelaxedTimeout:
         instruments = setup_recorder
 
         record_connection_relaxed_timeout(
-            connection_name="Connection<localhost:6379>",
+            connection_name="localhost:6379_abc123",
             maint_notification="MOVING",
             relaxed=True,
         )
@@ -379,7 +410,7 @@ class TestRecordConnectionRelaxedTimeout:
         # relaxed=True means count up (+1)
         assert call_args[0][0] == 1
         attrs = call_args[1]["attributes"]
-        assert attrs[DB_CLIENT_CONNECTION_NAME] == "Connection<localhost:6379>"
+        assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "localhost:6379_abc123"
         assert attrs[REDIS_CLIENT_CONNECTION_NOTIFICATION] == "MOVING"
 
     def test_record_connection_relaxed_timeout_unrelaxed(self, setup_recorder):
@@ -388,7 +419,7 @@ class TestRecordConnectionRelaxedTimeout:
         instruments = setup_recorder
 
         record_connection_relaxed_timeout(
-            connection_name="ConnectionPool<localhost:6379>",
+            connection_name="localhost:6379_abc123",
             maint_notification="MIGRATING",
             relaxed=False,
         )
@@ -402,6 +433,7 @@ class TestRecordConnectionRelaxedTimeout:
         assert attrs[REDIS_CLIENT_CONNECTION_NOTIFICATION] == "MIGRATING"
 
 
+@pytest.mark.fixed_client
 class TestRecordConnectionHandoff:
     """Tests for record_connection_handoff - verifies Counter.add() calls."""
 
@@ -422,6 +454,7 @@ class TestRecordConnectionHandoff:
         assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "ConnectionPool<localhost:6379>"
 
 
+@pytest.mark.fixed_client
 class TestRecordErrorCount:
     """Tests for record_error_count - verifies Counter.add() calls."""
 
@@ -478,6 +511,7 @@ class TestRecordErrorCount:
         assert attrs[REDIS_CLIENT_OPERATION_RETRY_ATTEMPTS] == 2
 
 
+@pytest.mark.fixed_client
 class TestRecordMaintNotificationCount:
     """Tests for record_maint_notification_count - verifies Counter.add() calls."""
 
@@ -528,6 +562,7 @@ class TestRecordMaintNotificationCount:
         assert attrs[REDIS_CLIENT_CONNECTION_NOTIFICATION] == "MIGRATING"
 
 
+@pytest.mark.fixed_client
 class TestRecordGeoFailover:
     """Tests for record_geo_failover - verifies Counter.add() calls."""
 
@@ -599,6 +634,7 @@ class TestRecordGeoFailover:
         assert attrs[DB_CLIENT_GEOFAILOVER_REASON] == "manual"
 
 
+@pytest.mark.fixed_client
 class TestRecordPubsubMessage:
     """Tests for record_pubsub_message - verifies Counter.add() calls."""
 
@@ -646,6 +682,7 @@ class TestRecordPubsubMessage:
         assert attrs[REDIS_CLIENT_PUBSUB_SHARDED] is True
 
 
+@pytest.mark.fixed_client
 class TestRecordStreamingLag:
     """Tests for record_streaming_lag - verifies Histogram.record() calls."""
 
@@ -701,6 +738,7 @@ class TestRecordStreamingLag:
         assert attrs[REDIS_CLIENT_STREAM_NAME] == "events-stream"
 
 
+@pytest.mark.fixed_client
 class TestHidePubSubChannelNames:
     """Tests for hide_pubsub_channel_names configuration option."""
 
@@ -760,6 +798,7 @@ class TestHidePubSubChannelNames:
         assert attrs[REDIS_CLIENT_PUBSUB_CHANNEL] == "visible-channel"
 
 
+@pytest.mark.fixed_client
 class TestHideStreamNames:
     """Tests for hide_stream_names configuration option."""
 
@@ -873,6 +912,7 @@ class TestHideStreamNames:
         assert REDIS_CLIENT_STREAM_NAME not in attrs
 
 
+@pytest.mark.fixed_client
 class TestRecorderDisabled:
     """Tests for recorder behavior when observability is disabled."""
 
@@ -924,6 +964,7 @@ class TestRecorderDisabled:
         recorder.reset_collector()
 
 
+@pytest.mark.fixed_client
 class TestResetCollector:
     """Tests for reset_collector function."""
 
@@ -934,6 +975,7 @@ class TestResetCollector:
         assert recorder._metrics_collector is None
 
 
+@pytest.mark.fixed_client
 class TestMetricGroupsDisabled:
     """Tests for verifying metrics are not sent to Meter when their MetricGroup is disabled.
 
@@ -1254,6 +1296,7 @@ class TestMetricGroupsDisabled:
         instruments.stream_lag.record.assert_not_called()
 
 
+@pytest.mark.fixed_client
 class TestObservablesRegistry:
     """Tests for ObservablesRegistry singleton and callback registration."""
 
@@ -1298,19 +1341,23 @@ class TestObservablesRegistry:
         assert len(registry) == 0
 
 
-class TestInitConnectionCount:
-    """Tests for init_connection_count and register_pools_connection_count."""
+@pytest.mark.fixed_client
+class TestRecordConnectionCount:
+    """Tests for record_connection_count (UpDownCounter)."""
 
     @pytest.fixture
-    def mock_observable_gauge(self):
-        """Create a mock observable gauge."""
+    def mock_up_down_counter(self):
+        """Create a mock UpDownCounter."""
         return MagicMock()
 
     @pytest.fixture
-    def mock_meter_with_observable(self, mock_observable_gauge):
-        """Create a mock meter that returns our mock observable gauge."""
+    def mock_meter_with_counter(self, mock_up_down_counter):
+        """Create a mock meter that returns our mock UpDownCounter."""
         meter = MagicMock()
-        meter.create_observable_gauge.return_value = mock_observable_gauge
+        meter.create_up_down_counter.return_value = mock_up_down_counter
+        meter.create_counter.return_value = MagicMock()
+        meter.create_histogram.return_value = MagicMock()
+        meter.create_observable_gauge.return_value = MagicMock()
         return meter
 
     @pytest.fixture
@@ -1320,101 +1367,153 @@ class TestInitConnectionCount:
 
     @pytest.fixture
     def setup_connection_count_recorder(
-        self, mock_meter_with_observable, mock_config_with_connection_basic
+        self,
+        mock_meter_with_counter,
+        mock_config_with_connection_basic,
+        mock_up_down_counter,
     ):
         """Setup recorder with mocked meter for connection count tests."""
         recorder.reset_collector()
-        get_observables_registry_instance().clear()
 
         with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(
-                mock_meter_with_observable, mock_config_with_connection_basic
+                mock_meter_with_counter, mock_config_with_connection_basic
             )
 
         with patch.object(recorder, "_get_or_create_collector", return_value=collector):
-            yield mock_meter_with_observable
+            # Reset mock call counts to avoid pollution from external code
+            # paths (e.g., connection pool operations in other tests) that may
+            # have called record_connection_count on our mock collector.
+            mock_up_down_counter.reset_mock()
+            yield mock_meter_with_counter
 
         recorder.reset_collector()
-        get_observables_registry_instance().clear()
 
-    def test_init_connection_count_creates_observable_gauge(
-        self, setup_connection_count_recorder
+    def test_record_connection_count_increment(
+        self, setup_connection_count_recorder, mock_up_down_counter
     ):
-        """Test that init_connection_count creates an observable gauge."""
-        mock_meter = setup_connection_count_recorder
+        """Test recording connection count increment."""
+        recorder.record_connection_count(
+            pool_name="localhost:6379_abc123",
+            connection_state=ConnectionState.IDLE,
+            counter=1,
+        )
 
-        recorder.init_connection_count()
+        assert mock_up_down_counter.add.call_count == 1
 
-        mock_meter.create_observable_gauge.assert_called_once()
-        call_kwargs = mock_meter.create_observable_gauge.call_args[1]
-        assert call_kwargs["name"] == "db.client.connection.count"
+        calls = mock_up_down_counter.add.call_args_list
+        assert calls[0][0][0] == 1
+        assert (
+            calls[0][1]["attributes"][DB_CLIENT_CONNECTION_POOL_NAME]
+            == "localhost:6379_abc123"
+        )
+        assert calls[0][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "idle"
 
-    def test_init_connection_count_callback_aggregates_registry_callbacks(
-        self, setup_connection_count_recorder
+    def test_record_connection_count_decrement(
+        self, setup_connection_count_recorder, mock_up_down_counter
     ):
-        """Test that the observable callback aggregates all registered pool callbacks."""
-        mock_meter = setup_connection_count_recorder
+        """Test recording connection count decrement."""
+        recorder.record_connection_count(
+            pool_name="localhost:6379_abc123",
+            connection_state=ConnectionState.USED,
+            counter=-1,
+        )
 
-        recorder.init_connection_count()
+        assert mock_up_down_counter.add.call_count == 1
 
-        # Get the callback that was passed to create_observable_gauge
-        call_args = mock_meter.create_observable_gauge.call_args
-        observable_callback = call_args[1]["callbacks"][0]
+        calls = mock_up_down_counter.add.call_args_list
+        assert calls[0][0][0] == -1
+        assert (
+            calls[0][1]["attributes"][DB_CLIENT_CONNECTION_POOL_NAME]
+            == "localhost:6379_abc123"
+        )
+        assert calls[0][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "used"
 
-        # Register some mock pool callbacks
-        from opentelemetry.metrics import Observation
-
-        mock_observation1 = Observation(5, attributes={"pool": "pool1"})
-        mock_observation2 = Observation(3, attributes={"pool": "pool2"})
-
-        pool_callback1 = MagicMock(return_value=[mock_observation1])
-        pool_callback2 = MagicMock(return_value=[mock_observation2])
-
-        registry = get_observables_registry_instance()
-        registry.register(recorder.CONNECTION_COUNT_REGISTRY_KEY, pool_callback1)
-        registry.register(recorder.CONNECTION_COUNT_REGISTRY_KEY, pool_callback2)
-
-        # Call the observable callback
-        observations = observable_callback(None)
-
-        # Verify both pool callbacks were called and observations aggregated
-        pool_callback1.assert_called_once()
-        pool_callback2.assert_called_once()
-        assert len(observations) == 2
-        assert mock_observation1 in observations
-        assert mock_observation2 in observations
-
-    def test_register_pools_connection_count_adds_callback_to_registry(
-        self, setup_connection_count_recorder
+    def test_record_connection_count_batch_decrement(
+        self, setup_connection_count_recorder, mock_up_down_counter
     ):
-        """Test that register_pools_connection_count adds a callback to the registry."""
-        # Create mock connection pools
-        mock_pool1 = MagicMock()
-        mock_pool1.get_connection_count.return_value = [
-            (5, {"state": "idle"}),
-            (2, {"state": "used"}),
-        ]
+        """Test recording batch connection count decrement (e.g., pool disconnect)."""
+        recorder.record_connection_count(
+            pool_name="localhost:6379_abc123",
+            connection_state=ConnectionState.IDLE,
+            counter=-5,
+        )
 
-        mock_pool2 = MagicMock()
-        mock_pool2.get_connection_count.return_value = [
-            (3, {"state": "idle"}),
-        ]
+        assert mock_up_down_counter.add.call_count == 1
 
-        recorder.register_pools_connection_count([mock_pool1, mock_pool2])
+        calls = mock_up_down_counter.add.call_args_list
+        assert calls[0][0][0] == -5
+        assert calls[0][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "idle"
 
-        registry = get_observables_registry_instance()
-        callbacks = registry.get(recorder.CONNECTION_COUNT_REGISTRY_KEY)
+    def test_record_connection_count_lifecycle_scenario(
+        self, setup_connection_count_recorder, mock_up_down_counter
+    ):
+        """Test realistic lifecycle: create connection, acquire, release, re-acquire, disconnect."""
+        # 1. New connection created (goes to IDLE)
+        recorder.record_connection_count(
+            pool_name="pool1",
+            connection_state=ConnectionState.IDLE,
+            counter=1,
+        )
 
-        assert len(callbacks) == 1
+        # 2. Connection acquired from pool (transition: IDLE -> USED)
+        recorder.record_connection_count(
+            pool_name="pool1",
+            connection_state=ConnectionState.IDLE,
+            counter=-1,
+        )
+        recorder.record_connection_count(
+            pool_name="pool1",
+            connection_state=ConnectionState.USED,
+            counter=1,
+        )
 
-        # Call the registered callback and verify it returns observations
-        observations = callbacks[0]()
+        # 3. Connection released to pool (transition: USED -> IDLE)
+        recorder.record_connection_count(
+            pool_name="pool1",
+            connection_state=ConnectionState.USED,
+            counter=-1,
+        )
+        recorder.record_connection_count(
+            pool_name="pool1",
+            connection_state=ConnectionState.IDLE,
+            counter=1,
+        )
 
-        assert len(observations) == 3
-        mock_pool1.get_connection_count.assert_called_once()
-        mock_pool2.get_connection_count.assert_called_once()
+        # 4. Pool disconnect (IDLE -> destroyed)
+        recorder.record_connection_count(
+            pool_name="pool1",
+            connection_state=ConnectionState.IDLE,
+            counter=-1,
+        )
+
+        # Total calls: 6
+        assert mock_up_down_counter.add.call_count == 6
+
+        calls = mock_up_down_counter.add.call_args_list
+
+        # Step 1: IDLE +1 (creation)
+        assert calls[0][0][0] == 1
+        assert calls[0][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "idle"
+
+        # Step 2: IDLE -1, USED +1 (acquire)
+        assert calls[1][0][0] == -1
+        assert calls[1][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "idle"
+        assert calls[2][0][0] == 1
+        assert calls[2][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "used"
+
+        # Step 3: USED -1, IDLE +1 (release)
+        assert calls[3][0][0] == -1
+        assert calls[3][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "used"
+        assert calls[4][0][0] == 1
+        assert calls[4][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "idle"
+
+        # Step 4: IDLE -1 (disconnect)
+        assert calls[5][0][0] == -1
+        assert calls[5][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "idle"
 
 
+@pytest.mark.fixed_client
 class TestInitCSCItems:
     """Tests for init_csc_items and register_csc_items_callback."""
 
@@ -1475,8 +1574,6 @@ class TestInitCSCItems:
         observable_callback = call_args[1]["callbacks"][0]
 
         # Register some mock CSC callbacks
-        from opentelemetry.metrics import Observation
-
         mock_observation1 = Observation(100, attributes={"db": 0})
         mock_observation2 = Observation(50, attributes={"db": 1})
 
@@ -1547,144 +1644,7 @@ class TestInitCSCItems:
         assert obs2[0].value == 20
 
 
-class TestObservableGaugeIntegration:
-    """Integration tests for observable gauge pattern with registry."""
-
-    @pytest.fixture
-    def clean_registry(self):
-        """Ensure clean registry before and after test."""
-        get_observables_registry_instance().clear()
-        yield
-        get_observables_registry_instance().clear()
-
-    def test_full_observable_gauge_flow(self, clean_registry):
-        """Test the complete flow: init -> register -> callback invocation."""
-
-        # Create mock meter and collector
-        mock_meter = MagicMock()
-        captured_callback = None
-
-        def capture_callback(name, **kwargs):
-            nonlocal captured_callback
-            captured_callback = kwargs.get("callbacks", [None])[0]
-            return MagicMock()
-
-        mock_meter.create_observable_gauge.side_effect = capture_callback
-        mock_meter.create_counter.return_value = MagicMock()
-        mock_meter.create_histogram.return_value = MagicMock()
-        mock_meter.create_up_down_counter.return_value = MagicMock()
-
-        config = OTelConfig(metric_groups=[MetricGroup.CONNECTION_BASIC])
-
-        recorder.reset_collector()
-
-        with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
-            collector = RedisMetricsCollector(mock_meter, config)
-
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
-            # Step 1: Initialize the observable gauge
-            recorder.init_connection_count()
-
-            # Step 2: Register pool callbacks
-            mock_pool = MagicMock()
-            mock_pool.get_connection_count.return_value = [
-                (5, {"state": "idle", "pool": "pool1"}),
-            ]
-            recorder.register_pools_connection_count([mock_pool])
-
-            # Step 3: Simulate OTel calling the observable callback
-            assert captured_callback is not None
-            observations = captured_callback(None)
-
-            # Verify the observation was created correctly
-            assert len(observations) == 1
-            assert observations[0].value == 5
-
-        recorder.reset_collector()
-
-    def test_observable_callback_handles_empty_registry(self, clean_registry):
-        """Test that observable callback handles empty registry gracefully."""
-        mock_meter = MagicMock()
-        captured_callback = None
-
-        def capture_callback(name, **kwargs):
-            nonlocal captured_callback
-            captured_callback = kwargs.get("callbacks", [None])[0]
-            return MagicMock()
-
-        mock_meter.create_observable_gauge.side_effect = capture_callback
-        mock_meter.create_counter.return_value = MagicMock()
-        mock_meter.create_histogram.return_value = MagicMock()
-        mock_meter.create_up_down_counter.return_value = MagicMock()
-
-        config = OTelConfig(metric_groups=[MetricGroup.CONNECTION_BASIC])
-
-        recorder.reset_collector()
-
-        with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
-            collector = RedisMetricsCollector(mock_meter, config)
-
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
-            recorder.init_connection_count()
-
-            # Don't register any pools - registry is empty
-            assert captured_callback is not None
-            observations = captured_callback(None)
-
-            # Should return empty list, not raise an error
-            assert observations == []
-
-        recorder.reset_collector()
-
-    def test_multiple_pools_aggregated_correctly(self, clean_registry):
-        """Test that observations from multiple pools are aggregated correctly."""
-        mock_meter = MagicMock()
-        captured_callback = None
-
-        def capture_callback(name, **kwargs):
-            nonlocal captured_callback
-            captured_callback = kwargs.get("callbacks", [None])[0]
-            return MagicMock()
-
-        mock_meter.create_observable_gauge.side_effect = capture_callback
-        mock_meter.create_counter.return_value = MagicMock()
-        mock_meter.create_histogram.return_value = MagicMock()
-        mock_meter.create_up_down_counter.return_value = MagicMock()
-
-        config = OTelConfig(metric_groups=[MetricGroup.CONNECTION_BASIC])
-
-        recorder.reset_collector()
-
-        with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
-            collector = RedisMetricsCollector(mock_meter, config)
-
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
-            recorder.init_connection_count()
-
-            # Register multiple pools in separate calls
-            mock_pool1 = MagicMock()
-            mock_pool1.get_connection_count.return_value = [
-                (5, {"state": "idle"}),
-                (2, {"state": "used"}),
-            ]
-
-            mock_pool2 = MagicMock()
-            mock_pool2.get_connection_count.return_value = [
-                (3, {"state": "idle"}),
-            ]
-
-            recorder.register_pools_connection_count([mock_pool1])
-            recorder.register_pools_connection_count([mock_pool2])
-
-            # Simulate OTel calling the observable callback
-            observations = captured_callback(None)
-
-            # Should have 3 observations total (2 from pool1, 1 from pool2)
-            assert len(observations) == 3
-
-        recorder.reset_collector()
-
-
+@pytest.mark.fixed_client
 class TestHistogramBucketBoundaries:
     """Tests for custom histogram bucket boundaries configuration."""
 
