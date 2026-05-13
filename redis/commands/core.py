@@ -3,7 +3,6 @@ from __future__ import annotations
 import datetime
 import hashlib
 import inspect
-from dataclasses import dataclass
 
 # Try to import the xxhash library as an optional dependency
 try:
@@ -105,25 +104,6 @@ if TYPE_CHECKING:
     import redis.asyncio.cluster
     import redis.client
     import redis.cluster
-
-
-@dataclass
-class GCRAResponse:
-    """Response from the GCRA (Generic Cell Rate Algorithm) rate limiting command.
-
-    Attributes:
-        limited: Whether the request was rate limited (True) or allowed (False).
-        max_req_num: Maximum number of requests allowed (always equals max_burst + 1).
-        num_avail_req: Number of requests available immediately.
-        retry_after: Seconds until the caller should retry. Returns -1 if not limited.
-        full_burst_after: Seconds until the full burst allowance is restored.
-    """
-
-    limited: bool
-    max_req_num: int
-    num_avail_req: int
-    retry_after: int
-    full_burst_after: int
 
 
 class ACLCommands(CommandsProtocol):
@@ -2445,75 +2425,6 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("HOTKEYS GET", **kwargs)
 
-    @overload
-    def gcra(
-        self: SyncClientProtocol,
-        key: KeyT,
-        max_burst: int,
-        tokens_per_period: int,
-        period: float,
-        tokens: int | None = None,
-    ) -> GCRAResponse: ...
-
-    @overload
-    def gcra(
-        self: AsyncClientProtocol,
-        key: KeyT,
-        max_burst: int,
-        tokens_per_period: int,
-        period: float,
-        tokens: int | None = None,
-    ) -> Awaitable[GCRAResponse]: ...
-
-    def gcra(
-        self,
-        key: KeyT,
-        max_burst: int,
-        tokens_per_period: int,
-        period: float,
-        tokens: int | None = None,
-    ) -> GCRAResponse | Awaitable[GCRAResponse]:
-        """
-        Rate limit via GCRA (Generic Cell Rate Algorithm).
-
-        ``key`` is the key related to a specific rate limiting case
-            (e.g., use ``user:123`` for limiting requests of user 123).
-
-        ``max_burst`` is the maximum number of tokens allowed as a burst
-            (in addition to the sustained rate). Minimum: 0.
-
-        ``tokens_per_period`` is the number of tokens allowed per period.
-            Minimum: 1.
-
-        ``period`` is the period in seconds as a floating point number used for
-            calculating the sustained rate. Minimum: 1.0, Maximum: 1e12.
-
-        ``tokens`` is the cost (or weight) of this rate-limiting request.
-            A higher cost drains the allowance faster. Default: 1.
-
-        Returns a GCRAResponse dataclass with:
-            - limited: whether the request was rate limited (bool)
-            - max_req_num: maximum number of requests (always max_burst + 1)
-            - num_avail_req: number of requests available immediately
-            - retry_after: seconds after which caller should retry
-                (-1 if not limited)
-            - full_burst_after: seconds after which a full burst will be allowed
-
-        For more information, see https://redis.io/commands/gcra
-        """
-        if max_burst < 0:
-            raise DataError("GCRA max_burst must be >= 0")
-        if tokens_per_period < 1:
-            raise DataError("GCRA tokens_per_period must be >= 1")
-        if period < 1.0 or period > 1e12:
-            raise DataError("GCRA period must be between 1.0 and 1e12")
-
-        pieces: list[EncodableT] = [key, max_burst, tokens_per_period, period]
-        if tokens is not None:
-            pieces.extend(["TOKENS", tokens])
-
-        return self.execute_command("GCRA", *pieces)
-
 
 class AsyncManagementCommands(ManagementCommands):
     async def command_info(self, **kwargs) -> None:
@@ -4279,6 +4190,11 @@ class BasicKeyCommands(CommandsProtocol):
         self: AsyncClientProtocol, name: KeyT, time: ExpiryT, value: EncodableT
     ) -> Awaitable[bool]: ...
 
+    @deprecated_function(
+        version="2.6.12",
+        reason="Use 'set' instead.",
+        name="setex",
+    )
     def setex(
         self, name: KeyT, time: ExpiryT, value: EncodableT
     ) -> bool | Awaitable[bool]:
@@ -4286,6 +4202,9 @@ class BasicKeyCommands(CommandsProtocol):
         Set the value of key ``name`` to ``value`` that expires in ``time``
         seconds. ``time`` can be represented by an integer or a Python
         timedelta object.
+
+        As per Redis 2.6.12, SETEX is considered deprecated.
+        Please use SET with EX parameter in new code.
 
         For more information, see https://redis.io/commands/setex
         """
