@@ -985,9 +985,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
         for _ in range(execute_attempts):
             if self._initialize:
-                await self.initialize(
-                    last_failed_node_name=last_failed_node_name
-                )
+                await self.initialize(last_failed_node_name=last_failed_node_name)
                 last_failed_node_name = None
                 if (
                     len(target_nodes) == 1

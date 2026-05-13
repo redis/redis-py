@@ -3552,9 +3552,7 @@ class TestClusterConnectionErrorHandling:
                     async def initialize(nodes_manager, *args, **kwargs):
                         if nodes_manager is rc.nodes_manager:
                             initialize_calls.append(kwargs)
-                        return await original_initialize(
-                            nodes_manager, *args, **kwargs
-                        )
+                        return await original_initialize(nodes_manager, *args, **kwargs)
 
                     with mock.patch.object(
                         NodesManager,
