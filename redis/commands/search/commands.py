@@ -1103,7 +1103,7 @@ class SearchCommands:
                          returned. Implies `replace`
             fields: kwargs dictionary of the document fields to be saved
                     and/or indexed.
-                    NOTE: Geo points shoule be encoded as strings of "lon,lat"
+                    NOTE: Geo points should be encoded as strings of "lon,lat"
         """  # noqa
         return self._add_document(
             doc_id,
