@@ -1165,7 +1165,7 @@ class ManagementCommands(CommandsProtocol):
     def client_setinfo(self, attr: str, value: str, **kwargs) -> bool | Awaitable[bool]:
         """
         Sets the current connection library name or version
-        For mor information see https://redis.io/commands/client-setinfo
+        For more information see https://redis.io/commands/client-setinfo
         """
         return self.execute_command("CLIENT SETINFO", attr, value, **kwargs)
 
@@ -5136,7 +5136,7 @@ class ListCommands(CommandsProtocol):
             pieces.extend([b"LIMIT", start, num])
         if get is not None:
             # If get is a string assume we want to get a single value.
-            # Otherwise assume it's an interable and we want to get multiple
+            # Otherwise assume it's an iterable and we want to get multiple
             # values. We can't just iterate blindly because strings are
             # iterable.
             if isinstance(get, (bytes, str)):
@@ -10644,7 +10644,7 @@ class GeoCommands(CommandsProtocol):
                 raise DataError("GEORADIUS invalid sort")
 
         if kwargs["store"] and kwargs["store_dist"]:
-            raise DataError("GEORADIUS store and store_dist cant be set together")
+            raise DataError("GEORADIUS store and store_dist can't be set together")
 
         if kwargs["store"]:
             pieces.extend([b"STORE", kwargs["store"]])
@@ -10868,7 +10868,7 @@ class GeoCommands(CommandsProtocol):
         if kwargs["member"]:
             if kwargs["longitude"] or kwargs["latitude"]:
                 raise DataError(
-                    "GEOSEARCH member and longitude or latitude cant be set together"
+                    "GEOSEARCH member and longitude or latitude can't be set together"
                 )
             pieces.extend([b"FROMMEMBER", kwargs["member"]])
         if kwargs["longitude"] is not None and kwargs["latitude"] is not None:
@@ -10885,7 +10885,7 @@ class GeoCommands(CommandsProtocol):
         if kwargs["radius"]:
             if kwargs["width"] or kwargs["height"]:
                 raise DataError(
-                    "GEOSEARCH radius and width or height cant be set together"
+                    "GEOSEARCH radius and width or height can't be set together"
                 )
             pieces.extend([b"BYRADIUS", kwargs["radius"], kwargs["unit"]])
         if kwargs["width"] and kwargs["height"]:
