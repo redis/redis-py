@@ -1,7 +1,6 @@
 import logging
-import sys
 from abc import ABC
-from asyncio import IncompleteReadError, StreamReader, TimeoutError
+from asyncio import IncompleteReadError, StreamReader
 from typing import Awaitable, Callable, List, Optional, Protocol, Union
 
 from redis.maint_notifications import (
@@ -14,12 +13,7 @@ from redis.maint_notifications import (
     OSSNodeMigratedNotification,
     OSSNodeMigratingNotification,
 )
-from redis.utils import safe_str
-
-if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
-    from asyncio import timeout as async_timeout
-else:
-    from async_timeout import timeout as async_timeout
+from redis.utils import deprecated_function, safe_str
 
 from ..exceptions import (
     AskError,
@@ -169,7 +163,13 @@ class AsyncBaseParser(BaseParser):
         self._stream: Optional[StreamReader] = None
         self._read_size = socket_read_size
 
+    @deprecated_function(
+        version="8.0.0", reason="Use can_read() instead", name="can_read_destructive"
+    )
     async def can_read_destructive(self) -> bool:
+        raise NotImplementedError()
+
+    async def can_read(self) -> bool:
         raise NotImplementedError()
 
     async def read_response(
@@ -515,16 +515,20 @@ class _AsyncRESPBase(AsyncBaseParser):
         """Called when the stream disconnects"""
         self._connected = False
 
+    @deprecated_function(
+        version="8.0.0",
+        reason="Use can_read() instead",
+        name="can_read_destructive",
+    )
     async def can_read_destructive(self) -> bool:
+        return await self.can_read()
+
+    async def can_read(self) -> bool:
         if not self._connected:
             raise OSError("Buffer is closed.")
         if self._buffer:
             return True
-        try:
-            async with async_timeout(0):
-                return self._stream.at_eof()
-        except TimeoutError:
-            return False
+        return self._stream.at_eof()
 
     async def _read(self, length: int) -> bytes:
         """
