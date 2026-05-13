@@ -15,7 +15,7 @@ class CredentialProvider:
 
     async def get_credentials_async(self) -> Union[Tuple[str], Tuple[str, str]]:
         logger.warning(
-            "This method is added for backward compatability. "
+            "This method is added for backward compatibility. "
             "Please override it in your implementation."
         )
         return self.get_credentials()
