@@ -1039,12 +1039,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     # Try again with the new cluster setup.
                     retry_attempts -= 1
                     failure_count += 1
-                    if (
-                        self._initialize
-                        and hasattr(e, "connection")
-                        and hasattr(e.connection, "name")
-                    ):
-                        last_failed_node_name = e.connection.name
+                    last_failed_node_name = getattr(e, "last_failed_node_name", None)
 
                     if hasattr(e, "connection"):
                         await self._record_command_metric(
@@ -1139,6 +1134,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 # Move the failed node to the end of the cached nodes list
                 # so it's tried last during reinitialization
                 self.nodes_manager.move_node_to_end_of_cached_nodes(target_node.name)
+                e.last_failed_node_name = target_node.name
 
                 # Signal that reinitialization is needed
                 # The retry loop will handle initialize() AND replace_default_node()
