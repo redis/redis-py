@@ -1,17 +1,10 @@
-import asyncio
 import socket
-import sys
 from logging import getLogger
 from typing import Callable, List, Optional, TypedDict, Union
 
-if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
-    from asyncio import timeout as async_timeout
-else:
-    from async_timeout import timeout as async_timeout
-
 from ..exceptions import ConnectionError, InvalidResponse, RedisError
 from ..typing import EncodableT
-from ..utils import HIREDIS_AVAILABLE
+from ..utils import HIREDIS_AVAILABLE, deprecated_function
 from .base import (
     AsyncBaseParser,
     AsyncPushNotificationsParser,
@@ -243,16 +236,20 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
     def on_disconnect(self):
         self._connected = False
 
+    @deprecated_function(
+        version="8.0.0", reason="Use can_read() instead", name="can_read_destructive"
+    )
     async def can_read_destructive(self):
+        return await self.can_read()
+
+    async def can_read(self):
         if not self._connected:
             raise OSError("Buffer is closed.")
         if self._reader.gets() is not NOT_ENOUGH_DATA:
             return True
-        try:
-            async with async_timeout(0):
-                return await self.read_from_socket()
-        except asyncio.TimeoutError:
-            return False
+        if self._stream.at_eof():
+            return True
+        return bool(self._stream._buffer)
 
     async def read_from_socket(self):
         buffer = await self._stream.read(self._read_size)
