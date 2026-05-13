@@ -524,7 +524,11 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self._usage_counter = 0
         self._usage_lock = asyncio.Lock()
 
-    async def initialize(self) -> "RedisCluster":
+    async def initialize(
+        self,
+        additional_startup_nodes_info: Optional[List[Tuple[str, int]]] = None,
+        last_failed_node_name: Optional[str] = None,
+    ) -> "RedisCluster":
         """Get all nodes from startup nodes & creates connections if not initialized."""
         if self._initialize:
             if not self._lock:
@@ -532,7 +536,10 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             async with self._lock:
                 if self._initialize:
                     try:
-                        await self.nodes_manager.initialize()
+                        await self.nodes_manager.initialize(
+                            additional_startup_nodes_info=additional_startup_nodes_info,
+                            last_failed_node_name=last_failed_node_name,
+                        )
                         await self.commands_parser.initialize(
                             self.nodes_manager.default_node
                         )
@@ -974,10 +981,14 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
         # Start timing for observability
         start_time = time.monotonic()
+        last_failed_node_name = None
 
         for _ in range(execute_attempts):
             if self._initialize:
-                await self.initialize()
+                await self.initialize(
+                    last_failed_node_name=last_failed_node_name
+                )
+                last_failed_node_name = None
                 if (
                     len(target_nodes) == 1
                     and target_nodes[0] == self.get_default_node()
@@ -1030,6 +1041,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     # Try again with the new cluster setup.
                     retry_attempts -= 1
                     failure_count += 1
+                    if (
+                        self._initialize
+                        and hasattr(e, "connection")
+                        and hasattr(e.connection, "name")
+                    ):
+                        last_failed_node_name = e.connection.name
 
                     if hasattr(e, "connection"):
                         await self._record_command_metric(
@@ -1923,7 +1940,11 @@ class NodesManager:
             if node.server_type == server_type
         ]
 
-    async def initialize(self) -> None:
+    async def initialize(
+        self,
+        additional_startup_nodes_info: Optional[List[Tuple[str, int]]] = None,
+        last_failed_node_name: Optional[str] = None,
+    ) -> None:
         self.read_load_balancer.reset()
         tmp_nodes_cache: Dict[str, "ClusterNode"] = {}
         tmp_slots: Dict[int, List["ClusterNode"]] = {}
@@ -1932,6 +1953,8 @@ class NodesManager:
         fully_covered = False
         exception = None
         epoch = self._epoch
+        if additional_startup_nodes_info is None:
+            additional_startup_nodes_info = []
 
         async with self._initialize_lock:
             if self._epoch != epoch:
@@ -1943,11 +1966,32 @@ class NodesManager:
             # Copy to a list to prevent RuntimeError if self.startup_nodes
             # is modified during iteration, then shuffle the iteration order.
             startup_nodes = list(self.startup_nodes.values())
+            deferred_failed_nodes = []
+            if last_failed_node_name is not None:
+                for index, node in enumerate(startup_nodes):
+                    if node.name == last_failed_node_name:
+                        deferred_failed_nodes.append(startup_nodes.pop(index))
+                        break
             if len(startup_nodes) > 1:
                 # Vary which startup node is queried first so clients do not
                 # all reinitialize through the same node.
                 random.shuffle(startup_nodes)
-            for startup_node in startup_nodes:
+            additional_startup_nodes = [
+                ClusterNode(host, port, **self.connection_kwargs)
+                for host, port in additional_startup_nodes_info
+            ]
+            if last_failed_node_name is not None:
+                for index, node in enumerate(additional_startup_nodes):
+                    if node.name == last_failed_node_name:
+                        if not deferred_failed_nodes:
+                            deferred_failed_nodes.append(node)
+                        additional_startup_nodes.pop(index)
+                        break
+            for startup_node in chain(
+                startup_nodes,
+                additional_startup_nodes,
+                deferred_failed_nodes,
+            ):
                 try:
                     # Make sure cluster mode is enabled on this node
                     try:

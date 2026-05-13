@@ -1736,7 +1736,8 @@ class RedisCluster(
                 self.nodes_manager.move_node_to_end_of_cached_nodes(target_node.name)
 
                 # DON'T set redis_connection = None - keep the pool for reuse
-                self.nodes_manager.initialize()
+                # provide the name of the failed node so we can try it last
+                self.nodes_manager.initialize(last_failed_node_name=target_node.name)
                 self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
@@ -2431,6 +2432,7 @@ class NodesManager:
         self,
         additional_startup_nodes_info: Optional[List[Tuple[str, int]]] = None,
         disconnect_startup_nodes_pools: bool = True,
+        last_failed_node_name: Optional[str] = None,
     ):
         """
         Initializes the nodes cache, slots cache and redis connections.
@@ -2450,6 +2452,9 @@ class NodesManager:
             with them.
             The format of the list is a list of tuples, where each tuple contains
             the host and port of the node.
+        :last_failed_node_name:
+            Name of the node that just failed and should be tried only after
+            other startup and additional startup nodes during this refresh.
         """
         self.reset()
         tmp_nodes_cache = {}
@@ -2472,6 +2477,12 @@ class NodesManager:
 
             with self._lock:
                 startup_nodes = list(self.startup_nodes.values())
+            deferred_failed_nodes = []
+            if last_failed_node_name is not None:
+                for index, node in enumerate(startup_nodes):
+                    if node.name == last_failed_node_name:
+                        deferred_failed_nodes.append(startup_nodes.pop(index))
+                        break
             if len(startup_nodes) > 1:
                 # Vary which startup node is queried first so clients do not
                 # all reinitialize through the same node.
@@ -2480,6 +2491,13 @@ class NodesManager:
             additional_startup_nodes = [
                 ClusterNode(host, port) for host, port in additional_startup_nodes_info
             ]
+            if last_failed_node_name is not None:
+                for index, node in enumerate(additional_startup_nodes):
+                    if node.name == last_failed_node_name:
+                        if not deferred_failed_nodes:
+                            deferred_failed_nodes.append(node)
+                        additional_startup_nodes.pop(index)
+                        break
             if is_debug_log_enabled():
                 logger.debug(
                     f"Topology refresh: using additional nodes: {[node.name for node in additional_startup_nodes]}; "
@@ -2489,6 +2507,7 @@ class NodesManager:
             for startup_node in chain(
                 startup_nodes,
                 additional_startup_nodes,
+                deferred_failed_nodes,
             ):
                 try:
                     if startup_node.redis_connection:

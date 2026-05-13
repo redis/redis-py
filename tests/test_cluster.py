@@ -598,7 +598,7 @@ class TestRedisClusterObj:
                         elif connection.port == 7007:
                             parse_response.successful_calls += 1
 
-                    def initialize_mock(self):
+                    def initialize_mock(self, *args, **kwargs):
                         # start with all slots mapped to 7006
                         self.nodes_cache = {node_7006.name: node_7006}
                         self.default_node = node_7006
@@ -609,7 +609,7 @@ class TestRedisClusterObj:
 
                         # After the first connection fails, a reinitialize
                         # should follow the cluster to 7007
-                        def map_7007(self):
+                        def map_7007(self, *args, **kwargs):
                             self.nodes_cache = {node_7007.name: node_7007}
                             self.default_node = node_7007
                             self.slots_cache = {}
