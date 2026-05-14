@@ -1,16 +1,16 @@
 from dataclasses import dataclass
 import logging
+from typing import List, Optional, cast
+from unittest.mock import patch
 
 import pytest
-from typing import List, Optional, cast
-
 from redis import ConnectionPool, RedisCluster
+from redis.cache import CacheConfig
 from redis.cluster import ClusterNode
 from redis.connection import (
     BlockingConnectionPool,
 )
 from redis.maint_notifications import MaintNotificationsConfig, MaintenanceState
-from redis.cache import CacheConfig
 from tests.conftest import skip_if_server_version_lt
 from tests.maint_notifications.proxy_server_helpers import (
     ProxyInterceptorHelper,
@@ -36,6 +36,10 @@ PROXY_CLUSTER_NODES = [
 ]
 
 CLUSTER_SLOTS_INTERCEPTOR_NAME = "test_topology"
+
+
+def _preserve_startup_nodes_order(_startup_nodes):
+    pass
 
 
 @pytest.mark.fixed_client
@@ -682,6 +686,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         )
         assert new_node is not None
 
+    @patch("redis.cluster.random.shuffle", new=_preserve_startup_nodes_order)
     def test_smigrating_smigrated_on_two_nodes_without_node_replacement(self):
         """Test receiving an OSS maintenance notification on two nodes without node replacement."""
         # warm up connection pools - create several connections in each pool
@@ -832,6 +837,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
             ],
         )
 
+    @patch("redis.cluster.random.shuffle", new=_preserve_startup_nodes_order)
     def test_smigrating_smigrated_on_two_nodes_with_node_replacements(self):
         """Test receiving an OSS maintenance notification on two nodes with node replacement."""
         # warm up connection pools - create several connections in each pool
