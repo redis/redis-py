@@ -4044,14 +4044,23 @@ class PipelineStrategy(AbstractStrategy):
         nodes: dict[str, NodeCommands] = {}
         nodes_written = 0
         nodes_read = 0
+        pipe = self._pipe
+
+        # commonly used policies for reuse
+        default_keyless = CommandPolicies()
+        default_keyed = CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYED,
+            response_policy=ResponsePolicy.DEFAULT_KEYED,
+        )
 
         try:
             # as we move through each command that still needs to be processed,
             # we figure out the slot number that command maps to, then from
             # the slot determine the node.
             for c in attempt:
-                command_policies = self._pipe._policy_resolver.resolve(
-                    c.args[0].lower()
+                args = c.args
+                command_policies = pipe._policy_resolver.resolve(
+                    args[0].lower()
                 )
                 # refer to our internal node -> slot table that
                 # tells us where a given command should route to.
@@ -4062,60 +4071,56 @@ class PipelineStrategy(AbstractStrategy):
                     target_nodes = self._parse_target_nodes(passed_targets)
 
                     if not command_policies:
-                        command_policies = CommandPolicies()
+                        command_policies = default_keyless
                 else:
                     if not command_policies:
-                        command = c.args[0].upper()
-                        if (
-                            len(c.args) >= 2
-                            and f"{c.args[0]} {c.args[1]}".upper()
-                            in self._pipe.command_flags
-                        ):
-                            command = f"{c.args[0]} {c.args[1]}".upper()
+                        if len(args) >= 2:
+                            command = f"{args[0]} {args[1]}".upper()
+                            if command not in pipe.command_flags:
+                                command = args[0].upper()
+                        else:
+                            command = args[0].upper()
 
                         # We only could resolve key properties if command is not
                         # in a list of pre-defined request policies
                         command_flag = self.command_flags.get(command)
                         if not command_flag:
                             # Fallback to default policy
-                            if not self._pipe.get_default_node():
+                            if not pipe.get_default_node():
                                 keys = None
                             else:
-                                keys = self._pipe._get_command_keys(*c.args)
+                                keys = pipe._get_command_keys(*args)
                             if not keys or len(keys) == 0:
-                                command_policies = CommandPolicies()
+                                command_policies = default_keyless
                             else:
-                                command_policies = CommandPolicies(
-                                    request_policy=RequestPolicy.DEFAULT_KEYED,
-                                    response_policy=ResponsePolicy.DEFAULT_KEYED,
-                                )
+                                command_policies = default_keyed
                         else:
-                            if command_flag in self._pipe._command_flags_mapping:
+                            if command_flag in pipe._command_flags_mapping:
                                 command_policies = CommandPolicies(
-                                    request_policy=self._pipe._command_flags_mapping[
+                                    request_policy=pipe._command_flags_mapping[
                                         command_flag
                                     ]
                                 )
                             else:
-                                command_policies = CommandPolicies()
+                                command_policies = default_keyless
 
                     target_nodes = self._determine_nodes(
-                        *c.args,
+                        *args,
                         request_policy=command_policies.request_policy,
                         node_flag=passed_targets,
                     )
                     if not target_nodes:
                         raise RedisClusterException(
-                            f"No targets were found to execute {c.args} command on"
+                            f"No targets were found to execute {args} command on"
                         )
                 c.command_policies = command_policies
                 if len(target_nodes) > 1:
                     raise RedisClusterException(
-                        f"Too many targets for command {c.args}"
+                        f"Too many targets for command {args}"
                     )
 
                 node = target_nodes[0]
-                if node == self._pipe.get_default_node():
+                if node == pipe.get_default_node():
                     is_default_node = True
 
                 # now that we know the name of the node
@@ -4123,7 +4128,7 @@ class PipelineStrategy(AbstractStrategy):
                 # we can build a list of commands for each node.
                 node_name = node.name
                 if node_name not in nodes:
-                    redis_node = self._pipe.get_redis_connection(node)
+                    redis_node = pipe.get_redis_connection(node)
                     try:
                         connection = get_connection(redis_node)
                     except (ConnectionError, TimeoutError):
@@ -4134,7 +4139,7 @@ class PipelineStrategy(AbstractStrategy):
                         # Retry object. Reinitialize the node -> slot table.
                         self._nodes_manager.initialize()
                         if is_default_node:
-                            self._pipe.replace_default_node()
+                            pipe.replace_default_node()
                         nodes = {}
                         raise
                     nodes[node_name] = NodeCommands(
@@ -4232,16 +4237,16 @@ class PipelineStrategy(AbstractStrategy):
             # If a lot of commands have failed, we'll be setting the
             # flag to rebuild the slots table from scratch.
             # So MOVED errors should correct themselves fairly quickly.
-            self._pipe.reinitialize_counter += 1
-            if self._pipe._should_reinitialized():
+            pipe.reinitialize_counter += 1
+            if pipe._should_reinitialized():
                 self._nodes_manager.initialize()
                 if is_default_node:
-                    self._pipe.replace_default_node()
+                    pipe.replace_default_node()
             for c in attempt:
                 try:
                     # send each command individually like we
                     # do in the main client.
-                    c.result = self._pipe.parent_execute_command(*c.args, **c.options)
+                    c.result = pipe.parent_execute_command(*c.args, **c.options)
                 except RedisError as e:
                     c.result = e
 
@@ -4249,13 +4254,13 @@ class PipelineStrategy(AbstractStrategy):
         # to the sequence of commands issued in the stack in pipeline.execute()
         response = []
         for c in sorted(stack, key=lambda x: x.position):
-            if c.args[0] in self._pipe.cluster_response_callbacks:
+            if c.args[0] in pipe.cluster_response_callbacks:
                 # Remove keys entry, it needs only for cache.
                 c.options.pop("keys", None)
-                c.result = self._pipe._policies_callback_mapping[
+                c.result = pipe._policies_callback_mapping[
                     c.command_policies.response_policy
                 ](
-                    self._pipe.cluster_response_callbacks[c.args[0]](
+                    pipe.cluster_response_callbacks[c.args[0]](
                         c.result, **c.options
                     )
                 )
