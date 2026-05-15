@@ -114,6 +114,18 @@ class CommandsParser(AbstractCommandsParser):
         for cmd in uppercase_commands:
             commands[cmd.lower()] = commands.pop(cmd)
         self.commands = commands
+        for command in self.commands.values():
+            first_key_pos = command["first_key_pos"]
+            last_key_pos = command["last_key_pos"]
+            flags = command["flags"]
+            if (
+                first_key_pos > 0
+                and first_key_pos == last_key_pos
+                and "movablekeys" not in flags
+                and "pubsub" not in flags
+                and command["name"] != "pubsub"
+            ):
+                command["_single_key_pos"] = first_key_pos
 
     # As soon as this PR is merged into Redis, we should reimplement
     # our logic to use COMMAND INFO changes to determine the key positions
@@ -134,33 +146,44 @@ class CommandsParser(AbstractCommandsParser):
             return None
 
         cmd_name = args[0].lower()
-        if cmd_name not in self.commands:
+        commands = self.commands
+        command = commands.get(cmd_name)
+        if command is None:
             # try to split the command name and to take only the main command,
             # e.g. 'memory' for 'memory usage'
             cmd_name_split = cmd_name.split()
             cmd_name = cmd_name_split[0]
-            if cmd_name in self.commands:
+            if cmd_name in commands:
                 # save the split command to args
                 args = cmd_name_split + list(args[1:])
             else:
                 # We'll try to reinitialize the commands cache, if the engine
                 # version has changed, the commands may not be current
                 self.initialize(redis_conn)
-                if cmd_name not in self.commands:
+                commands = self.commands
+                if cmd_name not in commands:
                     raise RedisError(
                         f"{cmd_name.upper()} command doesn't exist in Redis commands"
                     )
+            command = commands.get(cmd_name)
 
-        command = self.commands.get(cmd_name)
-        if "movablekeys" in command["flags"]:
+        single_pos = command.get("_single_key_pos")
+        if single_pos is not None:
+            return [args[single_pos]]
+
+        flags = command["flags"]
+        if "movablekeys" in flags:
             keys = self._get_moveable_keys(redis_conn, *args)
-        elif "pubsub" in command["flags"] or command["name"] == "pubsub":
+        elif "pubsub" in flags or command["name"] == "pubsub":
             keys = self._get_pubsub_keys(*args)
         else:
+            step_count = command["step_count"]
+            first_key_pos = command["first_key_pos"]
+            last_key_pos = command["last_key_pos"]
             if (
-                command["step_count"] == 0
-                and command["first_key_pos"] == 0
-                and command["last_key_pos"] == 0
+                step_count == 0
+                and first_key_pos == 0
+                and last_key_pos == 0
             ):
                 is_subcmd = False
                 if "subcommands" in command:
@@ -169,19 +192,22 @@ class CommandsParser(AbstractCommandsParser):
                         if str_if_bytes(subcmd[0]) == subcmd_name:
                             command = self.parse_subcommand(subcmd)
 
-                            if command["first_key_pos"] > 0:
+                            step_count = command["step_count"]
+                            first_key_pos = command["first_key_pos"]
+                            last_key_pos = command["last_key_pos"]
+
+                            if first_key_pos > 0:
                                 is_subcmd = True
 
                 # The command doesn't have keys in it
                 if not is_subcmd:
                     return None
-            last_key_pos = command["last_key_pos"]
             if last_key_pos < 0:
-                last_key_pos = len(args) - abs(last_key_pos)
-            keys_pos = list(
-                range(command["first_key_pos"], last_key_pos + 1, command["step_count"])
-            )
-            keys = [args[pos] for pos in keys_pos]
+                last_key_pos += len(args)
+            keys = list(map(
+                args.__getitem__,
+                range(first_key_pos, last_key_pos + 1, step_count)
+            ))
 
         return keys
 
@@ -454,21 +480,30 @@ class AsyncCommandsParser(AbstractCommandsParser):
                 # We'll try to reinitialize the commands cache, if the engine
                 # version has changed, the commands may not be current
                 await self.initialize()
-                if cmd_name not in self.commands:
+                commands = self.commands
+                if cmd_name not in commands:
                     raise RedisError(
                         f"{cmd_name.upper()} command doesn't exist in Redis commands"
                     )
 
-        command = self.commands.get(cmd_name)
-        if "movablekeys" in command["flags"]:
+        single_pos = command.get("_single_key_pos")
+        if single_pos is not None:
+            return [args[single_pos]]
+
+        command = commands.get(cmd_name)
+        flags = command["flags"]
+        if "movablekeys" in flags:
             keys = await self._get_moveable_keys(*args)
-        elif "pubsub" in command["flags"] or command["name"] == "pubsub":
+        elif "pubsub" in flags or command["name"] == "pubsub":
             keys = self._get_pubsub_keys(*args)
         else:
+            step_count = command["step_count"]
+            first_key_pos = command["first_key_pos"]
+            last_key_pos = command["last_key_pos"]
             if (
-                command["step_count"] == 0
-                and command["first_key_pos"] == 0
-                and command["last_key_pos"] == 0
+                step_count == 0
+                and first_key_pos == 0
+                and last_key_pos == 0
             ):
                 is_subcmd = False
                 if "subcommands" in command:
@@ -477,19 +512,21 @@ class AsyncCommandsParser(AbstractCommandsParser):
                         if str_if_bytes(subcmd[0]) == subcmd_name:
                             command = self.parse_subcommand(subcmd)
 
-                            if command["first_key_pos"] > 0:
+                            first_key_pos = command["first_key_pos"]
+                            last_key_pos = command["last_key_pos"]
+                            step_count = command["step_count"]
+                            if first_key_pos > 0:
                                 is_subcmd = True
 
                 # The command doesn't have keys in it
                 if not is_subcmd:
                     return None
-            last_key_pos = command["last_key_pos"]
             if last_key_pos < 0:
-                last_key_pos = len(args) - abs(last_key_pos)
-            keys_pos = list(
-                range(command["first_key_pos"], last_key_pos + 1, command["step_count"])
-            )
-            keys = [args[pos] for pos in keys_pos]
+                last_key_pos += len(args)
+            keys = [
+                args[pos]
+                for pos in range(first_key_pos, last_key_pos + 1, step_count)
+            ]
 
         return keys
 
