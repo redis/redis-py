@@ -26,7 +26,6 @@ from redis.commands.core import (
     ArrayPredicateCombinator,
     ArrayPredicateType,
     DataPersistOptions,
-    GCRAResponse,
     HotkeysMetricsTypes,
 )
 from redis.commands.core import DataPersistOptions, HotkeysMetricsTypes
@@ -2582,6 +2581,28 @@ class TestRedisCommands:
     async def test_armget_single_index(self, r: redis.Redis):
         await r.arset("a", 0, "v0", "v1")
         assert await r.armget("a", 1) == [b"v1"]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_argetrange_returns_values_in_range(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1", "v2")
+        assert await r.argetrange("a", 0, 2) == [b"v0", b"v1", b"v2"]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arinsert_single_value(self, r: redis.Redis):
+        assert await r.arinsert("a", "v0") == 0
+        assert await r.armget("a", 0) == [b"v0"]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arinsert_multiple_values(self, r: redis.Redis):
+        assert await r.arinsert("a", "v0", "v1", "v2") == 2
+        assert await r.armget("a", 0, 1, 2) == [b"v0", b"v1", b"v2"]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arinsert_cursor_advancement(self, r: redis.Redis):
+        assert await r.arinsert("a", "v0", "v1") == 1
+        assert await r.arnext("a") == 2
+        assert await r.arinsert("a", "v2") == 2
+        assert await r.armget("a", 0, 1, 2) == [b"v0", b"v1", b"v2"]
 
     @skip_if_server_version_lt("8.7.2")
     async def test_arscan_returns_index_value_pairs(self, r: redis.Redis):

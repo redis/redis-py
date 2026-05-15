@@ -26,7 +26,6 @@ from redis.commands.core import (
     ArrayPredicateCombinator,
     ArrayPredicateType,
     DataPersistOptions,
-    GCRAResponse,
     HotkeysMetricsTypes,
 )
 from redis.commands.core import DataPersistOptions, HotkeysMetricsTypes

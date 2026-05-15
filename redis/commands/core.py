@@ -5707,7 +5707,7 @@ class ArrayCommands(CommandsProtocol):
         """
         pieces: list = [name, count]
         if rev:
-            pieces.append("REV")
+            pieces.append(b"REV")
         return self.execute_command("ARLASTITEMS", *pieces)
 
     @overload
