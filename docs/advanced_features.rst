@@ -365,7 +365,7 @@ subscribe to a channel or pattern with a message handler, pass the
 channel or pattern name as a keyword argument with its value being the
 callback function. For channel or pattern names that cannot be used as
 Python keyword arguments, including arbitrary binary names, pass a
-``redis.Subscription`` object positionally instead.
+``redis.Subscription`` object as a positional argument instead.
 
 Subscription forms can be mixed in the same call. Assuming
 ``my_handler`` is a callback, a plain channel name can be supplied

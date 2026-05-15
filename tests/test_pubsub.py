@@ -2589,9 +2589,7 @@ class TestClusterPubSubSlotMigration:
         pubsub.ssubscribe(foo=new_handler)
 
         old_ps.sunsubscribe.assert_called_once_with(channel)
-        new_ps.ssubscribe.assert_called_once_with(
-            Subscription(channel, new_handler)
-        )
+        new_ps.ssubscribe.assert_called_once_with(Subscription(channel, new_handler))
 
     def test_ssubscribe_migration_accepts_binary_subscription_with_handler(self):
         pubsub = self._make_cluster_pubsub()
@@ -2610,9 +2608,7 @@ class TestClusterPubSubSlotMigration:
         pubsub.ssubscribe(Subscription(channel, new_handler))
 
         old_ps.sunsubscribe.assert_called_once_with(channel)
-        new_ps.ssubscribe.assert_called_once_with(
-            Subscription(channel, new_handler)
-        )
+        new_ps.ssubscribe.assert_called_once_with(Subscription(channel, new_handler))
 
     def test_ssubscribe_skips_channel_when_node_resolution_returns_none(self):
         """
