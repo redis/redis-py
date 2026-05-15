@@ -1133,7 +1133,7 @@ def parse_geosearch_generic(response, **options):
     """
     try:
         if options["store"] or options["store_dist"]:
-            # `store` and `store_dist` cant be combined
+            # `store` and `store_dist` can't be combined
             # with other command arguments.
             # relevant to 'GEORADIUS' and 'GEORADIUSBYMEMBER'
             return response

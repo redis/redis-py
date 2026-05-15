@@ -98,7 +98,7 @@ def _check_certificate(issuer_cert, ocsp_bytes, validate=True):
 
         ext = responder_cert.extensions.get_extension_for_class(x509.ExtendedKeyUsage)
         if ext is None or x509.oid.ExtendedKeyUsageOID.OCSP_SIGNING not in ext.value:
-            raise ConnectionError("delegate not autorized for ocsp signing")
+            raise ConnectionError("delegate not authorized for ocsp signing")
         cert_to_validate = responder_cert
 
     if validate:
@@ -193,7 +193,7 @@ class OCSPVerifier:
         server in the chain for a socket already wrapped with ssl.
         """
 
-        # convert the binary certifcate to text
+        # convert the binary certificate to text
         der = self.SOCK.getpeercert(True)
         if der is False:
             raise ConnectionError("no certificate found for ssl peer")
