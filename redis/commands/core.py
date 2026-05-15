@@ -3264,7 +3264,15 @@ class BasicKeyCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/getex
         """
-        if not at_most_one_value_set((ex, px, exat, pxat, persist)):
+        if not at_most_one_value_set(
+            (
+                ex is not None,
+                px is not None,
+                exat is not None,
+                pxat is not None,
+                persist,
+            )
+        ):
             raise DataError(
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``persist`` are mutually exclusive."
@@ -3385,6 +3393,124 @@ class BasicKeyCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/incrbyfloat
         """
         return self.execute_command("INCRBYFLOAT", name, amount)
+
+    @overload
+    def increx(
+        self: SyncClientProtocol,
+        name: KeyT,
+        *,
+        byfloat: EncodableT | None = None,
+        byint: EncodableT | None = None,
+        lbound: EncodableT | None = None,
+        ubound: EncodableT | None = None,
+        overflow: Literal["FAIL", "REJECT", "SAT"] | None = None,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        persist: bool = False,
+        enx: bool = False,
+    ) -> list[Number | bytes | str]: ...
+
+    @overload
+    def increx(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        *,
+        byfloat: EncodableT | None = None,
+        byint: EncodableT | None = None,
+        lbound: EncodableT | None = None,
+        ubound: EncodableT | None = None,
+        overflow: Literal["FAIL", "REJECT", "SAT"] | None = None,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        persist: bool = False,
+        enx: bool = False,
+    ) -> Awaitable[list[Number | bytes | str]]: ...
+
+    def increx(
+        self,
+        name: KeyT,
+        *,
+        byfloat: EncodableT | None = None,
+        byint: EncodableT | None = None,
+        lbound: EncodableT | None = None,
+        ubound: EncodableT | None = None,
+        overflow: Literal["FAIL", "REJECT", "SAT"] | None = None,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        persist: bool = False,
+        enx: bool = False,
+    ) -> list[Number | bytes | str] | Awaitable[list[Number | bytes | str]]:
+        """
+        Increment the numeric value at key ``name`` and return the new value
+        and the actual increment.
+
+        ``byfloat`` increments a floating point value by the provided amount.
+
+        ``byint`` increments an integer value by the provided amount.
+
+        If neither ``byfloat`` nor ``byint`` is specified, the value is
+        incremented by one.
+
+        ``lbound`` and ``ubound`` constrain the valid range of the result.
+
+        ``overflow`` controls bound handling and can be ``FAIL``, ``REJECT``,
+        or ``SAT``.
+
+        ``enx`` applies the expiration only when the key does not already
+        have an expiration, and requires ``ex``, ``px``, ``exat``, or ``pxat``.
+        """
+        if byfloat is not None and byint is not None:
+            raise DataError("``byfloat`` and ``byint`` are mutually exclusive.")
+
+        if not at_most_one_value_set(
+            (
+                ex is not None,
+                px is not None,
+                exat is not None,
+                pxat is not None,
+                persist,
+            )
+        ):
+            raise DataError(
+                "``ex``, ``px``, ``exat``, ``pxat``, "
+                "and ``persist`` are mutually exclusive."
+            )
+
+        if overflow is not None and overflow not in {"FAIL", "REJECT", "SAT"}:
+            raise DataError("INCREX overflow must be one of: FAIL, REJECT, SAT")
+
+        if enx and ex is None and px is None and exat is None and pxat is None:
+            raise DataError(
+                "``enx`` requires one of ``ex``, ``px``, ``exat``, or ``pxat``."
+            )
+
+        pieces: list[EncodableT] = [name]
+
+        if byfloat is not None:
+            pieces.extend(("BYFLOAT", byfloat))
+        elif byint is not None:
+            pieces.extend(("BYINT", byint))
+
+        if lbound is not None:
+            pieces.extend(("LBOUND", lbound))
+        if ubound is not None:
+            pieces.extend(("UBOUND", ubound))
+        if overflow is not None:
+            pieces.extend(("OVERFLOW", overflow))
+
+        pieces.extend(extract_expire_flags(ex, px, exat, pxat))
+        if persist:
+            pieces.append("PERSIST")
+        if enx:
+            pieces.append("ENX")
+
+        return self.execute_command("INCREX", *pieces)
 
     @overload
     def keys(
@@ -3598,7 +3724,15 @@ class BasicKeyCommands(CommandsProtocol):
         Available since Redis 8.4
         For more information, see https://redis.io/commands/msetex
         """
-        if not at_most_one_value_set((ex, px, exat, pxat, keepttl)):
+        if not at_most_one_value_set(
+            (
+                ex is not None,
+                px is not None,
+                exat is not None,
+                pxat is not None,
+                keepttl,
+            )
+        ):
             raise DataError(
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``keepttl`` are mutually exclusive."
@@ -4117,14 +4251,31 @@ class BasicKeyCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/set
         """
 
-        if not at_most_one_value_set((ex, px, exat, pxat, keepttl)):
+        if not at_most_one_value_set(
+            (
+                ex is not None,
+                px is not None,
+                exat is not None,
+                pxat is not None,
+                keepttl,
+            )
+        ):
             raise DataError(
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``keepttl`` are mutually exclusive."
             )
 
         # Enforce mutual exclusivity among all conditional switches.
-        if not at_most_one_value_set((nx, xx, ifeq, ifne, ifdeq, ifdne)):
+        if not at_most_one_value_set(
+            (
+                nx,
+                xx,
+                ifeq is not None,
+                ifne is not None,
+                ifdeq is not None,
+                ifdne is not None,
+            )
+        ):
             raise DataError(
                 "``nx``, ``xx``, ``ifeq``, ``ifne``, ``ifdeq``, ``ifdne`` are mutually exclusive."
             )
@@ -8891,7 +9042,15 @@ class HashCommands(CommandsProtocol):
         if not keys:
             raise DataError("'hgetex' should have at least one key provided")
 
-        if not at_most_one_value_set((ex, px, exat, pxat, persist)):
+        if not at_most_one_value_set(
+            (
+                ex is not None,
+                px is not None,
+                exat is not None,
+                pxat is not None,
+                persist,
+            )
+        ):
             raise DataError(
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``persist`` are mutually exclusive."
@@ -9118,7 +9277,15 @@ class HashCommands(CommandsProtocol):
                 "'items' must contain a list of key/value pairs."
             )
 
-        if not at_most_one_value_set((ex, px, exat, pxat, keepttl)):
+        if not at_most_one_value_set(
+            (
+                ex is not None,
+                px is not None,
+                exat is not None,
+                pxat is not None,
+                keepttl,
+            )
+        ):
             raise DataError(
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``keepttl`` are mutually exclusive."
