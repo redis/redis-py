@@ -363,7 +363,19 @@ published messages. Message handlers take a single argument, the
 message, which is a dictionary just like the examples above. To
 subscribe to a channel or pattern with a message handler, pass the
 channel or pattern name as a keyword argument with its value being the
-callback function.
+callback function. For channel or pattern names that cannot be used as
+Python keyword arguments, including arbitrary binary names, pass a
+``redis.Subscription`` object positionally instead.
+
+Subscription forms can be mixed in the same call. Assuming
+``my_handler`` is a callback, a plain channel name can be supplied
+alongside a ``Subscription`` object, and ``Subscription`` objects can
+also be used together with the existing keyword-argument handler style.
+
+.. code:: python
+
+   >>> p.subscribe('logs', redis.Subscription(b'\x80\x81', my_handler))
+   >>> p.subscribe(redis.Subscription(b'\x82\x83', my_handler), **{'my-channel': my_handler})
 
 When a message is read on a channel or pattern with a message handler,
 the message dictionary is created and passed to the message handler. In
@@ -375,6 +387,7 @@ was already handled.
    >>> def my_handler(message):
    ...     print('MY HANDLER: ', message['data'])
    >>> p.subscribe(**{'my-channel': my_handler})
+   >>> p.subscribe(redis.Subscription(b'\x80\x81', my_handler))
    # read the subscribe confirmation message
    >>> p.get_message()
    {'pattern': None, 'type': 'subscribe', 'channel': b'my-channel', 'data': 1}

@@ -36,6 +36,7 @@ from redis.exceptions import (
     TimeoutError,
     WatchError,
 )
+from redis.typing import Subscription
 
 __all__ = [
     "AsyncClusterKeyspaceNotifications",
@@ -66,6 +67,7 @@ __all__ = [
     "SentinelManagedSSLConnection",
     "SSLConnection",
     "StrictRedis",
+    "Subscription",
     "TimeoutError",
     "UnixDomainSocketConnection",
     "WatchError",

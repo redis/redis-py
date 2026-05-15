@@ -72,7 +72,7 @@ from redis.cluster import (
     parse_cluster_slots,
 )
 from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
-from redis.commands.helpers import list_or_args
+from redis.commands.helpers import list_or_args, parse_pubsub_subscriptions
 from redis.commands.policies import AsyncPolicyResolver, AsyncStaticPolicyResolver
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.credentials import CredentialProvider
@@ -103,7 +103,14 @@ from redis.exceptions import (
     TryAgainError,
     WatchError,
 )
-from redis.typing import AnyKeyT, EncodableT, KeyT
+from redis.typing import (
+    AnyKeyT,
+    ChannelT,
+    EncodableT,
+    KeyT,
+    PubSubHandler,
+    Subscription,
+)
 from redis.utils import (
     SSL_AVAILABLE,
     deprecated_args,
@@ -3535,17 +3542,16 @@ class ClusterPubSub(PubSub):
                 return None
         return message
 
-    async def ssubscribe(self, *args: Any, **kwargs: Any) -> None:
+    async def ssubscribe(
+        self, *args: ChannelT | Subscription, **kwargs: PubSubHandler
+    ) -> None:
         """
         Subscribe to shard channels.
 
-        :param args: Channel names
+        :param args: Channel names or ``Subscription`` objects
         :param kwargs: Channel names with handlers
         """
-        if args:
-            args = list_or_args(args[0], args[1:])
-        s_channels = dict.fromkeys(args)
-        s_channels.update(kwargs)
+        s_channels = parse_pubsub_subscriptions(args, kwargs)
 
         # Serialize against reinitialize_shard_subscriptions (background
         # task) so the reverse index, shard_channels, and node_pubsub_mapping
@@ -3574,7 +3580,7 @@ class ClusterPubSub(PubSub):
                     continue
                 pubsub = self._get_node_pubsub(node)
                 if handler:
-                    await pubsub.ssubscribe(**{s_channel: handler})
+                    await pubsub.ssubscribe(Subscription(s_channel, handler))
                 else:
                     await pubsub.ssubscribe(s_channel)
                 self.shard_channels.update(pubsub.shard_channels)
@@ -3732,12 +3738,7 @@ class ClusterPubSub(PubSub):
         # a text key only when we must pass it as a kwarg (handler present).
         new_pubsub = self._get_node_pubsub(new_node)
         if handler:
-            decoded = (
-                self.encoder.decode(channel, force=True)
-                if isinstance(channel, (bytes, bytearray))
-                else channel
-            )
-            await new_pubsub.ssubscribe(**{decoded: handler})
+            await new_pubsub.ssubscribe(Subscription(channel, handler))
         else:
             await new_pubsub.ssubscribe(channel)
         self.shard_channels.update(new_pubsub.shard_channels)

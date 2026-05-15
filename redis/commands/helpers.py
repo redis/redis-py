@@ -14,7 +14,7 @@ from typing import (
 )
 
 import redis
-from redis.typing import ChannelT, KeysT, KeyT
+from redis.typing import ChannelT, KeysT, KeyT, PubSubHandler, Subscription
 
 if TYPE_CHECKING:
     from redis._parsers import Encoder
@@ -35,6 +35,29 @@ def list_or_args(keys: KeysT, args: Tuple[KeyT, ...]) -> List[KeyT]:
     if args:
         keys.extend(args)
     return keys
+
+
+def parse_pubsub_subscriptions(
+    args: tuple[Any, ...], kwargs: Mapping[str, PubSubHandler]
+) -> dict[ChannelT, PubSubHandler | None]:
+    parsed_args = list_or_args(args[0], args[1:]) if args else []
+    subscriptions: dict[ChannelT, PubSubHandler | None] = {}
+    for arg in parsed_args:
+        if isinstance(arg, Subscription):
+            subscriptions[arg.name] = arg.handler
+        else:
+            subscriptions[arg] = None
+    subscriptions.update(kwargs)
+    return subscriptions
+
+
+def pubsub_subscription_args(
+    subscriptions: Mapping[ChannelT, PubSubHandler | None],
+) -> list[ChannelT | Subscription]:
+    return [
+        channel if handler is None else Subscription(channel, handler)
+        for channel, handler in subscriptions.items()
+    ]
 
 
 def nativestr(x):

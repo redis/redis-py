@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import pytest
 import redis
+from redis import Subscription
 from redis._parsers import Encoder
 from redis.client import PubSub
 from redis.cluster import ClusterPubSub
@@ -255,6 +256,63 @@ class TestPubSubSubscribeUnsubscribe:
         assert messages[0]["type"] == "psubscribe"
         assert messages[0]["channel"] == binary_pattern
 
+    @pytest.mark.onlynoncluster
+    def test_resubscribe_binary_channel_with_handler_on_reconnection(self, r):
+        binary_channel = b"\x80\x81\x82"
+        handled = []
+
+        def handler(message):
+            handled.append(message)
+
+        p = r.pubsub()
+        p.subscribe(Subscription(binary_channel, handler))
+        assert wait_for_message(p) == {
+            "type": "subscribe",
+            "pattern": None,
+            "channel": binary_channel,
+            "data": 1,
+        }
+
+        p.connection.disconnect()
+
+        assert wait_for_message(p) == {
+            "type": "subscribe",
+            "pattern": None,
+            "channel": binary_channel,
+            "data": 1,
+        }
+        assert r.publish(binary_channel, b"test message") == 1
+        assert p.get_message(timeout=1) is None
+        assert handled == [
+            {
+                "type": "message",
+                "pattern": None,
+                "channel": binary_channel,
+                "data": b"test message",
+            }
+        ]
+
+    @pytest.mark.fixed_client
+    def test_resubscribe_binary_handler_uses_subscription(self):
+        pool = mock.MagicMock()
+        encoder = Encoder(
+            encoding="utf-8", encoding_errors="strict", decode_responses=False
+        )
+        p = PubSub(connection_pool=pool, encoder=encoder)
+        binary_channel = b"\x80\x81\x82"
+        handler = mock.Mock()
+        p.channels = {binary_channel: handler}
+
+        calls = []
+        with mock.patch.object(
+            p,
+            "subscribe",
+            side_effect=lambda *a, **kw: calls.append((tuple(a), dict(kw))),
+        ):
+            p._resubscribe(p.channels, p.subscribe)
+
+        assert calls == [((Subscription(binary_channel, handler),), {})]
+
     @pytest.mark.fixed_client
     def test_cluster_pubsub_resubscribe_shard_channels_groups_by_slot(self):
         """The cluster-aware ``_resubscribe_shard_channels`` must group shard
@@ -313,6 +371,27 @@ class TestPubSubSubscribeUnsubscribe:
         assert set(slots_per_call) == {key_slot(ch_a1), key_slot(ch_b)}
         # Channels sharing a slot are batched: two unique slots => two calls.
         assert len(calls) == 2
+
+    @pytest.mark.fixed_client
+    def test_cluster_pubsub_resubscribe_binary_shard_channel_with_handler(self):
+        pool = mock.MagicMock()
+        encoder = Encoder(
+            encoding="utf-8", encoding_errors="strict", decode_responses=False
+        )
+        p = PubSub(connection_pool=pool, encoder=encoder)
+        binary_channel = b"\x80\x81\x82"
+        handler = mock.Mock()
+        p.shard_channels = {binary_channel: handler}
+
+        calls = []
+        with mock.patch.object(
+            p,
+            "ssubscribe",
+            side_effect=lambda *a, **kw: calls.append((tuple(a), dict(kw))),
+        ):
+            ClusterPubSub._resubscribe_shard_channels(p)
+
+        assert calls == [((Subscription(binary_channel, handler),), {})]
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
@@ -677,6 +756,21 @@ class TestPubSubMessages:
         assert wait_for_message(p) is None
         assert self.message == make_message("message", "foo", "test message")
 
+    @pytest.mark.onlynoncluster
+    def test_binary_channel_message_handler_with_subscription(self, r):
+        p = r.pubsub(ignore_subscribe_messages=True)
+        channel = b"\x80\x81\x82"
+        p.subscribe(Subscription(channel, self.message_handler))
+        assert p.get_message(timeout=1) is None
+        assert r.publish(channel, b"test message") == 1
+        assert p.get_message(timeout=1) is None
+        assert self.message == {
+            "type": "message",
+            "pattern": None,
+            "channel": channel,
+            "data": b"test message",
+        }
+
     @skip_if_server_version_lt("7.0.0")
     def test_shard_channel_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
@@ -685,6 +779,21 @@ class TestPubSubMessages:
         assert r.spublish("foo", "test message") == 1
         assert wait_for_message(p, func=p.get_sharded_message) is None
         assert self.message == make_message("smessage", "foo", "test message")
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_binary_shard_channel_message_handler_with_subscription(self, r):
+        p = r.pubsub(ignore_subscribe_messages=True)
+        channel = b"\x80\x81\x82"
+        p.ssubscribe(Subscription(channel, self.message_handler))
+        assert p.get_sharded_message(timeout=1) is None
+        assert r.spublish(channel, b"test message") == 1
+        assert p.get_sharded_message(timeout=1) is None
+        assert self.message == {
+            "type": "smessage",
+            "pattern": None,
+            "channel": channel,
+            "data": b"test message",
+        }
 
     @pytest.mark.onlynoncluster
     def test_pattern_message_handler(self, r):
@@ -696,6 +805,22 @@ class TestPubSubMessages:
         assert self.message == make_message(
             "pmessage", "foo", "test message", pattern="f*"
         )
+
+    @pytest.mark.onlynoncluster
+    def test_binary_pattern_message_handler_with_subscription(self, r):
+        p = r.pubsub(ignore_subscribe_messages=True)
+        pattern = b"\x80*"
+        channel = b"\x80channel"
+        p.psubscribe(Subscription(pattern, self.message_handler))
+        assert p.get_message(timeout=1) is None
+        assert r.publish(channel, b"test message") == 1
+        assert p.get_message(timeout=1) is None
+        assert self.message == {
+            "type": "pmessage",
+            "pattern": pattern,
+            "channel": channel,
+            "data": b"test message",
+        }
 
     def test_unicode_channel_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
@@ -2464,7 +2589,30 @@ class TestClusterPubSubSlotMigration:
         pubsub.ssubscribe(foo=new_handler)
 
         old_ps.sunsubscribe.assert_called_once_with(channel)
-        new_ps.ssubscribe.assert_called_once_with(foo=new_handler)
+        new_ps.ssubscribe.assert_called_once_with(
+            Subscription(channel, new_handler)
+        )
+
+    def test_ssubscribe_migration_accepts_binary_subscription_with_handler(self):
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"\x80\x81\x82"
+        old_ps = self._make_node_pubsub({channel: None})
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+
+        new_handler = mock.Mock()
+        pubsub.ssubscribe(Subscription(channel, new_handler))
+
+        old_ps.sunsubscribe.assert_called_once_with(channel)
+        new_ps.ssubscribe.assert_called_once_with(
+            Subscription(channel, new_handler)
+        )
 
     def test_ssubscribe_skips_channel_when_node_resolution_returns_none(self):
         """
