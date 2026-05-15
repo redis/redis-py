@@ -935,22 +935,22 @@ class RedisCluster(
         self._policies_callback_mapping: dict[
             Union[RequestPolicy, ResponsePolicy], Callable
         ] = {
-            RequestPolicy.DEFAULT_KEYLESS: lambda self, command_name, *args, **kwargs: [
-                self.get_random_primary_or_all_nodes(command_name)
+            RequestPolicy.DEFAULT_KEYLESS: lambda self, command, *args, **kwargs: [
+                self.get_random_primary_or_all_nodes(command)
             ],
-            RequestPolicy.DEFAULT_KEYED: lambda self, command_name, *args, **kwargs:
+            RequestPolicy.DEFAULT_KEYED: lambda self, command, *args, **kwargs:
                 self.get_nodes_from_slot(command, *args),
-            RequestPolicy.DEFAULT_NODE: lambda self, command_name, *args, **kwargs:
+            RequestPolicy.DEFAULT_NODE: lambda self, command, *args, **kwargs:
                 [self.get_default_node()],
-            RequestPolicy.ALL_SHARDS: lambda self, command_name, *args, **kwargs:
+            RequestPolicy.ALL_SHARDS: lambda self, command, *args, **kwargs:
                 self.get_primaries(),
-            RequestPolicy.ALL_NODES: lambda self, command_name, *args, **kwargs:
+            RequestPolicy.ALL_NODES: lambda self, command, *args, **kwargs:
                 self.get_nodes(),
-            RequestPolicy.ALL_REPLICAS: lambda self, command_name, *args, **kwargs:
+            RequestPolicy.ALL_REPLICAS: lambda self, command, *args, **kwargs:
                 self.get_replicas(),
-            RequestPolicy.MULTI_SHARD: lambda self, command_name, *args, **kwargs:
+            RequestPolicy.MULTI_SHARD: lambda self, command, *args, **kwargs:
                 self._split_multi_shard_command(*args, **kwargs),
-            RequestPolicy.SPECIAL: lambda self, command_name, *args, **kwargs:
+            RequestPolicy.SPECIAL: lambda self, command, *args, **kwargs:
                 self.get_special_nodes(),
             ResponsePolicy.DEFAULT_KEYLESS: lambda res: res,
             ResponsePolicy.DEFAULT_KEYED: lambda res: res,
@@ -3436,22 +3436,22 @@ class ClusterPipeline(RedisCluster):
         self._policies_callback_mapping: dict[
             Union[RequestPolicy, ResponsePolicy], Callable
         ] = {
-            RequestPolicy.DEFAULT_KEYLESS: lambda self, command_name, *args, **kwargs: [
-                self.get_random_primary_or_all_nodes(command_name)
+            RequestPolicy.DEFAULT_KEYLESS: lambda self, command, *args, **kwargs: [
+                self.get_random_primary_or_all_nodes(command)
             ],
-            RequestPolicy.DEFAULT_KEYED: lambda self, command_name, *args, **kwargs:
+            RequestPolicy.DEFAULT_KEYED: lambda self, command, *args, **kwargs:
                 self.get_nodes_from_slot(command, *args),
-            RequestPolicy.DEFAULT_NODE: lambda self, command_name, *args, **kwargs:
+            RequestPolicy.DEFAULT_NODE: lambda self, command, *args, **kwargs:
                 [self.get_default_node()],
-            RequestPolicy.ALL_SHARDS: lambda self, command_name, *args, **kwargs:
+            RequestPolicy.ALL_SHARDS: lambda self, command, *args, **kwargs:
                 self.get_primaries(),
-            RequestPolicy.ALL_NODES: lambda self, command_name, *args, **kwargs:
+            RequestPolicy.ALL_NODES: lambda self, command, *args, **kwargs:
                 self.get_nodes(),
-            RequestPolicy.ALL_REPLICAS: lambda self, command_name, *args, **kwargs:
+            RequestPolicy.ALL_REPLICAS: lambda self, command, *args, **kwargs:
                 self.get_replicas(),
-            RequestPolicy.MULTI_SHARD: lambda self, command_name, *args, **kwargs:
+            RequestPolicy.MULTI_SHARD: lambda self, command, *args, **kwargs:
                 self._split_multi_shard_command(*args, **kwargs),
-            RequestPolicy.SPECIAL: lambda self, command_name, *args, **kwargs:
+            RequestPolicy.SPECIAL: lambda self, command, *args, **kwargs:
                 self.get_special_nodes(),
             ResponsePolicy.DEFAULT_KEYLESS: lambda res: res,
             ResponsePolicy.DEFAULT_KEYED: lambda res: res,
