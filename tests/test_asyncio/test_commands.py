@@ -28,7 +28,6 @@ from redis.commands.core import (
     DataPersistOptions,
     HotkeysMetricsTypes,
 )
-from redis.commands.core import DataPersistOptions, HotkeysMetricsTypes
 from redis.commands.json.path import Path
 from redis.commands.search.field import TextField
 from redis.commands.search.query import Query
@@ -2631,23 +2630,17 @@ class TestRedisCommands:
     @skip_if_server_version_lt("8.7.2")
     async def test_argrep_exact_match(self, r: redis.Redis):
         await r.armset("a", {0: "boot", 1: "warn", 2: "error", 3: "boot"})
-        assert await r.argrep(
-            "a", 0, 3, [(ArrayPredicateType.EXACT, "boot")]
-        ) == [0, 3]
+        assert await r.argrep("a", 0, 3, [(ArrayPredicateType.EXACT, "boot")]) == [0, 3]
 
     @skip_if_server_version_lt("8.7.2")
     async def test_argrep_substring_match(self, r: redis.Redis):
         await r.armset("a", {0: "boot: ok", 1: "warn: disk", 2: "ERROR: cpu"})
-        assert await r.argrep(
-            "a", 0, 2, [(ArrayPredicateType.MATCH, "warn")]
-        ) == [1]
+        assert await r.argrep("a", 0, 2, [(ArrayPredicateType.MATCH, "warn")]) == [1]
 
     @skip_if_server_version_lt("8.7.2")
     async def test_argrep_glob_match(self, r: redis.Redis):
         await r.armset("a", {0: "warn:disk", 1: "info:ok", 2: "warn:net"})
-        result = await r.argrep(
-            "a", 0, 2, [(ArrayPredicateType.GLOB, "warn:*")]
-        )
+        result = await r.argrep("a", 0, 2, [(ArrayPredicateType.GLOB, "warn:*")])
         assert result == [0, 2]
 
     @skip_if_server_version_lt("8.7.2")
@@ -2727,17 +2720,12 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("8.7.2")
     async def test_argrep_missing_key(self, r: redis.Redis):
-        assert (
-            await r.argrep("a", 0, 10, [(ArrayPredicateType.MATCH, "x")])
-            == []
-        )
+        assert await r.argrep("a", 0, 10, [(ArrayPredicateType.MATCH, "x")]) == []
 
     @skip_if_server_version_lt("8.7.2")
     async def test_argrep_reverse(self, r: redis.Redis):
         await r.armset("a", {0: "warn", 1: "info", 2: "warn"})
-        assert await r.argrep(
-            "a", 2, 0, [(ArrayPredicateType.EXACT, "warn")]
-        ) == [2, 0]
+        assert await r.argrep("a", 2, 0, [(ArrayPredicateType.EXACT, "warn")]) == [2, 0]
 
     @skip_if_server_version_lt("8.7.2")
     async def test_ardel_single_index(self, r: redis.Redis):

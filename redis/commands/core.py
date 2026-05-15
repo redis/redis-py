@@ -5261,9 +5261,7 @@ class ArrayCommands(CommandsProtocol):
         self: AsyncClientProtocol, name: KeyT, index: int, *values: FieldT
     ) -> Awaitable[int]: ...
 
-    def arset(
-        self, name: KeyT, index: int, *values: FieldT
-    ) -> int | Awaitable[int]:
+    def arset(self, name: KeyT, index: int, *values: FieldT) -> int | Awaitable[int]:
         """
         Set one or more contiguous ``values`` in the array stored at ``name``
         starting at ``index``. When multiple values are provided, they are
@@ -5285,9 +5283,7 @@ class ArrayCommands(CommandsProtocol):
         self: AsyncClientProtocol, name: KeyT, mapping: Mapping[int, FieldT]
     ) -> Awaitable[int]: ...
 
-    def armset(
-        self, name: KeyT, mapping: Mapping[int, FieldT]
-    ) -> int | Awaitable[int]:
+    def armset(self, name: KeyT, mapping: Mapping[int, FieldT]) -> int | Awaitable[int]:
         """
         Set multiple index/value pairs in the array stored at ``name``.
         ``mapping`` is a dictionary of zero-based integer indices to values.
@@ -5482,18 +5478,14 @@ class ArrayCommands(CommandsProtocol):
         return self.execute_command("ARGREP", *pieces)
 
     @overload
-    def ardel(
-        self: SyncClientProtocol, name: KeyT, *indices: int
-    ) -> int: ...
+    def ardel(self: SyncClientProtocol, name: KeyT, *indices: int) -> int: ...
 
     @overload
     def ardel(
         self: AsyncClientProtocol, name: KeyT, *indices: int
     ) -> Awaitable[int]: ...
 
-    def ardel(
-        self, name: KeyT, *indices: int
-    ) -> int | Awaitable[int]:
+    def ardel(self, name: KeyT, *indices: int) -> int | Awaitable[int]:
         """
         Delete elements at the specified ``indices`` in the array stored at
         ``name``. Deleting an index that does not exist counts as zero
@@ -5515,9 +5507,7 @@ class ArrayCommands(CommandsProtocol):
         self: AsyncClientProtocol, name: KeyT, *ranges: tuple[int, int]
     ) -> Awaitable[int]: ...
 
-    def ardelrange(
-        self, name: KeyT, *ranges: tuple[int, int]
-    ) -> int | Awaitable[int]:
+    def ardelrange(self, name: KeyT, *ranges: tuple[int, int]) -> int | Awaitable[int]:
         """
         Delete elements within one or more inclusive index ranges in the
         array stored at ``name``. Each range is a ``(start, end)`` tuple.
@@ -5613,9 +5603,7 @@ class ArrayCommands(CommandsProtocol):
     def arseek(self: SyncClientProtocol, name: KeyT, index: int) -> int: ...
 
     @overload
-    def arseek(
-        self: AsyncClientProtocol, name: KeyT, index: int
-    ) -> Awaitable[int]: ...
+    def arseek(self: AsyncClientProtocol, name: KeyT, index: int) -> Awaitable[int]: ...
 
     def arseek(self, name: KeyT, index: int) -> int | Awaitable[int]:
         """
@@ -5630,18 +5618,14 @@ class ArrayCommands(CommandsProtocol):
         return self.execute_command("ARSEEK", name, index)
 
     @overload
-    def arinsert(
-        self: SyncClientProtocol, name: KeyT, *values: FieldT
-    ) -> int: ...
+    def arinsert(self: SyncClientProtocol, name: KeyT, *values: FieldT) -> int: ...
 
     @overload
     def arinsert(
         self: AsyncClientProtocol, name: KeyT, *values: FieldT
     ) -> Awaitable[int]: ...
 
-    def arinsert(
-        self, name: KeyT, *values: FieldT
-    ) -> int | Awaitable[int]:
+    def arinsert(self, name: KeyT, *values: FieldT) -> int | Awaitable[int]:
         """
         Insert one or more ``values`` at consecutive indices in the array
         stored at ``name``, beginning at the current insert cursor position.
@@ -5665,9 +5649,7 @@ class ArrayCommands(CommandsProtocol):
         self: AsyncClientProtocol, name: KeyT, size: int, *values: FieldT
     ) -> Awaitable[int]: ...
 
-    def arring(
-        self, name: KeyT, size: int, *values: FieldT
-    ) -> int | Awaitable[int]:
+    def arring(self, name: KeyT, size: int, *values: FieldT) -> int | Awaitable[int]:
         """
         Insert one or more ``values`` into the array stored at ``name`` as a
         fixed-size ring buffer of ``size`` slots. Each value is placed at

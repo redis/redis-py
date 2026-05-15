@@ -28,7 +28,6 @@ from redis.commands.core import (
     DataPersistOptions,
     HotkeysMetricsTypes,
 )
-from redis.commands.core import DataPersistOptions, HotkeysMetricsTypes
 from redis.commands.json.path import Path
 from redis.commands.search.field import TextField
 from redis.commands.search.query import Query
@@ -3440,16 +3439,12 @@ class TestRedisCommands:
     @skip_if_server_version_lt("8.7.2")
     def test_argrep_exact_match(self, r):
         r.armset("a", {0: "boot", 1: "warn", 2: "error", 3: "boot"})
-        assert r.argrep(
-            "a", 0, 3, [(ArrayPredicateType.EXACT, "boot")]
-        ) == [0, 3]
+        assert r.argrep("a", 0, 3, [(ArrayPredicateType.EXACT, "boot")]) == [0, 3]
 
     @skip_if_server_version_lt("8.7.2")
     def test_argrep_substring_match(self, r):
         r.armset("a", {0: "boot: ok", 1: "warn: disk", 2: "ERROR: cpu"})
-        assert r.argrep(
-            "a", 0, 2, [(ArrayPredicateType.MATCH, "warn")]
-        ) == [1]
+        assert r.argrep("a", 0, 2, [(ArrayPredicateType.MATCH, "warn")]) == [1]
 
     @skip_if_server_version_lt("8.7.2")
     def test_argrep_glob_match(self, r):
@@ -3534,16 +3529,12 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("8.7.2")
     def test_argrep_missing_key(self, r):
-        assert (
-            r.argrep("a", 0, 10, [(ArrayPredicateType.MATCH, "x")]) == []
-        )
+        assert r.argrep("a", 0, 10, [(ArrayPredicateType.MATCH, "x")]) == []
 
     @skip_if_server_version_lt("8.7.2")
     def test_argrep_reverse(self, r):
         r.armset("a", {0: "warn", 1: "info", 2: "warn"})
-        assert r.argrep(
-            "a", 2, 0, [(ArrayPredicateType.EXACT, "warn")]
-        ) == [2, 0]
+        assert r.argrep("a", 2, 0, [(ArrayPredicateType.EXACT, "warn")]) == [2, 0]
 
     @skip_if_server_version_lt("8.7.2")
     def test_ardel_single_index(self, r):
