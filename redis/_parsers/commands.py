@@ -140,7 +140,7 @@ class CommandsParser(AbstractCommandsParser):
             cmd_name_split = cmd_name.split()
             cmd_name = cmd_name_split[0]
             if cmd_name in self.commands:
-                # save the splitted command to args
+                # save the split command to args
                 args = cmd_name_split + list(args[1:])
             else:
                 # We'll try to reinitialize the commands cache, if the engine
@@ -194,8 +194,8 @@ class CommandsParser(AbstractCommandsParser):
 
         So, don't use this function with EVAL or EVALSHA.
         """
-        # The command name should be splitted into separate arguments,
-        # e.g. 'MEMORY USAGE' will be splitted into ['MEMORY', 'USAGE']
+        # The command name should be split into separate arguments,
+        # e.g. 'MEMORY USAGE' will be split into ['MEMORY', 'USAGE']
         pieces = args[0].split() + list(args[1:])
         try:
             keys = redis_conn.execute_command("COMMAND GETKEYS", *pieces)
@@ -448,7 +448,7 @@ class AsyncCommandsParser(AbstractCommandsParser):
             cmd_name_split = cmd_name.split()
             cmd_name = cmd_name_split[0]
             if cmd_name in self.commands:
-                # save the splitted command to args
+                # save the split command to args
                 args = cmd_name_split + list(args[1:])
             else:
                 # We'll try to reinitialize the commands cache, if the engine

@@ -1289,13 +1289,18 @@ class TestPubSubWorkerThread:
 
         p = r.pubsub()
         p.subscribe(**{"foo": lambda m: m})
-        with mock.patch.object(p, "get_message", side_effect=Exception("error")):
-            pubsub_thread = p.run_in_thread(
-                daemon=True, exception_handler=exception_handler
-            )
+        pubsub_thread = None
+        try:
+            with mock.patch.object(p, "get_message", side_effect=Exception("error")):
+                pubsub_thread = p.run_in_thread(
+                    daemon=True, exception_handler=exception_handler
+                )
 
-        assert event.wait(timeout=1.0)
-        pubsub_thread.join(timeout=1.0)
+                assert event.wait(timeout=1.0)
+        finally:
+            if pubsub_thread is not None:
+                pubsub_thread.stop()
+                pubsub_thread.join(timeout=1.0)
         assert not pubsub_thread.is_alive()
 
 
