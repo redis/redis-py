@@ -4058,6 +4058,9 @@ class PipelineStrategy(AbstractStrategy):
             request_policy=RequestPolicy.DEFAULT_KEYED,
             response_policy=ResponsePolicy.DEFAULT_KEYED,
         )
+        policy_resolver = pipe._policy_resolver
+        pipe_command_flags = pipe.command_flags
+        command_flags = self.command_flags
 
         try:
             # as we move through each command that still needs to be processed,
@@ -4065,8 +4068,9 @@ class PipelineStrategy(AbstractStrategy):
             # the slot determine the node.
             for c in attempt:
                 args = c.args
-                command_policies = pipe._policy_resolver.resolve(
-                    args[0].lower()
+                arg0 = args[0]
+                command_policies = policy_resolver.resolve(
+                    arg0.lower()
                 )
                 # refer to our internal node -> slot table that
                 # tells us where a given command should route to.
@@ -4081,15 +4085,15 @@ class PipelineStrategy(AbstractStrategy):
                 else:
                     if not command_policies:
                         if len(args) >= 2:
-                            command = f"{args[0]} {args[1]}".upper()
-                            if command not in pipe.command_flags:
-                                command = args[0].upper()
+                            command = f"{arg0} {args[1]}".upper()
+                            if command not in pipe_command_flags:
+                                command = arg0.upper()
                         else:
-                            command = args[0].upper()
+                            command = arg0.upper()
 
                         # We only could resolve key properties if command is not
                         # in a list of pre-defined request policies
-                        command_flag = self.command_flags.get(command)
+                        command_flag = command_flags.get(command)
                         if not command_flag:
                             # Fallback to default policy
                             if not pipe.get_default_node():
