@@ -501,6 +501,46 @@ class TestRedisClusterObj:
 
             assert r.execute_command("SET", "foo", "bar") == "MOCK_OK"
 
+    def test_ask_redirection_to_uncached_node(self):
+        """
+        Test that ASK can redirect to a node that is not in the current topology.
+        """
+        r = get_mocked_redis_client(host=default_host, port=default_port)
+        key = "foo"
+        first_node = r.get_node_from_key(key, False)
+        redirect_host = default_host
+        redirect_port = 7999
+        first_connection = Mock(host=first_node.host, port=first_node.port)
+        redirect_connection = Mock(host=redirect_host, port=redirect_port)
+
+        assert r.get_node(host=redirect_host, port=redirect_port) is None
+
+        with (
+            patch(
+                "redis.cluster.get_connection",
+                side_effect=[first_connection, redirect_connection],
+            ),
+            patch.object(Redis, "parse_response") as parse_response,
+        ):
+
+            def ask_redirect_effect(connection, *args, **options):
+                def ok_response(connection, *args, **options):
+                    assert connection is redirect_connection
+                    return "MOCK_OK"
+
+                assert connection is first_connection
+                parse_response.side_effect = ok_response
+                raise AskError(f"{r.keyslot(key)} {redirect_host}:{redirect_port}")
+
+            parse_response.side_effect = ask_redirect_effect
+
+            assert r.execute_command("GET", key) == "MOCK_OK"
+
+        redirect_node = r.get_node(host=redirect_host, port=redirect_port)
+        assert redirect_node is not None
+        assert redirect_node.server_type == PRIMARY
+        redirect_connection.send_command.assert_any_call("ASKING")
+
     def test_handling_cluster_failover_to_a_replica(self, r):
         # Set the key we'll test for
         key = "key"

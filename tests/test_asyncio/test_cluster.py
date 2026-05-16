@@ -649,6 +649,40 @@ class TestRedisClusterObj:
 
             assert await r.execute_command("SET", "foo", "bar") == "MOCK_OK"
 
+    async def test_ask_redirection_to_uncached_node(self) -> None:
+        """
+        Test that ASK can redirect to a node that is not in the current topology.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        key = "foo"
+        first_node = r.get_node_from_key(key, False)
+        redirect_host = default_host
+        redirect_port = 7999
+
+        assert r.get_node(host=redirect_host, port=redirect_port) is None
+
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True
+        ) as execute_command:
+
+            def ask_redirect_effect(self, *args, **options):
+                def ok_response(self, *args, **options):
+                    assert self.host == redirect_host
+                    assert self.port == redirect_port
+                    return "MOCK_OK"
+
+                assert self == first_node
+                execute_command.side_effect = ok_response
+                raise AskError(f"{r.keyslot(key)} {redirect_host}:{redirect_port}")
+
+            execute_command.side_effect = ask_redirect_effect
+
+            assert await r.execute_command("GET", key) == "MOCK_OK"
+
+        redirect_node = r.get_node(host=redirect_host, port=redirect_port)
+        assert redirect_node is not None
+        assert redirect_node.server_type == PRIMARY
+
     async def test_moved_redirection(
         self, create_redis: Callable[..., RedisCluster]
     ) -> None:
