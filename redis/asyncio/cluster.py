@@ -581,8 +581,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
     async def __aenter__(self) -> "RedisCluster":
         """
         Async context manager entry. Increments a usage counter so that the
-        connection pool is only closed (via aclose()) when no context is using
-        the client.
+        node connections are only closed when no context is using the client.
         """
         await self._increment_usage()
         try:
@@ -614,12 +613,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
     async def __aexit__(self, exc_type, exc_value, traceback):
         """
         Async context manager exit. Decrements a usage counter. If this is the
-        last exit (counter becomes zero), the client closes its connection pool.
+        last exit (counter becomes zero), the client closes its node connections.
         """
         current_usage = await asyncio.shield(self._decrement_usage())
         if current_usage == 0:
-            # This was the last active context, so disconnect the pool.
-            await asyncio.shield(self.aclose())
+            # This was the last active context, so disconnect the nodes.
+            await asyncio.shield(self._close_nodes())
 
     def __await__(self) -> Generator[Any, None, "RedisCluster"]:
         return self.initialize().__await__()

@@ -524,6 +524,21 @@ class TestRedisClusterObj:
 
         initialize.assert_not_called()
 
+    async def test_context_manager_exit_allows_reentry(self) -> None:
+        cluster = RedisCluster(host=default_host, port=default_port)
+
+        with mock.patch.object(cluster, "initialize", return_value=cluster) as init:
+            with mock.patch.object(cluster, "_close_nodes") as close_nodes:
+                async with cluster as first_context:
+                    assert first_context is cluster
+
+                async with cluster as second_context:
+                    assert second_context is cluster
+
+        assert init.await_count == 2
+        assert close_nodes.await_count == 2
+        assert not cluster._closed
+
     async def test_close_is_aclose(self) -> None:
         """
         Test that it is possible to use host & port arguments as startup node
