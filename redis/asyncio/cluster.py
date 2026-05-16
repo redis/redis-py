@@ -2979,6 +2979,7 @@ class TransactionStrategy(AbstractStrategy):
         stack = self._command_queue
         if not stack and (not self._watching or not self._pipeline_slots):
             return []
+        self._pipe.cluster_client._ensure_open()
 
         return await self._execute_transaction_with_retries(stack, raise_on_error)
 

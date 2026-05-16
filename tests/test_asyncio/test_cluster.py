@@ -355,6 +355,7 @@ class TestRedisClusterObj:
 
         initialize.assert_not_called()
 
+    @pytest.mark.onlycluster
     async def test_aclose_prevents_real_cluster_client_reuse(
         self, create_redis: Callable[..., RedisCluster]
     ) -> None:
@@ -498,6 +499,21 @@ class TestRedisClusterObj:
     async def test_pipeline_execute_after_aclose_does_not_reinitialize(self) -> None:
         cluster = await get_mocked_redis_client(host=default_host, port=default_port)
         pipe = cluster.pipeline()
+        pipe.get("key")
+
+        await cluster.aclose()
+
+        with mock.patch.object(NodesManager, "initialize", autospec=True) as initialize:
+            with pytest.raises(RedisClusterException, match="closed"):
+                await pipe.execute()
+
+        initialize.assert_not_called()
+
+    async def test_transaction_pipeline_execute_after_aclose_does_not_reinitialize(
+        self,
+    ) -> None:
+        cluster = await get_mocked_redis_client(host=default_host, port=default_port)
+        pipe = cluster.pipeline(transaction=True)
         pipe.get("key")
 
         await cluster.aclose()
