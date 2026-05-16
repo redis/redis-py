@@ -267,6 +267,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
     __slots__ = (
         "_initialize",
+        "_closed",
         "_lock",
         "retry",
         "command_flags",
@@ -516,6 +517,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         )
 
         self._initialize = True
+        self._closed = False
         self._lock: Optional[asyncio.Lock] = None
 
         # When used as an async context manager, we need to increment and decrement
@@ -526,10 +528,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
     async def initialize(self) -> "RedisCluster":
         """Get all nodes from startup nodes & creates connections if not initialized."""
+        self._ensure_open()
         if self._initialize:
             if not self._lock:
                 self._lock = asyncio.Lock()
             async with self._lock:
+                self._ensure_open()
                 if self._initialize:
                     try:
                         await self.nodes_manager.initialize()
@@ -538,21 +542,36 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                         )
                         self._initialize = False
                     except BaseException:
-                        await self.nodes_manager.aclose()
-                        await self.nodes_manager.aclose("startup_nodes")
+                        await self._disconnect_nodes()
                         raise
         return self
 
-    async def aclose(self) -> None:
-        """Close all connections & client if initialized."""
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise RedisClusterException("RedisCluster client is closed")
+
+    async def _disconnect_nodes(self) -> None:
+        self._initialize = True
+        await self.nodes_manager.aclose()
+        await self.nodes_manager.aclose("startup_nodes")
+
+    async def _close_nodes(self) -> None:
+        """Close cluster node connections without marking the client closed."""
         if not self._initialize:
             if not self._lock:
                 self._lock = asyncio.Lock()
             async with self._lock:
                 if not self._initialize:
-                    self._initialize = True
-                    await self.nodes_manager.aclose()
-                    await self.nodes_manager.aclose("startup_nodes")
+                    await self._disconnect_nodes()
+
+    async def aclose(self) -> None:
+        """Close all connections and mark the client as closed."""
+        self._closed = True
+        if not self._lock:
+            self._lock = asyncio.Lock()
+        async with self._lock:
+            if not self._initialize:
+                await self._disconnect_nodes()
 
     @deprecated_function(version="5.0.0", reason="Use aclose() instead", name="close")
     async def close(self) -> None:
@@ -930,6 +949,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         :raises RedisClusterException: if target_nodes is not provided & the command
             can't be mapped to a slot
         """
+        self._ensure_open()
         command = args[0]
         target_nodes = []
         target_nodes_specified = False
@@ -1146,7 +1166,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 # We will try to reinitialize the cluster topology
                 # and retry executing the command
 
-                await self.aclose()
+                await self._close_nodes()
                 await asyncio.sleep(0.25)
                 e.connection = target_node
                 await self._record_command_metric(
@@ -1170,7 +1190,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     self.reinitialize_steps
                     and self.reinitialize_counter % self.reinitialize_steps == 0
                 ):
-                    await self.aclose()
+                    await self._close_nodes()
                     # Reset the counter
                     self.reinitialize_counter = 0
                 else:
@@ -2417,6 +2437,7 @@ class AbstractStrategy(ExecutionStrategy):
         self._command_queue: List["PipelineCommand"] = []
 
     async def initialize(self) -> "ClusterPipeline":
+        self._pipe.cluster_client._ensure_open()
         if self._pipe.cluster_client._initialize:
             await self._pipe.cluster_client.initialize()
         self._command_queue = []
@@ -2505,6 +2526,7 @@ class PipelineStrategy(AbstractStrategy):
     ) -> List[Any]:
         if not self._command_queue:
             return []
+        self._pipe.cluster_client._ensure_open()
 
         try:
             retry_attempts = self._pipe.cluster_client.retry.get_retries()
@@ -2524,7 +2546,7 @@ class PipelineStrategy(AbstractStrategy):
                         # Try again with the new cluster setup. All other errors
                         # should be raised.
                         retry_attempts -= 1
-                        await self._pipe.cluster_client.aclose()
+                        await self._pipe.cluster_client._close_nodes()
                         await asyncio.sleep(0.25)
                     else:
                         # All other errors should be raised.
@@ -2785,6 +2807,7 @@ class TransactionStrategy(AbstractStrategy):
     async def _execute_command(
         self, *args: Union[KeyT, EncodableT], **kwargs: Any
     ) -> Any:
+        self._pipe.cluster_client._ensure_open()
         if self._pipe.cluster_client._initialize:
             await self._pipe.cluster_client.initialize()
 
