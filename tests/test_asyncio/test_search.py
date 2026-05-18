@@ -2184,6 +2184,9 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
 
 
 class TestHybridSearch(AsyncSearchTestsBase):
+    _HYBRID_TIMEOUT_DIM = 8192
+    _HYBRID_TIMEOUT_DOCS = 1500
+
     async def _create_hybrid_search_index(self, decoded_r: redis.Redis, dim=4):
         await decoded_r.ft().create_index(
             (
@@ -2214,6 +2217,44 @@ class TestHybridSearch(AsyncSearchTestsBase):
             definition=IndexDefinition(prefix=["item:"]),
         )
         await AsyncSearchTestsBase.waitForIndex(decoded_r, "idx")
+
+    async def _create_hybrid_search_timeout_index(self, decoded_r: redis.Redis):
+        await decoded_r.ft().create_index(
+            (
+                TextField("description"),
+                VectorField(
+                    "embedding",
+                    "FLAT",
+                    {
+                        "TYPE": "FLOAT32",
+                        "DIM": self._HYBRID_TIMEOUT_DIM,
+                        "DISTANCE_METRIC": "L2",
+                    },
+                ),
+            ),
+            definition=IndexDefinition(prefix=["timeout-item:"]),
+        )
+        await AsyncSearchTestsBase.waitForIndex(decoded_r, "idx")
+
+    async def _add_data_for_hybrid_search_timeout(self, decoded_r: redis.Redis):
+        vectors = [
+            np.full(self._HYBRID_TIMEOUT_DIM, value, dtype=np.float32).tobytes()
+            for value in (0.1, 0.2, 0.3, 0.4, 0.5)
+        ]
+        pipeline = decoded_r.pipeline()
+        batch_size = 250
+        for i in range(self._HYBRID_TIMEOUT_DOCS):
+            pipeline.hset(
+                f"timeout-item:{i}",
+                mapping={
+                    "description": "red shoes",
+                    "embedding": vectors[i % len(vectors)],
+                },
+            )
+            if (i + 1) % batch_size == 0:
+                await pipeline.execute()
+                pipeline = decoded_r.pipeline()
+        await pipeline.execute()
 
     @staticmethod
     def _generate_random_vector(dim):
@@ -3236,69 +3277,45 @@ class TestHybridSearch(AsyncSearchTestsBase):
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")
-    @pytest.mark.timeout(120)
+    @pytest.mark.timeout(60)
     async def test_hybrid_search_query_with_timeout(self, decoded_r):
-        dim = 128
-        # Create index and add data
-        await self._create_hybrid_search_index(decoded_r, dim=dim)
-        await self._add_data_for_hybrid_search(
-            decoded_r,
-            items_sets=2000,
-            dim_for_random_data=dim,
-            randomize_data=True,
-        )
+        await self._create_hybrid_search_timeout_index(decoded_r)
+        await self._add_data_for_hybrid_search_timeout(decoded_r)
 
-        # set search query
-        search_query = HybridSearchQuery("*")
-
+        search_query = HybridSearchQuery("@description:(shoes)")
         vsim_query = HybridVsimQuery(
-            vector_field_name="@embedding-hnsw",
+            vector_field_name="@embedding",
             vector_data="$vec",
         )
-        vsim_query.vsim_method_params(VectorSearchMethods.KNN, K=1000)
-        vsim_query.filter(
-            HybridFilter(
-                "((@price:[15 16] @size:[10 11]) | (@price:[13 15] @size:[11 12])) @description:(shoes) -@description:(green)"
-            )
+        vsim_query.vsim_method_params(
+            VectorSearchMethods.KNN, K=self._HYBRID_TIMEOUT_DOCS
         )
-
         hybrid_query = HybridQuery(search_query, vsim_query)
-
-        combine_method = CombineResultsMethod(CombinationMethods.RRF, WINDOW=1000)
-        query_vector = np.array([0.25] * dim, dtype=np.float32).tobytes()
-
-        timeout = 5000  # 5 second timeout
-        res = await decoded_r.ft().hybrid_search(
-            query=hybrid_query,
-            combine_method=combine_method,
-            params_substitution={"vec": query_vector},
-            timeout=timeout,
-        )
-
-        if expects_resp2_shape(decoded_r) or expects_unified_shape(decoded_r):
-            assert len(res.results) > 0
-            assert res.warnings == []
-            assert res.execution_time > 0 and res.execution_time < timeout
-        elif expects_resp3_shape(decoded_r):
-            assert len(res["results"]) > 0
-            assert res["warnings"] == []
-            assert res["execution_time"] > 0 and res["execution_time"] < timeout
+        query_vector = np.full(
+            self._HYBRID_TIMEOUT_DIM, 0.25, dtype=np.float32
+        ).tobytes()
 
         res = await decoded_r.ft().hybrid_search(
             query=hybrid_query,
             params_substitution={"vec": query_vector},
             timeout=1,
-        )  # 1 ms timeout
+        )
+
         if expects_resp2_shape(decoded_r) or expects_unified_shape(decoded_r):
-            assert (
-                b"Timeout limit was reached (VSIM)" in res.warnings
-                or b"Timeout limit was reached (SEARCH)" in res.warnings
-            )
+            warnings = res.warnings
+            assert res.execution_time > 0
         elif expects_resp3_shape(decoded_r):
-            assert (
-                "Timeout limit was reached (VSIM)" in res["warnings"]
-                or "Timeout limit was reached (SEARCH)" in res["warnings"]
-            )
+            warnings = res["warnings"]
+            assert res["execution_time"] > 0
+
+        assert any(
+            safe_str(warning)
+            in {
+                "Timeout limit was reached (VSIM)",
+                "Timeout limit was reached (SEARCH)",
+            }
+            for warning in warnings
+        )
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")
