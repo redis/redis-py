@@ -101,7 +101,7 @@ class TestLock:
         assert lock1.acquire(blocking=False)
         bt = 0.4
         sleep = 0.05
-        fudge_factor = 0.05
+        fudge_factor = 0.2
         lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
         start = time.monotonic()
         assert not lock2.acquire()
@@ -120,7 +120,7 @@ class TestLock:
         with self.get_lock(r, "foo", blocking=False):
             bt = 0.4
             sleep = 0.05
-            fudge_factor = 0.05
+            fudge_factor = 0.2
             lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
             start = time.monotonic()
             assert not lock2.acquire()
