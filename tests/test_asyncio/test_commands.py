@@ -3529,6 +3529,7 @@ class TestRedisCommands:
     ):
         with pytest.raises(DataError):
             await r.hsetex("h", "f", "v", ex=0, px=1)
+
     async def test_hget_and_hset_with_encodable_fields_and_values(self, r: redis.Redis):
         cases = (
             (b"field-bytes", b"value-bytes", b"value-bytes"),

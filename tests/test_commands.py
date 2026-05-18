@@ -4755,6 +4755,7 @@ class TestRedisCommands:
     def test_hsetex_zero_expiry_options_are_mutually_exclusive(self, r):
         with pytest.raises(DataError):
             r.hsetex("h", "f", "v", ex=0, px=1)
+
     def test_hget_and_hset_with_encodable_fields_and_values(self, r):
         cases = (
             (b"field-bytes", b"value-bytes", b"value-bytes"),
