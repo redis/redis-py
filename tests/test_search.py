@@ -5297,9 +5297,9 @@ class TestHybridSearch(SearchTestsBase):
         self._create_hybrid_search_index(client, dim=dim)
         self._add_data_for_hybrid_search(
             client,
-            items_sets=5000,
+            items_sets=2000,
             dim_for_random_data=dim,
-            use_random_str_data=True,
+            randomize_data=True,
         )
 
         # set search query
@@ -5319,12 +5319,13 @@ class TestHybridSearch(SearchTestsBase):
         hybrid_query = HybridQuery(search_query, vsim_query)
 
         combine_method = CombineResultsMethod(CombinationMethods.RRF, WINDOW=1000)
+        query_vector = np.array([0.25] * dim, dtype=np.float32).tobytes()
 
         timeout = 5000  # 5 second timeout
         res = client.ft().hybrid_search(
             query=hybrid_query,
             combine_method=combine_method,
-            params_substitution={"vec": "abcd" * dim},
+            params_substitution={"vec": query_vector},
             timeout=timeout,
         )
 
@@ -5339,7 +5340,7 @@ class TestHybridSearch(SearchTestsBase):
 
         res = client.ft().hybrid_search(
             query=hybrid_query,
-            params_substitution={"vec": "abcd" * dim},
+            params_substitution={"vec": query_vector},
             timeout=1,
         )  # 1 ms timeout
         if expects_resp2_shape(client) or expects_unified_shape(client):
