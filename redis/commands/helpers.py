@@ -9,14 +9,13 @@ from typing import (
     List,
     Mapping,
     Optional,
-    Tuple,
 )
 
 import redis
 from redis.typing import ChannelT, KeysT, KeyT, PubSubHandler, Subscription
 
 
-def list_or_args(keys: KeysT, args: Tuple[KeyT, ...]) -> List[KeyT]:
+def list_or_args(keys: Any, args: Iterable[Any] | None) -> List[Any]:
     # returns a single new list combining keys and args
     try:
         iter(keys)
