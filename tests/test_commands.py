@@ -4755,6 +4755,30 @@ class TestRedisCommands:
     def test_hsetex_zero_expiry_options_are_mutually_exclusive(self, r):
         with pytest.raises(DataError):
             r.hsetex("h", "f", "v", ex=0, px=1)
+    def test_hget_and_hset_with_encodable_fields_and_values(self, r):
+        cases = (
+            (b"field-bytes", b"value-bytes", b"value-bytes"),
+            (
+                bytearray(b"field-bytearray"),
+                bytearray(b"value-bytearray"),
+                b"value-bytearray",
+            ),
+            (
+                memoryview(b"field-memoryview"),
+                memoryview(b"value-memoryview"),
+                b"value-memoryview",
+            ),
+            ("field-str", "value-str", b"value-str"),
+            (42, 43, b"43"),
+            (1.25, 2.5, b"2.5"),
+        )
+
+        for field, value, expected in cases:
+            assert r.hset("encodable-hash", field, value) == 1
+            assert r.hget("encodable-hash", field) == expected
+            assert r.hmget("encodable-hash", field) == [expected]
+
+        assert r.hmget("encodable-hash", bytearray(b"field-bytes")) == [b"value-bytes"]
 
     def test_hset_with_multi_key_values(self, r):
         r.hset("a", mapping={"1": 1, "2": 2, "3": 3})
