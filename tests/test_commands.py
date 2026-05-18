@@ -87,6 +87,16 @@ class TestResponseCallbacks:
 
 
 class TestRedisCommands:
+    def _wait_for_bgsave(self, r, timeout=10):
+        deadline = time.monotonic() + timeout
+        while True:
+            info = r.info("persistence")
+            if int(info.get("rdb_bgsave_in_progress", 0)) == 0:
+                return
+            if time.monotonic() > deadline:
+                pytest.fail("Timed out waiting for BGSAVE to finish")
+            time.sleep(0.05)
+
     @pytest.mark.onlynoncluster
     @skip_if_redis_enterprise()
     def test_auth(self, r, request):
@@ -1547,9 +1557,11 @@ class TestRedisCommands:
 
     @skip_if_redis_enterprise()
     def test_bgsave(self, r):
+        self._wait_for_bgsave(r)
         assert r.bgsave()
-        time.sleep(0.3)
+        self._wait_for_bgsave(r)
         assert r.bgsave(True)
+        self._wait_for_bgsave(r)
 
     def test_never_decode_option(self, r: redis.Redis):
         opts = {NEVER_DECODE: []}
