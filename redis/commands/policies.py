@@ -189,7 +189,7 @@ class BasePolicyResolver(PolicyResolver):
         self._fallback = fallback
 
     def resolve(self, command_name: str) -> Optional[CommandPolicies]:
-        parts = command_name.split(".", 1)
+        parts = command_name.split(".", 2)
 
         if len(parts) > 2:
             raise ValueError(f"Wrong command or module name: {command_name}")

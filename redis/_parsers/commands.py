@@ -468,12 +468,14 @@ class AsyncCommandsParser(AbstractCommandsParser):
             return None
 
         cmd_name = args[0].lower()
-        if cmd_name not in self.commands:
+        commands = self.commands
+        command = commands.get(cmd_name)
+        if command is None:
             # try to split the command name and to take only the main command,
             # e.g. 'memory' for 'memory usage'
             cmd_name_split = cmd_name.split()
             cmd_name = cmd_name_split[0]
-            if cmd_name in self.commands:
+            if cmd_name in commands:
                 # save the split command to args
                 args = cmd_name_split + list(args[1:])
             else:
@@ -485,12 +487,12 @@ class AsyncCommandsParser(AbstractCommandsParser):
                     raise RedisError(
                         f"{cmd_name.upper()} command doesn't exist in Redis commands"
                     )
+            command = commands.get(cmd_name)
 
         single_pos = command.get("_single_key_pos")
         if single_pos is not None:
             return [args[single_pos]]
 
-        command = commands.get(cmd_name)
         flags = command["flags"]
         if "movablekeys" in flags:
             keys = await self._get_moveable_keys(*args)
