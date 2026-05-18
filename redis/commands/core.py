@@ -3465,7 +3465,12 @@ class BasicKeyCommands(CommandsProtocol):
         ``enx`` applies the expiration only when the key does not already
         have an expiration, and requires ``ex``, ``px``, ``exat``, or ``pxat``.
         """
-        if byfloat is not None and byint is not None:
+        if not at_most_one_value_set(
+            (
+                byfloat is not None,
+                byint is not None,
+            )
+        ):
             raise DataError("``byfloat`` and ``byint`` are mutually exclusive.")
 
         if not at_most_one_value_set(
