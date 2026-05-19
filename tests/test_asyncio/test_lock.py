@@ -114,7 +114,11 @@ class TestLock:
         start = asyncio.get_running_loop().time()
         assert not await lock2.acquire()
         # The elapsed duration should be less than the total blocking_timeout
-        assert (bt + fudge_factor) >= (asyncio.get_running_loop().time() - start) > bt - sleep
+        assert (
+            (bt + fudge_factor)
+            >= (asyncio.get_running_loop().time() - start)
+            > bt - sleep
+        )
         await lock1.release()
 
     async def test_context_manager(self, r):

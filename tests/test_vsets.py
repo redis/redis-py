@@ -891,7 +891,9 @@ def test_vset_commands_without_decoding_responces(client):
     emb = client.vset().vemb("myset", "elem1")
     assert len(emb) == 8
     assert isinstance(emb, list)
-    assert all(isinstance(x, (int, float)) for x in emb), f"Expected numeric values, got {emb}"
+    assert all(isinstance(x, (int, float)) for x in emb), (
+        f"Expected numeric values, got {emb}"
+    )
 
     emb_raw = client.vset().vemb("myset", "elem1", raw=True)
     assert emb_raw["quantization"] == b"int8"

@@ -329,9 +329,10 @@ def test_redis_from_pool(request, from_url):
 
     called = 0
 
-    def mock_disconnect(_):
+    def mock_disconnect(target_pool):
         nonlocal called
-        called += 1
+        if pool is not None and target_pool is pool:
+            called += 1
 
     with patch.object(ConnectionPool, "disconnect", mock_disconnect):
         with get_redis_connection() as r1:
