@@ -3,6 +3,7 @@ import functools
 import logging
 import socket
 import sys
+from collections import defaultdict
 from typing import Optional
 from unittest.mock import patch, AsyncMock, MagicMock
 
@@ -23,9 +24,15 @@ from redis.asyncio.client import PubSub
 from redis.asyncio.cluster import ClusterPubSub
 from redis.crc import key_slot
 
-from redis.exceptions import ConnectionError, SlotNotCoveredError, TimeoutError
+from redis.exceptions import (
+    ConnectionError,
+    RedisError,
+    ResponseError,
+    SlotNotCoveredError,
+    TimeoutError,
+)
 from redis.typing import EncodableT
-from tests.conftest import get_protocol_version, skip_if_server_version_lt
+from tests.conftest import REDIS_INFO, get_protocol_version, skip_if_server_version_lt
 
 from .compat import aclosing, create_task
 
@@ -102,6 +109,344 @@ def make_subscribe_test_data(pubsub, type):
 async def pubsub(r: redis.Redis):
     async with r.pubsub() as p:
         yield p
+
+
+@pytest.mark.fixed_client
+class TestPubSubSubscriberModeProtocol:
+    DEFAULT_STANDALONE_URL = "redis://localhost:6379/0"
+    DEFAULT_CLUSTER_URL = "redis://localhost:16379/0"
+
+    async def _get_resp2_client(self, request, cluster=False):
+        client = None
+        redis_url = self._get_url(request, cluster)
+        try:
+            if cluster:
+                client = redis.RedisCluster.from_url(
+                    redis_url,
+                    protocol=2,
+                    socket_connect_timeout=1,
+                    socket_timeout=1,
+                )
+                await client.initialize()
+            else:
+                client = redis.Redis.from_url(
+                    redis_url,
+                    protocol=2,
+                    socket_connect_timeout=1,
+                    socket_timeout=1,
+                )
+            await client.ping()
+        except RedisError as exc:
+            await self._close_client(client)
+            pytest.skip(
+                f"Redis {'cluster' if cluster else 'standalone'} unavailable: {exc}"
+            )
+
+        if get_protocol_version(client) not in [2, "2"]:
+            await self._close_client(client)
+            pytest.skip("subscriber-mode command rejection is RESP2-specific")
+
+        return client
+
+    def _get_url(self, request, cluster):
+        if bool(REDIS_INFO.get("cluster_enabled", False)) == cluster:
+            return request.config.getoption("--redis-url")
+        if cluster:
+            return self.DEFAULT_CLUSTER_URL
+        return self.DEFAULT_STANDALONE_URL
+
+    async def _close_client(self, client):
+        if client is not None:
+            await client.aclose()
+
+    async def test_subscriber_mode_rejects_regular_command_after_subscribe(
+        self, request
+    ):
+        r = await self._get_resp2_client(request)
+        p = r.pubsub()
+        try:
+            await p.subscribe("subscriber-mode")
+            assert (await wait_for_message(p))["type"] == "subscribe"
+
+            await p.execute_command("SET", "should-not-run", "1")
+            with pytest.raises(ResponseError, match="only .* allowed|Can't execute"):
+                await p.parse_response(block=False, timeout=1)
+        finally:
+            await p.aclose()
+            await self._close_client(r)
+
+    async def test_subscriber_mode_rejects_regular_command_after_psubscribe(
+        self, request
+    ):
+        r = await self._get_resp2_client(request)
+        p = r.pubsub()
+        try:
+            await p.psubscribe("subscriber-*")
+            assert (await wait_for_message(p))["type"] == "psubscribe"
+
+            await p.execute_command("SET", "should-not-run", "1")
+            with pytest.raises(ResponseError, match="only .* allowed|Can't execute"):
+                await p.parse_response(block=False, timeout=1)
+        finally:
+            await p.aclose()
+            await self._close_client(r)
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_subscriber_mode_rejects_regular_command_after_ssubscribe(
+        self, request
+    ):
+        r = await self._get_resp2_client(request, cluster=True)
+        channel = "subscriber-mode-{shard}"
+        node = r.get_node_from_key(channel)
+        p = r.pubsub()
+        try:
+            await p.ssubscribe(channel)
+            message = await p.get_sharded_message(target_node=node, timeout=1)
+            assert message["type"] == "ssubscribe"
+
+            per_node_pubsub = p.node_pubsub_mapping[node.name]
+            await per_node_pubsub.execute_command("SET", "should-not-run-{shard}", "1")
+            with pytest.raises(ResponseError, match="only .* allowed|Can't execute"):
+                await per_node_pubsub.parse_response(block=False, timeout=1)
+        finally:
+            await p.aclose()
+            await self._close_client(r)
+
+
+class TestPubSubCloseServerCleanup:
+    async def _assert_eventually_equal(self, get_result, expected, timeout=2.0):
+        deadline = asyncio.get_running_loop().time() + timeout
+        result = None
+        while asyncio.get_running_loop().time() < deadline:
+            result = await get_result()
+            if result == expected:
+                return
+            await asyncio.sleep(0.01)
+        assert result == expected
+
+    @pytest.mark.onlynoncluster
+    async def test_close_while_subscribed_removes_numsub_entry(self, r: redis.Redis):
+        channel = "close-cleanup"
+        p = r.pubsub()
+        try:
+            await p.subscribe(channel)
+            assert (await wait_for_message(p))["type"] == "subscribe"
+            await self._assert_eventually_equal(
+                lambda: r.pubsub_numsub(channel),
+                [(channel.encode(), 1)],
+            )
+        finally:
+            await p.aclose()
+
+        assert p.connection is None
+        assert p.channels == {}
+        await self._assert_eventually_equal(
+            lambda: r.pubsub_numsub(channel),
+            [(channel.encode(), 0)],
+        )
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("7.0.0")
+    async def test_close_while_ssubscribed_removes_shardnumsub_entry(
+        self, r: redis.Redis
+    ):
+        channel = "close-cleanup-{shard}"
+        node = r.get_node_from_key(channel)
+        p = r.pubsub()
+        try:
+            await p.ssubscribe(channel)
+            message = await p.get_sharded_message(target_node=node, timeout=1)
+            assert message["type"] == "ssubscribe"
+            await self._assert_eventually_equal(
+                lambda: r.pubsub_shardnumsub(channel, target_nodes=node),
+                [(channel.encode(), 1)],
+            )
+        finally:
+            await p.aclose()
+
+        assert p.node_pubsub_mapping == {}
+        assert p.shard_channels == {}
+        await self._assert_eventually_equal(
+            lambda: r.pubsub_shardnumsub(channel, target_nodes=node),
+            [(channel.encode(), 0)],
+        )
+
+
+@pytest.mark.onlycluster
+@skip_if_server_version_lt("7.0.0")
+class TestClusterShardedPubSubDelivery:
+    def _as_string(self, value):
+        if isinstance(value, bytes):
+            return value.decode()
+        return value
+
+    async def _wait_for_sharded_acks(
+        self, pubsub, count, node=None, message_type="ssubscribe"
+    ):
+        for _ in range(count):
+            if node is not None:
+                message = await pubsub.get_sharded_message(
+                    target_node=node, timeout=2.0
+                )
+            else:
+                message = await pubsub.get_sharded_message(timeout=2.0)
+            assert message is not None
+            assert message["type"] == message_type
+
+    async def _read_sharded_messages(self, pubsub, expected_count, timeout=5.0):
+        messages = []
+        deadline = asyncio.get_running_loop().time() + timeout
+        while (
+            asyncio.get_running_loop().time() < deadline
+            and len(messages) < expected_count
+        ):
+            message = await pubsub.get_sharded_message(timeout=0.05)
+            if message is not None and message["type"] == "smessage":
+                messages.append(message)
+        return messages
+
+    async def test_multiple_sharded_subscribers_receive_all_messages(
+        self, r: redis.Redis
+    ):
+        channels = ["multi-sub-{shared}:0", "multi-sub-{shared}:1"]
+        subscriber_count = 2
+        message_count = 20
+        expected = set(range(message_count))
+        received = [defaultdict(set) for _ in range(subscriber_count)]
+        subscribers = [r.pubsub() for _ in range(subscriber_count)]
+
+        try:
+            for pubsub in subscribers:
+                await pubsub.ssubscribe(*channels)
+                await self._wait_for_sharded_acks(pubsub, len(channels))
+
+            for seq in range(message_count):
+                for channel in channels:
+                    assert await r.spublish(channel, str(seq)) == subscriber_count
+
+            deadline = asyncio.get_running_loop().time() + 5.0
+            while asyncio.get_running_loop().time() < deadline:
+                for index, pubsub in enumerate(subscribers):
+                    message = await pubsub.get_sharded_message(timeout=0.01)
+                    if message is not None and message["type"] == "smessage":
+                        channel = self._as_string(message["channel"])
+                        received[index][channel].add(int(message["data"]))
+
+                if all(
+                    all(subscriber[channel] == expected for channel in channels)
+                    for subscriber in received
+                ):
+                    return
+
+            assert [
+                {channel: sorted(seqs) for channel, seqs in subscriber.items()}
+                for subscriber in received
+            ] == [
+                {channel: list(range(message_count)) for channel in channels}
+                for _ in range(subscriber_count)
+            ]
+        finally:
+            for pubsub in subscribers:
+                await pubsub.aclose()
+
+    async def test_duplicate_ssubscribe_delivers_each_message_once(
+        self, r: redis.Redis
+    ):
+        channel = "duplicate-ssubscribe-{shared}"
+        p = r.pubsub()
+        try:
+            await p.ssubscribe(channel)
+            await self._wait_for_sharded_acks(p, 1)
+
+            await p.ssubscribe(channel)
+            maybe_ack = await p.get_sharded_message(timeout=0.5)
+            assert maybe_ack is None or maybe_ack["type"] == "ssubscribe"
+
+            for seq in range(10):
+                assert await r.spublish(channel, str(seq)) == 1
+
+            messages = await self._read_sharded_messages(p, expected_count=10)
+            received = [int(message["data"]) for message in messages]
+
+            assert sorted(received) == list(range(10))
+            assert await p.get_sharded_message(timeout=0.5) is None
+        finally:
+            await p.aclose()
+
+    async def test_no_messages_delivered_after_sunsubscribe(self, r: redis.Redis):
+        kept = "still-subscribed-{shared}"
+        removed = "removed-{shared}"
+        p = r.pubsub()
+        try:
+            await p.ssubscribe(kept, removed)
+            await self._wait_for_sharded_acks(p, 2)
+
+            await p.sunsubscribe(removed)
+            await self._wait_for_sharded_acks(p, 1, message_type="sunsubscribe")
+
+            for seq in range(10):
+                assert await r.spublish(kept, str(seq)) == 1
+                assert await r.spublish(removed, str(seq)) == 0
+
+            messages = await self._read_sharded_messages(p, expected_count=10)
+            delivered_channels = [
+                self._as_string(message["channel"]) for message in messages
+            ]
+
+            assert delivered_channels == [kept] * 10
+            assert await p.get_sharded_message(timeout=0.5) is None
+        finally:
+            await p.aclose()
+
+
+@pytest.mark.onlycluster
+@skip_if_server_version_lt("7.0.0")
+class TestClusterShardedPubSubConnectionLifecycle:
+    async def _wait_for_ssubscribe_ack(self, pubsub):
+        message = await pubsub.get_sharded_message(timeout=2.0)
+        assert message is not None
+        assert message["type"] == "ssubscribe"
+
+    async def test_cluster_sharded_pubsub_creates_connections_lazily(
+        self, r: redis.Redis
+    ):
+        channel = "lazy-connection-{shared}"
+        node = r.get_node_from_key(channel)
+        p = r.pubsub()
+        try:
+            assert p.node_pubsub_mapping == {}
+            assert p.connection is None
+
+            await p.ssubscribe(channel)
+            await self._wait_for_ssubscribe_ack(p)
+
+            assert list(p.node_pubsub_mapping) == [node.name]
+            assert p.node_pubsub_mapping[node.name].connection is not None
+        finally:
+            await p.aclose()
+
+    async def test_cluster_sharded_pubsub_reuses_connection_for_same_shard(
+        self, r: redis.Redis
+    ):
+        first = "reuse-1-{same-shard}"
+        second = "reuse-2-{same-shard}"
+        node = r.get_node_from_key(first)
+        assert node.name == r.get_node_from_key(second).name
+        p = r.pubsub()
+        try:
+            await p.ssubscribe(first)
+            await self._wait_for_ssubscribe_ack(p)
+            first_mapping = dict(p.node_pubsub_mapping)
+            first_pubsub = p.node_pubsub_mapping[node.name]
+
+            await p.ssubscribe(second)
+            await self._wait_for_ssubscribe_ack(p)
+
+            assert p.node_pubsub_mapping == first_mapping
+            assert p.node_pubsub_mapping[node.name] is first_pubsub
+            assert len(p.node_pubsub_mapping) == 1
+        finally:
+            await p.aclose()
 
 
 @pytest.mark.onlynoncluster
