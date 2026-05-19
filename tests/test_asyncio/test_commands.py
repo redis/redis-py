@@ -1649,6 +1649,12 @@ class TestRedisCommands:
         assert await r.get("integer") == str(integer).encode()
         assert (await r.get("unicode_string")).decode("utf-8") == unicode_string
 
+    async def test_getex_zero_expiry_options_are_mutually_exclusive(
+        self, r: redis.Redis
+    ):
+        with pytest.raises(DataError):
+            await r.getex("a", ex=0, px=1)
+
     async def test_get_set_bit(self, r: redis.Redis):
         # no value
         assert not await r.getbit("a", 5)
@@ -1695,6 +1701,75 @@ class TestRedisCommands:
         assert await r.get("a") == b"1"
         assert await r.incrbyfloat("a", 1.1) == 2.1
         assert float(await r.get("a")) == float(2.1)
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_increx_default(self, r: redis.Redis):
+        key = "increx:default"
+        assert await r.set(key, 10)
+        assert await r.increx(key) == [11, 1]
+        assert await r.get(key) == b"11"
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_increx_byint(self, r: redis.Redis):
+        key = "increx:byint"
+        assert await r.set(key, 20)
+        assert await r.increx(key, byint=4) == [24, 4]
+        assert await r.get(key) == b"24"
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_increx_byfloat(self, r: redis.Redis):
+        key = "increx:float"
+        assert await r.set(key, "1.5")
+        result = await r.increx(key, byfloat=0.25, lbound=0, ubound=2)
+        assert [float(value) for value in result] == pytest.approx([1.75, 0.25])
+        assert float(await r.get(key)) == pytest.approx(1.75)
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_increx_saturating_bounds(self, r: redis.Redis):
+        key = "increx:sat"
+        assert await r.set(key, "1.8")
+        result = await r.increx(key, byfloat=0.7, ubound=2, overflow="SAT")
+        assert [float(value) for value in result] == pytest.approx([2.0, 0.2])
+        assert float(await r.get(key)) == pytest.approx(2.0)
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_increx_fail_overflow_keeps_value(self, r: redis.Redis):
+        key = "increx:overflow"
+        assert await r.set(key, 10)
+        with pytest.raises(ResponseError):
+            await r.increx(key, byint=5, ubound=12)
+        assert await r.get(key) == b"10"
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_increx_expiration_enx(self, r: redis.Redis):
+        key = "increx:expiration"
+        assert await r.set(key, 40)
+        assert await r.ttl(key) == -1
+
+        assert await r.increx(key, byint=2, ex=60, enx=True) == [42, 2]
+        ttl = await r.ttl(key)
+        assert 0 < ttl <= 60
+
+        assert await r.increx(key, byint=3, ex=600, enx=True) == [45, 3]
+        assert 0 < await r.ttl(key) <= ttl
+
+    async def test_increx_invalid_options(self, r: redis.Redis):
+        key = "increx:invalid"
+        assert await r.set(key, 1)
+        with pytest.raises(DataError):
+            await r.increx(key, byfloat=1.0, byint=1)
+        with pytest.raises(DataError):
+            await r.increx(key, ex=10, px=10)
+        with pytest.raises(DataError):
+            await r.increx(key, overflow="WRAP")
+        with pytest.raises(DataError):
+            await r.increx(key, enx=True)
+
+    async def test_increx_zero_expiry_options_are_mutually_exclusive(
+        self, r: redis.Redis
+    ):
+        with pytest.raises(DataError):
+            await r.increx("a", ex=0, px=1)
 
     @pytest.mark.onlynoncluster
     async def test_keys(self, r: redis.Redis):
@@ -2065,6 +2140,12 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             await r.msetex(mapping, ex=10, keepttl=True)
 
+    async def test_msetex_zero_expiry_options_are_mutually_exclusive(
+        self, r: redis.Redis
+    ):
+        with pytest.raises(DataError):
+            await r.msetex({"a": 1}, ex=0, px=1)
+
     @pytest.mark.onlynoncluster
     async def test_msetnx(self, r: redis.Redis):
         d = {"a": b"1", "b": b"2", "c": b"3"}
@@ -2199,6 +2280,10 @@ class TestRedisCommands:
         assert await r.set("a", "1", ex=10)
         assert 0 < await r.ttl("a") <= 10
 
+    async def test_set_zero_expiry_options_are_mutually_exclusive(self, r: redis.Redis):
+        with pytest.raises(DataError):
+            await r.set("a", "1", ex=0, px=1)
+
     @skip_if_server_version_lt("2.6.0")
     async def test_set_ex_timedelta(self, r: redis.Redis):
         expire_at = datetime.timedelta(seconds=60)
@@ -2219,6 +2304,10 @@ class TestRedisCommands:
         await r.set("a", "2", keepttl=True)
         assert await r.get("a") == b"2"
         assert 0 < await r.ttl("a") <= 10
+
+    async def test_set_empty_condition_is_mutually_exclusive(self, r: redis.Redis):
+        with pytest.raises(DataError):
+            await r.set("a", "1", nx=True, ifeq=b"")
 
     @skip_if_server_version_lt("8.3.224")
     async def test_set_ifeq_true_sets_and_returns_true(self, r):
@@ -3984,6 +4073,45 @@ class TestRedisCommands:
         # keys with bool(key) == False
         assert await r.hset("a", 0, 10) == 1
         assert await r.hset("a", "", 10) == 1
+
+    async def test_hgetex_zero_expiry_options_are_mutually_exclusive(
+        self, r: redis.Redis
+    ):
+        with pytest.raises(DataError):
+            await r.hgetex("h", "f", ex=0, px=1)
+
+    async def test_hsetex_zero_expiry_options_are_mutually_exclusive(
+        self, r: redis.Redis
+    ):
+        with pytest.raises(DataError):
+            await r.hsetex("h", "f", "v", ex=0, px=1)
+
+    async def test_hget_and_hset_with_encodable_fields_and_values(self, r: redis.Redis):
+        cases = (
+            (b"field-bytes", b"value-bytes", b"value-bytes"),
+            (
+                bytearray(b"field-bytearray"),
+                bytearray(b"value-bytearray"),
+                b"value-bytearray",
+            ),
+            (
+                memoryview(b"field-memoryview"),
+                memoryview(b"value-memoryview"),
+                b"value-memoryview",
+            ),
+            ("field-str", "value-str", b"value-str"),
+            (42, 43, b"43"),
+            (1.25, 2.5, b"2.5"),
+        )
+
+        for field, value, expected in cases:
+            assert await r.hset("encodable-hash", field, value) == 1
+            assert await r.hget("encodable-hash", field) == expected
+            assert await r.hmget("encodable-hash", field) == [expected]
+
+        assert await r.hmget("encodable-hash", bytearray(b"field-bytes")) == [
+            b"value-bytes"
+        ]
 
     async def test_hset_with_multi_key_values(self, r: redis.Redis):
         await r.hset("a", mapping={"1": 1, "2": 2, "3": 3})

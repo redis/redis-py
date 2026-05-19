@@ -3264,7 +3264,15 @@ class BasicKeyCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/getex
         """
-        if not at_most_one_value_set((ex, px, exat, pxat, persist)):
+        if not at_most_one_value_set(
+            (
+                ex is not None,
+                px is not None,
+                exat is not None,
+                pxat is not None,
+                persist,
+            )
+        ):
             raise DataError(
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``persist`` are mutually exclusive."
@@ -3385,6 +3393,129 @@ class BasicKeyCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/incrbyfloat
         """
         return self.execute_command("INCRBYFLOAT", name, amount)
+
+    @overload
+    def increx(
+        self: SyncClientProtocol,
+        name: KeyT,
+        *,
+        byfloat: EncodableT | None = None,
+        byint: EncodableT | None = None,
+        lbound: EncodableT | None = None,
+        ubound: EncodableT | None = None,
+        overflow: Literal["FAIL", "REJECT", "SAT"] | None = None,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        persist: bool = False,
+        enx: bool = False,
+    ) -> list[Number | bytes | str]: ...
+
+    @overload
+    def increx(
+        self: AsyncClientProtocol,
+        name: KeyT,
+        *,
+        byfloat: EncodableT | None = None,
+        byint: EncodableT | None = None,
+        lbound: EncodableT | None = None,
+        ubound: EncodableT | None = None,
+        overflow: Literal["FAIL", "REJECT", "SAT"] | None = None,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        persist: bool = False,
+        enx: bool = False,
+    ) -> Awaitable[list[Number | bytes | str]]: ...
+
+    def increx(
+        self,
+        name: KeyT,
+        *,
+        byfloat: EncodableT | None = None,
+        byint: EncodableT | None = None,
+        lbound: EncodableT | None = None,
+        ubound: EncodableT | None = None,
+        overflow: Literal["FAIL", "REJECT", "SAT"] | None = None,
+        ex: ExpiryT | None = None,
+        px: ExpiryT | None = None,
+        exat: AbsExpiryT | None = None,
+        pxat: AbsExpiryT | None = None,
+        persist: bool = False,
+        enx: bool = False,
+    ) -> list[Number | bytes | str] | Awaitable[list[Number | bytes | str]]:
+        """
+        Increment the numeric value at key ``name`` and return the new value
+        and the actual increment.
+
+        ``byfloat`` increments a floating point value by the provided amount.
+
+        ``byint`` increments an integer value by the provided amount.
+
+        If neither ``byfloat`` nor ``byint`` is specified, the value is
+        incremented by one.
+
+        ``lbound`` and ``ubound`` constrain the valid range of the result.
+
+        ``overflow`` controls bound handling and can be ``FAIL``, ``REJECT``,
+        or ``SAT``.
+
+        ``enx`` applies the expiration only when the key does not already
+        have an expiration, and requires ``ex``, ``px``, ``exat``, or ``pxat``.
+        """
+        if not at_most_one_value_set(
+            (
+                byfloat is not None,
+                byint is not None,
+            )
+        ):
+            raise DataError("``byfloat`` and ``byint`` are mutually exclusive.")
+
+        if not at_most_one_value_set(
+            (
+                ex is not None,
+                px is not None,
+                exat is not None,
+                pxat is not None,
+                persist,
+            )
+        ):
+            raise DataError(
+                "``ex``, ``px``, ``exat``, ``pxat``, "
+                "and ``persist`` are mutually exclusive."
+            )
+
+        if overflow is not None and overflow not in {"FAIL", "REJECT", "SAT"}:
+            raise DataError("INCREX overflow must be one of: FAIL, REJECT, SAT")
+
+        if enx and ex is None and px is None and exat is None and pxat is None:
+            raise DataError(
+                "``enx`` requires one of ``ex``, ``px``, ``exat``, or ``pxat``."
+            )
+
+        pieces: list[EncodableT] = [name]
+
+        if byfloat is not None:
+            pieces.extend(("BYFLOAT", byfloat))
+        elif byint is not None:
+            pieces.extend(("BYINT", byint))
+
+        if lbound is not None:
+            pieces.extend(("LBOUND", lbound))
+        if ubound is not None:
+            pieces.extend(("UBOUND", ubound))
+        if overflow is not None:
+            pieces.extend(("OVERFLOW", overflow))
+
+        pieces.extend(extract_expire_flags(ex, px, exat, pxat))
+        if persist:
+            pieces.append("PERSIST")
+        if enx:
+            pieces.append("ENX")
+
+        return self.execute_command("INCREX", *pieces)
 
     @overload
     def keys(
@@ -3598,7 +3729,15 @@ class BasicKeyCommands(CommandsProtocol):
         Available since Redis 8.4
         For more information, see https://redis.io/commands/msetex
         """
-        if not at_most_one_value_set((ex, px, exat, pxat, keepttl)):
+        if not at_most_one_value_set(
+            (
+                ex is not None,
+                px is not None,
+                exat is not None,
+                pxat is not None,
+                keepttl,
+            )
+        ):
             raise DataError(
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``keepttl`` are mutually exclusive."
@@ -3847,7 +3986,7 @@ class BasicKeyCommands(CommandsProtocol):
     @overload
     def hrandfield(
         self: SyncClientProtocol,
-        key: str,
+        key: KeyT,
         count: int | None = None,
         withvalues: bool = False,
     ) -> HRandFieldResponse: ...
@@ -3855,13 +3994,13 @@ class BasicKeyCommands(CommandsProtocol):
     @overload
     def hrandfield(
         self: AsyncClientProtocol,
-        key: str,
+        key: KeyT,
         count: int | None = None,
         withvalues: bool = False,
     ) -> Awaitable[HRandFieldResponse]: ...
 
     def hrandfield(
-        self, key: str, count: int | None = None, withvalues: bool = False
+        self, key: KeyT, count: int | None = None, withvalues: bool = False
     ) -> HRandFieldResponse | Awaitable[HRandFieldResponse]:
         """
         Return a random field from the hash value stored at key.
@@ -4117,14 +4256,31 @@ class BasicKeyCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/set
         """
 
-        if not at_most_one_value_set((ex, px, exat, pxat, keepttl)):
+        if not at_most_one_value_set(
+            (
+                ex is not None,
+                px is not None,
+                exat is not None,
+                pxat is not None,
+                keepttl,
+            )
+        ):
             raise DataError(
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``keepttl`` are mutually exclusive."
             )
 
         # Enforce mutual exclusivity among all conditional switches.
-        if not at_most_one_value_set((nx, xx, ifeq, ifne, ifdeq, ifdne)):
+        if not at_most_one_value_set(
+            (
+                nx,
+                xx,
+                ifeq is not None,
+                ifne is not None,
+                ifdeq is not None,
+                ifdne is not None,
+            )
+        ):
             raise DataError(
                 "``nx``, ``xx``, ``ifeq``, ``ifne``, ``ifdeq``, ``ifdne`` are mutually exclusive."
             )
@@ -5945,7 +6101,7 @@ class ScanCommands(CommandsProtocol):
 
     def hscan_iter(
         self,
-        name: str,
+        name: KeyT,
         match: Union[PatternT, None] = None,
         count: Optional[int] = None,
         no_values: Union[bool, None] = None,
@@ -6101,7 +6257,7 @@ class AsyncScanCommands(ScanCommands):
 
     async def hscan_iter(
         self,
-        name: str,
+        name: KeyT,
         match: Union[PatternT, None] = None,
         count: Optional[int] = None,
         no_values: Union[bool, None] = None,
@@ -9266,12 +9422,14 @@ class HashCommands(CommandsProtocol):
     """
 
     @overload
-    def hdel(self: SyncClientProtocol, name: str, *keys: str) -> int: ...
+    def hdel(self: SyncClientProtocol, name: KeyT, *keys: FieldT) -> int: ...
 
     @overload
-    def hdel(self: AsyncClientProtocol, name: str, *keys: str) -> Awaitable[int]: ...
+    def hdel(
+        self: AsyncClientProtocol, name: KeyT, *keys: FieldT
+    ) -> Awaitable[int]: ...
 
-    def hdel(self, name: str, *keys: str) -> int | Awaitable[int]:
+    def hdel(self, name: KeyT, *keys: FieldT) -> int | Awaitable[int]:
         """
         Delete ``keys`` from hash ``name``
 
@@ -9280,12 +9438,14 @@ class HashCommands(CommandsProtocol):
         return self.execute_command("HDEL", name, *keys)
 
     @overload
-    def hexists(self: SyncClientProtocol, name: str, key: str) -> bool: ...
+    def hexists(self: SyncClientProtocol, name: KeyT, key: FieldT) -> bool: ...
 
     @overload
-    def hexists(self: AsyncClientProtocol, name: str, key: str) -> Awaitable[bool]: ...
+    def hexists(
+        self: AsyncClientProtocol, name: KeyT, key: FieldT
+    ) -> Awaitable[bool]: ...
 
-    def hexists(self, name: str, key: str) -> bool | Awaitable[bool]:
+    def hexists(self, name: KeyT, key: FieldT) -> bool | Awaitable[bool]:
         """
         Returns a boolean indicating if ``key`` exists within hash ``name``
 
@@ -9294,14 +9454,16 @@ class HashCommands(CommandsProtocol):
         return self.execute_command("HEXISTS", name, key, keys=[name])
 
     @overload
-    def hget(self: SyncClientProtocol, name: str, key: str) -> bytes | str | None: ...
+    def hget(
+        self: SyncClientProtocol, name: KeyT, key: FieldT
+    ) -> bytes | str | None: ...
 
     @overload
     def hget(
-        self: AsyncClientProtocol, name: str, key: str
+        self: AsyncClientProtocol, name: KeyT, key: FieldT
     ) -> Awaitable[bytes | str | None]: ...
 
-    def hget(self, name: str, key: str) -> (bytes | str | None) | Awaitable[
+    def hget(self, name: KeyT, key: FieldT) -> (bytes | str | None) | Awaitable[
         bytes | str | None
     ]:
         """
@@ -9313,16 +9475,16 @@ class HashCommands(CommandsProtocol):
 
     @overload
     def hgetall(
-        self: SyncClientProtocol, name: str
+        self: SyncClientProtocol, name: KeyT
     ) -> dict[bytes | str, bytes | str]: ...
 
     @overload
     def hgetall(
-        self: AsyncClientProtocol, name: str
+        self: AsyncClientProtocol, name: KeyT
     ) -> Awaitable[dict[bytes | str, bytes | str]]: ...
 
     def hgetall(
-        self, name: str
+        self, name: KeyT
     ) -> dict[bytes | str, bytes | str] | Awaitable[dict[bytes | str, bytes | str]]:
         """
         Return a Python dict of the hash's name/value pairs
@@ -9333,16 +9495,16 @@ class HashCommands(CommandsProtocol):
 
     @overload
     def hgetdel(
-        self: SyncClientProtocol, name: str, *keys: str
+        self: SyncClientProtocol, name: KeyT, *keys: FieldT
     ) -> list[bytes | str | None]: ...
 
     @overload
     def hgetdel(
-        self: AsyncClientProtocol, name: str, *keys: str
+        self: AsyncClientProtocol, name: KeyT, *keys: FieldT
     ) -> Awaitable[list[bytes | str | None]]: ...
 
     def hgetdel(
-        self, name: str, *keys: str
+        self, name: KeyT, *keys: FieldT
     ) -> list[bytes | str | None] | Awaitable[list[bytes | str | None]]:
         """
         Return the value of ``key`` within the hash ``name`` and
@@ -9362,7 +9524,7 @@ class HashCommands(CommandsProtocol):
     def hgetex(
         self: SyncClientProtocol,
         name: KeyT,
-        *keys: str,
+        *keys: FieldT,
         ex: ExpiryT | None = None,
         px: ExpiryT | None = None,
         exat: AbsExpiryT | None = None,
@@ -9374,7 +9536,7 @@ class HashCommands(CommandsProtocol):
     def hgetex(
         self: AsyncClientProtocol,
         name: KeyT,
-        *keys: str,
+        *keys: FieldT,
         ex: ExpiryT | None = None,
         px: ExpiryT | None = None,
         exat: AbsExpiryT | None = None,
@@ -9385,7 +9547,7 @@ class HashCommands(CommandsProtocol):
     def hgetex(
         self,
         name: KeyT,
-        *keys: str,
+        *keys: FieldT,
         ex: ExpiryT | None = None,
         px: ExpiryT | None = None,
         exat: AbsExpiryT | None = None,
@@ -9414,7 +9576,15 @@ class HashCommands(CommandsProtocol):
         if not keys:
             raise DataError("'hgetex' should have at least one key provided")
 
-        if not at_most_one_value_set((ex, px, exat, pxat, persist)):
+        if not at_most_one_value_set(
+            (
+                ex is not None,
+                px is not None,
+                exat is not None,
+                pxat is not None,
+                persist,
+            )
+        ):
             raise DataError(
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``persist`` are mutually exclusive."
@@ -9436,15 +9606,15 @@ class HashCommands(CommandsProtocol):
 
     @overload
     def hincrby(
-        self: SyncClientProtocol, name: str, key: str, amount: int = 1
+        self: SyncClientProtocol, name: KeyT, key: FieldT, amount: int = 1
     ) -> int: ...
 
     @overload
     def hincrby(
-        self: AsyncClientProtocol, name: str, key: str, amount: int = 1
+        self: AsyncClientProtocol, name: KeyT, key: FieldT, amount: int = 1
     ) -> Awaitable[int]: ...
 
-    def hincrby(self, name: str, key: str, amount: int = 1) -> int | Awaitable[int]:
+    def hincrby(self, name: KeyT, key: FieldT, amount: int = 1) -> int | Awaitable[int]:
         """
         Increment the value of ``key`` in hash ``name`` by ``amount``
 
@@ -9454,16 +9624,16 @@ class HashCommands(CommandsProtocol):
 
     @overload
     def hincrbyfloat(
-        self: SyncClientProtocol, name: str, key: str, amount: float = 1.0
+        self: SyncClientProtocol, name: KeyT, key: FieldT, amount: float = 1.0
     ) -> float: ...
 
     @overload
     def hincrbyfloat(
-        self: AsyncClientProtocol, name: str, key: str, amount: float = 1.0
+        self: AsyncClientProtocol, name: KeyT, key: FieldT, amount: float = 1.0
     ) -> Awaitable[float]: ...
 
     def hincrbyfloat(
-        self, name: str, key: str, amount: float = 1.0
+        self, name: KeyT, key: FieldT, amount: float = 1.0
     ) -> float | Awaitable[float]:
         """
         Increment the value of ``key`` in hash ``name`` by floating ``amount``
@@ -9473,12 +9643,14 @@ class HashCommands(CommandsProtocol):
         return self.execute_command("HINCRBYFLOAT", name, key, amount)
 
     @overload
-    def hkeys(self: SyncClientProtocol, name: str) -> list[bytes | str]: ...
+    def hkeys(self: SyncClientProtocol, name: KeyT) -> list[bytes | str]: ...
 
     @overload
-    def hkeys(self: AsyncClientProtocol, name: str) -> Awaitable[list[bytes | str]]: ...
+    def hkeys(
+        self: AsyncClientProtocol, name: KeyT
+    ) -> Awaitable[list[bytes | str]]: ...
 
-    def hkeys(self, name: str) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+    def hkeys(self, name: KeyT) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return the list of keys within hash ``name``
 
@@ -9487,12 +9659,12 @@ class HashCommands(CommandsProtocol):
         return self.execute_command("HKEYS", name, keys=[name])
 
     @overload
-    def hlen(self: SyncClientProtocol, name: str) -> int: ...
+    def hlen(self: SyncClientProtocol, name: KeyT) -> int: ...
 
     @overload
-    def hlen(self: AsyncClientProtocol, name: str) -> Awaitable[int]: ...
+    def hlen(self: AsyncClientProtocol, name: KeyT) -> Awaitable[int]: ...
 
-    def hlen(self, name: str) -> int | Awaitable[int]:
+    def hlen(self, name: KeyT) -> int | Awaitable[int]:
         """
         Return the number of elements in hash ``name``
 
@@ -9503,30 +9675,30 @@ class HashCommands(CommandsProtocol):
     @overload
     def hset(
         self: SyncClientProtocol,
-        name: str,
-        key: str | None = None,
-        value: str | None = None,
-        mapping: dict | None = None,
-        items: list | None = None,
+        name: KeyT,
+        key: FieldT | None = None,
+        value: EncodableT | None = None,
+        mapping: Mapping[FieldT, EncodableT] | None = None,
+        items: Sequence[EncodableT] | None = None,
     ) -> int: ...
 
     @overload
     def hset(
         self: AsyncClientProtocol,
-        name: str,
-        key: str | None = None,
-        value: str | None = None,
-        mapping: dict | None = None,
-        items: list | None = None,
+        name: KeyT,
+        key: FieldT | None = None,
+        value: EncodableT | None = None,
+        mapping: Mapping[FieldT, EncodableT] | None = None,
+        items: Sequence[EncodableT] | None = None,
     ) -> Awaitable[int]: ...
 
     def hset(
         self,
-        name: str,
-        key: str | None = None,
-        value: str | None = None,
-        mapping: dict | None = None,
-        items: list | None = None,
+        name: KeyT,
+        key: FieldT | None = None,
+        value: EncodableT | None = None,
+        mapping: Mapping[FieldT, EncodableT] | None = None,
+        items: Sequence[EncodableT] | None = None,
     ) -> int | Awaitable[int]:
         """
         Set ``key`` to ``value`` within hash ``name``,
@@ -9556,11 +9728,11 @@ class HashCommands(CommandsProtocol):
     @overload
     def hsetex(
         self: SyncClientProtocol,
-        name: str,
-        key: str | None = None,
-        value: str | None = None,
-        mapping: dict | None = None,
-        items: list | None = None,
+        name: KeyT,
+        key: FieldT | None = None,
+        value: EncodableT | None = None,
+        mapping: Mapping[FieldT, EncodableT] | None = None,
+        items: Sequence[EncodableT] | None = None,
         ex: ExpiryT | None = None,
         px: ExpiryT | None = None,
         exat: AbsExpiryT | None = None,
@@ -9572,11 +9744,11 @@ class HashCommands(CommandsProtocol):
     @overload
     def hsetex(
         self: AsyncClientProtocol,
-        name: str,
-        key: str | None = None,
-        value: str | None = None,
-        mapping: dict | None = None,
-        items: list | None = None,
+        name: KeyT,
+        key: FieldT | None = None,
+        value: EncodableT | None = None,
+        mapping: Mapping[FieldT, EncodableT] | None = None,
+        items: Sequence[EncodableT] | None = None,
         ex: ExpiryT | None = None,
         px: ExpiryT | None = None,
         exat: AbsExpiryT | None = None,
@@ -9587,11 +9759,11 @@ class HashCommands(CommandsProtocol):
 
     def hsetex(
         self,
-        name: str,
-        key: str | None = None,
-        value: str | None = None,
-        mapping: dict | None = None,
-        items: list | None = None,
+        name: KeyT,
+        key: FieldT | None = None,
+        value: EncodableT | None = None,
+        mapping: Mapping[FieldT, EncodableT] | None = None,
+        items: Sequence[EncodableT] | None = None,
         ex: ExpiryT | None = None,
         px: ExpiryT | None = None,
         exat: AbsExpiryT | None = None,
@@ -9641,7 +9813,15 @@ class HashCommands(CommandsProtocol):
                 "'items' must contain a list of key/value pairs."
             )
 
-        if not at_most_one_value_set((ex, px, exat, pxat, keepttl)):
+        if not at_most_one_value_set(
+            (
+                ex is not None,
+                px is not None,
+                exat is not None,
+                pxat is not None,
+                keepttl,
+            )
+        ):
             raise DataError(
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``keepttl`` are mutually exclusive."
@@ -9668,14 +9848,18 @@ class HashCommands(CommandsProtocol):
         )
 
     @overload
-    def hsetnx(self: SyncClientProtocol, name: str, key: str, value: str) -> int: ...
+    def hsetnx(
+        self: SyncClientProtocol, name: KeyT, key: FieldT, value: EncodableT
+    ) -> int: ...
 
     @overload
     def hsetnx(
-        self: AsyncClientProtocol, name: str, key: str, value: str
+        self: AsyncClientProtocol, name: KeyT, key: FieldT, value: EncodableT
     ) -> Awaitable[int]: ...
 
-    def hsetnx(self, name: str, key: str, value: str) -> int | Awaitable[int]:
+    def hsetnx(
+        self, name: KeyT, key: FieldT, value: EncodableT
+    ) -> int | Awaitable[int]:
         """
         Set ``key`` to ``value`` within hash ``name`` if ``key`` does not
         exist.  Returns 1 if HSETNX created a field, otherwise 0.
@@ -9685,11 +9869,15 @@ class HashCommands(CommandsProtocol):
         return self.execute_command("HSETNX", name, key, value)
 
     @overload
-    def hmset(self: SyncClientProtocol, name: str, mapping: dict) -> bool: ...
+    def hmset(
+        self: SyncClientProtocol, name: KeyT, mapping: Mapping[FieldT, EncodableT]
+    ) -> bool: ...
 
     @overload
     def hmset(
-        self: AsyncClientProtocol, name: str, mapping: dict
+        self: AsyncClientProtocol,
+        name: KeyT,
+        mapping: Mapping[FieldT, EncodableT],
     ) -> Awaitable[bool]: ...
 
     @deprecated_function(
@@ -9697,7 +9885,9 @@ class HashCommands(CommandsProtocol):
         reason="Use 'hset' instead.",
         name="hmset",
     )
-    def hmset(self, name: str, mapping: dict) -> bool | Awaitable[bool]:
+    def hmset(
+        self, name: KeyT, mapping: Mapping[FieldT, EncodableT]
+    ) -> bool | Awaitable[bool]:
         """
         Set key to value within hash ``name`` for each corresponding
         key and value from the ``mapping`` dict.
@@ -9713,16 +9903,22 @@ class HashCommands(CommandsProtocol):
 
     @overload
     def hmget(
-        self: SyncClientProtocol, name: str, keys: List, *args: List
+        self: SyncClientProtocol,
+        name: KeyT,
+        keys: FieldT | Iterable[FieldT],
+        *args: FieldT,
     ) -> list[bytes | str | None]: ...
 
     @overload
     def hmget(
-        self: AsyncClientProtocol, name: str, keys: List, *args: List
+        self: AsyncClientProtocol,
+        name: KeyT,
+        keys: FieldT | Iterable[FieldT],
+        *args: FieldT,
     ) -> Awaitable[list[bytes | str | None]]: ...
 
     def hmget(
-        self, name: str, keys: List, *args: List
+        self, name: KeyT, keys: FieldT | Iterable[FieldT], *args: FieldT
     ) -> list[bytes | str | None] | Awaitable[list[bytes | str | None]]:
         """
         Returns a list of values ordered identically to ``keys``
@@ -9733,12 +9929,14 @@ class HashCommands(CommandsProtocol):
         return self.execute_command("HMGET", name, *args, keys=[name])
 
     @overload
-    def hvals(self: SyncClientProtocol, name: str) -> list[bytes | str]: ...
+    def hvals(self: SyncClientProtocol, name: KeyT) -> list[bytes | str]: ...
 
     @overload
-    def hvals(self: AsyncClientProtocol, name: str) -> Awaitable[list[bytes | str]]: ...
+    def hvals(
+        self: AsyncClientProtocol, name: KeyT
+    ) -> Awaitable[list[bytes | str]]: ...
 
-    def hvals(self, name: str) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+    def hvals(self, name: KeyT) -> list[bytes | str] | Awaitable[list[bytes | str]]:
         """
         Return the list of values within hash ``name``
 
@@ -9747,12 +9945,14 @@ class HashCommands(CommandsProtocol):
         return self.execute_command("HVALS", name, keys=[name])
 
     @overload
-    def hstrlen(self: SyncClientProtocol, name: str, key: str) -> int: ...
+    def hstrlen(self: SyncClientProtocol, name: KeyT, key: FieldT) -> int: ...
 
     @overload
-    def hstrlen(self: AsyncClientProtocol, name: str, key: str) -> Awaitable[int]: ...
+    def hstrlen(
+        self: AsyncClientProtocol, name: KeyT, key: FieldT
+    ) -> Awaitable[int]: ...
 
-    def hstrlen(self, name: str, key: str) -> int | Awaitable[int]:
+    def hstrlen(self, name: KeyT, key: FieldT) -> int | Awaitable[int]:
         """
         Return the number of bytes stored in the value of ``key``
         within hash ``name``
@@ -9766,7 +9966,7 @@ class HashCommands(CommandsProtocol):
         self: SyncClientProtocol,
         name: KeyT,
         seconds: ExpiryT,
-        *fields: str,
+        *fields: FieldT,
         nx: bool = False,
         xx: bool = False,
         gt: bool = False,
@@ -9778,7 +9978,7 @@ class HashCommands(CommandsProtocol):
         self: AsyncClientProtocol,
         name: KeyT,
         seconds: ExpiryT,
-        *fields: str,
+        *fields: FieldT,
         nx: bool = False,
         xx: bool = False,
         gt: bool = False,
@@ -9789,7 +9989,7 @@ class HashCommands(CommandsProtocol):
         self,
         name: KeyT,
         seconds: ExpiryT,
-        *fields: str,
+        *fields: FieldT,
         nx: bool = False,
         xx: bool = False,
         gt: bool = False,
@@ -9850,7 +10050,7 @@ class HashCommands(CommandsProtocol):
         self: SyncClientProtocol,
         name: KeyT,
         milliseconds: ExpiryT,
-        *fields: str,
+        *fields: FieldT,
         nx: bool = False,
         xx: bool = False,
         gt: bool = False,
@@ -9862,7 +10062,7 @@ class HashCommands(CommandsProtocol):
         self: AsyncClientProtocol,
         name: KeyT,
         milliseconds: ExpiryT,
-        *fields: str,
+        *fields: FieldT,
         nx: bool = False,
         xx: bool = False,
         gt: bool = False,
@@ -9873,7 +10073,7 @@ class HashCommands(CommandsProtocol):
         self,
         name: KeyT,
         milliseconds: ExpiryT,
-        *fields: str,
+        *fields: FieldT,
         nx: bool = False,
         xx: bool = False,
         gt: bool = False,
@@ -9934,7 +10134,7 @@ class HashCommands(CommandsProtocol):
         self: SyncClientProtocol,
         name: KeyT,
         unix_time_seconds: AbsExpiryT,
-        *fields: str,
+        *fields: FieldT,
         nx: bool = False,
         xx: bool = False,
         gt: bool = False,
@@ -9946,7 +10146,7 @@ class HashCommands(CommandsProtocol):
         self: AsyncClientProtocol,
         name: KeyT,
         unix_time_seconds: AbsExpiryT,
-        *fields: str,
+        *fields: FieldT,
         nx: bool = False,
         xx: bool = False,
         gt: bool = False,
@@ -9957,7 +10157,7 @@ class HashCommands(CommandsProtocol):
         self,
         name: KeyT,
         unix_time_seconds: AbsExpiryT,
-        *fields: str,
+        *fields: FieldT,
         nx: bool = False,
         xx: bool = False,
         gt: bool = False,
@@ -10024,7 +10224,7 @@ class HashCommands(CommandsProtocol):
         self: SyncClientProtocol,
         name: KeyT,
         unix_time_milliseconds: AbsExpiryT,
-        *fields: str,
+        *fields: FieldT,
         nx: bool = False,
         xx: bool = False,
         gt: bool = False,
@@ -10036,7 +10236,7 @@ class HashCommands(CommandsProtocol):
         self: AsyncClientProtocol,
         name: KeyT,
         unix_time_milliseconds: AbsExpiryT,
-        *fields: str,
+        *fields: FieldT,
         nx: bool = False,
         xx: bool = False,
         gt: bool = False,
@@ -10047,7 +10247,7 @@ class HashCommands(CommandsProtocol):
         self,
         name: KeyT,
         unix_time_milliseconds: AbsExpiryT,
-        *fields: str,
+        *fields: FieldT,
         nx: bool = False,
         xx: bool = False,
         gt: bool = False,
@@ -10110,14 +10310,16 @@ class HashCommands(CommandsProtocol):
         )
 
     @overload
-    def hpersist(self: SyncClientProtocol, name: KeyT, *fields: str) -> list[int]: ...
+    def hpersist(
+        self: SyncClientProtocol, name: KeyT, *fields: FieldT
+    ) -> list[int]: ...
 
     @overload
     def hpersist(
-        self: AsyncClientProtocol, name: KeyT, *fields: str
+        self: AsyncClientProtocol, name: KeyT, *fields: FieldT
     ) -> Awaitable[list[int]]: ...
 
-    def hpersist(self, name: KeyT, *fields: str) -> list[int] | Awaitable[list[int]]:
+    def hpersist(self, name: KeyT, *fields: FieldT) -> list[int] | Awaitable[list[int]]:
         """
         Removes the expiration time for each specified field in a hash.
 
@@ -10137,14 +10339,18 @@ class HashCommands(CommandsProtocol):
         return self.execute_command("HPERSIST", name, "FIELDS", len(fields), *fields)
 
     @overload
-    def hexpiretime(self: SyncClientProtocol, key: KeyT, *fields: str) -> list[int]: ...
+    def hexpiretime(
+        self: SyncClientProtocol, key: KeyT, *fields: FieldT
+    ) -> list[int]: ...
 
     @overload
     def hexpiretime(
-        self: AsyncClientProtocol, key: KeyT, *fields: str
+        self: AsyncClientProtocol, key: KeyT, *fields: FieldT
     ) -> Awaitable[list[int]]: ...
 
-    def hexpiretime(self, key: KeyT, *fields: str) -> list[int] | Awaitable[list[int]]:
+    def hexpiretime(
+        self, key: KeyT, *fields: FieldT
+    ) -> list[int] | Awaitable[list[int]]:
         """
         Returns the expiration times of hash fields as Unix timestamps in seconds.
 
@@ -10168,15 +10374,17 @@ class HashCommands(CommandsProtocol):
 
     @overload
     def hpexpiretime(
-        self: SyncClientProtocol, key: KeyT, *fields: str
+        self: SyncClientProtocol, key: KeyT, *fields: FieldT
     ) -> list[int]: ...
 
     @overload
     def hpexpiretime(
-        self: AsyncClientProtocol, key: KeyT, *fields: str
+        self: AsyncClientProtocol, key: KeyT, *fields: FieldT
     ) -> Awaitable[list[int]]: ...
 
-    def hpexpiretime(self, key: KeyT, *fields: str) -> list[int] | Awaitable[list[int]]:
+    def hpexpiretime(
+        self, key: KeyT, *fields: FieldT
+    ) -> list[int] | Awaitable[list[int]]:
         """
         Returns the expiration times of hash fields as Unix timestamps in milliseconds.
 
@@ -10199,14 +10407,14 @@ class HashCommands(CommandsProtocol):
         )
 
     @overload
-    def httl(self: SyncClientProtocol, key: KeyT, *fields: str) -> list[int]: ...
+    def httl(self: SyncClientProtocol, key: KeyT, *fields: FieldT) -> list[int]: ...
 
     @overload
     def httl(
-        self: AsyncClientProtocol, key: KeyT, *fields: str
+        self: AsyncClientProtocol, key: KeyT, *fields: FieldT
     ) -> Awaitable[list[int]]: ...
 
-    def httl(self, key: KeyT, *fields: str) -> list[int] | Awaitable[list[int]]:
+    def httl(self, key: KeyT, *fields: FieldT) -> list[int] | Awaitable[list[int]]:
         """
         Returns the TTL (Time To Live) in seconds for each specified field within a hash
         key.
@@ -10229,14 +10437,14 @@ class HashCommands(CommandsProtocol):
         )
 
     @overload
-    def hpttl(self: SyncClientProtocol, key: KeyT, *fields: str) -> list[int]: ...
+    def hpttl(self: SyncClientProtocol, key: KeyT, *fields: FieldT) -> list[int]: ...
 
     @overload
     def hpttl(
-        self: AsyncClientProtocol, key: KeyT, *fields: str
+        self: AsyncClientProtocol, key: KeyT, *fields: FieldT
     ) -> Awaitable[list[int]]: ...
 
-    def hpttl(self, key: KeyT, *fields: str) -> list[int] | Awaitable[list[int]]:
+    def hpttl(self, key: KeyT, *fields: FieldT) -> list[int] | Awaitable[list[int]]:
         """
         Returns the TTL (Time To Live) in milliseconds for each specified field within a
         hash key.
