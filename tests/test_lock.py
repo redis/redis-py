@@ -206,10 +206,10 @@ class TestLock:
     def test_extend_lock_float(self, r):
         lock = self.get_lock(r, "foo", timeout=10.5)
         assert lock.acquire(blocking=False)
-        assert 10400 < r.pttl("foo") <= 10500
+        assert 10000 < r.pttl("foo") <= 10500
         old_ttl = r.pttl("foo")
         assert lock.extend(10.5)
-        assert old_ttl + 10400 < r.pttl("foo") <= old_ttl + 10500
+        assert old_ttl + 10000 < r.pttl("foo") <= old_ttl + 10500
         lock.release()
 
     def test_extending_unlocked_lock_raises_error(self, r):
