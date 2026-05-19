@@ -1103,7 +1103,7 @@ class TestClusterRedisCommands:
     def _wait_for_bgsave(self, r, timeout=10):
         deadline = monotonic() + timeout
         while True:
-            info = r.info("persistence")
+            info = r.info("persistence", target_nodes=r.get_default_node())
             if int(info.get("rdb_bgsave_in_progress", 0)) == 0:
                 return
             if monotonic() > deadline:
