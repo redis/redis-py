@@ -226,13 +226,10 @@ class Lock:
                 return True
             if not blocking:
                 return False
-            if stop_trying_at is not None:
-                remaining = stop_trying_at - asyncio.get_running_loop().time()
-                if remaining <= 0:
-                    return False
-                await asyncio.sleep(min(sleep, remaining))
-            else:
-                await asyncio.sleep(sleep)
+            next_try_at = asyncio.get_running_loop().time() + sleep
+            if stop_trying_at is not None and next_try_at > stop_trying_at:
+                return False
+            await asyncio.sleep(sleep)
 
     async def do_acquire(self, token: Union[str, bytes]) -> bool:
         if self.timeout:

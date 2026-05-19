@@ -229,13 +229,10 @@ class Lock:
                 return True
             if not blocking:
                 return False
-            if stop_trying_at is not None:
-                remaining = stop_trying_at - mod_time.monotonic()
-                if remaining <= 0:
-                    return False
-                mod_time.sleep(min(sleep, remaining))
-            else:
-                mod_time.sleep(sleep)
+            next_try_at = mod_time.monotonic() + sleep
+            if stop_trying_at is not None and next_try_at > stop_trying_at:
+                return False
+            mod_time.sleep(sleep)
 
     def do_acquire(self, token: str) -> bool:
         if self.timeout:
