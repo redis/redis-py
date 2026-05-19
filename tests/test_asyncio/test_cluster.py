@@ -1111,7 +1111,7 @@ class TestClusterRedisCommands:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
         while True:
-            info = await r.info("persistence")
+            info = await r.info("persistence", target_nodes=r.get_default_node())
             if int(info.get("rdb_bgsave_in_progress", 0)) == 0:
                 return
             if loop.time() > deadline:
