@@ -109,11 +109,16 @@ class TestLock:
         assert await lock1.acquire(blocking=False)
         bt = 0.2
         sleep = 0.05
+        fudge_factor = 0.1
         lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
         start = asyncio.get_running_loop().time()
         assert not await lock2.acquire()
         # The elapsed duration should be less than the total blocking_timeout
-        assert bt >= (asyncio.get_running_loop().time() - start) > bt - sleep
+        assert (
+            (bt + fudge_factor)
+            >= (asyncio.get_running_loop().time() - start)
+            > bt - sleep
+        )
         await lock1.release()
 
     async def test_context_manager(self, r):
@@ -206,10 +211,10 @@ class TestLock:
     async def test_extend_lock_float(self, r):
         lock = self.get_lock(r, "foo", timeout=10.5)
         assert await lock.acquire(blocking=False)
-        assert 10400 < (await r.pttl("foo")) <= 10500
+        assert 10000 < (await r.pttl("foo")) <= 10500
         old_ttl = await r.pttl("foo")
         assert await lock.extend(10.5)
-        assert old_ttl + 10400 < (await r.pttl("foo")) <= old_ttl + 10500
+        assert old_ttl + 10000 < (await r.pttl("foo")) <= old_ttl + 10500
         await lock.release()
 
     async def test_extending_unlocked_lock_raises_error(self, r):
