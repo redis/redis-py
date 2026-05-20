@@ -21,7 +21,13 @@ from redis._parsers.helpers import (
     zset_score_pairs,
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
-from redis.commands.core import DataPersistOptions, HotkeysMetricsTypes
+from redis.commands.core import (
+    ArrayAggregateOperations,
+    ArrayPredicateCombinator,
+    ArrayPredicateType,
+    DataPersistOptions,
+    HotkeysMetricsTypes,
+)
 from redis.commands.json.path import Path
 from redis.commands.search.field import TextField
 from redis.commands.search.query import Query
@@ -3376,6 +3382,588 @@ class TestRedisCommands:
         assert r.lrange("a", 0, -1) == [b"1", b"2", b"3"]
         assert r.lset("a", 1, "4")
         assert r.lrange("a", 0, 2) == [b"1", b"4", b"3"]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arset_at_index_zero(self, r):
+        assert r.arset("a", 0, "v0") == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arset_at_positive_index(self, r):
+        assert r.arset("a", 1, "v1") == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arset_multiple_values(self, r):
+        assert r.arset("a", 0, "v0", "v1", "v2") == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arset_negative_index(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        with pytest.raises(redis.ResponseError):
+            r.arset("a", -1, "vlast")
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_armset_sets_values_at_correct_indices(self, r):
+        assert r.armset("a", {0: "v0", 2: "v2", 4: "v4"}) == 3
+        assert r.arget("a", 0) == b"v0"
+        assert r.arget("a", 1) is None
+        assert r.arget("a", 2) == b"v2"
+        assert r.arget("a", 3) is None
+        assert r.arget("a", 4) == b"v4"
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_armset_single_pair(self, r):
+        assert r.armset("a", {3: "v3"}) == 1
+        assert r.arget("a", 3) == b"v3"
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_armset_overwrites_existing_indices(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        assert r.armset("a", {0: "new0", 1: "new1", 2: "new2"}) == 0
+        assert r.arget("a", 0) == b"new0"
+        assert r.arget("a", 1) == b"new1"
+        assert r.arget("a", 2) == b"new2"
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_armset_mixed_new_and_existing_indices(self, r):
+        r.arset("a", 0, "v0", "v1")
+        assert r.armset("a", {0: "new0", 2: "v2", 3: "v3"}) == 2
+        assert r.arget("a", 0) == b"new0"
+        assert r.arget("a", 1) == b"v1"
+        assert r.arget("a", 2) == b"v2"
+        assert r.arget("a", 3) == b"v3"
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arget_returns_value_at_index(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        assert r.arget("a", 0) == b"v0"
+        assert r.arget("a", 1) == b"v1"
+        assert r.arget("a", 2) == b"v2"
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arget_missing_key_returns_none(self, r):
+        assert r.arget("a", 0) is None
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arget_missing_index_returns_none(self, r):
+        r.arset("a", 0, "v0")
+        assert r.arget("a", 5) is None
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_armget_returns_values_at_indices(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        assert r.armget("a", 0, 1, 2) == [b"v0", b"v1", b"v2"]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_armget_preserves_requested_order(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        assert r.armget("a", 2, 0, 1) == [b"v2", b"v0", b"v1"]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_armget_missing_key_returns_nones(self, r):
+        assert r.armget("a", 0, 2, 5) == [None, None, None]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_armget_missing_indices_return_nones(self, r):
+        r.arset("a", 0, "v0", "v1")
+        assert r.armget("a", 0, 5, 1, 10) == [b"v0", None, b"v1", None]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_armget_single_index(self, r):
+        r.arset("a", 0, "v0", "v1")
+        assert r.armget("a", 1) == [b"v1"]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_argetrange_returns_array_slice(self, r):
+        r.arset("a", 0, "v0", "v1", "v2", "v3", "v4")
+        assert r.argetrange("a", 1, 3) == [b"v1", b"v2", b"v3"]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_argetrange_full_range(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        assert r.argetrange("a", 0, 2) == [b"v0", b"v1", b"v2"]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_argetrange_reversed_range(self, r):
+        r.arset("a", 0, "v0", "v1", "v2", "v3", "v4")
+        assert r.argetrange("a", 3, 1) == [b"v3", b"v2", b"v1"]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_argetrange_single_index(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        assert r.argetrange("a", 1, 1) == [b"v1"]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_argetrange_includes_empty_indices(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        r.ardel("a", 1)
+        assert r.argetrange("a", 0, 2) == [b"v0", None, b"v2"]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_argetrange_missing_key(self, r):
+        assert r.argetrange("a", 0, 4) == [None] * 5
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_argetrange_out_of_bounds(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        assert r.argetrange("a", 10, 20) == [None] * 11
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arscan_returns_index_value_pairs(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        assert r.arscan("a", 0, 2) == [[0, b"v0"], [1, b"v1"], [2, b"v2"]]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arscan_skips_empty_slots(self, r):
+        r.armset("a", {0: "a", 5: "b", 9: "c"})
+        assert r.arscan("a", 0, 10) == [[0, b"a"], [5, b"b"], [9, b"c"]]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arscan_reverse(self, r):
+        r.armset("a", {0: "a", 5: "b", 9: "c"})
+        assert r.arscan("a", 10, 0) == [[9, b"c"], [5, b"b"], [0, b"a"]]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arscan_with_limit(self, r):
+        r.armset("a", {0: "a", 5: "b", 9: "c"})
+        assert r.arscan("a", 0, 10, limit=2) == [[0, b"a"], [5, b"b"]]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arscan_missing_key_returns_empty(self, r):
+        assert r.arscan("a", 0, 10) == []
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_argrep_exact_match(self, r):
+        r.armset("a", {0: "boot", 1: "warn", 2: "error", 3: "boot"})
+        assert r.argrep("a", 0, 3, [(ArrayPredicateType.EXACT, "boot")]) == [0, 3]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_argrep_substring_match(self, r):
+        r.armset("a", {0: "boot: ok", 1: "warn: disk", 2: "ERROR: cpu"})
+        assert r.argrep("a", 0, 2, [(ArrayPredicateType.MATCH, "warn")]) == [1]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_argrep_glob_match(self, r):
+        r.armset("a", {0: "warn:disk", 1: "info:ok", 2: "warn:net"})
+        result = r.argrep("a", 0, 2, [(ArrayPredicateType.GLOB, "warn:*")])
+        assert result == [0, 2]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_argrep_regex_match(self, r):
+        r.armset("a", {0: "boot: ok", 1: "ERROR: cpu", 2: "error: net"})
+        result = r.argrep(
+            "a",
+            0,
+            2,
+            [(ArrayPredicateType.RE, r"^[A-Za-z]+: (cpu|net)$")],
+            nocase=True,
+        )
+        assert result == [1, 2]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_argrep_nocase(self, r):
+        r.armset("a", {0: "ERROR", 1: "info", 2: "Error"})
+        assert r.argrep(
+            "a", 0, 2, [(ArrayPredicateType.MATCH, "error")], nocase=True
+        ) == [0, 2]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_argrep_withvalues(self, r):
+        r.armset("a", {0: "ERROR: cpu", 1: "info", 2: "error: net"})
+        result = r.argrep(
+            "a",
+            0,
+            2,
+            [(ArrayPredicateType.MATCH, "error")],
+            withvalues=True,
+            nocase=True,
+        )
+        assert result == [[0, b"ERROR: cpu"], [2, b"error: net"]]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_argrep_limit(self, r):
+        r.armset("a", {0: "ERROR", 1: "info", 2: "Error"})
+        result = r.argrep(
+            "a",
+            0,
+            2,
+            [(ArrayPredicateType.MATCH, "error")],
+            limit=1,
+            nocase=True,
+        )
+        assert result == [0]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_argrep_combinator_and(self, r):
+        r.armset("a", {0: "warn: ok", 1: "error: ok", 2: "warn: bad"})
+        result = r.argrep(
+            "a",
+            0,
+            2,
+            [
+                (ArrayPredicateType.MATCH, "warn"),
+                (ArrayPredicateType.MATCH, "ok"),
+            ],
+            combinator=ArrayPredicateCombinator.AND,
+        )
+        assert result == [0]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_argrep_combinator_or(self, r):
+        r.armset("a", {0: "warn", 1: "info", 2: "error"})
+        result = r.argrep(
+            "a",
+            0,
+            2,
+            [
+                (ArrayPredicateType.EXACT, "warn"),
+                (ArrayPredicateType.EXACT, "error"),
+            ],
+            combinator=ArrayPredicateCombinator.OR,
+        )
+        assert result == [0, 2]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_argrep_missing_key(self, r):
+        assert r.argrep("a", 0, 10, [(ArrayPredicateType.MATCH, "x")]) == []
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_argrep_reverse(self, r):
+        r.armset("a", {0: "warn", 1: "info", 2: "warn"})
+        assert r.argrep("a", 2, 0, [(ArrayPredicateType.EXACT, "warn")]) == [2, 0]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_ardel_single_index(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        assert r.ardel("a", 1) == 1
+        assert r.arget("a", 1) is None
+        assert r.arget("a", 0) == b"v0"
+        assert r.arget("a", 2) == b"v2"
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_ardel_multiple_indices(self, r):
+        r.arset("a", 0, "v0", "v1", "v2", "v3")
+        assert r.ardel("a", 0, 2, 3) == 3
+        assert r.arget("a", 0) is None
+        assert r.arget("a", 1) == b"v1"
+        assert r.arget("a", 2) is None
+        assert r.arget("a", 3) is None
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_ardel_non_existing_index(self, r):
+        r.arset("a", 0, "v0", "v1")
+        assert r.ardel("a", 10) == 0
+        assert r.arget("a", 0) == b"v0"
+        assert r.arget("a", 1) == b"v1"
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_ardel_mixed_existing_and_missing(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        assert r.ardel("a", 0, 10, 2) == 2
+        assert r.arget("a", 0) is None
+        assert r.arget("a", 1) == b"v1"
+        assert r.arget("a", 2) is None
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_ardelrange_single_range(self, r):
+        r.arset("a", 0, "v0", "v1", "v2", "v3", "v4")
+        assert r.ardelrange("a", (1, 3)) == 3
+        assert r.arget("a", 0) == b"v0"
+        assert r.arget("a", 1) is None
+        assert r.arget("a", 2) is None
+        assert r.arget("a", 3) is None
+        assert r.arget("a", 4) == b"v4"
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_ardelrange_multiple_ranges(self, r):
+        r.arset("a", 0, "v0", "v1", "v2", "v3", "v4", "v5")
+        assert r.ardelrange("a", (0, 1), (4, 5)) == 4
+        assert r.arget("a", 0) is None
+        assert r.arget("a", 1) is None
+        assert r.arget("a", 2) == b"v2"
+        assert r.arget("a", 3) == b"v3"
+        assert r.arget("a", 4) is None
+        assert r.arget("a", 5) is None
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_ardelrange_reversed_range(self, r):
+        r.arset("a", 0, "v0", "v1", "v2", "v3", "v4")
+        assert r.ardelrange("a", (3, 1)) == 3
+        assert r.arget("a", 0) == b"v0"
+        assert r.arget("a", 1) is None
+        assert r.arget("a", 2) is None
+        assert r.arget("a", 3) is None
+        assert r.arget("a", 4) == b"v4"
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_ardelrange_overlapping_ranges(self, r):
+        r.arset("a", 0, "v0", "v1", "v2", "v3", "v4")
+        assert r.ardelrange("a", (0, 2), (1, 3)) == 4
+        assert r.arget("a", 0) is None
+        assert r.arget("a", 1) is None
+        assert r.arget("a", 2) is None
+        assert r.arget("a", 3) is None
+        assert r.arget("a", 4) == b"v4"
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_ardelrange_missing_key(self, r):
+        assert r.ardelrange("a", (0, 4)) == 0
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_ardelrange_empty_indices(self, r):
+        r.arset("a", 0, "v0")
+        assert r.ardelrange("a", (5, 10)) == 0
+        assert r.arget("a", 0) == b"v0"
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arcount_missing_key(self, r):
+        assert r.arcount("a") == 0
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arcount_returns_number_of_elements(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        assert r.arcount("a") == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arcount_after_delete(self, r):
+        r.arset("a", 0, "v0", "v1", "v2", "v3")
+        r.ardel("a", 1, 3)
+        assert r.arcount("a") == 2
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arlen_missing_key(self, r):
+        assert r.arlen("a") == 0
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arlen_returns_length(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        assert r.arlen("a") == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arlen_uses_max_index_plus_one(self, r):
+        r.arset("a", 7, "v7")
+        assert r.arlen("a") == 8
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arlen_unchanged_after_delete(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        r.ardel("a", 1)
+        assert r.arlen("a") == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arinfo_returns_basic_fields(self, r):
+        r.armset("a", {0: "x", 1: "y", 100: "z"})
+        info = r.arinfo("a")
+        assert isinstance(info, dict)
+        assert info["count"] == 3
+        assert info["len"] == 101
+        for field in ("next-insert-index", "slices", "slice-size"):
+            assert field in info
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arinfo_full_includes_slice_stats(self, r):
+        r.armset("a", {0: "x", 1: "y", 100: "z"})
+        info = r.arinfo("a", full=True)
+        for field in (
+            "dense-slices",
+            "sparse-slices",
+            "avg-dense-size",
+            "avg-dense-fill",
+            "avg-sparse-size",
+        ):
+            assert field in info
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arinfo_missing_key_raises(self, r):
+        with pytest.raises(redis.ResponseError):
+            r.arinfo("a")
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arnext_missing_key(self, r):
+        assert r.arnext("a") == 0
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arnext_returns_next_index(self, r):
+        r.arinsert("a", "v0", "v1", "v2")
+        assert r.arnext("a") == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arnext_after_delete(self, r):
+        r.arinsert("a", "v0", "v1", "v2")
+        r.ardel("a", 1)
+        assert r.arnext("a") == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arseek_missing_key_returns_zero(self, r):
+        assert r.arseek("a", 5) == 0
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arseek_repositions_insert_cursor(self, r):
+        r.arinsert("a", "v0")
+        assert r.arseek("a", 10) == 1
+        assert r.arnext("a") == 10
+        r.arinsert("a", "v10")
+        assert r.arget("a", 10) == b"v10"
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arseek_followed_by_arnext(self, r):
+        r.arinsert("a", "v0", "v1")
+        assert r.arseek("a", 7) == 1
+        assert r.arnext("a") == 7
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arinsert_single_value(self, r):
+        assert r.arinsert("a", "v0") == 0
+        assert r.arget("a", 0) == b"v0"
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arinsert_multiple_values(self, r):
+        assert r.arinsert("a", "v0", "v1", "v2") == 2
+        assert r.arget("a", 0) == b"v0"
+        assert r.arget("a", 1) == b"v1"
+        assert r.arget("a", 2) == b"v2"
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arinsert_advances_cursor(self, r):
+        r.arinsert("a", "v0", "v1")
+        assert r.arnext("a") == 2
+        assert r.arinsert("a", "v2") == 2
+        assert r.arnext("a") == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arring_inserts_sequentially(self, r):
+        assert r.arring("a", 3, "v0") == 0
+        assert r.arring("a", 3, "v1") == 1
+        assert r.arring("a", 3, "v2") == 2
+        assert r.arget("a", 0) == b"v0"
+        assert r.arget("a", 1) == b"v1"
+        assert r.arget("a", 2) == b"v2"
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arring_wraps_when_full(self, r):
+        r.arring("a", 3, "v0", "v1", "v2")
+        assert r.arring("a", 3, "v3") == 0
+        assert r.arget("a", 0) == b"v3"
+        assert r.arget("a", 1) == b"v1"
+        assert r.arget("a", 2) == b"v2"
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arring_multiple_values_in_one_call(self, r):
+        assert r.arring("a", 4, "v0", "v1", "v2") == 2
+        assert r.arget("a", 0) == b"v0"
+        assert r.arget("a", 2) == b"v2"
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arring_returns_last_inserted_index(self, r):
+        assert r.arring("a", 5, "v0", "v1", "v2", "v3", "v4", "v5") == 0
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arring_truncates_on_smaller_size(self, r):
+        r.arring("a", 5, "v0", "v1", "v2", "v3", "v4")
+        assert r.arring("a", 3, "v5") == 0
+        assert r.arlen("a") == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arlastitems_returns_last_elements(self, r):
+        r.arinsert("a", "v0", "v1", "v2", "v3", "v4")
+        assert r.arlastitems("a", 3) == [b"v2", b"v3", b"v4"]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arlastitems_reverse_order(self, r):
+        r.arinsert("a", "v0", "v1", "v2", "v3", "v4")
+        assert r.arlastitems("a", 3, rev=True) == [b"v4", b"v3", b"v2"]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arlastitems_count_greater_than_size(self, r):
+        r.arinsert("a", "v0", "v1", "v2")
+        assert r.arlastitems("a", 10) == [b"v0", b"v1", b"v2"]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arlastitems_count_greater_than_size_reverse(self, r):
+        r.arinsert("a", "v0", "v1", "v2")
+        assert r.arlastitems("a", 10, rev=True) == [b"v2", b"v1", b"v0"]
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arlastitems_missing_key(self, r):
+        assert r.arlastitems("a", 3) == []
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arlastitems_zero_count(self, r):
+        r.arinsert("a", "v0", "v1", "v2")
+        assert r.arlastitems("a", 0) == []
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arop_sum(self, r):
+        r.arset("a", 0, 1, 2, 3, 4, 5)
+        assert r.arop("a", 0, 4, ArrayAggregateOperations.SUM) == b"15"
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arop_min_max(self, r):
+        r.arset("a", 0, 5, 1, 4, 2, 3)
+        assert r.arop("a", 0, 4, ArrayAggregateOperations.MIN) == b"1"
+        assert r.arop("a", 0, 4, ArrayAggregateOperations.MAX) == b"5"
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arop_bitwise(self, r):
+        r.arset("a", 0, 1, 2, 3, 4, 5)
+        assert r.arop("a", 0, 4, ArrayAggregateOperations.AND) == 0
+        assert r.arop("a", 0, 4, ArrayAggregateOperations.OR) == 7
+        assert r.arop("a", 0, 4, ArrayAggregateOperations.XOR) == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arop_match(self, r):
+        r.arset("a", 0, 1, 2, 3, 2, 1)
+        assert r.arop("a", 0, 4, ArrayAggregateOperations.MATCH, 2) == 2
+        assert r.arop("a", 0, 4, ArrayAggregateOperations.MATCH, 7) == 0
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arop_used(self, r):
+        r.arset("a", 0, "v0", "v1", "v2")
+        assert r.arop("a", 0, 2, ArrayAggregateOperations.USED) == 3
+        r.ardel("a", 1)
+        assert r.arop("a", 0, 2, ArrayAggregateOperations.USED) == 2
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arop_reversed_range(self, r):
+        r.arset("a", 0, 1, 2, 3, 4, 5)
+        assert r.arop("a", 4, 0, ArrayAggregateOperations.SUM) == b"15"
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arop_non_numeric_values(self, r):
+        r.arset("a", 0, "x", "y", "z")
+        assert r.arop("a", 0, 2, ArrayAggregateOperations.SUM) is None
+        assert r.arop("a", 0, 2, ArrayAggregateOperations.MIN) is None
+        assert r.arop("a", 0, 2, ArrayAggregateOperations.MAX) is None
+        assert r.arop("a", 0, 2, ArrayAggregateOperations.USED) == 3
+        assert r.arop("a", 0, 2, ArrayAggregateOperations.MATCH, "y") == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arop_mixed_numeric_non_numeric(self, r):
+        r.arset("a", 0, 1, "x", 3)
+        assert r.arop("a", 0, 2, ArrayAggregateOperations.SUM) == b"4"
+        assert r.arop("a", 0, 2, ArrayAggregateOperations.MIN) == b"1"
+        assert r.arop("a", 0, 2, ArrayAggregateOperations.USED) == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arop_empty_range(self, r):
+        r.arset("a", 0, 1, 2, 3)
+        assert r.arop("a", 100, 200, ArrayAggregateOperations.SUM) is None
+        assert r.arop("a", 100, 200, ArrayAggregateOperations.AND) is None
+        assert r.arop("a", 100, 200, ArrayAggregateOperations.OR) is None
+        assert r.arop("a", 100, 200, ArrayAggregateOperations.XOR) is None
+        assert r.arop("a", 100, 200, ArrayAggregateOperations.USED) == 0
+        assert r.arop("a", 100, 200, ArrayAggregateOperations.MATCH, 1) == 0
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arop_missing_key(self, r):
+        assert r.arop("a", 0, 4, ArrayAggregateOperations.SUM) is None
+        assert r.arop("a", 0, 4, ArrayAggregateOperations.AND) is None
+        assert r.arop("a", 0, 4, ArrayAggregateOperations.USED) == 0
+
+    @skip_if_server_version_lt("8.7.2")
+    def test_arop_match_requires_value(self, r):
+        r.arset("a", 0, 1, 2, 3)
+        with pytest.raises(redis.ResponseError):
+            r.arop("a", 0, 2, ArrayAggregateOperations.MATCH)
 
     def test_ltrim(self, r):
         r.rpush("a", "1", "2", "3")
