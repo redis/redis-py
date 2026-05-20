@@ -1,6 +1,7 @@
 import time
 
 import pytest
+from redis import lock as lock_module
 from redis.client import Redis
 from redis.exceptions import LockError, LockNotOwnedError
 from redis.lock import Lock
@@ -8,10 +9,29 @@ from redis.lock import Lock
 from .conftest import _get_client
 
 
+class FakeLockTime:
+    def __init__(self):
+        self.now = 0
+        self.sleeps = []
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, sleep):
+        self.sleeps.append(sleep)
+        self.now += sleep
+
+
 class TestLock:
     @pytest.fixture()
     def r_decoded(self, request):
         return _get_client(Redis, request=request, decode_responses=True)
+
+    @pytest.fixture()
+    def fake_lock_time(self, monkeypatch):
+        fake_time = FakeLockTime()
+        monkeypatch.setattr(lock_module, "mod_time", fake_time)
+        return fake_time
 
     def get_lock(self, redis, *args, **kwargs):
         kwargs["lock_class"] = Lock
@@ -96,18 +116,19 @@ class TestLock:
         assert 8 < r.pttl("foo") <= 9500
         lock.release()
 
-    def test_blocking_timeout(self, r):
+    def test_blocking_timeout(self, r, fake_lock_time):
         lock1 = self.get_lock(r, "foo")
         assert lock1.acquire(blocking=False)
-        bt = 0.4
-        sleep = 0.05
-        fudge_factor = 0.2
-        lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
-        start = time.monotonic()
-        assert not lock2.acquire()
-        # The elapsed duration should be less than the total blocking_timeout
-        assert (bt + fudge_factor) > (time.monotonic() - start) > bt - sleep
-        lock1.release()
+        try:
+            bt = 0.4
+            sleep = 0.05
+            lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
+            assert not lock2.acquire()
+            assert fake_lock_time.now == pytest.approx(bt)
+            assert fake_lock_time.now > bt - sleep
+            assert fake_lock_time.sleeps == [sleep] * 8
+        finally:
+            lock1.release()
 
     def test_context_manager(self, r):
         # blocking_timeout prevents a deadlock if the lock can't be acquired
@@ -116,16 +137,15 @@ class TestLock:
             assert r.get("foo") == lock.local.token
         assert r.get("foo") is None
 
-    def test_context_manager_blocking_timeout(self, r):
+    def test_context_manager_blocking_timeout(self, r, fake_lock_time):
         with self.get_lock(r, "foo", blocking=False):
             bt = 0.4
             sleep = 0.05
-            fudge_factor = 0.2
             lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
-            start = time.monotonic()
             assert not lock2.acquire()
-            # The elapsed duration should be less than the total blocking_timeout
-            assert (bt + fudge_factor) > (time.monotonic() - start) > bt - sleep
+            assert fake_lock_time.now == pytest.approx(bt)
+            assert fake_lock_time.now > bt - sleep
+            assert fake_lock_time.sleeps == [sleep] * 8
 
     def test_context_manager_raises_when_locked_not_acquired(self, r):
         r.set("foo", "bar")
@@ -159,18 +179,18 @@ class TestLock:
             ) as lock:
                 lock.release()
 
-    def test_high_sleep_small_blocking_timeout(self, r):
+    def test_high_sleep_small_blocking_timeout(self, r, fake_lock_time):
         lock1 = self.get_lock(r, "foo")
         assert lock1.acquire(blocking=False)
-        sleep = 60
-        bt = 1
-        lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
-        start = time.monotonic()
-        assert not lock2.acquire()
-        # the elapsed timed is less than the blocking_timeout as the lock is
-        # unattainable given the sleep/blocking_timeout configuration
-        assert bt > (time.monotonic() - start)
-        lock1.release()
+        try:
+            sleep = 60
+            bt = 1
+            lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
+            assert not lock2.acquire()
+            assert fake_lock_time.now == 0
+            assert fake_lock_time.sleeps == []
+        finally:
+            lock1.release()
 
     def test_releasing_unlocked_lock_raises_error(self, r):
         lock = self.get_lock(r, "foo")
