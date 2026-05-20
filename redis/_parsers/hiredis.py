@@ -1,3 +1,4 @@
+import select
 import socket
 from logging import getLogger
 from typing import Callable, List, Optional, TypedDict, Union
@@ -22,6 +23,12 @@ from .socket import (
 # Using `False` or `None` is not reliable, given that the parser can
 # return `False` or `None` for legitimate reasons from RESP payloads.
 NOT_ENOUGH_DATA = object()
+
+
+def _socket_can_read(sock, timeout):
+    if hasattr(sock, "pending") and sock.pending():
+        return True
+    return bool(select.select([sock], [], [], timeout)[0])
 
 
 class _HiredisReaderArgs(TypedDict, total=False):
@@ -72,7 +79,6 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
         if connection.encoder.decode_responses:
             kwargs["encoding"] = connection.encoder.encoding
         self._reader = hiredis.Reader(**kwargs)
-        self._next_response = NOT_ENOUGH_DATA
 
         try:
             self._hiredis_PushNotificationType = hiredis.PushNotification
@@ -83,17 +89,16 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
     def on_disconnect(self):
         self._sock = None
         self._reader = None
-        self._next_response = NOT_ENOUGH_DATA
 
     def can_read(self, timeout):
         if not self._reader:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
-        if self._next_response is NOT_ENOUGH_DATA:
-            self._next_response = self._reader.gets()
-            if self._next_response is NOT_ENOUGH_DATA:
-                return self.read_from_socket(timeout=timeout, raise_on_timeout=False)
-        return True
+        if self._reader.has_data():
+            return True
+        if timeout is SENTINEL:
+            timeout = self._socket_timeout
+        return _socket_can_read(self._sock, timeout)
 
     def read_from_socket(self, timeout=SENTINEL, raise_on_timeout=True):
         sock = self._sock
@@ -134,26 +139,6 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
         if not self._reader:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
-        # _next_response might be cached from a can_read() call
-        if self._next_response is not NOT_ENOUGH_DATA:
-            response = self._next_response
-            self._next_response = NOT_ENOUGH_DATA
-            if self._hiredis_PushNotificationType is not None and isinstance(
-                response, self._hiredis_PushNotificationType
-            ):
-                response = self.handle_push_response(response)
-
-                # if this is a push request return the push response
-                if push_request:
-                    return response
-
-                return self.read_response(
-                    disable_decoding=disable_decoding,
-                    push_request=push_request,
-                    timeout=timeout,
-                )
-            return response
-
         if disable_decoding:
             response = self._reader.gets(False)
         else:
@@ -193,14 +178,13 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
 class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
     """Async implementation of parser class for connections using Hiredis"""
 
-    __slots__ = ("_reader", "_next_response")
+    __slots__ = ("_reader",)
 
     def __init__(self, socket_read_size: int):
         if not HIREDIS_AVAILABLE:
             raise RedisError("Hiredis is not available.")
         super().__init__(socket_read_size=socket_read_size)
         self._reader = None
-        self._next_response = NOT_ENOUGH_DATA
         self.pubsub_push_handler_func = self.handle_pubsub_push_response
         self.invalidation_push_handler_func = None
         self._hiredis_PushNotificationType = None
@@ -224,7 +208,6 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
             kwargs["errors"] = connection.encoder.encoding_errors
 
         self._reader = hiredis.Reader(**kwargs)
-        self._next_response = NOT_ENOUGH_DATA
         self._connected = True
 
         try:
@@ -237,7 +220,6 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
 
     def on_disconnect(self):
         self._connected = False
-        self._next_response = NOT_ENOUGH_DATA
 
     @deprecated_function(
         version="8.0.0", reason="Use can_read() instead", name="can_read_destructive"
@@ -248,9 +230,7 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
     async def can_read(self):
         if not self._connected:
             raise OSError("Buffer is closed.")
-        if self._next_response is NOT_ENOUGH_DATA:
-            self._next_response = self._reader.gets()
-        if self._next_response is not NOT_ENOUGH_DATA:
+        if self._reader.has_data():
             return True
         if self._stream.at_eof():
             return True
@@ -274,22 +254,17 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         if not self._connected:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
 
-        # _next_response might be cached from a can_read() call
-        if self._next_response is not NOT_ENOUGH_DATA:
-            response = self._next_response
-            self._next_response = NOT_ENOUGH_DATA
+        if disable_decoding:
+            response = self._reader.gets(False)
         else:
+            response = self._reader.gets()
+
+        while response is NOT_ENOUGH_DATA:
+            await self.read_from_socket()
             if disable_decoding:
                 response = self._reader.gets(False)
             else:
                 response = self._reader.gets()
-
-            while response is NOT_ENOUGH_DATA:
-                await self.read_from_socket()
-                if disable_decoding:
-                    response = self._reader.gets(False)
-                else:
-                    response = self._reader.gets()
 
         # if the response is a ConnectionError or the response is a list and
         # the first item is a ConnectionError, raise it as something bad
