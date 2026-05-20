@@ -4074,6 +4074,9 @@ class PipelineStrategy(AbstractStrategy):
         pipe_command_flags = pipe.command_flags
         command_flags = self.command_flags
 
+        policy_cache = {}
+        SENTINEL = object()
+
         try:
             # as we move through each command that still needs to be processed,
             # we figure out the slot number that command maps to, then from
@@ -4081,9 +4084,14 @@ class PipelineStrategy(AbstractStrategy):
             for c in attempt:
                 args = c.args
                 arg0 = args[0]
-                command_policies = policy_resolver.resolve(
-                    arg0.lower()
-                )
+
+                command_policies = policy_cache.get(arg0, SENTINEL)
+                if command_policies is SENTINEL:
+                    command_policies = policy_resolver.resolve(
+                        arg0.lower()
+                    )
+                    policy_cache[arg0] = command_policies
+
                 # refer to our internal node -> slot table that
                 # tells us where a given command should route to.
                 # (it might be possible we have a cached node that no longer
