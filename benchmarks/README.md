@@ -36,6 +36,52 @@ and gRPC exporter scenarios:
 docker compose -f docs/examples/opentelemetry/docker-compose.yml up -d
 ```
 
+Choose one way to run the benchmark and use the matching examples below.
+
+### Run as a module
+
+If you prefer to run the benchmark with `python -m`, use these commands.
+
+Run one scenario at a time:
+
+```shell
+python -m benchmarks.otel_benchmark --scenario otel_disabled
+python -m benchmarks.otel_benchmark --scenario otel_noop
+python -m benchmarks.otel_benchmark --scenario otel_inmemory
+python -m benchmarks.otel_benchmark --scenario otel_enabled_http
+python -m benchmarks.otel_benchmark --scenario otel_enabled_grpc
+```
+
+For a shorter smoke run while checking setup, lower the duration and iteration
+count:
+
+```shell
+python -m benchmarks.otel_benchmark --scenario otel_enabled_grpc --duration 10 --warmup 2 --iterations 1
+```
+
+Run the baseline scenario with a redis-py release tag:
+
+```shell
+python -m benchmarks.otel_benchmark --scenario baseline --baseline-tag v5.2.1
+```
+
+Use `--async` to run the async client variant:
+
+```shell
+python -m benchmarks.otel_benchmark --scenario otel_enabled_http --async
+```
+
+By default the benchmark sends exporter traffic to `localhost`. Set
+`OTEL_COLLECTOR_HOST` when the collector is on another host:
+
+```shell
+OTEL_COLLECTOR_HOST=collector.example.com python -m benchmarks.otel_benchmark --scenario otel_enabled_grpc
+```
+
+### Run the file directly
+
+If you prefer to run the Python file directly, use these commands instead.
+
 Run one scenario at a time:
 
 ```shell
