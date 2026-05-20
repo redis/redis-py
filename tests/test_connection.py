@@ -1,7 +1,6 @@
 import copy
 import platform
 import socket
-import sys
 import threading
 import types
 from errno import ECONNREFUSED
@@ -348,7 +347,6 @@ def test_pool_auto_close(request, from_url):
     r1.close()
 
 
-@pytest.mark.skipif(sys.version_info == (3, 9), reason="Flacky test on Python 3.9")
 @pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
 def test_redis_connection_pool(request, from_url):
     """Verify that basic Redis instances using `connection_pool`
@@ -369,9 +367,10 @@ def test_redis_connection_pool(request, from_url):
 
     called = 0
 
-    def mock_disconnect(_):
+    def mock_disconnect(target_pool):
         nonlocal called
-        called += 1
+        if pool is not None and target_pool is pool:
+            called += 1
 
     with patch.object(ConnectionPool, "disconnect", mock_disconnect):
         with get_redis_connection() as r1:
@@ -401,9 +400,10 @@ def test_redis_from_pool(request, from_url):
 
     called = 0
 
-    def mock_disconnect(_):
+    def mock_disconnect(target_pool):
         nonlocal called
-        called += 1
+        if pool is not None and target_pool is pool:
+            called += 1
 
     with patch.object(ConnectionPool, "disconnect", mock_disconnect):
         with get_redis_connection() as r1:
