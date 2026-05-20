@@ -5546,9 +5546,7 @@ class ArrayCommands(CommandsProtocol):
         start: int,
         end: int,
         limit: int | None = None,
-    ) -> (
-        list[list[int | bytes | str]] | Awaitable[list[list[int | bytes | str]]]
-    ):
+    ) -> list[list[int | bytes | str]] | Awaitable[list[list[int | bytes | str]]]:
         """
         Iterate populated elements of the array stored at ``name`` in the
         inclusive range [``start``, ``end``] and return a list of
