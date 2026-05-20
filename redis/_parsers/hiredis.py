@@ -193,13 +193,14 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
 class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
     """Async implementation of parser class for connections using Hiredis"""
 
-    __slots__ = ("_reader",)
+    __slots__ = ("_reader", "_next_response")
 
     def __init__(self, socket_read_size: int):
         if not HIREDIS_AVAILABLE:
             raise RedisError("Hiredis is not available.")
         super().__init__(socket_read_size=socket_read_size)
         self._reader = None
+        self._next_response = NOT_ENOUGH_DATA
         self.pubsub_push_handler_func = self.handle_pubsub_push_response
         self.invalidation_push_handler_func = None
         self._hiredis_PushNotificationType = None
@@ -223,6 +224,7 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
             kwargs["errors"] = connection.encoder.encoding_errors
 
         self._reader = hiredis.Reader(**kwargs)
+        self._next_response = NOT_ENOUGH_DATA
         self._connected = True
 
         try:
@@ -235,6 +237,7 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
 
     def on_disconnect(self):
         self._connected = False
+        self._next_response = NOT_ENOUGH_DATA
 
     @deprecated_function(
         version="8.0.0", reason="Use can_read() instead", name="can_read_destructive"
@@ -245,7 +248,9 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
     async def can_read(self):
         if not self._connected:
             raise OSError("Buffer is closed.")
-        if self._reader.gets() is not NOT_ENOUGH_DATA:
+        if self._next_response is NOT_ENOUGH_DATA:
+            self._next_response = self._reader.gets()
+        if self._next_response is not NOT_ENOUGH_DATA:
             return True
         if self._stream.at_eof():
             return True
@@ -269,17 +274,22 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         if not self._connected:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
 
-        if disable_decoding:
-            response = self._reader.gets(False)
+        # _next_response might be cached from a can_read() call
+        if self._next_response is not NOT_ENOUGH_DATA:
+            response = self._next_response
+            self._next_response = NOT_ENOUGH_DATA
         else:
-            response = self._reader.gets()
-
-        while response is NOT_ENOUGH_DATA:
-            await self.read_from_socket()
             if disable_decoding:
                 response = self._reader.gets(False)
             else:
                 response = self._reader.gets()
+
+            while response is NOT_ENOUGH_DATA:
+                await self.read_from_socket()
+                if disable_decoding:
+                    response = self._reader.gets(False)
+                else:
+                    response = self._reader.gets()
 
         # if the response is a ConnectionError or the response is a list and
         # the first item is a ConnectionError, raise it as something bad
