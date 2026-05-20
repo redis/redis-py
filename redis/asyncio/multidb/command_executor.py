@@ -1,6 +1,6 @@
 from abc import abstractmethod
-from asyncio import iscoroutinefunction
 from datetime import datetime
+from inspect import iscoroutinefunction
 from typing import Any, Awaitable, Callable, List, Optional, Union
 
 from redis.asyncio import RedisCluster
