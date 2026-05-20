@@ -1709,10 +1709,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             if self._cache.get(self._current_command_cache_key):
                 entry = self._cache.get(self._current_command_cache_key)
 
-                if entry.connection_ref != self._conn:
-                    with self._pool_lock:
-                        while entry.connection_ref.can_read():
-                            entry.connection_ref.read_response(push_request=True)
+                with self._pool_lock:
+                    while entry.connection_ref.can_read():
+                        entry.connection_ref.read_response(push_request=True)
 
                 # Re-check: if the entry was invalidated during the drain,
                 # fall through to send the command over the network.
