@@ -1,0 +1,1 @@
+opentelemetry-exporter-otlp-proto-grpc>=1.30.0
