@@ -413,7 +413,7 @@ class AbstractConnection:
                 # Use the passed function redis_connect_func
                 (
                     await self.redis_connect_func(self)
-                    if asyncio.iscoroutinefunction(self.redis_connect_func)
+                    if inspect.iscoroutinefunction(self.redis_connect_func)
                     else self.redis_connect_func(self)
                 )
         except RedisError:
