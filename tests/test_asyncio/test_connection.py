@@ -31,9 +31,7 @@ from .mocks import MockStream
 
 
 class DummyHiredisReader:
-    def __init__(
-        self, response=NOT_ENOUGH_DATA, decoded_response=None, has_data=False
-    ):
+    def __init__(self, response=NOT_ENOUGH_DATA, decoded_response=None, has_data=False):
         self.responses = [response]
         self.decoded_response = decoded_response
         self.has_data_value = has_data
