@@ -598,7 +598,7 @@ class TestRedisClusterObj:
                         elif connection.port == 7007:
                             parse_response.successful_calls += 1
 
-                    def initialize_mock(self):
+                    def initialize_mock(self, *args, **kwargs):
                         # start with all slots mapped to 7006
                         self.nodes_cache = {node_7006.name: node_7006}
                         self.default_node = node_7006
@@ -609,7 +609,7 @@ class TestRedisClusterObj:
 
                         # After the first connection fails, a reinitialize
                         # should follow the cluster to 7007
-                        def map_7007(self):
+                        def map_7007(self, *args, **kwargs):
                             self.nodes_cache = {node_7007.name: node_7007}
                             self.default_node = node_7007
                             self.slots_cache = {}
@@ -2898,6 +2898,28 @@ class TestNodesManager:
                 assert n_manager.slots_cache[i][1].port in all_ports
 
         assert len(n_manager.nodes_cache) == 6
+
+    @pytest.mark.onlycluster
+    def test_initialize_uses_shuffled_startup_nodes(self, r):
+        startup_nodes = list(r.nodes_manager.startup_nodes.values())
+        first_shuffled_node = startup_nodes[-1]
+        redis_connection = first_shuffled_node.redis_connection
+
+        with (
+            patch(
+                "redis.cluster.random.shuffle",
+                side_effect=lambda nodes: nodes.reverse(),
+            ) as shuffle,
+            patch.object(
+                redis_connection,
+                "execute_command",
+                wraps=redis_connection.execute_command,
+            ) as execute_command,
+        ):
+            r.nodes_manager.initialize(disconnect_startup_nodes_pools=False)
+
+        shuffle.assert_called_once()
+        execute_command.assert_any_call("CLUSTER SLOTS")
 
     @pytest.mark.fixed_client
     def test_init_promote_server_type_for_node_in_cache(self):
