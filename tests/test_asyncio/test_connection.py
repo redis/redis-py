@@ -32,10 +32,12 @@ from .mocks import MockStream
 
 class DummyHiredisReader:
     def __init__(self, response=NOT_ENOUGH_DATA):
-        self.response = response
+        self.responses = [response]
 
-    def gets(self):
-        return self.response
+    def gets(self, *args):
+        if self.responses:
+            return self.responses.pop(0)
+        return NOT_ENOUGH_DATA
 
 
 class DummyAsyncStream:
@@ -56,7 +58,9 @@ def make_async_hiredis_parser(stream, response=NOT_ENOUGH_DATA):
     parser = _AsyncHiredisParser.__new__(_AsyncHiredisParser)
     parser._connected = True
     parser._reader = DummyHiredisReader(response)
+    parser._next_response = NOT_ENOUGH_DATA
     parser._stream = stream
+    parser._hiredis_PushNotificationType = None
     return parser
 
 
@@ -92,6 +96,15 @@ async def test_async_hiredis_can_read_detects_reader_response():
     parser = make_async_hiredis_parser(stream, response=b"OK")
 
     assert await parser.can_read() is True
+    assert stream.read_called is False
+
+
+async def test_async_hiredis_can_read_caches_reader_response():
+    stream = DummyAsyncStream()
+    parser = make_async_hiredis_parser(stream, response=b"OK")
+
+    assert await parser.can_read() is True
+    assert await parser.read_response() == b"OK"
     assert stream.read_called is False
 
 
