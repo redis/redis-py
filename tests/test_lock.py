@@ -119,15 +119,16 @@ class TestLock:
     def test_blocking_timeout(self, r, fake_lock_time):
         lock1 = self.get_lock(r, "foo")
         assert lock1.acquire(blocking=False)
-        bt = 0.4
-        sleep = 0.05
-        fudge_factor = 0.2
-        lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
-        start = time.monotonic()
-        assert not lock2.acquire()
-        # The elapsed duration should be less than the total blocking_timeout
-        assert (bt + fudge_factor) > (time.monotonic() - start) > bt - sleep
-        lock1.release()
+        try:
+            bt = 0.4
+            sleep = 0.05
+            lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
+            assert not lock2.acquire()
+            assert fake_lock_time.now == pytest.approx(bt)
+            assert fake_lock_time.now > bt - sleep
+            assert fake_lock_time.sleeps == [sleep] * 8
+        finally:
+            lock1.release()
 
     def test_context_manager(self, r):
         # blocking_timeout prevents a deadlock if the lock can't be acquired
@@ -140,7 +141,6 @@ class TestLock:
         with self.get_lock(r, "foo", blocking=False):
             bt = 0.4
             sleep = 0.05
-            fudge_factor = 0.2
             lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
             assert not lock2.acquire()
             assert fake_lock_time.now == pytest.approx(bt)
