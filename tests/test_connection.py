@@ -13,6 +13,7 @@ import pytest
 import redis
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
+from redis._parsers.hiredis import NOT_ENOUGH_DATA
 from redis._parsers.socket import SENTINEL
 from redis.backoff import NoBackoff
 from redis.cache import (
@@ -50,6 +51,37 @@ from .conftest import skip_if_server_version_lt
 from .mocks import MockSocket
 
 
+class DummyHiredisReader:
+    def __init__(
+        self, response=NOT_ENOUGH_DATA, decoded_response=None, has_data=False
+    ):
+        self.responses = [response]
+        self.decoded_response = decoded_response
+        self.has_data_value = has_data
+
+    def has_data(self):
+        return self.has_data_value
+
+    def gets(self, *args):
+        if self.responses:
+            response = self.responses.pop(0)
+            if args == (False,) or self.decoded_response is None:
+                return response
+            return self.decoded_response
+        return NOT_ENOUGH_DATA
+
+
+def make_hiredis_parser(
+    response=NOT_ENOUGH_DATA, decoded_response=None, has_data=False
+):
+    parser = _HiredisParser.__new__(_HiredisParser)
+    parser._reader = DummyHiredisReader(response, decoded_response, has_data)
+    parser._hiredis_PushNotificationType = None
+    parser._sock = mock.Mock()
+    parser._socket_timeout = None
+    return parser
+
+
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
 def test_invalid_response(r):
@@ -58,6 +90,46 @@ def test_invalid_response(r):
     with mock.patch.object(parser._buffer, "readline", return_value=raw):
         with pytest.raises(InvalidResponse, match=f"Protocol Error: {raw!r}"):
             parser.read_response()
+
+
+def test_hiredis_can_read_detects_reader_data():
+    parser = make_hiredis_parser(response=b"OK", has_data=True)
+
+    assert parser.can_read(timeout=0) is True
+    assert parser.read_response() == b"OK"
+
+
+def test_hiredis_can_read_checks_socket_readiness_without_reading():
+    parser = make_hiredis_parser(has_data=False)
+
+    with patch("redis._parsers.hiredis._socket_can_read", return_value=True) as ready:
+        assert parser.can_read(timeout=0) is True
+
+    ready.assert_called_once_with(parser._sock, 0)
+
+
+def test_hiredis_can_read_does_not_decide_disable_decoding():
+    raw = b"\xe2\x98\x83"
+    parser = make_hiredis_parser(
+        response=raw,
+        decoded_response=raw.decode(),
+        has_data=True,
+    )
+
+    assert parser.can_read(timeout=0) is True
+    assert parser.read_response(disable_decoding=True) == raw
+
+
+def test_hiredis_can_read_leaves_decoding_to_read_response():
+    raw = b"\xe2\x98\x83"
+    parser = make_hiredis_parser(
+        response=raw,
+        decoded_response=raw.decode(),
+        has_data=True,
+    )
+
+    assert parser.can_read(timeout=0) is True
+    assert parser.read_response() == raw.decode()
 
 
 @skip_if_server_version_lt("4.0.0")

@@ -31,12 +31,22 @@ from .mocks import MockStream
 
 
 class DummyHiredisReader:
-    def __init__(self, response=NOT_ENOUGH_DATA):
+    def __init__(
+        self, response=NOT_ENOUGH_DATA, decoded_response=None, has_data=False
+    ):
         self.responses = [response]
+        self.decoded_response = decoded_response
+        self.has_data_value = has_data
+
+    def has_data(self):
+        return self.has_data_value
 
     def gets(self, *args):
         if self.responses:
-            return self.responses.pop(0)
+            response = self.responses.pop(0)
+            if args == (False,) or self.decoded_response is None:
+                return response
+            return self.decoded_response
         return NOT_ENOUGH_DATA
 
 
@@ -54,11 +64,12 @@ class DummyAsyncStream:
         raise AssertionError("can_read should not read from the stream")
 
 
-def make_async_hiredis_parser(stream, response=NOT_ENOUGH_DATA):
+def make_async_hiredis_parser(
+    stream, response=NOT_ENOUGH_DATA, decoded_response=None, has_data=False
+):
     parser = _AsyncHiredisParser.__new__(_AsyncHiredisParser)
     parser._connected = True
-    parser._reader = DummyHiredisReader(response)
-    parser._next_response = NOT_ENOUGH_DATA
+    parser._reader = DummyHiredisReader(response, decoded_response, has_data)
     parser._stream = stream
     parser._hiredis_PushNotificationType = None
     return parser
@@ -93,19 +104,47 @@ async def test_async_hiredis_can_read_uses_buffer_without_reading(
 
 async def test_async_hiredis_can_read_detects_reader_response():
     stream = DummyAsyncStream()
-    parser = make_async_hiredis_parser(stream, response=b"OK")
+    parser = make_async_hiredis_parser(stream, response=b"OK", has_data=True)
 
     assert await parser.can_read() is True
     assert stream.read_called is False
 
 
-async def test_async_hiredis_can_read_caches_reader_response():
+async def test_async_hiredis_can_read_preserves_reader_response():
     stream = DummyAsyncStream()
-    parser = make_async_hiredis_parser(stream, response=b"OK")
+    parser = make_async_hiredis_parser(stream, response=b"OK", has_data=True)
 
     assert await parser.can_read() is True
     assert await parser.read_response() == b"OK"
     assert stream.read_called is False
+
+
+async def test_async_hiredis_can_read_does_not_decide_disable_decoding():
+    stream = DummyAsyncStream()
+    raw = b"\xe2\x98\x83"
+    parser = make_async_hiredis_parser(
+        stream,
+        response=raw,
+        decoded_response=raw.decode(),
+        has_data=True,
+    )
+
+    assert await parser.can_read() is True
+    assert await parser.read_response(disable_decoding=True) == raw
+
+
+async def test_async_hiredis_can_read_leaves_decoding_to_read_response():
+    stream = DummyAsyncStream()
+    raw = b"\xe2\x98\x83"
+    parser = make_async_hiredis_parser(
+        stream,
+        response=raw,
+        decoded_response=raw.decode(),
+        has_data=True,
+    )
+
+    assert await parser.can_read() is True
+    assert await parser.read_response() == raw.decode()
 
 
 @pytest.mark.parametrize(
