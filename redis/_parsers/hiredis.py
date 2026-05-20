@@ -230,10 +230,12 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
     async def can_read(self):
         if not self._connected:
             raise OSError("Buffer is closed.")
-        if self._reader.has_data():
+        # EOF means the connection is closed and not safe to reuse.
+        if self._reader.has_data() or self._stream.at_eof():
             return True
-        if self._stream.at_eof():
-            return True
+        # asyncio.StreamReader has no public non-destructive API for checking
+        # buffered bytes. Preserve dirty-connection detection for hiredis and
+        # fail loudly if the private buffer API changes.
         return bool(self._stream._buffer)
 
     async def read_from_socket(self):
