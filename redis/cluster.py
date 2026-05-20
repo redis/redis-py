@@ -957,6 +957,7 @@ class RedisCluster(
         }
 
         self._policy_resolver = policy_resolver
+        self._policy_cb_cache = {}
         self.commands_parser = CommandsParser(self)
 
         # Node where FT.AGGREGATE command is executed.
@@ -1070,11 +1071,12 @@ class RedisCluster(
         Returns a list of nodes that hold the specified keys' slots.
         """
         # get the node that holds the key's slot
+        is_read = command in READ_COMMANDS
         slot = self.determine_slot(*args)
         node = self.nodes_manager.get_node_from_slot(
             slot,
-            self.read_from_replicas and command in READ_COMMANDS,
-            self.load_balancing_strategy if command in READ_COMMANDS else None,
+            self.read_from_replicas and is_read,
+            self.load_balancing_strategy if is_read else None,
         )
         return [node]
 
@@ -1321,24 +1323,33 @@ class RedisCluster(
         Determines a nodes the command should be executed on.
         """
         arg0 = args[0]
-        command = arg0.upper()
-        if len(args) >= 2 and f"{arg0} {args[1]}".upper() in self.command_flags:
-            command = f"{arg0} {args[1]}".upper()
+        policy_cb = self._policy_cb_cache.get(arg0)
+        if policy_cb is None:
+            command = arg0.upper()
+            if len(args) >= 2 and f"{arg0} {args[1]}".upper() in self.command_flags:
+                command = f"{arg0} {args[1]}".upper()
 
-        nodes_flag = kwargs.pop("nodes_flag", None)
-        if nodes_flag is not None:
-            # nodes flag passed by the user
-            command_flag = nodes_flag
+            nodes_flag = kwargs.pop("nodes_flag", None)
+            if nodes_flag is not None:
+                # nodes flag passed by the user
+                command_flag = nodes_flag
+            else:
+                # get the nodes group for this command if it was predefined
+                command_flag = self.command_flags.get(command)
+
+            request_policy = self._command_flags_mapping.get(
+                command_flag, request_policy)
+
+            policy_cb = self._policies_callback_mapping[request_policy]
+            if command == arg0:
+                if len(self._policy_cb_cache) > 5000:
+                    # Prevent unbounded memory leak on abnormal use
+                    self._policy_cb_cache.clear()
+                self._policy_cb_cache[arg0] = policy_cb
         else:
-            # get the nodes group for this command if it was predefined
-            command_flag = self.command_flags.get(command)
+            command = arg0
 
-        request_policy = self._command_flags_mapping.get(
-            command_flag, request_policy)
-
-        nodes = self._policies_callback_mapping[request_policy](
-            self, command, *args, **kwargs,
-        )
+        nodes = policy_cb(self, command, *args, **kwargs)
 
         if arg0.lower() == "ft.aggregate":
             self._aggregate_nodes = nodes
@@ -3458,6 +3469,7 @@ class ClusterPipeline(RedisCluster):
         }
 
         self._policy_resolver = policy_resolver
+        self._policy_cb_cache = {}
 
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -4311,26 +4323,35 @@ class PipelineStrategy(AbstractStrategy):
         # Returns a list of target nodes.
         pipe = self._pipe
         arg0 = args[0]
-        command = arg0.upper()
-        if (
-            len(args) >= 2
-            and f"{arg0} {args[1]}".upper() in pipe.command_flags
-        ):
-            command = f"{arg0} {args[1]}".upper()
+        policy_cb = pipe._policy_cb_cache.get(arg0)
+        if policy_cb is None:
+            command = arg0.upper()
+            if (
+                len(args) >= 2
+                and f"{arg0} {args[1]}".upper() in pipe.command_flags
+            ):
+                command = f"{arg0} {args[1]}".upper()
 
-        nodes_flag = kwargs.pop("nodes_flag", None)
-        if nodes_flag is not None:
-            # nodes flag passed by the user
-            command_flag = nodes_flag
+            nodes_flag = kwargs.pop("nodes_flag", None)
+            if nodes_flag is not None:
+                # nodes flag passed by the user
+                command_flag = nodes_flag
+            else:
+                # get the nodes group for this command if it was predefined
+                command_flag = pipe.command_flags.get(command)
+
+            request_policy = pipe._command_flags_mapping.get(
+                command_flag, request_policy)
+            policy_cb = pipe._policies_callback_mapping[request_policy]
+
+            if command == arg0:
+                if len(pipe._policy_cb_cache) > 5000:
+                    # Prevent unbounded memory leak on abnormal use
+                    pipe._policy_cb_cache.clear()
+                pipe._policy_cb_cache[arg0] = policy_cb
         else:
-            # get the nodes group for this command if it was predefined
-            command_flag = pipe.command_flags.get(command)
-
-        request_policy = pipe._command_flags_mapping.get(
-            command_flag, request_policy)
-        nodes = pipe._policies_callback_mapping[request_policy](
-            pipe, command, *args, **kwargs
-        )
+            command = arg0
+        nodes = policy_cb(pipe, command, *args, **kwargs)
 
         if arg0.lower() == "ft.aggregate":
             self._aggregate_nodes = nodes
