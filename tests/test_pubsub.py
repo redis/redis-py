@@ -2147,7 +2147,10 @@ class TestPubSubTimeoutPropagation:
         assert msg is not None
 
         # Publish a message after a short delay in a thread
+        start_publishing = threading.Event()
+
         def publish_after_delay():
+            start_publishing.wait()
             time.sleep(0.2)
             r.publish("foo", "delayed_message")
 
@@ -2156,6 +2159,7 @@ class TestPubSubTimeoutPropagation:
 
         # get_message with timeout=None should block until message arrives
         start = time.monotonic()
+        start_publishing.set()
         msg = p.get_message(timeout=None)
         elapsed = time.monotonic() - start
         assert msg is not None
@@ -2736,8 +2740,11 @@ class TestClusterPubSubSlotMigration:
                 assert len(pubsub._reconcile_futures) == 1
                 (future,) = list(pubsub._reconcile_futures)
                 assert not future.done()
+                callbacks_done = threading.Event()
+                future.add_done_callback(lambda _f: callbacks_done.set())
                 release.set()
                 future.result(timeout=5.0)
+                assert callbacks_done.wait(timeout=5.0)
                 assert worker_thread["id"] != caller_thread
                 # Done-callback cleared the tracking set.
                 assert pubsub._reconcile_futures == set()

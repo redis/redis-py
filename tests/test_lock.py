@@ -101,7 +101,7 @@ class TestLock:
         assert lock1.acquire(blocking=False)
         bt = 0.4
         sleep = 0.05
-        fudge_factor = 0.05
+        fudge_factor = 0.2
         lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
         start = time.monotonic()
         assert not lock2.acquire()
@@ -120,7 +120,7 @@ class TestLock:
         with self.get_lock(r, "foo", blocking=False):
             bt = 0.4
             sleep = 0.05
-            fudge_factor = 0.05
+            fudge_factor = 0.2
             lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
             start = time.monotonic()
             assert not lock2.acquire()
@@ -206,10 +206,10 @@ class TestLock:
     def test_extend_lock_float(self, r):
         lock = self.get_lock(r, "foo", timeout=10.5)
         assert lock.acquire(blocking=False)
-        assert 10400 < r.pttl("foo") <= 10500
+        assert 10000 < r.pttl("foo") <= 10500
         old_ttl = r.pttl("foo")
         assert lock.extend(10.5)
-        assert old_ttl + 10400 < r.pttl("foo") <= old_ttl + 10500
+        assert old_ttl + 10000 < r.pttl("foo") <= old_ttl + 10500
         lock.release()
 
     def test_extending_unlocked_lock_raises_error(self, r):

@@ -1531,7 +1531,10 @@ class TestAsyncPubSubTimeoutPropagation:
         assert msg is not None
 
         # Publish a message after a short delay in a task
+        start_publishing = asyncio.Event()
+
         async def publish_after_delay():
+            await start_publishing.wait()
             await asyncio.sleep(0.2)
             await r.publish("foo", "delayed_message")
 
@@ -1539,6 +1542,7 @@ class TestAsyncPubSubTimeoutPropagation:
 
         # get_message with timeout=None should block until message arrives
         start = asyncio.get_running_loop().time()
+        start_publishing.set()
         msg = await p.get_message(timeout=None)
         elapsed = asyncio.get_running_loop().time() - start
         assert msg is not None
