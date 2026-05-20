@@ -87,6 +87,16 @@ class TestResponseCallbacks:
 
 
 class TestRedisCommands:
+    def _wait_for_bgsave(self, r, timeout=10):
+        deadline = time.monotonic() + timeout
+        while True:
+            info = r.info("persistence")
+            if int(info.get("rdb_bgsave_in_progress", 0)) == 0:
+                return
+            if time.monotonic() > deadline:
+                pytest.fail("Timed out waiting for BGSAVE to finish")
+            time.sleep(0.05)
+
     @pytest.mark.onlynoncluster
     @skip_if_redis_enterprise()
     def test_auth(self, r, request):
@@ -1547,9 +1557,11 @@ class TestRedisCommands:
 
     @skip_if_redis_enterprise()
     def test_bgsave(self, r):
+        self._wait_for_bgsave(r)
         assert r.bgsave()
-        time.sleep(0.3)
+        self._wait_for_bgsave(r)
         assert r.bgsave(True)
+        self._wait_for_bgsave(r)
 
     def test_never_decode_option(self, r: redis.Redis):
         opts = {NEVER_DECODE: []}
@@ -2214,6 +2226,10 @@ class TestRedisCommands:
         assert r.getex("a", persist=True) == b"1"
         assert r.ttl("a") == -1
 
+    def test_getex_zero_expiry_options_are_mutually_exclusive(self, r):
+        with pytest.raises(DataError):
+            r.getex("a", ex=0, px=1)
+
     def test_getitem_and_setitem(self, r):
         r["a"] = "bar"
         assert r["a"] == b"bar"
@@ -2272,6 +2288,73 @@ class TestRedisCommands:
         assert r["a"] == b"1"
         assert r.incrbyfloat("a", 1.1) == 2.1
         assert float(r["a"]) == float(2.1)
+
+    @skip_if_server_version_lt("8.7.0")
+    def test_increx_default(self, r):
+        key = "increx:default"
+        assert r.set(key, 10)
+        assert r.increx(key) == [11, 1]
+        assert r[key] == b"11"
+
+    @skip_if_server_version_lt("8.7.0")
+    def test_increx_byint(self, r):
+        key = "increx:byint"
+        assert r.set(key, 20)
+        assert r.increx(key, byint=4) == [24, 4]
+        assert r[key] == b"24"
+
+    @skip_if_server_version_lt("8.7.0")
+    def test_increx_byfloat(self, r):
+        key = "increx:float"
+        assert r.set(key, "1.5")
+        result = r.increx(key, byfloat=0.25, lbound=0, ubound=2)
+        assert [float(value) for value in result] == pytest.approx([1.75, 0.25])
+        assert float(r[key]) == pytest.approx(1.75)
+
+    @skip_if_server_version_lt("8.7.0")
+    def test_increx_saturating_bounds(self, r):
+        key = "increx:sat"
+        assert r.set(key, "1.8")
+        result = r.increx(key, byfloat=0.7, ubound=2, overflow="SAT")
+        assert [float(value) for value in result] == pytest.approx([2.0, 0.2])
+        assert float(r[key]) == pytest.approx(2.0)
+
+    @skip_if_server_version_lt("8.7.0")
+    def test_increx_fail_overflow_keeps_value(self, r):
+        key = "increx:overflow"
+        assert r.set(key, 10)
+        with pytest.raises(ResponseError):
+            r.increx(key, byint=5, ubound=12)
+        assert r[key] == b"10"
+
+    @skip_if_server_version_lt("8.7.0")
+    def test_increx_expiration_enx(self, r):
+        key = "increx:expiration"
+        assert r.set(key, 40)
+        assert r.ttl(key) == -1
+
+        assert r.increx(key, byint=2, ex=60, enx=True) == [42, 2]
+        ttl = r.ttl(key)
+        assert 0 < ttl <= 60
+
+        assert r.increx(key, byint=3, ex=600, enx=True) == [45, 3]
+        assert 0 < r.ttl(key) <= ttl
+
+    def test_increx_invalid_options(self, r):
+        key = "increx:invalid"
+        assert r.set(key, 1)
+        with pytest.raises(DataError):
+            r.increx(key, byfloat=1.0, byint=1)
+        with pytest.raises(DataError):
+            r.increx(key, ex=10, px=10)
+        with pytest.raises(DataError):
+            r.increx(key, overflow="WRAP")
+        with pytest.raises(DataError):
+            r.increx(key, enx=True)
+
+    def test_increx_zero_expiry_options_are_mutually_exclusive(self, r):
+        with pytest.raises(DataError):
+            r.increx("a", ex=0, px=1)
 
     @pytest.mark.onlynoncluster
     def test_keys(self, r):
@@ -2644,6 +2727,10 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             r.msetex(mapping, ex=10, keepttl=True)
 
+    def test_msetex_zero_expiry_options_are_mutually_exclusive(self, r):
+        with pytest.raises(DataError):
+            r.msetex({"a": 1}, ex=0, px=1)
+
     @pytest.mark.onlynoncluster
     def test_msetnx(self, r):
         d = {"a": b"1", "b": b"2", "c": b"3"}
@@ -2850,6 +2937,10 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             assert r.set("a", "1", ex=10.0)
 
+    def test_set_zero_expiry_options_are_mutually_exclusive(self, r):
+        with pytest.raises(DataError):
+            r.set("a", "1", ex=0, px=1)
+
     @skip_if_server_version_lt("2.6.0")
     def test_set_ex_str(self, r):
         assert r.set("a", "1", ex="10")
@@ -2889,6 +2980,10 @@ class TestRedisCommands:
         r.set("a", "2", keepttl=True)
         assert r.get("a") == b"2"
         assert 0 < r.ttl("a") <= 10
+
+    def test_set_empty_condition_is_mutually_exclusive(self, r):
+        with pytest.raises(DataError):
+            r.set("a", "1", nx=True, ifeq=b"")
 
     @skip_if_server_version_lt("8.3.224")
     def test_set_ifeq_true_sets_and_returns_true(self, r):
@@ -4664,6 +4759,39 @@ class TestRedisCommands:
         # keys with bool(key) == False
         assert r.hset("a", 0, 10) == 1
         assert r.hset("a", "", 10) == 1
+
+    def test_hgetex_zero_expiry_options_are_mutually_exclusive(self, r):
+        with pytest.raises(DataError):
+            r.hgetex("h", "f", ex=0, px=1)
+
+    def test_hsetex_zero_expiry_options_are_mutually_exclusive(self, r):
+        with pytest.raises(DataError):
+            r.hsetex("h", "f", "v", ex=0, px=1)
+
+    def test_hget_and_hset_with_encodable_fields_and_values(self, r):
+        cases = (
+            (b"field-bytes", b"value-bytes", b"value-bytes"),
+            (
+                bytearray(b"field-bytearray"),
+                bytearray(b"value-bytearray"),
+                b"value-bytearray",
+            ),
+            (
+                memoryview(b"field-memoryview"),
+                memoryview(b"value-memoryview"),
+                b"value-memoryview",
+            ),
+            ("field-str", "value-str", b"value-str"),
+            (42, 43, b"43"),
+            (1.25, 2.5, b"2.5"),
+        )
+
+        for field, value, expected in cases:
+            assert r.hset("encodable-hash", field, value) == 1
+            assert r.hget("encodable-hash", field) == expected
+            assert r.hmget("encodable-hash", field) == [expected]
+
+        assert r.hmget("encodable-hash", bytearray(b"field-bytes")) == [b"value-bytes"]
 
     def test_hset_with_multi_key_values(self, r):
         r.hset("a", mapping={"1": 1, "2": 2, "3": 3})

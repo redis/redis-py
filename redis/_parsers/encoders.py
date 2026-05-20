@@ -13,7 +13,7 @@ class Encoder:
 
     def encode(self, value):
         "Return a bytestring or bytes-like representation of the value"
-        if isinstance(value, (bytes, memoryview)):
+        if isinstance(value, (bytes, bytearray, memoryview)):
             return value
         elif isinstance(value, bool):
             # special case bool since it is a subclass of int
