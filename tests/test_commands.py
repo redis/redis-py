@@ -3415,22 +3415,22 @@ class TestRedisCommands:
     @skip_if_server_version_lt("8.7.2")
     def test_arscan_returns_index_value_pairs(self, r):
         r.arset("a", 0, "v0", "v1", "v2")
-        assert r.arscan("a", 0, 2) == [0, b"v0", 1, b"v1", 2, b"v2"]
+        assert r.arscan("a", 0, 2) == [[0, b"v0"], [1, b"v1"], [2, b"v2"]]
 
     @skip_if_server_version_lt("8.7.2")
     def test_arscan_skips_empty_slots(self, r):
         r.armset("a", {0: "a", 5: "b", 9: "c"})
-        assert r.arscan("a", 0, 10) == [0, b"a", 5, b"b", 9, b"c"]
+        assert r.arscan("a", 0, 10) == [[0, b"a"], [5, b"b"], [9, b"c"]]
 
     @skip_if_server_version_lt("8.7.2")
     def test_arscan_reverse(self, r):
         r.armset("a", {0: "a", 5: "b", 9: "c"})
-        assert r.arscan("a", 10, 0) == [9, b"c", 5, b"b", 0, b"a"]
+        assert r.arscan("a", 10, 0) == [[9, b"c"], [5, b"b"], [0, b"a"]]
 
     @skip_if_server_version_lt("8.7.2")
     def test_arscan_with_limit(self, r):
         r.armset("a", {0: "a", 5: "b", 9: "c"})
-        assert r.arscan("a", 0, 10, limit=2) == [0, b"a", 5, b"b"]
+        assert r.arscan("a", 0, 10, limit=2) == [[0, b"a"], [5, b"b"]]
 
     @skip_if_server_version_lt("8.7.2")
     def test_arscan_missing_key_returns_empty(self, r):
@@ -3482,7 +3482,7 @@ class TestRedisCommands:
             withvalues=True,
             nocase=True,
         )
-        assert result == [0, b"ERROR: cpu", 2, b"error: net"]
+        assert result == [[0, b"ERROR: cpu"], [2, b"error: net"]]
 
     @skip_if_server_version_lt("8.7.2")
     def test_argrep_limit(self, r):

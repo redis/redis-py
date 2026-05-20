@@ -5373,7 +5373,7 @@ class ArrayCommands(CommandsProtocol):
         start: int,
         end: int,
         limit: int | None = None,
-    ) -> list[int | bytes | str]: ...
+    ) -> list[list[int | bytes | str]]: ...
 
     @overload
     def arscan(
@@ -5382,7 +5382,7 @@ class ArrayCommands(CommandsProtocol):
         start: int,
         end: int,
         limit: int | None = None,
-    ) -> Awaitable[list[int | bytes | str]]: ...
+    ) -> Awaitable[list[list[int | bytes | str]]]: ...
 
     def arscan(
         self,
@@ -5390,13 +5390,15 @@ class ArrayCommands(CommandsProtocol):
         start: int,
         end: int,
         limit: int | None = None,
-    ) -> list[int | bytes | str] | Awaitable[list[int | bytes | str]]:
+    ) -> (
+        list[list[int | bytes | str]] | Awaitable[list[list[int | bytes | str]]]
+    ):
         """
         Iterate populated elements of the array stored at ``name`` in the
-        inclusive range [``start``, ``end``] and return alternating
-        index/value pairs as a flat list: ``[idx1, val1, idx2, val2, ...]``.
-        Empty slots are skipped. If ``start`` is greater than ``end``, the
-        iteration is reversed.
+        inclusive range [``start``, ``end``] and return a list of
+        ``[index, value]`` pairs in traversal order:
+        ``[[idx1, val1], [idx2, val2], ...]``. Empty slots are skipped. If
+        ``start`` is greater than ``end``, the iteration is reversed.
 
         ``limit`` caps the number of populated elements returned. When
         omitted, all populated elements in range are returned.
@@ -5419,7 +5421,7 @@ class ArrayCommands(CommandsProtocol):
         limit: int | None = None,
         withvalues: bool = False,
         nocase: bool = False,
-    ) -> list[int | bytes | str]: ...
+    ) -> list[int] | list[list[int | bytes | str]]: ...
 
     @overload
     def argrep(
@@ -5432,7 +5434,7 @@ class ArrayCommands(CommandsProtocol):
         limit: int | None = None,
         withvalues: bool = False,
         nocase: bool = False,
-    ) -> Awaitable[list[int | bytes | str]]: ...
+    ) -> Awaitable[list[int] | list[list[int | bytes | str]]]: ...
 
     def argrep(
         self,
@@ -5444,7 +5446,11 @@ class ArrayCommands(CommandsProtocol):
         limit: int | None = None,
         withvalues: bool = False,
         nocase: bool = False,
-    ) -> list[int | bytes | str] | Awaitable[list[int | bytes | str]]:
+    ) -> (
+        list[int]
+        | list[list[int | bytes | str]]
+        | Awaitable[list[int] | list[list[int | bytes | str]]]
+    ):
         """
         Search elements of the array stored at ``name`` within the inclusive
         index range [``start``, ``end``] using one or more textual
@@ -5455,12 +5461,14 @@ class ArrayCommands(CommandsProtocol):
         Multiple predicates are combined via ``combinator``
         (``ArrayPredicateCombinator.AND`` or ``OR``); the server defaults to
         OR when omitted. ``limit`` caps the number of matches.
-        ``withvalues=True`` returns alternating ``[idx, val, idx, val, ...]``
-        instead of indices only. ``nocase=True`` makes all comparisons
-        case-insensitive.
+        ``withvalues=True`` returns a list of ``[index, value]`` pairs
+        (``[[idx, val], ...]``) instead of a flat list of indices.
+        ``nocase=True`` makes all comparisons case-insensitive.
 
-        Returns matching indices (or index/value pairs) in traversal order.
-        Empty slots are skipped.
+        Without ``withvalues``, returns a flat list of matching indices in
+        traversal order. With ``withvalues``, returns a list of
+        ``[index, value]`` pairs in traversal order. Empty slots are
+        skipped.
 
         For more information, see https://redis.io/commands/argrep
         """
