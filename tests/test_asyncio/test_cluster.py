@@ -1107,6 +1107,17 @@ class TestClusterRedisCommands:
     Tests for RedisCluster unique commands
     """
 
+    async def _wait_for_bgsave(self, r: RedisCluster, timeout=10) -> None:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while True:
+            info = await r.info("persistence", target_nodes=r.get_default_node())
+            if int(info.get("rdb_bgsave_in_progress", 0)) == 0:
+                return
+            if loop.time() > deadline:
+                pytest.fail("Timed out waiting for BGSAVE to finish")
+            await asyncio.sleep(0.05)
+
     async def test_get_and_set(self, r: RedisCluster) -> None:
         # get and set can't be tested independently of each other
         assert await r.get("a") is None
@@ -1536,13 +1547,11 @@ class TestClusterRedisCommands:
 
     @skip_if_redis_enterprise()
     async def test_bgsave(self, r: RedisCluster) -> None:
-        try:
-            assert await r.bgsave()
-            await asyncio.sleep(0.3)
-            assert await r.bgsave(True)
-        except ResponseError as e:
-            if "Background save already in progress" not in e.__str__():
-                raise
+        await self._wait_for_bgsave(r)
+        assert await r.bgsave()
+        await self._wait_for_bgsave(r)
+        assert await r.bgsave(True)
+        await self._wait_for_bgsave(r)
 
     async def test_info(self, r: RedisCluster) -> None:
         # Map keys to same slot

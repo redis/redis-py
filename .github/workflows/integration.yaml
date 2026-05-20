@@ -31,7 +31,7 @@ env:
   # for example after 8.2.1 is published, 8.2 image contains 8.2.1 content
   CURRENT_REDIS_VERSION: '8.6.1'
   REDIS_VERSION_CUSTOM_MAP: >-
-    8.8:unstable-24805570909-debian
+    8.8:8.8-rc1
 
 jobs:
   dependency-audit:
@@ -47,6 +47,8 @@ jobs:
             CVE-2026-34073 # DNS name constraints were validated only against SANs, not against the peer name used in verification
                            # Update version when msal dependency in entraid is updated
             CVE-2026-4539  # pygments ReDoS in AdlLexer, local access only, no fix available yet
+            PYSEC-2025-183 # PyJWT weak-encryption advisory disputed by maintainer (key length is the caller's responsibility);
+                           # no fixed version published — 2.12.1 is the latest release.
 
   lint:
     name: Code linters

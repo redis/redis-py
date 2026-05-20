@@ -7,7 +7,7 @@ import threading
 from typing import List
 import warnings
 from queue import LifoQueue, Queue
-from time import sleep
+from time import monotonic, sleep
 from unittest.mock import DEFAULT, Mock, call, patch
 
 import pytest
@@ -1100,6 +1100,16 @@ class TestClusterRedisCommands:
     Tests for RedisCluster unique commands
     """
 
+    def _wait_for_bgsave(self, r, timeout=10):
+        deadline = monotonic() + timeout
+        while True:
+            info = r.info("persistence", target_nodes=r.get_default_node())
+            if int(info.get("rdb_bgsave_in_progress", 0)) == 0:
+                return
+            if monotonic() > deadline:
+                pytest.fail("Timed out waiting for BGSAVE to finish")
+            sleep(0.05)
+
     def test_case_insensitive_command_names(self, r):
         assert (
             r.cluster_response_callbacks["cluster slots"]
@@ -1669,9 +1679,11 @@ class TestClusterRedisCommands:
 
     @skip_if_redis_enterprise()
     def test_bgsave(self, r):
+        self._wait_for_bgsave(r)
         assert r.bgsave()
-        sleep(0.3)
+        self._wait_for_bgsave(r)
         assert r.bgsave(True)
+        self._wait_for_bgsave(r)
 
     def test_info(self, r):
         # Map keys to same slot
@@ -3349,6 +3361,17 @@ class TestNodesManager:
             execute_command_mock.side_effect = execute_command
 
             errors: list[Exception] = []
+            initialize_paused = threading.Event()
+            allow_initialize_to_finish = threading.Event()
+            original_check_slots_coverage = nm.check_slots_coverage
+
+            def check_slots_coverage(slots_cache):
+                # Pause initialization after it has rebuilt the temporary slots
+                # cache, so move_slot runs during a deterministic refresh window.
+                initialize_paused.set()
+                if not allow_initialize_to_finish.wait(timeout=5):
+                    raise TimeoutError("Timed out waiting for move_slot worker")
+                return original_check_slots_coverage(slots_cache)
 
             def initialize_worker():
                 """Reinitialize the cluster"""
@@ -3371,15 +3394,29 @@ class TestNodesManager:
                     except Exception as e:
                         errors.append(e)
 
-            for _ in range(100):
+            with patch.object(nm, "check_slots_coverage", check_slots_coverage):
                 t1 = threading.Thread(target=initialize_worker)
                 t2 = threading.Thread(target=move_slots_worker)
 
                 t1.start()
-                t2.start()
+                initialize_ready = False
+                move_worker_started = False
+                try:
+                    initialize_ready = initialize_paused.wait(timeout=5)
+                    if initialize_ready:
+                        t2.start()
+                        move_worker_started = True
+                        t2.join(timeout=5)
+                finally:
+                    allow_initialize_to_finish.set()
+                    t1.join(timeout=5)
+                    if move_worker_started and t2.is_alive():
+                        t2.join(timeout=5)
 
-                t1.join()
-                t2.join()
+                assert initialize_ready
+                if move_worker_started:
+                    assert not t2.is_alive()
+                assert not t1.is_alive()
 
                 # check that no errors occurred
                 assert len(errors) == 0, f"Errors occurred: {errors}"
