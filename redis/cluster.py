@@ -1440,13 +1440,12 @@ class RedisCluster(
                 )
 
         # single key command
-        keyslot = self.keyslot
         if len(keys) == 1:
-            return keyslot(keys[0])
+            return self.keyslot(keys[0])
 
         # multi-key command; we need to make sure all keys are mapped to
         # the same slot
-        slots = {keyslot(key) for key in keys}
+        slots = {self.keyslot(key) for key in keys}
         if len(slots) != 1:
             raise RedisClusterException(
                 f"{command} - all keys must map to the same key slot"
