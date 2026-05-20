@@ -343,6 +343,202 @@ class TestRedisClusterObj:
             assert called == 1
         await cluster.aclose()
 
+    async def test_aclose_prevents_client_reuse(self) -> None:
+        cluster = await get_mocked_redis_client(host=default_host, port=default_port)
+
+        await cluster.aclose()
+        await cluster.aclose()
+
+        with mock.patch.object(NodesManager, "initialize", autospec=True) as initialize:
+            with pytest.raises(RedisClusterException, match="closed"):
+                await cluster.get("key")
+
+        initialize.assert_not_called()
+
+    @pytest.mark.onlycluster
+    async def test_aclose_prevents_real_cluster_client_reuse(
+        self, create_redis: Callable[..., RedisCluster]
+    ) -> None:
+        cluster = await create_redis(cls=RedisCluster, flushdb=False)
+        assert await cluster.ping(target_nodes=RedisCluster.DEFAULT_NODE)
+
+        await cluster.aclose()
+
+        with pytest.raises(RedisClusterException, match="closed"):
+            await cluster.ping(target_nodes=RedisCluster.DEFAULT_NODE)
+
+    async def test_aclose_before_initialize_prevents_later_initialize(self) -> None:
+        cluster = RedisCluster(host=default_host, port=default_port)
+
+        await cluster.aclose()
+
+        with mock.patch.object(NodesManager, "initialize", autospec=True) as initialize:
+            with pytest.raises(RedisClusterException, match="closed"):
+                await cluster.initialize()
+
+        initialize.assert_not_called()
+
+    async def test_aclose_waits_for_concurrent_initialize(self) -> None:
+        cluster = RedisCluster(host=default_host, port=default_port)
+        initialize_started = asyncio.Event()
+        allow_initialize_to_finish = asyncio.Event()
+
+        async def initialize_nodes(nodes_manager):
+            initialize_started.set()
+            await allow_initialize_to_finish.wait()
+            nodes_manager.default_node = ClusterNode(default_host, default_port)
+
+        async def initialize_parser(*args):
+            return None
+
+        with (
+            mock.patch.object(
+                NodesManager,
+                "initialize",
+                autospec=True,
+                side_effect=initialize_nodes,
+            ),
+            mock.patch.object(
+                AsyncCommandsParser,
+                "initialize",
+                autospec=True,
+                side_effect=initialize_parser,
+            ),
+            mock.patch.object(NodesManager, "aclose", autospec=True) as nodes_aclose,
+        ):
+            initialize_task = asyncio.create_task(cluster.initialize())
+            await initialize_started.wait()
+
+            close_task = asyncio.create_task(cluster.aclose())
+            await asyncio.sleep(0)
+
+            assert not close_task.done()
+
+            allow_initialize_to_finish.set()
+            await initialize_task
+            await close_task
+
+        assert cluster._closed
+        assert cluster._initialize
+        assert nodes_aclose.await_args_list == [
+            mock.call(cluster.nodes_manager),
+            mock.call(cluster.nodes_manager, "startup_nodes"),
+        ]
+
+    async def test_closed_initialized_client_rejects_commands(self) -> None:
+        cluster = await get_mocked_redis_client(host=default_host, port=default_port)
+        cluster._closed = True
+
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True
+        ) as execute_command:
+            with pytest.raises(RedisClusterException, match="closed"):
+                await cluster.get("key")
+
+        execute_command.assert_not_called()
+        await cluster.aclose()
+
+    async def test_initialize_failure_disconnects_opened_nodes(self) -> None:
+        cluster = RedisCluster(host=default_host, port=default_port)
+
+        with mock.patch.object(ClusterNode, "execute_command") as execute_command_mock:
+
+            async def execute_command(*args, **kwargs):
+                if args[0] == "CLUSTER SLOTS":
+                    return default_cluster_slots
+                elif args[0] == "COMMAND":
+                    return {"get": [], "set": []}
+                elif args[0] == "INFO":
+                    return {"cluster_enabled": True}
+                elif len(args) > 1 and args[1] == "cluster-require-full-coverage":
+                    return {"cluster-require-full-coverage": "yes"}
+                return await execute_command_mock(*args, **kwargs)
+
+            execute_command_mock.side_effect = execute_command
+
+            with mock.patch.object(
+                AsyncCommandsParser, "initialize", autospec=True
+            ) as parser_initialize:
+                parser_initialize.side_effect = RuntimeError("parser failed")
+
+                with mock.patch.object(
+                    NodesManager, "aclose", autospec=True
+                ) as nodes_aclose:
+                    with pytest.raises(RuntimeError, match="parser failed"):
+                        await cluster.initialize()
+
+        assert nodes_aclose.await_args_list == [
+            mock.call(cluster.nodes_manager),
+            mock.call(cluster.nodes_manager, "startup_nodes"),
+        ]
+
+    async def test_internal_close_nodes_allows_reinitialization(self) -> None:
+        cluster = await get_mocked_redis_client(host=default_host, port=default_port)
+
+        await cluster._close_nodes()
+
+        with mock.patch.object(ClusterNode, "execute_command") as execute_command_mock:
+
+            async def execute_command(*args, **kwargs):
+                if args[0] == "CLUSTER SLOTS":
+                    return default_cluster_slots
+                elif args[0] == "COMMAND":
+                    return {"get": [], "set": []}
+                elif args[0] == "INFO":
+                    return {"cluster_enabled": True}
+                elif len(args) > 1 and args[1] == "cluster-require-full-coverage":
+                    return {"cluster-require-full-coverage": "yes"}
+                return await execute_command_mock(*args, **kwargs)
+
+            execute_command_mock.side_effect = execute_command
+            await cluster.initialize()
+
+        assert not cluster._initialize
+        await cluster.aclose()
+
+    async def test_pipeline_execute_after_aclose_does_not_reinitialize(self) -> None:
+        cluster = await get_mocked_redis_client(host=default_host, port=default_port)
+        pipe = cluster.pipeline()
+        pipe.get("key")
+
+        await cluster.aclose()
+
+        with mock.patch.object(NodesManager, "initialize", autospec=True) as initialize:
+            with pytest.raises(RedisClusterException, match="closed"):
+                await pipe.execute()
+
+        initialize.assert_not_called()
+
+    async def test_transaction_pipeline_execute_after_aclose_does_not_reinitialize(
+        self,
+    ) -> None:
+        cluster = await get_mocked_redis_client(host=default_host, port=default_port)
+        pipe = cluster.pipeline(transaction=True)
+        pipe.get("key")
+
+        await cluster.aclose()
+
+        with mock.patch.object(NodesManager, "initialize", autospec=True) as initialize:
+            with pytest.raises(RedisClusterException, match="closed"):
+                await pipe.execute()
+
+        initialize.assert_not_called()
+
+    async def test_context_manager_exit_allows_reentry(self) -> None:
+        cluster = RedisCluster(host=default_host, port=default_port)
+
+        with mock.patch.object(cluster, "initialize", return_value=cluster) as init:
+            with mock.patch.object(cluster, "_close_nodes") as close_nodes:
+                async with cluster as first_context:
+                    assert first_context is cluster
+
+                async with cluster as second_context:
+                    assert second_context is cluster
+
+        assert init.await_count == 2
+        assert close_nodes.await_count == 2
+        assert not cluster._closed
+
     async def test_close_is_aclose(self) -> None:
         """
         Test that it is possible to use host & port arguments as startup node

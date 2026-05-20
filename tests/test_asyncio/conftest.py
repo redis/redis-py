@@ -13,6 +13,7 @@ from redis.asyncio.connection import Connection, parse_url
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.credentials import CredentialProvider
+from redis.exceptions import RedisClusterException
 from tests.conftest import REDIS_INFO, get_credential_provider
 
 
@@ -21,6 +22,19 @@ async def _get_info(redis_url):
     info = await client.info()
     await client.connection_pool.disconnect()
     return info
+
+
+async def _flush_cluster_client(client):
+    await client.flushdb(target_nodes="primaries")
+
+
+async def _flush_cluster_with_new_client(url, kwargs):
+    cleanup_client = redis.RedisCluster.from_url(url, **kwargs)
+    try:
+        await cleanup_client.initialize()
+        await _flush_cluster_client(cleanup_client)
+    finally:
+        await cleanup_client.aclose()
 
 
 @pytest_asyncio.fixture(
@@ -88,12 +102,19 @@ async def create_redis(request):
                 await client.connection_pool.disconnect()
             else:
                 if flushdb:
-                    try:
-                        await client.flushdb(target_nodes="primaries")
-                    except redis.ConnectionError:
-                        # handle cases where a test disconnected a client
-                        # just manually retry the flushdb
-                        await client.flushdb(target_nodes="primaries")
+                    if getattr(client, "_closed", False):
+                        await _flush_cluster_with_new_client(url, kwargs)
+                    else:
+                        try:
+                            await _flush_cluster_client(client)
+                        except RedisClusterException:
+                            if not getattr(client, "_closed", False):
+                                raise
+                            await _flush_cluster_with_new_client(url, kwargs)
+                        except redis.ConnectionError:
+                            # handle cases where a test disconnected a client
+                            # just manually retry the flushdb
+                            await _flush_cluster_client(client)
                 await client.aclose()
 
         teardown_clients.append(teardown)
