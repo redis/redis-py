@@ -820,22 +820,26 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
     def parse_response(self, connection, command_name, **options):
         """Parses a response from the Redis server"""
-        try:
-            if NEVER_DECODE in options:
-                response = connection.read_response(disable_decoding=True)
-                options.pop(NEVER_DECODE)
-            else:
-                response = connection.read_response()
-        except ResponseError:
+        if not options:
+            # Fast-path for the common case of no options
+            response = connection.read_response()
+        else:
+            try:
+                if NEVER_DECODE in options:
+                    response = connection.read_response(disable_decoding=True)
+                    options.pop(NEVER_DECODE)
+                else:
+                    response = connection.read_response()
+            except ResponseError:
+                if EMPTY_RESPONSE in options:
+                    return options[EMPTY_RESPONSE]
+                raise
+
             if EMPTY_RESPONSE in options:
-                return options[EMPTY_RESPONSE]
-            raise
+                options.pop(EMPTY_RESPONSE)
 
-        if EMPTY_RESPONSE in options:
-            options.pop(EMPTY_RESPONSE)
-
-        # Remove keys entry, it needs only for cache.
-        options.pop("keys", None)
+            # Remove keys entry, it needs only for cache.
+            options.pop("keys", None)
 
         if command_name in self.response_callbacks:
             return self.response_callbacks[command_name](response, **options)
