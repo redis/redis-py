@@ -1323,13 +1323,16 @@ class RedisCluster(
         Determines a nodes the command should be executed on.
         """
         arg0 = args[0]
-        policy_cb = self._policy_cb_cache.get(arg0)
+        nodes_flag = kwargs.pop("nodes_flag", None)
+        if nodes_flag is None:
+            policy_cb = self._policy_cb_cache.get(arg0)
+        else:
+            policy_cb = None
         if policy_cb is None:
             command = arg0.upper()
             if len(args) >= 2 and f"{arg0} {args[1]}".upper() in self.command_flags:
                 command = f"{arg0} {args[1]}".upper()
 
-            nodes_flag = kwargs.pop("nodes_flag", None)
             if nodes_flag is not None:
                 # nodes flag passed by the user
                 command_flag = nodes_flag
@@ -1341,7 +1344,7 @@ class RedisCluster(
                 command_flag, request_policy)
 
             policy_cb = self._policies_callback_mapping[request_policy]
-            if command == arg0:
+            if nodes_flag is None and command == arg0:
                 if len(self._policy_cb_cache) > 5000:
                     # Prevent unbounded memory leak on abnormal use
                     self._policy_cb_cache.clear()
@@ -4330,7 +4333,11 @@ class PipelineStrategy(AbstractStrategy):
         # Returns a list of target nodes.
         pipe = self._pipe
         arg0 = args[0]
-        policy_cb = pipe._policy_cb_cache.get(arg0)
+        nodes_flag = kwargs.pop("nodes_flag", None)
+        if nodes_flag is None:
+            policy_cb = pipe._policy_cb_cache.get(arg0)
+        else:
+            policy_cb = None
         if policy_cb is None:
             command = arg0.upper()
             if (
@@ -4339,7 +4346,6 @@ class PipelineStrategy(AbstractStrategy):
             ):
                 command = f"{arg0} {args[1]}".upper()
 
-            nodes_flag = kwargs.pop("nodes_flag", None)
             if nodes_flag is not None:
                 # nodes flag passed by the user
                 command_flag = nodes_flag
@@ -4351,7 +4357,7 @@ class PipelineStrategy(AbstractStrategy):
                 command_flag, request_policy)
             policy_cb = pipe._policies_callback_mapping[request_policy]
 
-            if command == arg0:
+            if nodes_flag is None and command == arg0:
                 if len(pipe._policy_cb_cache) > 5000:
                     # Prevent unbounded memory leak on abnormal use
                     pipe._policy_cb_cache.clear()
