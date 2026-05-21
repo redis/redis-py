@@ -12,7 +12,7 @@ from typing import (
 )
 
 import redis
-from redis.typing import ChannelT, KeysT, KeyT, PubSubHandler, Subscription
+from redis.typing import ChannelT, PubSubHandler, Subscription
 
 
 def list_or_args(keys: Any, args: Iterable[Any] | None) -> List[Any]:
