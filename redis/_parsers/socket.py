@@ -91,7 +91,7 @@ class SocketBuffer:
             if custom_timeout:
                 sock.settimeout(self.socket_timeout)
 
-    def can_read(self, timeout: float) -> bool:
+    def can_read(self, timeout: float = 0) -> bool:
         return bool(self.unread_bytes()) or self._read_from_socket(
             timeout=timeout, raise_on_timeout=False
         )

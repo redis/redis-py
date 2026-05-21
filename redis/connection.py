@@ -234,7 +234,9 @@ class ConnectionInterface:
         pass
 
     @abstractmethod
-    def can_read(self, timeout=0):
+    def can_read(self, timeout: float = 0) -> bool:
+        # TODO: Rename this API; it detects pending data or dirty/closed
+        # connection state, not only whether application data can be read.
         pass
 
     @abstractmethod
@@ -1329,8 +1331,10 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             check_health=kwargs.get("check_health", True),
         )
 
-    def can_read(self, timeout=0):
+    def can_read(self, timeout: float = 0) -> bool:
         """Poll the socket to see if there's data that can be read."""
+        # TODO: Rename this API; it detects pending data or dirty/closed
+        # connection state, not only whether application data can be read.
         sock = self._sock
         if not sock:
             self.connect()
@@ -1733,7 +1737,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         # read-only command that not yet cached.
         self._conn.send_command(*args, **kwargs)
 
-    def can_read(self, timeout=0):
+    def can_read(self, timeout: float = 0) -> bool:
+        # TODO: Rename this API; it detects pending data or dirty/closed
+        # connection state, not only whether application data can be read.
         return self._conn.can_read(timeout)
 
     def read_response(

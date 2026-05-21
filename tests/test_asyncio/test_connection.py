@@ -145,6 +145,17 @@ async def test_async_hiredis_can_read_leaves_decoding_to_read_response():
     assert await parser.read_response() == raw.decode()
 
 
+@pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
+async def test_async_resp_can_read_detects_stream_buffer(parser_class):
+    stream = DummyAsyncStream(buffer=b"+OK\r\n")
+    parser = parser_class(socket_read_size=65536)
+    parser._connected = True
+    parser._stream = stream
+
+    assert await parser.can_read(timeout=0) is True
+    assert stream.read_called is False
+
+
 @pytest.mark.parametrize(
     ("protocol", "parser_class", "expected_parser_class"),
     [

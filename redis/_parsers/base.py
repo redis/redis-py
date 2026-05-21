@@ -1,5 +1,5 @@
 import logging
-from abc import ABC
+from abc import ABC, abstractmethod
 from asyncio import IncompleteReadError, StreamReader
 from typing import Awaitable, Callable, List, Optional, Protocol, Union
 
@@ -112,11 +112,19 @@ class BaseParser(ABC):
             return exception_class(response, status_code=error_code)
         return ResponseError(response)
 
+    @abstractmethod
     def on_disconnect(self):
-        raise NotImplementedError()
+        pass
 
+    @abstractmethod
     def on_connect(self, connection):
-        raise NotImplementedError()
+        pass
+
+    @abstractmethod
+    def can_read(self, timeout: float = 0) -> bool:
+        # TODO: Rename this API; it detects pending data or dirty/closed
+        # connection state, not only whether application data can be read.
+        pass
 
 
 class _RESPBase(BaseParser):
@@ -150,8 +158,12 @@ class _RESPBase(BaseParser):
             self._buffer = None
         self.encoder = None
 
-    def can_read(self, timeout):
-        return self._buffer and self._buffer.can_read(timeout)
+    def can_read(self, timeout: float = 0) -> bool:
+        # TODO: Rename this API; it detects pending data or dirty/closed
+        # connection state, not only whether application data can be read.
+        if self._buffer is None:
+            return False
+        return self._buffer.can_read(timeout)
 
 
 class AsyncBaseParser(BaseParser):
@@ -166,11 +178,15 @@ class AsyncBaseParser(BaseParser):
     @deprecated_function(
         version="8.0.0", reason="Use can_read() instead", name="can_read_destructive"
     )
-    async def can_read_destructive(self) -> bool:
-        raise NotImplementedError()
+    @abstractmethod
+    async def can_read_destructive(self, timeout: float = 0) -> bool:
+        pass
 
-    async def can_read(self) -> bool:
-        raise NotImplementedError()
+    @abstractmethod
+    async def can_read(self, timeout: float = 0) -> bool:
+        # TODO: Rename this API; it detects pending data or dirty/closed
+        # connection state, not only whether application data can be read.
+        pass
 
     async def read_response(
         self, disable_decoding: bool = False
@@ -520,15 +536,20 @@ class _AsyncRESPBase(AsyncBaseParser):
         reason="Use can_read() instead",
         name="can_read_destructive",
     )
-    async def can_read_destructive(self) -> bool:
-        return await self.can_read()
+    async def can_read_destructive(self, timeout: float = 0) -> bool:
+        return await self.can_read(timeout=timeout)
 
-    async def can_read(self) -> bool:
+    async def can_read(self, timeout: float = 0) -> bool:
+        # TODO: Rename this API; it detects pending data or dirty/closed
+        # connection state, not only whether application data can be read.
         if not self._connected:
             raise OSError("Buffer is closed.")
         if self._buffer:
             return True
-        return self._stream.at_eof()
+        # asyncio.StreamReader has no public non-destructive API for checking
+        # buffered bytes. Preserve dirty-connection detection for the Python
+        # parser and fail loudly if the private buffer API changes.
+        return bool(self._stream._buffer) or self._stream.at_eof()
 
     async def _read(self, length: int) -> bytes:
         """

@@ -61,7 +61,7 @@ class DummyConnection:
     def disconnect(self):
         self._sock = None
 
-    def can_read(self):
+    def can_read(self, timeout: float = 0) -> bool:
         return False
 
     def should_reconnect(self):

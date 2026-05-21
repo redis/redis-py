@@ -25,7 +25,8 @@ from .socket import (
 NOT_ENOUGH_DATA = object()
 
 
-def _socket_can_read(sock, timeout):
+def _socket_can_read(sock, timeout: float) -> bool:
+    # SSL sockets can have decrypted bytes buffered above the OS socket layer.
     if hasattr(sock, "pending") and sock.pending():
         return True
     return bool(select.select([sock], [], [], timeout)[0])
@@ -90,7 +91,9 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
         self._sock = None
         self._reader = None
 
-    def can_read(self, timeout):
+    def can_read(self, timeout: float = 0) -> bool:
+        # TODO: Rename this API; it detects pending data or dirty/closed
+        # connection state, not only whether application data can be read.
         if not self._reader:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
@@ -224,10 +227,12 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
     @deprecated_function(
         version="8.0.0", reason="Use can_read() instead", name="can_read_destructive"
     )
-    async def can_read_destructive(self):
-        return await self.can_read()
+    async def can_read_destructive(self, timeout: float = 0) -> bool:
+        return await self.can_read(timeout=timeout)
 
-    async def can_read(self):
+    async def can_read(self, timeout: float = 0) -> bool:
+        # TODO: Rename this API; it detects pending data or dirty/closed
+        # connection state, not only whether application data can be read.
         if not self._connected:
             raise OSError("Buffer is closed.")
         # EOF means the connection is closed and not safe to reuse.
