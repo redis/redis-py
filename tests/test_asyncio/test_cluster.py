@@ -709,7 +709,7 @@ class TestRedisClusterObj:
                         elif self.port == 7007:
                             execute_command.successful_calls += 1
 
-                    def initialize_mock(self):
+                    def initialize_mock(self, *args, **kwargs):
                         # start with all slots mapped to 7006
                         self.nodes_cache = {node_7006.name: node_7006}
                         self.default_node = node_7006
@@ -720,7 +720,7 @@ class TestRedisClusterObj:
 
                         # After the first connection fails, a reinitialize
                         # should follow the cluster to 7007
-                        def map_7007(self):
+                        def map_7007(self, *args, **kwargs):
                             self.nodes_cache = {node_7007.name: node_7007}
                             self.default_node = node_7007
                             self.slots_cache = {}
@@ -2833,6 +2833,39 @@ class TestNodesManager:
                 for node in nodes:
                     assert node is nodes_manager.nodes_cache[node.name]
 
+    @pytest.mark.onlycluster
+    async def test_initialize_uses_shuffled_startup_nodes(
+        self, r: RedisCluster
+    ) -> None:
+        startup_nodes = list(r.nodes_manager.startup_nodes.values())
+        first_shuffled_node = startup_nodes[-1]
+        original_execute_command = ClusterNode.execute_command
+        executed_nodes = []
+
+        async def execute_command(node, *args, **kwargs):
+            executed_nodes.append((node, args))
+            return await original_execute_command(node, *args, **kwargs)
+
+        with (
+            mock.patch(
+                "redis.asyncio.cluster.random.shuffle",
+                side_effect=lambda nodes: nodes.reverse(),
+            ) as shuffle,
+            mock.patch.object(
+                ClusterNode,
+                "execute_command",
+                autospec=True,
+                side_effect=execute_command,
+            ),
+        ):
+            await r.nodes_manager.initialize()
+
+        shuffle.assert_called_once()
+        assert any(
+            node is first_shuffled_node and args == ("CLUSTER SLOTS",)
+            for node, args in executed_nodes
+        )
+
     @pytest.mark.fixed_client
     async def test_init_slots_cache_cluster_mode_disabled(self) -> None:
         """
@@ -3522,11 +3555,29 @@ class TestClusterConnectionErrorHandling:
                     cmd_parser_initialize.side_effect = cmd_init_mock
 
                     rc = await RedisCluster(host=default_host, port=7000)
-                    with pytest.raises(ConnectionError):
-                        await rc.get("foo")
+                    initialize_calls = []
+                    original_initialize = NodesManager.initialize
+
+                    async def initialize(nodes_manager, *args, **kwargs):
+                        if nodes_manager is rc.nodes_manager:
+                            initialize_calls.append(kwargs)
+                        return await original_initialize(nodes_manager, *args, **kwargs)
+
+                    with mock.patch.object(
+                        NodesManager,
+                        "initialize",
+                        autospec=True,
+                        side_effect=initialize,
+                    ):
+                        with pytest.raises(ConnectionError):
+                            await rc.get("foo")
 
                     # Verify move_node_to_end_of_cached_nodes was called
                     move_node_to_end_of_cached_nodes.assert_called()
+                    assert any(
+                        call.get("last_failed_node_name") is not None
+                        for call in initialize_calls
+                    )
 
     async def test_connection_error_handles_node_connections(self) -> None:
         """
