@@ -99,8 +99,6 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
 
         if self._reader.has_data():
             return True
-        if timeout is SENTINEL:
-            timeout = self._socket_timeout
         return _socket_can_read(self._sock, timeout)
 
     def read_from_socket(self, timeout=SENTINEL, raise_on_timeout=True):
