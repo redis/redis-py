@@ -1717,7 +1717,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                     while entry.connection_ref.can_read():
                         try:
                             entry.connection_ref.read_response(
-                                push_request=True, timeout=0
+                                push_request=True,
+                                timeout=0,
+                                disconnect_on_error=False,
                             )
                         except TimeoutError:
                             break
@@ -1947,7 +1949,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def _process_pending_invalidations(self):
         while self.can_read():
             try:
-                self._conn.read_response(push_request=True, timeout=0)
+                self._conn.read_response(
+                    push_request=True, timeout=0, disconnect_on_error=False
+                )
             except TimeoutError:
                 break
 

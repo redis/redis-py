@@ -83,8 +83,11 @@ class SocketBuffer:
             # there's no data to be read. otherwise raise the
             # original exception.
             allowed = NONBLOCKING_EXCEPTION_ERROR_NUMBERS.get(ex.__class__, -1)
-            if not raise_on_timeout and ex.errno == allowed:
-                return False
+            if ex.errno == allowed:
+                if not raise_on_timeout:
+                    return False
+                if timeout == 0:
+                    raise TimeoutError("Timeout reading from socket")
             raise ConnectionError(f"Error while reading from socket: {ex.args}")
         finally:
             buf.seek(current_pos)

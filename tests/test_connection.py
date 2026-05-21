@@ -3,7 +3,7 @@ import platform
 import socket
 import threading
 import types
-from errno import ECONNREFUSED
+from errno import ECONNREFUSED, EWOULDBLOCK
 from typing import Any
 from unittest import mock
 from unittest.mock import call, patch, MagicMock, Mock
@@ -13,7 +13,7 @@ import redis
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
 from redis._parsers.hiredis import NOT_ENOUGH_DATA
-from redis._parsers.socket import SENTINEL
+from redis._parsers.socket import SENTINEL, SocketBuffer
 from redis.backoff import NoBackoff
 from redis.cache import (
     CacheConfig,
@@ -75,6 +75,7 @@ def make_hiredis_parser(
     parser._reader = DummyHiredisReader(response, decoded_response, has_data)
     parser._hiredis_PushNotificationType = None
     parser._sock = mock.Mock()
+    parser._buffer = bytearray(65536)
     parser._socket_timeout = None
     return parser
 
@@ -127,6 +128,27 @@ def test_hiredis_can_read_leaves_decoding_to_read_response():
 
     assert parser.can_read(timeout=0) is True
     assert parser.read_response() == raw.decode()
+
+
+def test_hiredis_read_response_timeout_zero_maps_would_block_to_timeout():
+    parser = make_hiredis_parser()
+    parser._sock.recv_into.side_effect = BlockingIOError(
+        EWOULDBLOCK, "Resource temporarily unavailable"
+    )
+
+    with pytest.raises(TimeoutError):
+        parser.read_response(timeout=0)
+
+
+def test_socket_buffer_timeout_zero_maps_would_block_to_timeout():
+    sock = Mock()
+    sock.recv.side_effect = BlockingIOError(
+        EWOULDBLOCK, "Resource temporarily unavailable"
+    )
+    socket_buffer = SocketBuffer(sock, socket_read_size=65536, socket_timeout=None)
+
+    with pytest.raises(TimeoutError):
+        socket_buffer.readline(timeout=0)
 
 
 @skip_if_server_version_lt("4.0.0")
@@ -800,7 +822,9 @@ class TestUnitCacheProxyConnection:
 
         assert proxy_connection.read_response() == b"bar"
         assert another_conn.can_read.call_count == 2
-        another_conn.read_response.assert_called_once_with(push_request=True, timeout=0)
+        another_conn.read_response.assert_called_once_with(
+            push_request=True, timeout=0, disconnect_on_error=False
+        )
 
     @pytest.mark.skipif(
         platform.python_implementation() == "PyPy",
@@ -852,7 +876,9 @@ class TestUnitCacheProxyConnection:
 
         # The drain should have happened on the other connection
         assert another_conn.can_read.call_count == 2
-        another_conn.read_response.assert_called_once_with(push_request=True, timeout=0)
+        another_conn.read_response.assert_called_once_with(
+            push_request=True, timeout=0, disconnect_on_error=False
+        )
 
         # The command must have been sent over the wire (not returned early)
         mock_connection.send_command.assert_called_once_with("GET", "foo", keys=["foo"])
@@ -904,7 +930,9 @@ class TestUnitCacheProxyConnection:
         )
         proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
 
-        another_conn.read_response.assert_called_once_with(push_request=True, timeout=0)
+        another_conn.read_response.assert_called_once_with(
+            push_request=True, timeout=0, disconnect_on_error=False
+        )
         mock_connection.send_command.assert_not_called()
 
     def test_process_pending_invalidations_breaks_on_timeout(self, mock_connection):
@@ -925,7 +953,7 @@ class TestUnitCacheProxyConnection:
         proxy_connection._process_pending_invalidations()
 
         mock_connection.read_response.assert_called_once_with(
-            push_request=True, timeout=0
+            push_request=True, timeout=0, disconnect_on_error=False
         )
 
     def test_read_response_propagates_timeout_parameter(self, mock_connection):
