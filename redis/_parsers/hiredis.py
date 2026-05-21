@@ -225,10 +225,10 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
     @deprecated_function(
         version="8.0.0", reason="Use can_read() instead", name="can_read_destructive"
     )
-    async def can_read_destructive(self, timeout: float = 0) -> bool:
-        return await self.can_read(timeout=timeout)
+    async def can_read_destructive(self) -> bool:
+        return await self.can_read()
 
-    async def can_read(self, timeout: float = 0) -> bool:
+    async def can_read(self) -> bool:
         # TODO: Rename this API; it detects pending data or dirty/closed
         # connection state, not only whether application data can be read.
         if not self._connected:

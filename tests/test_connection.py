@@ -800,7 +800,7 @@ class TestUnitCacheProxyConnection:
 
         assert proxy_connection.read_response() == b"bar"
         assert another_conn.can_read.call_count == 2
-        another_conn.read_response.assert_called_once()
+        another_conn.read_response.assert_called_once_with(push_request=True, timeout=0)
 
     @pytest.mark.skipif(
         platform.python_implementation() == "PyPy",
@@ -852,7 +852,7 @@ class TestUnitCacheProxyConnection:
 
         # The drain should have happened on the other connection
         assert another_conn.can_read.call_count == 2
-        another_conn.read_response.assert_called_once()
+        another_conn.read_response.assert_called_once_with(push_request=True, timeout=0)
 
         # The command must have been sent over the wire (not returned early)
         mock_connection.send_command.assert_called_once_with("GET", "foo", keys=["foo"])
@@ -865,6 +865,67 @@ class TestUnitCacheProxyConnection:
                 status=CacheEntryStatus.IN_PROGRESS,
                 connection_ref=mock_connection,
             )
+        )
+
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Pypy doesn't support side_effect",
+    )
+    def test_invalidation_processing_on_another_connection_breaks_on_timeout(
+        self, mock_cache, mock_connection
+    ):
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection._event_dispatcher = Mock(spec=EventDispatcher)
+
+        another_conn = copy.deepcopy(mock_connection)
+        another_conn.can_read.return_value = True
+        another_conn.read_response.side_effect = TimeoutError("timeout")
+
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache_entry = CacheEntry(
+            cache_key=cache_key,
+            cache_value=b"bar",
+            status=CacheEntryStatus.VALID,
+            connection_ref=another_conn,
+        )
+
+        mock_cache.is_cachable.return_value = True
+        mock_cache.get.side_effect = [cache_entry, cache_entry, cache_entry]
+        mock_connection.can_read.return_value = False
+
+        proxy_connection = CacheProxyConnection(
+            mock_connection, mock_cache, threading.RLock()
+        )
+        proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
+
+        another_conn.read_response.assert_called_once_with(push_request=True, timeout=0)
+        mock_connection.send_command.assert_not_called()
+
+    def test_process_pending_invalidations_breaks_on_timeout(self, mock_connection):
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection._event_dispatcher = EventDispatcher()
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection.can_read.return_value = True
+        mock_connection.read_response.side_effect = TimeoutError("timeout")
+
+        cache = DefaultCache(CacheConfig(max_size=10))
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+
+        proxy_connection._process_pending_invalidations()
+
+        mock_connection.read_response.assert_called_once_with(
+            push_request=True, timeout=0
         )
 
     def test_read_response_propagates_timeout_parameter(self, mock_connection):

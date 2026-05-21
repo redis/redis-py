@@ -152,7 +152,7 @@ async def test_async_resp_can_read_detects_stream_buffer(parser_class):
     parser._connected = True
     parser._stream = stream
 
-    assert await parser.can_read(timeout=0) is True
+    assert await parser.can_read() is True
     assert stream.read_called is False
 
 

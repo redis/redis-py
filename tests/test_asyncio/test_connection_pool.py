@@ -119,7 +119,7 @@ class DummyConnection(Connection):
     def is_connected(self):
         return self._connected
 
-    async def can_read(self, timeout: float = 0) -> bool:
+    async def can_read(self) -> bool:
         return False
 
     def set_re_auth_token(self, token: TokenInterface):

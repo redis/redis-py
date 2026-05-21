@@ -120,12 +120,6 @@ class BaseParser(ABC):
     def on_connect(self, connection):
         pass
 
-    @abstractmethod
-    def can_read(self, timeout: float = 0) -> bool:
-        # TODO: Rename this API; it detects pending data or dirty/closed
-        # connection state, not only whether application data can be read.
-        pass
-
 
 class _RESPBase(BaseParser):
     """Base class for sync-based resp parsing"""
@@ -179,11 +173,11 @@ class AsyncBaseParser(BaseParser):
         version="8.0.0", reason="Use can_read() instead", name="can_read_destructive"
     )
     @abstractmethod
-    async def can_read_destructive(self, timeout: float = 0) -> bool:
+    async def can_read_destructive(self) -> bool:
         pass
 
     @abstractmethod
-    async def can_read(self, timeout: float = 0) -> bool:
+    async def can_read(self) -> bool:
         # TODO: Rename this API; it detects pending data or dirty/closed
         # connection state, not only whether application data can be read.
         pass
@@ -536,10 +530,10 @@ class _AsyncRESPBase(AsyncBaseParser):
         reason="Use can_read() instead",
         name="can_read_destructive",
     )
-    async def can_read_destructive(self, timeout: float = 0) -> bool:
-        return await self.can_read(timeout=timeout)
+    async def can_read_destructive(self) -> bool:
+        return await self.can_read()
 
-    async def can_read(self, timeout: float = 0) -> bool:
+    async def can_read(self) -> bool:
         # TODO: Rename this API; it detects pending data or dirty/closed
         # connection state, not only whether application data can be read.
         if not self._connected:

@@ -715,21 +715,21 @@ class AbstractConnection:
     @deprecated_function(
         version="8.0.0", reason="Use can_read() instead", name="can_read_destructive"
     )
-    async def can_read_destructive(self, timeout: float = 0) -> bool:
+    async def can_read_destructive(self) -> bool:
         """Check the socket to see if there's data loaded in the buffer."""
         try:
-            return await self._parser.can_read(timeout=timeout)
+            return await self._parser.can_read()
         except OSError as e:
             await self.disconnect(nowait=True)
             host_error = self._host_error()
             raise ConnectionError(f"Error while reading from {host_error}: {e.args}")
 
-    async def can_read(self, timeout: float = 0) -> bool:
+    async def can_read(self) -> bool:
         """Check the socket to see if there's data loaded in the buffer."""
         # TODO: Rename this API; it detects pending data or dirty/closed
         # connection state, not only whether application data can be read.
         try:
-            return await self._parser.can_read(timeout=timeout)
+            return await self._parser.can_read()
         except OSError as e:
             await self.disconnect(nowait=True)
             host_error = self._host_error()

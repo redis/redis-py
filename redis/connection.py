@@ -1715,7 +1715,12 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
                 with self._pool_lock:
                     while entry.connection_ref.can_read():
-                        entry.connection_ref.read_response(push_request=True)
+                        try:
+                            entry.connection_ref.read_response(
+                                push_request=True, timeout=0
+                            )
+                        except TimeoutError:
+                            break
 
                 # Re-check: if the entry was invalidated during the drain,
                 # fall through to send the command over the network.
@@ -1941,7 +1946,10 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
     def _process_pending_invalidations(self):
         while self.can_read():
-            self._conn.read_response(push_request=True)
+            try:
+                self._conn.read_response(push_request=True, timeout=0)
+            except TimeoutError:
+                break
 
     def _on_invalidation_callback(self, data: List[Union[str, Optional[List[bytes]]]]):
         with self._cache_lock:
