@@ -3403,7 +3403,7 @@ class BasicKeyCommands(CommandsProtocol):
         byint: EncodableT | None = None,
         lbound: EncodableT | None = None,
         ubound: EncodableT | None = None,
-        overflow: Literal["FAIL", "REJECT", "SAT"] | None = None,
+        saturate: bool = False,
         ex: ExpiryT | None = None,
         px: ExpiryT | None = None,
         exat: AbsExpiryT | None = None,
@@ -3421,7 +3421,7 @@ class BasicKeyCommands(CommandsProtocol):
         byint: EncodableT | None = None,
         lbound: EncodableT | None = None,
         ubound: EncodableT | None = None,
-        overflow: Literal["FAIL", "REJECT", "SAT"] | None = None,
+        saturate: bool = False,
         ex: ExpiryT | None = None,
         px: ExpiryT | None = None,
         exat: AbsExpiryT | None = None,
@@ -3438,7 +3438,7 @@ class BasicKeyCommands(CommandsProtocol):
         byint: EncodableT | None = None,
         lbound: EncodableT | None = None,
         ubound: EncodableT | None = None,
-        overflow: Literal["FAIL", "REJECT", "SAT"] | None = None,
+        saturate: bool = False,
         ex: ExpiryT | None = None,
         px: ExpiryT | None = None,
         exat: AbsExpiryT | None = None,
@@ -3459,8 +3459,11 @@ class BasicKeyCommands(CommandsProtocol):
 
         ``lbound`` and ``ubound`` constrain the valid range of the result.
 
-        ``overflow`` controls bound handling and can be ``FAIL``, ``REJECT``,
-        or ``SAT``.
+        If ``saturate`` is True, out-of-bounds results are saturated to the
+        specified bound, or to the type limit when no bound is specified.
+        Otherwise, out-of-bounds results are rejected, leaving the value and
+        TTL unchanged and returning the current value and zero as the actual
+        increment.
 
         ``enx`` applies the expiration only when the key does not already
         have an expiration, and requires ``ex``, ``px``, ``exat``, or ``pxat``.
@@ -3487,9 +3490,6 @@ class BasicKeyCommands(CommandsProtocol):
                 "and ``persist`` are mutually exclusive."
             )
 
-        if overflow is not None and overflow not in {"FAIL", "REJECT", "SAT"}:
-            raise DataError("INCREX overflow must be one of: FAIL, REJECT, SAT")
-
         if enx and ex is None and px is None and exat is None and pxat is None:
             raise DataError(
                 "``enx`` requires one of ``ex``, ``px``, ``exat``, or ``pxat``."
@@ -3506,8 +3506,8 @@ class BasicKeyCommands(CommandsProtocol):
             pieces.extend(("LBOUND", lbound))
         if ubound is not None:
             pieces.extend(("UBOUND", ubound))
-        if overflow is not None:
-            pieces.extend(("OVERFLOW", overflow))
+        if saturate:
+            pieces.append("SATURATE")
 
         pieces.extend(extract_expire_flags(ex, px, exat, pxat))
         if persist:
