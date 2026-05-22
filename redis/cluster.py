@@ -4127,7 +4127,7 @@ class PipelineStrategy(AbstractStrategy):
                                 command_policies = default_keyless
                             else:
                                 command_policies = default_keyed
-                                if command == arg0 and pipe.commands_parser._is_keyed_command(command):
+                                if command == arg0 and pipe.commands_parser._is_keyed_command(*args):
                                     # safe to cache
                                     policy_cache[arg0] = command_policies
                         else:
