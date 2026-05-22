@@ -4075,6 +4075,7 @@ class PipelineStrategy(AbstractStrategy):
         policy_resolver = pipe._policy_resolver
         pipe_command_flags = pipe.command_flags
         command_flags = self.command_flags
+        no_default_node = not pipe.get_default_node()
 
         policy_cache = {}
         SENTINEL = object()
@@ -4118,7 +4119,7 @@ class PipelineStrategy(AbstractStrategy):
                         command_flag = command_flags.get(command)
                         if not command_flag:
                             # Fallback to default policy
-                            if not pipe.get_default_node():
+                            if no_default_node:
                                 keys = None
                             else:
                                 keys = pipe._get_command_keys(*args)
@@ -4126,6 +4127,9 @@ class PipelineStrategy(AbstractStrategy):
                                 command_policies = default_keyless
                             else:
                                 command_policies = default_keyed
+                                if command == arg0 and pipe.commands_parser._is_keyed_command(command):
+                                    # safe to cache
+                                    policy_cache[arg0] = command_policies
                         else:
                             if command_flag in pipe._command_flags_mapping:
                                 command_policies = CommandPolicies(

@@ -127,6 +127,25 @@ class CommandsParser(AbstractCommandsParser):
             ):
                 command["_single_key_pos"] = first_key_pos
 
+    def _is_keyed_command(self, *args):
+        """
+        Determines whether the command is always keyed, never keyless.
+
+        Must have been initialized, won't automatically do so.
+        """
+        if len(args) < 2:
+            # The command has no keys in it
+            return False
+
+        cmd_name = args[0].lower()
+        commands = self.commands
+        command = commands.get(cmd_name)
+        if command is None:
+            return False
+
+        single_pos = command.get("_single_key_pos")
+        return single_pos is not None
+
     # As soon as this PR is merged into Redis, we should reimplement
     # our logic to use COMMAND INFO changes to determine the key positions
     # https://github.com/redis/redis/pull/8324
