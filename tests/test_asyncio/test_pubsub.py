@@ -2420,6 +2420,26 @@ class TestClusterPubSubSlotMigration:
         assert pubsub.node_pubsub_mapping == {}
         assert pubsub._shard_channel_to_node == {b"foo": "127.0.0.1:7000"}
 
+    async def test_ssubscribe_initializes_cluster_before_resolving_slot(self):
+        """
+        Async RedisCluster lazily initializes on first awaited command.
+        ClusterPubSub.ssubscribe must honor that contract before it resolves
+        the shard channel slot through the cluster's slots cache.
+        """
+        pubsub = self._make_cluster_pubsub()
+        node = self._make_node("127.0.0.1:7000")
+        node_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[node.name] = node_ps
+        pubsub.cluster._initialize = True
+        pubsub.cluster.initialize = AsyncMock()
+        pubsub.cluster.get_node_from_key.return_value = node
+
+        await pubsub.ssubscribe(b"foo")
+
+        pubsub.cluster.initialize.assert_awaited_once()
+        pubsub.cluster.get_node_from_key.assert_called_once_with(b"foo")
+        node_ps.ssubscribe.assert_awaited_once_with(b"foo")
+
     async def test_aclose_clears_state_and_cancels_reconcile_tasks(self):
         """
         Regression: aclose() must clear the ``_shard_channel_to_node`` reverse

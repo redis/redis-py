@@ -34,6 +34,11 @@ from tests.test_scenario.common_scenario_helpers import (
 POST_RECOVERY_DELIVERY_RATIO = 0.90
 BASELINE_TIMEOUT = 30
 RECOVERY_TIMEOUT = 120
+SHARD_FAILURE_RECOVERY_TIMEOUT = 180
+# node_failure/reboot in the fault injector can wait up to 180s for shutdown
+# and 180s for startup before the action completes.
+INFRASTRUCTURE_ACTION_TIMEOUT = 360
+INFRASTRUCTURE_RECOVERY_TEST_TIMEOUT = 600
 PUBLISH_INTERVAL = 0.02
 PUBSUB_PROGRESS_LOG_MESSAGE_INTERVAL = 300
 PUBSUB_TEST_SHARDS_COUNT = 3
@@ -88,6 +93,170 @@ FAILURE_SCENARIOS = [
         id="shard-failure",
     ),
 ]
+
+
+def recovery_timeout_for_failure(failure_name):
+    if failure_name == "shard_failure":
+        return SHARD_FAILURE_RECOVERY_TIMEOUT
+    return RECOVERY_TIMEOUT
+
+
+def action_timeout_for_failure(failure_name):
+    if failure_name == "shard_failure":
+        return RECOVERY_TIMEOUT
+    return INFRASTRUCTURE_ACTION_TIMEOUT
+
+
+def execute_rladmin_command_action(
+    fault_injector_client: FaultInjectorClient,
+    command,
+    bdb_id,
+    timeout=RECOVERY_TIMEOUT,
+):
+    parameters = {
+        "bdb_id": bdb_id,
+        "rladmin_command": command,
+    }
+    logging.debug("Executing rladmin_command with parameter: %s", parameters)
+    result = fault_injector_client.trigger_action(
+        ActionRequest(
+            action_type=ActionType.EXECUTE_RLADMIN_COMMAND,
+            parameters=parameters,
+        )
+    )
+    action_id = result.get("action_id")
+    if not action_id:
+        pytest.fail(f"Failed to trigger rladmin command action: {result}")
+    return fault_injector_client.get_operation_result(action_id, timeout=timeout)
+
+
+def get_master_shard_on_rladmin_action_node(
+    fault_injector_client: FaultInjectorClient,
+    bdb_id,
+):
+    status_result = execute_rladmin_command_action(
+        fault_injector_client,
+        command="status",
+        bdb_id=bdb_id,
+    )
+    status_output = status_result.get("output", {}).get("output", "")
+    if not status_output:
+        pytest.fail(f"rladmin status did not return output: {status_result}")
+    action_node_id = str(status_result.get("output", {}).get("node_id"))
+
+    shards_section_started = False
+    for line in status_output.splitlines():
+        line = line.strip()
+        if line.startswith("SHARDS:"):
+            shards_section_started = True
+            continue
+        if not shards_section_started or not line or line.startswith("DB:ID"):
+            continue
+
+        parts = line.split()
+        if (
+            len(parts) >= 8
+            and parts[0] == f"db:{bdb_id}"
+            and parts[3] == f"node:{action_node_id}"
+            and parts[4] == "master"
+        ):
+            return parts[2].replace("redis:", "")
+
+    pytest.fail(f"No master shard found for db:{bdb_id} on node:{action_node_id}")
+
+
+def database_and_shards_are_active(status_output, bdb_id):
+    database_active = False
+    shard_count = 0
+    shards_ok = True
+    section = None
+
+    for line in status_output.splitlines():
+        line = line.strip()
+        if line.startswith("DATABASES:"):
+            section = "databases"
+            continue
+        if line.startswith("ENDPOINTS:"):
+            section = "endpoints"
+            continue
+        if line.startswith("SHARDS:"):
+            section = "shards"
+            continue
+
+        if not line or line.startswith("DB:ID"):
+            continue
+
+        parts = line.split()
+        if section == "databases" and len(parts) >= 5 and parts[0] == f"db:{bdb_id}":
+            database_active = parts[4] == "active"
+        elif section == "shards" and len(parts) >= 8 and parts[0] == f"db:{bdb_id}":
+            shard_count += 1
+            shards_ok = shards_ok and parts[-1] == "OK"
+
+    return database_active and shard_count > 0 and shards_ok
+
+
+def wait_for_database_active_after_shard_failure(
+    fault_injector_client: FaultInjectorClient,
+    bdb_id,
+    timeout=RECOVERY_TIMEOUT,
+):
+    deadline = time.time() + timeout
+    last_status_output = ""
+
+    while time.time() < deadline:
+        status_result = execute_rladmin_command_action(
+            fault_injector_client,
+            command="status",
+            bdb_id=bdb_id,
+        )
+        last_status_output = status_result.get("output", {}).get("output", "")
+        if database_and_shards_are_active(last_status_output, bdb_id):
+            return
+        time.sleep(3)
+
+    pytest.fail(
+        f"Timed out waiting for db:{bdb_id} to become active after shard failure. "
+        f"Last rladmin status output: {last_status_output}"
+    )
+
+
+def execute_failure_scenario(
+    fault_injector_client: FaultInjectorClient,
+    failure_name,
+    create_action,
+    cluster_endpoint_config,
+):
+    if failure_name == "shard_failure":
+        bdb_id = cluster_endpoint_config["bdb_id"]
+        shard_id = get_master_shard_on_rladmin_action_node(
+            fault_injector_client, bdb_id
+        )
+        # The deployed shard_failure action fails before shard.kill() because
+        # rlauto cannot resolve the shard's node. Execute the same shard process
+        # kill through the generic command action until that action is fixed.
+        command = (
+            "status >/dev/null; "
+            f"sudo -in kill -9 $(sudo -in cat /var/run/redis/redis-{shard_id}.pid)"
+        )
+        execute_rladmin_command_action(
+            fault_injector_client,
+            command=command,
+            bdb_id=bdb_id,
+            timeout=action_timeout_for_failure(failure_name),
+        )
+        wait_for_database_active_after_shard_failure(
+            fault_injector_client,
+            bdb_id,
+            timeout=action_timeout_for_failure(failure_name),
+        )
+        return
+
+    result = fault_injector_client.trigger_action(create_action(cluster_endpoint_config))
+    fault_injector_client.get_operation_result(
+        result["action_id"],
+        timeout=action_timeout_for_failure(failure_name),
+    )
 
 
 def make_pubsub_db_config(base_config, test_name):
@@ -181,6 +350,7 @@ def run_sharded_pubsub_scenario(
     channel_prefix,
     subscriber_count,
     cluster_op_action,
+    recovery_timeout=RECOVERY_TIMEOUT,
 ):
     channels = KeyGenerationHelpers.generate_keys_for_all_shards(
         shards_count=endpoint_config["shards_count"],
@@ -349,7 +519,7 @@ def run_sharded_pubsub_scenario(
         try:
             wait_for_condition(
                 enough_messages_sent,
-                timeout=RECOVERY_TIMEOUT,
+                timeout=recovery_timeout,
                 check_interval=0.1,
                 error_message="Timed out waiting for post-recovery messages to be sent",
             )
@@ -381,7 +551,7 @@ def run_sharded_pubsub_scenario(
         try:
             wait_for_condition(
                 delivery_ratio_met,
-                timeout=RECOVERY_TIMEOUT,
+                timeout=recovery_timeout,
                 check_interval=0.1,
                 error_message="Timed out waiting for post-recovery delivery ratio",
             )
@@ -405,6 +575,7 @@ async def async_run_sharded_pubsub_recovery_scenario(
     channel_prefix,
     subscriber_count,
     cluster_op_action,
+    recovery_timeout=RECOVERY_TIMEOUT,
 ):
     channels = KeyGenerationHelpers.generate_keys_for_all_shards(
         shards_count=endpoint_config["shards_count"],
@@ -537,7 +708,7 @@ async def async_run_sharded_pubsub_recovery_scenario(
         try:
             await async_wait_for_condition(
                 enough_messages_sent,
-                timeout=RECOVERY_TIMEOUT,
+                timeout=recovery_timeout,
                 check_interval=0.1,
                 error_message="Timed out waiting for post-recovery messages to be sent",
             )
@@ -567,7 +738,7 @@ async def async_run_sharded_pubsub_recovery_scenario(
         try:
             await async_wait_for_condition(
                 delivery_ratio_met,
-                timeout=RECOVERY_TIMEOUT,
+                timeout=recovery_timeout,
                 check_interval=0.1,
                 error_message="Timed out waiting for post-recovery delivery ratio",
             )
@@ -635,7 +806,7 @@ class TestShardedPubSubMigrationScenario(TestPubSubBase):
 
 
 class TestShardedPubSubInfrastructureRecovery(TestPubSubBase):
-    @pytest.mark.timeout(420)
+    @pytest.mark.timeout(INFRASTRUCTURE_RECOVERY_TEST_TIMEOUT)
     @pytest.mark.parametrize("subscriber_count", [1, 2])
     @pytest.mark.parametrize("failure_name, create_action", FAILURE_SCENARIOS)
     def test_sharded_pubsub_recovers_after_infrastructure_failure(
@@ -648,12 +819,11 @@ class TestShardedPubSubInfrastructureRecovery(TestPubSubBase):
         cluster_client,
     ):
         def inject_failure():
-            result = fault_injector_client_oss_api.trigger_action(
-                create_action(cluster_endpoint_config)
-            )
-            fault_injector_client_oss_api.get_operation_result(
-                result["action_id"],
-                timeout=RECOVERY_TIMEOUT,
+            execute_failure_scenario(
+                fault_injector_client_oss_api,
+                failure_name,
+                create_action,
+                cluster_endpoint_config,
             )
 
         run_sharded_pubsub_scenario(
@@ -662,6 +832,7 @@ class TestShardedPubSubInfrastructureRecovery(TestPubSubBase):
             channel_prefix=f"pubsub-recovery-{failure_name}",
             subscriber_count=subscriber_count,
             cluster_op_action=inject_failure,
+            recovery_timeout=recovery_timeout_for_failure(failure_name),
         )
 
 
@@ -698,7 +869,7 @@ class TestAsyncShardedPubSubFaultInjectorMigrationScenario(TestPubSubBase):
 
 class TestAsyncShardedPubSubInfrastructureRecovery(TestPubSubBase):
     @pytest.mark.asyncio
-    @pytest.mark.timeout(420)
+    @pytest.mark.timeout(INFRASTRUCTURE_RECOVERY_TEST_TIMEOUT)
     @pytest.mark.parametrize("subscriber_count", [1, 2])
     @pytest.mark.parametrize("failure_name, create_action", FAILURE_SCENARIOS)
     async def test_sharded_pubsub_recovers_after_infrastructure_failure(
@@ -711,12 +882,11 @@ class TestAsyncShardedPubSubInfrastructureRecovery(TestPubSubBase):
         async_cluster_client,
     ):
         def inject_failure():
-            result = fault_injector_client_oss_api.trigger_action(
-                create_action(cluster_endpoint_config)
-            )
-            fault_injector_client_oss_api.get_operation_result(
-                result["action_id"],
-                timeout=RECOVERY_TIMEOUT,
+            execute_failure_scenario(
+                fault_injector_client_oss_api,
+                failure_name,
+                create_action,
+                cluster_endpoint_config,
             )
 
         await async_run_sharded_pubsub_recovery_scenario(
@@ -725,4 +895,5 @@ class TestAsyncShardedPubSubInfrastructureRecovery(TestPubSubBase):
             channel_prefix=f"async-pubsub-recovery-{failure_name}",
             subscriber_count=subscriber_count,
             cluster_op_action=inject_failure,
+            recovery_timeout=recovery_timeout_for_failure(failure_name),
         )
