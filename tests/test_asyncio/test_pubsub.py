@@ -1167,12 +1167,9 @@ class TestPubSubRun:
 
         messages = asyncio.Queue()
         p = pubsub
+        # Establish the connection before run() so CI does not race startup.
+        await p.connect()
         task = asyncio.get_running_loop().create_task(p.run())
-        # Wait until run() has established the PubSub connection. A fixed sleep
-        # can race RESP3 handshakes on slower CI jobs.
-        async with async_timeout(1):
-            while p.connection is None or not p.connection.is_connected:
-                await asyncio.sleep(0)
         await p.subscribe(foo=callback)
         # wait tof the subscribe to finish.  Cannot use _subscribe() because
         # p.run() is already accepting messages
