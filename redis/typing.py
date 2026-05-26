@@ -83,7 +83,23 @@ StreamRangeResponse = list[StreamEntry]
 XClaimResponse = StreamRangeResponse | list[bytes | str]
 XPendingRangeEntry = dict[str, bytes | str | int]
 XPendingRangeResponse = list[XPendingRangeEntry]
-XReadResponse = list[list[Any]] | dict[bytes | str, list[StreamRangeResponse]]
+XReadGroupClaimEntry = tuple[
+    bytes | str,
+    dict[bytes | str, bytes | str],
+    bytes | str | int,
+    bytes | str | int,
+]
+XReadGroupStreamResponse = StreamRangeResponse | list[XReadGroupClaimEntry]
+XReadResponse = (
+    list[list[Any]]
+    | dict[bytes | str, list[StreamRangeResponse]]
+    | dict[bytes | str, StreamRangeResponse]
+)
+XReadGroupResponse = (
+    list[list[Any]]
+    | dict[bytes | str, list[XReadGroupStreamResponse]]
+    | dict[bytes | str, XReadGroupStreamResponse]
+)
 ClusterNodeDetail = dict[str, str | bool | list[list[str]] | list[dict[str, str]]]
 ClusterLink = dict[str, Any] | list[Any]
 ClusterLinksResponse = list[ClusterLink]
