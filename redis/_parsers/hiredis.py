@@ -168,6 +168,7 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
             return self.read_response(
                 disable_decoding=disable_decoding,
                 push_request=push_request,
+                timeout=timeout,
             )
 
         elif (
@@ -240,8 +241,8 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         if self._reader.has_data() or self._stream.at_eof():
             return True
         # asyncio.StreamReader has no public non-destructive API for checking
-        # buffered bytes. Preserve dirty-connection detection for hiredis and
-        # fail loudly if the private buffer API changes.
+        # buffered bytes. Preserve dirty-connection detection for hiredis; tests
+        # with a real StreamReader guard this private buffer API in CI.
         return bool(self._stream._buffer)
 
     async def read_from_socket(self):

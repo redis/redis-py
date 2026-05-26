@@ -108,6 +108,16 @@ async def test_async_hiredis_can_read_detects_reader_response():
     assert stream.read_called is False
 
 
+async def test_async_hiredis_can_read_detects_real_stream_reader_buffer():
+    payload = b"+OK\r\n"
+    stream = asyncio.StreamReader()
+    stream.feed_data(payload)
+    parser = make_async_hiredis_parser(stream)
+
+    assert await parser.can_read() is True
+    assert await stream.read(len(payload)) == payload
+
+
 async def test_async_hiredis_can_read_preserves_reader_response():
     stream = DummyAsyncStream()
     parser = make_async_hiredis_parser(stream, response=b"OK", has_data=True)

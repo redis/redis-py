@@ -68,6 +68,10 @@ class DummyHiredisReader:
         return NOT_ENOUGH_DATA
 
 
+class DummyPushNotification(list):
+    pass
+
+
 def make_hiredis_parser(
     response=NOT_ENOUGH_DATA, decoded_response=None, has_data=False
 ):
@@ -128,6 +132,45 @@ def test_hiredis_can_read_leaves_decoding_to_read_response():
 
     assert parser.can_read(timeout=0) is True
     assert parser.read_response() == raw.decode()
+
+
+def test_hiredis_read_response_returns_initial_push_notification():
+    push_response = DummyPushNotification([b"message", b"channel", b"data"])
+    handled_response = object()
+    parser = make_hiredis_parser()
+    parser._hiredis_PushNotificationType = DummyPushNotification
+    parser._reader.responses = [push_response]
+    parser.pubsub_push_handler_func = Mock(return_value=handled_response)
+
+    assert parser.read_response(push_request=True) is handled_response
+    parser.pubsub_push_handler_func.assert_called_once_with(push_response)
+
+
+def test_hiredis_read_response_skips_initial_push_notification():
+    push_response = DummyPushNotification([b"message", b"channel", b"data"])
+    parser = make_hiredis_parser()
+    parser._hiredis_PushNotificationType = DummyPushNotification
+    parser._reader.responses = [push_response, b"OK"]
+    parser.pubsub_push_handler_func = Mock(return_value=push_response)
+
+    assert parser.read_response() == b"OK"
+    parser.pubsub_push_handler_func.assert_called_once_with(push_response)
+
+
+def test_hiredis_read_response_preserves_timeout_after_initial_push_notification():
+    push_response = DummyPushNotification([b"message", b"channel", b"data"])
+    parser = make_hiredis_parser()
+    parser._hiredis_PushNotificationType = DummyPushNotification
+    parser._reader.responses = [push_response, NOT_ENOUGH_DATA]
+    parser._sock.recv_into.side_effect = BlockingIOError(
+        EWOULDBLOCK, "Resource temporarily unavailable"
+    )
+    parser.pubsub_push_handler_func = Mock(return_value=push_response)
+
+    with pytest.raises(TimeoutError):
+        parser.read_response(timeout=0)
+
+    parser.pubsub_push_handler_func.assert_called_once_with(push_response)
 
 
 def test_hiredis_read_response_timeout_zero_maps_would_block_to_timeout():
