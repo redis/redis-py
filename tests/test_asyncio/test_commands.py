@@ -21,7 +21,13 @@ from redis._parsers.helpers import (
     parse_info,
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
-from redis.commands.core import DataPersistOptions, HotkeysMetricsTypes
+from redis.commands.core import (
+    ArrayAggregateOperations,
+    ArrayPredicateCombinator,
+    ArrayPredicateType,
+    DataPersistOptions,
+    HotkeysMetricsTypes,
+)
 from redis.commands.json.path import Path
 from redis.commands.search.field import TextField
 from redis.commands.search.query import Query
@@ -1643,6 +1649,12 @@ class TestRedisCommands:
         assert await r.get("integer") == str(integer).encode()
         assert (await r.get("unicode_string")).decode("utf-8") == unicode_string
 
+    async def test_getex_zero_expiry_options_are_mutually_exclusive(
+        self, r: redis.Redis
+    ):
+        with pytest.raises(DataError):
+            await r.getex("a", ex=0, px=1)
+
     async def test_get_set_bit(self, r: redis.Redis):
         # no value
         assert not await r.getbit("a", 5)
@@ -1689,6 +1701,75 @@ class TestRedisCommands:
         assert await r.get("a") == b"1"
         assert await r.incrbyfloat("a", 1.1) == 2.1
         assert float(await r.get("a")) == float(2.1)
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_increx_default(self, r: redis.Redis):
+        key = "increx:default"
+        assert await r.set(key, 10)
+        assert await r.increx(key) == [11, 1]
+        assert await r.get(key) == b"11"
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_increx_byint(self, r: redis.Redis):
+        key = "increx:byint"
+        assert await r.set(key, 20)
+        assert await r.increx(key, byint=4) == [24, 4]
+        assert await r.get(key) == b"24"
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_increx_byfloat(self, r: redis.Redis):
+        key = "increx:float"
+        assert await r.set(key, "1.5")
+        result = await r.increx(key, byfloat=0.25, lbound=0, ubound=2)
+        assert [float(value) for value in result] == pytest.approx([1.75, 0.25])
+        assert float(await r.get(key)) == pytest.approx(1.75)
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_increx_saturating_bounds(self, r: redis.Redis):
+        key = "increx:sat"
+        assert await r.set(key, "1.8")
+        result = await r.increx(key, byfloat=0.7, ubound=2, overflow="SAT")
+        assert [float(value) for value in result] == pytest.approx([2.0, 0.2])
+        assert float(await r.get(key)) == pytest.approx(2.0)
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_increx_fail_overflow_keeps_value(self, r: redis.Redis):
+        key = "increx:overflow"
+        assert await r.set(key, 10)
+        with pytest.raises(ResponseError):
+            await r.increx(key, byint=5, ubound=12)
+        assert await r.get(key) == b"10"
+
+    @skip_if_server_version_lt("8.7.0")
+    async def test_increx_expiration_enx(self, r: redis.Redis):
+        key = "increx:expiration"
+        assert await r.set(key, 40)
+        assert await r.ttl(key) == -1
+
+        assert await r.increx(key, byint=2, ex=60, enx=True) == [42, 2]
+        ttl = await r.ttl(key)
+        assert 0 < ttl <= 60
+
+        assert await r.increx(key, byint=3, ex=600, enx=True) == [45, 3]
+        assert 0 < await r.ttl(key) <= ttl
+
+    async def test_increx_invalid_options(self, r: redis.Redis):
+        key = "increx:invalid"
+        assert await r.set(key, 1)
+        with pytest.raises(DataError):
+            await r.increx(key, byfloat=1.0, byint=1)
+        with pytest.raises(DataError):
+            await r.increx(key, ex=10, px=10)
+        with pytest.raises(DataError):
+            await r.increx(key, overflow="WRAP")
+        with pytest.raises(DataError):
+            await r.increx(key, enx=True)
+
+    async def test_increx_zero_expiry_options_are_mutually_exclusive(
+        self, r: redis.Redis
+    ):
+        with pytest.raises(DataError):
+            await r.increx("a", ex=0, px=1)
 
     @pytest.mark.onlynoncluster
     async def test_keys(self, r: redis.Redis):
@@ -2059,6 +2140,12 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             await r.msetex(mapping, ex=10, keepttl=True)
 
+    async def test_msetex_zero_expiry_options_are_mutually_exclusive(
+        self, r: redis.Redis
+    ):
+        with pytest.raises(DataError):
+            await r.msetex({"a": 1}, ex=0, px=1)
+
     @pytest.mark.onlynoncluster
     async def test_msetnx(self, r: redis.Redis):
         d = {"a": b"1", "b": b"2", "c": b"3"}
@@ -2193,6 +2280,10 @@ class TestRedisCommands:
         assert await r.set("a", "1", ex=10)
         assert 0 < await r.ttl("a") <= 10
 
+    async def test_set_zero_expiry_options_are_mutually_exclusive(self, r: redis.Redis):
+        with pytest.raises(DataError):
+            await r.set("a", "1", ex=0, px=1)
+
     @skip_if_server_version_lt("2.6.0")
     async def test_set_ex_timedelta(self, r: redis.Redis):
         expire_at = datetime.timedelta(seconds=60)
@@ -2213,6 +2304,10 @@ class TestRedisCommands:
         await r.set("a", "2", keepttl=True)
         assert await r.get("a") == b"2"
         assert 0 < await r.ttl("a") <= 10
+
+    async def test_set_empty_condition_is_mutually_exclusive(self, r: redis.Redis):
+        with pytest.raises(DataError):
+            await r.set("a", "1", nx=True, ifeq=b"")
 
     @skip_if_server_version_lt("8.3.224")
     async def test_set_ifeq_true_sets_and_returns_true(self, r):
@@ -2485,6 +2580,556 @@ class TestRedisCommands:
         assert await r.lrange("a", 0, -1) == [b"1", b"2", b"3"]
         assert await r.lset("a", 1, "4")
         assert await r.lrange("a", 0, 2) == [b"1", b"4", b"3"]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arset_at_index_zero(self, r: redis.Redis):
+        assert await r.arset("a", 0, "v0") == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arset_at_positive_index(self, r: redis.Redis):
+        assert await r.arset("a", 1, "v1") == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arset_multiple_values(self, r: redis.Redis):
+        assert await r.arset("a", 0, "v0", "v1", "v2") == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arset_negative_index(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1", "v2")
+        with pytest.raises(redis.ResponseError):
+            await r.arset("a", -1, "vlast")
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_armset_sets_values_at_correct_indices(self, r: redis.Redis):
+        assert await r.armset("a", {0: "v0", 2: "v2", 4: "v4"}) == 3
+        assert await r.arget("a", 0) == b"v0"
+        assert await r.arget("a", 1) is None
+        assert await r.arget("a", 2) == b"v2"
+        assert await r.arget("a", 3) is None
+        assert await r.arget("a", 4) == b"v4"
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_armset_single_pair(self, r: redis.Redis):
+        assert await r.armset("a", {3: "v3"}) == 1
+        assert await r.arget("a", 3) == b"v3"
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_armset_overwrites_existing_indices(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1", "v2")
+        assert await r.armset("a", {0: "new0", 1: "new1", 2: "new2"}) == 0
+        assert await r.arget("a", 0) == b"new0"
+        assert await r.arget("a", 1) == b"new1"
+        assert await r.arget("a", 2) == b"new2"
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_armset_mixed_new_and_existing_indices(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1")
+        assert await r.armset("a", {0: "new0", 2: "v2", 3: "v3"}) == 2
+        assert await r.arget("a", 0) == b"new0"
+        assert await r.arget("a", 1) == b"v1"
+        assert await r.arget("a", 2) == b"v2"
+        assert await r.arget("a", 3) == b"v3"
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arget_returns_value_at_index(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1", "v2")
+        assert await r.arget("a", 0) == b"v0"
+        assert await r.arget("a", 1) == b"v1"
+        assert await r.arget("a", 2) == b"v2"
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arget_missing_key_returns_none(self, r: redis.Redis):
+        assert await r.arget("a", 0) is None
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arget_missing_index_returns_none(self, r: redis.Redis):
+        await r.arset("a", 0, "v0")
+        assert await r.arget("a", 5) is None
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_armget_returns_values_at_indices(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1", "v2")
+        assert await r.armget("a", 0, 1, 2) == [b"v0", b"v1", b"v2"]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_armget_preserves_requested_order(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1", "v2")
+        assert await r.armget("a", 2, 0, 1) == [b"v2", b"v0", b"v1"]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_armget_missing_key_returns_nones(self, r: redis.Redis):
+        assert await r.armget("a", 0, 2, 5) == [None, None, None]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_armget_missing_indices_return_nones(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1")
+        assert await r.armget("a", 0, 5, 1, 10) == [b"v0", None, b"v1", None]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_armget_single_index(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1")
+        assert await r.armget("a", 1) == [b"v1"]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_argetrange_returns_values_in_range(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1", "v2")
+        assert await r.argetrange("a", 0, 2) == [b"v0", b"v1", b"v2"]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arinsert_single_value(self, r: redis.Redis):
+        assert await r.arinsert("a", "v0") == 0
+        assert await r.armget("a", 0) == [b"v0"]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arinsert_multiple_values(self, r: redis.Redis):
+        assert await r.arinsert("a", "v0", "v1", "v2") == 2
+        assert await r.armget("a", 0, 1, 2) == [b"v0", b"v1", b"v2"]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arinsert_cursor_advancement(self, r: redis.Redis):
+        assert await r.arinsert("a", "v0", "v1") == 1
+        assert await r.arnext("a") == 2
+        assert await r.arinsert("a", "v2") == 2
+        assert await r.armget("a", 0, 1, 2) == [b"v0", b"v1", b"v2"]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arscan_returns_index_value_pairs(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1", "v2")
+        assert await r.arscan("a", 0, 2) == [[0, b"v0"], [1, b"v1"], [2, b"v2"]]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arscan_skips_empty_slots(self, r: redis.Redis):
+        await r.armset("a", {0: "a", 5: "b", 9: "c"})
+        assert await r.arscan("a", 0, 10) == [[0, b"a"], [5, b"b"], [9, b"c"]]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arscan_reverse(self, r: redis.Redis):
+        await r.armset("a", {0: "a", 5: "b", 9: "c"})
+        assert await r.arscan("a", 10, 0) == [[9, b"c"], [5, b"b"], [0, b"a"]]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arscan_with_limit(self, r: redis.Redis):
+        await r.armset("a", {0: "a", 5: "b", 9: "c"})
+        assert await r.arscan("a", 0, 10, limit=2) == [[0, b"a"], [5, b"b"]]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arscan_missing_key_returns_empty(self, r: redis.Redis):
+        assert await r.arscan("a", 0, 10) == []
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_argrep_exact_match(self, r: redis.Redis):
+        await r.armset("a", {0: "boot", 1: "warn", 2: "error", 3: "boot"})
+        assert await r.argrep("a", 0, 3, [(ArrayPredicateType.EXACT, "boot")]) == [0, 3]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_argrep_substring_match(self, r: redis.Redis):
+        await r.armset("a", {0: "boot: ok", 1: "warn: disk", 2: "ERROR: cpu"})
+        assert await r.argrep("a", 0, 2, [(ArrayPredicateType.MATCH, "warn")]) == [1]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_argrep_glob_match(self, r: redis.Redis):
+        await r.armset("a", {0: "warn:disk", 1: "info:ok", 2: "warn:net"})
+        result = await r.argrep("a", 0, 2, [(ArrayPredicateType.GLOB, "warn:*")])
+        assert result == [0, 2]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_argrep_regex_match(self, r: redis.Redis):
+        await r.armset("a", {0: "boot: ok", 1: "ERROR: cpu", 2: "error: net"})
+        result = await r.argrep(
+            "a",
+            0,
+            2,
+            [(ArrayPredicateType.RE, r"^[A-Za-z]+: (cpu|net)$")],
+            nocase=True,
+        )
+        assert result == [1, 2]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_argrep_nocase(self, r: redis.Redis):
+        await r.armset("a", {0: "ERROR", 1: "info", 2: "Error"})
+        assert await r.argrep(
+            "a", 0, 2, [(ArrayPredicateType.MATCH, "error")], nocase=True
+        ) == [0, 2]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_argrep_withvalues(self, r: redis.Redis):
+        await r.armset("a", {0: "ERROR: cpu", 1: "info", 2: "error: net"})
+        result = await r.argrep(
+            "a",
+            0,
+            2,
+            [(ArrayPredicateType.MATCH, "error")],
+            withvalues=True,
+            nocase=True,
+        )
+        assert result == [[0, b"ERROR: cpu"], [2, b"error: net"]]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_argrep_limit(self, r: redis.Redis):
+        await r.armset("a", {0: "ERROR", 1: "info", 2: "Error"})
+        result = await r.argrep(
+            "a",
+            0,
+            2,
+            [(ArrayPredicateType.MATCH, "error")],
+            limit=1,
+            nocase=True,
+        )
+        assert result == [0]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_argrep_combinator_and(self, r: redis.Redis):
+        await r.armset("a", {0: "warn: ok", 1: "error: ok", 2: "warn: bad"})
+        result = await r.argrep(
+            "a",
+            0,
+            2,
+            [
+                (ArrayPredicateType.MATCH, "warn"),
+                (ArrayPredicateType.MATCH, "ok"),
+            ],
+            combinator=ArrayPredicateCombinator.AND,
+        )
+        assert result == [0]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_argrep_combinator_or(self, r: redis.Redis):
+        await r.armset("a", {0: "warn", 1: "info", 2: "error"})
+        result = await r.argrep(
+            "a",
+            0,
+            2,
+            [
+                (ArrayPredicateType.EXACT, "warn"),
+                (ArrayPredicateType.EXACT, "error"),
+            ],
+            combinator=ArrayPredicateCombinator.OR,
+        )
+        assert result == [0, 2]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_argrep_missing_key(self, r: redis.Redis):
+        assert await r.argrep("a", 0, 10, [(ArrayPredicateType.MATCH, "x")]) == []
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_argrep_reverse(self, r: redis.Redis):
+        await r.armset("a", {0: "warn", 1: "info", 2: "warn"})
+        assert await r.argrep("a", 2, 0, [(ArrayPredicateType.EXACT, "warn")]) == [2, 0]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_ardel_single_index(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1", "v2")
+        assert await r.ardel("a", 1) == 1
+        assert await r.arget("a", 1) is None
+        assert await r.arget("a", 0) == b"v0"
+        assert await r.arget("a", 2) == b"v2"
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_ardel_multiple_indices(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1", "v2", "v3")
+        assert await r.ardel("a", 0, 2, 3) == 3
+        assert await r.arget("a", 0) is None
+        assert await r.arget("a", 1) == b"v1"
+        assert await r.arget("a", 2) is None
+        assert await r.arget("a", 3) is None
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_ardel_non_existing_index(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1")
+        assert await r.ardel("a", 10) == 0
+        assert await r.arget("a", 0) == b"v0"
+        assert await r.arget("a", 1) == b"v1"
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_ardel_mixed_existing_and_missing(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1", "v2")
+        assert await r.ardel("a", 0, 10, 2) == 2
+        assert await r.arget("a", 0) is None
+        assert await r.arget("a", 1) == b"v1"
+        assert await r.arget("a", 2) is None
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_ardelrange_single_range(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1", "v2", "v3", "v4")
+        assert await r.ardelrange("a", (1, 3)) == 3
+        assert await r.arget("a", 0) == b"v0"
+        assert await r.arget("a", 1) is None
+        assert await r.arget("a", 2) is None
+        assert await r.arget("a", 3) is None
+        assert await r.arget("a", 4) == b"v4"
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_ardelrange_multiple_ranges(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1", "v2", "v3", "v4", "v5")
+        assert await r.ardelrange("a", (0, 1), (4, 5)) == 4
+        assert await r.arget("a", 0) is None
+        assert await r.arget("a", 1) is None
+        assert await r.arget("a", 2) == b"v2"
+        assert await r.arget("a", 3) == b"v3"
+        assert await r.arget("a", 4) is None
+        assert await r.arget("a", 5) is None
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_ardelrange_reversed_range(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1", "v2", "v3", "v4")
+        assert await r.ardelrange("a", (3, 1)) == 3
+        assert await r.arget("a", 0) == b"v0"
+        assert await r.arget("a", 1) is None
+        assert await r.arget("a", 2) is None
+        assert await r.arget("a", 3) is None
+        assert await r.arget("a", 4) == b"v4"
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_ardelrange_overlapping_ranges(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1", "v2", "v3", "v4")
+        assert await r.ardelrange("a", (0, 2), (1, 3)) == 4
+        assert await r.arget("a", 0) is None
+        assert await r.arget("a", 1) is None
+        assert await r.arget("a", 2) is None
+        assert await r.arget("a", 3) is None
+        assert await r.arget("a", 4) == b"v4"
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_ardelrange_missing_key(self, r: redis.Redis):
+        assert await r.ardelrange("a", (0, 4)) == 0
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_ardelrange_empty_indices(self, r: redis.Redis):
+        await r.arset("a", 0, "v0")
+        assert await r.ardelrange("a", (5, 10)) == 0
+        assert await r.arget("a", 0) == b"v0"
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arcount_missing_key(self, r: redis.Redis):
+        assert await r.arcount("a") == 0
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arcount_returns_number_of_elements(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1", "v2")
+        assert await r.arcount("a") == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arcount_after_delete(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1", "v2", "v3")
+        await r.ardel("a", 1, 3)
+        assert await r.arcount("a") == 2
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arlen_missing_key(self, r: redis.Redis):
+        assert await r.arlen("a") == 0
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arlen_returns_length(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1", "v2")
+        assert await r.arlen("a") == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arlen_uses_max_index_plus_one(self, r: redis.Redis):
+        await r.arset("a", 7, "v7")
+        assert await r.arlen("a") == 8
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arlen_unchanged_after_delete(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1", "v2")
+        await r.ardel("a", 1)
+        assert await r.arlen("a") == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arinfo_returns_basic_fields(self, r: redis.Redis):
+        await r.armset("a", {0: "x", 1: "y", 100: "z"})
+        info = await r.arinfo("a")
+        assert isinstance(info, dict)
+        assert info["count"] == 3
+        assert info["len"] == 101
+        for field in ("next-insert-index", "slices", "slice-size"):
+            assert field in info
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arinfo_full_includes_slice_stats(self, r: redis.Redis):
+        await r.armset("a", {0: "x", 1: "y", 100: "z"})
+        info = await r.arinfo("a", full=True)
+        for field in (
+            "dense-slices",
+            "sparse-slices",
+            "avg-dense-size",
+            "avg-dense-fill",
+            "avg-sparse-size",
+        ):
+            assert field in info
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arinfo_missing_key_raises(self, r: redis.Redis):
+        with pytest.raises(redis.ResponseError):
+            await r.arinfo("a")
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arnext_missing_key(self, r: redis.Redis):
+        assert await r.arnext("a") == 0
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arnext_returns_next_index(self, r: redis.Redis):
+        await r.arinsert("a", "v0", "v1", "v2")
+        assert await r.arnext("a") == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arnext_after_delete(self, r: redis.Redis):
+        await r.arinsert("a", "v0", "v1", "v2")
+        await r.ardel("a", 1)
+        assert await r.arnext("a") == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arseek_missing_key_returns_zero(self, r: redis.Redis):
+        assert await r.arseek("a", 5) == 0
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arseek_repositions_insert_cursor(self, r: redis.Redis):
+        await r.arinsert("a", "v0")
+        assert await r.arseek("a", 10) == 1
+        assert await r.arnext("a") == 10
+        await r.arinsert("a", "v10")
+        assert await r.arget("a", 10) == b"v10"
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arseek_followed_by_arnext(self, r: redis.Redis):
+        await r.arinsert("a", "v0", "v1")
+        assert await r.arseek("a", 7) == 1
+        assert await r.arnext("a") == 7
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arring_inserts_sequentially(self, r: redis.Redis):
+        assert await r.arring("a", 3, "v0") == 0
+        assert await r.arring("a", 3, "v1") == 1
+        assert await r.arring("a", 3, "v2") == 2
+        assert await r.arget("a", 0) == b"v0"
+        assert await r.arget("a", 1) == b"v1"
+        assert await r.arget("a", 2) == b"v2"
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arring_wraps_when_full(self, r: redis.Redis):
+        await r.arring("a", 3, "v0", "v1", "v2")
+        assert await r.arring("a", 3, "v3") == 0
+        assert await r.arget("a", 0) == b"v3"
+        assert await r.arget("a", 1) == b"v1"
+        assert await r.arget("a", 2) == b"v2"
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arring_multiple_values_in_one_call(self, r: redis.Redis):
+        assert await r.arring("a", 4, "v0", "v1", "v2") == 2
+        assert await r.arget("a", 0) == b"v0"
+        assert await r.arget("a", 2) == b"v2"
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arring_returns_last_inserted_index(self, r: redis.Redis):
+        assert await r.arring("a", 5, "v0", "v1", "v2", "v3", "v4", "v5") == 0
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arring_truncates_on_smaller_size(self, r: redis.Redis):
+        await r.arring("a", 5, "v0", "v1", "v2", "v3", "v4")
+        assert await r.arring("a", 3, "v5") == 0
+        assert await r.arlen("a") == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arlastitems_returns_last_elements(self, r: redis.Redis):
+        await r.arinsert("a", "v0", "v1", "v2", "v3", "v4")
+        assert await r.arlastitems("a", 3) == [b"v2", b"v3", b"v4"]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arlastitems_reverse_order(self, r: redis.Redis):
+        await r.arinsert("a", "v0", "v1", "v2", "v3", "v4")
+        assert await r.arlastitems("a", 3, rev=True) == [b"v4", b"v3", b"v2"]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arlastitems_count_greater_than_size(self, r: redis.Redis):
+        await r.arinsert("a", "v0", "v1", "v2")
+        assert await r.arlastitems("a", 10) == [b"v0", b"v1", b"v2"]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arlastitems_count_greater_than_size_reverse(self, r: redis.Redis):
+        await r.arinsert("a", "v0", "v1", "v2")
+        assert await r.arlastitems("a", 10, rev=True) == [b"v2", b"v1", b"v0"]
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arlastitems_missing_key(self, r: redis.Redis):
+        assert await r.arlastitems("a", 3) == []
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arlastitems_zero_count(self, r: redis.Redis):
+        await r.arinsert("a", "v0", "v1", "v2")
+        assert await r.arlastitems("a", 0) == []
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arop_sum(self, r: redis.Redis):
+        await r.arset("a", 0, 1, 2, 3, 4, 5)
+        assert await r.arop("a", 0, 4, ArrayAggregateOperations.SUM) == b"15"
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arop_min_max(self, r: redis.Redis):
+        await r.arset("a", 0, 5, 1, 4, 2, 3)
+        assert await r.arop("a", 0, 4, ArrayAggregateOperations.MIN) == b"1"
+        assert await r.arop("a", 0, 4, ArrayAggregateOperations.MAX) == b"5"
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arop_bitwise(self, r: redis.Redis):
+        await r.arset("a", 0, 1, 2, 3, 4, 5)
+        assert await r.arop("a", 0, 4, ArrayAggregateOperations.AND) == 0
+        assert await r.arop("a", 0, 4, ArrayAggregateOperations.OR) == 7
+        assert await r.arop("a", 0, 4, ArrayAggregateOperations.XOR) == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arop_match(self, r: redis.Redis):
+        await r.arset("a", 0, 1, 2, 3, 2, 1)
+        assert await r.arop("a", 0, 4, ArrayAggregateOperations.MATCH, 2) == 2
+        assert await r.arop("a", 0, 4, ArrayAggregateOperations.MATCH, 7) == 0
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arop_used(self, r: redis.Redis):
+        await r.arset("a", 0, "v0", "v1", "v2")
+        assert await r.arop("a", 0, 2, ArrayAggregateOperations.USED) == 3
+        await r.ardel("a", 1)
+        assert await r.arop("a", 0, 2, ArrayAggregateOperations.USED) == 2
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arop_reversed_range(self, r: redis.Redis):
+        await r.arset("a", 0, 1, 2, 3, 4, 5)
+        assert await r.arop("a", 4, 0, ArrayAggregateOperations.SUM) == b"15"
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arop_non_numeric_values(self, r: redis.Redis):
+        await r.arset("a", 0, "x", "y", "z")
+        assert await r.arop("a", 0, 2, ArrayAggregateOperations.SUM) is None
+        assert await r.arop("a", 0, 2, ArrayAggregateOperations.MIN) is None
+        assert await r.arop("a", 0, 2, ArrayAggregateOperations.MAX) is None
+        assert await r.arop("a", 0, 2, ArrayAggregateOperations.USED) == 3
+        assert await r.arop("a", 0, 2, ArrayAggregateOperations.MATCH, "y") == 1
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arop_mixed_numeric_non_numeric(self, r: redis.Redis):
+        await r.arset("a", 0, 1, "x", 3)
+        assert await r.arop("a", 0, 2, ArrayAggregateOperations.SUM) == b"4"
+        assert await r.arop("a", 0, 2, ArrayAggregateOperations.MIN) == b"1"
+        assert await r.arop("a", 0, 2, ArrayAggregateOperations.USED) == 3
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arop_empty_range(self, r: redis.Redis):
+        await r.arset("a", 0, 1, 2, 3)
+        assert await r.arop("a", 100, 200, ArrayAggregateOperations.SUM) is None
+        assert await r.arop("a", 100, 200, ArrayAggregateOperations.AND) is None
+        assert await r.arop("a", 100, 200, ArrayAggregateOperations.OR) is None
+        assert await r.arop("a", 100, 200, ArrayAggregateOperations.XOR) is None
+        assert await r.arop("a", 100, 200, ArrayAggregateOperations.USED) == 0
+        assert await r.arop("a", 100, 200, ArrayAggregateOperations.MATCH, 1) == 0
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arop_missing_key(self, r: redis.Redis):
+        assert await r.arop("a", 0, 4, ArrayAggregateOperations.SUM) is None
+        assert await r.arop("a", 0, 4, ArrayAggregateOperations.AND) is None
+        assert await r.arop("a", 0, 4, ArrayAggregateOperations.USED) == 0
+
+    @skip_if_server_version_lt("8.7.2")
+    async def test_arop_match_requires_value(self, r: redis.Redis):
+        await r.arset("a", 0, 1, 2, 3)
+        with pytest.raises(redis.ResponseError):
+            await r.arop("a", 0, 2, ArrayAggregateOperations.MATCH)
 
     async def test_ltrim(self, r: redis.Redis):
         await r.rpush("a", "1", "2", "3")
@@ -3428,6 +4073,45 @@ class TestRedisCommands:
         # keys with bool(key) == False
         assert await r.hset("a", 0, 10) == 1
         assert await r.hset("a", "", 10) == 1
+
+    async def test_hgetex_zero_expiry_options_are_mutually_exclusive(
+        self, r: redis.Redis
+    ):
+        with pytest.raises(DataError):
+            await r.hgetex("h", "f", ex=0, px=1)
+
+    async def test_hsetex_zero_expiry_options_are_mutually_exclusive(
+        self, r: redis.Redis
+    ):
+        with pytest.raises(DataError):
+            await r.hsetex("h", "f", "v", ex=0, px=1)
+
+    async def test_hget_and_hset_with_encodable_fields_and_values(self, r: redis.Redis):
+        cases = (
+            (b"field-bytes", b"value-bytes", b"value-bytes"),
+            (
+                bytearray(b"field-bytearray"),
+                bytearray(b"value-bytearray"),
+                b"value-bytearray",
+            ),
+            (
+                memoryview(b"field-memoryview"),
+                memoryview(b"value-memoryview"),
+                b"value-memoryview",
+            ),
+            ("field-str", "value-str", b"value-str"),
+            (42, 43, b"43"),
+            (1.25, 2.5, b"2.5"),
+        )
+
+        for field, value, expected in cases:
+            assert await r.hset("encodable-hash", field, value) == 1
+            assert await r.hget("encodable-hash", field) == expected
+            assert await r.hmget("encodable-hash", field) == [expected]
+
+        assert await r.hmget("encodable-hash", bytearray(b"field-bytes")) == [
+            b"value-bytes"
+        ]
 
     async def test_hset_with_multi_key_values(self, r: redis.Redis):
         await r.hset("a", mapping={"1": 1, "2": 2, "3": 3})

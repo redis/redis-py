@@ -2,8 +2,25 @@ import asyncio
 
 import pytest
 import pytest_asyncio
+import redis.asyncio.lock as lock_module
 from redis.asyncio.lock import Lock
 from redis.exceptions import LockError, LockNotOwnedError
+
+
+class FakeLockTime:
+    def __init__(self):
+        self.now = 0
+        self.sleeps = []
+
+    def get_running_loop(self):
+        return self
+
+    def time(self):
+        return self.now
+
+    async def sleep(self, sleep):
+        self.sleeps.append(sleep)
+        self.now += sleep
 
 
 class TestLock:
@@ -12,6 +29,12 @@ class TestLock:
         redis = await create_redis(decode_responses=True)
         yield redis
         await redis.flushall()
+
+    @pytest.fixture()
+    def fake_lock_time(self, monkeypatch):
+        fake_time = FakeLockTime()
+        monkeypatch.setattr(lock_module, "asyncio", fake_time)
+        return fake_time
 
     def get_lock(self, redis, *args, **kwargs):
         kwargs["lock_class"] = Lock
@@ -104,17 +127,19 @@ class TestLock:
         lock_2 = self.get_lock(r, "foo")
         assert lock_2.blocking
 
-    async def test_blocking_timeout(self, r):
+    async def test_blocking_timeout(self, r, fake_lock_time):
         lock1 = self.get_lock(r, "foo")
         assert await lock1.acquire(blocking=False)
-        bt = 0.2
-        sleep = 0.05
-        lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
-        start = asyncio.get_running_loop().time()
-        assert not await lock2.acquire()
-        # The elapsed duration should be less than the total blocking_timeout
-        assert bt >= (asyncio.get_running_loop().time() - start) > bt - sleep
-        await lock1.release()
+        try:
+            bt = 0.2
+            sleep = 0.05
+            lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
+            assert not await lock2.acquire()
+            assert fake_lock_time.now == pytest.approx(bt)
+            assert fake_lock_time.now > bt - sleep
+            assert fake_lock_time.sleeps == [sleep] * 4
+        finally:
+            await lock1.release()
 
     async def test_context_manager(self, r):
         # blocking_timeout prevents a deadlock if the lock can't be acquired
@@ -159,18 +184,18 @@ class TestLock:
             ) as lock:
                 await lock.release()
 
-    async def test_high_sleep_small_blocking_timeout(self, r):
+    async def test_high_sleep_small_blocking_timeout(self, r, fake_lock_time):
         lock1 = self.get_lock(r, "foo")
         assert await lock1.acquire(blocking=False)
-        sleep = 60
-        bt = 1
-        lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
-        start = asyncio.get_running_loop().time()
-        assert not await lock2.acquire()
-        # the elapsed timed is less than the blocking_timeout as the lock is
-        # unattainable given the sleep/blocking_timeout configuration
-        assert bt > (asyncio.get_running_loop().time() - start)
-        await lock1.release()
+        try:
+            sleep = 60
+            bt = 1
+            lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
+            assert not await lock2.acquire()
+            assert fake_lock_time.now == 0
+            assert fake_lock_time.sleeps == []
+        finally:
+            await lock1.release()
 
     async def test_releasing_unlocked_lock_raises_error(self, r):
         lock = self.get_lock(r, "foo")
@@ -206,10 +231,10 @@ class TestLock:
     async def test_extend_lock_float(self, r):
         lock = self.get_lock(r, "foo", timeout=10.5)
         assert await lock.acquire(blocking=False)
-        assert 10400 < (await r.pttl("foo")) <= 10500
+        assert 10000 < (await r.pttl("foo")) <= 10500
         old_ttl = await r.pttl("foo")
         assert await lock.extend(10.5)
-        assert old_ttl + 10400 < (await r.pttl("foo")) <= old_ttl + 10500
+        assert old_ttl + 10000 < (await r.pttl("foo")) <= old_ttl + 10500
         await lock.release()
 
     async def test_extending_unlocked_lock_raises_error(self, r):

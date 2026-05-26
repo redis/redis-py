@@ -1,10 +1,10 @@
-# from __future__ import annotations
-
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import (
     TYPE_CHECKING,
     Any,
     Awaitable,
+    Callable,
     Iterable,
     Literal,
     Mapping,
@@ -17,9 +17,6 @@ from typing import (
 if TYPE_CHECKING:
     from redis._parsers import Encoder
     from redis.event import EventDispatcherInterface
-
-
-Number = Union[int, float]
 
 
 class AsyncClientProtocol(Protocol):
@@ -42,6 +39,8 @@ class SyncClientProtocol(Protocol):
     _is_async_client: Literal[False]
 
 
+Number = Union[int, float]
+
 EncodedT = Union[bytes, bytearray, memoryview]
 DecodedT = Union[str, int, float]
 EncodableT = Union[EncodedT, DecodedT]
@@ -55,7 +54,6 @@ PatternT = _StringLikeT  # Patterns matched against keys, fields etc
 FieldT = EncodableT  # Fields within hash tables, streams and geo commands
 KeysT = Union[KeyT, Iterable[KeyT]]
 ResponseT = Union[Awaitable[Any], Any]
-ChannelT = _StringLikeT
 GroupT = _StringLikeT  # Consumer group
 ConsumerT = _StringLikeT  # Consumer name
 StreamIdT = Union[int, _StringLikeT]
@@ -124,9 +122,20 @@ StralgoResponse = str | int | LCSResult
 # type signature because they will all be required to be the same key type.
 AnyKeyT = TypeVar("AnyKeyT", bytes, str, memoryview)
 AnyFieldT = TypeVar("AnyFieldT", bytes, str, memoryview)
-AnyChannelT = TypeVar("AnyChannelT", bytes, str, memoryview)
 
 ExceptionMappingT = Mapping[str, Union[Type[Exception], Mapping[str, Type[Exception]]]]
+
+ChannelT = _StringLikeT
+AnyChannelT = TypeVar("AnyChannelT", bytes, str, memoryview)
+PubSubHandler = Callable[[dict[str, Any]], Any]
+
+
+@dataclass(frozen=True)
+class Subscription:
+    """PubSub channel or pattern subscription with an optional handler."""
+
+    name: ChannelT
+    handler: PubSubHandler | None = None
 
 
 class CommandsProtocol(Protocol):

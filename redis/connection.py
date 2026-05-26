@@ -124,6 +124,10 @@ class HiredisRespSerializer:
             args = tuple(args[0].encode().split()) + args[1:]
         elif b" " in args[0]:
             args = tuple(args[0].split()) + args[1:]
+        args = tuple(
+            bytes(arg) if isinstance(arg, (bytearray, memoryview)) else arg
+            for arg in args
+        )
         try:
             output.append(hiredis.pack_command(args))
         except TypeError:
@@ -1705,10 +1709,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             if self._cache.get(self._current_command_cache_key):
                 entry = self._cache.get(self._current_command_cache_key)
 
-                if entry.connection_ref != self._conn:
-                    with self._pool_lock:
-                        while entry.connection_ref.can_read():
-                            entry.connection_ref.read_response(push_request=True)
+                with self._pool_lock:
+                    while entry.connection_ref.can_read():
+                        entry.connection_ref.read_response(push_request=True)
 
                 # Re-check: if the entry was invalidated during the drain,
                 # fall through to send the command over the network.
