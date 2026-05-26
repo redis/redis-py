@@ -84,15 +84,18 @@ class SocketBuffer:
             # there's no data to be read. otherwise raise the
             # original exception.
             allowed = NONBLOCKING_EXCEPTION_ERROR_NUMBERS.get(ex.__class__, -1)
-            if not raise_on_timeout and ex.errno == allowed:
-                return False
+            if ex.errno == allowed:
+                if not raise_on_timeout:
+                    return False
+                if timeout == 0:
+                    raise TimeoutError("Timeout reading from socket")
             raise ConnectionError(f"Error while reading from socket: {ex.args}")
         finally:
             buf.seek(current_pos)
             if custom_timeout:
                 sock.settimeout(self.socket_timeout)
 
-    def can_read(self, timeout: float) -> bool:
+    def can_read(self, timeout: float = 0) -> bool:
         return bool(self.unread_bytes()) or self._read_from_socket(
             timeout=timeout, raise_on_timeout=False
         )

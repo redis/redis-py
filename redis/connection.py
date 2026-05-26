@@ -234,7 +234,9 @@ class ConnectionInterface:
         pass
 
     @abstractmethod
-    def can_read(self, timeout=0):
+    def can_read(self, timeout: float = 0) -> bool:
+        # TODO: Rename this API; it detects pending data or dirty/closed
+        # connection state, not only whether application data can be read.
         pass
 
     @abstractmethod
@@ -1329,8 +1331,10 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             check_health=kwargs.get("check_health", True),
         )
 
-    def can_read(self, timeout=0):
+    def can_read(self, timeout: float = 0) -> bool:
         """Poll the socket to see if there's data that can be read."""
+        # TODO: Rename this API; it detects pending data or dirty/closed
+        # connection state, not only whether application data can be read.
         sock = self._sock
         if not sock:
             self.connect()
@@ -1711,7 +1715,14 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
                 with self._pool_lock:
                     while entry.connection_ref.can_read():
-                        entry.connection_ref.read_response(push_request=True)
+                        try:
+                            entry.connection_ref.read_response(
+                                push_request=True,
+                                timeout=0,
+                                disconnect_on_error=False,
+                            )
+                        except TimeoutError:
+                            break
 
                 # Re-check: if the entry was invalidated during the drain,
                 # fall through to send the command over the network.
@@ -1733,7 +1744,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         # read-only command that not yet cached.
         self._conn.send_command(*args, **kwargs)
 
-    def can_read(self, timeout=0):
+    def can_read(self, timeout: float = 0) -> bool:
+        # TODO: Rename this API; it detects pending data or dirty/closed
+        # connection state, not only whether application data can be read.
         return self._conn.can_read(timeout)
 
     def read_response(
@@ -1935,7 +1948,12 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
     def _process_pending_invalidations(self):
         while self.can_read():
-            self._conn.read_response(push_request=True)
+            try:
+                self._conn.read_response(
+                    push_request=True, timeout=0, disconnect_on_error=False
+                )
+            except TimeoutError:
+                break
 
     def _on_invalidation_callback(self, data: List[Union[str, Optional[List[bytes]]]]):
         with self._cache_lock:

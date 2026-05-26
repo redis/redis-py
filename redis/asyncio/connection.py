@@ -34,7 +34,7 @@ from ..observability.attributes import (
     ConnectionState,
     get_pool_name,
 )
-from ..utils import SSL_AVAILABLE
+from ..utils import SSL_AVAILABLE, deprecated_function
 
 if SSL_AVAILABLE:
     import ssl
@@ -719,10 +719,24 @@ class AbstractConnection:
             self.pack_command(*args), check_health=kwargs.get("check_health", True)
         )
 
-    async def can_read_destructive(self):
-        """Poll the socket to see if there's data that can be read."""
+    @deprecated_function(
+        version="8.0.0", reason="Use can_read() instead", name="can_read_destructive"
+    )
+    async def can_read_destructive(self) -> bool:
+        """Check the socket to see if there's data loaded in the buffer."""
         try:
-            return await self._parser.can_read_destructive()
+            return await self._parser.can_read()
+        except OSError as e:
+            await self.disconnect(nowait=True)
+            host_error = self._host_error()
+            raise ConnectionError(f"Error while reading from {host_error}: {e.args}")
+
+    async def can_read(self) -> bool:
+        """Check the socket to see if there's data loaded in the buffer."""
+        # TODO: Rename this API; it detects pending data or dirty/closed
+        # connection state, not only whether application data can be read.
+        try:
+            return await self._parser.can_read()
         except OSError as e:
             await self.disconnect(nowait=True)
             host_error = self._host_error()
@@ -1578,12 +1592,12 @@ class ConnectionPool(ConnectionPoolInterface):
         # pool before all data has been read or the socket has been
         # closed. either way, reconnect and verify everything is good.
         try:
-            if await connection.can_read_destructive():
+            if await connection.can_read():
                 raise ConnectionError("Connection has data") from None
         except (ConnectionError, TimeoutError, OSError):
             await connection.disconnect()
             await connection.connect()
-            if await connection.can_read_destructive():
+            if await connection.can_read():
                 raise ConnectionError("Connection not ready") from None
 
     async def release(self, connection: AbstractConnection):
