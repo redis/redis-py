@@ -29,6 +29,35 @@ from tests.conftest import skip_if_server_version_lt
 from .mocks import MockStream
 
 
+@pytest.mark.fixed_client
+@pytest.mark.parametrize(
+    "client_kwargs",
+    [
+        {"driver_info": None},
+        {"lib_name": None, "lib_version": None},
+    ],
+)
+async def test_redis_client_preserves_explicit_none_driver_info(client_kwargs):
+    if "lib_name" in client_kwargs:
+        with pytest.warns(DeprecationWarning):
+            client = Redis(**client_kwargs)
+    else:
+        client = Redis(**client_kwargs)
+
+    assert client.connection_pool.connection_kwargs["driver_info"] is None
+    await client.aclose()
+
+
+@pytest.mark.fixed_client
+async def test_redis_client_default_driver_info():
+    client = Redis()
+    driver_info = client.connection_pool.connection_kwargs["driver_info"]
+
+    assert driver_info.formatted_name == "redis-py"
+    assert driver_info.lib_version is not None
+    await client.aclose()
+
+
 def test_connection_default_parser_matches_default_protocol():
     conn = Connection()
     expected_parser_class = (
@@ -56,6 +85,31 @@ def test_connection_parser_matches_protocol(
         kwargs["protocol"] = protocol
     conn = Connection(**kwargs)
     assert isinstance(conn._parser, expected_parser_class)
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize(
+    "connection_kwargs",
+    [
+        {"driver_info": None},
+        {"lib_name": None, "lib_version": None},
+    ],
+)
+async def test_client_setinfo_skipped_with_explicit_none(connection_kwargs):
+    if "lib_name" in connection_kwargs:
+        with pytest.warns(DeprecationWarning):
+            conn = Connection(protocol=2, **connection_kwargs)
+    else:
+        conn = Connection(protocol=2, **connection_kwargs)
+    conn._parser.on_connect = mock.Mock()
+    conn.send_command = mock.AsyncMock()
+    conn.read_response = mock.AsyncMock(return_value="OK")
+
+    await conn.on_connect_check_health()
+
+    assert conn.driver_info is None
+    conn.send_command.assert_not_awaited()
+    conn.read_response.assert_not_awaited()
 
 
 @pytest.mark.onlynoncluster
