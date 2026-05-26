@@ -77,6 +77,7 @@ from redis.typing import (
     TimeoutSecT,
     XClaimResponse,
     XPendingRangeResponse,
+    XReadGroupResponse,
     XReadResponse,
     ZMPopResponse,
     ZRandMemberResponse,
@@ -7710,7 +7711,7 @@ class StreamCommands(CommandsProtocol):
         block: int | None = None,
         noack: bool = False,
         claim_min_idle_time: int | None = None,
-    ) -> XReadResponse: ...
+    ) -> XReadGroupResponse: ...
 
     @overload
     def xreadgroup(
@@ -7722,7 +7723,7 @@ class StreamCommands(CommandsProtocol):
         block: int | None = None,
         noack: bool = False,
         claim_min_idle_time: int | None = None,
-    ) -> Awaitable[XReadResponse]: ...
+    ) -> Awaitable[XReadGroupResponse]: ...
 
     def xreadgroup(
         self,
@@ -7733,7 +7734,7 @@ class StreamCommands(CommandsProtocol):
         block: int | None = None,
         noack: bool = False,
         claim_min_idle_time: int | None = None,
-    ) -> XReadResponse | Awaitable[XReadResponse]:
+    ) -> XReadGroupResponse | Awaitable[XReadGroupResponse]:
         """
         Read from a stream via a consumer group.
 
