@@ -67,7 +67,7 @@ class MockConnectionWithoutHostPort(ConnectionInterface):
     def send_command(self, *args, **kwargs):
         pass
 
-    def can_read(self, timeout=0):
+    def can_read(self, timeout: float = 0) -> bool:
         return False
 
     def read_response(
