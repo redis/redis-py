@@ -33,7 +33,6 @@ from redis.cache import (
 )
 
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
-from ._parsers.socket import SENTINEL
 from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
@@ -84,6 +83,7 @@ from .utils import (
     CRYPTOGRAPHY_AVAILABLE,
     DEFAULT_RESP_VERSION,
     HIREDIS_AVAILABLE,
+    SENTINEL,
     SSL_AVAILABLE,
     check_protocol_version,
     compare_versions,
@@ -797,9 +797,9 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         socket_read_size: int = 65536,
         health_check_interval: int = 0,
         client_name: Optional[str] = None,
-        lib_name: Optional[str] = None,
-        lib_version: Optional[str] = None,
-        driver_info: Optional[DriverInfo] = None,
+        lib_name: Union[Optional[str], object] = SENTINEL,
+        lib_version: Union[Optional[str], object] = SENTINEL,
+        driver_info: Union[Optional[DriverInfo], object] = SENTINEL,
         username: Optional[str] = None,
         retry: Union[Any, None] = None,
         redis_connect_func: Optional[Callable[[], None]] = None,
@@ -834,7 +834,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         driver_info : DriverInfo, optional
             Driver metadata for CLIENT SETINFO. If provided, lib_name and lib_version
             are ignored. If not provided, a DriverInfo will be created from lib_name
-            and lib_version (or defaults if those are also None).
+            and lib_version. Explicit None disables CLIENT SETINFO.
         lib_name : str, optional
             **Deprecated.** Use driver_info instead. Library name for CLIENT SETINFO.
         lib_version : str, optional
@@ -855,7 +855,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         self.db = db
         self.client_name = client_name
 
-        # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version
+        # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version.
         self.driver_info = resolve_driver_info(driver_info, lib_name, lib_version)
 
         self.credential_provider = credential_provider

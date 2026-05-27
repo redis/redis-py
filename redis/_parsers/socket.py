@@ -5,7 +5,9 @@ from io import SEEK_END
 from typing import Optional, Union
 
 from ..exceptions import ConnectionError, TimeoutError
-from ..utils import SSL_AVAILABLE
+from ..utils import SENTINEL, SSL_AVAILABLE
+
+# Re-export SENTINEL from this historical location for compatibility.
 
 NONBLOCKING_EXCEPTION_ERROR_NUMBERS = {BlockingIOError: errno.EWOULDBLOCK}
 
@@ -21,7 +23,6 @@ if SSL_AVAILABLE:
 NONBLOCKING_EXCEPTIONS = tuple(NONBLOCKING_EXCEPTION_ERROR_NUMBERS.keys())
 
 SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
-SENTINEL = object()
 
 SYM_CRLF = b"\r\n"
 
