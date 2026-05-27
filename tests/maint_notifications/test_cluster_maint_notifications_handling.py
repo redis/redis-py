@@ -28,6 +28,8 @@ NODE_PORT_NEW = 15382
 NODE_IP_LOCALHOST = "127.0.0.1"
 NODE_IP_PROXY = "0.0.0.0"
 
+DEFAULT_SOCKET_TIMEOUT = 5
+
 # Initial cluster node configuration for proxy-based tests
 PROXY_CLUSTER_NODES = [
     ClusterNode("127.0.0.1", NODE_PORT_1),
@@ -1142,11 +1144,12 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         assert not pubsub.node_pubsub_mapping[node_1.name].connection._should_reconnect
         assert pubsub.node_pubsub_mapping[node_1.name].connection._sock is not None
         assert (
-            pubsub.node_pubsub_mapping[node_1.name].connection._socket_timeout is None
+            pubsub.node_pubsub_mapping[node_1.name].connection._socket_timeout
+            == DEFAULT_SOCKET_TIMEOUT
         )
         assert (
             pubsub.node_pubsub_mapping[node_1.name].connection._socket_connect_timeout
-            is None
+            == DEFAULT_SOCKET_TIMEOUT
         )
         assert (
             pubsub.node_pubsub_mapping[node_1.name].connection.maintenance_state
@@ -1250,11 +1253,12 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         assert not pubsub.node_pubsub_mapping[node_1.name].connection._should_reconnect
         assert pubsub.node_pubsub_mapping[node_1.name].connection._sock is not None
         assert (
-            pubsub.node_pubsub_mapping[node_1.name].connection._socket_timeout is None
+            pubsub.node_pubsub_mapping[node_1.name].connection._socket_timeout
+            == DEFAULT_SOCKET_TIMEOUT
         )
         assert (
             pubsub.node_pubsub_mapping[node_1.name].connection._socket_connect_timeout
-            is None
+            == DEFAULT_SOCKET_TIMEOUT
         )
         assert (
             pubsub.node_pubsub_mapping[node_1.name].connection.maintenance_state
@@ -1331,8 +1335,8 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
 
         assert not pubsub.connection._should_reconnect
         assert pubsub.connection._sock is not None
-        assert pubsub.connection._socket_timeout is None
-        assert pubsub.connection._socket_connect_timeout is None
+        assert pubsub.connection._socket_timeout == DEFAULT_SOCKET_TIMEOUT
+        assert pubsub.connection._socket_connect_timeout == DEFAULT_SOCKET_TIMEOUT
         assert pubsub.connection.maintenance_state == MaintenanceState.NONE
         # validate resubscribed
         assert pubsub.subscribed
