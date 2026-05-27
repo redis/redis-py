@@ -128,17 +128,20 @@ class TestClusterTransaction:
         slot = r.keyslot(key)
         node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
 
+        original_parse_response = Redis.parse_response
         with (
-            patch.object(Redis, "parse_response") as parse_response,
+            patch.object(Redis, "parse_response", autospec=True) as parse_response,
         ):
 
-            def ask_redirect_effect(connection, *args, **options):
-                if "MULTI" in args:
+            def ask_redirect_effect(redis_node, connection, command, **options):
+                if command == "MULTI":
                     return
-                elif "EXEC" in args:
+                elif command == "EXEC":
                     raise redis.exceptions.ExecAbortError()
+                elif command == "_":
+                    raise redis.exceptions.AskError(f"{slot} {node_importing.name}")
 
-                raise redis.exceptions.AskError(f"{slot} {node_importing.name}")
+                return original_parse_response(redis_node, connection, command, **options)
 
             parse_response.side_effect = ask_redirect_effect
 
