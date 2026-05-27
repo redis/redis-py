@@ -82,7 +82,6 @@ from redis.utils import (
     SSL_AVAILABLE,
     deprecated_args,
     deprecated_function,
-    get_lib_version,
     safe_str,
     str_if_bytes,
     truncate_text,

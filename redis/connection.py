@@ -81,7 +81,6 @@ from .retry import Retry
 from .utils import (
     CRYPTOGRAPHY_AVAILABLE,
     HIREDIS_AVAILABLE,
-    SENTINEL,
     SSL_AVAILABLE,
     check_protocol_version,
     compare_versions,
@@ -89,6 +88,9 @@ from .utils import (
     ensure_string,
     format_error_message,
     str_if_bytes,
+)
+from .utils import (
+    SENTINEL as DEFAULT_SENTINEL,
 )
 
 if SSL_AVAILABLE:
@@ -779,9 +781,9 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         socket_read_size: int = 65536,
         health_check_interval: int = 0,
         client_name: Optional[str] = None,
-        lib_name: Union[Optional[str], object] = SENTINEL,
-        lib_version: Union[Optional[str], object] = SENTINEL,
-        driver_info: Union[Optional[DriverInfo], object] = SENTINEL,
+        lib_name: Union[Optional[str], object] = DEFAULT_SENTINEL,
+        lib_version: Union[Optional[str], object] = DEFAULT_SENTINEL,
+        driver_info: Union[Optional[DriverInfo], object] = DEFAULT_SENTINEL,
         username: Optional[str] = None,
         retry: Union[Any, None] = None,
         redis_connect_func: Optional[Callable[[], None]] = None,
