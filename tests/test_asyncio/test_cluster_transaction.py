@@ -138,7 +138,7 @@ class TestClusterTransaction:
                     return
                 elif command == "EXEC":
                     raise redis.exceptions.ExecAbortError()
-                elif command == "_":
+                elif command in ("_", "SET"):
                     raise redis.exceptions.AskError(f"{slot} {node_importing.name}")
 
                 return await original_parse_response(

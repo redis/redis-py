@@ -4076,6 +4076,7 @@ class TestClusterPipeline:
             e = ConnectionError("error")
             return e
 
+        r.reinitialize_steps = 0
         with r.pipeline() as pipe:
             mock_node_resp_func(node, raise_connection_error)
             with pytest.raises(ConnectionError):
