@@ -32,6 +32,7 @@ from redis.cache import (
     CacheProxy,
 )
 
+from ._defaults import get_default_socket_keepalive_options
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .auth.token import TokenInterface
 from .backoff import NoBackoff
@@ -1494,14 +1495,31 @@ class Connection(AbstractConnection):
         self,
         host="localhost",
         port=6379,
-        socket_keepalive=False,
-        socket_keepalive_options=None,
+        socket_keepalive=True,
+        socket_keepalive_options=SENTINEL,
         socket_type=0,
         **kwargs,
     ):
+        """
+        Initialize a TCP connection.
+
+        Parameters
+        ----------
+        socket_keepalive : bool
+            If `True`, TCP keepalive is enabled for TCP socket connections.
+        socket_keepalive_options : Mapping[int, int | bytes] | object | None
+            Mapping of TCP keepalive socket option constants to values, for
+            example `{socket.TCP_KEEPIDLE: 30}`. If left unspecified, redis-py
+            uses TCP keepalive defaults when `socket_keepalive` is enabled:
+            idle 30 seconds, interval 5 seconds, and 3 probes. Platform-specific
+            options that are not available are skipped. Pass `None` or `{}` to
+            avoid setting additional TCP keepalive options.
+        """
         self._host = host
         self.port = int(port)
         self.socket_keepalive = socket_keepalive
+        if socket_keepalive_options is SENTINEL:
+            socket_keepalive_options = get_default_socket_keepalive_options()
         self.socket_keepalive_options = socket_keepalive_options or {}
         self.socket_type = socket_type
         super().__init__(**kwargs)
