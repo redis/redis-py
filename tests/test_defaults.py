@@ -1,7 +1,11 @@
 import inspect
 import socket
 
-from redis._defaults import get_default_socket_keepalive_options
+from redis._defaults import (
+    DEFAULT_SOCKET_CONNECT_TIMEOUT,
+    DEFAULT_SOCKET_TIMEOUT,
+    get_default_socket_keepalive_options,
+)
 from redis.asyncio.client import Redis as AsyncRedis
 from redis.asyncio.cluster import ClusterNode as AsyncClusterNode
 from redis.asyncio.cluster import RedisCluster as AsyncRedisCluster
@@ -55,18 +59,24 @@ def test_socket_timeout_default():
 
     for cls in classes:
         parameters = inspect.signature(cls.__init__).parameters
-        assert parameters["socket_timeout"].default == 5
-        assert parameters["socket_connect_timeout"].default == 5
+        assert parameters["socket_timeout"].default == DEFAULT_SOCKET_TIMEOUT
+        assert (
+            parameters["socket_connect_timeout"].default
+            == DEFAULT_SOCKET_CONNECT_TIMEOUT
+        )
 
     cluster_parameters = inspect.signature(AsyncRedisCluster.__init__).parameters
-    assert cluster_parameters["socket_timeout"].default == 5
-    assert cluster_parameters["socket_connect_timeout"].default == 5
+    assert cluster_parameters["socket_timeout"].default == DEFAULT_SOCKET_TIMEOUT
+    assert (
+        cluster_parameters["socket_connect_timeout"].default
+        == DEFAULT_SOCKET_CONNECT_TIMEOUT
+    )
 
-    assert Connection().socket_timeout == 5
-    assert Connection().socket_connect_timeout == 5
-    assert AsyncConnection().socket_timeout == 5
-    assert AsyncConnection().socket_connect_timeout == 5
-    assert UnixDomainSocketConnection().socket_timeout == 5
+    assert Connection().socket_timeout == DEFAULT_SOCKET_TIMEOUT
+    assert Connection().socket_connect_timeout == DEFAULT_SOCKET_CONNECT_TIMEOUT
+    assert AsyncConnection().socket_timeout == DEFAULT_SOCKET_TIMEOUT
+    assert AsyncConnection().socket_connect_timeout == DEFAULT_SOCKET_CONNECT_TIMEOUT
+    assert UnixDomainSocketConnection().socket_timeout == DEFAULT_SOCKET_TIMEOUT
 
 
 def test_default_max_connections():

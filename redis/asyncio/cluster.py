@@ -36,6 +36,7 @@ if TYPE_CHECKING:
         AsyncClusterKeyspaceNotifications,
     )
 
+from redis._defaults import DEFAULT_SOCKET_CONNECT_TIMEOUT, DEFAULT_SOCKET_TIMEOUT
 from redis._parsers import AsyncCommandsParser, Encoder
 from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
 from redis._parsers.helpers import get_response_callbacks
@@ -348,8 +349,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         decode_responses: bool = False,
         # Connection related kwargs
         health_check_interval: float = 0,
-        socket_timeout: float | None = 5,
-        socket_connect_timeout: float | None = 5,
+        socket_timeout: float | None = DEFAULT_SOCKET_TIMEOUT,
+        socket_connect_timeout: float | None = DEFAULT_SOCKET_CONNECT_TIMEOUT,
         socket_keepalive: bool = True,
         socket_keepalive_options: Mapping[int, int | bytes] | object | None = SENTINEL,
         # SSL related kwargs

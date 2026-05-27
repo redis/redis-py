@@ -27,6 +27,7 @@ from typing import (
     cast,
 )
 
+from redis._defaults import DEFAULT_SOCKET_CONNECT_TIMEOUT, DEFAULT_SOCKET_TIMEOUT
 from redis._parsers.helpers import bool_ok, get_response_callbacks
 from redis.asyncio.connection import (
     Connection,
@@ -234,8 +235,8 @@ class Redis(
         port: int = 6379,
         db: str | int = 0,
         password: str | None = None,
-        socket_timeout: float | None = 5,
-        socket_connect_timeout: float | None = 5,
+        socket_timeout: float | None = DEFAULT_SOCKET_TIMEOUT,
+        socket_connect_timeout: float | None = DEFAULT_SOCKET_CONNECT_TIMEOUT,
         socket_keepalive: bool | None = True,
         socket_keepalive_options: Mapping[int, int | bytes] | object | None = SENTINEL,
         connection_pool: ConnectionPool | None = None,
