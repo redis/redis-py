@@ -28,7 +28,6 @@ from typing import (
 )
 
 from redis._parsers.helpers import bool_ok, get_response_callbacks
-from redis._parsers.socket import SENTINEL
 from redis.asyncio.connection import (
     Connection,
     ConnectionPool,

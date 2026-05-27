@@ -81,10 +81,8 @@ from redis.typing import EncodableT
 from redis.utils import (
     DEFAULT_RESP_VERSION,
     HIREDIS_AVAILABLE,
+    SENTINEL,
     str_if_bytes,
-)
-from redis.utils import (
-    SENTINEL as DEFAULT_SENTINEL,
 )
 
 from .._defaults import get_default_socket_keepalive_options
@@ -95,7 +93,6 @@ from .._parsers import (
     _AsyncRESP2Parser,
     _AsyncRESP3Parser,
 )
-from .._parsers.socket import SENTINEL
 
 SYM_STAR = b"*"
 SYM_DOLLAR = b"$"
@@ -175,9 +172,9 @@ class AbstractConnection:
         socket_read_size: int = 32768,
         health_check_interval: float = 0,
         client_name: str | None = None,
-        lib_name: str | object | None = DEFAULT_SENTINEL,
-        lib_version: str | object | None = DEFAULT_SENTINEL,
-        driver_info: DriverInfo | object | None = DEFAULT_SENTINEL,
+        lib_name: str | object | None = SENTINEL,
+        lib_version: str | object | None = SENTINEL,
+        driver_info: DriverInfo | object | None = SENTINEL,
         username: str | None = None,
         retry: Retry | None = None,
         redis_connect_func: ConnectCallbackT | None = None,

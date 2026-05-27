@@ -7,8 +7,6 @@ from typing import Optional, Union
 from ..exceptions import ConnectionError, TimeoutError
 from ..utils import SENTINEL, SSL_AVAILABLE
 
-# Re-export SENTINEL from this historical location for compatibility.
-
 NONBLOCKING_EXCEPTION_ERROR_NUMBERS = {BlockingIOError: errno.EWOULDBLOCK}
 
 if SSL_AVAILABLE:

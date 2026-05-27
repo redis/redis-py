@@ -2,8 +2,9 @@ from typing import Any, Union
 
 from ..exceptions import ConnectionError, InvalidResponse, ResponseError
 from ..typing import EncodableT
+from ..utils import SENTINEL
 from .base import _AsyncRESPBase, _RESPBase
-from .socket import SENTINEL, SERVER_CLOSED_CONNECTION_ERROR
+from .socket import SERVER_CLOSED_CONNECTION_ERROR
 
 
 class _RESP2Parser(_RESPBase):

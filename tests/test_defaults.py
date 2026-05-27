@@ -2,7 +2,6 @@ import inspect
 import socket
 
 from redis._defaults import get_default_socket_keepalive_options
-from redis._parsers.socket import SENTINEL
 from redis.asyncio.client import Redis as AsyncRedis
 from redis.asyncio.cluster import ClusterNode as AsyncClusterNode
 from redis.asyncio.cluster import RedisCluster as AsyncRedisCluster
@@ -18,6 +17,7 @@ from redis.connection import Connection
 from redis.connection import ConnectionPool
 from redis.connection import UnixDomainSocketConnection
 from redis.retry import Retry
+from redis.utils import SENTINEL
 
 
 def test_socket_keepalive_signature_defaults_are_true():
