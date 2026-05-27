@@ -79,7 +79,14 @@ from redis.exceptions import (
 )
 from redis.observability.metrics import CloseReason
 from redis.typing import EncodableT
-from redis.utils import DEFAULT_RESP_VERSION, HIREDIS_AVAILABLE, str_if_bytes
+from redis.utils import (
+    DEFAULT_RESP_VERSION,
+    HIREDIS_AVAILABLE,
+    str_if_bytes,
+)
+from redis.utils import (
+    SENTINEL as DEFAULT_SENTINEL,
+)
 
 from .._parsers import (
     BaseParser,
@@ -174,9 +181,9 @@ class AbstractConnection:
         socket_read_size: int = 65536,
         health_check_interval: float = 0,
         client_name: Optional[str] = None,
-        lib_name: Optional[str] = None,
-        lib_version: Optional[str] = None,
-        driver_info: Optional[DriverInfo] = None,
+        lib_name: Union[Optional[str], object] = DEFAULT_SENTINEL,
+        lib_version: Union[Optional[str], object] = DEFAULT_SENTINEL,
+        driver_info: Union[Optional[DriverInfo], object] = DEFAULT_SENTINEL,
         username: Optional[str] = None,
         retry: Optional[Retry] = None,
         redis_connect_func: Optional[ConnectCallbackT] = None,
@@ -194,7 +201,7 @@ class AbstractConnection:
         driver_info : DriverInfo, optional
             Driver metadata for CLIENT SETINFO. If provided, lib_name and lib_version
             are ignored. If not provided, a DriverInfo will be created from lib_name
-            and lib_version (or defaults if those are also None).
+            and lib_version. Explicit None disables CLIENT SETINFO.
         lib_name : str, optional
             **Deprecated.** Use driver_info instead. Library name for CLIENT SETINFO.
         lib_version : str, optional
@@ -214,7 +221,7 @@ class AbstractConnection:
         self.db = db
         self.client_name = client_name
 
-        # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version
+        # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version.
         self.driver_info = resolve_driver_info(driver_info, lib_name, lib_version)
 
         self.credential_provider = credential_provider

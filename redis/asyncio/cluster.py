@@ -112,6 +112,7 @@ from redis.typing import (
     Subscription,
 )
 from redis.utils import (
+    SENTINEL,
     SSL_AVAILABLE,
     deprecated_args,
     deprecated_function,
@@ -328,9 +329,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         username: Optional[str] = None,
         password: Optional[str] = None,
         client_name: Optional[str] = None,
-        lib_name: Optional[str] = None,
-        lib_version: Optional[str] = None,
-        driver_info: Optional["DriverInfo"] = None,
+        lib_name: Union[Optional[str], object] = SENTINEL,
+        lib_version: Union[Optional[str], object] = SENTINEL,
+        driver_info: Union[Optional["DriverInfo"], object] = SENTINEL,
         # Encoding related kwargs
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
