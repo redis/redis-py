@@ -771,6 +771,12 @@ def parse_xautoclaim(response, **options):
     return response
 
 
+def parse_arinfo(response, **options):
+    if isinstance(response, list):
+        return pairs_to_dict(response, decode_keys=True)
+    return {str_if_bytes(k): v for k, v in response.items()}
+
+
 def parse_xinfo_stream(response, **options):
     if isinstance(response, list):
         data = pairs_to_dict(response, decode_keys=True)
