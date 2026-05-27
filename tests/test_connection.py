@@ -244,6 +244,7 @@ def test_redis_client_default_driver_info():
     assert driver_info.lib_version is not None
     client.close()
 
+
 @pytest.mark.fixed_client
 class TestConnection:
     def test_disconnect(self):

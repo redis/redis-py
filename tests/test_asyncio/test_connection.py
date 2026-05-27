@@ -154,7 +154,7 @@ async def test_async_hiredis_can_read_leaves_decoding_to_read_response():
     assert await parser.can_read() is True
     assert await parser.read_response() == raw.decode()
 
-    
+
 @pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
 async def test_async_resp_can_read_detects_stream_buffer(parser_class):
     stream = DummyAsyncStream(buffer=b"+OK\r\n")
