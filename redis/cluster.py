@@ -938,20 +938,27 @@ class RedisCluster(
             RequestPolicy.DEFAULT_KEYLESS: lambda self, command, *args, **kwargs: [
                 self.get_random_primary_or_all_nodes(command)
             ],
-            RequestPolicy.DEFAULT_KEYED: lambda self, command, *args, **kwargs:
-                self.get_nodes_from_slot(command, *args),
-            RequestPolicy.DEFAULT_NODE: lambda self, command, *args, **kwargs:
-                [self.get_default_node()],
-            RequestPolicy.ALL_SHARDS: lambda self, command, *args, **kwargs:
-                self.get_primaries(),
-            RequestPolicy.ALL_NODES: lambda self, command, *args, **kwargs:
-                self.get_nodes(),
-            RequestPolicy.ALL_REPLICAS: lambda self, command, *args, **kwargs:
-                self.get_replicas(),
-            RequestPolicy.MULTI_SHARD: lambda self, command, *args, **kwargs:
-                self._split_multi_shard_command(*args, **kwargs),
-            RequestPolicy.SPECIAL: lambda self, command, *args, **kwargs:
-                self.get_special_nodes(),
+            RequestPolicy.DEFAULT_KEYED: lambda self, command, *args, **kwargs: (
+                self.get_nodes_from_slot(command, *args)
+            ),
+            RequestPolicy.DEFAULT_NODE: lambda self, command, *args, **kwargs: [
+                self.get_default_node()
+            ],
+            RequestPolicy.ALL_SHARDS: lambda self, command, *args, **kwargs: (
+                self.get_primaries()
+            ),
+            RequestPolicy.ALL_NODES: lambda self, command, *args, **kwargs: (
+                self.get_nodes()
+            ),
+            RequestPolicy.ALL_REPLICAS: lambda self, command, *args, **kwargs: (
+                self.get_replicas()
+            ),
+            RequestPolicy.MULTI_SHARD: lambda self, command, *args, **kwargs: (
+                self._split_multi_shard_command(*args, **kwargs)
+            ),
+            RequestPolicy.SPECIAL: lambda self, command, *args, **kwargs: (
+                self.get_special_nodes()
+            ),
             ResponsePolicy.DEFAULT_KEYLESS: lambda res: res,
             ResponsePolicy.DEFAULT_KEYED: lambda res: res,
         }
@@ -1341,7 +1348,8 @@ class RedisCluster(
                 command_flag = self.command_flags.get(command)
 
             request_policy = self._command_flags_mapping.get(
-                command_flag, request_policy)
+                command_flag, request_policy
+            )
 
             policy_cb = self._policies_callback_mapping[request_policy]
             if nodes_flag is None and command == arg0:
@@ -3452,20 +3460,27 @@ class ClusterPipeline(RedisCluster):
             RequestPolicy.DEFAULT_KEYLESS: lambda self, command, *args, **kwargs: [
                 self.get_random_primary_or_all_nodes(command)
             ],
-            RequestPolicy.DEFAULT_KEYED: lambda self, command, *args, **kwargs:
-                self.get_nodes_from_slot(command, *args),
-            RequestPolicy.DEFAULT_NODE: lambda self, command, *args, **kwargs:
-                [self.get_default_node()],
-            RequestPolicy.ALL_SHARDS: lambda self, command, *args, **kwargs:
-                self.get_primaries(),
-            RequestPolicy.ALL_NODES: lambda self, command, *args, **kwargs:
-                self.get_nodes(),
-            RequestPolicy.ALL_REPLICAS: lambda self, command, *args, **kwargs:
-                self.get_replicas(),
-            RequestPolicy.MULTI_SHARD: lambda self, command, *args, **kwargs:
-                self._split_multi_shard_command(*args, **kwargs),
-            RequestPolicy.SPECIAL: lambda self, command, *args, **kwargs:
-                self.get_special_nodes(),
+            RequestPolicy.DEFAULT_KEYED: lambda self, command, *args, **kwargs: (
+                self.get_nodes_from_slot(command, *args)
+            ),
+            RequestPolicy.DEFAULT_NODE: lambda self, command, *args, **kwargs:  [
+                self.get_default_node()
+            ],
+            RequestPolicy.ALL_SHARDS: lambda self, command, *args, **kwargs: (
+                self.get_primaries()
+            ),
+            RequestPolicy.ALL_NODES: lambda self, command, *args, **kwargs: (
+                self.get_nodes()
+            ),
+            RequestPolicy.ALL_REPLICAS: lambda self, command, *args, **kwargs: (
+                self.get_replicas()
+            ),
+            RequestPolicy.MULTI_SHARD: lambda self, command, *args, **kwargs: (
+                self._split_multi_shard_command(*args, **kwargs)
+            ),
+            RequestPolicy.SPECIAL: lambda self, command, *args, **kwargs: (
+                self.get_special_nodes()
+            ),
             ResponsePolicy.DEFAULT_KEYLESS: lambda res: res,
             ResponsePolicy.DEFAULT_KEYED: lambda res: res,
         }
@@ -4090,9 +4105,7 @@ class PipelineStrategy(AbstractStrategy):
 
                 command_policies = policy_cache.get(arg0, sentinel)
                 if command_policies is sentinel:
-                    command_policies = policy_resolver.resolve(
-                        arg0.lower()
-                    )
+                    command_policies = policy_resolver.resolve(arg0.lower())
                     policy_cache[arg0] = command_policies
 
                 # refer to our internal node -> slot table that
@@ -4127,7 +4140,10 @@ class PipelineStrategy(AbstractStrategy):
                                 command_policies = default_keyless
                             else:
                                 command_policies = default_keyed
-                                if command == arg0 and pipe.commands_parser._is_keyed_command(*args):
+                                if (
+                                    command == arg0
+                                    and pipe.commands_parser._is_keyed_command(*args)
+                                ):
                                     # safe to cache
                                     policy_cache[arg0] = command_policies
                         else:
@@ -4151,9 +4167,7 @@ class PipelineStrategy(AbstractStrategy):
                         )
                 c.command_policies = command_policies
                 if len(target_nodes) > 1:
-                    raise RedisClusterException(
-                        f"Too many targets for command {args}"
-                    )
+                    raise RedisClusterException(f"Too many targets for command {args}")
 
                 node = target_nodes[0]
                 if node == pipe.get_default_node():
@@ -4295,11 +4309,7 @@ class PipelineStrategy(AbstractStrategy):
                 c.options.pop("keys", None)
                 c.result = pipe._policies_callback_mapping[
                     c.command_policies.response_policy
-                ](
-                    pipe.cluster_response_callbacks[c.args[0]](
-                        c.result, **c.options
-                    )
-                )
+                ](pipe.cluster_response_callbacks[c.args[0]](}c.result, **c.options))
             response.append(c.result)
 
         if raise_on_error:
@@ -4344,10 +4354,7 @@ class PipelineStrategy(AbstractStrategy):
             policy_cb = None
         if policy_cb is None:
             command = arg0.upper()
-            if (
-                len(args) >= 2
-                and f"{arg0} {args[1]}".upper() in pipe.command_flags
-            ):
+            if len(args) >= 2 and f"{arg0} {args[1]}".upper() in pipe.command_flags:
                 command = f"{arg0} {args[1]}".upper()
 
             if nodes_flag is not None:
@@ -4358,7 +4365,8 @@ class PipelineStrategy(AbstractStrategy):
                 command_flag = pipe.command_flags.get(command)
 
             request_policy = pipe._command_flags_mapping.get(
-                command_flag, request_policy)
+                command_flag, request_policy
+            )
             policy_cb = pipe._policies_callback_mapping[request_policy]
 
             if nodes_flag is None and command == arg0:

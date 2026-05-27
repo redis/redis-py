@@ -199,11 +199,7 @@ class CommandsParser(AbstractCommandsParser):
             step_count = command["step_count"]
             first_key_pos = command["first_key_pos"]
             last_key_pos = command["last_key_pos"]
-            if (
-                step_count == 0
-                and first_key_pos == 0
-                and last_key_pos == 0
-            ):
+            if step_count == 0 and first_key_pos == 0 and last_key_pos == 0:
                 is_subcmd = False
                 if "subcommands" in command:
                     subcmd_name = f"{cmd_name}|{args[1].lower()}"
@@ -223,10 +219,11 @@ class CommandsParser(AbstractCommandsParser):
                     return None
             if last_key_pos < 0:
                 last_key_pos += len(args)
-            keys = list(map(
-                args.__getitem__,
-                range(first_key_pos, last_key_pos + 1, step_count)
-            ))
+            keys = list(
+                map(
+                    args.__getitem__, range(first_key_pos, last_key_pos + 1, step_count)
+                )
+            )
 
         return keys
 
@@ -521,11 +518,7 @@ class AsyncCommandsParser(AbstractCommandsParser):
             step_count = command["step_count"]
             first_key_pos = command["first_key_pos"]
             last_key_pos = command["last_key_pos"]
-            if (
-                step_count == 0
-                and first_key_pos == 0
-                and last_key_pos == 0
-            ):
+            if step_count == 0 and first_key_pos == 0 and last_key_pos == 0:
                 is_subcmd = False
                 if "subcommands" in command:
                     subcmd_name = f"{cmd_name}|{args[1].lower()}"
@@ -545,8 +538,7 @@ class AsyncCommandsParser(AbstractCommandsParser):
             if last_key_pos < 0:
                 last_key_pos += len(args)
             keys = [
-                args[pos]
-                for pos in range(first_key_pos, last_key_pos + 1, step_count)
+                args[pos] for pos in range(first_key_pos, last_key_pos + 1, step_count)
             ]
 
         return keys
