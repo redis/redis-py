@@ -43,6 +43,9 @@ except ImportError:
 
 from importlib import metadata
 
+# Marker for omitted arguments. Compare by identity only.
+SENTINEL = object()
+
 
 def from_url(url: str, **kwargs: Any) -> "Redis":
     """

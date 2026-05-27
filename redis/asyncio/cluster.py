@@ -59,6 +59,7 @@ from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
 from redis.commands.policies import AsyncPolicyResolver, AsyncStaticPolicyResolver
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.credentials import CredentialProvider
+from redis.driver_info import DriverInfo, resolve_driver_info
 from redis.event import AfterAsyncClusterInstantiationEvent, EventDispatcher
 from redis.exceptions import (
     AskError,
@@ -82,10 +83,10 @@ from redis.exceptions import (
 )
 from redis.typing import AnyKeyT, EncodableT, KeyT
 from redis.utils import (
+    SENTINEL,
     SSL_AVAILABLE,
     deprecated_args,
     deprecated_function,
-    get_lib_version,
     safe_str,
     str_if_bytes,
     truncate_text,
@@ -289,8 +290,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         username: Optional[str] = None,
         password: Optional[str] = None,
         client_name: Optional[str] = None,
-        lib_name: Optional[str] = "redis-py",
-        lib_version: Optional[str] = get_lib_version(),
+        lib_name: Union[Optional[str], object] = SENTINEL,
+        lib_version: Union[Optional[str], object] = SENTINEL,
+        driver_info: Union[Optional["DriverInfo"], object] = SENTINEL,
         # Encoding related kwargs
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
@@ -337,6 +339,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 'ClusterNode("localhost", 6379), ClusterNode("localhost", 6380)])'
             )
 
+        computed_driver_info = resolve_driver_info(driver_info, lib_name, lib_version)
+
         kwargs: Dict[str, Any] = {
             "max_connections": max_connections,
             "connection_class": Connection,
@@ -345,8 +349,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "username": username,
             "password": password,
             "client_name": client_name,
-            "lib_name": lib_name,
-            "lib_version": lib_version,
+            "driver_info": computed_driver_info,
             # Encoding related kwargs
             "encoding": encoding,
             "encoding_errors": encoding_errors,
