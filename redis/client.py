@@ -20,7 +20,6 @@ from typing import (
 
 from redis._parsers.encoders import Encoder
 from redis._parsers.helpers import bool_ok, get_response_callbacks
-from redis._parsers.socket import SENTINEL
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.cache import CacheConfig, CacheInterface
 from redis.commands import (
@@ -69,6 +68,7 @@ from redis.observability.recorder import (
 from redis.retry import Retry
 from redis.typing import ChannelT, PubSubHandler, Subscription
 from redis.utils import (
+    SENTINEL,
     _set_info_logger,
     check_protocol_version,
     deprecated_args,
@@ -272,9 +272,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         single_connection_client: bool = False,
         health_check_interval: int = 0,
         client_name: Optional[str] = None,
-        lib_name: Optional[str] = None,
-        lib_version: Optional[str] = None,
-        driver_info: Optional["DriverInfo"] = None,
+        lib_name: Union[Optional[str], object] = SENTINEL,
+        lib_version: Union[Optional[str], object] = SENTINEL,
+        driver_info: Union[Optional["DriverInfo"], object] = SENTINEL,
         username: Optional[str] = None,
         redis_connect_func: Optional[Callable[[], None]] = None,
         credential_provider: Optional[CredentialProvider] = None,
@@ -321,6 +321,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             Optional DriverInfo object to identify upstream libraries.
             If provided, lib_name and lib_version are ignored.
             If not provided, a DriverInfo will be created from lib_name and lib_version.
+            Explicit None disables CLIENT SETINFO.
             Argument is ignored when connection_pool is provided.
         lib_name:
             **Deprecated.** Use driver_info instead. Library name for CLIENT SETINFO.
@@ -348,7 +349,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             if not retry_on_error:
                 retry_on_error = []
 
-            # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version
+            # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version.
             computed_driver_info = resolve_driver_info(
                 driver_info, lib_name, lib_version
             )

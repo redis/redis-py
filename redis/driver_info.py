@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from redis.utils import SENTINEL
+
 _BRACES = {"(", ")", "[", "]", "{", "}"}
 
 
@@ -66,10 +68,11 @@ class DriverInfo:
     Parameters
     ----------
     name : str, optional
-        The base library name (default: "redis-py")
+        The base library name. If omitted, defaults to "redis-py". If None,
+        LIB-NAME will not be sent.
     lib_version : str, optional
-        The redis-py library version. If None, the version will be determined
-        automatically from the installed package.
+        The redis-py library version. If omitted, the version will be determined
+        automatically from the installed package. If None, LIB-VER will not be sent.
 
     Examples
     --------
@@ -86,13 +89,15 @@ class DriverInfo:
     '5.0.0'
     """
 
-    name: str = "redis-py"
-    lib_version: Optional[str] = None
+    name: Optional[str] | object = SENTINEL
+    lib_version: Optional[str] | object = SENTINEL
     _upstream: List[str] = field(default_factory=list)
 
     def __post_init__(self):
-        """Initialize lib_version if not provided."""
-        if self.lib_version is None:
+        """Initialize default metadata if not explicitly provided."""
+        if self.name is SENTINEL:
+            self.name = "redis-py"
+        if self.lib_version is SENTINEL:
             from redis.utils import get_lib_version
 
             self.lib_version = get_lib_version()
@@ -128,7 +133,7 @@ class DriverInfo:
         return self
 
     @property
-    def formatted_name(self) -> str:
+    def formatted_name(self) -> Optional[str]:
         """Return the base name with upstream drivers encoded, if any.
 
         With no upstream drivers, this is just :pyattr:`name`. Otherwise::
@@ -136,20 +141,23 @@ class DriverInfo:
             name(driver1_vX;driver2_vY)
         """
 
+        name = self.name
+        if not isinstance(name, str) or not name:
+            return None
         if not self._upstream:
-            return self.name
-        return f"{self.name}({';'.join(self._upstream)})"
+            return name
+        return f"{name}({';'.join(self._upstream)})"
 
 
 def resolve_driver_info(
-    driver_info: Optional[DriverInfo],
-    lib_name: Optional[str],
-    lib_version: Optional[str],
-) -> DriverInfo:
+    driver_info: Optional[DriverInfo] | object = SENTINEL,
+    lib_name: Optional[str] | object = SENTINEL,
+    lib_version: Optional[str] | object = SENTINEL,
+) -> Optional[DriverInfo]:
     """Resolve driver_info from parameters.
 
     If driver_info is provided, use it. Otherwise, create DriverInfo from
-    lib_name and lib_version (using defaults if not provided).
+    lib_name and lib_version (using defaults only for sentinel values).
 
     Parameters
     ----------
@@ -162,15 +170,15 @@ def resolve_driver_info(
 
     Returns
     -------
-    DriverInfo
+    DriverInfo, optional
         The resolved DriverInfo instance
     """
-    if driver_info is not None:
+    if driver_info is SENTINEL:
+        if lib_name is None and lib_version is None:
+            return None
+        return DriverInfo(name=lib_name, lib_version=lib_version)
+
+    if driver_info is None or isinstance(driver_info, DriverInfo):
         return driver_info
 
-    # Fallback: create DriverInfo from lib_name and lib_version
-    from redis.utils import get_lib_version
-
-    name = lib_name if lib_name is not None else "redis-py"
-    version = lib_version if lib_version is not None else get_lib_version()
-    return DriverInfo(name=name, lib_version=version)
+    raise TypeError("driver_info must be a DriverInfo instance or None")
