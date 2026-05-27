@@ -141,7 +141,9 @@ class TestClusterTransaction:
                 elif command == "_":
                     raise redis.exceptions.AskError(f"{slot} {node_importing.name}")
 
-                return original_parse_response(redis_node, connection, command, **options)
+                return original_parse_response(
+                    redis_node, connection, command, **options
+                )
 
             parse_response.side_effect = ask_redirect_effect
 

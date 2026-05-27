@@ -127,7 +127,9 @@ class TestClusterTransaction:
 
         original_parse_response = ClusterNode.parse_response
         with (
-            patch.object(ClusterNode, "parse_response", autospec=True) as parse_response,
+            patch.object(
+                ClusterNode, "parse_response", autospec=True
+            ) as parse_response,
             patch.object(NodesManager, "move_slot") as manager_move_slot,
         ):
 
