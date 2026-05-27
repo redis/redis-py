@@ -64,6 +64,7 @@ from redis.exceptions import (
     InvalidPipelineStack,
     MaxConnectionsError,
     MovedError,
+    NodeUnavailableError,
     RedisClusterException,
     RedisError,
     ResponseError,
@@ -713,6 +714,8 @@ class RedisCluster(
         event_dispatcher: Optional[EventDispatcher] = None,
         policy_resolver: PolicyResolver = StaticPolicyResolver(),
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+        node_health_failure_threshold: int = 5,
+        node_health_recovery_time: float = 10.0,
         **kwargs,
     ):
         """
@@ -790,6 +793,15 @@ class RedisCluster(
             If not provided and protocol is RESP3, the maintenance notifications
             will be enabled by default (logic is included in the NodesManager
             initialization).
+        :param node_health_failure_threshold:
+            Number of consecutive TimeoutError/ConnectionError failures on a
+            single node before it is marked unavailable. Subsequent requests
+            to that node will immediately raise NodeUnavailableError without
+            attempting network I/O. Default: 5.
+        :param node_health_recovery_time:
+            Seconds to wait before allowing a single probe request to a node
+            that was marked unavailable. If the probe succeeds, the node is
+            fully recovered. If it fails, the timer resets. Default: 10.0.
         :**kwargs:
             Extra arguments that will be sent into Redis instance when created
             (See Official redis-py doc for supported kwargs - the only limitation
@@ -893,6 +905,10 @@ class RedisCluster(
         else:
             self._event_dispatcher = event_dispatcher
         self.startup_nodes = startup_nodes
+        self.node_health_manager = NodeHealthManager(
+            failure_threshold=node_health_failure_threshold,
+            recovery_time=node_health_recovery_time,
+        )
 
         self.nodes_manager = NodesManager(
             startup_nodes=startup_nodes,
@@ -1632,6 +1648,7 @@ class RedisCluster(
         redirect_addr = None
         asking = False
         moved = False
+        _node_contacted = False
         ttl = int(self.RedisClusterRequestTTL)
 
         # Start timing for observability
@@ -1655,6 +1672,12 @@ class RedisCluster(
                     )
                     moved = False
 
+                if not self.node_health_manager.is_available(target_node.name):
+                    raise NodeUnavailableError(
+                        f"Node {target_node.name} is marked unavailable "
+                        f"(consecutive failures exceeded threshold)"
+                    )
+
                 redis_node = self.get_redis_connection(target_node)
                 connection = get_connection(redis_node)
                 if asking:
@@ -1662,6 +1685,7 @@ class RedisCluster(
                     redis_node.parse_response(connection, "ASKING", **kwargs)
                     asking = False
                 connection.send_command(*args, **kwargs)
+                _node_contacted = True
                 response = redis_node.parse_response(connection, command, **kwargs)
 
                 # Remove keys entry, it needs only for cache.
@@ -1687,6 +1711,18 @@ class RedisCluster(
                     error=e,
                 )
                 raise
+            except NodeUnavailableError as e:
+                # Node is marked unavailable by health tracking — no network
+                # I/O was attempted. Don't disconnect pools or reinitialize
+                # topology; just re-raise so the retry loop can handle it.
+                e.connection = target_node
+                self._record_command_metric(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=e.connection,
+                    error=e,
+                )
+                raise
             except MaxConnectionsError as e:
                 # MaxConnectionsError indicates client-side resource exhaustion
                 # (too many connections in the pool), not a node failure.
@@ -1704,6 +1740,9 @@ class RedisCluster(
                 )
                 raise
             except (ConnectionError, TimeoutError) as e:
+                self.node_health_manager.record_failure(target_node.name)
+                _node_contacted = False
+
                 if is_debug_log_enabled():
                     socket_address = self._extracts_socket_address(connection)
                     args_log_str = truncate_text(" ".join(map(safe_str, args)))
@@ -1878,6 +1917,9 @@ class RedisCluster(
                 )
                 raise e
             finally:
+                if _node_contacted:
+                    self.node_health_manager.record_success(target_node.name)
+                    _node_contacted = False
                 if connection is not None:
                     redis_node.connection_pool.release(connection)
 
@@ -2012,6 +2054,80 @@ class RedisCluster(
                     if watch_delay is not None and watch_delay > 0:
                         time.sleep(watch_delay)
                     continue
+
+
+class NodeHealthManager:
+    """Tracks per-node health to enable fail-fast behavior on known-dead nodes.
+
+    States:
+      - **Closed** (healthy): all requests pass through normally.
+      - **Open** (unavailable): after ``failure_threshold`` consecutive
+        failures, requests immediately raise ``NodeUnavailableError``
+        without attempting network I/O.
+      - **Half-open**: after ``recovery_time`` seconds in the open state,
+        exactly one probe request is allowed through. If it succeeds
+        (``record_success``), the node transitions back to closed. If it
+        fails (``record_failure``), the timer resets and the node remains
+        open for another ``recovery_time`` window. All other concurrent
+        callers remain blocked during the probe.
+    """
+
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        recovery_time: float = 10.0,
+    ):
+        self.failure_threshold = failure_threshold
+        self.recovery_time = recovery_time
+        self._node_failures: Dict[str, int] = {}
+        self._node_unavailable_since: Dict[str, float] = {}
+        self._half_open: Set[str] = set()
+        self._lock = threading.Lock()
+
+    def record_failure(self, node_name: str) -> None:
+        with self._lock:
+            self._node_failures[node_name] = (
+                self._node_failures.get(node_name, 0) + 1
+            )
+            if self._node_failures[node_name] >= self.failure_threshold:
+                if node_name not in self._node_unavailable_since:
+                    self._node_unavailable_since[node_name] = time.monotonic()
+                    logger.warning(
+                        f"Node {node_name} marked unavailable after "
+                        f"{self.failure_threshold} consecutive failures"
+                    )
+                elif node_name in self._half_open:
+                    # Probe failed — reset the timer for another recovery_time
+                    self._half_open.discard(node_name)
+                    self._node_unavailable_since[node_name] = time.monotonic()
+
+    def record_success(self, node_name: str) -> None:
+        with self._lock:
+            self._node_failures.pop(node_name, None)
+            self._half_open.discard(node_name)
+            if node_name in self._node_unavailable_since:
+                logger.info(f"Node {node_name} recovered, marking available")
+                del self._node_unavailable_since[node_name]
+
+    def is_available(self, node_name: str) -> bool:
+        with self._lock:
+            if node_name not in self._node_unavailable_since:
+                return True
+            if node_name in self._half_open:
+                # Another thread is already probing — remain unavailable
+                return False
+            elapsed = time.monotonic() - self._node_unavailable_since[node_name]
+            if elapsed >= self.recovery_time:
+                # Transition to half-open: allow exactly one probe through
+                self._half_open.add(node_name)
+                return True
+            return False
+
+    def reset(self) -> None:
+        with self._lock:
+            self._node_failures.clear()
+            self._node_unavailable_since.clear()
+            self._half_open.clear()
 
 
 class ClusterNode:
@@ -2469,7 +2585,16 @@ class NodesManager:
         if additional_startup_nodes_info is None:
             additional_startup_nodes_info = []
 
-        with self._initialization_lock:
+        acquired = self._initialization_lock.acquire(blocking=False)
+        if not acquired:
+            # Another thread is already refreshing topology.
+            # Use stale topology until the refresh completes.
+            logger.debug(
+                "Topology refresh already in progress, skipping "
+                "redundant initialize()"
+            )
+            return
+        try:
             with self._lock:
                 if epoch != self._epoch:
                     # another thread has already re-initialized the nodes; don't
@@ -2671,6 +2796,8 @@ class NodesManager:
                     type(e).__name__,
                     e,
                 )
+        finally:
+            self._initialization_lock.release()
 
     def close(self) -> None:
         with self._lock:

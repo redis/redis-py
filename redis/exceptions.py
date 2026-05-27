@@ -273,6 +273,16 @@ class MaxConnectionsError(ConnectionError):
     pass
 
 
+class NodeUnavailableError(ConnectionError):
+    """
+    Raised when a cluster node is marked unavailable due to consecutive
+    failures exceeding the health threshold. This is a fast-fail signal —
+    no network I/O was attempted.
+    """
+
+    pass
+
+
 class CrossSlotTransactionError(RedisClusterException):
     """
     Raised when a transaction or watch is triggered in a pipeline
