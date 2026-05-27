@@ -4309,7 +4309,7 @@ class PipelineStrategy(AbstractStrategy):
                 c.options.pop("keys", None)
                 c.result = pipe._policies_callback_mapping[
                     c.command_policies.response_policy
-                ](pipe.cluster_response_callbacks[c.args[0]](}c.result, **c.options))
+                ](pipe.cluster_response_callbacks[c.args[0]](c.result, **c.options))
             response.append(c.result)
 
         if raise_on_error:
