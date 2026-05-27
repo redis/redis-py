@@ -30,7 +30,7 @@ from redis.commands import (
     list_or_args,
 )
 from redis.commands.core import Script
-from redis.commands.helpers import partition_pubsub_subscriptions_by_handler
+from redis.commands.helpers import parse_pubsub_subscriptions, pubsub_subscription_args
 from redis.connection import (
     AbstractConnection,
     Connection,
@@ -67,6 +67,7 @@ from redis.observability.recorder import (
     record_pubsub_message,
 )
 from redis.retry import Retry
+from redis.typing import ChannelT, PubSubHandler, Subscription
 from redis.utils import (
     _set_info_logger,
     check_protocol_version,
@@ -1011,11 +1012,11 @@ class PubSub:
         self.reset()
 
     def _resubscribe(self, subscribed, subscribe_fn) -> None:
-        subscriptions_without_handlers, subscriptions_with_handlers = (
-            partition_pubsub_subscriptions_by_handler(subscribed, self.encoder)
-        )
-        if subscriptions_without_handlers or subscriptions_with_handlers:
-            subscribe_fn(*subscriptions_without_handlers, **subscriptions_with_handlers)
+        # Replay handler-backed subscriptions as positional Subscription objects
+        # so binary names never need to be decoded into keyword argument keys.
+        subscriptions = pubsub_subscription_args(subscribed)
+        if subscriptions:
+            subscribe_fn(*subscriptions)
 
     def _resubscribe_shard_channels(self) -> None:
         self._resubscribe(self.shard_channels, self.ssubscribe)
@@ -1277,18 +1278,20 @@ class PubSub:
         decode = self.encoder.decode
         return {decode(encode(k)): v for k, v in data.items()}
 
-    def psubscribe(self, *args, **kwargs):
+    def psubscribe(
+        self, *args: ChannelT | Subscription, **kwargs: PubSubHandler
+    ) -> None:
         """
-        Subscribe to channel patterns. Patterns supplied as keyword arguments
-        expect a pattern name as the key and a callable as the value. A
-        pattern's callable will be invoked automatically when a message is
-        received on that pattern rather than producing a message via
-        ``listen()``.
+        Subscribe to channel patterns.
+        Patterns supplied as keyword arguments expect a pattern name as the
+        key and a callable as the value.
+        ``Subscription`` objects can also be supplied positionally with an
+        optional handler.
+        A pattern's callable will be invoked automatically
+        when a message is received on that pattern rather than producing a
+        message via ``listen()``.
         """
-        if args:
-            args = list_or_args(args[0], args[1:])
-        new_patterns = dict.fromkeys(args)
-        new_patterns.update(kwargs)
+        new_patterns = parse_pubsub_subscriptions(args, kwargs)
         ret_val = self.execute_command("PSUBSCRIBE", *new_patterns.keys())
         # update the patterns dict AFTER we send the command. we don't want to
         # subscribe twice to these patterns, once for the command and again
@@ -1316,18 +1319,20 @@ class PubSub:
         self.pending_unsubscribe_patterns.update(patterns)
         return self.execute_command("PUNSUBSCRIBE", *args)
 
-    def subscribe(self, *args, **kwargs):
+    def subscribe(
+        self, *args: ChannelT | Subscription, **kwargs: PubSubHandler
+    ) -> None:
         """
-        Subscribe to channels. Channels supplied as keyword arguments expect
-        a channel name as the key and a callable as the value. A channel's
-        callable will be invoked automatically when a message is received on
-        that channel rather than producing a message via ``listen()`` or
-        ``get_message()``.
+        Subscribe to channels.
+        Channels supplied as keyword arguments expect
+        a channel name as the key and a callable as the value.
+        ``Subscription`` objects can also be supplied positionally with an
+        optional handler.
+        A channel's callable will be invoked automatically
+        when a message is received on that channel rather than producing a
+        message via ``listen()`` or ``get_message()``.
         """
-        if args:
-            args = list_or_args(args[0], args[1:])
-        new_channels = dict.fromkeys(args)
-        new_channels.update(kwargs)
+        new_channels = parse_pubsub_subscriptions(args, kwargs)
         ret_val = self.execute_command("SUBSCRIBE", *new_channels.keys())
         # update the channels dict AFTER we send the command. we don't want to
         # subscribe twice to these channels, once for the command and again
@@ -1355,18 +1360,23 @@ class PubSub:
         self.pending_unsubscribe_channels.update(channels)
         return self.execute_command("UNSUBSCRIBE", *args)
 
-    def ssubscribe(self, *args, target_node=None, **kwargs):
+    def ssubscribe(
+        self,
+        *args: ChannelT | Subscription,
+        target_node: Any = None,
+        **kwargs: PubSubHandler,
+    ) -> None:
         """
         Subscribes the client to the specified shard channels.
         Channels supplied as keyword arguments expect a channel name as the key
-        and a callable as the value. A channel's callable will be invoked automatically
-        when a message is received on that channel rather than producing a message via
-        ``listen()`` or ``get_sharded_message()``.
+        and a callable as the value.
+        ``Subscription`` objects can also be supplied positionally
+        with an optional handler.
+        A channel's callable will be invoked automatically when a message
+        is received on that channel rather than producing a message
+        via ``listen()`` or ``get_sharded_message()``.
         """
-        if args:
-            args = list_or_args(args[0], args[1:])
-        new_s_channels = dict.fromkeys(args)
-        new_s_channels.update(kwargs)
+        new_s_channels = parse_pubsub_subscriptions(args, kwargs)
         ret_val = self.execute_command("SSUBSCRIBE", *new_s_channels.keys())
         # update the s_channels dict AFTER we send the command. we don't want to
         # subscribe twice to these channels, once for the command and again

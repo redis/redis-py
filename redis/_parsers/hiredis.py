@@ -1,17 +1,11 @@
-import asyncio
+import select
 import socket
-import sys
 from logging import getLogger
 from typing import Callable, List, Optional, TypedDict, Union
 
-if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
-    from asyncio import timeout as async_timeout
-else:
-    from async_timeout import timeout as async_timeout
-
-from ..exceptions import ConnectionError, InvalidResponse, RedisError
+from ..exceptions import ConnectionError, InvalidResponse, RedisError, TimeoutError
 from ..typing import EncodableT
-from ..utils import HIREDIS_AVAILABLE
+from ..utils import HIREDIS_AVAILABLE, deprecated_function
 from .base import (
     AsyncBaseParser,
     AsyncPushNotificationsParser,
@@ -29,6 +23,13 @@ from .socket import (
 # Using `False` or `None` is not reliable, given that the parser can
 # return `False` or `None` for legitimate reasons from RESP payloads.
 NOT_ENOUGH_DATA = object()
+
+
+def _socket_can_read(sock, timeout: float) -> bool:
+    # SSL sockets can have decrypted bytes buffered above the OS socket layer.
+    if hasattr(sock, "pending") and sock.pending():
+        return True
+    return bool(select.select([sock], [], [], timeout)[0])
 
 
 class _HiredisReaderArgs(TypedDict, total=False):
@@ -79,7 +80,6 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
         if connection.encoder.decode_responses:
             kwargs["encoding"] = connection.encoder.encoding
         self._reader = hiredis.Reader(**kwargs)
-        self._next_response = NOT_ENOUGH_DATA
 
         try:
             self._hiredis_PushNotificationType = hiredis.PushNotification
@@ -90,17 +90,16 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
     def on_disconnect(self):
         self._sock = None
         self._reader = None
-        self._next_response = NOT_ENOUGH_DATA
 
-    def can_read(self, timeout):
+    def can_read(self, timeout: float = 0) -> bool:
+        # TODO: Rename this API; it detects pending data or dirty/closed
+        # connection state, not only whether application data can be read.
         if not self._reader:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
-        if self._next_response is NOT_ENOUGH_DATA:
-            self._next_response = self._reader.gets()
-            if self._next_response is NOT_ENOUGH_DATA:
-                return self.read_from_socket(timeout=timeout, raise_on_timeout=False)
-        return True
+        if self._reader.has_data():
+            return True
+        return _socket_can_read(self._sock, timeout)
 
     def read_from_socket(self, timeout=SENTINEL, raise_on_timeout=True):
         sock = self._sock
@@ -125,8 +124,11 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
             # there's no data to be read. otherwise raise the
             # original exception.
             allowed = NONBLOCKING_EXCEPTION_ERROR_NUMBERS.get(ex.__class__, -1)
-            if not raise_on_timeout and ex.errno == allowed:
-                return False
+            if ex.errno == allowed:
+                if not raise_on_timeout:
+                    return False
+                if timeout == 0:
+                    raise TimeoutError("Timeout reading from socket")
             raise ConnectionError(f"Error while reading from socket: {ex.args}")
         finally:
             if custom_timeout:
@@ -140,26 +142,6 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
     ):
         if not self._reader:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-
-        # _next_response might be cached from a can_read() call
-        if self._next_response is not NOT_ENOUGH_DATA:
-            response = self._next_response
-            self._next_response = NOT_ENOUGH_DATA
-            if self._hiredis_PushNotificationType is not None and isinstance(
-                response, self._hiredis_PushNotificationType
-            ):
-                response = self.handle_push_response(response)
-
-                # if this is a push request return the push response
-                if push_request:
-                    return response
-
-                return self.read_response(
-                    disable_decoding=disable_decoding,
-                    push_request=push_request,
-                    timeout=timeout,
-                )
-            return response
 
         if disable_decoding:
             response = self._reader.gets(False)
@@ -186,6 +168,7 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
             return self.read_response(
                 disable_decoding=disable_decoding,
                 push_request=push_request,
+                timeout=timeout,
             )
 
         elif (
@@ -243,16 +226,24 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
     def on_disconnect(self):
         self._connected = False
 
-    async def can_read_destructive(self):
+    @deprecated_function(
+        version="8.0.0", reason="Use can_read() instead", name="can_read_destructive"
+    )
+    async def can_read_destructive(self) -> bool:
+        return await self.can_read()
+
+    async def can_read(self) -> bool:
+        # TODO: Rename this API; it detects pending data or dirty/closed
+        # connection state, not only whether application data can be read.
         if not self._connected:
             raise OSError("Buffer is closed.")
-        if self._reader.gets() is not NOT_ENOUGH_DATA:
+        # EOF means the connection is closed and not safe to reuse.
+        if self._reader.has_data() or self._stream.at_eof():
             return True
-        try:
-            async with async_timeout(0):
-                return await self.read_from_socket()
-        except asyncio.TimeoutError:
-            return False
+        # asyncio.StreamReader has no public non-destructive API for checking
+        # buffered bytes. Preserve dirty-connection detection for hiredis; tests
+        # with a real StreamReader guard this private buffer API in CI.
+        return bool(self._stream._buffer)
 
     async def read_from_socket(self):
         buffer = await self._stream.read(self._read_size)
