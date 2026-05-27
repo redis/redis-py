@@ -32,7 +32,11 @@ from redis.cache import (
     CacheProxy,
 )
 
-from ._defaults import get_default_socket_keepalive_options
+from ._defaults import (
+    DEFAULT_SOCKET_CONNECT_TIMEOUT,
+    DEFAULT_SOCKET_TIMEOUT,
+    get_default_socket_keepalive_options,
+)
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .auth.token import TokenInterface
 from .backoff import NoBackoff
@@ -787,8 +791,8 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         self,
         db: int = 0,
         password: Optional[str] = None,
-        socket_timeout: Optional[float] = 5,
-        socket_connect_timeout: Optional[float] = 5,
+        socket_timeout: Optional[float] = DEFAULT_SOCKET_TIMEOUT,
+        socket_connect_timeout: Optional[float] = DEFAULT_SOCKET_CONNECT_TIMEOUT,
         retry_on_timeout: bool = False,
         retry_on_error: Union[Iterable[Type[Exception]], object] = SENTINEL,
         encoding: str = "utf-8",
@@ -2178,7 +2182,7 @@ class SSLConnection(Connection):
 class UnixDomainSocketConnection(AbstractConnection):
     "Manages UDS communication to and from a Redis server"
 
-    def __init__(self, path="", socket_timeout=5, **kwargs):
+    def __init__(self, path="", socket_timeout=DEFAULT_SOCKET_TIMEOUT, **kwargs):
         super().__init__(**kwargs)
         self.path = path
         self.socket_timeout = socket_timeout
@@ -2551,10 +2555,10 @@ class MaintNotificationsAbstractConnectionPool:
                 {
                     "orig_host_address": self.connection_kwargs.get("host"),
                     "orig_socket_timeout": self.connection_kwargs.get(
-                        "socket_timeout", None
+                        "socket_timeout", DEFAULT_SOCKET_TIMEOUT
                     ),
                     "orig_socket_connect_timeout": self.connection_kwargs.get(
-                        "socket_connect_timeout", None
+                        "socket_connect_timeout", DEFAULT_SOCKET_CONNECT_TIMEOUT
                     ),
                 }
             )

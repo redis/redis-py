@@ -4,6 +4,9 @@ import socket
 
 # Connection defaults
 
+DEFAULT_SOCKET_TIMEOUT = 5
+DEFAULT_SOCKET_CONNECT_TIMEOUT = DEFAULT_SOCKET_TIMEOUT
+
 
 def get_default_socket_keepalive_options() -> dict[int, int]:
     options = {}

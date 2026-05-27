@@ -85,7 +85,11 @@ from redis.utils import (
     str_if_bytes,
 )
 
-from .._defaults import get_default_socket_keepalive_options
+from .._defaults import (
+    DEFAULT_SOCKET_CONNECT_TIMEOUT,
+    DEFAULT_SOCKET_TIMEOUT,
+    get_default_socket_keepalive_options,
+)
 from .._parsers import (
     BaseParser,
     Encoder,
@@ -161,8 +165,8 @@ class AbstractConnection:
         *,
         db: str | int = 0,
         password: str | None = None,
-        socket_timeout: float | None = 5,
-        socket_connect_timeout: float | None = 5,
+        socket_timeout: float | None = DEFAULT_SOCKET_TIMEOUT,
+        socket_connect_timeout: float | None = DEFAULT_SOCKET_CONNECT_TIMEOUT,
         retry_on_timeout: bool = False,
         retry_on_error: list | object = SENTINEL,
         encoding: str = "utf-8",
