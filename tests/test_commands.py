@@ -2321,17 +2321,36 @@ class TestRedisCommands:
     def test_increx_saturating_bounds(self, r):
         key = "increx:sat"
         assert r.set(key, "1.8")
-        result = r.increx(key, byfloat=0.7, ubound=2, overflow="SAT")
+        result = r.increx(key, byfloat=0.7, ubound=2, saturate=True)
         assert [float(value) for value in result] == pytest.approx([2.0, 0.2])
         assert float(r[key]) == pytest.approx(2.0)
 
     @skip_if_server_version_lt("8.7.0")
-    def test_increx_fail_overflow_keeps_value(self, r):
+    def test_increx_overflow_rejected_keeps_value_and_ttl(self, r):
         key = "increx:overflow"
         assert r.set(key, 10)
-        with pytest.raises(ResponseError):
-            r.increx(key, byint=5, ubound=12)
+        assert r.expire(key, 60)
+        ttl = r.pttl(key)
+        assert r.increx(key, byint=5, ubound=12) == [10, 0]
         assert r[key] == b"10"
+        assert 0 < r.pttl(key) <= ttl
+
+    @skip_if_server_version_lt("8.7.0")
+    def test_increx_integer_overflow_uses_type_limits(self, r):
+        key = "increx:type-overflow"
+        max_int = 9223372036854775807
+        almost_max = max_int - 1
+
+        assert r.set(key, almost_max)
+        assert r.expire(key, 60)
+        ttl = r.pttl(key)
+        assert r.increx(key, byint=2) == [almost_max, 0]
+        assert r[key] == str(almost_max).encode()
+        assert 0 < r.pttl(key) <= ttl
+
+        assert r.set(key, almost_max)
+        assert r.increx(key, byint=2, saturate=True) == [max_int, 1]
+        assert r[key] == str(max_int).encode()
 
     @skip_if_server_version_lt("8.7.0")
     def test_increx_expiration_enx(self, r):
@@ -2353,8 +2372,6 @@ class TestRedisCommands:
             r.increx(key, byfloat=1.0, byint=1)
         with pytest.raises(DataError):
             r.increx(key, ex=10, px=10)
-        with pytest.raises(DataError):
-            r.increx(key, overflow="WRAP")
         with pytest.raises(DataError):
             r.increx(key, enx=True)
 
