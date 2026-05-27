@@ -172,7 +172,7 @@ class AbstractConnection:
         encoding_errors: str = "strict",
         decode_responses: bool = False,
         parser_class: Type[BaseParser] = DefaultParser,
-        socket_read_size: int = 65536,
+        socket_read_size: int = 32768,
         health_check_interval: float = 0,
         client_name: str | None = None,
         lib_name: str | object | None = DEFAULT_SENTINEL,

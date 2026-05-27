@@ -5,8 +5,10 @@ from redis._defaults import get_default_socket_keepalive_options
 from redis._parsers.socket import SENTINEL
 from redis.asyncio.client import Redis as AsyncRedis
 from redis.asyncio.cluster import RedisCluster as AsyncRedisCluster
+from redis.asyncio.connection import AbstractConnection as AsyncAbstractConnection
 from redis.asyncio.connection import Connection as AsyncConnection
 from redis.client import Redis
+from redis.connection import AbstractConnection
 from redis.connection import Connection
 
 
@@ -21,6 +23,23 @@ def test_socket_keepalive_signature_defaults_are_true():
 def test_connection_socket_keepalive_defaults_to_true():
     assert Connection().socket_keepalive is True
     assert AsyncConnection().socket_keepalive is True
+
+
+def test_connection_socket_read_size_defaults_to_32kb():
+    assert (
+        inspect.signature(AbstractConnection.__init__)
+        .parameters["socket_read_size"]
+        .default
+        == 32768
+    )
+    assert (
+        inspect.signature(AsyncAbstractConnection.__init__)
+        .parameters["socket_read_size"]
+        .default
+        == 32768
+    )
+    assert Connection()._socket_read_size == 32768
+    assert AsyncConnection()._socket_read_size == 32768
 
 
 def test_default_socket_keepalive_options():

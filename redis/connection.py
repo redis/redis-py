@@ -795,7 +795,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         encoding_errors: str = "strict",
         decode_responses: bool = False,
         parser_class=DefaultParser,
-        socket_read_size: int = 65536,
+        socket_read_size: int = 32768,
         health_check_interval: int = 0,
         client_name: Optional[str] = None,
         lib_name: Union[Optional[str], object] = SENTINEL,
