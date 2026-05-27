@@ -78,6 +78,7 @@ from redis.exceptions import (
 )
 from redis.typing import AnyKeyT, EncodableT, KeyT
 from redis.utils import (
+    SENTINEL,
     SSL_AVAILABLE,
     deprecated_args,
     deprecated_function,
@@ -285,8 +286,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         username: Optional[str] = None,
         password: Optional[str] = None,
         client_name: Optional[str] = None,
-        lib_name: Optional[str] = "redis-py",
-        lib_version: Optional[str] = get_lib_version(),
+        lib_name: Union[Optional[str], object] = SENTINEL,
+        lib_version: Union[Optional[str], object] = SENTINEL,
         # Encoding related kwargs
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
