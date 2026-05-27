@@ -2090,7 +2090,9 @@ class TestMaintenanceNotificationsHandlingMultipleProxies(
                 assert conn.socket_connect_timeout == self.config.relaxed_timeout
                 assert conn.orig_host_address == self.orig_host
                 assert conn.orig_socket_timeout == DEFAULT_SOCKET_TIMEOUT
-                assert conn.orig_socket_connect_timeout == DEFAULT_SOCKET_CONNECT_TIMEOUT
+                assert (
+                    conn.orig_socket_connect_timeout == DEFAULT_SOCKET_CONNECT_TIMEOUT
+                )
             else:
                 assert conn.maintenance_state == MaintenanceState.NONE
                 assert conn.host == self.orig_host
@@ -2098,7 +2100,9 @@ class TestMaintenanceNotificationsHandlingMultipleProxies(
                 assert conn.socket_connect_timeout == DEFAULT_SOCKET_CONNECT_TIMEOUT
                 assert conn.orig_host_address == self.orig_host
                 assert conn.orig_socket_timeout == DEFAULT_SOCKET_TIMEOUT
-                assert conn.orig_socket_connect_timeout == DEFAULT_SOCKET_CONNECT_TIMEOUT
+                assert (
+                    conn.orig_socket_connect_timeout == DEFAULT_SOCKET_CONNECT_TIMEOUT
+                )
         assert changed_free_connections == 2
         assert len(free_connections) == 4
 
@@ -2138,7 +2142,9 @@ class TestMaintenanceNotificationsHandlingMultipleProxies(
                 assert conn.socket_connect_timeout == self.config.relaxed_timeout
                 assert conn.orig_host_address == self.orig_host
                 assert conn.orig_socket_timeout == DEFAULT_SOCKET_TIMEOUT
-                assert conn.orig_socket_connect_timeout == DEFAULT_SOCKET_CONNECT_TIMEOUT
+                assert (
+                    conn.orig_socket_connect_timeout == DEFAULT_SOCKET_CONNECT_TIMEOUT
+                )
             # here I can't validate the other connections since some of
             # them are in MOVING state from the first notification
             # and some are in NONE state
