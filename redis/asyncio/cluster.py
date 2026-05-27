@@ -330,7 +330,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         dynamic_startup_nodes: bool = True,
         reinitialize_steps: int = 5,
         cluster_error_retry_attempts: int = 10,
-        max_connections: int = 2**31,
+        max_connections: int = 100,
         retry: Retry | None = None,
         retry_on_error: List[Type[Exception]] | None = None,
         # Client related kwargs
@@ -1474,7 +1474,7 @@ class ClusterNode:
         port: Union[str, int],
         server_type: Optional[str] = None,
         *,
-        max_connections: int = 2**31,
+        max_connections: int = 100,
         connection_class: Type[Connection] = Connection,
         **connection_kwargs: Any,
     ) -> None:

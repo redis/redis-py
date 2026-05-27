@@ -4,15 +4,18 @@ import socket
 from redis._defaults import get_default_socket_keepalive_options
 from redis._parsers.socket import SENTINEL
 from redis.asyncio.client import Redis as AsyncRedis
+from redis.asyncio.cluster import ClusterNode as AsyncClusterNode
 from redis.asyncio.cluster import RedisCluster as AsyncRedisCluster
 from redis.asyncio.connection import AbstractConnection as AsyncAbstractConnection
 from redis.asyncio.connection import Connection as AsyncConnection
+from redis.asyncio.connection import ConnectionPool as AsyncConnectionPool
 from redis.asyncio.retry import Retry as AsyncRetry
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.client import Redis
 from redis.cluster import RedisCluster
 from redis.connection import AbstractConnection
 from redis.connection import Connection
+from redis.connection import ConnectionPool
 from redis.connection import UnixDomainSocketConnection
 from redis.retry import Retry
 
@@ -64,6 +67,20 @@ def test_socket_timeout_default():
     assert AsyncConnection().socket_timeout == 5
     assert AsyncConnection().socket_connect_timeout == 5
     assert UnixDomainSocketConnection().socket_timeout == 5
+
+
+def test_default_max_connections():
+    assert ConnectionPool().max_connections == 100
+    assert AsyncConnectionPool().max_connections == 100
+    assert Redis().connection_pool.max_connections == 100
+    assert AsyncRedis().connection_pool.max_connections == 100
+
+    async_cluster_parameters = inspect.signature(AsyncRedisCluster.__init__).parameters
+    assert async_cluster_parameters["max_connections"].default == 100
+    async_cluster_node_parameters = inspect.signature(
+        AsyncClusterNode.__init__
+    ).parameters
+    assert async_cluster_node_parameters["max_connections"].default == 100
 
 
 def test_default_retry_config():
