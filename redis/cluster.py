@@ -4078,7 +4078,7 @@ class PipelineStrategy(AbstractStrategy):
         no_default_node = not pipe.get_default_node()
 
         policy_cache = {}
-        SENTINEL = object()
+        sentinel = object()
 
         try:
             # as we move through each command that still needs to be processed,
@@ -4088,8 +4088,8 @@ class PipelineStrategy(AbstractStrategy):
                 args = c.args
                 arg0 = args[0]
 
-                command_policies = policy_cache.get(arg0, SENTINEL)
-                if command_policies is SENTINEL:
+                command_policies = policy_cache.get(arg0, sentinel)
+                if command_policies is sentinel:
                     command_policies = policy_resolver.resolve(
                         arg0.lower()
                     )
