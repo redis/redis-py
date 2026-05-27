@@ -787,8 +787,8 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         self,
         db: int = 0,
         password: Optional[str] = None,
-        socket_timeout: Optional[float] = None,
-        socket_connect_timeout: Optional[float] = None,
+        socket_timeout: Optional[float] = 5,
+        socket_connect_timeout: Optional[float] = 5,
         retry_on_timeout: bool = False,
         retry_on_error: Union[Iterable[Type[Exception]], object] = SENTINEL,
         encoding: str = "utf-8",
@@ -2178,7 +2178,7 @@ class SSLConnection(Connection):
 class UnixDomainSocketConnection(AbstractConnection):
     "Manages UDS communication to and from a Redis server"
 
-    def __init__(self, path="", socket_timeout=None, **kwargs):
+    def __init__(self, path="", socket_timeout=5, **kwargs):
         super().__init__(**kwargs)
         self.path = path
         self.socket_timeout = socket_timeout

@@ -349,10 +349,10 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         decode_responses: bool = False,
         # Connection related kwargs
         health_check_interval: float = 0,
-        socket_connect_timeout: float | None = None,
+        socket_timeout: float | None = 5,
+        socket_connect_timeout: float | None = 5,
         socket_keepalive: bool = True,
         socket_keepalive_options: Mapping[int, int | bytes] | object | None = SENTINEL,
-        socket_timeout: float | None = None,
         # SSL related kwargs
         ssl: bool = False,
         ssl_ca_certs: str | None = None,

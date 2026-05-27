@@ -10,6 +10,7 @@ from redis.asyncio.connection import Connection as AsyncConnection
 from redis.client import Redis
 from redis.connection import AbstractConnection
 from redis.connection import Connection
+from redis.connection import UnixDomainSocketConnection
 
 
 def test_socket_keepalive_signature_defaults_are_true():
@@ -40,6 +41,25 @@ def test_connection_socket_read_size_defaults_to_32kb():
     )
     assert Connection()._socket_read_size == 32768
     assert AsyncConnection()._socket_read_size == 32768
+
+
+def test_socket_timeout_default():
+    classes = (Redis, AbstractConnection, AsyncRedis, AsyncAbstractConnection)
+
+    for cls in classes:
+        parameters = inspect.signature(cls.__init__).parameters
+        assert parameters["socket_timeout"].default == 5
+        assert parameters["socket_connect_timeout"].default == 5
+
+    cluster_parameters = inspect.signature(AsyncRedisCluster.__init__).parameters
+    assert cluster_parameters["socket_timeout"].default == 5
+    assert cluster_parameters["socket_connect_timeout"].default == 5
+
+    assert Connection().socket_timeout == 5
+    assert Connection().socket_connect_timeout == 5
+    assert AsyncConnection().socket_timeout == 5
+    assert AsyncConnection().socket_connect_timeout == 5
+    assert UnixDomainSocketConnection().socket_timeout == 5
 
 
 def test_default_socket_keepalive_options():
