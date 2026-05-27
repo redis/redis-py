@@ -433,8 +433,10 @@ class TestRedisClusterObj:
             host = rc_default.get_default_node().host
 
             assert isinstance(retry, Retry)
-            assert retry._retries == 3
+            assert retry._retries == 10
             assert isinstance(retry._backoff, type(ExponentialWithJitterBackoff()))
+            assert retry._backoff._base == 0.01
+            assert retry._backoff._cap == 1
 
             # validate nodes connections are using the default retry for
             # lower level connections when client is created through 'from_url' method

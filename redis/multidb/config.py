@@ -140,7 +140,7 @@ class MultiDbConfig:
     databases_config: List[DatabaseConfig]
     client_class: Type[Union[Redis, RedisCluster]] = Redis
     command_retry: Retry = Retry(
-        backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
+        backoff=ExponentialWithJitterBackoff(base=0.01, cap=1), retries=10
     )
     failure_detectors: Optional[List[FailureDetector]] = None
     min_num_failures: int = DEFAULT_MIN_NUM_FAILURES

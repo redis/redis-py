@@ -7,10 +7,14 @@ from redis.asyncio.client import Redis as AsyncRedis
 from redis.asyncio.cluster import RedisCluster as AsyncRedisCluster
 from redis.asyncio.connection import AbstractConnection as AsyncAbstractConnection
 from redis.asyncio.connection import Connection as AsyncConnection
+from redis.asyncio.retry import Retry as AsyncRetry
+from redis.backoff import ExponentialWithJitterBackoff
 from redis.client import Redis
+from redis.cluster import RedisCluster
 from redis.connection import AbstractConnection
 from redis.connection import Connection
 from redis.connection import UnixDomainSocketConnection
+from redis.retry import Retry
 
 
 def test_socket_keepalive_signature_defaults_are_true():
@@ -60,6 +64,30 @@ def test_socket_timeout_default():
     assert AsyncConnection().socket_timeout == 5
     assert AsyncConnection().socket_connect_timeout == 5
     assert UnixDomainSocketConnection().socket_timeout == 5
+
+
+def test_default_retry_config():
+    sync_retry = inspect.signature(Redis.__init__).parameters["retry"].default
+    assert isinstance(sync_retry, Retry)
+    assert sync_retry.get_retries() == 10
+    assert isinstance(sync_retry._backoff, ExponentialWithJitterBackoff)
+    assert sync_retry._backoff._base == 0.01
+    assert sync_retry._backoff._cap == 1
+
+    async_retry = inspect.signature(AsyncRedis.__init__).parameters["retry"].default
+    assert isinstance(async_retry, AsyncRetry)
+    assert async_retry.get_retries() == 10
+    assert isinstance(async_retry._backoff, ExponentialWithJitterBackoff)
+    assert async_retry._backoff._base == 0.01
+    assert async_retry._backoff._cap == 1
+
+    for cls in (RedisCluster, AsyncRedisCluster):
+        default = (
+            inspect.signature(cls.__init__)
+            .parameters["cluster_error_retry_attempts"]
+            .default
+        )
+        assert default == 10
 
 
 def test_default_socket_keepalive_options():

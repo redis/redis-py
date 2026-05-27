@@ -66,7 +66,7 @@ class HttpClient:
         headers: Optional[Mapping[str, str]] = None,
         timeout: float = DEFAULT_TIMEOUT,
         retry: Retry = Retry(
-            backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
+            backoff=ExponentialWithJitterBackoff(base=0.01, cap=1), retries=10
         ),
         verify_tls: bool = True,
         # TLS verification (server) options

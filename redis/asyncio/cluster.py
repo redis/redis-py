@@ -329,7 +329,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         load_balancing_strategy: LoadBalancingStrategy | None = None,
         dynamic_startup_nodes: bool = True,
         reinitialize_steps: int = 5,
-        cluster_error_retry_attempts: int = 3,
+        cluster_error_retry_attempts: int = 10,
         max_connections: int = 2**31,
         retry: Retry | None = None,
         retry_on_error: List[Type[Exception]] | None = None,
@@ -441,7 +441,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             self.retry = retry
         else:
             self.retry = Retry(
-                backoff=ExponentialWithJitterBackoff(base=1, cap=10),
+                backoff=ExponentialWithJitterBackoff(base=0.01, cap=1),
                 retries=cluster_error_retry_attempts,
             )
         if retry_on_error:

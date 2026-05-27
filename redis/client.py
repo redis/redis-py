@@ -248,7 +248,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         decode_responses: bool = False,
         retry_on_timeout: bool = False,
         retry: Retry = Retry(
-            backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
+            backoff=ExponentialWithJitterBackoff(base=0.01, cap=1), retries=10
         ),
         retry_on_error: List[Type[Exception]] | None = None,
         ssl: bool = False,

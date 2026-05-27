@@ -1008,8 +1008,10 @@ class TestRedisClusterObj:
         # test default retry config
         retry = r.retry
         assert isinstance(retry, Retry)
-        assert retry.get_retries() == 3
+        assert retry.get_retries() == 10
         assert isinstance(retry._backoff, type(ExponentialWithJitterBackoff()))
+        assert retry._backoff._base == 0.01
+        assert retry._backoff._cap == 1
         node1_connection = r.get_node(host, 16379).redis_connection
         node2_connection = r.get_node(host, 16380).redis_connection
         assert node1_connection.get_retry()._retries == 0
