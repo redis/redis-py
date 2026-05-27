@@ -192,6 +192,7 @@ REDIS_ALLOWED_KEYS = (
     "encoding",
     "encoding_errors",
     "host",
+    "driver_info",
     "lib_name",
     "lib_version",
     "max_connections",
