@@ -3463,7 +3463,7 @@ class ClusterPipeline(RedisCluster):
             RequestPolicy.DEFAULT_KEYED: lambda self, command, *args, **kwargs: (
                 self.get_nodes_from_slot(command, *args)
             ),
-            RequestPolicy.DEFAULT_NODE: lambda self, command, *args, **kwargs:  [
+            RequestPolicy.DEFAULT_NODE: lambda self, command, *args, **kwargs: [
                 self.get_default_node()
             ],
             RequestPolicy.ALL_SHARDS: lambda self, command, *args, **kwargs: (
