@@ -36,7 +36,11 @@ if TYPE_CHECKING:
         AsyncClusterKeyspaceNotifications,
     )
 
-from redis._defaults import DEFAULT_SOCKET_CONNECT_TIMEOUT, DEFAULT_SOCKET_TIMEOUT
+from redis._defaults import (
+    DEFAULT_SOCKET_CONNECT_TIMEOUT,
+    DEFAULT_SOCKET_READ_SIZE,
+    DEFAULT_SOCKET_TIMEOUT,
+)
 from redis._parsers import AsyncCommandsParser, Encoder
 from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
 from redis._parsers.helpers import get_response_callbacks
@@ -351,6 +355,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         health_check_interval: float = 0,
         socket_timeout: float | None = DEFAULT_SOCKET_TIMEOUT,
         socket_connect_timeout: float | None = DEFAULT_SOCKET_CONNECT_TIMEOUT,
+        socket_read_size: int = DEFAULT_SOCKET_READ_SIZE,
         socket_keepalive: bool = True,
         socket_keepalive_options: Mapping[int, int | bytes] | object | None = SENTINEL,
         # SSL related kwargs
@@ -410,6 +415,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "socket_connect_timeout": socket_connect_timeout,
             "socket_keepalive": socket_keepalive,
             "socket_keepalive_options": socket_keepalive_options,
+            "socket_read_size": socket_read_size,
             "socket_timeout": socket_timeout,
             "protocol": protocol,
             "legacy_responses": legacy_responses,

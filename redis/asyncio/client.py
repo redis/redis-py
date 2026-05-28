@@ -27,7 +27,11 @@ from typing import (
     cast,
 )
 
-from redis._defaults import DEFAULT_SOCKET_CONNECT_TIMEOUT, DEFAULT_SOCKET_TIMEOUT
+from redis._defaults import (
+    DEFAULT_SOCKET_CONNECT_TIMEOUT,
+    DEFAULT_SOCKET_READ_SIZE,
+    DEFAULT_SOCKET_TIMEOUT,
+)
 from redis._parsers.helpers import bool_ok, get_response_callbacks
 from redis.asyncio.connection import (
     Connection,
@@ -237,6 +241,7 @@ class Redis(
         password: str | None = None,
         socket_timeout: float | None = DEFAULT_SOCKET_TIMEOUT,
         socket_connect_timeout: float | None = DEFAULT_SOCKET_CONNECT_TIMEOUT,
+        socket_read_size: int = DEFAULT_SOCKET_READ_SIZE,
         socket_keepalive: bool | None = True,
         socket_keepalive_options: Mapping[int, int | bytes] | object | None = SENTINEL,
         connection_pool: ConnectionPool | None = None,
@@ -348,6 +353,7 @@ class Redis(
                 "password": password,
                 "credential_provider": credential_provider,
                 "socket_timeout": socket_timeout,
+                "socket_read_size": socket_read_size,
                 "encoding": encoding,
                 "encoding_errors": encoding_errors,
                 "decode_responses": decode_responses,

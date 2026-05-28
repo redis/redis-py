@@ -3,6 +3,7 @@ import socket
 
 from redis._defaults import (
     DEFAULT_SOCKET_CONNECT_TIMEOUT,
+    DEFAULT_SOCKET_READ_SIZE,
     DEFAULT_SOCKET_TIMEOUT,
     get_default_socket_keepalive_options,
 )
@@ -15,7 +16,7 @@ from redis.asyncio.connection import ConnectionPool as AsyncConnectionPool
 from redis.asyncio.retry import Retry as AsyncRetry
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.client import Redis
-from redis.cluster import RedisCluster
+from redis.cluster import REDIS_ALLOWED_KEYS, RedisCluster
 from redis.connection import AbstractConnection
 from redis.connection import Connection
 from redis.connection import ConnectionPool
@@ -38,20 +39,62 @@ def test_connection_socket_keepalive_defaults_to_true():
 
 
 def test_connection_socket_read_size_defaults_to_32kb():
+    classes = (
+        Redis,
+        AbstractConnection,
+        AsyncRedis,
+        AsyncRedisCluster,
+        AsyncAbstractConnection,
+    )
+
+    for cls in classes:
+        default = (
+            inspect.signature(cls.__init__).parameters["socket_read_size"].default
+        )
+        assert default == DEFAULT_SOCKET_READ_SIZE
+
+    assert Connection()._socket_read_size == DEFAULT_SOCKET_READ_SIZE
+    assert AsyncConnection()._socket_read_size == DEFAULT_SOCKET_READ_SIZE
+    assert "socket_read_size" in REDIS_ALLOWED_KEYS
+
+
+def test_socket_read_size_can_be_configured_from_clients_and_pools():
+    socket_read_size = 65536
+
     assert (
-        inspect.signature(AbstractConnection.__init__)
-        .parameters["socket_read_size"]
-        .default
-        == 32768
+        Redis(socket_read_size=socket_read_size)
+        .connection_pool.connection_kwargs["socket_read_size"]
+        == socket_read_size
     )
     assert (
-        inspect.signature(AsyncAbstractConnection.__init__)
-        .parameters["socket_read_size"]
-        .default
-        == 32768
+        AsyncRedis(socket_read_size=socket_read_size)
+        .connection_pool.connection_kwargs["socket_read_size"]
+        == socket_read_size
     )
-    assert Connection()._socket_read_size == 32768
-    assert AsyncConnection()._socket_read_size == 32768
+    assert (
+        ConnectionPool(socket_read_size=socket_read_size).connection_kwargs[
+            "socket_read_size"
+        ]
+        == socket_read_size
+    )
+    assert (
+        AsyncConnectionPool(socket_read_size=socket_read_size).connection_kwargs[
+            "socket_read_size"
+        ]
+        == socket_read_size
+    )
+    assert (
+        ConnectionPool.from_url(
+            f"redis://localhost?socket_read_size={socket_read_size}"
+        ).connection_kwargs["socket_read_size"]
+        == socket_read_size
+    )
+    assert (
+        AsyncConnectionPool.from_url(
+            f"redis://localhost?socket_read_size={socket_read_size}"
+        ).connection_kwargs["socket_read_size"]
+        == socket_read_size
+    )
 
 
 def test_socket_timeout_default():

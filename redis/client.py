@@ -18,7 +18,11 @@ from typing import (
     Union,
 )
 
-from redis._defaults import DEFAULT_SOCKET_CONNECT_TIMEOUT, DEFAULT_SOCKET_TIMEOUT
+from redis._defaults import (
+    DEFAULT_SOCKET_CONNECT_TIMEOUT,
+    DEFAULT_SOCKET_READ_SIZE,
+    DEFAULT_SOCKET_TIMEOUT,
+)
 from redis._parsers.encoders import Encoder
 from redis._parsers.helpers import bool_ok, get_response_callbacks
 from redis.backoff import ExponentialWithJitterBackoff
@@ -240,6 +244,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         password: str | None = None,
         socket_timeout: float | None = DEFAULT_SOCKET_TIMEOUT,
         socket_connect_timeout: float | None = DEFAULT_SOCKET_CONNECT_TIMEOUT,
+        socket_read_size: int = DEFAULT_SOCKET_READ_SIZE,
         socket_keepalive: bool | None = True,
         socket_keepalive_options: Mapping[int, int | bytes] | object | None = SENTINEL,
         connection_pool: ConnectionPool | None = None,
@@ -370,6 +375,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "username": username,
                 "password": password,
                 "socket_timeout": socket_timeout,
+                "socket_read_size": socket_read_size,
                 "encoding": encoding,
                 "encoding_errors": encoding_errors,
                 "decode_responses": decode_responses,

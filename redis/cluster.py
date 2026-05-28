@@ -289,6 +289,7 @@ REDIS_ALLOWED_KEYS = (
     "socket_connect_timeout",
     "socket_keepalive",
     "socket_keepalive_options",
+    "socket_read_size",
     "socket_timeout",
     "ssl",
     "ssl_ca_certs",

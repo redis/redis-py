@@ -6,6 +6,7 @@ import socket
 
 DEFAULT_SOCKET_TIMEOUT = 5
 DEFAULT_SOCKET_CONNECT_TIMEOUT = DEFAULT_SOCKET_TIMEOUT
+DEFAULT_SOCKET_READ_SIZE = 32768  # 32KB
 
 
 def get_default_socket_keepalive_options() -> dict[int, int]:

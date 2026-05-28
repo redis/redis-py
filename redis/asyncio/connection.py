@@ -87,6 +87,7 @@ from redis.utils import (
 
 from .._defaults import (
     DEFAULT_SOCKET_CONNECT_TIMEOUT,
+    DEFAULT_SOCKET_READ_SIZE,
     DEFAULT_SOCKET_TIMEOUT,
     get_default_socket_keepalive_options,
 )
@@ -173,7 +174,7 @@ class AbstractConnection:
         encoding_errors: str = "strict",
         decode_responses: bool = False,
         parser_class: Type[BaseParser] = DefaultParser,
-        socket_read_size: int = 32768,
+        socket_read_size: int = DEFAULT_SOCKET_READ_SIZE,
         health_check_interval: float = 0,
         client_name: str | None = None,
         lib_name: str | object | None = SENTINEL,
@@ -1197,6 +1198,7 @@ URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyTy
         "db": int,
         "socket_timeout": float,
         "socket_connect_timeout": float,
+        "socket_read_size": int,
         "socket_keepalive": to_bool,
         "retry_on_timeout": to_bool,
         "max_connections": int,

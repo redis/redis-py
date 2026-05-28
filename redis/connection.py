@@ -34,6 +34,7 @@ from redis.cache import (
 
 from ._defaults import (
     DEFAULT_SOCKET_CONNECT_TIMEOUT,
+    DEFAULT_SOCKET_READ_SIZE,
     DEFAULT_SOCKET_TIMEOUT,
     get_default_socket_keepalive_options,
 )
@@ -799,7 +800,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         encoding_errors: str = "strict",
         decode_responses: bool = False,
         parser_class=DefaultParser,
-        socket_read_size: int = 32768,
+        socket_read_size: int = DEFAULT_SOCKET_READ_SIZE,
         health_check_interval: int = 0,
         client_name: Optional[str] = None,
         lib_name: Union[Optional[str], object] = SENTINEL,
@@ -2243,6 +2244,7 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "db": int,
     "socket_timeout": float,
     "socket_connect_timeout": float,
+    "socket_read_size": int,
     "socket_keepalive": to_bool,
     "retry_on_timeout": to_bool,
     "retry_on_error": list,
