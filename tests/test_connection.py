@@ -13,7 +13,7 @@ import redis
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
 from redis._parsers.hiredis import NOT_ENOUGH_DATA
-from redis._parsers.socket import SENTINEL, SocketBuffer
+from redis._parsers.socket import SocketBuffer
 from redis.backoff import NoBackoff
 from redis.cache import (
     CacheConfig,
@@ -44,7 +44,7 @@ from redis.observability.attributes import (
     ConnectionState,
 )
 from redis.retry import Retry
-from redis.utils import HIREDIS_AVAILABLE
+from redis.utils import HIREDIS_AVAILABLE, SENTINEL
 
 from .conftest import skip_if_server_version_lt
 from .mocks import MockSocket

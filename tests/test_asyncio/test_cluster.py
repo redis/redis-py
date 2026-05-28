@@ -433,8 +433,10 @@ class TestRedisClusterObj:
             host = rc_default.get_default_node().host
 
             assert isinstance(retry, Retry)
-            assert retry._retries == 3
+            assert retry._retries == 10
             assert isinstance(retry._backoff, type(ExponentialWithJitterBackoff()))
+            assert retry._backoff._base == 0.01
+            assert retry._backoff._cap == 1
 
             # validate nodes connections are using the default retry for
             # lower level connections when client is created through 'from_url' method
@@ -3969,8 +3971,11 @@ class TestClusterPipeline:
                         break
             assert executed_on_replicas_only
 
-    async def test_can_run_concurrent_pipelines(self, r: RedisCluster) -> None:
+    async def test_can_run_concurrent_pipelines(
+        self, create_redis: Callable[..., RedisCluster]
+    ) -> None:
         """Test that the pipeline can be used concurrently."""
+        r = await create_redis(max_connections=1000)
         await asyncio.gather(
             *(self.test_redis_cluster_pipeline(r) for i in range(100)),
             *(self.test_multi_key_operation_with_a_single_slot(r) for i in range(100)),

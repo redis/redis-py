@@ -43,7 +43,9 @@ except ImportError:
 
 from importlib import metadata
 
-# Marker for omitted arguments. Compare by identity only.
+# Shared marker for omitted arguments, especially where None is a valid
+# explicit value. Import this object from redis.utils instead of creating local
+# sentinels, and compare it by identity only (`is` / `is not`).
 SENTINEL = object()
 
 

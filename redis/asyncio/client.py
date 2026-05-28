@@ -27,6 +27,14 @@ from typing import (
     cast,
 )
 
+from redis._defaults import (
+    DEFAULT_RETRY_BASE,
+    DEFAULT_RETRY_CAP,
+    DEFAULT_RETRY_COUNT,
+    DEFAULT_SOCKET_CONNECT_TIMEOUT,
+    DEFAULT_SOCKET_READ_SIZE,
+    DEFAULT_SOCKET_TIMEOUT,
+)
 from redis._parsers.helpers import bool_ok, get_response_callbacks
 from redis.asyncio.connection import (
     Connection,
@@ -232,49 +240,53 @@ class Redis(
         *,
         host: str = "localhost",
         port: int = 6379,
-        db: Union[str, int] = 0,
-        password: Optional[str] = None,
-        socket_timeout: Optional[float] = None,
-        socket_connect_timeout: Optional[float] = None,
-        socket_keepalive: Optional[bool] = None,
-        socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
-        connection_pool: Optional[ConnectionPool] = None,
-        unix_socket_path: Optional[str] = None,
+        db: str | int = 0,
+        password: str | None = None,
+        socket_timeout: float | None = DEFAULT_SOCKET_TIMEOUT,
+        socket_connect_timeout: float | None = DEFAULT_SOCKET_CONNECT_TIMEOUT,
+        socket_read_size: int = DEFAULT_SOCKET_READ_SIZE,
+        socket_keepalive: bool | None = True,
+        socket_keepalive_options: Mapping[int, int | bytes] | object | None = SENTINEL,
+        connection_pool: ConnectionPool | None = None,
+        unix_socket_path: str | None = None,
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
         decode_responses: bool = False,
         retry_on_timeout: bool = False,
         retry: Retry = Retry(
-            backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
+            backoff=ExponentialWithJitterBackoff(
+                base=DEFAULT_RETRY_BASE, cap=DEFAULT_RETRY_CAP
+            ),
+            retries=DEFAULT_RETRY_COUNT,
         ),
-        retry_on_error: Optional[list] = None,
+        retry_on_error: list | None = None,
         ssl: bool = False,
-        ssl_keyfile: Optional[str] = None,
-        ssl_certfile: Optional[str] = None,
-        ssl_cert_reqs: Union[str, VerifyMode] = "required",
-        ssl_include_verify_flags: Optional[List[VerifyFlags]] = None,
-        ssl_exclude_verify_flags: Optional[List[VerifyFlags]] = None,
-        ssl_ca_certs: Optional[str] = None,
-        ssl_ca_data: Optional[str] = None,
-        ssl_ca_path: Optional[str] = None,
+        ssl_keyfile: str | None = None,
+        ssl_certfile: str | None = None,
+        ssl_cert_reqs: "str | VerifyMode" = "required",
+        ssl_include_verify_flags: List["VerifyFlags"] | None = None,
+        ssl_exclude_verify_flags: List["VerifyFlags"] | None = None,
+        ssl_ca_certs: str | None = None,
+        ssl_ca_data: str | None = None,
+        ssl_ca_path: str | None = None,
         ssl_check_hostname: bool = True,
-        ssl_min_version: Optional[TLSVersion] = None,
-        ssl_ciphers: Optional[str] = None,
-        ssl_password: Optional[str] = None,
-        max_connections: Optional[int] = None,
+        ssl_min_version: "TLSVersion | None" = None,
+        ssl_ciphers: str | None = None,
+        ssl_password: str | None = None,
+        max_connections: int | None = None,
         single_connection_client: bool = False,
         health_check_interval: int = 0,
-        client_name: Optional[str] = None,
-        lib_name: Union[Optional[str], object] = SENTINEL,
-        lib_version: Union[Optional[str], object] = SENTINEL,
-        driver_info: Union[Optional["DriverInfo"], object] = SENTINEL,
-        username: Optional[str] = None,
-        auto_close_connection_pool: Optional[bool] = None,
+        client_name: str | None = None,
+        lib_name: str | object | None = SENTINEL,
+        lib_version: str | object | None = SENTINEL,
+        driver_info: DriverInfo | object | None = SENTINEL,
+        username: str | None = None,
+        auto_close_connection_pool: bool | None = None,
         redis_connect_func=None,
-        credential_provider: Optional[CredentialProvider] = None,
-        protocol: Optional[int] = None,
+        credential_provider: CredentialProvider | None = None,
+        protocol: int | None = None,
         legacy_responses: bool = True,
-        event_dispatcher: Optional[EventDispatcher] = None,
+        event_dispatcher: EventDispatcher | None = None,
     ):
         """
         Initialize a new Redis client.
@@ -296,6 +308,20 @@ class Redis(
 
         When 'connection_pool' is provided - the retry configuration of the
         provided pool will be used.
+
+        Args:
+
+        socket_keepalive:
+            if `True`, TCP keepalive is enabled for TCP socket connections.
+            Argument is ignored when connection_pool is provided.
+        socket_keepalive_options:
+            mapping of TCP keepalive socket option constants to values, for
+            example `{socket.TCP_KEEPIDLE: 30}`. If left unspecified, redis-py
+            uses TCP keepalive defaults when `socket_keepalive` is enabled:
+            idle 30 seconds, interval 5 seconds, and 3 probes. Platform-specific
+            options that are not available are skipped. Pass `None` or `{}` to
+            avoid setting additional TCP keepalive options. Argument is ignored
+            when connection_pool is provided.
         """
         kwargs: Dict[str, Any]
         if event_dispatcher is None:
@@ -333,6 +359,7 @@ class Redis(
                 "password": password,
                 "credential_provider": credential_provider,
                 "socket_timeout": socket_timeout,
+                "socket_read_size": socket_read_size,
                 "encoding": encoding,
                 "encoding_errors": encoding_errors,
                 "decode_responses": decode_responses,
