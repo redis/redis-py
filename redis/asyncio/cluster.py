@@ -37,6 +37,9 @@ if TYPE_CHECKING:
     )
 
 from redis._defaults import (
+    DEFAULT_RETRY_BASE,
+    DEFAULT_RETRY_CAP,
+    DEFAULT_RETRY_COUNT,
     DEFAULT_SOCKET_CONNECT_TIMEOUT,
     DEFAULT_SOCKET_READ_SIZE,
     DEFAULT_SOCKET_TIMEOUT,
@@ -333,7 +336,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         load_balancing_strategy: LoadBalancingStrategy | None = None,
         dynamic_startup_nodes: bool = True,
         reinitialize_steps: int = 5,
-        cluster_error_retry_attempts: int = 10,
+        cluster_error_retry_attempts: int = DEFAULT_RETRY_COUNT,
         max_connections: int = 100,
         retry: Retry | None = None,
         retry_on_error: List[Type[Exception]] | None = None,
@@ -447,7 +450,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             self.retry = retry
         else:
             self.retry = Retry(
-                backoff=ExponentialWithJitterBackoff(base=0.01, cap=1),
+                backoff=ExponentialWithJitterBackoff(
+                    base=DEFAULT_RETRY_BASE, cap=DEFAULT_RETRY_CAP
+                ),
                 retries=cluster_error_retry_attempts,
             )
         if retry_on_error:

@@ -4,7 +4,7 @@ import socket
 
 # Connection defaults
 
-DEFAULT_SOCKET_TIMEOUT = 5
+DEFAULT_SOCKET_TIMEOUT = 5  # 5s
 DEFAULT_SOCKET_CONNECT_TIMEOUT = DEFAULT_SOCKET_TIMEOUT
 DEFAULT_SOCKET_READ_SIZE = 32768  # 32KB
 
@@ -34,3 +34,6 @@ def get_default_socket_keepalive_options() -> dict[int, int]:
 
 
 # Retry defaults
+DEFAULT_RETRY_COUNT = 10
+DEFAULT_RETRY_BASE = 0.01  # 10ms
+DEFAULT_RETRY_CAP = 1  # 1s
