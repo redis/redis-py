@@ -48,9 +48,7 @@ def test_connection_socket_read_size_defaults_to_32kb():
     )
 
     for cls in classes:
-        default = (
-            inspect.signature(cls.__init__).parameters["socket_read_size"].default
-        )
+        default = inspect.signature(cls.__init__).parameters["socket_read_size"].default
         assert default == DEFAULT_SOCKET_READ_SIZE
 
     assert Connection()._socket_read_size == DEFAULT_SOCKET_READ_SIZE
@@ -62,13 +60,15 @@ def test_socket_read_size_can_be_configured_from_clients_and_pools():
     socket_read_size = 65536
 
     assert (
-        Redis(socket_read_size=socket_read_size)
-        .connection_pool.connection_kwargs["socket_read_size"]
+        Redis(socket_read_size=socket_read_size).connection_pool.connection_kwargs[
+            "socket_read_size"
+        ]
         == socket_read_size
     )
     assert (
-        AsyncRedis(socket_read_size=socket_read_size)
-        .connection_pool.connection_kwargs["socket_read_size"]
+        AsyncRedis(socket_read_size=socket_read_size).connection_pool.connection_kwargs[
+            "socket_read_size"
+        ]
         == socket_read_size
     )
     assert (
