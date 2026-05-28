@@ -78,7 +78,7 @@ class SimpleToken(TokenInterface):
 class JWToken(TokenInterface):
     REQUIRED_FIELDS = {"exp"}
 
-    def __init__(self, token: str):
+    def __init__(self, token: str, key: str = None, algorithms: list = None):
         try:
             import jwt
         except ImportError as ie:
@@ -86,11 +86,24 @@ class JWToken(TokenInterface):
                 f"The PyJWT library is required for {self.__class__.__name__}.",
             ) from ie
         self._value = token
-        self._decoded = jwt.decode(
-            self._value,
-            options={"verify_signature": False},
-            algorithms=[jwt.get_unverified_header(self._value).get("alg")],
-        )
+        if key is not None:
+            if algorithms is None:
+                algorithms = ["HS256"]
+            self._decoded = jwt.decode(
+                self._value,
+                key,
+                algorithms=algorithms,
+                options={"verify_exp": False},
+            )
+        else:
+            if algorithms is None:
+                header = jwt.get_unverified_header(self._value)
+                algorithms = [header["alg"]]
+            self._decoded = jwt.decode(
+                self._value,
+                options={"verify_signature": False, "verify_exp": False},
+                algorithms=algorithms,
+            )
         self._validate_token()
 
     def is_expired(self) -> bool:

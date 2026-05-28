@@ -46,7 +46,7 @@ class TestToken:
             "key": "value",
         }
         encoded = jwt.encode(token, "secret", algorithm="HS256")
-        jwt_token = JWToken(encoded)
+        jwt_token = JWToken(encoded, key="secret", algorithms=["HS256"])
 
         assert jwt_token.ttl() == pytest.approx(100000, 10)
         assert jwt_token.is_expired() is False
@@ -65,7 +65,7 @@ class TestToken:
             "key": "value",
         }
         encoded = jwt.encode(token, "secret", algorithm="HS256")
-        jwt_token = JWToken(encoded)
+        jwt_token = JWToken(encoded, key="secret", algorithms=["HS256"])
 
         assert jwt_token.ttl() == -1
         assert jwt_token.is_expired() is False
@@ -74,4 +74,4 @@ class TestToken:
         with pytest.raises(InvalidTokenSchemaErr):
             token = {"key": "value"}
             encoded = jwt.encode(token, "secret", algorithm="HS256")
-            JWToken(encoded)
+            JWToken(encoded, key="secret", algorithms=["HS256"])
