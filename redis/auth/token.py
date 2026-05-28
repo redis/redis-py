@@ -93,7 +93,7 @@ class JWToken(TokenInterface):
                 self._value,
                 key,
                 algorithms=algorithms,
-                options={"verify_exp": False},
+                options={"verify_exp": False, "verify_aud": False, "verify_nbf": False},
             )
         else:
             if algorithms is None:
