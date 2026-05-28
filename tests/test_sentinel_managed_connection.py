@@ -2,10 +2,10 @@ import socket
 
 import pytest
 
-from redis._parsers.socket import SENTINEL
 from redis.retry import Retry
 from redis.sentinel import SentinelManagedConnection
 from redis.backoff import NoBackoff
+from redis.utils import SENTINEL
 from unittest import mock
 
 

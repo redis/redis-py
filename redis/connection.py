@@ -32,6 +32,12 @@ from redis.cache import (
     CacheProxy,
 )
 
+from ._defaults import (
+    DEFAULT_SOCKET_CONNECT_TIMEOUT,
+    DEFAULT_SOCKET_READ_SIZE,
+    DEFAULT_SOCKET_TIMEOUT,
+    get_default_socket_keepalive_options,
+)
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .auth.token import TokenInterface
 from .backoff import NoBackoff
@@ -786,15 +792,15 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         self,
         db: int = 0,
         password: Optional[str] = None,
-        socket_timeout: Optional[float] = None,
-        socket_connect_timeout: Optional[float] = None,
+        socket_timeout: Optional[float] = DEFAULT_SOCKET_TIMEOUT,
+        socket_connect_timeout: Optional[float] = DEFAULT_SOCKET_CONNECT_TIMEOUT,
         retry_on_timeout: bool = False,
         retry_on_error: Union[Iterable[Type[Exception]], object] = SENTINEL,
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
         decode_responses: bool = False,
         parser_class=DefaultParser,
-        socket_read_size: int = 65536,
+        socket_read_size: int = DEFAULT_SOCKET_READ_SIZE,
         health_check_interval: int = 0,
         client_name: Optional[str] = None,
         lib_name: Union[Optional[str], object] = SENTINEL,
@@ -1494,14 +1500,31 @@ class Connection(AbstractConnection):
         self,
         host="localhost",
         port=6379,
-        socket_keepalive=False,
-        socket_keepalive_options=None,
+        socket_keepalive=True,
+        socket_keepalive_options=SENTINEL,
         socket_type=0,
         **kwargs,
     ):
+        """
+        Initialize a TCP connection.
+
+        Parameters
+        ----------
+        socket_keepalive : bool
+            If `True`, TCP keepalive is enabled for TCP socket connections.
+        socket_keepalive_options : Mapping[int, int | bytes] | object | None
+            Mapping of TCP keepalive socket option constants to values, for
+            example `{socket.TCP_KEEPIDLE: 30}`. If left unspecified, redis-py
+            uses TCP keepalive defaults when `socket_keepalive` is enabled:
+            idle 30 seconds, interval 5 seconds, and 3 probes. Platform-specific
+            options that are not available are skipped. Pass `None` or `{}` to
+            avoid setting additional TCP keepalive options.
+        """
         self._host = host
         self.port = int(port)
         self.socket_keepalive = socket_keepalive
+        if socket_keepalive_options is SENTINEL:
+            socket_keepalive_options = get_default_socket_keepalive_options()
         self.socket_keepalive_options = socket_keepalive_options or {}
         self.socket_type = socket_type
         super().__init__(**kwargs)
@@ -2160,7 +2183,7 @@ class SSLConnection(Connection):
 class UnixDomainSocketConnection(AbstractConnection):
     "Manages UDS communication to and from a Redis server"
 
-    def __init__(self, path="", socket_timeout=None, **kwargs):
+    def __init__(self, path="", socket_timeout=DEFAULT_SOCKET_TIMEOUT, **kwargs):
         super().__init__(**kwargs)
         self.path = path
         self.socket_timeout = socket_timeout
@@ -2221,6 +2244,7 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "db": int,
     "socket_timeout": float,
     "socket_connect_timeout": float,
+    "socket_read_size": int,
     "socket_keepalive": to_bool,
     "retry_on_timeout": to_bool,
     "retry_on_error": list,
@@ -2533,10 +2557,10 @@ class MaintNotificationsAbstractConnectionPool:
                 {
                     "orig_host_address": self.connection_kwargs.get("host"),
                     "orig_socket_timeout": self.connection_kwargs.get(
-                        "socket_timeout", None
+                        "socket_timeout", DEFAULT_SOCKET_TIMEOUT
                     ),
                     "orig_socket_connect_timeout": self.connection_kwargs.get(
-                        "socket_connect_timeout", None
+                        "socket_connect_timeout", DEFAULT_SOCKET_CONNECT_TIMEOUT
                     ),
                 }
             )
@@ -2853,7 +2877,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
         **connection_kwargs,
     ):
-        max_connections = max_connections or 2**31
+        max_connections = max_connections or 100
         if not isinstance(max_connections, int) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
 

@@ -306,7 +306,9 @@ def _get_client_maint_notifications(
     if disable_retries:
         retry = Retry(NoBackoff(), 0)
     else:
-        retry = Retry(backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3)
+        retry = Retry(
+            backoff=ExponentialWithJitterBackoff(base=0.01, cap=1), retries=10
+        )
 
     tls_enabled = True if parsed.scheme == "rediss" else False
     logging.info(f"TLS enabled: {tls_enabled}")
@@ -365,7 +367,9 @@ def get_cluster_client_maint_notifications(
     if disable_retries:
         retry = Retry(NoBackoff(), 0)
     else:
-        retry = Retry(backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3)
+        retry = Retry(
+            backoff=ExponentialWithJitterBackoff(base=0.01, cap=1), retries=10
+        )
 
     tls_enabled = True if parsed.scheme == "rediss" else False
     logging.info(f"TLS enabled: {tls_enabled}")

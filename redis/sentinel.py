@@ -2,7 +2,6 @@ import random
 import weakref
 from typing import Optional, Union
 
-from redis._parsers.socket import SENTINEL
 from redis.client import Redis
 from redis.commands import SentinelCommands
 from redis.connection import Connection, ConnectionPool, SSLConnection
@@ -12,6 +11,7 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
+from redis.utils import SENTINEL
 
 
 class MasterNotFoundError(ConnectionError):

@@ -185,8 +185,8 @@ MultiDbConfig
 
         # Global command retry policy (applied at multi-db layer)
         command_retry=Retry(
-            retries=3,
-            backoff=ExponentialWithJitterBackoff(base=1, cap=10),
+            retries=10,
+            backoff=ExponentialWithJitterBackoff(base=0.01, cap=1),
         ),
 
         # Health checks

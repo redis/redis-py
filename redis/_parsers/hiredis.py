@@ -5,7 +5,7 @@ from typing import Callable, List, Optional, TypedDict, Union
 
 from ..exceptions import ConnectionError, InvalidResponse, RedisError, TimeoutError
 from ..typing import EncodableT
-from ..utils import HIREDIS_AVAILABLE, deprecated_function
+from ..utils import HIREDIS_AVAILABLE, SENTINEL, deprecated_function
 from .base import (
     AsyncBaseParser,
     AsyncPushNotificationsParser,
@@ -15,7 +15,6 @@ from .base import (
 from .socket import (
     NONBLOCKING_EXCEPTION_ERROR_NUMBERS,
     NONBLOCKING_EXCEPTIONS,
-    SENTINEL,
     SERVER_CLOSED_CONNECTION_ERROR,
 )
 

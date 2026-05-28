@@ -1,6 +1,5 @@
 import pytest
 
-from redis._parsers.socket import SENTINEL as PARSER_SENTINEL
 from redis.driver_info import DriverInfo, resolve_driver_info
 from redis.utils import SENTINEL, get_lib_version
 
@@ -32,11 +31,6 @@ def test_resolve_driver_info_default_values():
     info = resolve_driver_info()
     assert info.formatted_name == "redis-py"
     assert info.lib_version == get_lib_version()
-
-
-@pytest.mark.fixed_client
-def test_parser_sentinel_uses_shared_sentinel():
-    assert PARSER_SENTINEL is SENTINEL
 
 
 @pytest.mark.fixed_client
