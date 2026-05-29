@@ -755,15 +755,6 @@ def mock_identity_provider() -> IdentityProviderInterface:
     return mock_provider
 
 
-def mock_identity_provider_unsafe() -> IdentityProviderInterface:
-    jwt = pytest.importorskip("jwt")
-    mock_provider = Mock(spec=IdentityProviderInterface)
-    token = {"exp": datetime.now(timezone.utc).timestamp() + 3600, "oid": "username"}
-    encoded = jwt.encode(token, "secret", algorithm="HS256")
-    jwt_token = JWToken(encoded)
-    mock_provider.request_token.return_value = jwt_token
-    return mock_provider
-
 
 def get_credential_provider(request) -> CredentialProvider:
     cred_provider_class = request.param.get("cred_provider_class")
