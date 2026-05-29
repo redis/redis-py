@@ -102,7 +102,6 @@ class _JSONBase(JSONCommands):
         }
 
         self.client = client
-        self.execute_command = client.execute_command
         self.MODULE_VERSION = version
 
         self._MODULE_CALLBACKS = apply_module_callbacks(
@@ -116,8 +115,16 @@ class _JSONBase(JSONCommands):
             resp3_to_resp2_legacy=_RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS,
         )
 
-        for key, value in self._MODULE_CALLBACKS.items():
-            self.client.set_response_callback(key, value)
+        # NOTE: JSON callbacks are intentionally NOT registered on the parent
+        # client's response_callbacks table.  Registering them there mutates the
+        # shared callback dict and causes bare execute_command("JSON.GET", ...)
+        # calls on the parent client to return decoded dicts even when
+        # decode_responses=False (issue #3937).
+        #
+        # Instead, each JSON sub-client instance intercepts execute_command via
+        # the execute_command() method defined on the JSON / AsyncJSON subclasses,
+        # applies _MODULE_CALLBACKS to the raw response, and leaves the parent
+        # client's response_callbacks untouched.
 
         self.__encoder__ = encoder
         self.__decoder__ = decoder
@@ -254,9 +261,14 @@ class _JSONBase(JSONCommands):
             )
 
         else:
+            # Merge parent callbacks with JSON module callbacks into the
+            # pipeline's private copy.  This keeps the parent client clean
+            # while still letting the pipeline decode JSON.* responses.
+            pipeline_callbacks = dict(self.client.response_callbacks)
+            pipeline_callbacks.update(self._MODULE_CALLBACKS)
             p = Pipeline(
                 connection_pool=self.client.connection_pool,
-                response_callbacks=dict(self.client.response_callbacks),
+                response_callbacks=pipeline_callbacks,
                 transaction=transaction,
                 shard_hint=shard_hint,
             )
@@ -277,9 +289,33 @@ class Pipeline(JSONCommands, redis.client.Pipeline):
 class JSON(_JSONBase):
     _is_async_client: Literal[False] = False
 
+    def execute_command(self, *args, **kwargs):
+        """Execute a command and apply any JSON module response callback.
+
+        Callbacks are applied locally on this sub-client instance rather than
+        being registered on the parent Redis client (see issue #3937).
+        """
+        cmd = args[0] if args else ""
+        response = self.client.execute_command(*args, **kwargs)
+        if cmd in self._MODULE_CALLBACKS:
+            return self._MODULE_CALLBACKS[cmd](response, **kwargs)
+        return response
+
 
 class AsyncJSON(_JSONBase):
     _is_async_client: Literal[True] = True
+
+    async def execute_command(self, *args, **kwargs):
+        """Execute a command and apply any JSON module response callback.
+
+        Callbacks are applied locally on this sub-client instance rather than
+        being registered on the parent Redis client (see issue #3937).
+        """
+        cmd = args[0] if args else ""
+        response = await self.client.execute_command(*args, **kwargs)
+        if cmd in self._MODULE_CALLBACKS:
+            return self._MODULE_CALLBACKS[cmd](response, **kwargs)
+        return response
 
     async def set_file(
         self,
