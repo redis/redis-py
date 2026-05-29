@@ -84,3 +84,57 @@ def test_jwt_token_key_without_algorithms_raises():
 
     with pytest.raises(ValueError, match="algorithms must be provided"):
         JWToken(encoded, key="secret")
+
+
+def test_jwt_token_legacy_never_expires_sentinel():
+    """Legacy initialization handles exp=-1 sentinel correctly."""
+    token = {
+        "exp": -1,
+        "iat": datetime.now(timezone.utc).timestamp(),
+        "key": "value",
+    }
+    encoded = jwt.encode(token, "secret", algorithm="HS256")
+    jwt_token = JWToken(encoded)
+
+    assert not jwt_token.is_expired()
+    assert jwt_token.ttl() == -1
+
+
+def test_jwt_token_verified_never_expires_sentinel():
+    """Verified initialization handles exp=-1 sentinel correctly."""
+    token = {
+        "exp": -1,
+        "iat": datetime.now(timezone.utc).timestamp(),
+        "key": "value",
+    }
+    encoded = jwt.encode(token, "secret", algorithm="HS256")
+    jwt_token = JWToken(encoded, key="secret", algorithms=["HS256"])
+
+    assert not jwt_token.is_expired()
+    assert jwt_token.ttl() == -1
+
+
+def test_jwt_token_legacy_with_audience_claim():
+    """Legacy initialization skips aud verification."""
+    token = {
+        "exp": datetime.now(timezone.utc).timestamp() + 100,
+        "aud": "some-audience",
+        "key": "value",
+    }
+    encoded = jwt.encode(token, "secret", algorithm="HS256")
+    jwt_token = JWToken(encoded)
+
+    assert jwt_token.try_get("key") == "value"
+
+
+def test_jwt_token_verified_with_audience_claim():
+    """Verified initialization skips aud verification."""
+    token = {
+        "exp": datetime.now(timezone.utc).timestamp() + 100,
+        "aud": "some-audience",
+        "key": "value",
+    }
+    encoded = jwt.encode(token, "secret", algorithm="HS256")
+    jwt_token = JWToken(encoded, key="secret", algorithms=["HS256"])
+
+    assert jwt_token.try_get("key") == "value"
