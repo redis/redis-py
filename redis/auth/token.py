@@ -78,7 +78,28 @@ class SimpleToken(TokenInterface):
 class JWToken(TokenInterface):
     REQUIRED_FIELDS = {"exp"}
 
-    def __init__(self, token: str, key: str = None, algorithms: list = None):
+    def __init__(
+        self, token: str, key: str | None = None, algorithms: list[str] | None = None
+    ):
+        """Initialize a JWT token wrapper.
+
+        Args:
+            token: The encoded JWT string.
+            key: The secret key to verify the token signature. If None,
+                signature verification is skipped (backward compatibility).
+            algorithms: A list of allowed algorithms. Required when key is
+                provided.
+
+        Raises:
+            ImportError: If the PyJWT library is not installed.
+            ValueError: If key is provided but algorithms is None.
+            InvalidTokenSchemaErr: If required fields are missing.
+
+        Note:
+            The old unsafe initialization path (key=None) is still available
+            for backward compatibility. It disables signature verification
+            but still validates the token expiration.
+        """
         try:
             import jwt
         except ImportError as ie:
@@ -88,12 +109,14 @@ class JWToken(TokenInterface):
         self._value = token
         if key is not None:
             if algorithms is None:
-                algorithms = ["HS256"]
+                raise ValueError(
+                    "algorithms must be provided when key is specified"
+                )
             self._decoded = jwt.decode(
                 self._value,
                 key,
                 algorithms=algorithms,
-                options={"verify_exp": False, "verify_aud": False, "verify_nbf": False},
+                options={"verify_aud": False, "verify_nbf": False},
             )
         else:
             if algorithms is None:
@@ -101,7 +124,7 @@ class JWToken(TokenInterface):
                 algorithms = [header["alg"]]
             self._decoded = jwt.decode(
                 self._value,
-                options={"verify_signature": False, "verify_exp": False},
+                options={"verify_signature": False},
                 algorithms=algorithms,
             )
         self._validate_token()
