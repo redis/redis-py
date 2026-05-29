@@ -22,7 +22,7 @@ from redis_entraid.identity_provider import (
     DefaultAzureCredentialIdentityProviderConfig,
     _create_provider_from_default_azure_credential,
 )
-from tests.conftest import mock_identity_provider
+from tests.conftest import mock_identity_provider, mock_identity_provider_legacy
 
 
 class AuthType(Enum):
@@ -37,7 +37,10 @@ def identity_provider(request) -> IdentityProviderInterface:
     else:
         kwargs = {}
 
-    if request.param.get("mock_idp", None) is not None:
+    mock_idp = request.param.get("mock_idp", None)
+    if mock_idp is not None:
+        if mock_idp == "legacy":
+            return mock_identity_provider_legacy()
         return mock_identity_provider()
 
     auth_type = kwargs.get("auth_type", AuthType.SERVICE_PRINCIPAL)
