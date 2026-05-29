@@ -3,6 +3,135 @@
 This directory contains local benchmark scripts for redis-py. They are not part
 of the normal CI test matrix.
 
+## Client-Side Caching Benchmarks
+
+`client_side_caching.py` measures redis-py sync client-side caching performance
+with focused GET/SET workloads. The benchmark supports standalone Redis and
+Redis Cluster, accepts server address and credentials as inputs, and emits
+throughput and latency percentiles as text and JSON.
+
+Client-side caching requires RESP3 and Redis 7.4 or later. Run the commands
+below from the repository root.
+
+The benchmark uses RESP3 by default for both `--client-side-cache on` and
+`--client-side-cache off` so the comparison isolates caching rather than RESP2
+versus RESP3. Use the same `--seed`, key range, value size, clients, duration,
+and workload settings for each pair of runs. Each `--clients` value creates one
+Redis client and one worker thread; client objects are not shared between worker
+threads. The benchmark exits non-zero if Redis operations fail unless
+`--allow-errors` is set.
+
+Install the regular development requirements:
+
+```shell
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r dev_requirements.txt
+```
+
+Run a standalone read-heavy comparison:
+
+```shell
+python -m benchmarks.client_side_caching \
+    --mode standalone \
+    --host localhost \
+    --port 6379 \
+    --username default \
+    --password "$REDIS_PASSWORD" \
+    --client-side-cache off \
+    --workload read-heavy \
+    --duration 60 \
+    --seed 1 \
+    --output-json csc-off-read-heavy.json
+
+python -m benchmarks.client_side_caching \
+    --mode standalone \
+    --host localhost \
+    --port 6379 \
+    --username default \
+    --password "$REDIS_PASSWORD" \
+    --client-side-cache on \
+    --workload read-heavy \
+    --duration 60 \
+    --seed 1 \
+    --output-json csc-on-read-heavy.json
+```
+
+Run the write-heavy pair by changing `--workload` and output file names:
+
+```shell
+python -m benchmarks.client_side_caching \
+    --mode standalone \
+    --host localhost \
+    --port 6379 \
+    --username default \
+    --password "$REDIS_PASSWORD" \
+    --client-side-cache off \
+    --workload write-heavy \
+    --duration 60 \
+    --seed 1 \
+    --output-json csc-off-write-heavy.json
+
+python -m benchmarks.client_side_caching \
+    --mode standalone \
+    --host localhost \
+    --port 6379 \
+    --username default \
+    --password "$REDIS_PASSWORD" \
+    --client-side-cache on \
+    --workload write-heavy \
+    --duration 60 \
+    --seed 1 \
+    --output-json csc-on-write-heavy.json
+```
+
+Run against Redis Cluster by using `--mode cluster` and either `--host/--port`
+for one startup node or `--cluster-nodes` for multiple startup nodes:
+
+```shell
+python -m benchmarks.client_side_caching \
+    --mode cluster \
+    --cluster-nodes "node1.example.com:6379,node2.example.com:6379,node3.example.com:6379" \
+    --username default \
+    --password "$REDIS_PASSWORD" \
+    --client-side-cache on \
+    --workload read-heavy \
+    --duration 60 \
+    --seed 1 \
+    --output-json cluster-csc-on-read-heavy.json
+```
+
+Run the matching cluster baseline with the same options and
+`--client-side-cache off`.
+
+The JSON summary contains the fields most useful for comparison:
+
+- `throughput_ops_per_sec`
+- `avg_latency_ms`
+- `p50_latency_ms`
+- `p95_latency_ms`
+- `p99_latency_ms`
+- `total_operations`
+- `read_operations`
+- `write_operations`
+- `clients`
+- `errors`
+- `warmup_errors`
+- `total_errors`
+- `cache_sizes`
+- `metadata.seed`
+
+For a quick setup check, use a short duration and small key range:
+
+```shell
+python -m benchmarks.client_side_caching \
+    --client-side-cache on \
+    --workload read-heavy \
+    --duration 3 \
+    --warmup 0 \
+    --key-range 100
+```
+
 ## OpenTelemetry Benchmarks
 
 `otel_benchmark.py` measures redis-py operation throughput and latency with
