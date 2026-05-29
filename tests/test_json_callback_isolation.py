@@ -103,3 +103,87 @@ def test_json_subclient_callbacks_are_registered_on_json_object_not_parent():
         "JSON.GET must not be present on the parent Redis client's "
         "response_callbacks after r.json() is called"
     )
+
+
+@pytest.mark.fixed_client
+def test_execute_command_strips_redis_internal_kwargs():
+    """
+    JSON.execute_command must not forward redis-internal kwargs (e.g. ``keys``,
+    ``options``) to the module callback.  Callbacks like _decode, bulk_of_jsons,
+    and simple lambdas don't accept **kwargs, so passing those through causes a
+    TypeError — which in some call paths (e.g. JSON.get) is silently swallowed
+    and returns None instead of the actual data.
+
+    The fix: only ``_json_path`` (and any other JSON-module kwargs) are
+    forwarded; everything else is stripped.
+    """
+    sentinel = object()
+    received_kwargs = {}
+
+    def spy_callback(response, **kwargs):
+        received_kwargs.update(kwargs)
+        return sentinel
+
+    r = redis.Redis()
+    j = r.json()
+
+    # Patch the callback for JSON.GET on this instance
+    j._MODULE_CALLBACKS["JSON.GET"] = spy_callback
+
+    # Monkeypatch the parent client so no real network call is made
+    j.client.execute_command = lambda *a, **kw: b"raw"
+
+    result = j.execute_command("JSON.GET", "mykey", keys=["mykey"], options={})
+
+    assert result is sentinel, "Callback return value must be passed through"
+    # redis-internal kwargs must have been stripped
+    assert "keys" not in received_kwargs, (
+        "redis-internal kwarg 'keys' must not be forwarded to the callback"
+    )
+    assert "options" not in received_kwargs, (
+        "redis-internal kwarg 'options' must not be forwarded to the callback"
+    )
+
+
+@pytest.mark.fixed_client
+def test_pipeline_merges_json_callbacks_into_cluster_pipeline():
+    """
+    j.pipeline() on a ClusterPipeline path must merge _MODULE_CALLBACKS into
+    the pipeline's cluster_response_callbacks copy so JSON.* commands are
+    decoded correctly.  Before the fix, the ClusterPipeline was constructed
+    with the unmodified parent cluster_response_callbacks (which no longer
+    contain JSON entries after we stopped registering them on the parent).
+    """
+    import unittest.mock as mock
+
+    r = redis.Redis()
+    j = r.json()
+
+    # Simulate a minimal RedisCluster-like client
+    fake_cluster = mock.MagicMock(spec=redis.RedisCluster)
+    fake_cluster.cluster_response_callbacks = {"PING": lambda r: r}
+    fake_cluster.response_callbacks = {}
+    j.client = fake_cluster
+
+    captured = {}
+
+    def fake_cluster_pipeline(**kwargs):
+        captured.update(kwargs)
+        p = mock.MagicMock()
+        p._encode = None
+        p._decode = None
+        return p
+
+    with mock.patch(
+        "redis.commands.json.ClusterPipeline", side_effect=fake_cluster_pipeline
+    ):
+        j.pipeline()
+
+    crc = captured.get("cluster_response_callbacks", {})
+    assert "JSON.GET" in crc, (
+        "ClusterPipeline must receive JSON.GET in cluster_response_callbacks"
+    )
+    # The original parent callback must still be present (not replaced)
+    assert "PING" in crc, (
+        "Original cluster_response_callbacks entries must be preserved"
+    )

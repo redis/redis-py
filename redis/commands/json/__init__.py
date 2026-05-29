@@ -248,12 +248,17 @@ class _JSONBase(JSONCommands):
         pipe.jsonget('notakey')
         """
         if isinstance(self.client, redis.RedisCluster):
+            # Merge JSON callbacks into a copy of the cluster callbacks so
+            # ClusterPipeline decodes JSON.* responses correctly without
+            # mutating the parent client's shared callback dict.
+            cluster_callbacks = dict(self.client.cluster_response_callbacks)
+            cluster_callbacks.update(self._MODULE_CALLBACKS)
             p = ClusterPipeline(
                 nodes_manager=self.client.nodes_manager,
                 commands_parser=self.client.commands_parser,
                 startup_nodes=self.client.nodes_manager.startup_nodes,
                 result_callbacks=self.client.result_callbacks,
-                cluster_response_callbacks=self.client.cluster_response_callbacks,
+                cluster_response_callbacks=cluster_callbacks,
                 cluster_error_retry_attempts=self.client.retry.get_retries(),
                 read_from_replicas=self.client.read_from_replicas,
                 reinitialize_steps=self.client.reinitialize_steps,
@@ -294,11 +299,19 @@ class JSON(_JSONBase):
 
         Callbacks are applied locally on this sub-client instance rather than
         being registered on the parent Redis client (see issue #3937).
+
+        Only JSON-module kwargs (``_json_path``) are forwarded to the
+        callback; redis-internal kwargs (``keys``, ``options``, etc.) are
+        intentionally stripped to avoid TypeError when callbacks don't
+        accept arbitrary keyword arguments.
         """
         cmd = args[0] if args else ""
         response = self.client.execute_command(*args, **kwargs)
         if cmd in self._MODULE_CALLBACKS:
-            return self._MODULE_CALLBACKS[cmd](response, **kwargs)
+            cb_kwargs = {}
+            if "_json_path" in kwargs:
+                cb_kwargs["_json_path"] = kwargs["_json_path"]
+            return self._MODULE_CALLBACKS[cmd](response, **cb_kwargs)
         return response
 
 
@@ -310,11 +323,19 @@ class AsyncJSON(_JSONBase):
 
         Callbacks are applied locally on this sub-client instance rather than
         being registered on the parent Redis client (see issue #3937).
+
+        Only JSON-module kwargs (``_json_path``) are forwarded to the
+        callback; redis-internal kwargs (``keys``, ``options``, etc.) are
+        intentionally stripped to avoid TypeError when callbacks don't
+        accept arbitrary keyword arguments.
         """
         cmd = args[0] if args else ""
         response = await self.client.execute_command(*args, **kwargs)
         if cmd in self._MODULE_CALLBACKS:
-            return self._MODULE_CALLBACKS[cmd](response, **kwargs)
+            cb_kwargs = {}
+            if "_json_path" in kwargs:
+                cb_kwargs["_json_path"] = kwargs["_json_path"]
+            return self._MODULE_CALLBACKS[cmd](response, **cb_kwargs)
         return response
 
     async def set_file(
