@@ -112,11 +112,19 @@ class JWToken(TokenInterface):
                 raise ValueError(
                     "algorithms must be provided when key is specified"
                 )
+            unverified_claims = jwt.decode(
+                self._value,
+                options={"verify_signature": False},
+                algorithms=algorithms,
+            )
+            options = {"verify_aud": False, "verify_nbf": False}
+            if unverified_claims.get("exp") == -1:
+                options["verify_exp"] = False
             self._decoded = jwt.decode(
                 self._value,
                 key,
                 algorithms=algorithms,
-                options={"verify_aud": False, "verify_nbf": False},
+                options=options,
             )
         else:
             if algorithms is None:

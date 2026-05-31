@@ -23,7 +23,6 @@ from tests.conftest import (
     _get_client,
     get_credential_provider,
     get_endpoint,
-    mock_identity_provider_legacy,
     skip_if_redis_enterprise,
 )
 from tests.entraid_utils import AuthType
@@ -712,16 +711,3 @@ class TestClusterEntraIdCredentialsProvider:
     @pytest.mark.cp_integration
     def test_auth_pool_with_credential_provider(self, r_entra: redis.Redis):
         assert r_entra.ping() is True
-
-
-
-class TestLegacyMockIdentityProvider:
-    """Tests for legacy (unverified) JWToken initialization via mock identity provider."""
-
-    def test_legacy_mock_identity_provider_returns_valid_token(self):
-        """Legacy mock returns a JWToken initialized without key/algorithms."""
-        provider = mock_identity_provider_legacy()
-        token = provider.request_token()
-        assert token is not None
-        assert token.try_get("oid") == "username"
-        assert not token.is_expired()

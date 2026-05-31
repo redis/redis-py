@@ -3,9 +3,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-jwt = pytest.importorskip("jwt")
-
 from redis.auth.token import JWToken
+
+jwt = pytest.importorskip("jwt")
 
 
 def test_jwt_token_rejects_forged_token_with_wrong_key():
