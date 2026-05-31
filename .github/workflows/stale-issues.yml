@@ -20,6 +20,9 @@ permissions:
 jobs:
   stale:
     runs-on: ubuntu-latest
+    permissions:
+      issues: write          # required by actions/stale to label/close issues
+      pull-requests: write   # required by actions/stale to label/close PRs
     steps:
       # First step: Handle regular issues (excluding needs-information)
       - name: Mark regular issues as stale
