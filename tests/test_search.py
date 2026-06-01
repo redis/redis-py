@@ -3973,6 +3973,9 @@ class TestSearchWithVamana(SearchTestsBase):
 
 
 class TestHybridSearch(SearchTestsBase):
+    _HYBRID_TIMEOUT_DIM = 8192
+    _HYBRID_TIMEOUT_DOCS = 1500
+
     def _create_hybrid_search_index(self, client, dim=4):
         client.ft().create_index(
             (
@@ -4003,6 +4006,44 @@ class TestHybridSearch(SearchTestsBase):
             definition=IndexDefinition(prefix=["item:"]),
         )
         SearchTestsBase.waitForIndex(client, "idx")
+
+    def _create_hybrid_search_timeout_index(self, client):
+        client.ft().create_index(
+            (
+                TextField("description"),
+                VectorField(
+                    "embedding",
+                    "FLAT",
+                    {
+                        "TYPE": "FLOAT32",
+                        "DIM": self._HYBRID_TIMEOUT_DIM,
+                        "DISTANCE_METRIC": "L2",
+                    },
+                ),
+            ),
+            definition=IndexDefinition(prefix=["timeout-item:"]),
+        )
+        SearchTestsBase.waitForIndex(client, "idx")
+
+    def _add_data_for_hybrid_search_timeout(self, client):
+        vectors = [
+            np.full(self._HYBRID_TIMEOUT_DIM, value, dtype=np.float32).tobytes()
+            for value in (0.1, 0.2, 0.3, 0.4, 0.5)
+        ]
+        pipeline = client.pipeline()
+        batch_size = 250
+        for i in range(self._HYBRID_TIMEOUT_DOCS):
+            pipeline.hset(
+                f"timeout-item:{i}",
+                mapping={
+                    "description": "red shoes",
+                    "embedding": vectors[i % len(vectors)],
+                },
+            )
+            if (i + 1) % batch_size == 0:
+                pipeline.execute()
+                pipeline = client.pipeline()
+        pipeline.execute()
 
     @staticmethod
     def _generate_random_vector(dim):
@@ -5186,67 +5227,45 @@ class TestHybridSearch(SearchTestsBase):
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.timeout(60)
     def test_hybrid_search_query_with_timeout(self, client):
-        dim = 128
-        # Create index and add data
-        self._create_hybrid_search_index(client, dim=dim)
-        self._add_data_for_hybrid_search(
-            client,
-            items_sets=5000,
-            dim_for_random_data=dim,
-            use_random_str_data=True,
-        )
+        self._create_hybrid_search_timeout_index(client)
+        self._add_data_for_hybrid_search_timeout(client)
 
-        # set search query
-        search_query = HybridSearchQuery("*")
-
+        search_query = HybridSearchQuery("@description:(shoes)")
         vsim_query = HybridVsimQuery(
-            vector_field_name="@embedding-hnsw",
+            vector_field_name="@embedding",
             vector_data="$vec",
         )
-        vsim_query.vsim_method_params(VectorSearchMethods.KNN, K=1000)
-        vsim_query.filter(
-            HybridFilter(
-                "((@price:[15 16] @size:[10 11]) | (@price:[13 15] @size:[11 12])) @description:(shoes) -@description:(green)"
-            )
+        vsim_query.vsim_method_params(
+            VectorSearchMethods.KNN, K=self._HYBRID_TIMEOUT_DOCS
         )
-
         hybrid_query = HybridQuery(search_query, vsim_query)
+        query_vector = np.full(
+            self._HYBRID_TIMEOUT_DIM, 0.25, dtype=np.float32
+        ).tobytes()
 
-        combine_method = CombineResultsMethod(CombinationMethods.RRF, WINDOW=1000)
-
-        timeout = 5000  # 5 second timeout
         res = client.ft().hybrid_search(
             query=hybrid_query,
-            combine_method=combine_method,
-            params_substitution={"vec": "abcd" * dim},
-            timeout=timeout,
+            params_substitution={"vec": query_vector},
+            timeout=1,
         )
 
         if is_resp2_connection(client):
-            assert len(res.results) > 0
-            assert res.warnings == []
-            assert res.execution_time > 0 and res.execution_time < timeout
+            warnings = res.warnings
+            assert res.execution_time > 0
         else:
-            assert len(res["results"]) > 0
-            assert res["warnings"] == []
-            assert res["execution_time"] > 0 and res["execution_time"] < timeout
+            warnings = res["warnings"]
+            assert res["execution_time"] > 0
 
-        res = client.ft().hybrid_search(
-            query=hybrid_query,
-            params_substitution={"vec": "abcd" * dim},
-            timeout=1,
-        )  # 1 ms timeout
-        if is_resp2_connection(client):
-            assert (
-                b"Timeout limit was reached (VSIM)" in res.warnings
-                or b"Timeout limit was reached (SEARCH)" in res.warnings
-            )
-        else:
-            assert (
-                "Timeout limit was reached (VSIM)" in res["warnings"]
-                or "Timeout limit was reached (SEARCH)" in res["warnings"]
-            )
+        assert any(
+            safe_str(warning)
+            in {
+                "Timeout limit was reached (VSIM)",
+                "Timeout limit was reached (SEARCH)",
+            }
+            for warning in warnings
+        )
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")

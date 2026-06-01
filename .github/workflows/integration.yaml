@@ -44,8 +44,11 @@ jobs:
           inputs: dev_requirements.txt
           ignore-vulns: |
             GHSA-w596-4wvx-j9j6  # subversion related git pull, dependency for pytest. There is no impact here.
+            CVE-2026-34073 # DNS name constraints were validated only against SANs, not against the peer name used in verification
+                           # Update version when msal dependency in entraid is updated
+            CVE-2026-4539  # pygments ReDoS in AdlLexer, local access only, no fix available yet
             PYSEC-2025-183 # PyJWT weak-encryption advisory disputed by maintainer (key length is the caller's responsibility);
-                           # no fixed version published.
+                           # no fixed version published — 2.12.1 is the latest release.
 
   lint:
     name: Code linters
