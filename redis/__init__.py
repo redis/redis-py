@@ -47,7 +47,7 @@ def int_or_str(value):
         return value
 
 
-__version__ = "7.3.0"
+__version__ = "7.3.1"
 
 VERSION = tuple(map(int_or_str, __version__.split(".")))
 
