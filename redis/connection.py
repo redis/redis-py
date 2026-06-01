@@ -604,7 +604,7 @@ class MaintNotificationsAbstractConnection:
             and self.maint_notifications_config
             and self.maint_notifications_config.enabled
             and self._maint_notifications_connection_handler
-            and hasattr(self, "host")
+            and getattr(self, "host", None) is not None
         ):
             self._enable_maintenance_notifications(
                 maint_notifications_config=self.maint_notifications_config,
