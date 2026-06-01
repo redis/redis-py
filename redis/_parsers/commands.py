@@ -463,7 +463,22 @@ class AsyncCommandsParser(AbstractCommandsParser):
             self.node = node
 
         commands = await self.node.execute_command("COMMAND")
-        self.commands = {cmd.lower(): command for cmd, command in commands.items()}
+        commands = {cmd.lower(): command for cmd, command in commands.items()}
+
+        for command in commands.values():
+            first_key_pos = command["first_key_pos"]
+            last_key_pos = command["last_key_pos"]
+            flags = command["flags"]
+            if (
+                first_key_pos > 0
+                and first_key_pos == last_key_pos
+                and "movablekeys" not in flags
+                and "pubsub" not in flags
+                and command["name"] != "pubsub"
+            ):
+                command["_single_key_pos"] = first_key_pos
+
+        self.commands = commands
 
     # As soon as this PR is merged into Redis, we should reimplement
     # our logic to use COMMAND INFO changes to determine the key positions
