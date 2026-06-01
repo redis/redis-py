@@ -44,7 +44,8 @@ jobs:
           inputs: dev_requirements.txt
           ignore-vulns: |
             GHSA-w596-4wvx-j9j6  # subversion related git pull, dependency for pytest. There is no impact here.
-            CVE-2026-26007 # dependency for entraid tests
+            PYSEC-2025-183 # PyJWT weak-encryption advisory disputed by maintainer (key length is the caller's responsibility);
+                           # no fixed version published.
 
   lint:
     name: Code linters

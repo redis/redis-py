@@ -26,7 +26,7 @@ vulture>=2.3.0
 numpy>=1.24.0 ; platform_python_implementation == "CPython"
 numpy>=1.24.0,<2.0 ; platform_python_implementation == "PyPy"
 
-redis-entraid==1.0.0
+redis-entraid==1.1.2
 pybreaker>=1.4.0
 
 xxhash==3.6.0
