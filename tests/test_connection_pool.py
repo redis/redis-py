@@ -659,17 +659,23 @@ class TestConnectionPoolUnixSocketURLParsing:
         ]
         socket_mock = mock.MagicMock()
 
-        with mock.patch.object(
-            redis.UnixDomainSocketConnection, "_connect", return_value=socket_mock
-        ), mock.patch.object(
-            redis.UnixDomainSocketConnection, "can_read", return_value=False
-        ), mock.patch.object(
-            redis.UnixDomainSocketConnection, "send_command"
-        ) as send_command, mock.patch.object(
-            redis.UnixDomainSocketConnection, "read_response", side_effect=responses
-        ), mock.patch.object(
-            redis.UnixDomainSocketConnection, "_enable_maintenance_notifications"
-        ) as enable:
+        with (
+            mock.patch.object(
+                redis.UnixDomainSocketConnection, "_connect", return_value=socket_mock
+            ),
+            mock.patch.object(
+                redis.UnixDomainSocketConnection, "can_read", return_value=False
+            ),
+            mock.patch.object(
+                redis.UnixDomainSocketConnection, "send_command"
+            ) as send_command,
+            mock.patch.object(
+                redis.UnixDomainSocketConnection, "read_response", side_effect=responses
+            ),
+            mock.patch.object(
+                redis.UnixDomainSocketConnection, "_enable_maintenance_notifications"
+            ) as enable,
+        ):
             assert client.ping() is True
             assert client.set(key, "value") is True
             assert client.get(key) == b"value"
