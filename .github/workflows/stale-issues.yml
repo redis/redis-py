@@ -23,6 +23,7 @@ jobs:
     permissions:
       issues: write          # required by actions/stale to label/close issues
       pull-requests: write   # required by actions/stale to label/close PRs
+      actions: write         # required by actions/stale@v10 for its cache state
     steps:
       # First step: Handle regular issues (excluding needs-information)
       - name: Mark regular issues as stale
