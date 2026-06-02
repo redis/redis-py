@@ -132,7 +132,7 @@ jobs:
     # in pipeline ofter these pypy jobs hang, so their timeout is set
     # to just 50 minutes - close to the max time the jobs are running at the moment
     # adding more tests will make them even slower, and we will need to adjust the timeout
-    timeout-minutes: 50
+    timeout-minutes: 60
     strategy:
       max-parallel: 30
       fail-fast: false
