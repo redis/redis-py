@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import inspect
+import logging
 import socket
 import sys
 import time
@@ -56,6 +57,10 @@ if sys.version_info >= (3, 11, 3):
 else:
     from async_timeout import timeout as async_timeout
 
+from redis.asyncio.maint_notifications import (
+    AsyncMaintNotificationsConnectionHandler,
+    AsyncMaintNotificationsPoolHandler,
+)
 from redis.asyncio.observability.recorder import (
     record_connection_closed,
     record_connection_count,
@@ -76,12 +81,20 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
+from redis.maint_notifications import (
+    MaintenanceState,
+    MaintNotificationsConfig,
+    NodeMovingNotification,
+    _build_moving_cleanup_connection_kwargs,
+    _build_moving_connection_kwargs,
+)
 from redis.observability.metrics import CloseReason
 from redis.typing import EncodableT
 from redis.utils import (
     DEFAULT_RESP_VERSION,
     HIREDIS_AVAILABLE,
     SENTINEL,
+    check_protocol_version,
     str_if_bytes,
 )
 
@@ -105,6 +118,8 @@ SYM_CRLF = b"\r\n"
 SYM_LF = b"\n"
 SYM_EMPTY = b""
 
+logger = logging.getLogger(__name__)
+
 
 DefaultParser: Type[Union[_AsyncRESP2Parser, _AsyncRESP3Parser, _AsyncHiredisParser]]
 if HIREDIS_AVAILABLE:
@@ -124,7 +139,308 @@ class AsyncConnectCallbackProtocol(Protocol):
 ConnectCallbackT = Union[ConnectCallbackProtocol, AsyncConnectCallbackProtocol]
 
 
-class AbstractConnection:
+class AsyncMaintNotificationsAbstractConnection:
+    """
+    Internal mixin for async maintenance notification state and parser handlers.
+
+    The sync implementation uses the same mixin-style structure. The async
+    version keeps the notification state and parser handler installation close
+    to the connection without sending the server-side handshake; that is wired
+    in a later step.
+    """
+
+    __slots__ = ()
+
+    def __init__(
+        self,
+        maint_notifications_config: MaintNotificationsConfig | None,
+        maint_notifications_pool_handler: (
+            AsyncMaintNotificationsPoolHandler | None
+        ) = None,
+        maintenance_state: MaintenanceState = MaintenanceState.NONE,
+        maintenance_notification_hash: int | None = None,
+        orig_host_address: str | None = None,
+        orig_socket_timeout: float | None = None,
+        orig_socket_connect_timeout: float | None = None,
+        parser: _AsyncHiredisParser | _AsyncRESP3Parser | None = None,
+    ) -> None:
+        self.maint_notifications_config = maint_notifications_config
+        self.maintenance_state = maintenance_state
+        self.maintenance_notification_hash = maintenance_notification_hash
+        self._processed_start_maint_notifications: set[int] = set()
+        self._skipped_end_maint_notifications: set[int] = set()
+        self._configure_maintenance_notifications(
+            maint_notifications_pool_handler,
+            orig_host_address,
+            orig_socket_timeout,
+            orig_socket_connect_timeout,
+            parser,
+        )
+
+    def _configure_maintenance_notifications(
+        self,
+        maint_notifications_pool_handler: (
+            AsyncMaintNotificationsPoolHandler | None
+        ) = None,
+        orig_host_address: str | None = None,
+        orig_socket_timeout: float | None = None,
+        orig_socket_connect_timeout: float | None = None,
+        parser: _AsyncHiredisParser | _AsyncRESP3Parser | None = None,
+    ) -> None:
+        if (
+            not self.maint_notifications_config
+            or not self.maint_notifications_config.enabled
+        ):
+            self._maint_notifications_pool_handler = None
+            self._maint_notifications_connection_handler = None
+            return
+
+        host = getattr(self, "host", None)
+        if host is None:
+            if self.maint_notifications_config.enabled is True:
+                raise RedisError(
+                    "Maintenance notifications are not supported for connections without a host"
+                )
+            self._maint_notifications_pool_handler = None
+            self._maint_notifications_connection_handler = None
+            return
+
+        if not parser:
+            raise RedisError(
+                "To configure maintenance notifications, a parser must be provided!"
+            )
+
+        if not isinstance(parser, _AsyncHiredisParser) and not isinstance(
+            parser, _AsyncRESP3Parser
+        ):
+            raise RedisError(
+                "Maintenance notifications are only supported with hiredis and RESP3 parsers!"
+            )
+
+        if maint_notifications_pool_handler:
+            self._maint_notifications_pool_handler = (
+                maint_notifications_pool_handler.get_handler_for_connection()
+            )
+            self._maint_notifications_pool_handler.set_connection(self)
+            parser.set_node_moving_push_handler(
+                self._maint_notifications_pool_handler.handle_notification
+            )
+        else:
+            self._maint_notifications_pool_handler = None
+
+        self._maint_notifications_connection_handler = (
+            AsyncMaintNotificationsConnectionHandler(
+                self, self.maint_notifications_config
+            )
+        )
+        parser.set_maintenance_push_handler(
+            self._maint_notifications_connection_handler.handle_notification
+        )
+
+        self.orig_host_address = orig_host_address if orig_host_address else host
+        self.orig_socket_timeout = (
+            orig_socket_timeout if orig_socket_timeout else self.socket_timeout
+        )
+        self.orig_socket_connect_timeout = (
+            orig_socket_connect_timeout
+            if orig_socket_connect_timeout
+            else self.socket_connect_timeout
+        )
+
+    def set_maint_notifications_pool_handler_for_connection(
+        self, maint_notifications_pool_handler: AsyncMaintNotificationsPoolHandler
+    ) -> None:
+        maint_notifications_pool_handler_copy = (
+            maint_notifications_pool_handler.get_handler_for_connection()
+        )
+        maint_notifications_pool_handler_copy.set_connection(self)
+        self._parser.set_node_moving_push_handler(
+            maint_notifications_pool_handler_copy.handle_notification
+        )
+        self._maint_notifications_pool_handler = maint_notifications_pool_handler_copy
+
+        if not self._maint_notifications_connection_handler:
+            self._maint_notifications_connection_handler = (
+                AsyncMaintNotificationsConnectionHandler(
+                    self, maint_notifications_pool_handler.config
+                )
+            )
+            self._parser.set_maintenance_push_handler(
+                self._maint_notifications_connection_handler.handle_notification
+            )
+        else:
+            self._maint_notifications_connection_handler.config = (
+                maint_notifications_pool_handler.config
+            )
+
+    async def activate_maint_notifications_handling_if_enabled(
+        self, check_health: bool = True
+    ) -> None:
+        host = getattr(self, "host", None)
+        if (
+            check_protocol_version(self.get_protocol(), 3)
+            and self.maint_notifications_config
+            and self.maint_notifications_config.enabled
+            and self._maint_notifications_connection_handler
+            and host is not None
+        ):
+            await self._enable_maintenance_notifications(
+                maint_notifications_config=self.maint_notifications_config,
+                check_health=check_health,
+            )
+
+    async def _enable_maintenance_notifications(
+        self,
+        maint_notifications_config: MaintNotificationsConfig,
+        check_health: bool = True,
+    ) -> None:
+        try:
+            host = getattr(self, "host", None)
+            if host is None:
+                raise ValueError(
+                    "Cannot enable maintenance notifications for connection"
+                    " object that doesn't have a host attribute."
+                )
+
+            endpoint_type = maint_notifications_config.get_endpoint_type(host, self)
+            await self.send_command(
+                "CLIENT",
+                "MAINT_NOTIFICATIONS",
+                "ON",
+                "moving-endpoint-type",
+                endpoint_type.value,
+                check_health=check_health,
+            )
+            response = await self.read_response()
+            if not response or str_if_bytes(response) != "OK":
+                raise ResponseError(
+                    "The server doesn't support maintenance notifications"
+                )
+        except Exception as e:
+            if (
+                isinstance(e, ResponseError)
+                and maint_notifications_config.enabled == "auto"
+            ):
+                logger.debug(f"Failed to enable maintenance notifications: {e}")
+            else:
+                raise
+
+    def get_resolved_ip(self) -> str | None:
+        try:
+            peer_addr = self._get_peer_address()
+            if peer_addr:
+                return peer_addr
+        except (AttributeError, OSError):
+            pass
+
+        try:
+            host = getattr(self, "host", None)
+            port = getattr(self, "port", 6379)
+            if host:
+                addr_info = socket.getaddrinfo(
+                    host, port, socket.AF_UNSPEC, socket.SOCK_STREAM
+                )
+                if addr_info:
+                    return str(addr_info[0][4][0])
+        except (AttributeError, OSError, socket.gaierror):
+            pass
+
+        return None
+
+    @property
+    def maintenance_state(self) -> MaintenanceState:
+        return self._maintenance_state
+
+    @maintenance_state.setter
+    def maintenance_state(self, state: MaintenanceState) -> None:
+        self._maintenance_state = state
+
+    def add_maint_start_notification(self, id: int) -> None:
+        self._processed_start_maint_notifications.add(id)
+
+    def get_processed_start_notifications(self) -> set[int]:
+        return self._processed_start_maint_notifications
+
+    def add_skipped_end_notification(self, id: int) -> None:
+        self._skipped_end_maint_notifications.add(id)
+
+    def get_skipped_end_notifications(self) -> set[int]:
+        return self._skipped_end_maint_notifications
+
+    def reset_received_notifications(self) -> None:
+        self._processed_start_maint_notifications.clear()
+        self._skipped_end_maint_notifications.clear()
+
+    def getpeername(self) -> str | None:
+        return self._get_peer_address()
+
+    def _get_peer_address(self) -> str | None:
+        writer = getattr(self, "_writer", None)
+        if writer is None:
+            return None
+        peername = writer.get_extra_info("peername")
+        if isinstance(peername, tuple) and peername:
+            return str(peername[0])
+        return None
+
+    def update_current_socket_timeout(
+        self, relaxed_timeout: float | None = None
+    ) -> None:
+        timeout = relaxed_timeout if relaxed_timeout != -1 else self.socket_timeout
+        self.update_parser_timeout(timeout)
+        self._reschedule_active_read_timeout(timeout)
+
+    def _reschedule_active_read_timeout(self, timeout: float | None) -> None:
+        timeout_context = getattr(self, "_active_read_timeout", None)
+        if timeout_context is None:
+            return
+
+        if timeout is None:
+            if hasattr(timeout_context, "reschedule"):
+                timeout_context.reschedule(None)
+            elif hasattr(timeout_context, "reject"):
+                timeout_context.reject()
+            return
+
+        deadline = asyncio.get_running_loop().time() + timeout
+        if hasattr(timeout_context, "reschedule"):
+            timeout_context.reschedule(deadline)
+        elif hasattr(timeout_context, "update"):
+            timeout_context.update(deadline)
+
+    def update_parser_timeout(self, timeout: float | None = None) -> None:
+        # Keep handler behavior aligned with sync and centralize parser timeout
+        # updates for parser implementations that expose such state.
+        parser = getattr(self, "_parser", None)
+        if isinstance(parser, _AsyncHiredisParser) and hasattr(
+            parser, "_socket_timeout"
+        ):
+            parser._socket_timeout = timeout
+
+    def set_tmp_settings(
+        self,
+        tmp_host_address: str | object | None = SENTINEL,
+        tmp_relaxed_timeout: float | None = None,
+    ) -> None:
+        if tmp_host_address and tmp_host_address != SENTINEL:
+            self.host = str(tmp_host_address)
+        if tmp_relaxed_timeout != -1:
+            self.socket_timeout = tmp_relaxed_timeout
+            self.socket_connect_timeout = tmp_relaxed_timeout
+
+    def reset_tmp_settings(
+        self,
+        reset_host_address: bool = False,
+        reset_relaxed_timeout: bool = False,
+    ) -> None:
+        if reset_host_address:
+            self.host = self.orig_host_address
+        if reset_relaxed_timeout:
+            self.socket_timeout = self.orig_socket_timeout
+            self.socket_connect_timeout = self.orig_socket_connect_timeout
+
+
+class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
     """Manages communication to and from a Redis server"""
 
     __slots__ = (
@@ -149,6 +465,7 @@ class AbstractConnection:
         "_reader",
         "_writer",
         "_parser",
+        "_active_read_timeout",
         "_connect_callbacks",
         "_buffer_cutoff",
         "_lock",
@@ -188,6 +505,15 @@ class AbstractConnection:
         protocol: int | None = None,
         legacy_responses: bool = True,
         event_dispatcher: EventDispatcher | None = None,
+        maint_notifications_config: MaintNotificationsConfig | None = None,
+        maint_notifications_pool_handler: (
+            AsyncMaintNotificationsPoolHandler | None
+        ) = None,
+        maintenance_state: MaintenanceState = MaintenanceState.NONE,
+        maintenance_notification_hash: int | None = None,
+        orig_host_address: str | None = None,
+        orig_socket_timeout: float | None = None,
+        orig_socket_connect_timeout: float | None = None,
     ):
         """
         Initialize a new async Connection.
@@ -252,6 +578,7 @@ class AbstractConnection:
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
         self._socket_read_size = socket_read_size
+        self._active_read_timeout = None
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
         self._buffer_cutoff = 6000
         self._re_auth_token: Optional[TokenInterface] = None
@@ -275,6 +602,17 @@ class AbstractConnection:
             elif self.protocol == 2 and parser_class == _AsyncRESP3Parser:
                 parser_class = _AsyncRESP2Parser
         self.set_parser(parser_class)
+        AsyncMaintNotificationsAbstractConnection.__init__(
+            self,
+            maint_notifications_config,
+            maint_notifications_pool_handler,
+            maintenance_state,
+            maintenance_notification_hash,
+            orig_host_address,
+            orig_socket_timeout,
+            orig_socket_connect_timeout,
+            self._parser,
+        )
 
     def __del__(self, _warnings: Any = warnings):
         # For some reason, the individual streams don't get properly garbage
@@ -476,7 +814,7 @@ class AbstractConnection:
 
             # if resp version is specified and we have auth args,
             # we need to send them via HELLO
-        if auth_args and self.protocol not in [2, "2"]:
+        if auth_args and check_protocol_version(self.protocol, 3):
             if isinstance(self._parser, _AsyncRESP2Parser):
                 self.set_parser(_AsyncRESP3Parser)
                 # update cluster exception classes
@@ -513,7 +851,7 @@ class AbstractConnection:
                 raise AuthenticationError("Invalid Username or Password")
 
         # if resp version is specified, switch to it
-        elif self.protocol not in [2, "2"]:
+        elif check_protocol_version(self.protocol, 3):
             if isinstance(self._parser, _AsyncRESP2Parser):
                 self.set_parser(_AsyncRESP3Parser)
                 # update cluster exception classes
@@ -525,6 +863,10 @@ class AbstractConnection:
             #     "proto"
             # ) != self.protocol:
             #     raise ConnectionError("Invalid RESP version")
+
+        await self.activate_maint_notifications_handling_if_enabled(
+            check_health=check_health
+        )
 
         # if a client_name is given, set it
         if self.client_name:
@@ -642,6 +984,14 @@ class AbstractConnection:
                 close_reason=CloseReason.APPLICATION_CLOSE,
             )
 
+        if self.maintenance_state == MaintenanceState.MAINTENANCE:
+            # MOVING state is owned by the pool-level TTL cleanup. Regular
+            # maintenance timeout relaxation can be restored when this
+            # connection closes, matching the sync lifecycle.
+            self.reset_tmp_settings(reset_relaxed_timeout=True)
+            self.maintenance_state = MaintenanceState.NONE
+            self.reset_received_notifications()
+
     async def _send_ping(self):
         """Send PING, expect PONG in return"""
         await self.send_command("PING", check_health=False)
@@ -741,32 +1091,37 @@ class AbstractConnection:
     async def read_response(
         self,
         disable_decoding: bool = False,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
         *,
         disconnect_on_error: bool = True,
-        push_request: Optional[bool] = False,
+        push_request: bool | None = False,
     ):
         """Read the response from a previously sent command"""
         read_timeout = timeout if timeout is not None else self.socket_timeout
         host_error = self._host_error()
         try:
-            if read_timeout is not None and self.protocol in ["3", 3]:
-                async with async_timeout(read_timeout):
-                    response = await self._parser.read_response(
-                        disable_decoding=disable_decoding, push_request=push_request
-                    )
-            elif read_timeout is not None:
-                async with async_timeout(read_timeout):
-                    response = await self._parser.read_response(
-                        disable_decoding=disable_decoding
-                    )
-            elif self.protocol in ["3", 3]:
-                response = await self._parser.read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
-                )
+            if read_timeout is not None:
+                timeout_context = async_timeout(read_timeout)
+                if timeout is None:
+                    async with timeout_context as active_timeout:
+                        self._active_read_timeout = active_timeout
+                        try:
+                            response = await self._read_response_from_parser(
+                                disable_decoding=disable_decoding,
+                                push_request=push_request,
+                            )
+                        finally:
+                            self._active_read_timeout = None
+                else:
+                    async with timeout_context:
+                        response = await self._read_response_from_parser(
+                            disable_decoding=disable_decoding,
+                            push_request=push_request,
+                        )
             else:
-                response = await self._parser.read_response(
-                    disable_decoding=disable_decoding
+                response = await self._read_response_from_parser(
+                    disable_decoding=disable_decoding,
+                    push_request=push_request,
                 )
         except asyncio.TimeoutError:
             if timeout is not None:
@@ -795,6 +1150,15 @@ class AbstractConnection:
         if isinstance(response, ResponseError):
             raise response from None
         return response
+
+    async def _read_response_from_parser(
+        self, disable_decoding: bool = False, push_request: bool | None = False
+    ):
+        if check_protocol_version(self.protocol, 3):
+            return await self._parser.read_response(
+                disable_decoding=disable_decoding, push_request=push_request
+            )
+        return await self._parser.read_response(disable_decoding=disable_decoding)
 
     def pack_command(self, *args: EncodableT) -> List[bytes]:
         """Pack a series of arguments into the Redis protocol"""
@@ -1332,7 +1696,444 @@ class ConnectionPoolInterface(ABC):
         pass
 
 
-class ConnectionPool(ConnectionPoolInterface):
+class AsyncMaintNotificationsAbstractConnectionPool:
+    """
+    Internal mixin for async maintenance notification pool wiring.
+
+    The handler owns notification policy. This mixin owns pool state mutation
+    because `_available_connections`, `_in_use_connections`, `connection_kwargs`,
+    and the non-reentrant `asyncio.Lock` all live on the pool.
+    """
+
+    def __init__(
+        self,
+        maint_notifications_config: MaintNotificationsConfig | None = None,
+        **kwargs: Any,
+    ) -> None:
+        protocol = kwargs.get("protocol")
+        is_protocol_supported = check_protocol_version(protocol, 3)
+        is_connection_supported = self._maintenance_notifications_supported()
+
+        if (
+            maint_notifications_config is None
+            and is_protocol_supported
+            and is_connection_supported
+        ):
+            maint_notifications_config = MaintNotificationsConfig()
+
+        if maint_notifications_config and maint_notifications_config.enabled:
+            if not is_connection_supported:
+                if maint_notifications_config.enabled is True:
+                    raise RedisError(
+                        self._maintenance_notifications_unsupported_error_message()
+                    )
+                self._maint_notifications_pool_handler = None
+                return
+
+            if not is_protocol_supported:
+                raise RedisError(
+                    "Maintenance notifications handlers on connection are only supported with RESP version 3"
+                )
+
+            self._maint_notifications_pool_handler = AsyncMaintNotificationsPoolHandler(
+                self, maint_notifications_config
+            )
+            self._update_connection_kwargs_for_maint_notifications(
+                maint_notifications_pool_handler=self._maint_notifications_pool_handler
+            )
+        else:
+            self._maint_notifications_pool_handler = None
+
+    def _maintenance_notifications_supported(self) -> bool:
+        return "path" not in self.connection_kwargs
+
+    def _maintenance_notifications_unsupported_error_message(self) -> str:
+        connection_class = getattr(self, "connection_class", None)
+        connection_class_name = getattr(connection_class, "__name__", connection_class)
+        return (
+            "Maintenance notifications are not supported for connection class "
+            f"{connection_class_name}"
+        )
+
+    def maint_notifications_enabled(self):
+        maint_notifications_config = (
+            self._maint_notifications_pool_handler.config
+            if self._maint_notifications_pool_handler
+            else None
+        )
+        return maint_notifications_config and maint_notifications_config.enabled
+
+    async def update_maint_notifications_config(
+        self,
+        maint_notifications_config: MaintNotificationsConfig,
+    ) -> None:
+        if (
+            self.maint_notifications_enabled()
+            and not maint_notifications_config.enabled
+        ):
+            raise ValueError(
+                "Cannot disable maintenance notifications after enabling them"
+            )
+
+        if (
+            maint_notifications_config.enabled
+            and not self._maintenance_notifications_supported()
+        ):
+            if maint_notifications_config.enabled is True:
+                raise RedisError(
+                    self._maintenance_notifications_unsupported_error_message()
+                )
+            self._maint_notifications_pool_handler = None
+            return
+
+        if not self._maint_notifications_pool_handler:
+            self._maint_notifications_pool_handler = AsyncMaintNotificationsPoolHandler(
+                self, maint_notifications_config
+            )
+        else:
+            self._maint_notifications_pool_handler.config = maint_notifications_config
+
+        self._update_connection_kwargs_for_maint_notifications(
+            maint_notifications_pool_handler=self._maint_notifications_pool_handler
+        )
+        await self._update_maint_notifications_configs_for_connections(
+            maint_notifications_pool_handler=self._maint_notifications_pool_handler
+        )
+
+    def _update_connection_kwargs_for_maint_notifications(
+        self,
+        maint_notifications_pool_handler: (
+            AsyncMaintNotificationsPoolHandler | None
+        ) = None,
+    ) -> None:
+        if not self.maint_notifications_enabled():
+            return
+
+        if maint_notifications_pool_handler:
+            self.connection_kwargs.update(
+                {
+                    "maint_notifications_pool_handler": maint_notifications_pool_handler,
+                    "maint_notifications_config": maint_notifications_pool_handler.config,
+                }
+            )
+
+        if self.connection_kwargs.get("orig_host_address", None) is None:
+            self.connection_kwargs.update(
+                {
+                    "orig_host_address": self.connection_kwargs.get("host"),
+                    "orig_socket_timeout": self.connection_kwargs.get(
+                        "socket_timeout", DEFAULT_SOCKET_TIMEOUT
+                    ),
+                    "orig_socket_connect_timeout": self.connection_kwargs.get(
+                        "socket_connect_timeout", DEFAULT_SOCKET_CONNECT_TIMEOUT
+                    ),
+                }
+            )
+
+    async def _update_maint_notifications_configs_for_connections(
+        self,
+        maint_notifications_pool_handler: (
+            AsyncMaintNotificationsPoolHandler | None
+        ) = None,
+    ) -> None:
+        async with self._lock:
+            for conn in self._get_free_connections():
+                if not maint_notifications_pool_handler:
+                    raise ValueError("maint_notifications_pool_handler must be set")
+                conn.set_maint_notifications_pool_handler_for_connection(
+                    maint_notifications_pool_handler
+                )
+                conn.maint_notifications_config = (
+                    maint_notifications_pool_handler.config
+                )
+                await conn.disconnect()
+
+            for conn in self._get_in_use_connections():
+                if not maint_notifications_pool_handler:
+                    raise ValueError("maint_notifications_pool_handler must be set")
+                conn.set_maint_notifications_pool_handler_for_connection(
+                    maint_notifications_pool_handler
+                )
+                conn.maint_notifications_config = (
+                    maint_notifications_pool_handler.config
+                )
+                conn.mark_for_reconnect()
+
+    def _get_free_connections(self) -> Iterable["AbstractConnection"]:
+        return self._available_connections
+
+    def _get_in_use_connections(self) -> Iterable["AbstractConnection"]:
+        return self._in_use_connections
+
+    def _should_update_connection(
+        self,
+        conn: "AbstractConnection",
+        matching_pattern: str = "connected_address",
+        matching_address: str | None = None,
+        matching_notification_hash: int | None = None,
+    ) -> bool:
+        if matching_pattern == "connected_address":
+            if matching_address and conn.getpeername() != matching_address:
+                return False
+        elif matching_pattern == "configured_address":
+            if matching_address and getattr(conn, "host", None) != matching_address:
+                return False
+        elif matching_pattern == "notification_hash":
+            if (
+                matching_notification_hash
+                and conn.maintenance_notification_hash != matching_notification_hash
+            ):
+                return False
+        return True
+
+    def update_connection_settings(
+        self,
+        conn: "AbstractConnection",
+        state: MaintenanceState | None = None,
+        maintenance_notification_hash: int | None = None,
+        host_address: str | None = None,
+        relaxed_timeout: float | None = None,
+        update_notification_hash: bool = False,
+        reset_host_address: bool = False,
+        reset_relaxed_timeout: bool = False,
+    ) -> None:
+        if state:
+            conn.maintenance_state = state
+
+        if update_notification_hash:
+            conn.maintenance_notification_hash = maintenance_notification_hash
+
+        if host_address is not None:
+            conn.set_tmp_settings(tmp_host_address=host_address)
+
+        if relaxed_timeout is not None:
+            conn.set_tmp_settings(tmp_relaxed_timeout=relaxed_timeout)
+
+        if reset_relaxed_timeout or reset_host_address:
+            conn.reset_tmp_settings(
+                reset_host_address=reset_host_address,
+                reset_relaxed_timeout=reset_relaxed_timeout,
+            )
+
+        conn.update_current_socket_timeout(relaxed_timeout)
+
+    async def update_connections_settings(
+        self,
+        state: MaintenanceState | None = None,
+        maintenance_notification_hash: int | None = None,
+        host_address: str | None = None,
+        relaxed_timeout: float | None = None,
+        matching_address: str | None = None,
+        matching_notification_hash: int | None = None,
+        matching_pattern: str = "connected_address",
+        update_notification_hash: bool = False,
+        reset_host_address: bool = False,
+        reset_relaxed_timeout: bool = False,
+        include_free_connections: bool = True,
+    ) -> None:
+        async with self._lock:
+            self._update_connections_settings_locked(
+                state=state,
+                maintenance_notification_hash=maintenance_notification_hash,
+                host_address=host_address,
+                relaxed_timeout=relaxed_timeout,
+                matching_address=matching_address,
+                matching_notification_hash=matching_notification_hash,
+                matching_pattern=matching_pattern,
+                update_notification_hash=update_notification_hash,
+                reset_host_address=reset_host_address,
+                reset_relaxed_timeout=reset_relaxed_timeout,
+                include_free_connections=include_free_connections,
+            )
+
+    def _update_connections_settings_locked(
+        self,
+        state: MaintenanceState | None = None,
+        maintenance_notification_hash: int | None = None,
+        host_address: str | None = None,
+        relaxed_timeout: float | None = None,
+        matching_address: str | None = None,
+        matching_notification_hash: int | None = None,
+        matching_pattern: str = "connected_address",
+        update_notification_hash: bool = False,
+        reset_host_address: bool = False,
+        reset_relaxed_timeout: bool = False,
+        include_free_connections: bool = True,
+    ) -> None:
+        for conn in self._get_in_use_connections():
+            if self._should_update_connection(
+                conn,
+                matching_pattern,
+                matching_address,
+                matching_notification_hash,
+            ):
+                self.update_connection_settings(
+                    conn,
+                    state=state,
+                    maintenance_notification_hash=maintenance_notification_hash,
+                    host_address=host_address,
+                    relaxed_timeout=relaxed_timeout,
+                    update_notification_hash=update_notification_hash,
+                    reset_host_address=reset_host_address,
+                    reset_relaxed_timeout=reset_relaxed_timeout,
+                )
+
+        if include_free_connections:
+            for conn in self._get_free_connections():
+                if self._should_update_connection(
+                    conn,
+                    matching_pattern,
+                    matching_address,
+                    matching_notification_hash,
+                ):
+                    self.update_connection_settings(
+                        conn,
+                        state=state,
+                        maintenance_notification_hash=maintenance_notification_hash,
+                        host_address=host_address,
+                        relaxed_timeout=relaxed_timeout,
+                        update_notification_hash=update_notification_hash,
+                        reset_host_address=reset_host_address,
+                        reset_relaxed_timeout=reset_relaxed_timeout,
+                    )
+
+    def update_connection_kwargs(self, **kwargs: Any) -> None:
+        self.connection_kwargs.update(kwargs)
+
+    async def apply_moving_notification(
+        self,
+        notification: NodeMovingNotification,
+        config: MaintNotificationsConfig,
+        moving_address_src: str | None,
+        run_proactive_reconnect: bool = False,
+    ) -> None:
+        """
+        Apply the pool state transition for a MOVING notification atomically.
+
+        Async pools use a non-reentrant `asyncio.Lock`, so the handler cannot
+        safely compose several separately locked calls. Existing connection
+        updates, optional proactive reconnect, and future `connection_kwargs`
+        changes must happen under one pool-owned lock; otherwise a connection
+        can move between active/free lists and escape handling.
+        """
+        async with self._lock:
+            await self._set_in_maintenance(True)
+            try:
+                self._update_connections_settings_locked(
+                    state=MaintenanceState.MOVING,
+                    maintenance_notification_hash=hash(notification),
+                    relaxed_timeout=config.relaxed_timeout,
+                    host_address=notification.new_node_host,
+                    matching_address=moving_address_src,
+                    matching_pattern="connected_address",
+                    update_notification_hash=True,
+                    include_free_connections=True,
+                )
+
+                if run_proactive_reconnect:
+                    await self._run_proactive_reconnect_locked(moving_address_src)
+
+                self.update_connection_kwargs(
+                    **_build_moving_connection_kwargs(notification, config)
+                )
+            finally:
+                await self._set_in_maintenance(False)
+
+    async def run_proactive_reconnect(
+        self,
+        moving_address_src: str | None = None,
+    ) -> None:
+        """
+        Mark active connections and disconnect free connections atomically.
+
+        This operation is pool-owned because the active/free lists can change
+        while tasks acquire or release connections. Keeping the mark/disconnect
+        pass under one lock avoids a connection moving between lists between
+        separately locked calls.
+        """
+        async with self._lock:
+            await self._run_proactive_reconnect_locked(moving_address_src)
+
+    async def _run_proactive_reconnect_locked(
+        self,
+        moving_address_src: str | None = None,
+    ) -> None:
+        for conn in self._get_in_use_connections():
+            if self._should_update_connection(
+                conn, "connected_address", moving_address_src
+            ):
+                conn.mark_for_reconnect()
+
+        free_connections = [
+            conn
+            for conn in self._get_free_connections()
+            if self._should_update_connection(
+                conn, "connected_address", moving_address_src
+            )
+        ]
+        await self._disconnect_connections(free_connections)
+
+    async def cleanup_moving_notification(
+        self,
+        notification_hash: int,
+        reset_relaxed_timeout: bool,
+        reset_host_address: bool,
+    ) -> None:
+        """
+        Revert MOVING pool state atomically after the notification TTL.
+
+        Future connection kwargs and existing connection state must be cleaned
+        up in the same critical section. Splitting the cleanup lets an
+        acquire/release interleave, which can leave stale MOVING state or undo a
+        newer overlapping MOVING notification.
+        """
+        async with self._lock:
+            kwargs = _build_moving_cleanup_connection_kwargs(
+                self.connection_kwargs, notification_hash
+            )
+            if kwargs is not None:
+                self.update_connection_kwargs(**kwargs)
+
+            self._update_connections_settings_locked(
+                relaxed_timeout=-1,
+                state=MaintenanceState.NONE,
+                maintenance_notification_hash=None,
+                matching_notification_hash=notification_hash,
+                matching_pattern="notification_hash",
+                update_notification_hash=True,
+                reset_relaxed_timeout=reset_relaxed_timeout,
+                reset_host_address=reset_host_address,
+                include_free_connections=True,
+            )
+
+    async def _disconnect_connections(
+        self, connections: Iterable["AbstractConnection"]
+    ) -> None:
+        connections = tuple(connections)
+        if not connections:
+            return
+        results = await asyncio.gather(
+            *(connection.disconnect() for connection in connections),
+            return_exceptions=True,
+        )
+        exc = next(
+            (result for result in results if isinstance(result, BaseException)), None
+        )
+        if exc:
+            raise exc
+
+    async def _set_in_maintenance(self, in_maintenance: bool) -> None:
+        set_in_maintenance = getattr(self, "set_in_maintenance", None)
+        if not callable(set_in_maintenance):
+            return
+        result = set_in_maintenance(in_maintenance)
+        if inspect.isawaitable(result):
+            await result
+
+
+class ConnectionPool(
+    AsyncMaintNotificationsAbstractConnectionPool, ConnectionPoolInterface
+):
     """
     Create a connection pool. ``If max_connections`` is set, then this
     object raises :py:class:`~redis.ConnectionError` when the pool's
@@ -1398,6 +2199,7 @@ class ConnectionPool(ConnectionPoolInterface):
         self,
         connection_class: Type[AbstractConnection] = Connection,
         max_connections: Optional[int] = None,
+        maint_notifications_config: MaintNotificationsConfig | None = None,
         **connection_kwargs,
     ):
         max_connections = max_connections or 100
@@ -1415,6 +2217,12 @@ class ConnectionPool(ConnectionPoolInterface):
         self._event_dispatcher = self.connection_kwargs.get("event_dispatcher", None)
         if self._event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
+
+        AsyncMaintNotificationsAbstractConnectionPool.__init__(
+            self,
+            maint_notifications_config=maint_notifications_config,
+            **connection_kwargs,
+        )
 
     # Keys that should be redacted in __repr__ to avoid exposing sensitive information
     SENSITIVE_REPR_KEYS = frozenset(
@@ -1607,7 +2415,7 @@ class ConnectionPool(ConnectionPoolInterface):
         # pool before all data has been read or the socket has been
         # closed. either way, reconnect and verify everything is good.
         try:
-            if await connection.can_read():
+            if await connection.can_read() and not self.maint_notifications_enabled():
                 raise ConnectionError("Connection has data") from None
         except (ConnectionError, TimeoutError, OSError):
             await connection.disconnect()
@@ -1619,12 +2427,13 @@ class ConnectionPool(ConnectionPoolInterface):
         """Releases the connection back to the pool"""
         # Connections should always be returned to the correct pool,
         # not doing so is an error that will cause an exception here.
-        self._in_use_connections.remove(connection)
+        async with self._lock:
+            self._in_use_connections.remove(connection)
 
-        if connection.should_reconnect():
-            await connection.disconnect()
+            if connection.should_reconnect():
+                await connection.disconnect()
 
-        self._available_connections.append(connection)
+            self._available_connections.append(connection)
         await self._event_dispatcher.dispatch_async(
             AsyncAfterConnectionReleasedEvent(connection)
         )
@@ -1792,16 +2601,17 @@ class BlockingConnectionPool(ConnectionPool):
             async with self._condition:
                 async with async_timeout(self.timeout):
                     await self._condition.wait_for(self.can_get_connection)
-                    # Track connection count before to detect if a new connection is created
-                    connections_before = len(self._available_connections) + len(
-                        self._in_use_connections
-                    )
-                    start_time_created = time.monotonic()
-                    connection = super().get_available_connection()
-                    connections_after = len(self._available_connections) + len(
-                        self._in_use_connections
-                    )
-                    is_created = connections_after > connections_before
+                    async with self._lock:
+                        # Track connection count before to detect if a new connection is created
+                        connections_before = len(self._available_connections) + len(
+                            self._in_use_connections
+                        )
+                        start_time_created = time.monotonic()
+                        connection = super().get_available_connection()
+                        connections_after = len(self._available_connections) + len(
+                            self._in_use_connections
+                        )
+                        is_created = connections_after > connections_before
         except asyncio.TimeoutError as err:
             raise ConnectionError("No connection available.") from err
 

@@ -601,7 +601,7 @@ class MaintNotificationsAbstractConnection:
         # When the mode is enabled=True, we raise an exception in case of failure
         host = getattr(self, "host", None)
         if (
-            self.get_protocol() not in [2, "2"]
+            check_protocol_version(self.get_protocol(), 3)
             and self.maint_notifications_config
             and self.maint_notifications_config.enabled
             and self._maint_notifications_connection_handler
@@ -1107,7 +1107,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
 
         # if resp version is specified and we have auth args,
         # we need to send them via HELLO
-        if auth_args and self.protocol not in [2, "2"]:
+        if auth_args and check_protocol_version(self.protocol, 3):
             if isinstance(self._parser, _RESP2Parser):
                 self.set_parser(_RESP3Parser)
                 # update cluster exception classes
@@ -1144,7 +1144,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 raise AuthenticationError("Invalid Username or Password")
 
         # if resp version is specified, switch to it
-        elif self.protocol not in [2, "2"]:
+        elif check_protocol_version(self.protocol, 3):
             if isinstance(self._parser, _RESP2Parser):
                 self.set_parser(_RESP3Parser)
                 # update cluster exception classes
