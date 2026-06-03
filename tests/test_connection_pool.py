@@ -111,8 +111,7 @@ class TestConnectionPool:
         with pytest.raises(
             redis.RedisError,
             match=(
-                "Maintenance notifications are not supported with "
-                ".*DummyConnection"
+                "Maintenance notifications are not supported with .*DummyConnection"
             ),
         ):
             redis.ConnectionPool(
