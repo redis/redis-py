@@ -1728,17 +1728,19 @@ class TestRedisCommands:
     async def test_increx_saturating_bounds(self, r: redis.Redis):
         key = "increx:sat"
         assert await r.set(key, "1.8")
-        result = await r.increx(key, byfloat=0.7, ubound=2, overflow="SAT")
+        result = await r.increx(key, byfloat=0.7, ubound=2, saturate=True)
         assert [float(value) for value in result] == pytest.approx([2.0, 0.2])
         assert float(await r.get(key)) == pytest.approx(2.0)
 
     @skip_if_server_version_lt("8.7.0")
-    async def test_increx_fail_overflow_keeps_value(self, r: redis.Redis):
+    async def test_increx_overflow_rejected_keeps_value_and_ttl(self, r: redis.Redis):
         key = "increx:overflow"
         assert await r.set(key, 10)
-        with pytest.raises(ResponseError):
-            await r.increx(key, byint=5, ubound=12)
+        assert await r.expire(key, 60)
+        ttl = await r.pttl(key)
+        assert await r.increx(key, byint=5, ubound=12) == [10, 0]
         assert await r.get(key) == b"10"
+        assert 0 < await r.pttl(key) <= ttl
 
     @skip_if_server_version_lt("8.7.0")
     async def test_increx_expiration_enx(self, r: redis.Redis):
@@ -1760,8 +1762,6 @@ class TestRedisCommands:
             await r.increx(key, byfloat=1.0, byint=1)
         with pytest.raises(DataError):
             await r.increx(key, ex=10, px=10)
-        with pytest.raises(DataError):
-            await r.increx(key, overflow="WRAP")
         with pytest.raises(DataError):
             await r.increx(key, enx=True)
 

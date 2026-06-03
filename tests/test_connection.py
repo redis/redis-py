@@ -13,7 +13,7 @@ import redis
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
 from redis._parsers.hiredis import NOT_ENOUGH_DATA
-from redis._parsers.socket import SENTINEL, SocketBuffer
+from redis._parsers.socket import SocketBuffer
 from redis.backoff import NoBackoff
 from redis.cache import (
     CacheConfig,
@@ -44,7 +44,7 @@ from redis.observability.attributes import (
     ConnectionState,
 )
 from redis.retry import Retry
-from redis.utils import HIREDIS_AVAILABLE
+from redis.utils import HIREDIS_AVAILABLE, SENTINEL
 
 from .conftest import skip_if_server_version_lt
 from .mocks import MockSocket
@@ -217,6 +217,35 @@ def test_loading_external_modules(r):
 
 
 @pytest.mark.fixed_client
+@pytest.mark.parametrize(
+    "client_kwargs",
+    [
+        {"driver_info": None},
+        {"lib_name": None, "lib_version": None},
+    ],
+)
+def test_redis_client_preserves_explicit_none_driver_info(client_kwargs):
+    if "lib_name" in client_kwargs:
+        with pytest.warns(DeprecationWarning):
+            client = Redis(**client_kwargs)
+    else:
+        client = Redis(**client_kwargs)
+
+    assert client.connection_pool.connection_kwargs["driver_info"] is None
+    client.close()
+
+
+@pytest.mark.fixed_client
+def test_redis_client_default_driver_info():
+    client = Redis()
+    driver_info = client.connection_pool.connection_kwargs["driver_info"]
+
+    assert driver_info.formatted_name == "redis-py"
+    assert driver_info.lib_version is not None
+    client.close()
+
+
+@pytest.mark.fixed_client
 class TestConnection:
     def test_disconnect(self):
         conn = Connection()
@@ -248,6 +277,29 @@ class TestConnection:
         mock_sock.shutdown.assert_called_once()
         mock_sock.close.assert_called_once()
         assert conn._sock is None
+
+    @pytest.mark.parametrize(
+        "connection_kwargs",
+        [
+            {"driver_info": None},
+            {"lib_name": None, "lib_version": None},
+        ],
+    )
+    def test_client_setinfo_skipped_with_explicit_none(self, connection_kwargs):
+        if "lib_name" in connection_kwargs:
+            with pytest.warns(DeprecationWarning):
+                conn = Connection(protocol=2, **connection_kwargs)
+        else:
+            conn = Connection(protocol=2, **connection_kwargs)
+        conn._parser.on_connect = mock.Mock()
+        conn.send_command = mock.Mock()
+        conn.read_response = mock.Mock(return_value="OK")
+
+        conn.on_connect_check_health()
+
+        assert conn.driver_info is None
+        conn.send_command.assert_not_called()
+        conn.read_response.assert_not_called()
 
     def clear(self, conn):
         conn.retry_on_error.clear()
