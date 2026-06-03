@@ -2892,17 +2892,21 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             supports_maint_notifications = issubclass(
                 connection_class, MaintNotificationsAbstractConnection
             )
+            is_unix_domain_socket_connection = issubclass(
+                connection_class, UnixDomainSocketConnection
+            )
         except TypeError:
             supports_maint_notifications = False
+            is_unix_domain_socket_connection = False
 
-        if not supports_maint_notifications:
+        if is_unix_domain_socket_connection or not supports_maint_notifications:
             if (
                 maint_notifications_config
                 and maint_notifications_config.enabled is True
             ):
                 raise RedisError(
-                    "Maintenance notifications are not supported with this "
-                    "connection class"
+                    "Maintenance notifications are not supported with "
+                    f"{connection_class}"
                 )
             maint_notifications_config = MaintNotificationsConfig(enabled=False)
 

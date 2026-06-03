@@ -110,7 +110,10 @@ class TestConnectionPool:
     def test_custom_connection_rejects_enabled_maint_notifications_config(self):
         with pytest.raises(
             redis.RedisError,
-            match="Maintenance notifications are not supported with this connection class",
+            match=(
+                "Maintenance notifications are not supported with "
+                ".*DummyConnection"
+            ),
         ):
             redis.ConnectionPool(
                 connection_class=DummyConnection,
@@ -645,6 +648,34 @@ class TestConnectionPoolUnixSocketURLParsing:
                 unix_socket_path="/socket",
                 maint_notifications_config=MaintNotificationsConfig(enabled=True),
             )
+
+    def test_pool_rejects_enabled_maint_notifications_config(self):
+        with pytest.raises(
+            redis.RedisError,
+            match=(
+                "Maintenance notifications are not supported with "
+                ".*UnixDomainSocketConnection"
+            ),
+        ):
+            redis.ConnectionPool(
+                connection_class=redis.UnixDomainSocketConnection,
+                path="/socket",
+                maint_notifications_config=MaintNotificationsConfig(enabled=True),
+            )
+
+    def test_pool_disables_default_maint_notifications(self):
+        pool = redis.ConnectionPool(
+            connection_class=redis.UnixDomainSocketConnection,
+            path="/socket",
+            protocol=3,
+        )
+
+        assert pool.connection_class == redis.UnixDomainSocketConnection
+        assert_kwargs_subset(pool.connection_kwargs, {"path": "/socket", "protocol": 3})
+        assert pool.maint_notifications_enabled() is None
+        assert pool._maint_notifications_pool_handler is None
+        assert "maint_notifications_config" not in pool.connection_kwargs
+        assert "maint_notifications_pool_handler" not in pool.connection_kwargs
 
     def test_default_config_client_executes_commands_without_maint_notifications(self):
         client = redis.Redis(unix_socket_path="/socket")
