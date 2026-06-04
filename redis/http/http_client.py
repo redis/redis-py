@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 
 __all__ = ["HttpClient", "HttpResponse", "HttpError", "DEFAULT_TIMEOUT"]
 
+from redis._defaults import DEFAULT_RETRY_BASE, DEFAULT_RETRY_CAP, DEFAULT_RETRY_COUNT
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.retry import Retry
 from redis.utils import dummy_fail
@@ -66,7 +67,10 @@ class HttpClient:
         headers: Optional[Mapping[str, str]] = None,
         timeout: float = DEFAULT_TIMEOUT,
         retry: Retry = Retry(
-            backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
+            backoff=ExponentialWithJitterBackoff(
+                base=DEFAULT_RETRY_BASE, cap=DEFAULT_RETRY_CAP
+            ),
+            retries=DEFAULT_RETRY_COUNT,
         ),
         verify_tls: bool = True,
         # TLS verification (server) options

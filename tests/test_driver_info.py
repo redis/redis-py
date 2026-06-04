@@ -1,7 +1,7 @@
 import pytest
 
-from redis.driver_info import DriverInfo
-from redis.utils import get_lib_version
+from redis.driver_info import DriverInfo, resolve_driver_info
+from redis.utils import SENTINEL, get_lib_version
 
 
 @pytest.mark.fixed_client
@@ -17,6 +17,45 @@ def test_driver_info_custom_lib_version():
     info = DriverInfo(lib_version="5.0.0")
     assert info.lib_version == "5.0.0"
     assert info.formatted_name == "redis-py"
+
+
+@pytest.mark.fixed_client
+def test_driver_info_explicit_none_values_are_preserved():
+    info = DriverInfo(name=None, lib_version=None)
+    assert info.formatted_name is None
+    assert info.lib_version is None
+
+
+@pytest.mark.fixed_client
+def test_resolve_driver_info_default_values():
+    info = resolve_driver_info()
+    assert info.formatted_name == "redis-py"
+    assert info.lib_version == get_lib_version()
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize(
+    ("driver_info", "lib_name", "lib_version"),
+    [
+        (None, SENTINEL, SENTINEL),
+        (SENTINEL, None, None),
+    ],
+)
+def test_resolve_driver_info_explicit_none_skips_config(
+    driver_info, lib_name, lib_version
+):
+    assert resolve_driver_info(driver_info, lib_name, lib_version) is None
+
+
+@pytest.mark.fixed_client
+def test_resolve_driver_info_explicit_none_values_are_individual():
+    info = resolve_driver_info(lib_name=None)
+    assert info.formatted_name is None
+    assert info.lib_version == get_lib_version()
+
+    info = resolve_driver_info(lib_version=None)
+    assert info.formatted_name == "redis-py"
+    assert info.lib_version is None
 
 
 @pytest.mark.fixed_client

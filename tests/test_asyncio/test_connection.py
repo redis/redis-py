@@ -13,6 +13,7 @@ from redis._parsers import (
     _AsyncRESP3Parser,
     _AsyncRESPBase,
 )
+from redis._parsers.hiredis import NOT_ENOUGH_DATA
 from redis.asyncio import ConnectionPool, Redis
 from redis.asyncio.connection import (
     Connection,
@@ -29,6 +30,49 @@ from tests.conftest import skip_if_server_version_lt
 from .mocks import MockStream
 
 
+class DummyHiredisReader:
+    def __init__(self, response=NOT_ENOUGH_DATA, decoded_response=None, has_data=False):
+        self.responses = [response]
+        self.decoded_response = decoded_response
+        self.has_data_value = has_data
+
+    def has_data(self):
+        return self.has_data_value
+
+    def gets(self, *args):
+        if self.responses:
+            response = self.responses.pop(0)
+            if args == (False,) or self.decoded_response is None:
+                return response
+            return self.decoded_response
+        return NOT_ENOUGH_DATA
+
+
+class DummyAsyncStream:
+    def __init__(self, buffer=b"", eof=False):
+        self._buffer = bytearray(buffer)
+        self.eof = eof
+        self.read_called = False
+
+    def at_eof(self):
+        return self.eof and not self._buffer
+
+    async def read(self, _):
+        self.read_called = True
+        raise AssertionError("can_read should not read from the stream")
+
+
+def make_async_hiredis_parser(
+    stream, response=NOT_ENOUGH_DATA, decoded_response=None, has_data=False
+):
+    parser = _AsyncHiredisParser.__new__(_AsyncHiredisParser)
+    parser._connected = True
+    parser._reader = DummyHiredisReader(response, decoded_response, has_data)
+    parser._stream = stream
+    parser._hiredis_PushNotificationType = None
+    return parser
+
+
 def test_connection_default_parser_matches_default_protocol():
     conn = Connection()
     expected_parser_class = (
@@ -36,6 +80,90 @@ def test_connection_default_parser_matches_default_protocol():
     )
     assert isinstance(conn._parser, expected_parser_class)
     assert conn.protocol == 3
+
+
+@pytest.mark.parametrize(
+    ("buffer", "eof", "expected"),
+    [
+        (b"", False, False),
+        (b"+OK\r\n", False, True),
+        (b"", True, True),
+    ],
+)
+async def test_async_hiredis_can_read_uses_buffer_without_reading(
+    buffer, eof, expected
+):
+    stream = DummyAsyncStream(buffer=buffer, eof=eof)
+    parser = make_async_hiredis_parser(stream)
+
+    assert await parser.can_read() is expected
+    assert stream.read_called is False
+
+
+async def test_async_hiredis_can_read_detects_reader_response():
+    stream = DummyAsyncStream()
+    parser = make_async_hiredis_parser(stream, response=b"OK", has_data=True)
+
+    assert await parser.can_read() is True
+    assert stream.read_called is False
+
+
+async def test_async_hiredis_can_read_detects_real_stream_reader_buffer():
+    payload = b"+OK\r\n"
+    stream = asyncio.StreamReader()
+    stream.feed_data(payload)
+    parser = make_async_hiredis_parser(stream)
+
+    assert await parser.can_read() is True
+    assert await stream.read(len(payload)) == payload
+
+
+async def test_async_hiredis_can_read_preserves_reader_response():
+    stream = DummyAsyncStream()
+    parser = make_async_hiredis_parser(stream, response=b"OK", has_data=True)
+
+    assert await parser.can_read() is True
+    assert await parser.read_response() == b"OK"
+    assert stream.read_called is False
+
+
+async def test_async_hiredis_can_read_does_not_decide_disable_decoding():
+    stream = DummyAsyncStream()
+    raw = b"\xe2\x98\x83"
+    parser = make_async_hiredis_parser(
+        stream,
+        response=raw,
+        decoded_response=raw.decode(),
+        has_data=True,
+    )
+
+    assert await parser.can_read() is True
+    assert await parser.read_response(disable_decoding=True) == raw
+
+
+async def test_async_hiredis_can_read_leaves_decoding_to_read_response():
+    stream = DummyAsyncStream()
+    raw = b"\xe2\x98\x83"
+    parser = make_async_hiredis_parser(
+        stream,
+        response=raw,
+        decoded_response=raw.decode(),
+        has_data=True,
+    )
+
+    assert await parser.can_read() is True
+    assert await parser.read_response() == raw.decode()
+
+
+@pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
+async def test_async_resp_can_read_detects_stream_buffer(parser_class):
+    stream = DummyAsyncStream(buffer=b"+OK\r\n")
+    parser = parser_class(socket_read_size=65536)
+    parser._connected = True
+    parser._stream = stream
+
+    assert await parser.can_read() is True
+    assert stream.read_called is False
 
 
 @pytest.mark.parametrize(
@@ -56,6 +184,60 @@ def test_connection_parser_matches_protocol(
         kwargs["protocol"] = protocol
     conn = Connection(**kwargs)
     assert isinstance(conn._parser, expected_parser_class)
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize(
+    "client_kwargs",
+    [
+        {"driver_info": None},
+        {"lib_name": None, "lib_version": None},
+    ],
+)
+async def test_redis_client_preserves_explicit_none_driver_info(client_kwargs):
+    if "lib_name" in client_kwargs:
+        with pytest.warns(DeprecationWarning):
+            client = Redis(**client_kwargs)
+    else:
+        client = Redis(**client_kwargs)
+
+    assert client.connection_pool.connection_kwargs["driver_info"] is None
+    await client.aclose()
+
+
+@pytest.mark.fixed_client
+async def test_redis_client_default_driver_info():
+    client = Redis()
+    driver_info = client.connection_pool.connection_kwargs["driver_info"]
+
+    assert driver_info.formatted_name == "redis-py"
+    assert driver_info.lib_version is not None
+    await client.aclose()
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize(
+    "connection_kwargs",
+    [
+        {"driver_info": None},
+        {"lib_name": None, "lib_version": None},
+    ],
+)
+async def test_client_setinfo_skipped_with_explicit_none(connection_kwargs):
+    if "lib_name" in connection_kwargs:
+        with pytest.warns(DeprecationWarning):
+            conn = Connection(protocol=2, **connection_kwargs)
+    else:
+        conn = Connection(protocol=2, **connection_kwargs)
+    conn._parser.on_connect = mock.Mock()
+    conn.send_command = mock.AsyncMock()
+    conn.read_response = mock.AsyncMock(return_value="OK")
+
+    await conn.on_connect_check_health()
+
+    assert conn.driver_info is None
+    conn.send_command.assert_not_awaited()
+    conn.read_response.assert_not_awaited()
 
 
 @pytest.mark.onlynoncluster

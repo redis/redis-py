@@ -29,6 +29,7 @@ from typing import (
 if TYPE_CHECKING:
     from redis.keyspace_notifications import ClusterKeyspaceNotifications
 
+from redis._defaults import DEFAULT_RETRY_BASE, DEFAULT_RETRY_CAP, DEFAULT_RETRY_COUNT
 from redis._parsers import CommandsParser, Encoder
 from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
 from redis._parsers.helpers import parse_scan
@@ -272,6 +273,7 @@ REDIS_ALLOWED_KEYS = (
     "encoding",
     "encoding_errors",
     "host",
+    "driver_info",
     "lib_name",
     "lib_version",
     "max_connections",
@@ -288,6 +290,7 @@ REDIS_ALLOWED_KEYS = (
     "socket_connect_timeout",
     "socket_keepalive",
     "socket_keepalive_options",
+    "socket_read_size",
     "socket_timeout",
     "ssl",
     "ssl_ca_certs",
@@ -699,7 +702,7 @@ class RedisCluster(
         host: Optional[str] = None,
         port: int = 6379,
         startup_nodes: Optional[List["ClusterNode"]] = None,
-        cluster_error_retry_attempts: int = 3,
+        cluster_error_retry_attempts: int = DEFAULT_RETRY_COUNT,
         retry: Optional["Retry"] = None,
         require_full_coverage: bool = True,
         reinitialize_steps: int = 5,
@@ -862,7 +865,9 @@ class RedisCluster(
             self.retry = retry
         else:
             self.retry = Retry(
-                backoff=ExponentialWithJitterBackoff(base=1, cap=10),
+                backoff=ExponentialWithJitterBackoff(
+                    base=DEFAULT_RETRY_BASE, cap=DEFAULT_RETRY_CAP
+                ),
                 retries=cluster_error_retry_attempts,
             )
 
@@ -1486,7 +1491,7 @@ class RedisCluster(
         Wrapper for ERRORS_ALLOW_RETRY error handling.
 
         It will try the number of times specified by the retries property from
-        config option "self.retry" which defaults to 3 unless manually
+        config option "self.retry" which defaults to 10 unless manually
         configured.
 
         If it reaches the number of times, the command will raise the exception
@@ -3405,7 +3410,7 @@ class ClusterPipeline(RedisCluster):
         startup_nodes: Optional[List["ClusterNode"]] = None,
         read_from_replicas: bool = False,
         load_balancing_strategy: Optional[LoadBalancingStrategy] = None,
-        cluster_error_retry_attempts: int = 3,
+        cluster_error_retry_attempts: int = DEFAULT_RETRY_COUNT,
         reinitialize_steps: int = 5,
         retry: Optional[Retry] = None,
         lock=None,
@@ -3433,7 +3438,9 @@ class ClusterPipeline(RedisCluster):
             self.retry = retry
         else:
             self.retry = Retry(
-                backoff=ExponentialWithJitterBackoff(base=1, cap=10),
+                backoff=ExponentialWithJitterBackoff(
+                    base=DEFAULT_RETRY_BASE, cap=DEFAULT_RETRY_CAP
+                ),
                 retries=cluster_error_retry_attempts,
             )
 
@@ -4028,7 +4035,7 @@ class PipelineStrategy(AbstractStrategy):
 
         It will try the number of times specified by
         the retries in config option "self.retry"
-        which defaults to 3 unless manually configured.
+        which defaults to 10 unless manually configured.
 
         If it reaches the number of times, the command will
         raises ClusterDownException.

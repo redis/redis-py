@@ -43,6 +43,11 @@ except ImportError:
 
 from importlib import metadata
 
+# Shared marker for omitted arguments, especially where None is a valid
+# explicit value. Import this object from redis.utils instead of creating local
+# sentinels, and compare it by identity only (`is` / `is not`).
+SENTINEL = object()
+
 
 def from_url(url: str, **kwargs: Any) -> "Redis":
     """

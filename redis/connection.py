@@ -32,8 +32,13 @@ from redis.cache import (
     CacheProxy,
 )
 
+from ._defaults import (
+    DEFAULT_SOCKET_CONNECT_TIMEOUT,
+    DEFAULT_SOCKET_READ_SIZE,
+    DEFAULT_SOCKET_TIMEOUT,
+    get_default_socket_keepalive_options,
+)
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
-from ._parsers.socket import SENTINEL
 from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
@@ -84,6 +89,7 @@ from .utils import (
     CRYPTOGRAPHY_AVAILABLE,
     DEFAULT_RESP_VERSION,
     HIREDIS_AVAILABLE,
+    SENTINEL,
     SSL_AVAILABLE,
     check_protocol_version,
     compare_versions,
@@ -234,7 +240,9 @@ class ConnectionInterface:
         pass
 
     @abstractmethod
-    def can_read(self, timeout=0):
+    def can_read(self, timeout: float = 0) -> bool:
+        # TODO: Rename this API; it detects pending data or dirty/closed
+        # connection state, not only whether application data can be read.
         pass
 
     @abstractmethod
@@ -591,12 +599,13 @@ class MaintNotificationsAbstractConnection:
         # When the maint_notifications_config enabled mode is "auto",
         # we just log a warning if the handshake fails
         # When the mode is enabled=True, we raise an exception in case of failure
+        host = getattr(self, "host", None)
         if (
             self.get_protocol() not in [2, "2"]
             and self.maint_notifications_config
             and self.maint_notifications_config.enabled
             and self._maint_notifications_connection_handler
-            and hasattr(self, "host")
+            and host is not None
         ):
             self._enable_maintenance_notifications(
                 maint_notifications_config=self.maint_notifications_config,
@@ -784,20 +793,20 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         self,
         db: int = 0,
         password: Optional[str] = None,
-        socket_timeout: Optional[float] = None,
-        socket_connect_timeout: Optional[float] = None,
+        socket_timeout: Optional[float] = DEFAULT_SOCKET_TIMEOUT,
+        socket_connect_timeout: Optional[float] = DEFAULT_SOCKET_CONNECT_TIMEOUT,
         retry_on_timeout: bool = False,
         retry_on_error: Union[Iterable[Type[Exception]], object] = SENTINEL,
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
         decode_responses: bool = False,
         parser_class=DefaultParser,
-        socket_read_size: int = 65536,
+        socket_read_size: int = DEFAULT_SOCKET_READ_SIZE,
         health_check_interval: int = 0,
         client_name: Optional[str] = None,
-        lib_name: Optional[str] = None,
-        lib_version: Optional[str] = None,
-        driver_info: Optional[DriverInfo] = None,
+        lib_name: Union[Optional[str], object] = SENTINEL,
+        lib_version: Union[Optional[str], object] = SENTINEL,
+        driver_info: Union[Optional[DriverInfo], object] = SENTINEL,
         username: Optional[str] = None,
         retry: Union[Any, None] = None,
         redis_connect_func: Optional[Callable[[], None]] = None,
@@ -832,7 +841,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         driver_info : DriverInfo, optional
             Driver metadata for CLIENT SETINFO. If provided, lib_name and lib_version
             are ignored. If not provided, a DriverInfo will be created from lib_name
-            and lib_version (or defaults if those are also None).
+            and lib_version. Explicit None disables CLIENT SETINFO.
         lib_name : str, optional
             **Deprecated.** Use driver_info instead. Library name for CLIENT SETINFO.
         lib_version : str, optional
@@ -853,7 +862,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         self.db = db
         self.client_name = client_name
 
-        # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version
+        # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version.
         self.driver_info = resolve_driver_info(driver_info, lib_name, lib_version)
 
         self.credential_provider = credential_provider
@@ -1329,8 +1338,10 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             check_health=kwargs.get("check_health", True),
         )
 
-    def can_read(self, timeout=0):
+    def can_read(self, timeout: float = 0) -> bool:
         """Poll the socket to see if there's data that can be read."""
+        # TODO: Rename this API; it detects pending data or dirty/closed
+        # connection state, not only whether application data can be read.
         sock = self._sock
         if not sock:
             self.connect()
@@ -1490,14 +1501,31 @@ class Connection(AbstractConnection):
         self,
         host="localhost",
         port=6379,
-        socket_keepalive=False,
-        socket_keepalive_options=None,
+        socket_keepalive=True,
+        socket_keepalive_options=SENTINEL,
         socket_type=0,
         **kwargs,
     ):
+        """
+        Initialize a TCP connection.
+
+        Parameters
+        ----------
+        socket_keepalive : bool
+            If `True`, TCP keepalive is enabled for TCP socket connections.
+        socket_keepalive_options : Mapping[int, int | bytes] | object | None
+            Mapping of TCP keepalive socket option constants to values, for
+            example `{socket.TCP_KEEPIDLE: 30}`. If left unspecified, redis-py
+            uses TCP keepalive defaults when `socket_keepalive` is enabled:
+            idle 30 seconds, interval 5 seconds, and 3 probes. Platform-specific
+            options that are not available are skipped. Pass `None` or `{}` to
+            avoid setting additional TCP keepalive options.
+        """
         self._host = host
         self.port = int(port)
         self.socket_keepalive = socket_keepalive
+        if socket_keepalive_options is SENTINEL:
+            socket_keepalive_options = get_default_socket_keepalive_options()
         self.socket_keepalive_options = socket_keepalive_options or {}
         self.socket_type = socket_type
         super().__init__(**kwargs)
@@ -1711,7 +1739,14 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
                 with self._pool_lock:
                     while entry.connection_ref.can_read():
-                        entry.connection_ref.read_response(push_request=True)
+                        try:
+                            entry.connection_ref.read_response(
+                                push_request=True,
+                                timeout=0,
+                                disconnect_on_error=False,
+                            )
+                        except TimeoutError:
+                            break
 
                 # Re-check: if the entry was invalidated during the drain,
                 # fall through to send the command over the network.
@@ -1733,7 +1768,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         # read-only command that not yet cached.
         self._conn.send_command(*args, **kwargs)
 
-    def can_read(self, timeout=0):
+    def can_read(self, timeout: float = 0) -> bool:
+        # TODO: Rename this API; it detects pending data or dirty/closed
+        # connection state, not only whether application data can be read.
         return self._conn.can_read(timeout)
 
     def read_response(
@@ -1935,7 +1972,12 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
     def _process_pending_invalidations(self):
         while self.can_read():
-            self._conn.read_response(push_request=True)
+            try:
+                self._conn.read_response(
+                    push_request=True, timeout=0, disconnect_on_error=False
+                )
+            except TimeoutError:
+                break
 
     def _on_invalidation_callback(self, data: List[Union[str, Optional[List[bytes]]]]):
         with self._cache_lock:
@@ -2142,7 +2184,7 @@ class SSLConnection(Connection):
 class UnixDomainSocketConnection(AbstractConnection):
     "Manages UDS communication to and from a Redis server"
 
-    def __init__(self, path="", socket_timeout=None, **kwargs):
+    def __init__(self, path="", socket_timeout=DEFAULT_SOCKET_TIMEOUT, **kwargs):
         super().__init__(**kwargs)
         self.path = path
         self.socket_timeout = socket_timeout
@@ -2203,6 +2245,7 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "db": int,
     "socket_timeout": float,
     "socket_connect_timeout": float,
+    "socket_read_size": int,
     "socket_keepalive": to_bool,
     "retry_on_timeout": to_bool,
     "retry_on_error": list,
@@ -2515,10 +2558,10 @@ class MaintNotificationsAbstractConnectionPool:
                 {
                     "orig_host_address": self.connection_kwargs.get("host"),
                     "orig_socket_timeout": self.connection_kwargs.get(
-                        "socket_timeout", None
+                        "socket_timeout", DEFAULT_SOCKET_TIMEOUT
                     ),
                     "orig_socket_connect_timeout": self.connection_kwargs.get(
-                        "socket_connect_timeout", None
+                        "socket_connect_timeout", DEFAULT_SOCKET_CONNECT_TIMEOUT
                     ),
                 }
             )
@@ -2835,7 +2878,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
         **connection_kwargs,
     ):
-        max_connections = max_connections or 2**31
+        max_connections = max_connections or 100
         if not isinstance(max_connections, int) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
 
@@ -2844,6 +2887,28 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         self.max_connections = max_connections
         self.cache = None
         self._cache_factory = cache_factory
+
+        try:
+            supports_maint_notifications = issubclass(
+                connection_class, MaintNotificationsAbstractConnection
+            )
+            is_unix_domain_socket_connection = issubclass(
+                connection_class, UnixDomainSocketConnection
+            )
+        except TypeError:
+            supports_maint_notifications = False
+            is_unix_domain_socket_connection = False
+
+        if is_unix_domain_socket_connection or not supports_maint_notifications:
+            if (
+                maint_notifications_config
+                and maint_notifications_config.enabled is True
+            ):
+                raise RedisError(
+                    "Maintenance notifications are not supported with "
+                    f"{connection_class}"
+                )
+            maint_notifications_config = MaintNotificationsConfig(enabled=False)
 
         self._event_dispatcher = self._connection_kwargs.get("event_dispatcher", None)
         if self._event_dispatcher is None:
