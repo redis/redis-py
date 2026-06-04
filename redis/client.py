@@ -398,10 +398,21 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
+                if (
+                    maint_notifications_config
+                    and maint_notifications_config.enabled is True
+                ):
+                    raise RedisError(
+                        "Maintenance notifications are not supported with Unix "
+                        "domain socket connections"
+                    )
                 kwargs.update(
                     {
                         "path": unix_socket_path,
                         "connection_class": UnixDomainSocketConnection,
+                        "maint_notifications_config": MaintNotificationsConfig(
+                            enabled=False
+                        ),
                     }
                 )
             else:
