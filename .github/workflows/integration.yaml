@@ -289,7 +289,7 @@ jobs:
       - name: Run installed unit tests
         env:
           CLIENT_LIBS_TEST_IMAGE_TAG: ${{ env.CURRENT_REDIS_VERSION }}
-          CLIENT_LIBS_TEST_STACK_IMAGE_TAG: ${{ env.CURRENT_CLIENT_LIBS_TEST_STACK_IMAGE_TAG }}
+          CLIENT_LIBS_TEST_STACK_IMAGE_TAG: ${{ env.CURRENT_REDIS_VERSION }}
         run: |
           bash .github/workflows/install_and_test.sh ${{ matrix.extension }}
 
