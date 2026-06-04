@@ -397,16 +397,16 @@ class JSONCommands:
     @overload
     def get(
         self: SyncClientProtocol, name: str, *args, no_escape: bool | None = False
-    ) -> Any | None: ...
+    ) -> JsonType | None: ...
 
     @overload
     def get(
         self: AsyncClientProtocol, name: str, *args, no_escape: bool | None = False
-    ) -> Awaitable[Any | None]: ...
+    ) -> Awaitable[JsonType | None]: ...
 
     def get(self, name: str, *args, no_escape: bool | None = False) -> (
-        Any | None
-    ) | Awaitable[Any | None]:
+        JsonType | None
+    ) | Awaitable[JsonType | None]:
         """
         Get the object stored as a JSON value at key ``name``.
 
@@ -833,17 +833,19 @@ class JSONCommands:
         return self.execute_command("JSON.DEBUG", *pieces)
 
     @overload
-    def jsonget(self: SyncClientProtocol, *args, **kwargs) -> Any | None: ...
+    def jsonget(self: SyncClientProtocol, *args, **kwargs) -> JsonType | None: ...
 
     @overload
     def jsonget(
         self: AsyncClientProtocol, *args, **kwargs
-    ) -> Awaitable[Any | None]: ...
+    ) -> Awaitable[JsonType | None]: ...
 
     @deprecated_function(
         version="4.0.0", reason="redisjson-py supported this, call get directly."
     )
-    def jsonget(self, *args, **kwargs) -> (Any | None) | Awaitable[Any | None]:
+    def jsonget(self, *args, **kwargs) -> (JsonType | None) | Awaitable[
+        JsonType | None
+    ]:
         return self.get(*args, **kwargs)
 
     @overload

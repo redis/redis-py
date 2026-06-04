@@ -53,6 +53,7 @@ from redis.sentinel import (
     SentinelManagedConnection,
     SentinelManagedSSLConnection,
 )
+from redis.typing import Subscription
 from redis.utils import from_url
 
 
@@ -115,6 +116,7 @@ __all__ = [
     "SSLConnection",
     "UsernamePasswordCredentialProvider",
     "StrictRedis",
+    "Subscription",
     "TimeoutError",
     "UnixDomainSocketConnection",
     "WatchError",

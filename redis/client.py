@@ -18,9 +18,16 @@ from typing import (
     Union,
 )
 
+from redis._defaults import (
+    DEFAULT_RETRY_BASE,
+    DEFAULT_RETRY_CAP,
+    DEFAULT_RETRY_COUNT,
+    DEFAULT_SOCKET_CONNECT_TIMEOUT,
+    DEFAULT_SOCKET_READ_SIZE,
+    DEFAULT_SOCKET_TIMEOUT,
+)
 from redis._parsers.encoders import Encoder
 from redis._parsers.helpers import bool_ok, get_response_callbacks
-from redis._parsers.socket import SENTINEL
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.cache import CacheConfig, CacheInterface
 from redis.commands import (
@@ -30,7 +37,7 @@ from redis.commands import (
     list_or_args,
 )
 from redis.commands.core import Script
-from redis.commands.helpers import partition_pubsub_subscriptions_by_handler
+from redis.commands.helpers import parse_pubsub_subscriptions, pubsub_subscription_args
 from redis.connection import (
     AbstractConnection,
     Connection,
@@ -67,7 +74,9 @@ from redis.observability.recorder import (
     record_pubsub_message,
 )
 from redis.retry import Retry
+from redis.typing import ChannelT, PubSubHandler, Subscription
 from redis.utils import (
+    SENTINEL,
     _set_info_logger,
     check_protocol_version,
     deprecated_args,
@@ -235,57 +244,60 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         host: str = "localhost",
         port: int = 6379,
         db: int = 0,
-        password: Optional[str] = None,
-        socket_timeout: Optional[float] = None,
-        socket_connect_timeout: Optional[float] = None,
-        socket_keepalive: Optional[bool] = None,
-        socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
-        connection_pool: Optional[ConnectionPool] = None,
-        unix_socket_path: Optional[str] = None,
+        password: str | None = None,
+        socket_timeout: float | None = DEFAULT_SOCKET_TIMEOUT,
+        socket_connect_timeout: float | None = DEFAULT_SOCKET_CONNECT_TIMEOUT,
+        socket_read_size: int = DEFAULT_SOCKET_READ_SIZE,
+        socket_keepalive: bool | None = True,
+        socket_keepalive_options: Mapping[int, int | bytes] | object | None = SENTINEL,
+        connection_pool: ConnectionPool | None = None,
+        unix_socket_path: str | None = None,
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
         decode_responses: bool = False,
         retry_on_timeout: bool = False,
         retry: Retry = Retry(
-            backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
+            backoff=ExponentialWithJitterBackoff(
+                base=DEFAULT_RETRY_BASE, cap=DEFAULT_RETRY_CAP
+            ),
+            retries=DEFAULT_RETRY_COUNT,
         ),
-        retry_on_error: Optional[List[Type[Exception]]] = None,
+        retry_on_error: List[Type[Exception]] | None = None,
         ssl: bool = False,
-        ssl_keyfile: Optional[str] = None,
-        ssl_certfile: Optional[str] = None,
-        ssl_cert_reqs: Union[str, "ssl.VerifyMode"] = "required",
-        ssl_include_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
-        ssl_exclude_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
-        ssl_ca_certs: Optional[str] = None,
-        ssl_ca_path: Optional[str] = None,
-        ssl_ca_data: Optional[str] = None,
+        ssl_keyfile: str | None = None,
+        ssl_certfile: str | None = None,
+        ssl_cert_reqs: "str | ssl.VerifyMode" = "required",
+        ssl_include_verify_flags: List["ssl.VerifyFlags"] | None = None,
+        ssl_exclude_verify_flags: List["ssl.VerifyFlags"] | None = None,
+        ssl_ca_certs: str | None = None,
+        ssl_ca_path: str | None = None,
+        ssl_ca_data: str | None = None,
         ssl_check_hostname: bool = True,
-        ssl_password: Optional[str] = None,
+        ssl_password: str | None = None,
         ssl_validate_ocsp: bool = False,
         ssl_validate_ocsp_stapled: bool = False,
-        ssl_ocsp_context: Optional["OpenSSL.SSL.Context"] = None,
-        ssl_ocsp_expected_cert: Optional[str] = None,
-        ssl_min_version: Optional["ssl.TLSVersion"] = None,
-        ssl_ciphers: Optional[str] = None,
-        max_connections: Optional[int] = None,
+        ssl_ocsp_context: "OpenSSL.SSL.Context | None" = None,
+        ssl_ocsp_expected_cert: str | None = None,
+        ssl_min_version: "ssl.TLSVersion | None" = None,
+        ssl_ciphers: str | None = None,
+        max_connections: int | None = None,
         single_connection_client: bool = False,
         health_check_interval: int = 0,
-        client_name: Optional[str] = None,
-        lib_name: Optional[str] = None,
-        lib_version: Optional[str] = None,
-        driver_info: Optional["DriverInfo"] = None,
-        username: Optional[str] = None,
-        redis_connect_func: Optional[Callable[[], None]] = None,
-        credential_provider: Optional[CredentialProvider] = None,
-        protocol: Optional[int] = None,
+        client_name: str | None = None,
+        lib_name: str | object | None = SENTINEL,
+        lib_version: str | object | None = SENTINEL,
+        driver_info: DriverInfo | object | None = SENTINEL,
+        username: str | None = None,
+        redis_connect_func: Callable[[], None] | None = None,
+        credential_provider: CredentialProvider | None = None,
+        protocol: int | None = None,
         legacy_responses: bool = True,
-        cache: Optional[CacheInterface] = None,
-        cache_config: Optional[CacheConfig] = None,
-        event_dispatcher: Optional[EventDispatcher] = None,
-        maint_notifications_config: Optional[MaintNotificationsConfig] = None,
-        oss_cluster_maint_notifications_handler: Optional[
-            OSSMaintNotificationsHandler
-        ] = None,
+        cache: CacheInterface | None = None,
+        cache_config: CacheConfig | None = None,
+        event_dispatcher: EventDispatcher | None = None,
+        maint_notifications_config: MaintNotificationsConfig | None = None,
+        oss_cluster_maint_notifications_handler: OSSMaintNotificationsHandler
+        | None = None,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -310,6 +322,17 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         Args:
 
+        socket_keepalive:
+            if `True`, TCP keepalive is enabled for TCP socket connections.
+            Argument is ignored when connection_pool is provided.
+        socket_keepalive_options:
+            mapping of TCP keepalive socket option constants to values, for
+            example `{socket.TCP_KEEPIDLE: 30}`. If left unspecified, redis-py
+            uses TCP keepalive defaults when `socket_keepalive` is enabled:
+            idle 30 seconds, interval 5 seconds, and 3 probes. Platform-specific
+            options that are not available are skipped. Pass `None` or `{}` to
+            avoid setting additional TCP keepalive options. Argument is ignored
+            when connection_pool is provided.
         single_connection_client:
             if `True`, connection pool is not used. In that case `Redis`
             instance use is not thread safe.
@@ -320,6 +343,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             Optional DriverInfo object to identify upstream libraries.
             If provided, lib_name and lib_version are ignored.
             If not provided, a DriverInfo will be created from lib_name and lib_version.
+            Explicit None disables CLIENT SETINFO.
             Argument is ignored when connection_pool is provided.
         lib_name:
             **Deprecated.** Use driver_info instead. Library name for CLIENT SETINFO.
@@ -347,7 +371,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             if not retry_on_error:
                 retry_on_error = []
 
-            # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version
+            # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version.
             computed_driver_info = resolve_driver_info(
                 driver_info, lib_name, lib_version
             )
@@ -357,6 +381,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "username": username,
                 "password": password,
                 "socket_timeout": socket_timeout,
+                "socket_read_size": socket_read_size,
                 "encoding": encoding,
                 "encoding_errors": encoding_errors,
                 "decode_responses": decode_responses,
@@ -373,10 +398,21 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
+                if (
+                    maint_notifications_config
+                    and maint_notifications_config.enabled is True
+                ):
+                    raise RedisError(
+                        "Maintenance notifications are not supported with Unix "
+                        "domain socket connections"
+                    )
                 kwargs.update(
                     {
                         "path": unix_socket_path,
                         "connection_class": UnixDomainSocketConnection,
+                        "maint_notifications_config": MaintNotificationsConfig(
+                            enabled=False
+                        ),
                     }
                 )
             else:
@@ -1011,11 +1047,11 @@ class PubSub:
         self.reset()
 
     def _resubscribe(self, subscribed, subscribe_fn) -> None:
-        subscriptions_without_handlers, subscriptions_with_handlers = (
-            partition_pubsub_subscriptions_by_handler(subscribed, self.encoder)
-        )
-        if subscriptions_without_handlers or subscriptions_with_handlers:
-            subscribe_fn(*subscriptions_without_handlers, **subscriptions_with_handlers)
+        # Replay handler-backed subscriptions as positional Subscription objects
+        # so binary names never need to be decoded into keyword argument keys.
+        subscriptions = pubsub_subscription_args(subscribed)
+        if subscriptions:
+            subscribe_fn(*subscriptions)
 
     def _resubscribe_shard_channels(self) -> None:
         self._resubscribe(self.shard_channels, self.ssubscribe)
@@ -1277,18 +1313,20 @@ class PubSub:
         decode = self.encoder.decode
         return {decode(encode(k)): v for k, v in data.items()}
 
-    def psubscribe(self, *args, **kwargs):
+    def psubscribe(
+        self, *args: ChannelT | Subscription, **kwargs: PubSubHandler
+    ) -> None:
         """
-        Subscribe to channel patterns. Patterns supplied as keyword arguments
-        expect a pattern name as the key and a callable as the value. A
-        pattern's callable will be invoked automatically when a message is
-        received on that pattern rather than producing a message via
-        ``listen()``.
+        Subscribe to channel patterns.
+        Patterns supplied as keyword arguments expect a pattern name as the
+        key and a callable as the value.
+        ``Subscription`` objects can also be supplied positionally with an
+        optional handler.
+        A pattern's callable will be invoked automatically
+        when a message is received on that pattern rather than producing a
+        message via ``listen()``.
         """
-        if args:
-            args = list_or_args(args[0], args[1:])
-        new_patterns = dict.fromkeys(args)
-        new_patterns.update(kwargs)
+        new_patterns = parse_pubsub_subscriptions(args, kwargs)
         ret_val = self.execute_command("PSUBSCRIBE", *new_patterns.keys())
         # update the patterns dict AFTER we send the command. we don't want to
         # subscribe twice to these patterns, once for the command and again
@@ -1316,18 +1354,20 @@ class PubSub:
         self.pending_unsubscribe_patterns.update(patterns)
         return self.execute_command("PUNSUBSCRIBE", *args)
 
-    def subscribe(self, *args, **kwargs):
+    def subscribe(
+        self, *args: ChannelT | Subscription, **kwargs: PubSubHandler
+    ) -> None:
         """
-        Subscribe to channels. Channels supplied as keyword arguments expect
-        a channel name as the key and a callable as the value. A channel's
-        callable will be invoked automatically when a message is received on
-        that channel rather than producing a message via ``listen()`` or
-        ``get_message()``.
+        Subscribe to channels.
+        Channels supplied as keyword arguments expect
+        a channel name as the key and a callable as the value.
+        ``Subscription`` objects can also be supplied positionally with an
+        optional handler.
+        A channel's callable will be invoked automatically
+        when a message is received on that channel rather than producing a
+        message via ``listen()`` or ``get_message()``.
         """
-        if args:
-            args = list_or_args(args[0], args[1:])
-        new_channels = dict.fromkeys(args)
-        new_channels.update(kwargs)
+        new_channels = parse_pubsub_subscriptions(args, kwargs)
         ret_val = self.execute_command("SUBSCRIBE", *new_channels.keys())
         # update the channels dict AFTER we send the command. we don't want to
         # subscribe twice to these channels, once for the command and again
@@ -1355,18 +1395,23 @@ class PubSub:
         self.pending_unsubscribe_channels.update(channels)
         return self.execute_command("UNSUBSCRIBE", *args)
 
-    def ssubscribe(self, *args, target_node=None, **kwargs):
+    def ssubscribe(
+        self,
+        *args: ChannelT | Subscription,
+        target_node: Any = None,
+        **kwargs: PubSubHandler,
+    ) -> None:
         """
         Subscribes the client to the specified shard channels.
         Channels supplied as keyword arguments expect a channel name as the key
-        and a callable as the value. A channel's callable will be invoked automatically
-        when a message is received on that channel rather than producing a message via
-        ``listen()`` or ``get_sharded_message()``.
+        and a callable as the value.
+        ``Subscription`` objects can also be supplied positionally
+        with an optional handler.
+        A channel's callable will be invoked automatically when a message
+        is received on that channel rather than producing a message
+        via ``listen()`` or ``get_sharded_message()``.
         """
-        if args:
-            args = list_or_args(args[0], args[1:])
-        new_s_channels = dict.fromkeys(args)
-        new_s_channels.update(kwargs)
+        new_s_channels = parse_pubsub_subscriptions(args, kwargs)
         ret_val = self.execute_command("SSUBSCRIBE", *new_s_channels.keys())
         # update the s_channels dict AFTER we send the command. we don't want to
         # subscribe twice to these channels, once for the command and again

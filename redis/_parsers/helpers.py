@@ -771,6 +771,12 @@ def parse_xautoclaim(response, **options):
     return response
 
 
+def parse_arinfo(response, **options):
+    if isinstance(response, list):
+        return pairs_to_dict(response, decode_keys=True)
+    return {str_if_bytes(k): v for k, v in response.items()}
+
+
 def parse_xinfo_stream(response, **options):
     if isinstance(response, list):
         data = pairs_to_dict(response, decode_keys=True)
@@ -1127,7 +1133,7 @@ def parse_geosearch_generic(response, **options):
     """
     try:
         if options["store"] or options["store_dist"]:
-            # `store` and `store_dist` cant be combined
+            # `store` and `store_dist` can't be combined
             # with other command arguments.
             # relevant to 'GEORADIUS' and 'GEORADIUSBYMEMBER'
             return response

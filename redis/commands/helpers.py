@@ -2,7 +2,6 @@ import copy
 import random
 import string
 from typing import (
-    TYPE_CHECKING,
     Any,
     Callable,
     Dict,
@@ -10,23 +9,19 @@ from typing import (
     List,
     Mapping,
     Optional,
-    Tuple,
 )
 
 import redis
-from redis.typing import ChannelT, KeysT, KeyT
-
-if TYPE_CHECKING:
-    from redis._parsers import Encoder
+from redis.typing import ChannelT, PubSubHandler, Subscription
 
 
-def list_or_args(keys: KeysT, args: Tuple[KeyT, ...]) -> List[KeyT]:
+def list_or_args(keys: Any, args: Iterable[Any] | None) -> List[Any]:
     # returns a single new list combining keys and args
     try:
         iter(keys)
-        # a string or bytes instance can be iterated, but indicates
+        # a string or bytes-like instance can be iterated, but indicates
         # keys wasn't passed as a list
-        if isinstance(keys, (bytes, str)):
+        if isinstance(keys, (bytes, str, bytearray, memoryview)):
             keys = [keys]
         else:
             keys = list(keys)
@@ -35,6 +30,29 @@ def list_or_args(keys: KeysT, args: Tuple[KeyT, ...]) -> List[KeyT]:
     if args:
         keys.extend(args)
     return keys
+
+
+def parse_pubsub_subscriptions(
+    args: tuple[Any, ...], kwargs: Mapping[str, PubSubHandler]
+) -> dict[ChannelT, PubSubHandler | None]:
+    parsed_args = list_or_args(args[0], args[1:]) if args else []
+    subscriptions: dict[ChannelT, PubSubHandler | None] = {}
+    for arg in parsed_args:
+        if isinstance(arg, Subscription):
+            subscriptions[arg.name] = arg.handler
+        else:
+            subscriptions[arg] = None
+    subscriptions.update(kwargs)
+    return subscriptions
+
+
+def pubsub_subscription_args(
+    subscriptions: Mapping[ChannelT, PubSubHandler | None],
+) -> list[ChannelT | Subscription]:
+    return [
+        channel if handler is None else Subscription(channel, handler)
+        for channel, handler in subscriptions.items()
+    ]
 
 
 def nativestr(x):
@@ -183,27 +201,3 @@ def at_most_one_value_set(iterable: Iterable[Any]):
     """
     values = (bool(x) for x in iterable)
     return sum(values) <= 1
-
-
-def partition_pubsub_subscriptions_by_handler(
-    subscriptions: Mapping[ChannelT, Callable | None],
-    encoder: "Encoder",
-) -> tuple[list[ChannelT], dict[str, Callable]]:
-    """Partition a PubSub ``{name: handler|None}`` mapping into the positional
-    and keyword arguments expected by ``[s|p]subscribe``.
-
-    For python3, we can't pass bytestrings as keyword arguments, so names
-    with a handler are decoded (keyword args). Names subscribed without a
-    callback are stored with a ``None`` handler and may have binary values
-    that are not valid in the current encoding (e.g. arbitrary bytes that
-    are not valid UTF-8); they are returned as raw keys (positional args)
-    so that no decoding is required.
-    """
-    subscriptions_without_handlers: list[ChannelT] = []
-    subscriptions_with_handlers: dict[str, Callable] = {}
-    for k, v in subscriptions.items():
-        if v is not None:
-            subscriptions_with_handlers[encoder.decode(k, force=True)] = v
-        else:
-            subscriptions_without_handlers.append(k)
-    return subscriptions_without_handlers, subscriptions_with_handlers

@@ -1,16 +1,16 @@
 from dataclasses import dataclass
 import logging
+from typing import List, Optional, cast
+from unittest.mock import patch
 
 import pytest
-from typing import List, Optional, cast
-
 from redis import ConnectionPool, RedisCluster
+from redis.cache import CacheConfig
 from redis.cluster import ClusterNode
 from redis.connection import (
     BlockingConnectionPool,
 )
 from redis.maint_notifications import MaintNotificationsConfig, MaintenanceState
-from redis.cache import CacheConfig
 from tests.conftest import skip_if_server_version_lt
 from tests.maint_notifications.proxy_server_helpers import (
     ProxyInterceptorHelper,
@@ -28,6 +28,8 @@ NODE_PORT_NEW = 15382
 NODE_IP_LOCALHOST = "127.0.0.1"
 NODE_IP_PROXY = "0.0.0.0"
 
+DEFAULT_SOCKET_TIMEOUT = 5
+
 # Initial cluster node configuration for proxy-based tests
 PROXY_CLUSTER_NODES = [
     ClusterNode("127.0.0.1", NODE_PORT_1),
@@ -36,6 +38,10 @@ PROXY_CLUSTER_NODES = [
 ]
 
 CLUSTER_SLOTS_INTERCEPTOR_NAME = "test_topology"
+
+
+def _preserve_startup_nodes_order(_startup_nodes):
+    pass
 
 
 @pytest.mark.fixed_client
@@ -682,6 +688,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         )
         assert new_node is not None
 
+    @patch("redis.cluster.random.shuffle", new=_preserve_startup_nodes_order)
     def test_smigrating_smigrated_on_two_nodes_without_node_replacement(self):
         """Test receiving an OSS maintenance notification on two nodes without node replacement."""
         # warm up connection pools - create several connections in each pool
@@ -832,6 +839,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
             ],
         )
 
+    @patch("redis.cluster.random.shuffle", new=_preserve_startup_nodes_order)
     def test_smigrating_smigrated_on_two_nodes_with_node_replacements(self):
         """Test receiving an OSS maintenance notification on two nodes with node replacement."""
         # warm up connection pools - create several connections in each pool
@@ -1136,11 +1144,12 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         assert not pubsub.node_pubsub_mapping[node_1.name].connection._should_reconnect
         assert pubsub.node_pubsub_mapping[node_1.name].connection._sock is not None
         assert (
-            pubsub.node_pubsub_mapping[node_1.name].connection._socket_timeout is None
+            pubsub.node_pubsub_mapping[node_1.name].connection._socket_timeout
+            == DEFAULT_SOCKET_TIMEOUT
         )
         assert (
             pubsub.node_pubsub_mapping[node_1.name].connection._socket_connect_timeout
-            is None
+            == DEFAULT_SOCKET_TIMEOUT
         )
         assert (
             pubsub.node_pubsub_mapping[node_1.name].connection.maintenance_state
@@ -1244,11 +1253,12 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         assert not pubsub.node_pubsub_mapping[node_1.name].connection._should_reconnect
         assert pubsub.node_pubsub_mapping[node_1.name].connection._sock is not None
         assert (
-            pubsub.node_pubsub_mapping[node_1.name].connection._socket_timeout is None
+            pubsub.node_pubsub_mapping[node_1.name].connection._socket_timeout
+            == DEFAULT_SOCKET_TIMEOUT
         )
         assert (
             pubsub.node_pubsub_mapping[node_1.name].connection._socket_connect_timeout
-            is None
+            == DEFAULT_SOCKET_TIMEOUT
         )
         assert (
             pubsub.node_pubsub_mapping[node_1.name].connection.maintenance_state
@@ -1325,8 +1335,8 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
 
         assert not pubsub.connection._should_reconnect
         assert pubsub.connection._sock is not None
-        assert pubsub.connection._socket_timeout is None
-        assert pubsub.connection._socket_connect_timeout is None
+        assert pubsub.connection._socket_timeout == DEFAULT_SOCKET_TIMEOUT
+        assert pubsub.connection._socket_connect_timeout == DEFAULT_SOCKET_TIMEOUT
         assert pubsub.connection.maintenance_state == MaintenanceState.NONE
         # validate resubscribed
         assert pubsub.subscribed

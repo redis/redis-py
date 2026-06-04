@@ -1,5 +1,7 @@
 from enum import Enum
 
+from ..helpers import list_or_args
+
 
 class IndexType(Enum):
     """Enum of the currently supported index types."""
@@ -42,7 +44,10 @@ class IndexDefinition:
 
     def _append_prefix(self, prefix):
         """Append PREFIX."""
+        if prefix is None:
+            raise TypeError("prefix must be provided")
         if len(prefix) > 0:
+            prefix = list_or_args(prefix, [])
             self.args.append("PREFIX")
             self.args.append(len(prefix))
             for p in prefix:

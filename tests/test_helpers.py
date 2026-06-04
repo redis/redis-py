@@ -17,7 +17,7 @@ def test_list_or_args():
     a = ["some", "argument", "list"]
     assert list_or_args(k, a) == k + a
 
-    for i in ["banana", b"banana"]:
+    for i in ["banana", b"banana", bytearray(b"banana"), memoryview(b"banana")]:
         assert list_or_args(i, a) == [i] + a
 
 
