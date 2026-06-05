@@ -2230,6 +2230,86 @@ class TestPubSubTimeoutPropagation:
         msg = p.get_message(timeout=0.1)
         assert msg is None
 
+    def test_listen_with_timeout_returns_none_when_no_message(self, r):
+        """
+        Test that listen() with timeout parameter respects the timeout
+        and yields nothing when no message arrives within the timeout period.
+        Fixes redis/redis-py#4098.
+        """
+        p = r.pubsub()
+        p.subscribe("foo")
+        # Read subscription message
+        msg = wait_for_message(p, timeout=1.0)
+        assert msg is not None
+        assert msg["type"] == "subscribe"
+
+        # listen with timeout should yield nothing and return quickly
+        start = time.monotonic()
+        messages = list(p.listen(timeout=0.1))
+        elapsed = time.monotonic() - start
+        assert len(messages) == 0
+        # Verify timeout was actually respected (within reasonable bounds)
+        assert elapsed < 0.5
+
+    def test_listen_with_timeout_yields_message_when_published(self, r):
+        """
+        Test that listen() with timeout yields a message if one arrives
+        before the timeout expires.
+        Fixes redis/redis-py#4098.
+        """
+        p = r.pubsub()
+        p.subscribe("foo")
+        # Read subscription message
+        msg = wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        # Publish a message
+        r.publish("foo", "hello")
+
+        # listen with timeout should yield the message
+        messages = list(p.listen(timeout=1.0))
+        assert len(messages) == 1
+        assert messages[0]["type"] == "message"
+        assert messages[0]["data"] == b"hello"
+
+    def test_listen_timeout_none_blocks_until_message(self, r):
+        """
+        Test that listen(timeout=None) blocks indefinitely until a message arrives.
+        We test this by using a thread to publish a message after a delay.
+        Fixes redis/redis-py#4098.
+        """
+        p = r.pubsub()
+        p.subscribe("foo")
+        # Read subscription message
+        msg = wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        # Publish a message after a short delay in a thread
+        start_publishing = threading.Event()
+
+        def publish_after_delay():
+            start_publishing.wait()
+            time.sleep(0.2)
+            r.publish("foo", "delayed_message")
+
+        thread = threading.Thread(target=publish_after_delay, daemon=True)
+        thread.start()
+
+        # listen with timeout=None should block until message arrives
+        start = time.monotonic()
+        start_publishing.set()
+        messages = []
+        for msg in p.listen(timeout=None):
+            messages.append(msg)
+            break
+        elapsed = time.monotonic() - start
+        assert len(messages) == 1
+        assert messages[0]["type"] == "message"
+        assert messages[0]["data"] == b"delayed_message"
+        # Should have waited at least 0.2 seconds
+        assert elapsed >= 0.15
+        thread.join(timeout=1.0)
+
 
 @pytest.mark.onlynoncluster
 class TestPubSubBlockingListen:
