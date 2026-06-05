@@ -1430,10 +1430,18 @@ class PubSub:
         self.pending_unsubscribe_shard_channels.update(s_channels)
         return self.execute_command("SUNSUBSCRIBE", *args)
 
-    async def listen(self) -> AsyncIterator:
-        """Listen for messages on channels this client has been subscribed to"""
+    async def listen(self, timeout: Optional[float] = 0.0) -> AsyncIterator:
+        """
+        Listen for messages on channels this client has been subscribed to.
+
+        If timeout is specified, the system will wait for `timeout` seconds
+        before returning. Timeout should be specified as a floating point
+        number or None to wait indefinitely.
+        """
         while self.subscribed:
-            response = await self.handle_message(await self.parse_response(block=True))
+            response = await self.handle_message(
+                await self.parse_response(block=(timeout is None), timeout=timeout)
+            )
             if response is not None:
                 yield response
 
