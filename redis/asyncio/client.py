@@ -1469,6 +1469,8 @@ class PubSub:
                 if elapsed >= timeout:
                     break
                 remaining = timeout - elapsed
+                if remaining <= 0:
+                    break
 
     async def get_message(
         self, ignore_subscribe_messages: bool = False, timeout: Optional[float] = 0.0
