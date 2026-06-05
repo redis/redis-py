@@ -14,8 +14,7 @@ env:
   NEEDS_INFO_DAYS_BEFORE_STALE: 30
   NEEDS_INFO_DAYS_BEFORE_CLOSE: 7
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   stale:
