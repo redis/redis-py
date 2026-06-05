@@ -2,7 +2,6 @@ import asyncio
 import logging
 from typing import Any, Awaitable, Callable, List, Literal, Optional, Union
 
-from redis.asyncio.client import PubSubHandler
 from redis.asyncio.multidb.command_executor import DefaultCommandExecutor
 from redis.asyncio.multidb.config import (
     DEFAULT_GRACE_PERIOD,
@@ -25,7 +24,7 @@ from redis.multidb.exception import (
     UnhealthyDatabaseException,
 )
 from redis.observability.attributes import GeoFailoverReason
-from redis.typing import ChannelT, EncodableT, KeyT
+from redis.typing import ChannelT, EncodableT, KeyT, PubSubHandler, Subscription
 from redis.utils import experimental
 
 logger = logging.getLogger(__name__)
@@ -536,7 +535,9 @@ class PubSub:
             "execute_command", *args
         )
 
-    async def psubscribe(self, *args: ChannelT, **kwargs: PubSubHandler):
+    async def psubscribe(
+        self, *args: ChannelT | Subscription, **kwargs: PubSubHandler
+    ) -> None:
         """
         Subscribe to channel patterns. Patterns supplied as keyword arguments
         expect a pattern name as the key and a callable as the value. A
@@ -557,7 +558,9 @@ class PubSub:
             "punsubscribe", *args
         )
 
-    async def subscribe(self, *args: ChannelT, **kwargs: Callable):
+    async def subscribe(
+        self, *args: ChannelT | Subscription, **kwargs: PubSubHandler
+    ) -> None:
         """
         Subscribe to channels. Channels supplied as keyword arguments expect
         a channel name as the key and a callable as the value. A channel's

@@ -36,6 +36,14 @@ if TYPE_CHECKING:
         AsyncClusterKeyspaceNotifications,
     )
 
+from redis._defaults import (
+    DEFAULT_RETRY_BASE,
+    DEFAULT_RETRY_CAP,
+    DEFAULT_RETRY_COUNT,
+    DEFAULT_SOCKET_CONNECT_TIMEOUT,
+    DEFAULT_SOCKET_READ_SIZE,
+    DEFAULT_SOCKET_TIMEOUT,
+)
 from redis._parsers import AsyncCommandsParser, Encoder
 from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
 from redis._parsers.helpers import get_response_callbacks
@@ -72,7 +80,7 @@ from redis.cluster import (
     parse_cluster_slots,
 )
 from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
-from redis.commands.helpers import list_or_args
+from redis.commands.helpers import list_or_args, parse_pubsub_subscriptions
 from redis.commands.policies import AsyncPolicyResolver, AsyncStaticPolicyResolver
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.credentials import CredentialProvider
@@ -103,8 +111,16 @@ from redis.exceptions import (
     TryAgainError,
     WatchError,
 )
-from redis.typing import AnyKeyT, EncodableT, KeyT
+from redis.typing import (
+    AnyKeyT,
+    ChannelT,
+    EncodableT,
+    KeyT,
+    PubSubHandler,
+    Subscription,
+)
 from redis.utils import (
+    SENTINEL,
     SSL_AVAILABLE,
     deprecated_args,
     deprecated_function,
@@ -210,6 +226,16 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         | Maximum number of connections per node. If there are no free connections & the
           maximum number of connections are already created, a
           :class:`~.MaxConnectionsError` is raised.
+    :param socket_keepalive:
+        | If ``True``, TCP keepalive is enabled for TCP socket connections.
+    :param socket_keepalive_options:
+        | Mapping of TCP keepalive socket option constants to values, for
+          example ``{socket.TCP_KEEPIDLE: 30}``. If left unspecified, redis-py
+          uses TCP keepalive defaults when ``socket_keepalive`` is enabled:
+          idle 30 seconds, interval 5 seconds, and 3 probes.
+          Platform-specific options that are not available are skipped.
+          Pass ``None`` or ``{}`` to avoid setting additional TCP keepalive
+          options.
     :param address_remap:
         | An optional callable which, when provided with an internal network
           address of a node, e.g. a `(host, port)` tuple, will return the address
@@ -302,55 +328,56 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
     )
     def __init__(
         self,
-        host: Optional[str] = None,
-        port: Union[str, int] = 6379,
+        host: str | None = None,
+        port: str | int = 6379,
         # Cluster related kwargs
-        startup_nodes: Optional[List["ClusterNode"]] = None,
+        startup_nodes: List["ClusterNode"] | None = None,
         require_full_coverage: bool = True,
         read_from_replicas: bool = False,
-        load_balancing_strategy: Optional[LoadBalancingStrategy] = None,
+        load_balancing_strategy: LoadBalancingStrategy | None = None,
         dynamic_startup_nodes: bool = True,
         reinitialize_steps: int = 5,
-        cluster_error_retry_attempts: int = 3,
-        max_connections: int = 2**31,
-        retry: Optional["Retry"] = None,
-        retry_on_error: Optional[List[Type[Exception]]] = None,
+        cluster_error_retry_attempts: int = DEFAULT_RETRY_COUNT,
+        max_connections: int = 100,
+        retry: Retry | None = None,
+        retry_on_error: List[Type[Exception]] | None = None,
         # Client related kwargs
-        db: Union[str, int] = 0,
-        path: Optional[str] = None,
-        credential_provider: Optional[CredentialProvider] = None,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
-        client_name: Optional[str] = None,
-        lib_name: Optional[str] = None,
-        lib_version: Optional[str] = None,
-        driver_info: Optional["DriverInfo"] = None,
+        db: str | int = 0,
+        path: str | None = None,
+        credential_provider: CredentialProvider | None = None,
+        username: str | None = None,
+        password: str | None = None,
+        client_name: str | None = None,
+        lib_name: str | object | None = SENTINEL,
+        lib_version: str | object | None = SENTINEL,
+        driver_info: DriverInfo | object | None = SENTINEL,
         # Encoding related kwargs
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
         decode_responses: bool = False,
         # Connection related kwargs
         health_check_interval: float = 0,
-        socket_connect_timeout: Optional[float] = None,
-        socket_keepalive: bool = False,
-        socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
-        socket_timeout: Optional[float] = None,
+        socket_timeout: float | None = DEFAULT_SOCKET_TIMEOUT,
+        socket_connect_timeout: float | None = DEFAULT_SOCKET_CONNECT_TIMEOUT,
+        socket_read_size: int = DEFAULT_SOCKET_READ_SIZE,
+        socket_keepalive: bool = True,
+        socket_keepalive_options: Mapping[int, int | bytes] | object | None = SENTINEL,
         # SSL related kwargs
         ssl: bool = False,
-        ssl_ca_certs: Optional[str] = None,
-        ssl_ca_data: Optional[str] = None,
-        ssl_cert_reqs: Union[str, VerifyMode] = "required",
-        ssl_include_verify_flags: Optional[List[VerifyFlags]] = None,
-        ssl_exclude_verify_flags: Optional[List[VerifyFlags]] = None,
-        ssl_certfile: Optional[str] = None,
+        ssl_ca_certs: str | None = None,
+        ssl_ca_data: str | None = None,
+        ssl_cert_reqs: "str | VerifyMode" = "required",
+        ssl_include_verify_flags: List["VerifyFlags"] | None = None,
+        ssl_exclude_verify_flags: List["VerifyFlags"] | None = None,
+        ssl_certfile: str | None = None,
         ssl_check_hostname: bool = True,
-        ssl_keyfile: Optional[str] = None,
-        ssl_min_version: Optional[TLSVersion] = None,
-        ssl_ciphers: Optional[str] = None,
-        protocol: Optional[int] = None,
+        ssl_keyfile: str | None = None,
+        ssl_min_version: "TLSVersion | None" = None,
+        ssl_ciphers: str | None = None,
+        protocol: int | None = None,
         legacy_responses: bool = True,
-        address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
-        event_dispatcher: Optional[EventDispatcher] = None,
+        address_remap: Callable[[Tuple[str, int]], Tuple[str, int]] | None = None,
+        event_dispatcher: EventDispatcher | None = None,
         policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver(),
     ) -> None:
         if db:
@@ -392,6 +419,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "socket_connect_timeout": socket_connect_timeout,
             "socket_keepalive": socket_keepalive,
             "socket_keepalive_options": socket_keepalive_options,
+            "socket_read_size": socket_read_size,
             "socket_timeout": socket_timeout,
             "protocol": protocol,
             "legacy_responses": legacy_responses,
@@ -423,7 +451,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             self.retry = retry
         else:
             self.retry = Retry(
-                backoff=ExponentialWithJitterBackoff(base=1, cap=10),
+                backoff=ExponentialWithJitterBackoff(
+                    base=DEFAULT_RETRY_BASE, cap=DEFAULT_RETRY_CAP
+                ),
                 retries=cluster_error_retry_attempts,
             )
         if retry_on_error:
@@ -526,7 +556,11 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self._usage_counter = 0
         self._usage_lock = asyncio.Lock()
 
-    async def initialize(self) -> "RedisCluster":
+    async def initialize(
+        self,
+        additional_startup_nodes_info: Optional[List[Tuple[str, int]]] = None,
+        last_failed_node_name: Optional[str] = None,
+    ) -> "RedisCluster":
         """Get all nodes from startup nodes & creates connections if not initialized."""
         self._ensure_open()
         if self._initialize:
@@ -536,7 +570,10 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 self._ensure_open()
                 if self._initialize:
                     try:
-                        await self.nodes_manager.initialize()
+                        await self.nodes_manager.initialize(
+                            additional_startup_nodes_info=additional_startup_nodes_info,
+                            last_failed_node_name=last_failed_node_name,
+                        )
                         await self.commands_parser.initialize(
                             self.nodes_manager.default_node
                         )
@@ -993,10 +1030,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
         # Start timing for observability
         start_time = time.monotonic()
+        last_failed_node_name = None
 
         for _ in range(execute_attempts):
             if self._initialize:
-                await self.initialize()
+                await self.initialize(last_failed_node_name=last_failed_node_name)
+                last_failed_node_name = None
                 if (
                     len(target_nodes) == 1
                     and target_nodes[0] == self.get_default_node()
@@ -1049,6 +1088,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     # Try again with the new cluster setup.
                     retry_attempts -= 1
                     failure_count += 1
+                    last_failed_node_name = getattr(e, "last_failed_node_name", None)
 
                     if hasattr(e, "connection"):
                         await self._record_command_metric(
@@ -1143,6 +1183,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 # Move the failed node to the end of the cached nodes list
                 # so it's tried last during reinitialization
                 self.nodes_manager.move_node_to_end_of_cached_nodes(target_node.name)
+                e.last_failed_node_name = target_node.name
 
                 # Signal that reinitialization is needed
                 # The retry loop will handle initialize() AND replace_default_node()
@@ -1463,7 +1504,7 @@ class ClusterNode:
         port: Union[str, int],
         server_type: Optional[str] = None,
         *,
-        max_connections: int = 2**31,
+        max_connections: int = 100,
         connection_class: Type[Connection] = Connection,
         **connection_kwargs: Any,
     ) -> None:
@@ -1942,7 +1983,11 @@ class NodesManager:
             if node.server_type == server_type
         ]
 
-    async def initialize(self) -> None:
+    async def initialize(
+        self,
+        additional_startup_nodes_info: Optional[List[Tuple[str, int]]] = None,
+        last_failed_node_name: Optional[str] = None,
+    ) -> None:
         self.read_load_balancer.reset()
         tmp_nodes_cache: Dict[str, "ClusterNode"] = {}
         tmp_slots: Dict[int, List["ClusterNode"]] = {}
@@ -1951,6 +1996,8 @@ class NodesManager:
         fully_covered = False
         exception = None
         epoch = self._epoch
+        if additional_startup_nodes_info is None:
+            additional_startup_nodes_info = []
 
         async with self._initialize_lock:
             if self._epoch != epoch:
@@ -1959,9 +2006,35 @@ class NodesManager:
                 # we don't need to do it again.
                 return
 
-            # Convert to tuple to prevent RuntimeError if self.startup_nodes
-            # is modified during iteration
-            for startup_node in tuple(self.startup_nodes.values()):
+            # Copy to a list to prevent RuntimeError if self.startup_nodes
+            # is modified during iteration, then shuffle the iteration order.
+            startup_nodes = list(self.startup_nodes.values())
+            deferred_failed_nodes = []
+            if last_failed_node_name is not None:
+                for index, node in enumerate(startup_nodes):
+                    if node.name == last_failed_node_name:
+                        deferred_failed_nodes.append(startup_nodes.pop(index))
+                        break
+            if len(startup_nodes) > 1:
+                # Vary which startup node is queried first so clients do not
+                # all reinitialize through the same node.
+                random.shuffle(startup_nodes)
+            additional_startup_nodes = [
+                ClusterNode(host, port, **self.connection_kwargs)
+                for host, port in additional_startup_nodes_info
+            ]
+            if last_failed_node_name is not None:
+                for index, node in enumerate(additional_startup_nodes):
+                    if node.name == last_failed_node_name:
+                        if not deferred_failed_nodes:
+                            deferred_failed_nodes.append(node)
+                        additional_startup_nodes.pop(index)
+                        break
+            for startup_node in chain(
+                startup_nodes,
+                additional_startup_nodes,
+                deferred_failed_nodes,
+            ):
                 try:
                     # Make sure cluster mode is enabled on this node
                     try:
@@ -3558,17 +3631,16 @@ class ClusterPubSub(PubSub):
                 return None
         return message
 
-    async def ssubscribe(self, *args: Any, **kwargs: Any) -> None:
+    async def ssubscribe(
+        self, *args: ChannelT | Subscription, **kwargs: PubSubHandler
+    ) -> None:
         """
         Subscribe to shard channels.
 
-        :param args: Channel names
+        :param args: Channel names or ``Subscription`` objects
         :param kwargs: Channel names with handlers
         """
-        if args:
-            args = list_or_args(args[0], args[1:])
-        s_channels = dict.fromkeys(args)
-        s_channels.update(kwargs)
+        s_channels = parse_pubsub_subscriptions(args, kwargs)
 
         # Serialize against reinitialize_shard_subscriptions (background
         # task) so the reverse index, shard_channels, and node_pubsub_mapping
@@ -3597,7 +3669,7 @@ class ClusterPubSub(PubSub):
                     continue
                 pubsub = self._get_node_pubsub(node)
                 if handler:
-                    await pubsub.ssubscribe(**{s_channel: handler})
+                    await pubsub.ssubscribe(Subscription(s_channel, handler))
                 else:
                     await pubsub.ssubscribe(s_channel)
                 self.shard_channels.update(pubsub.shard_channels)
@@ -3755,12 +3827,7 @@ class ClusterPubSub(PubSub):
         # a text key only when we must pass it as a kwarg (handler present).
         new_pubsub = self._get_node_pubsub(new_node)
         if handler:
-            decoded = (
-                self.encoder.decode(channel, force=True)
-                if isinstance(channel, (bytes, bytearray))
-                else channel
-            )
-            await new_pubsub.ssubscribe(**{decoded: handler})
+            await new_pubsub.ssubscribe(Subscription(channel, handler))
         else:
             await new_pubsub.ssubscribe(channel)
         self.shard_channels.update(new_pubsub.shard_channels)

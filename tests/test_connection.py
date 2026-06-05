@@ -1,10 +1,10 @@
 import copy
 import platform
 import socket
-import sys
+import ssl
 import threading
 import types
-from errno import ECONNREFUSED
+from errno import ECONNREFUSED, EWOULDBLOCK
 from typing import Any
 from unittest import mock
 from unittest.mock import call, patch, MagicMock, Mock
@@ -13,7 +13,8 @@ import pytest
 import redis
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
-from redis._parsers.socket import SENTINEL
+from redis._parsers.hiredis import NOT_ENOUGH_DATA
+from redis._parsers.socket import SocketBuffer
 from redis.backoff import NoBackoff
 from redis.cache import (
     CacheConfig,
@@ -44,10 +45,44 @@ from redis.observability.attributes import (
     ConnectionState,
 )
 from redis.retry import Retry
-from redis.utils import HIREDIS_AVAILABLE
+from redis.utils import HIREDIS_AVAILABLE, SENTINEL
 
 from .conftest import skip_if_server_version_lt
 from .mocks import MockSocket
+
+
+class DummyHiredisReader:
+    def __init__(self, response=NOT_ENOUGH_DATA, decoded_response=None, has_data=False):
+        self.responses = [response]
+        self.decoded_response = decoded_response
+        self.has_data_value = has_data
+
+    def has_data(self):
+        return self.has_data_value
+
+    def gets(self, *args):
+        if self.responses:
+            response = self.responses.pop(0)
+            if args == (False,) or self.decoded_response is None:
+                return response
+            return self.decoded_response
+        return NOT_ENOUGH_DATA
+
+
+class DummyPushNotification(list):
+    pass
+
+
+def make_hiredis_parser(
+    response=NOT_ENOUGH_DATA, decoded_response=None, has_data=False
+):
+    parser = _HiredisParser.__new__(_HiredisParser)
+    parser._reader = DummyHiredisReader(response, decoded_response, has_data)
+    parser._hiredis_PushNotificationType = None
+    parser._sock = mock.Mock()
+    parser._buffer = bytearray(65536)
+    parser._socket_timeout = None
+    return parser
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
@@ -58,6 +93,106 @@ def test_invalid_response(r):
     with mock.patch.object(parser._buffer, "readline", return_value=raw):
         with pytest.raises(InvalidResponse, match=f"Protocol Error: {raw!r}"):
             parser.read_response()
+
+
+def test_hiredis_can_read_detects_reader_data():
+    parser = make_hiredis_parser(response=b"OK", has_data=True)
+
+    assert parser.can_read(timeout=0) is True
+    assert parser.read_response() == b"OK"
+
+
+def test_hiredis_can_read_checks_socket_readiness_without_reading():
+    parser = make_hiredis_parser(has_data=False)
+
+    with patch("redis._parsers.hiredis._socket_can_read", return_value=True) as ready:
+        assert parser.can_read(timeout=0) is True
+
+    ready.assert_called_once_with(parser._sock, 0)
+
+
+def test_hiredis_can_read_does_not_decide_disable_decoding():
+    raw = b"\xe2\x98\x83"
+    parser = make_hiredis_parser(
+        response=raw,
+        decoded_response=raw.decode(),
+        has_data=True,
+    )
+
+    assert parser.can_read(timeout=0) is True
+    assert parser.read_response(disable_decoding=True) == raw
+
+
+def test_hiredis_can_read_leaves_decoding_to_read_response():
+    raw = b"\xe2\x98\x83"
+    parser = make_hiredis_parser(
+        response=raw,
+        decoded_response=raw.decode(),
+        has_data=True,
+    )
+
+    assert parser.can_read(timeout=0) is True
+    assert parser.read_response() == raw.decode()
+
+
+def test_hiredis_read_response_returns_initial_push_notification():
+    push_response = DummyPushNotification([b"message", b"channel", b"data"])
+    handled_response = object()
+    parser = make_hiredis_parser()
+    parser._hiredis_PushNotificationType = DummyPushNotification
+    parser._reader.responses = [push_response]
+    parser.pubsub_push_handler_func = Mock(return_value=handled_response)
+
+    assert parser.read_response(push_request=True) is handled_response
+    parser.pubsub_push_handler_func.assert_called_once_with(push_response)
+
+
+def test_hiredis_read_response_skips_initial_push_notification():
+    push_response = DummyPushNotification([b"message", b"channel", b"data"])
+    parser = make_hiredis_parser()
+    parser._hiredis_PushNotificationType = DummyPushNotification
+    parser._reader.responses = [push_response, b"OK"]
+    parser.pubsub_push_handler_func = Mock(return_value=push_response)
+
+    assert parser.read_response() == b"OK"
+    parser.pubsub_push_handler_func.assert_called_once_with(push_response)
+
+
+def test_hiredis_read_response_preserves_timeout_after_initial_push_notification():
+    push_response = DummyPushNotification([b"message", b"channel", b"data"])
+    parser = make_hiredis_parser()
+    parser._hiredis_PushNotificationType = DummyPushNotification
+    parser._reader.responses = [push_response, NOT_ENOUGH_DATA]
+    parser._sock.recv_into.side_effect = BlockingIOError(
+        EWOULDBLOCK, "Resource temporarily unavailable"
+    )
+    parser.pubsub_push_handler_func = Mock(return_value=push_response)
+
+    with pytest.raises(TimeoutError):
+        parser.read_response(timeout=0)
+
+    parser.pubsub_push_handler_func.assert_called_once_with(push_response)
+
+
+def test_hiredis_read_response_timeout_zero_maps_would_block_to_timeout():
+    parser = make_hiredis_parser()
+    parser._sock.recv_into.side_effect = BlockingIOError(
+        EWOULDBLOCK, "Resource temporarily unavailable"
+    )
+
+    with pytest.raises(TimeoutError):
+        parser.read_response(timeout=0)
+
+
+def test_socket_buffer_timeout_zero_maps_would_block_to_timeout():
+    sock = Mock()
+    sock.recv.side_effect = BlockingIOError(
+        EWOULDBLOCK, "Resource temporarily unavailable"
+    )
+    socket_buffer = SocketBuffer(sock, socket_read_size=65536, socket_timeout=None)
+
+    with pytest.raises(TimeoutError):
+        socket_buffer.readline(timeout=0)
 
 
 @skip_if_server_version_lt("4.0.0")
@@ -80,6 +215,35 @@ def test_loading_external_modules(r):
     # mod = j(r)
     # mod.set("fookey", ".", d)
     # assert mod.get('fookey') == d
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize(
+    "client_kwargs",
+    [
+        {"driver_info": None},
+        {"lib_name": None, "lib_version": None},
+    ],
+)
+def test_redis_client_preserves_explicit_none_driver_info(client_kwargs):
+    if "lib_name" in client_kwargs:
+        with pytest.warns(DeprecationWarning):
+            client = Redis(**client_kwargs)
+    else:
+        client = Redis(**client_kwargs)
+
+    assert client.connection_pool.connection_kwargs["driver_info"] is None
+    client.close()
+
+
+@pytest.mark.fixed_client
+def test_redis_client_default_driver_info():
+    client = Redis()
+    driver_info = client.connection_pool.connection_kwargs["driver_info"]
+
+    assert driver_info.formatted_name == "redis-py"
+    assert driver_info.lib_version is not None
+    client.close()
 
 
 @pytest.mark.fixed_client
@@ -114,6 +278,29 @@ class TestConnection:
         mock_sock.shutdown.assert_called_once()
         mock_sock.close.assert_called_once()
         assert conn._sock is None
+
+    @pytest.mark.parametrize(
+        "connection_kwargs",
+        [
+            {"driver_info": None},
+            {"lib_name": None, "lib_version": None},
+        ],
+    )
+    def test_client_setinfo_skipped_with_explicit_none(self, connection_kwargs):
+        if "lib_name" in connection_kwargs:
+            with pytest.warns(DeprecationWarning):
+                conn = Connection(protocol=2, **connection_kwargs)
+        else:
+            conn = Connection(protocol=2, **connection_kwargs)
+        conn._parser.on_connect = mock.Mock()
+        conn.send_command = mock.Mock()
+        conn.read_response = mock.Mock(return_value="OK")
+
+        conn.on_connect_check_health()
+
+        assert conn.driver_info is None
+        conn.send_command.assert_not_called()
+        conn.read_response.assert_not_called()
 
     def clear(self, conn):
         conn.retry_on_error.clear()
@@ -276,7 +463,6 @@ def test_pool_auto_close(request, from_url):
     r1.close()
 
 
-@pytest.mark.skipif(sys.version_info == (3, 9), reason="Flacky test on Python 3.9")
 @pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
 def test_redis_connection_pool(request, from_url):
     """Verify that basic Redis instances using `connection_pool`
@@ -297,9 +483,10 @@ def test_redis_connection_pool(request, from_url):
 
     called = 0
 
-    def mock_disconnect(_):
+    def mock_disconnect(target_pool):
         nonlocal called
-        called += 1
+        if pool is not None and target_pool is pool:
+            called += 1
 
     with patch.object(ConnectionPool, "disconnect", mock_disconnect):
         with get_redis_connection() as r1:
@@ -329,9 +516,10 @@ def test_redis_from_pool(request, from_url):
 
     called = 0
 
-    def mock_disconnect(_):
+    def mock_disconnect(target_pool):
         nonlocal called
-        called += 1
+        if pool is not None and target_pool is pool:
+            called += 1
 
     with patch.object(ConnectionPool, "disconnect", mock_disconnect):
         with get_redis_connection() as r1:
@@ -339,6 +527,19 @@ def test_redis_from_pool(request, from_url):
 
     assert called == 1
     pool.disconnect()
+
+
+@pytest.mark.fixed_client
+def test_create_secure_client_from_url_with_minimum_ssl_version():
+    client = redis.Redis.from_url(
+        "rediss://localhost:6379/0?ssl_cert_reqs=none&ssl_min_version={}".format(
+            ssl.TLSVersion.TLSv1_3
+        )
+    )
+    assert (
+        client.connection_pool.connection_kwargs["ssl_min_version"]
+        == ssl.TLSVersion.TLSv1_3
+    )
 
 
 @pytest.mark.parametrize(
@@ -730,7 +931,9 @@ class TestUnitCacheProxyConnection:
 
         assert proxy_connection.read_response() == b"bar"
         assert another_conn.can_read.call_count == 2
-        another_conn.read_response.assert_called_once()
+        another_conn.read_response.assert_called_once_with(
+            push_request=True, timeout=0, disconnect_on_error=False
+        )
 
     @pytest.mark.skipif(
         platform.python_implementation() == "PyPy",
@@ -782,7 +985,9 @@ class TestUnitCacheProxyConnection:
 
         # The drain should have happened on the other connection
         assert another_conn.can_read.call_count == 2
-        another_conn.read_response.assert_called_once()
+        another_conn.read_response.assert_called_once_with(
+            push_request=True, timeout=0, disconnect_on_error=False
+        )
 
         # The command must have been sent over the wire (not returned early)
         mock_connection.send_command.assert_called_once_with("GET", "foo", keys=["foo"])
@@ -795,6 +1000,69 @@ class TestUnitCacheProxyConnection:
                 status=CacheEntryStatus.IN_PROGRESS,
                 connection_ref=mock_connection,
             )
+        )
+
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Pypy doesn't support side_effect",
+    )
+    def test_invalidation_processing_on_another_connection_breaks_on_timeout(
+        self, mock_cache, mock_connection
+    ):
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection._event_dispatcher = Mock(spec=EventDispatcher)
+
+        another_conn = copy.deepcopy(mock_connection)
+        another_conn.can_read.return_value = True
+        another_conn.read_response.side_effect = TimeoutError("timeout")
+
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache_entry = CacheEntry(
+            cache_key=cache_key,
+            cache_value=b"bar",
+            status=CacheEntryStatus.VALID,
+            connection_ref=another_conn,
+        )
+
+        mock_cache.is_cachable.return_value = True
+        mock_cache.get.side_effect = [cache_entry, cache_entry, cache_entry]
+        mock_connection.can_read.return_value = False
+
+        proxy_connection = CacheProxyConnection(
+            mock_connection, mock_cache, threading.RLock()
+        )
+        proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
+
+        another_conn.read_response.assert_called_once_with(
+            push_request=True, timeout=0, disconnect_on_error=False
+        )
+        mock_connection.send_command.assert_not_called()
+
+    def test_process_pending_invalidations_breaks_on_timeout(self, mock_connection):
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection._event_dispatcher = EventDispatcher()
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection.can_read.return_value = True
+        mock_connection.read_response.side_effect = TimeoutError("timeout")
+
+        cache = DefaultCache(CacheConfig(max_size=10))
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+
+        proxy_connection._process_pending_invalidations()
+
+        mock_connection.read_response.assert_called_once_with(
+            push_request=True, timeout=0, disconnect_on_error=False
         )
 
     def test_read_response_propagates_timeout_parameter(self, mock_connection):

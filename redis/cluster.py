@@ -29,6 +29,7 @@ from typing import (
 if TYPE_CHECKING:
     from redis.keyspace_notifications import ClusterKeyspaceNotifications
 
+from redis._defaults import DEFAULT_RETRY_BASE, DEFAULT_RETRY_CAP, DEFAULT_RETRY_COUNT
 from redis._parsers import CommandsParser, Encoder
 from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
 from redis._parsers.helpers import parse_scan
@@ -36,7 +37,7 @@ from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.cache import CacheConfig, CacheFactory, CacheFactoryInterface, CacheInterface
 from redis.client import EMPTY_RESPONSE, CaseInsensitiveDict, PubSub, Redis
 from redis.commands import READ_COMMANDS, RedisClusterCommands
-from redis.commands.helpers import list_or_args
+from redis.commands.helpers import list_or_args, parse_pubsub_subscriptions
 from redis.commands.policies import PolicyResolver, StaticPolicyResolver
 from redis.connection import (
     Connection,
@@ -82,6 +83,7 @@ from redis.observability.recorder import (
     record_operation_duration,
 )
 from redis.retry import Retry
+from redis.typing import ChannelT, PubSubHandler, Subscription
 from redis.utils import (
     check_protocol_version,
     deprecated_args,
@@ -271,6 +273,7 @@ REDIS_ALLOWED_KEYS = (
     "encoding",
     "encoding_errors",
     "host",
+    "driver_info",
     "lib_name",
     "lib_version",
     "max_connections",
@@ -287,6 +290,7 @@ REDIS_ALLOWED_KEYS = (
     "socket_connect_timeout",
     "socket_keepalive",
     "socket_keepalive_options",
+    "socket_read_size",
     "socket_timeout",
     "ssl",
     "ssl_ca_certs",
@@ -698,7 +702,7 @@ class RedisCluster(
         host: Optional[str] = None,
         port: int = 6379,
         startup_nodes: Optional[List["ClusterNode"]] = None,
-        cluster_error_retry_attempts: int = 3,
+        cluster_error_retry_attempts: int = DEFAULT_RETRY_COUNT,
         retry: Optional["Retry"] = None,
         require_full_coverage: bool = True,
         reinitialize_steps: int = 5,
@@ -861,7 +865,9 @@ class RedisCluster(
             self.retry = retry
         else:
             self.retry = Retry(
-                backoff=ExponentialWithJitterBackoff(base=1, cap=10),
+                backoff=ExponentialWithJitterBackoff(
+                    base=DEFAULT_RETRY_BASE, cap=DEFAULT_RETRY_CAP
+                ),
                 retries=cluster_error_retry_attempts,
             )
 
@@ -1485,7 +1491,7 @@ class RedisCluster(
         Wrapper for ERRORS_ALLOW_RETRY error handling.
 
         It will try the number of times specified by the retries property from
-        config option "self.retry" which defaults to 3 unless manually
+        config option "self.retry" which defaults to 10 unless manually
         configured.
 
         If it reaches the number of times, the command will raise the exception
@@ -1736,7 +1742,8 @@ class RedisCluster(
                 self.nodes_manager.move_node_to_end_of_cached_nodes(target_node.name)
 
                 # DON'T set redis_connection = None - keep the pool for reuse
-                self.nodes_manager.initialize()
+                # provide the name of the failed node so we can try it last
+                self.nodes_manager.initialize(last_failed_node_name=target_node.name)
                 self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
@@ -2431,6 +2438,7 @@ class NodesManager:
         self,
         additional_startup_nodes_info: Optional[List[Tuple[str, int]]] = None,
         disconnect_startup_nodes_pools: bool = True,
+        last_failed_node_name: Optional[str] = None,
     ):
         """
         Initializes the nodes cache, slots cache and redis connections.
@@ -2450,6 +2458,9 @@ class NodesManager:
             with them.
             The format of the list is a list of tuples, where each tuple contains
             the host and port of the node.
+        :last_failed_node_name:
+            Name of the node that just failed and should be tried only after
+            other startup and additional startup nodes during this refresh.
         """
         self.reset()
         tmp_nodes_cache = {}
@@ -2471,18 +2482,39 @@ class NodesManager:
                     return
 
             with self._lock:
-                startup_nodes = tuple(self.startup_nodes.values())
+                startup_nodes = list(self.startup_nodes.values())
+            deferred_failed_nodes = []
+            if last_failed_node_name is not None:
+                for index, node in enumerate(startup_nodes):
+                    if node.name == last_failed_node_name:
+                        deferred_failed_nodes.append(startup_nodes.pop(index))
+                        break
+            if len(startup_nodes) > 1:
+                # Vary which startup node is queried first so clients do not
+                # all reinitialize through the same node.
+                random.shuffle(startup_nodes)
 
             additional_startup_nodes = [
                 ClusterNode(host, port) for host, port in additional_startup_nodes_info
             ]
+            if last_failed_node_name is not None:
+                for index, node in enumerate(additional_startup_nodes):
+                    if node.name == last_failed_node_name:
+                        if not deferred_failed_nodes:
+                            deferred_failed_nodes.append(node)
+                        additional_startup_nodes.pop(index)
+                        break
             if is_debug_log_enabled():
                 logger.debug(
                     f"Topology refresh: using additional nodes: {[node.name for node in additional_startup_nodes]}; "
                     f"and startup nodes: {[node.name for node in startup_nodes]}"
                 )
 
-            for startup_node in (*startup_nodes, *additional_startup_nodes):
+            for startup_node in chain(
+                startup_nodes,
+                additional_startup_nodes,
+                deferred_failed_nodes,
+            ):
                 try:
                     if startup_node.redis_connection:
                         r = startup_node.redis_connection
@@ -3031,11 +3063,17 @@ class ClusterPubSub(PubSub):
                 return None
         return message
 
-    def ssubscribe(self, *args, **kwargs):
-        if args:
-            args = list_or_args(args[0], args[1:])
-        s_channels = dict.fromkeys(args)
-        s_channels.update(kwargs)
+    def ssubscribe(
+        self, *args: ChannelT | Subscription, **kwargs: PubSubHandler
+    ) -> None:
+        """
+        Subscribe to shard channels.
+
+        Channels supplied as keyword arguments expect a channel name as the key
+        and a callable as the value. ``Subscription`` objects can also be
+        supplied positionally with an optional handler.
+        """
+        s_channels = parse_pubsub_subscriptions(args, kwargs)
         # Serialize against reinitialize_shard_subscriptions (worker thread)
         # so the reverse index, shard_channels, and node_pubsub_mapping are
         # not mutated concurrently.
@@ -3062,7 +3100,7 @@ class ClusterPubSub(PubSub):
                     continue
                 pubsub = self._get_node_pubsub(node)
                 if handler:
-                    pubsub.ssubscribe(**{s_channel: handler})
+                    pubsub.ssubscribe(Subscription(s_channel, handler))
                 else:
                     pubsub.ssubscribe(s_channel)
                 self.shard_channels.update(pubsub.shard_channels)
@@ -3210,12 +3248,7 @@ class ClusterPubSub(PubSub):
         # a text key only when we must pass it as a kwarg (handler present).
         new_pubsub = self._get_node_pubsub(new_node)
         if handler:
-            decoded = (
-                self.encoder.decode(channel, force=True)
-                if isinstance(channel, (bytes, bytearray))
-                else channel
-            )
-            new_pubsub.ssubscribe(**{decoded: handler})
+            new_pubsub.ssubscribe(Subscription(channel, handler))
         else:
             new_pubsub.ssubscribe(channel)
         self.shard_channels.update(new_pubsub.shard_channels)
@@ -3377,7 +3410,7 @@ class ClusterPipeline(RedisCluster):
         startup_nodes: Optional[List["ClusterNode"]] = None,
         read_from_replicas: bool = False,
         load_balancing_strategy: Optional[LoadBalancingStrategy] = None,
-        cluster_error_retry_attempts: int = 3,
+        cluster_error_retry_attempts: int = DEFAULT_RETRY_COUNT,
         reinitialize_steps: int = 5,
         retry: Optional[Retry] = None,
         lock=None,
@@ -3405,7 +3438,9 @@ class ClusterPipeline(RedisCluster):
             self.retry = retry
         else:
             self.retry = Retry(
-                backoff=ExponentialWithJitterBackoff(base=1, cap=10),
+                backoff=ExponentialWithJitterBackoff(
+                    base=DEFAULT_RETRY_BASE, cap=DEFAULT_RETRY_CAP
+                ),
                 retries=cluster_error_retry_attempts,
             )
 
@@ -4000,7 +4035,7 @@ class PipelineStrategy(AbstractStrategy):
 
         It will try the number of times specified by
         the retries in config option "self.retry"
-        which defaults to 3 unless manually configured.
+        which defaults to 10 unless manually configured.
 
         If it reaches the number of times, the command will
         raises ClusterDownException.
