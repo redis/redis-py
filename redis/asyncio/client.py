@@ -1440,9 +1440,12 @@ class PubSub:
         """
         if timeout is not None:
             start = time.monotonic()
+            remaining = timeout
+        else:
+            remaining = None
         while self.subscribed:
             response = await self.handle_message(
-                await self.parse_response(block=(timeout is None), timeout=timeout)
+                await self.parse_response(block=(timeout is None), timeout=remaining)
             )
             if response is not None:
                 yield response
@@ -1450,6 +1453,7 @@ class PubSub:
                 elapsed = time.monotonic() - start
                 if elapsed >= timeout:
                     break
+                remaining = timeout - elapsed
 
     async def get_message(
         self, ignore_subscribe_messages: bool = False, timeout: Optional[float] = 0.0
