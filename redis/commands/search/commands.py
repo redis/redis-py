@@ -170,6 +170,19 @@ class SearchCommands:
             self._parse_hybrid_search_resp3_unified
         )
 
+    def _cluster_kwargs(self):
+        """Return kwargs for cluster-aware command routing.
+
+        RedisCluster requires ``target_nodes`` for commands that don't
+        operate on a Redis key (and therefore can't be routed via hash
+        slot).  Search commands like ``FT.INFO``, ``FT.TAGVALS``, etc.
+        use ``index_name`` which is not a Redis key, so they need this
+        hint to avoid a slot-determination error.
+        """
+        if hasattr(self.client, "command_flags"):
+            return {"target_nodes": "random"}
+        return {}
+
     def _parse_results(self, cmd, res, **kwargs):
         if cmd in self._QUERY_REQUIRED_CMDS and "query" not in kwargs:
             return res
@@ -953,7 +966,7 @@ class SearchCommands:
         except TypeError:
             args += fields.redis_args()
 
-        return self.execute_command(*args)
+        return self.execute_command(*args, **self._cluster_kwargs())
 
     def alter_schema_add(self, fields: Union[Field, List[Field]]):
         """
@@ -973,7 +986,7 @@ class SearchCommands:
         except TypeError:
             args += fields.redis_args()
 
-        return self.execute_command(*args)
+        return self.execute_command(*args, **self._cluster_kwargs())
 
     def dropindex(self, delete_documents: bool = False):
         """
@@ -998,7 +1011,7 @@ class SearchCommands:
         if delete_str:
             args.append(delete_str)
 
-        return self.execute_command(*args)
+        return self.execute_command(*args, **self._cluster_kwargs())
 
     def _add_document(
         self,
@@ -1040,7 +1053,7 @@ class SearchCommands:
         if conn is not None:
             return conn.execute_command(*args)
 
-        return self.execute_command(*args)
+        return self.execute_command(*args, **self._cluster_kwargs())
 
     def _add_document_hash(
         self, doc_id, conn=None, score=1.0, language=None, replace=False
@@ -1060,7 +1073,7 @@ class SearchCommands:
         if conn is not None:
             return conn.execute_command(*args)
 
-        return self.execute_command(*args)
+        return self.execute_command(*args, **self._cluster_kwargs())
 
     @deprecated_function(
         version="2.0.0", reason="deprecated since redisearch 2.0, call hset instead"
@@ -1156,7 +1169,7 @@ class SearchCommands:
         if conn is not None:
             return conn.execute_command(*args)
 
-        return self.execute_command(*args)
+        return self.execute_command(*args, **self._cluster_kwargs())
 
     def load_document(self, id, field_encodings: Optional[Dict[str, Any]] = None):
         """
@@ -1190,7 +1203,8 @@ class SearchCommands:
 
         """
 
-        return self.execute_command(MGET_CMD, self.index_name, *ids)
+        kwargs = self._cluster_kwargs()
+        return self.execute_command(MGET_CMD, self.index_name, *ids, **kwargs)
 
     def info(self):
         """
@@ -1199,8 +1213,12 @@ class SearchCommands:
 
         For more information see `FT.INFO <https://redis.io/commands/ft.info>`_.
         """
-
-        res = self.execute_command(INFO_CMD, self.index_name)
+        # RedisCluster requires target_nodes for commands without keys
+        kwargs = {}
+        if hasattr(self.client, "command_flags"):
+            # RedisCluster client - route to a random node
+            kwargs["target_nodes"] = "random"
+        res = self.execute_command(INFO_CMD, self.index_name, **kwargs)
         return self._parse_results(INFO_CMD, res)
 
     def get_params_args(
@@ -1552,7 +1570,8 @@ class SearchCommands:
         For more information see `FT.TAGVALS <https://redis.io/commands/ft.tagvals>`_.
         """  # noqa
 
-        return self.execute_command(TAGVALS_CMD, self.index_name, tagfield)
+        kwargs = self._cluster_kwargs()
+        return self.execute_command(TAGVALS_CMD, self.index_name, tagfield, **kwargs)
 
     def aliasadd(self, alias: str):
         """
@@ -1565,7 +1584,8 @@ class SearchCommands:
         For more information see `FT.ALIASADD <https://redis.io/commands/ft.aliasadd>`_.
         """  # noqa
 
-        return self.execute_command(ALIAS_ADD_CMD, alias, self.index_name)
+        kwargs = self._cluster_kwargs()
+        return self.execute_command(ALIAS_ADD_CMD, alias, self.index_name, **kwargs)
 
     def aliasupdate(self, alias: str):
         """
@@ -1578,7 +1598,8 @@ class SearchCommands:
         For more information see `FT.ALIASUPDATE <https://redis.io/commands/ft.aliasupdate>`_.
         """  # noqa
 
-        return self.execute_command(ALIAS_UPDATE_CMD, alias, self.index_name)
+        kwargs = self._cluster_kwargs()
+        return self.execute_command(ALIAS_UPDATE_CMD, alias, self.index_name, **kwargs)
 
     def aliasdel(self, alias: str):
         """
@@ -1721,7 +1742,8 @@ class SearchCommands:
 
         For more information see `FT.SYNDUMP <https://redis.io/commands/ft.syndump>`_.
         """  # noqa
-        res = self.execute_command(SYNDUMP_CMD, self.index_name)
+        kwargs = self._cluster_kwargs()
+        res = self.execute_command(SYNDUMP_CMD, self.index_name, **kwargs)
         return self._parse_results(SYNDUMP_CMD, res)
 
 
@@ -1733,8 +1755,12 @@ class AsyncSearchCommands(SearchCommands):
 
         For more information see `FT.INFO <https://redis.io/commands/ft.info>`_.
         """
-
-        res = await self.execute_command(INFO_CMD, self.index_name)
+        # RedisCluster requires target_nodes for commands without keys
+        kwargs = {}
+        if hasattr(self.client, "command_flags"):
+            # RedisCluster client - route to a random node
+            kwargs["target_nodes"] = "random"
+        res = await self.execute_command(INFO_CMD, self.index_name, **kwargs)
         return self._parse_results(INFO_CMD, res)
 
     async def search(
