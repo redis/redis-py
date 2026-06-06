@@ -1203,8 +1203,7 @@ class SearchCommands:
 
         """
 
-        kwargs = self._cluster_kwargs()
-        return self.execute_command(MGET_CMD, self.index_name, *ids, **kwargs)
+        return self.execute_command(MGET_CMD, self.index_name, *ids)
 
     def info(self):
         """
