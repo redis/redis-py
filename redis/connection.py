@@ -599,12 +599,13 @@ class MaintNotificationsAbstractConnection:
         # When the maint_notifications_config enabled mode is "auto",
         # we just log a warning if the handshake fails
         # When the mode is enabled=True, we raise an exception in case of failure
+        host = getattr(self, "host", None)
         if (
             self.get_protocol() not in [2, "2"]
             and self.maint_notifications_config
             and self.maint_notifications_config.enabled
             and self._maint_notifications_connection_handler
-            and hasattr(self, "host")
+            and host is not None
         ):
             self._enable_maintenance_notifications(
                 maint_notifications_config=self.maint_notifications_config,
@@ -2253,6 +2254,7 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "ssl_check_hostname": to_bool,
     "ssl_include_verify_flags": parse_ssl_verify_flags,
     "ssl_exclude_verify_flags": parse_ssl_verify_flags,
+    "ssl_min_version": int,
     "timeout": float,
     "protocol": int,
     "legacy_responses": to_bool,
@@ -2886,6 +2888,28 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         self.max_connections = max_connections
         self.cache = None
         self._cache_factory = cache_factory
+
+        try:
+            supports_maint_notifications = issubclass(
+                connection_class, MaintNotificationsAbstractConnection
+            )
+            is_unix_domain_socket_connection = issubclass(
+                connection_class, UnixDomainSocketConnection
+            )
+        except TypeError:
+            supports_maint_notifications = False
+            is_unix_domain_socket_connection = False
+
+        if is_unix_domain_socket_connection or not supports_maint_notifications:
+            if (
+                maint_notifications_config
+                and maint_notifications_config.enabled is True
+            ):
+                raise RedisError(
+                    "Maintenance notifications are not supported with "
+                    f"{connection_class}"
+                )
+            maint_notifications_config = MaintNotificationsConfig(enabled=False)
 
         self._event_dispatcher = self._connection_kwargs.get("event_dispatcher", None)
         if self._event_dispatcher is None:
