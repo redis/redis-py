@@ -126,6 +126,22 @@ class _JSONBase(JSONCommands):
         # applies _MODULE_CALLBACKS to the raw response, and leaves the parent
         # client's response_callbacks untouched.
 
+        # FIX #3: When the JSON sub-client is created from a Pipeline (the
+        # r.pipeline().json() entry point), merge _MODULE_CALLBACKS into the
+        # pipeline's own response_callbacks so Pipeline.execute() can decode
+        # JSON.* responses at execution time.
+        # IMPORTANT: Pipeline.response_callbacks may be a shared reference to
+        # the parent client's dict.  We must replace it with a private copy
+        # before merging to avoid polluting the parent.
+        if isinstance(client, redis.client.Pipeline):
+            client.response_callbacks = dict(client.response_callbacks)
+            client.response_callbacks.update(self._MODULE_CALLBACKS)
+        elif isinstance(client, redis.cluster.ClusterPipeline):
+            client.cluster_response_callbacks = dict(
+                client.cluster_response_callbacks
+            )
+            client.cluster_response_callbacks.update(self._MODULE_CALLBACKS)
+
         self.__encoder__ = encoder
         self.__decoder__ = decoder
 
@@ -307,11 +323,24 @@ class JSON(_JSONBase):
         """
         cmd = args[0] if args else ""
         response = self.client.execute_command(*args, **kwargs)
-        if cmd in self._MODULE_CALLBACKS:
+
+        # FIX #1: Pipeline guard — when self.client is a Pipeline,
+        # execute_command() returns the pipeline object for chaining,
+        # not an actual Redis response.  Callbacks will be applied
+        # later by Pipeline.execute() from its response_callbacks.
+        if isinstance(response, (redis.client.Pipeline, redis.cluster.ClusterPipeline)):
+            return response
+
+        # FIX #2: Case-insensitive lookup — the original
+        # response_callbacks was a CaseInsensitiveDict, so
+        # j.execute_command("json.get", "k") worked.  We must
+        # upper-case the command name before lookup.
+        cmd_upper = cmd.upper() if isinstance(cmd, str) else cmd
+        if cmd_upper in self._MODULE_CALLBACKS:
             cb_kwargs = {}
             if "_json_path" in kwargs:
                 cb_kwargs["_json_path"] = kwargs["_json_path"]
-            return self._MODULE_CALLBACKS[cmd](response, **cb_kwargs)
+            return self._MODULE_CALLBACKS[cmd_upper](response, **cb_kwargs)
         return response
 
 
@@ -321,21 +350,22 @@ class AsyncJSON(_JSONBase):
     async def execute_command(self, *args, **kwargs):
         """Execute a command and apply any JSON module response callback.
 
-        Callbacks are applied locally on this sub-client instance rather than
-        being registered on the parent Redis client (see issue #3937).
-
-        Only JSON-module kwargs (``_json_path``) are forwarded to the
-        callback; redis-internal kwargs (``keys``, ``options``, etc.) are
-        intentionally stripped to avoid TypeError when callbacks don't
-        accept arbitrary keyword arguments.
+        Async version — same logic as JSON.execute_command.
         """
         cmd = args[0] if args else ""
         response = await self.client.execute_command(*args, **kwargs)
-        if cmd in self._MODULE_CALLBACKS:
+
+        # Pipeline guard (same as sync path)
+        if isinstance(response, (redis.client.Pipeline, redis.cluster.ClusterPipeline)):
+            return response
+
+        # Case-insensitive callback lookup (same as sync path)
+        cmd_upper = cmd.upper() if isinstance(cmd, str) else cmd
+        if cmd_upper in self._MODULE_CALLBACKS:
             cb_kwargs = {}
             if "_json_path" in kwargs:
                 cb_kwargs["_json_path"] = kwargs["_json_path"]
-            return self._MODULE_CALLBACKS[cmd](response, **cb_kwargs)
+            return self._MODULE_CALLBACKS[cmd_upper](response, **cb_kwargs)
         return response
 
     async def set_file(
