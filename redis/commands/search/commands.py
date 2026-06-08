@@ -1610,7 +1610,9 @@ class SearchCommands:
 
         For more information see `FT.ALIASDEL <https://redis.io/commands/ft.aliasdel>`_.
         """  # noqa
-        return self.execute_command(ALIAS_DEL_CMD, alias)
+
+        kwargs = self._cluster_kwargs()
+        return self.execute_command(ALIAS_DEL_CMD, alias, **kwargs)
 
     def sugadd(self, key, *suggestions, **kwargs):
         """
