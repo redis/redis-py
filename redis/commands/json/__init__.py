@@ -133,10 +133,13 @@ class _JSONBase(JSONCommands):
         # IMPORTANT: Pipeline.response_callbacks may be a shared reference to
         # the parent client's dict.  We must replace it with a private copy
         # before merging to avoid polluting the parent.
-        if isinstance(client, redis.client.Pipeline):
+        if isinstance(client, (redis.client.Pipeline, redis.asyncio.client.Pipeline)):
             client.response_callbacks = dict(client.response_callbacks)
             client.response_callbacks.update(self._MODULE_CALLBACKS)
-        elif isinstance(client, redis.cluster.ClusterPipeline):
+        elif isinstance(
+            client,
+            (redis.cluster.ClusterPipeline, redis.asyncio.cluster.ClusterPipeline),
+        ):
             client.cluster_response_callbacks = dict(
                 client.cluster_response_callbacks
             )
@@ -328,7 +331,15 @@ class JSON(_JSONBase):
         # execute_command() returns the pipeline object for chaining,
         # not an actual Redis response.  Callbacks will be applied
         # later by Pipeline.execute() from its response_callbacks.
-        if isinstance(response, (redis.client.Pipeline, redis.cluster.ClusterPipeline)):
+        if isinstance(
+            response,
+            (
+                redis.client.Pipeline,
+                redis.asyncio.client.Pipeline,
+                redis.cluster.ClusterPipeline,
+                redis.asyncio.cluster.ClusterPipeline,
+            ),
+        ):
             return response
 
         # FIX #2: Case-insensitive lookup — the original
@@ -356,7 +367,15 @@ class AsyncJSON(_JSONBase):
         response = await self.client.execute_command(*args, **kwargs)
 
         # Pipeline guard (same as sync path)
-        if isinstance(response, (redis.client.Pipeline, redis.cluster.ClusterPipeline)):
+        if isinstance(
+            response,
+            (
+                redis.client.Pipeline,
+                redis.asyncio.client.Pipeline,
+                redis.cluster.ClusterPipeline,
+                redis.asyncio.cluster.ClusterPipeline,
+            ),
+        ):
             return response
 
         # Case-insensitive callback lookup (same as sync path)

@@ -502,7 +502,7 @@ def test_async_json_subclient_does_not_mutate_parent():
 @pytest.mark.fixed_client
 def test_async_json_pipeline_detection():
     """
-    AsyncJSON created with a Pipeline client must merge callbacks
+    AsyncJSON created with a sync Pipeline client must merge callbacks
     into the pipeline, same as the sync path.
     """
     r = redis.Redis()
@@ -515,6 +515,53 @@ def test_async_json_pipeline_detection():
     )
     assert "JSON.GET" not in r.response_callbacks, (
         "Parent must remain clean when AsyncJSON wraps a pipeline"
+    )
+
+
+@pytest.mark.fixed_client
+def test_async_pipeline_type_merges_callbacks():
+    """
+    redis.asyncio.client.Pipeline is a DIFFERENT class from
+    redis.client.Pipeline (no inheritance relationship).
+    _JSONBase.__init__ must detect async pipelines and merge
+    _MODULE_CALLBACKS into them too.
+    """
+    import redis.asyncio as async_redis
+
+    async_r = async_redis.Redis()
+    async_p = async_r.pipeline()
+
+    parent_before = dict(async_r.response_callbacks)
+    _ = async_p.json()
+
+    assert "JSON.GET" in async_p.response_callbacks, (
+        "Async pipeline must have JSON.GET in response_callbacks after p.json()"
+    )
+    assert "JSON.GET" not in async_r.response_callbacks, (
+        "Async parent client must NOT be polluted by p.json()"
+    )
+    # Verify parent wasn't mutated at all
+    assert async_r.response_callbacks == parent_before
+
+
+@pytest.mark.fixed_client
+def test_async_pipeline_execute_command_returns_pipeline():
+    """
+    When AsyncJSON.execute_command() is called on an async pipeline,
+    the response is the async Pipeline object (for chaining).
+    The guard must detect it and return unchanged.
+    """
+    import redis.asyncio as async_redis
+
+    async_r = async_redis.Redis()
+    async_p = async_r.pipeline()
+    j = async_p.json()
+
+    # pipeline_execute_command is sync and returns self (the pipeline)
+    result = async_p.execute_command("JSON.SET", "k", ".", '{"a":1}')
+
+    assert result is async_p, (
+        "Async pipeline execute_command must return the pipeline for chaining"
     )
 
 
