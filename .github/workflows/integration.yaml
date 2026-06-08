@@ -110,6 +110,11 @@ jobs:
             parser-backend: ${{ matrix.parser-backend }}
             redis-version: ${{ matrix.redis-version }}
             test-config: ${{ matrix.test-config }}
+            # Fold the MultiDBClient (active-active) integration tests into an
+            # existing matrix cell instead of a dedicated job, so no extra CI
+            # runners are added. Run them once, on the current Redis version's
+            # cluster cell.
+            run-multidb-integration: ${{ (matrix.redis-version == needs.redis_version.outputs.CURRENT && matrix.test-config == 'default-unified_responses-cluster') && 'true' || 'false' }}
 
   python-compatibility-tests:
     runs-on: ubuntu-latest

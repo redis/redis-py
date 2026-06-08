@@ -31,6 +31,7 @@ services:
       - replica
       - all-stack
       - all
+      - multidb
 
   replica:
     <<: *client-libs-image
@@ -72,6 +73,34 @@ services:
       - cluster
       - all-stack
       - all
+      - multidb
+
+  # Second, independent cluster on shifted ports. Used together with `cluster`
+  # by the multi-database (active-active) integration tests so a MultiDBClient
+  # can front two real clusters. Each node announces 127.0.0.1:<port>, so host
+  # ports are mapped 1:1; the cluster bus port (data port + 21000) stays
+  # internal to the container. Only part of the dedicated `multidb` profile so
+  # the regular `all` / `all-stack` test runs are not burdened with a second
+  # cluster.
+  cluster2:
+    <<: *client-libs-image
+    container_name: redis-cluster-2
+    environment:
+      - REDIS_CLUSTER=yes
+      - NODES=6
+      - REPLICAS=1
+      - TLS_ENABLED=yes
+      - TLS_CLIENT_CNS=test_user
+      - PORT=16385
+      - TLS_PORT=27385
+    command: ${REDIS_EXTRA_ARGS:---enable-debug-command yes --enable-module-command yes --tls-auth-clients optional --save "" --tls-cluster yes}
+    ports:
+      - "16385-16390:16385-16390"
+      - "27385-27390:27385-27390"
+    volumes:
+      - "./dockers/cluster2:/redis/work"
+    profiles:
+      - multidb
 
   sentinel:
     <<: *client-libs-image
@@ -110,6 +139,7 @@ services:
       - standalone
       - all-stack
       - all
+      - multidb
 
   redis-proxied:
     <<: *client-libs-image

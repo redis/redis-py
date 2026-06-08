@@ -31,6 +31,15 @@ inputs:
       Legacy aliases like "2-standalone" are also accepted.
     required: false
     default: 'all'
+  run-multidb-integration:
+    description: |
+      When 'true', also run the MultiDBClient (active-active) integration tests
+      after the main test run. A second cluster (the docker "multidb" profile's
+      cluster2) is started so the client can front two real clusters, in
+      addition to the two standalone servers already up. Enabled for a single
+      existing matrix cell so no extra CI runners are added.
+    required: false
+    default: 'false'
   repository:
     description: 'Repository to checkout'
     required: false
@@ -248,6 +257,39 @@ runs:
         else
           run_tests "${{inputs.test-config}}"
         fi
+      shell: bash
+
+    - name: Run multi-database integration tests
+      # Folded into an existing matrix cell (see the `tests` job) so no extra CI
+      # runners are added. Brings up the second cluster (cluster2) on top of the
+      # already-running environment, then runs the MultiDBClient integration
+      # tests against two clusters and two standalone servers.
+      if: ${{ inputs.run-multidb-integration == 'true' }}
+      run: |
+        set -e
+
+        echo "::group::Starting second cluster (cluster2)"
+        docker compose up -d cluster2
+        # Wait for cluster2 to form (check from inside the container so we do
+        # not depend on a host-side redis-cli being installed).
+        for i in $(seq 1 60); do
+          if docker exec redis-cluster-2 redis-cli -p 16385 cluster info 2>/dev/null | grep -q 'cluster_state:ok'; then
+            echo "cluster2 is ready"
+            break
+          fi
+          sleep 1
+        done
+        echo "::endgroup::"
+
+        eventloop=""
+        if [ "${{inputs.event-loop}}" == "uvloop" ]; then
+          eventloop="--uvloop"
+        fi
+
+        echo "::group::Multi-database integration tests"
+        echo "Running MultiDBClient integration tests against two real Redis deployments (double-cluster and double-standalone)"
+        invoke multidb-integration-tests $eventloop
+        echo "::endgroup::"
       shell: bash
 
     - name: Debug
