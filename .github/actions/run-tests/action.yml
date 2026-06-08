@@ -269,16 +269,15 @@ runs:
         set -e
 
         echo "::group::Starting second cluster (cluster2)"
-        docker compose up -d cluster2
-        # Wait for cluster2 to form (check from inside the container so we do
-        # not depend on a host-side redis-cli being installed).
-        for i in $(seq 1 60); do
-          if docker exec redis-cluster-2 redis-cli -p 16385 cluster info 2>/dev/null | grep -q 'cluster_state:ok'; then
-            echo "cluster2 is ready"
-            break
-          fi
-          sleep 1
-        done
+        # `--wait` blocks until cluster2's healthcheck reports healthy
+        # (cluster_state:ok) and fails fast if it becomes unhealthy or exits, so
+        # the tests never run against a cluster that did not actually form.
+        if ! docker compose up -d --wait --wait-timeout 120 cluster2; then
+          echo "::error::cluster2 did not become healthy; aborting before running the multi-database integration tests."
+          docker compose logs --no-color --tail 100 cluster2 || true
+          echo "::endgroup::"
+          exit 1
+        fi
         echo "::endgroup::"
 
         eventloop=""

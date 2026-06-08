@@ -99,6 +99,15 @@ services:
       - "27385-27390:27385-27390"
     volumes:
       - "./dockers/cluster2:/redis/work"
+    # Report healthy only once the cluster has actually formed
+    # (cluster_state:ok), so `docker compose up --wait` blocks until the cluster
+    # is usable rather than just until the container is running.
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -p 16385 cluster info | grep -q cluster_state:ok"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
     profiles:
       - multidb
 
