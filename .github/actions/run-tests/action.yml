@@ -52,17 +52,17 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         repository: ${{ inputs.repository }}
         ref: ${{ inputs.ref }}
 
-    - uses: actions/setup-python@v5
+    - uses: actions/setup-python@v6
       with:
         python-version: ${{ inputs.python-version }}
         cache: 'pip'
 
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       if: ${{ inputs.parser-backend == 'hiredis' && inputs.hiredis-version == 'unstable' }}
       with:
         repository: redis/hiredis-py
@@ -303,7 +303,7 @@ runs:
       shell: bash
 
     - name: Upload test results and profiling data
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: pytest-results-redis_${{inputs.redis-version}}-python_${{inputs.python-version}}-parser_${{env.PARSER_BACKEND}}-el_${{inputs.event-loop}}-config_${{inputs.test-config}}
         path: |
@@ -314,6 +314,6 @@ runs:
         retention-days: 10
 
     - name: Upload codecov coverage
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v6
       with:
         fail_ci_if_error: false
