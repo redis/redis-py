@@ -1528,7 +1528,7 @@ def test_mrevrange_with_count_nan_count_all_aggregators(client):
 
 
 @pytest.mark.redismod
-@skip_if_server_version_lt("8.7.0")
+@skip_if_server_version_lt("8.8.0")
 def test_range_multiple_aggregators(client):
     """Test TS.RANGE with multiple aggregators (Redis 8.8+)."""
     client.ts().create("ts:multi_agg")
@@ -1551,7 +1551,7 @@ def test_range_multiple_aggregators(client):
 
 
 @pytest.mark.redismod
-@skip_if_server_version_lt("8.7.0")
+@skip_if_server_version_lt("8.8.0")
 def test_revrange_multiple_aggregators(client):
     """Test TS.REVRANGE with multiple aggregators (Redis 8.8+)."""
     client.ts().create("ts:multi_agg")
@@ -1574,7 +1574,7 @@ def test_revrange_multiple_aggregators(client):
 
 
 @pytest.mark.redismod
-@skip_if_server_version_lt("8.7.0")
+@skip_if_server_version_lt("8.8.0")
 def test_mrange_multiple_aggregators(client):
     """Test TS.MRANGE with multiple aggregators (Redis 8.8+)."""
     client.ts().create("ts:multi_agg_a", labels={"type": "test_multi_agg"})
@@ -1602,7 +1602,7 @@ def test_mrange_multiple_aggregators(client):
 
 
 @pytest.mark.redismod
-@skip_if_server_version_lt("8.7.0")
+@skip_if_server_version_lt("8.8.0")
 def test_mrevrange_multiple_aggregators(client):
     """Test TS.MREVRANGE with multiple aggregators (Redis 8.8+)."""
     client.ts().create("ts:multi_agg_b", labels={"type": "test_multi_agg_rev"})
