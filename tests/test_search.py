@@ -5590,3 +5590,95 @@ class TestHybridSearch(SearchTestsBase):
                 assert item["description"] is not None
                 assert item["discount_10_percents"] is not None
                 assert item["additional_discount"] is not None
+
+
+class TestSearchResp3BytesKeys(SearchTestsBase):
+    """Regression tests for #4107.
+
+    With ``protocol=3`` on the wire and ``decode_responses=False`` the
+    server's structural map keys arrive as ``bytes`` (e.g. ``b"results"``
+    rather than ``"results"``).  The RESP3->legacy-RESP2 search callbacks
+    used to look those keys up as plain strings, missed them, and
+    silently produced empty results.  These tests pin a
+    ``decode_responses=False`` client against a RESP3 wire with the
+    library's default legacy responses and exercise the three callbacks
+    that were affected: FT.SEARCH, FT.AGGREGATE and FT.SPELLCHECK.
+    """
+
+    @pytest.fixture
+    def bytes_client(self, request, stack_url):
+        r = _get_client(
+            redis.Redis,
+            request,
+            decode_responses=False,
+            protocol=3,
+            from_url=stack_url,
+        )
+        r.flushdb()
+        return r
+
+    @pytest.mark.redismod
+    @pytest.mark.fixed_client
+    def test_search_resp3_bytes_keys(self, bytes_client):
+        client = bytes_client
+        client.ft().create_index((TextField("title"), TextField("body")))
+        client.hset("doc1", mapping={"title": "hello", "body": "redis world"})
+        client.hset("doc2", mapping={"title": "hello", "body": "search world"})
+        self.waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
+
+        res = client.ft().search(Query("hello"))
+
+        # Before the fix this returned ``Result{0 total, docs: []}``
+        # because ``Result.from_resp3`` looked up the bytes-keyed map by
+        # ``str`` keys.  ``Result`` always normalises the doc id with
+        # ``str_if_bytes`` so the id assertion is in ``str`` form even
+        # for a ``decode_responses=False`` client.
+        assert res.total == 2
+        assert {d.id for d in res.docs} == {"doc1", "doc2"}
+
+    @pytest.mark.redismod
+    @pytest.mark.fixed_client
+    def test_aggregate_resp3_bytes_keys(self, bytes_client):
+        client = bytes_client
+        client.ft().create_index((TextField("title"), TextField("parent")))
+        client.hset("doc1", mapping={"title": "alpha", "parent": "redis"})
+        client.hset("doc2", mapping={"title": "beta", "parent": "redis"})
+        client.hset("doc3", mapping={"title": "gamma", "parent": "redis"})
+        self.waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
+
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.count()
+        )
+        res = client.ft().aggregate(req)
+
+        # Before the fix ``data.get("total_results")`` and
+        # ``data.get("results")`` both missed because the keys were
+        # ``bytes``, yielding ``total=0`` and ``rows=[]``.
+        assert len(res.rows) == 1
+        row = res.rows[0]
+        # Row content stays as bytes (matches RESP2 with
+        # decode_responses=False); only the structural map keys are
+        # normalised.
+        assert b"parent" in row
+        assert b"redis" in row
+
+    @pytest.mark.redismod
+    @pytest.mark.fixed_client
+    def test_spellcheck_resp3_bytes_keys(self, bytes_client):
+        client = bytes_client
+        client.ft().create_index((TextField("f1"),))
+        client.hset("doc1", mapping={"f1": "some valid content"})
+        client.hset("doc2", mapping={"f1": "very important"})
+        self.waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
+
+        res = client.ft().spellcheck("impornant")
+
+        # Before the fix ``res.get("results", {})`` missed the
+        # ``b"results"`` key and returned an empty ``{}``.
+        assert res
+        # The term key is preserved as it arrived (bytes when undecoded),
+        # mirroring the RESP2 ``decode_responses=False`` shape.
+        term_key = next(iter(res))
+        assert term_key in (b"impornant", "impornant")
+        suggestions = res[term_key]
+        assert any(s["suggestion"] == "important" for s in suggestions)
