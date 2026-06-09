@@ -870,6 +870,12 @@ class SearchCommands:
         ``legacy_responses=True`` on a RESP3 wire matches RESP2 output.
         """
         info = self._to_string_recursive(res)
+        if not isinstance(info, dict):
+            # In cluster mode or with certain Redis/RediSearch versions,
+            # the response may arrive as a RESP2-style flat array even
+            # though the client negotiated RESP3.  Fall back to the
+            # RESP2 parser (mirrors the guard in _parse_spellcheck_resp3).
+            return self._parse_info(res)
         attrs = info.get("attributes")
         if isinstance(attrs, list):
             info["attributes"] = [
