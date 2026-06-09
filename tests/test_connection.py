@@ -1887,6 +1887,30 @@ class TestBlockingConnectionPoolMetricCount:
         assert idle_net == 0, f"IDLE must not increase for dropped conn, got {idle_net}"
 
     @patch("redis.connection.record_connection_count")
+    def test_release_full_queue_no_double_decrement_on_reset(self, mock_rec):
+        """A connection dropped on a full queue must be removed from
+        _connections so a later reset() does not decrement USED again."""
+        pool = BlockingConnectionPool(
+            connection_class=_DummyConnection, max_connections=1, timeout=0.1,
+        )
+        pn = get_pool_name(pool)
+
+        conn = pool.get_connection()
+        pool.pool.put_nowait(None)  # fill the queue
+        pool.release(conn)
+
+        # The dropped connection must no longer be tracked.
+        assert conn not in pool._connections
+
+        mock_rec.reset_mock()
+        pool.reset()
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert used_net == 0, f"reset() must not decrement USED again, got {used_net}"
+        assert idle_net == 0, f"reset() must not touch IDLE, got {idle_net}"
+
+    @patch("redis.connection.record_connection_count")
     def test_release_unowned_uses_real_pool_name(self, mock_rec):
         pool = self._pool()
         pn = get_pool_name(pool)
