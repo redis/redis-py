@@ -29,9 +29,9 @@ env:
   COVERAGE_CORE: sysmon
   # patch releases get included in the base version image when they are published
   # for example after 8.2.1 is published, 8.2 image contains 8.2.1 content
-  CURRENT_REDIS_VERSION: '8.6.1'
+  CURRENT_REDIS_VERSION: '8.8.0'
   REDIS_VERSION_CUSTOM_MAP: >-
-    8.8:custom-26235535976-debian
+    8.8:8.8.0
 
 jobs:
   dependency-audit:
@@ -80,7 +80,7 @@ jobs:
       max-parallel: 30
       fail-fast: false
       matrix:
-        redis-version: ['8.8', '${{ needs.redis_version.outputs.CURRENT }}', '8.4.2', '8.2.5', '8.0.2' ,'7.4.4', '7.2.9']
+        redis-version: ['${{ needs.redis_version.outputs.CURRENT }}', '8.6.3', '8.4.3', '8.2.6', '8.0.6' ,'7.4.9', '7.2.14']
         python-version: ['3.10', '3.14']
         parser-backend: ['plain']
         event-loop: ['asyncio']
@@ -294,7 +294,7 @@ jobs:
       - name: Run installed unit tests
         env:
           CLIENT_LIBS_TEST_IMAGE_TAG: ${{ env.CURRENT_REDIS_VERSION }}
-          CLIENT_LIBS_TEST_STACK_IMAGE_TAG: ${{ env.CURRENT_CLIENT_LIBS_TEST_STACK_IMAGE_TAG }}
+          CLIENT_LIBS_TEST_STACK_IMAGE_TAG: ${{ env.CURRENT_REDIS_VERSION }}
         run: |
           bash .github/workflows/install_and_test.sh ${{ matrix.extension }}
 
