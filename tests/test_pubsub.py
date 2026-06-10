@@ -2238,10 +2238,15 @@ class TestPubSubTimeoutPropagation:
         causing listen() to time out between messages.
         Fixes redis/redis-py#4098.
         """
-        # Use a short socket timeout to simulate the Redis 8.0 default
-        client = redis.Redis.from_url(r.connection_pool.connection_kwargs.get(
-            "url", "redis://localhost:6379/0"
-        ), socket_timeout=0.5)
+        # Use a short socket timeout to simulate the Redis 8.0 default.
+        # Reuse the fixture's connection kwargs so the test targets the same
+        # Redis instance the fixture is using.
+        kwargs = {
+            k: v
+            for k, v in r.connection_pool.connection_kwargs.items()
+            if not k.startswith(("maint_", "orig_")) and k != "connection_class"
+        }
+        client = redis.Redis(socket_timeout=0.5, **kwargs)
         p = client.pubsub()
         p.subscribe("foo")
         # Read subscription message
