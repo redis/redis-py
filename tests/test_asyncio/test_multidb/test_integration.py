@@ -13,7 +13,10 @@ infrastructure:
 Nothing is mocked here - every multi-db component as well as the underlying
 async ``Redis`` / ``RedisCluster`` clients are real and talk to real servers.
 
-Run with: ``invoke multidb-integration-tests`` (after ``invoke devenv``).
+Run with: ``invoke multidb-integration-tests`` (after
+``invoke devenv --endpoints multidb``, which brings up the two standalone
+servers and two clusters these tests need; the default ``invoke devenv``
+profile does not include the second cluster).
 """
 
 import pytest
