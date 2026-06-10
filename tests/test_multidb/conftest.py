@@ -25,11 +25,18 @@ from redis.asyncio.multidb.healthcheck import (
 
 
 @pytest.fixture(autouse=True)
-def mock_health_check_connections():
+def mock_health_check_connections(request):
     """
     Mock clients for health check policies.
     Uses real policy classes but mocks only the client layer.
+
+    Skip this fixture for tests marked with @pytest.mark.no_mock_connections
+    (e.g. the integration tests that talk to real Redis deployments).
     """
+    # Check if the test is marked to skip connection mocking
+    if request.node.get_closest_marker("no_mock_connections"):
+        yield
+        return
 
     async def mock_get_client(self, database):
         mock_client = AsyncMock()
@@ -39,16 +46,6 @@ def mock_health_check_connections():
 
     with patch.object(AbstractHealthCheckPolicy, "get_client", mock_get_client):
         yield
-
-
-@pytest.fixture()
-def mock_client() -> Redis:
-    return Mock(spec=Redis)
-
-
-@pytest.fixture()
-def mock_cb() -> CircuitBreaker:
-    return Mock(spec=CircuitBreaker)
 
 
 @pytest.fixture()
