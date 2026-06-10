@@ -1443,32 +1443,12 @@ class PubSub:
         self.pending_unsubscribe_shard_channels.update(s_channels)
         return self.execute_command("SUNSUBSCRIBE", *args)
 
-    def listen(self, timeout: Optional[float] = None):
-        """
-        Listen for messages on channels this client has been subscribed to.
-
-        If timeout is specified, the system will wait for `timeout` seconds
-        before returning. Timeout should be specified as a floating point
-        number, or None, to wait indefinitely.
-        """
-        if timeout is not None:
-            start = time.monotonic()
-            remaining = timeout
-        else:
-            remaining = None
+    def listen(self):
+        "Listen for messages on channels this client has been subscribed to"
         while self.subscribed:
-            response = self.handle_message(
-                self.parse_response(block=(timeout is None), timeout=remaining)
-            )
+            response = self.handle_message(self.parse_response(block=True))
             if response is not None:
                 yield response
-            if timeout is not None:
-                elapsed = time.monotonic() - start
-                if elapsed >= timeout:
-                    break
-                remaining = timeout - elapsed
-                if remaining <= 0:
-                    break
 
     def get_message(
         self, ignore_subscribe_messages: bool = False, timeout: float = 0.0

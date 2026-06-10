@@ -2230,85 +2230,51 @@ class TestPubSubTimeoutPropagation:
         msg = p.get_message(timeout=0.1)
         assert msg is None
 
-    def test_listen_with_timeout_returns_none_when_no_message(self, r):
+    def test_listen_blocks_until_message_despite_socket_timeout(self, r):
         """
-        Test that listen() with timeout parameter respects the timeout
-        and yields nothing when no message arrives within the timeout period.
+        Test that listen() blocks indefinitely until a message arrives,
+        even when the underlying connection has a short socket_timeout.
+        This regressed in Redis 8.0 where socket_timeout defaults to 5s,
+        causing listen() to time out between messages.
         Fixes redis/redis-py#4098.
         """
-        p = r.pubsub()
+        # Use a short socket timeout to simulate the Redis 8.0 default
+        client = redis.Redis.from_url(r.connection_pool.connection_kwargs.get(
+            "url", "redis://localhost:6379/0"
+        ), socket_timeout=0.5)
+        p = client.pubsub()
         p.subscribe("foo")
         # Read subscription message
         msg = wait_for_message(p, timeout=1.0)
         assert msg is not None
         assert msg["type"] == "subscribe"
 
-        # listen with timeout should yield nothing and return quickly
-        start = time.monotonic()
-        messages = list(p.listen(timeout=0.1))
-        elapsed = time.monotonic() - start
-        assert len(messages) == 0
-        # Verify timeout was actually respected (within reasonable bounds)
-        assert elapsed < 0.5
-
-    def test_listen_with_timeout_yields_message_when_published(self, r):
-        """
-        Test that listen() with timeout yields a message if one arrives
-        before the timeout expires.
-        Fixes redis/redis-py#4098.
-        """
-        p = r.pubsub()
-        p.subscribe("foo")
-        # Read subscription message
-        msg = wait_for_message(p, timeout=1.0)
-        assert msg is not None
-
-        # Publish a message
-        r.publish("foo", "hello")
-
-        # listen with timeout should yield the message
-        messages = list(p.listen(timeout=1.0))
-        assert len(messages) == 1
-        assert messages[0]["type"] == "message"
-        assert messages[0]["data"] == b"hello"
-
-    def test_listen_timeout_none_blocks_until_message(self, r):
-        """
-        Test that listen(timeout=None) blocks indefinitely until a message arrives.
-        We test this by using a thread to publish a message after a delay.
-        Fixes redis/redis-py#4098.
-        """
-        p = r.pubsub()
-        p.subscribe("foo")
-        # Read subscription message
-        msg = wait_for_message(p, timeout=1.0)
-        assert msg is not None
-
-        # Publish a message after a short delay in a thread
+        # Publish a message after a delay that exceeds the socket timeout.
+        # If listen() incorrectly respected socket_timeout, it would raise
+        # TimeoutError before the message arrives.
         start_publishing = threading.Event()
 
         def publish_after_delay():
             start_publishing.wait()
-            time.sleep(0.2)
-            r.publish("foo", "delayed_message")
+            time.sleep(1.0)
+            client.publish("foo", "delayed_message")
 
         thread = threading.Thread(target=publish_after_delay, daemon=True)
         thread.start()
 
-        # listen with timeout=None should block until message arrives
         start = time.monotonic()
         start_publishing.set()
         messages = []
-        for msg in p.listen(timeout=None):
+        for msg in p.listen():
             messages.append(msg)
             break
         elapsed = time.monotonic() - start
         assert len(messages) == 1
         assert messages[0]["type"] == "message"
         assert messages[0]["data"] == b"delayed_message"
-        # Should have waited at least 0.2 seconds
-        assert elapsed >= 0.15
-        thread.join(timeout=1.0)
+        # Should have waited at least 1 second, proving listen() ignored socket_timeout
+        assert elapsed >= 0.9
+        thread.join(timeout=2.0)
 
 
 @pytest.mark.onlynoncluster
