@@ -666,8 +666,11 @@ class SearchCommands:
                     score_str = str(score)
                     if score_str.endswith(".0"):
                         score_str = score_str[:-2]
+                    # Preserve ``suggestion`` as-is so it keeps the
+                    # ``decode_responses`` shape RESP2 would produce
+                    # (``str`` when decoded, ``bytes`` otherwise).
                     term_corrections.append(
-                        {"score": score_str, "suggestion": str(suggestion)}
+                        {"score": score_str, "suggestion": suggestion}
                     )
             if term_corrections:
                 corrections[term] = term_corrections

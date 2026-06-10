@@ -221,8 +221,9 @@ class TestParseSpellcheckResp3:
     def test_bytes_keys_are_parsed(self):
         """The outer ``results`` structural key arrives as ``bytes`` on
         RESP3 with decode_responses=False.  The fix normalises only that
-        structural key; inner term keys mirror RESP2's behaviour and keep
-        their wire type (bytes when undecoded)."""
+        structural key; inner term keys and suggestion values mirror
+        RESP2's behaviour and keep their wire type (bytes when
+        undecoded)."""
         s = _make_search()
         res = {
             b"results": {
@@ -236,6 +237,9 @@ class TestParseSpellcheckResp3:
         assert list(out.keys()) == [b"impornant"]
         suggestions = list(out.values())[0]
         assert suggestions[0]["score"] == "0.5"
+        # And the suggestion stays in its wire form (bytes when
+        # ``decode_responses=False``) so the legacy path matches RESP2.
+        assert suggestions[0]["suggestion"] == b"important"
 
     def test_no_corrections_returns_empty(self):
         """Term with no candidate suggestions still yields ``{}``."""

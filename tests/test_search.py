@@ -43,7 +43,7 @@ from redis.commands.search.query import (
 )
 from redis.commands.search.result import Result
 from redis.commands.search.suggestion import Suggestion
-from redis.utils import safe_str
+from redis.utils import SENTINEL, safe_str
 
 from .conftest import (
     _get_client,
@@ -84,15 +84,28 @@ class SearchTestsBase:
         while True:
             try:
                 res = env.execute_command("FT.INFO", idx)
-                if int(res[res.index("indexing") + 1]) == 0:
+                # ``execute_command`` bypasses the search module's
+                # callbacks, so the response is the raw wire shape.
+                # With ``decode_responses=False`` the structural keys
+                # arrive as bytes; accept both forms.
+                try:
+                    i = res.index("indexing")
+                except ValueError:
+                    i = res.index(b"indexing")
+                if int(res[i + 1]) == 0:
                     break
             except ValueError:
                 break
             except AttributeError:
+                # RESP3 dict response.  Keys may be ``str`` or ``bytes``
+                # depending on ``decode_responses``.
+                indexing = res.get("indexing")
+                if indexing is None:
+                    indexing = res.get(b"indexing")
                 try:
-                    if int(res["indexing"]) == 0:
+                    if int(indexing) == 0:
                         break
-                except ValueError:
+                except (TypeError, ValueError):
                     break
             except ResponseError:
                 # index doesn't exist yet
@@ -5592,35 +5605,50 @@ class TestHybridSearch(SearchTestsBase):
                 assert item["additional_discount"] is not None
 
 
+# Parametrise the bytes-key regression tests over RESP2 and the
+# default protocol.  RESP2 uses ``_RedisCallbacksRESP2`` and anchors the
+# expected legacy output shape with ``decode_responses=False``.  The
+# default protocol (``SENTINEL`` -> not specified) leaves the wire on
+# RESP3 with the ``_RedisCallbacksRESP3toRESP2Legacy`` adapter selected,
+# which is the path the fix actually exercises.  An explicit
+# ``protocol=3`` would route through ``_RedisCallbacksRESP3`` instead
+# and bypass the changed methods.
+_SEARCH_BYTES_PROTOCOLS = [
+    pytest.param(2, id="resp2"),
+    pytest.param(SENTINEL, id="default-resp3"),
+]
+
+
+def _make_bytes_search_client(request, stack_url, protocol):
+    kwargs = {
+        "decode_responses": False,
+        "from_url": stack_url,
+    }
+    if protocol is not SENTINEL:
+        kwargs["protocol"] = protocol
+    client = _get_client(redis.Redis, request, **kwargs)
+    client.flushdb()
+    return client
+
+
 class TestSearchResp3BytesKeys(SearchTestsBase):
     """Regression tests for #4107.
 
-    With ``protocol=3`` on the wire and ``decode_responses=False`` the
-    server's structural map keys arrive as ``bytes`` (e.g. ``b"results"``
-    rather than ``"results"``).  The RESP3->legacy-RESP2 search callbacks
-    used to look those keys up as plain strings, missed them, and
-    silently produced empty results.  These tests pin a
-    ``decode_responses=False`` client against a RESP3 wire with the
-    library's default legacy responses and exercise the three callbacks
-    that were affected: FT.SEARCH, FT.AGGREGATE and FT.SPELLCHECK.
+    With the default protocol (RESP3 on the wire) and
+    ``decode_responses=False`` the server's structural map keys arrive
+    as ``bytes`` (e.g. ``b"results"`` rather than ``"results"``).  The
+    RESP3->legacy-RESP2 search callbacks used to look those keys up as
+    plain strings, missed them, and silently produced empty results.
+    Each test is parametrised over ``protocol=2`` (anchors the legacy
+    output shape) and the default protocol (exercises the actual fixed
+    parsers in ``_RedisCallbacksRESP3toRESP2Legacy``).
     """
 
-    @pytest.fixture
-    def bytes_client(self, request, stack_url):
-        r = _get_client(
-            redis.Redis,
-            request,
-            decode_responses=False,
-            protocol=3,
-            from_url=stack_url,
-        )
-        r.flushdb()
-        return r
-
+    @pytest.mark.parametrize("protocol", _SEARCH_BYTES_PROTOCOLS)
     @pytest.mark.redismod
     @pytest.mark.fixed_client
-    def test_search_resp3_bytes_keys(self, bytes_client):
-        client = bytes_client
+    def test_search_resp3_bytes_keys(self, request, stack_url, protocol):
+        client = _make_bytes_search_client(request, stack_url, protocol)
         client.ft().create_index((TextField("title"), TextField("body")))
         client.hset("doc1", mapping={"title": "hello", "body": "redis world"})
         client.hset("doc2", mapping={"title": "hello", "body": "search world"})
@@ -5628,18 +5656,20 @@ class TestSearchResp3BytesKeys(SearchTestsBase):
 
         res = client.ft().search(Query("hello"))
 
-        # Before the fix this returned ``Result{0 total, docs: []}``
-        # because ``Result.from_resp3`` looked up the bytes-keyed map by
-        # ``str`` keys.  ``Result`` always normalises the doc id with
-        # ``str_if_bytes`` so the id assertion is in ``str`` form even
-        # for a ``decode_responses=False`` client.
+        # Before the fix the default-RESP3 case returned
+        # ``Result{0 total, docs: []}`` because ``Result.from_resp3``
+        # looked up the bytes-keyed map by ``str`` keys.  ``Result``
+        # always normalises the doc id with ``str_if_bytes`` so the id
+        # assertion stays in ``str`` form even with
+        # ``decode_responses=False``.
         assert res.total == 2
         assert {d.id for d in res.docs} == {"doc1", "doc2"}
 
+    @pytest.mark.parametrize("protocol", _SEARCH_BYTES_PROTOCOLS)
     @pytest.mark.redismod
     @pytest.mark.fixed_client
-    def test_aggregate_resp3_bytes_keys(self, bytes_client):
-        client = bytes_client
+    def test_aggregate_resp3_bytes_keys(self, request, stack_url, protocol):
+        client = _make_bytes_search_client(request, stack_url, protocol)
         client.ft().create_index((TextField("title"), TextField("parent")))
         client.hset("doc1", mapping={"title": "alpha", "parent": "redis"})
         client.hset("doc2", mapping={"title": "beta", "parent": "redis"})
@@ -5651,9 +5681,10 @@ class TestSearchResp3BytesKeys(SearchTestsBase):
         )
         res = client.ft().aggregate(req)
 
-        # Before the fix ``data.get("total_results")`` and
-        # ``data.get("results")`` both missed because the keys were
-        # ``bytes``, yielding ``total=0`` and ``rows=[]``.
+        # Before the fix the default-RESP3 case missed
+        # ``data.get("total_results")`` and ``data.get("results")``
+        # because the keys were ``bytes``, yielding ``total=0`` and
+        # ``rows=[]``.
         assert len(res.rows) == 1
         row = res.rows[0]
         # Row content stays as bytes (matches RESP2 with
@@ -5662,10 +5693,11 @@ class TestSearchResp3BytesKeys(SearchTestsBase):
         assert b"parent" in row
         assert b"redis" in row
 
+    @pytest.mark.parametrize("protocol", _SEARCH_BYTES_PROTOCOLS)
     @pytest.mark.redismod
     @pytest.mark.fixed_client
-    def test_spellcheck_resp3_bytes_keys(self, bytes_client):
-        client = bytes_client
+    def test_spellcheck_resp3_bytes_keys(self, request, stack_url, protocol):
+        client = _make_bytes_search_client(request, stack_url, protocol)
         client.ft().create_index((TextField("f1"),))
         client.hset("doc1", mapping={"f1": "some valid content"})
         client.hset("doc2", mapping={"f1": "very important"})
@@ -5673,12 +5705,12 @@ class TestSearchResp3BytesKeys(SearchTestsBase):
 
         res = client.ft().spellcheck("impornant")
 
-        # Before the fix ``res.get("results", {})`` missed the
-        # ``b"results"`` key and returned an empty ``{}``.
-        assert res
-        # The term key is preserved as it arrived (bytes when undecoded),
-        # mirroring the RESP2 ``decode_responses=False`` shape.
-        term_key = next(iter(res))
-        assert term_key in (b"impornant", "impornant")
-        suggestions = res[term_key]
-        assert any(s["suggestion"] == "important" for s in suggestions)
+        # Before the fix the default-RESP3 case had
+        # ``res.get("results", {})`` miss the ``b"results"`` key and
+        # return an empty ``{}``.  Both protocols carry the term and
+        # suggestion through as bytes, matching
+        # ``_parse_spellcheck`` with ``decode_responses=False``.
+        assert b"impornant" in res
+        suggestions = res[b"impornant"]
+        assert suggestions
+        assert suggestions[0]["suggestion"] == b"important"
