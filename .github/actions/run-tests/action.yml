@@ -156,6 +156,15 @@ runs:
           invoke devenv --endpoints all
         fi
 
+        # Persist the resolved image tags so later steps start containers from
+        # the same Redis image as the rest of this environment. The
+        # multi-database integration step runs `docker compose up cluster2` in a
+        # fresh shell; without this it would fall back to compose's hard-coded
+        # default tag and could start the second cluster on a different Redis
+        # version than the first one.
+        echo "CLIENT_LIBS_TEST_IMAGE_TAG=${CLIENT_LIBS_TEST_IMAGE_TAG}" >> $GITHUB_ENV
+        echo "CLIENT_LIBS_TEST_STACK_IMAGE_TAG=${CLIENT_LIBS_TEST_STACK_IMAGE_TAG}" >> $GITHUB_ENV
+
         sleep 10 # time to settle
         echo "::endgroup::"
       shell: bash
