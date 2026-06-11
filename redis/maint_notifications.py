@@ -51,6 +51,7 @@ class EndpointType(enum.Enum):
 
 
 if TYPE_CHECKING:
+    from redis.asyncio.connection import AsyncMaintNotificationsAbstractConnection
     from redis.connection import (
         MaintNotificationsAbstractConnection,
         MaintNotificationsAbstractConnectionPool,
@@ -684,7 +685,9 @@ class MaintNotificationsConfig:
         return self.relaxed_timeout != -1
 
     def get_endpoint_type(
-        self, host: str, connection: "MaintNotificationsAbstractConnection"
+        self,
+        host: str,
+        connection: "MaintNotificationsAbstractConnection | AsyncMaintNotificationsAbstractConnection",
     ) -> EndpointType:
         """
         Determine the appropriate endpoint type for CLIENT MAINT_NOTIFICATIONS command.
@@ -872,11 +875,12 @@ class MaintNotificationsPoolHandler:
                 return
 
             with self.pool._lock:
-                logger.debug(
-                    f"Handling node MOVING notification: {notification}, "
-                    f"with connection: {self.connection}, connected to ip "
-                    f"{self.connection.get_resolved_ip() if self.connection else None}"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        f"Handling node MOVING notification: {notification}, "
+                        f"with connection: {self.connection}, connected to ip "
+                        f"{self.connection.get_resolved_ip() if self.connection else None}"
+                    )
                 # Get the current connected address - if any
                 # This is the address that is being moved
                 # and we need to handle only connections
@@ -962,11 +966,12 @@ class MaintNotificationsPoolHandler:
         notification_hash = hash(notification)
 
         with self._lock:
-            logger.debug(
-                f"Reverting temporary changes related to notification: {notification}, "
-                f"with connection: {self.connection}, connected to ip "
-                f"{self.connection.get_resolved_ip() if self.connection else None}"
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    f"Reverting temporary changes related to notification: {notification}, "
+                    f"with connection: {self.connection}, connected to ip "
+                    f"{self.connection.get_resolved_ip() if self.connection else None}"
+                )
             kwargs = _build_moving_cleanup_connection_kwargs(
                 self.pool.connection_kwargs, notification_hash
             )
@@ -1076,12 +1081,13 @@ class MaintNotificationsConnectionHandler:
             relaxed=True,
         )
 
-    def handle_maintenance_completed_notification(self, **kwargs):
+    def handle_maintenance_completed_notification(self, **kwargs: Any) -> None:
         # Only reset timeouts if state is not MOVING and relaxed timeouts are enabled
         if _should_skip_connection_timeout_update(
             self.connection.maintenance_state, self.config
         ):
             return
+
         notification = None
         if kwargs.get("notification"):
             notification = kwargs["notification"]

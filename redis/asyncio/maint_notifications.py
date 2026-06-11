@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from redis.asyncio.observability.recorder import (
     record_connection_handoff,
@@ -20,12 +20,15 @@ from redis.maint_notifications import (
 )
 from redis.observability.attributes import get_pool_name
 
+if TYPE_CHECKING:
+    from redis.asyncio.connection import AsyncMaintNotificationsAbstractConnection
+
 logger = logging.getLogger(__name__)
 
 _ScheduledCallback = Callable[..., Awaitable[None]]
 
 
-def _add_debug_log_for_notification(
+def add_debug_log_for_notification(
     connection: object,
     notification: str | MaintenanceNotification,
 ) -> None:
@@ -70,7 +73,9 @@ class AsyncMaintNotificationsPoolHandler:
         self._lock = asyncio.Lock()
         self.connection: Any | None = None
 
-    def set_connection(self, connection: Any) -> None:
+    def set_connection(
+        self, connection: "AsyncMaintNotificationsAbstractConnection"
+    ) -> None:
         self.connection = connection
 
     def get_handler_for_connection(self) -> "AsyncMaintNotificationsPoolHandler":
@@ -112,12 +117,12 @@ class AsyncMaintNotificationsPoolHandler:
                 # the notification has already been handled or is expired
                 # just return
                 return
-
-            logger.debug(
-                f"Handling node MOVING notification: {notification}, "
-                f"with connection: {self.connection}, connected to ip "
-                f"{self.connection.get_resolved_ip() if self.connection else None}"
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    f"Handling node MOVING notification: {notification}, "
+                    f"with connection: {self.connection}, connected to ip "
+                    f"{self.connection.get_resolved_ip() if self.connection else None}"
+                )
             # Get the current connected address - if any
             # This is the address that is being moved
             # and we need to handle only connections
@@ -184,11 +189,12 @@ class AsyncMaintNotificationsPoolHandler:
         notification_hash = hash(notification)
 
         async with self._lock:
-            logger.debug(
-                f"Reverting temporary changes related to notification: {notification}, "
-                f"with connection: {self.connection}, connected to ip "
-                f"{self.connection.get_resolved_ip() if self.connection else None}"
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    f"Reverting temporary changes related to notification: {notification}, "
+                    f"with connection: {self.connection}, connected to ip "
+                    f"{self.connection.get_resolved_ip() if self.connection else None}"
+                )
             reset_relaxed_timeout = self.config.is_relaxed_timeouts_enabled()
             reset_host_address = self.config.proactive_reconnect
 
@@ -236,7 +242,7 @@ class AsyncMaintNotificationsPoolHandler:
 class AsyncMaintNotificationsConnectionHandler:
     def __init__(
         self,
-        connection: Any,
+        connection: "AsyncMaintNotificationsAbstractConnection",
         config: MaintNotificationsConfig,
     ) -> None:
         self.connection = connection
@@ -252,6 +258,7 @@ class AsyncMaintNotificationsConnectionHandler:
         )
         if pool_handler and getattr(pool_handler, "pool", None):
             return get_pool_name(pool_handler.pool)
+        # Fallback for standalone connections without a pool
         return repr(self.connection)
 
     async def handle_notification(self, notification: MaintenanceNotification) -> None:
@@ -292,7 +299,7 @@ class AsyncMaintNotificationsConnectionHandler:
         maintenance_state: MaintenanceState,
         notification: MaintenanceNotification,
     ) -> None:
-        _add_debug_log_for_notification(self.connection, notification)
+        add_debug_log_for_notification(self.connection, notification)
 
         if _should_skip_connection_timeout_update(
             self.connection.maintenance_state, self.config
@@ -313,18 +320,25 @@ class AsyncMaintNotificationsConnectionHandler:
         )
 
     async def handle_maintenance_completed_notification(self, **kwargs: Any) -> None:
+        # Only reset timeouts if state is not MOVING and relaxed timeouts are enabled
         if _should_skip_connection_timeout_update(
             self.connection.maintenance_state, self.config
         ):
             return
 
-        notification = kwargs.get("notification")
-        _add_debug_log_for_notification(
+        notification = None
+        if kwargs.get("notification"):
+            notification = kwargs["notification"]
+        add_debug_log_for_notification(
             self.connection, notification if notification else "MAINTENANCE_COMPLETED"
         )
         self.connection.reset_tmp_settings(reset_relaxed_timeout=True)
+        # Maintenance completed - reset the connection
+        # timeouts by providing -1 as the relaxed timeout
         self.connection.update_current_socket_timeout(-1)
         self.connection.maintenance_state = MaintenanceState.NONE
+        # reset the sets that keep track of received start maint
+        # notifications and skipped end maint notifications
         self.connection.reset_received_notifications()
 
         if notification:

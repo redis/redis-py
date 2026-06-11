@@ -328,7 +328,10 @@ class Redis(
         maint_notifications_config:
             configures the pool to support maintenance notifications - see
             `redis.maint_notifications.MaintNotificationsConfig` for details.
-            Only supported with RESP3.
+            Only supported with RESP3
+            If not provided and protocol is RESP3, the maintenance notifications
+            will be enabled by default (logic is included in the connection pool
+            initialization).
             Argument is ignored when connection_pool is provided.
         """
         kwargs: Dict[str, Any]
@@ -383,10 +386,21 @@ class Redis(
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
+                if (
+                    maint_notifications_config
+                    and maint_notifications_config.enabled is True
+                ):
+                    raise RedisError(
+                        "Maintenance notifications are not supported with Unix "
+                        "domain socket connections"
+                    )
                 kwargs.update(
                     {
                         "path": unix_socket_path,
                         "connection_class": UnixDomainSocketConnection,
+                        "maint_notifications_config": MaintNotificationsConfig(
+                            enabled=False
+                        ),
                     }
                 )
             else:

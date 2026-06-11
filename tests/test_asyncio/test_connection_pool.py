@@ -26,9 +26,9 @@ from .test_pubsub import wait_for_message
 def assert_kwargs_subset(actual, expected):
     for key, value in expected.items():
         assert key in actual, f"missing key {key!r} in {actual!r}"
-        assert (
-            actual[key] == value
-        ), f"value mismatch for {key!r}: {actual[key]!r} != {value!r}"
+        assert actual[key] == value, (
+            f"value mismatch for {key!r}: {actual[key]!r} != {value!r}"
+        )
 
 
 @pytest.mark.onlynoncluster
@@ -269,9 +269,9 @@ class TestConnectionPool:
 
             # Verify the lock was NOT held during connect
             assert len(lock_states) > 0, "connect() should have been called"
-            assert (
-                lock_states[0] is False
-            ), "Lock should not be held during connection establishment"
+            assert lock_states[0] is False, (
+                "Lock should not be held during connection establishment"
+            )
 
             await pool.release(connection)
 

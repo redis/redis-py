@@ -626,6 +626,40 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
 
         self._validate_connection_handlers(conn, pool_handler, self.config)
 
+    def test_moving_update_with_disabled_relaxed_timeout_preserves_timeouts(self):
+        config = MaintNotificationsConfig(
+            enabled=True,
+            proactive_reconnect=True,
+            relaxed_timeout=-1,
+        )
+        pool = ConnectionPool(
+            host=DEFAULT_ADDRESS.split(":")[0],
+            port=int(DEFAULT_ADDRESS.split(":")[1]),
+            protocol=3,
+            maint_notifications_config=config,
+        )
+        connection = Connection(
+            host=DEFAULT_ADDRESS.split(":")[0],
+            port=int(DEFAULT_ADDRESS.split(":")[1]),
+            protocol=3,
+            maint_notifications_config=config,
+        )
+
+        pool.update_connection_settings(
+            connection,
+            state=MaintenanceState.MOVING,
+            maintenance_notification_hash=hash(MOVING_NOTIFICATION),
+            host_address=AFTER_MOVING_ADDRESS.split(":")[0],
+            relaxed_timeout=config.relaxed_timeout,
+            update_notification_hash=True,
+        )
+
+        assert connection.maintenance_state == MaintenanceState.MOVING
+        assert connection.maintenance_notification_hash == hash(MOVING_NOTIFICATION)
+        assert connection.host == AFTER_MOVING_ADDRESS.split(":")[0]
+        assert connection.socket_timeout == DEFAULT_SOCKET_TIMEOUT
+        assert connection.socket_connect_timeout == DEFAULT_SOCKET_CONNECT_TIMEOUT
+
     def test_maint_handler_init_for_existing_connections(self):
         """Test that maintenance notification handlers are properly set on existing and new connections
         when configuration is enabled after client creation."""

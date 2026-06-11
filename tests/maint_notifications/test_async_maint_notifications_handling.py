@@ -68,7 +68,7 @@ class DummyAsyncConnection:
     def set_tmp_settings(
         self,
         tmp_host_address: str | object | None = SENTINEL,
-        tmp_relaxed_timeout: float | None = None,
+        tmp_relaxed_timeout: float | None = -1,
     ):
         if tmp_host_address and tmp_host_address != SENTINEL:
             self.host = str(tmp_host_address)
@@ -102,6 +102,12 @@ class DummyAsyncConnection:
     async def disconnect(self, *args, **kwargs):
         self.disconnect_calls += 1
         self.connected = False
+
+
+class UnsupportedAsyncConnection:
+    def __init__(self, host=DEFAULT_HOST, **kwargs):
+        self.host = host
+        self.kwargs = kwargs
 
 
 def _assert_connection_in_moving_state(
@@ -514,32 +520,6 @@ async def test_async_handshake_enabled_raises_response_error():
         await connection.activate_maint_notifications_handling_if_enabled()
 
 
-def test_async_unix_socket_connection_auto_maint_notifications_disabled():
-    config = MaintNotificationsConfig(enabled="auto")
-    connection = UnixDomainSocketConnection(
-        path="/tmp/redis.sock",
-        protocol=3,
-        maint_notifications_config=config,
-    )
-
-    assert connection._maint_notifications_pool_handler is None
-    assert connection._maint_notifications_connection_handler is None
-
-
-def test_async_unix_socket_connection_rejects_enabled_maint_notifications():
-    config = MaintNotificationsConfig(enabled=True)
-
-    with pytest.raises(
-        RedisError,
-        match="Maintenance notifications are not supported for connections without a host",
-    ):
-        UnixDomainSocketConnection(
-            path="/tmp/redis.sock",
-            protocol=3,
-            maint_notifications_config=config,
-        )
-
-
 def test_async_pool_auto_enables_maint_notifications_for_default_resp3():
     pool = ConnectionPool(host=DEFAULT_HOST, port=DEFAULT_PORT)
 
@@ -551,6 +531,61 @@ def test_async_pool_auto_enables_maint_notifications_for_default_resp3():
     assert pool.connection_kwargs["maint_notifications_pool_handler"] is (
         pool._maint_notifications_pool_handler
     )
+
+
+def test_async_pool_does_not_auto_enable_maint_notifications_without_valid_host():
+    pool = ConnectionPool(host=None, port=DEFAULT_PORT, protocol=3)
+
+    assert pool._maint_notifications_pool_handler is None
+    assert not pool.maint_notifications_enabled()
+    assert "maint_notifications_config" not in pool.connection_kwargs
+    assert "maint_notifications_pool_handler" not in pool.connection_kwargs
+
+
+def test_async_pool_rejects_enabled_maint_notifications_without_valid_host():
+    config = MaintNotificationsConfig(enabled=True)
+
+    with pytest.raises(
+        RedisError,
+        match="Maintenance notifications are not supported for connections without a host",
+    ):
+        ConnectionPool(
+            host=None,
+            port=DEFAULT_PORT,
+            protocol=3,
+            maint_notifications_config=config,
+        )
+
+
+def test_async_custom_connection_does_not_auto_enable_maint_notifications():
+    pool = ConnectionPool(
+        connection_class=UnsupportedAsyncConnection,
+        host=DEFAULT_HOST,
+        protocol=3,
+    )
+
+    assert pool._maint_notifications_pool_handler is None
+    assert not pool.maint_notifications_enabled()
+    assert "maint_notifications_config" not in pool.connection_kwargs
+    assert "maint_notifications_pool_handler" not in pool.connection_kwargs
+
+
+def test_async_custom_connection_rejects_enabled_maint_notifications_config():
+    config = MaintNotificationsConfig(enabled=True)
+
+    with pytest.raises(
+        RedisError,
+        match=(
+            "Maintenance notifications are not supported for connection class "
+            "UnsupportedAsyncConnection"
+        ),
+    ):
+        ConnectionPool(
+            connection_class=UnsupportedAsyncConnection,
+            host=DEFAULT_HOST,
+            protocol=3,
+            maint_notifications_config=config,
+        )
 
 
 def test_async_unix_socket_pool_does_not_auto_enable_maint_notifications():
@@ -589,7 +624,7 @@ def test_async_unix_socket_pool_rejects_enabled_maint_notifications():
 
     with pytest.raises(
         RedisError,
-        match="Maintenance notifications are not supported for connection class UnixDomainSocketConnection",
+        match="Maintenance notifications are not supported for Unix domain socket connections",
     ):
         ConnectionPool(
             connection_class=UnixDomainSocketConnection,
@@ -604,7 +639,7 @@ def test_async_redis_unix_socket_rejects_enabled_maint_notifications():
 
     with pytest.raises(
         RedisError,
-        match="Maintenance notifications are not supported for connection class UnixDomainSocketConnection",
+        match="Maintenance notifications are not supported with Unix domain socket connections",
     ):
         redis.Redis(
             unix_socket_path="/tmp/redis.sock",
@@ -683,6 +718,46 @@ async def test_async_pool_applies_and_cleans_up_moving_notification(pool_class):
     assert pool.connection_kwargs["port"] == DEFAULT_PORT
     assert pool.connection_kwargs["maintenance_state"] == MaintenanceState.NONE
     assert pool.connection_kwargs["maintenance_notification_hash"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+async def test_async_pool_moving_with_disabled_relaxed_timeout_preserves_timeouts(
+    pool_class,
+):
+    config = MaintNotificationsConfig(
+        enabled=True,
+        proactive_reconnect=True,
+        relaxed_timeout=-1,
+    )
+    pool = pool_class(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=config,
+    )
+    connection = DummyAsyncConnection(peer=DEFAULT_HOST)
+    pool._in_use_connections.add(connection)
+    notification = NodeMovingNotification(
+        id=1,
+        new_node_host=MOVED_HOST,
+        new_node_port=MOVED_PORT,
+        ttl=5,
+    )
+
+    await pool.apply_moving_notification(
+        notification=notification,
+        config=config,
+        moving_address_src=DEFAULT_HOST,
+        run_proactive_reconnect=True,
+    )
+
+    assert connection.maintenance_state == MaintenanceState.MOVING
+    assert connection.maintenance_notification_hash == hash(notification)
+    assert connection.host == MOVED_HOST
+    assert connection.socket_timeout == DEFAULT_SOCKET_TIMEOUT
+    assert connection.socket_connect_timeout == DEFAULT_SOCKET_CONNECT_TIMEOUT
+    assert connection.timeout_updates == [-1]
 
 
 @pytest.mark.asyncio
