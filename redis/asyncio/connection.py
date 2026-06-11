@@ -206,6 +206,10 @@ class AsyncMaintNotificationsAbstractConnection:
     ) -> Any:
         pass
 
+    @abstractmethod
+    def getpeername(self) -> str | None:
+        pass
+
     def _configure_maintenance_notifications(
         self,
         maint_notifications_pool_handler: (
@@ -381,7 +385,7 @@ class AsyncMaintNotificationsAbstractConnection:
         # Method 1: Try to get the actual IP from the established stream.
         # This is most accurate as it shows the exact IP being used.
         try:
-            peer_addr = self._get_peer_address()
+            peer_addr = self.getpeername()
             if peer_addr:
                 return peer_addr
         except (AttributeError, OSError):
@@ -433,18 +437,6 @@ class AsyncMaintNotificationsAbstractConnection:
     def reset_received_notifications(self) -> None:
         self._processed_start_maint_notifications.clear()
         self._skipped_end_maint_notifications.clear()
-
-    def getpeername(self) -> str | None:
-        """
-        Returns the peer name of the connection.
-        """
-        writer = getattr(self, "_writer", None)
-        if writer is None:
-            return None
-        peername = writer.get_extra_info("peername")
-        if isinstance(peername, tuple) and peername:
-            return str(peername[0])
-        return None
 
     def update_current_socket_timeout(
         self, relaxed_timeout: float | None = None
@@ -748,6 +740,18 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
 
     def _get_parser(self) -> BaseParser:
         return self._parser
+
+    def getpeername(self) -> str | None:
+        """
+        Returns the peer name of the connection.
+        """
+        writer = self._writer
+        if writer is None:
+            return None
+        peername = writer.get_extra_info("peername")
+        if isinstance(peername, tuple) and peername:
+            return str(peername[0])
+        return None
 
     async def connect(self):
         """Connects to the Redis server if not already connected"""

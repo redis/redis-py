@@ -187,6 +187,21 @@ def test_connection_parser_matches_protocol(
     assert isinstance(conn._parser, expected_parser_class)
 
 
+def test_get_resolved_ip_uses_async_writer_peer_before_dns():
+    conn = Connection(host="redis.example.test")
+    writer = mock.Mock()
+    writer.get_extra_info.return_value = ("10.0.0.7", 6379)
+    conn._writer = writer
+
+    with mock.patch.object(socket, "getaddrinfo") as getaddrinfo:
+        try:
+            assert conn.get_resolved_ip() == "10.0.0.7"
+        finally:
+            conn._writer = None
+
+    getaddrinfo.assert_not_called()
+
+
 @pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "client_kwargs",
