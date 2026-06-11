@@ -1,4 +1,4 @@
-import select
+import selectors
 import socket
 from logging import getLogger
 from typing import Callable, List, Optional, TypedDict, Union
@@ -28,7 +28,11 @@ def _socket_can_read(sock, timeout: float) -> bool:
     # SSL sockets can have decrypted bytes buffered above the OS socket layer.
     if hasattr(sock, "pending") and sock.pending():
         return True
-    return bool(select.select([sock], [], [], timeout)[0])
+    # timeout=0 must be a non-blocking readiness check only. The selector keeps
+    # this non-destructive while avoiding select.select's low fd limit on Unix.
+    with selectors.DefaultSelector() as selector:
+        selector.register(sock, selectors.EVENT_READ)
+        return bool(selector.select(timeout))
 
 
 class _HiredisReaderArgs(TypedDict, total=False):
