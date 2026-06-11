@@ -1683,47 +1683,52 @@ class ClusterNode:
     async def execute_command(self, *args: Any, **kwargs: Any) -> Any:
         # Acquire connection
         connection = self.acquire_connection()
-        # Handle lazy disconnect for connections marked for reconnect
-        await self.disconnect_if_needed(connection)
-
-        # Execute command
-        await connection.send_packed_command(connection.pack_command(*args))
-
-        # Read response
         try:
+            # Handle lazy disconnect for connections marked for reconnect
+            await self.disconnect_if_needed(connection)
+
+            # Execute command
+            await connection.send_packed_command(connection.pack_command(*args))
+
+            # Read response
             return await self.parse_response(connection, args[0], **kwargs)
         finally:
-            await self.disconnect_if_needed(connection)
-            # Release connection
-            self.release(connection)
+            try:
+                await self.disconnect_if_needed(connection)
+            finally:
+                # Release connection
+                self.release(connection)
 
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:
         # Acquire connection
         connection = self.acquire_connection()
-        # Handle lazy disconnect for connections marked for reconnect
-        await self.disconnect_if_needed(connection)
+        try:
+            # Handle lazy disconnect for connections marked for reconnect
+            await self.disconnect_if_needed(connection)
 
-        # Execute command
-        await connection.send_packed_command(
-            connection.pack_commands(cmd.args for cmd in commands)
-        )
+            # Execute command
+            await connection.send_packed_command(
+                connection.pack_commands(cmd.args for cmd in commands)
+            )
 
-        # Read responses
-        ret = False
-        for cmd in commands:
+            # Read responses
+            ret = False
+            for cmd in commands:
+                try:
+                    cmd.result = await self.parse_response(
+                        connection, cmd.args[0], **cmd.kwargs
+                    )
+                except Exception as e:
+                    cmd.result = e
+                    ret = True
+
+            return ret
+        finally:
             try:
-                cmd.result = await self.parse_response(
-                    connection, cmd.args[0], **cmd.kwargs
-                )
-            except Exception as e:
-                cmd.result = e
-                ret = True
-
-        # Release connection
-        await self.disconnect_if_needed(connection)
-        self.release(connection)
-
-        return ret
+                await self.disconnect_if_needed(connection)
+            finally:
+                # Release connection
+                self.release(connection)
 
     async def re_auth_callback(self, token: TokenInterface):
         tmp_queue = collections.deque()

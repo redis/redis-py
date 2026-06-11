@@ -186,12 +186,22 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
                 # Use the first node as the startup node
                 if startup_nodes:
                     first_node = startup_nodes[0]
+                    nodes_manager = database.client.nodes_manager
+                    # The sync and async NodesManager expose this setting under
+                    # different names (``_require_full_coverage`` vs
+                    # ``require_full_coverage``), so resolve it defensively to
+                    # support a sync RedisCluster underlying client too.
+                    require_full_coverage = getattr(
+                        nodes_manager,
+                        "require_full_coverage",
+                        getattr(nodes_manager, "_require_full_coverage", True),
+                    )
                     client = AsyncRedisCluster(
                         host=first_node.host,
                         port=first_node.port,
-                        dynamic_startup_nodes=database.client.nodes_manager._dynamic_startup_nodes,
-                        address_remap=database.client.nodes_manager.address_remap,
-                        require_full_coverage=database.client.nodes_manager._require_full_coverage,
+                        dynamic_startup_nodes=nodes_manager._dynamic_startup_nodes,
+                        address_remap=nodes_manager.address_remap,
+                        require_full_coverage=require_full_coverage,
                         retry=database.client.retry,
                         **filtered_kwargs,
                     )

@@ -1,5 +1,7 @@
 import copy
+import os
 import platform
+import selectors
 import socket
 import ssl
 import threading
@@ -13,7 +15,7 @@ import pytest
 import redis
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
-from redis._parsers.hiredis import NOT_ENOUGH_DATA
+from redis._parsers.hiredis import NOT_ENOUGH_DATA, _socket_can_read
 from redis._parsers.socket import SocketBuffer
 from redis.backoff import NoBackoff
 from redis.cache import (
@@ -109,6 +111,46 @@ def test_hiredis_can_read_checks_socket_readiness_without_reading():
         assert parser.can_read(timeout=0) is True
 
     ready.assert_called_once_with(parser._sock, 0)
+
+
+@pytest.mark.fixed_client
+def test_hiredis_socket_can_read_uses_default_selector():
+    sock = Mock(spec=["fileno"])
+    selector = MagicMock()
+    selector.select.return_value = [(sock, selectors.EVENT_READ)]
+    selector.__enter__.return_value = selector
+
+    with patch(
+        "redis._parsers.hiredis.selectors.DefaultSelector", return_value=selector
+    ):
+        assert _socket_can_read(sock, timeout=0.001) is True
+
+    selector.register.assert_called_once_with(sock, selectors.EVENT_READ)
+    selector.select.assert_called_once_with(0.001)
+
+
+@pytest.mark.fixed_client
+def test_hiredis_socket_can_read_handles_high_file_descriptor():
+    fcntl = pytest.importorskip("fcntl")
+
+    with selectors.DefaultSelector() as selector:
+        if isinstance(selector, selectors.SelectSelector):
+            pytest.skip("Default selector uses select.select")
+
+    read_fd, write_fd = os.pipe()
+    high_read_fd = None
+    try:
+        try:
+            high_read_fd = fcntl.fcntl(read_fd, fcntl.F_DUPFD, 1024)
+        except OSError as exc:
+            pytest.skip(f"Could not allocate high file descriptor: {exc}")
+
+        assert _socket_can_read(high_read_fd, timeout=0) is False
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
+        if high_read_fd is not None and high_read_fd != read_fd:
+            os.close(high_read_fd)
 
 
 def test_hiredis_can_read_does_not_decide_disable_decoding():
