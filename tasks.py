@@ -104,11 +104,11 @@ def fixed_client_tests(c, uvloop=False, profile=False):
     profile_arg = "--profile" if profile else ""
     if uvloop:
         run(
-            f"pytest {profile_arg} --uvloop --cov=./ --cov-report=xml:coverage_fixed_client_uvloop.xml --junit-xml=fixed_client-uvloop-results.xml -m fixed_client"
+            f"pytest {profile_arg} --uvloop --cov=./ --cov-report=xml:coverage_fixed_client_uvloop.xml --junit-xml=junit-results/fixed_client-uvloop-results.xml -m fixed_client"
         )
     else:
         run(
-            f"pytest {profile_arg} --cov=./ --cov-report=xml:coverage_fixed_client.xml --junit-xml=fixed_client-results.xml -m fixed_client"
+            f"pytest {profile_arg} --cov=./ --cov-report=xml:coverage_fixed_client.xml --junit-xml=junit-results/fixed_client-results.xml -m fixed_client"
         )
 
 
@@ -133,11 +133,11 @@ def standalone_tests(
 
     if uvloop:
         run(
-            f"pytest {profile_arg} {protocol_arg} {legacy_arg} {redis_mod_url}  --ignore=tests/test_scenario --ignore=tests/test_asyncio/test_scenario --cov=./ --cov-report=xml:coverage_{protocol_tag}{legacy_tag}_uvloop.xml -m 'not onlycluster and not fixed_client and not multidb_integration{extra_markers}' --uvloop --junit-xml=standalone-{protocol_tag}{legacy_tag}-uvloop-results.xml"
+            f"pytest {profile_arg} {protocol_arg} {legacy_arg} {redis_mod_url}  --ignore=tests/test_scenario --ignore=tests/test_asyncio/test_scenario --cov=./ --cov-report=xml:coverage_{protocol_tag}{legacy_tag}_uvloop.xml -m 'not onlycluster and not fixed_client and not multidb_integration{extra_markers}' --uvloop --junit-xml=junit-results/standalone-{protocol_tag}{legacy_tag}-uvloop-results.xml"
         )
     else:
         run(
-            f"pytest {profile_arg} {protocol_arg} {legacy_arg} {redis_mod_url}  --ignore=tests/test_scenario --ignore=tests/test_asyncio/test_scenario --cov=./ --cov-report=xml:coverage_{protocol_tag}{legacy_tag}.xml -m 'not onlycluster and not fixed_client and not multidb_integration{extra_markers}' --junit-xml=standalone-{protocol_tag}{legacy_tag}-results.xml"
+            f"pytest {profile_arg} {protocol_arg} {legacy_arg} {redis_mod_url}  --ignore=tests/test_scenario --ignore=tests/test_asyncio/test_scenario --cov=./ --cov-report=xml:coverage_{protocol_tag}{legacy_tag}.xml -m 'not onlycluster and not fixed_client and not multidb_integration{extra_markers}' --junit-xml=junit-results/standalone-{protocol_tag}{legacy_tag}-results.xml"
         )
 
 
@@ -153,11 +153,11 @@ def cluster_tests(c, uvloop=False, protocol="", legacy_responses=True, profile=F
     legacy_tag = _legacy_tag(legacy_responses)
     if uvloop:
         run(
-            f"pytest {profile_arg} {protocol_arg} {legacy_arg}  --ignore=tests/test_scenario --ignore=tests/test_asyncio/test_scenario  --cov=./ --cov-report=xml:coverage_cluster_{protocol_tag}{legacy_tag}_uvloop.xml -m 'not onlynoncluster and not redismod and not fixed_client and not multidb_integration' --redis-url={cluster_url} --redis-ssl-url={cluster_tls_url} --junit-xml=cluster-{protocol_tag}{legacy_tag}-uvloop-results.xml --uvloop"
+            f"pytest {profile_arg} {protocol_arg} {legacy_arg}  --ignore=tests/test_scenario --ignore=tests/test_asyncio/test_scenario  --cov=./ --cov-report=xml:coverage_cluster_{protocol_tag}{legacy_tag}_uvloop.xml -m 'not onlynoncluster and not redismod and not fixed_client and not multidb_integration' --redis-url={cluster_url} --redis-ssl-url={cluster_tls_url} --junit-xml=junit-results/cluster-{protocol_tag}{legacy_tag}-uvloop-results.xml --uvloop"
         )
     else:
         run(
-            f"pytest  {profile_arg} {protocol_arg} {legacy_arg}  --ignore=tests/test_scenario --ignore=tests/test_asyncio/test_scenario  --cov=./ --cov-report=xml:coverage_cluster_{protocol_tag}{legacy_tag}.xml -m 'not onlynoncluster and not redismod and not fixed_client and not multidb_integration' --redis-url={cluster_url} --redis-ssl-url={cluster_tls_url} --junit-xml=cluster-{protocol_tag}{legacy_tag}-results.xml"
+            f"pytest  {profile_arg} {protocol_arg} {legacy_arg}  --ignore=tests/test_scenario --ignore=tests/test_asyncio/test_scenario  --cov=./ --cov-report=xml:coverage_cluster_{protocol_tag}{legacy_tag}.xml -m 'not onlynoncluster and not redismod and not fixed_client and not multidb_integration' --redis-url={cluster_url} --redis-ssl-url={cluster_tls_url} --junit-xml=junit-results/cluster-{protocol_tag}{legacy_tag}-results.xml"
         )
 
 
@@ -179,7 +179,7 @@ def multidb_integration_tests(c, uvloop=False, profile=False):
     run(
         f"pytest {profile_arg} {uvloop_arg} -m multidb_integration "
         f"tests/test_multidb tests/test_asyncio/test_multidb "
-        f"--junit-xml=multidb-integration-results.xml"
+        f"--junit-xml=junit-results/multidb-integration-results.xml"
     )
 
 
