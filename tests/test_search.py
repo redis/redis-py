@@ -5610,9 +5610,10 @@ class TestHybridSearch(SearchTestsBase):
 # expected legacy output shape with ``decode_responses=False``.  The
 # default protocol (``SENTINEL`` -> not specified) leaves the wire on
 # RESP3 with the ``_RedisCallbacksRESP3toRESP2Legacy`` adapter selected,
-# which is the path the fix actually exercises.  An explicit
-# ``protocol=3`` would route through ``_RedisCallbacksRESP3`` instead
-# and bypass the changed methods.
+# which is where the bytes-key normalisation in ``_parse_search_resp3``,
+# ``_parse_aggregate_resp3`` and ``_parse_spellcheck_resp3`` lives.  An
+# explicit ``protocol=3`` would route through ``_RedisCallbacksRESP3``
+# instead and bypass the methods we want to test.
 _SEARCH_BYTES_PROTOCOLS = [
     pytest.param(2, id="resp2"),
     pytest.param(SENTINEL, id="default-resp3"),
@@ -5644,9 +5645,9 @@ class TestSearchResp3BytesKeys(SearchTestsBase):
     parsers in ``_RedisCallbacksRESP3toRESP2Legacy``).
     """
 
-    @pytest.mark.parametrize("protocol", _SEARCH_BYTES_PROTOCOLS)
     @pytest.mark.redismod
     @pytest.mark.fixed_client
+    @pytest.mark.parametrize("protocol", _SEARCH_BYTES_PROTOCOLS)
     def test_search_resp3_bytes_keys(self, request, stack_url, protocol):
         client = _make_bytes_search_client(request, stack_url, protocol)
         client.ft().create_index((TextField("title"), TextField("body")))
@@ -5665,9 +5666,9 @@ class TestSearchResp3BytesKeys(SearchTestsBase):
         assert res.total == 2
         assert {d.id for d in res.docs} == {"doc1", "doc2"}
 
-    @pytest.mark.parametrize("protocol", _SEARCH_BYTES_PROTOCOLS)
     @pytest.mark.redismod
     @pytest.mark.fixed_client
+    @pytest.mark.parametrize("protocol", _SEARCH_BYTES_PROTOCOLS)
     def test_aggregate_resp3_bytes_keys(self, request, stack_url, protocol):
         client = _make_bytes_search_client(request, stack_url, protocol)
         client.ft().create_index((TextField("title"), TextField("parent")))
@@ -5693,9 +5694,9 @@ class TestSearchResp3BytesKeys(SearchTestsBase):
         assert b"parent" in row
         assert b"redis" in row
 
-    @pytest.mark.parametrize("protocol", _SEARCH_BYTES_PROTOCOLS)
     @pytest.mark.redismod
     @pytest.mark.fixed_client
+    @pytest.mark.parametrize("protocol", _SEARCH_BYTES_PROTOCOLS)
     def test_spellcheck_resp3_bytes_keys(self, request, stack_url, protocol):
         client = _make_bytes_search_client(request, stack_url, protocol)
         client.ft().create_index((TextField("f1"),))
