@@ -1617,6 +1617,60 @@ class TestAsyncPubSubTimeoutPropagation:
         assert msg is None
         await p.aclose()
 
+    @pytest.mark.asyncio
+    @pytest.mark.onlynoncluster
+    async def test_listen_blocks_until_message_despite_socket_timeout(self, r):
+        """
+        Test that listen() blocks indefinitely until a message arrives,
+        even when the underlying connection has a short socket_timeout.
+        This regressed in Redis 8.0 where socket_timeout defaults to 5s,
+        causing listen() to time out between messages.
+        Fixes redis/redis-py#4098.
+        """
+        # Use a short socket timeout to simulate the Redis 8.0 default.
+        # Reuse the fixture's connection kwargs so the test targets the same
+        # Redis instance the fixture is using.
+        kwargs = {
+            k: v
+            for k, v in r.connection_pool.connection_kwargs.items()
+            if not k.startswith(("maint_", "orig_")) and k != "connection_class"
+        }
+        client = redis.Redis(socket_timeout=0.5, **kwargs)
+        p = client.pubsub()
+        await p.subscribe("foo")
+        # Read subscription message
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+        assert msg["type"] == "subscribe"
+
+        # Publish a message after a delay that exceeds the socket timeout.
+        # If listen() incorrectly respected socket_timeout, it would raise
+        # TimeoutError before the message arrives.
+        start_publishing = asyncio.Event()
+
+        async def publish_after_delay():
+            await start_publishing.wait()
+            await asyncio.sleep(1.0)
+            await client.publish("foo", "delayed_message")
+
+        task = asyncio.create_task(publish_after_delay())
+
+        start = asyncio.get_running_loop().time()
+        start_publishing.set()
+        messages = []
+        async for msg in p.listen():
+            messages.append(msg)
+            break
+        elapsed = asyncio.get_running_loop().time() - start
+        assert len(messages) == 1
+        assert messages[0]["type"] == "message"
+        assert messages[0]["data"] == b"delayed_message"
+        # Should have waited at least 1 second, proving listen() ignored socket_timeout
+        assert elapsed >= 0.9
+        await task
+        await p.aclose()
+        await client.aclose()
+
 
 @pytest.mark.asyncio
 @pytest.mark.onlynoncluster
