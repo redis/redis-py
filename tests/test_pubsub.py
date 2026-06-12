@@ -2060,6 +2060,7 @@ class TestPubSubTimeoutPropagation:
     parse_response() to the parser and socket buffer layers.
     """
 
+    @pytest.mark.onlynoncluster
     def test_get_message_timeout_is_respected(self, r):
         """
         Test that get_message() with timeout parameter respects the timeout
@@ -2081,6 +2082,7 @@ class TestPubSubTimeoutPropagation:
         # Verify timeout was actually respected (within reasonable bounds)
         assert elapsed < 0.5
 
+    @pytest.mark.onlynoncluster
     def test_get_message_timeout_with_published_message(self, r):
         """
         Test that get_message() with timeout returns a message if one
@@ -2101,6 +2103,7 @@ class TestPubSubTimeoutPropagation:
         assert msg["type"] == "message"
         assert msg["data"] == b"hello"
 
+    @pytest.mark.onlynoncluster
     def test_parse_response_timeout_propagation(self, r):
         """
         Test that parse_response() properly propagates timeout to read_response().
@@ -2118,6 +2121,7 @@ class TestPubSubTimeoutPropagation:
         assert response is None
         assert elapsed < 0.5
 
+    @pytest.mark.onlynoncluster
     def test_get_message_timeout_zero_returns_immediately(self, r):
         """
         Test that get_message(timeout=0) returns immediately without blocking.
@@ -2135,6 +2139,7 @@ class TestPubSubTimeoutPropagation:
         assert msg is None
         assert elapsed < 0.1
 
+    @pytest.mark.onlynoncluster
     def test_get_message_timeout_none_blocks(self, r):
         """
         Test that get_message(timeout=None) blocks indefinitely.
@@ -2169,6 +2174,7 @@ class TestPubSubTimeoutPropagation:
         assert elapsed >= 0.15
         thread.join(timeout=1.0)
 
+    @pytest.mark.onlynoncluster
     def test_multiple_messages_with_timeout(self, r):
         """
         Test that timeout is properly handled when reading multiple messages.
@@ -2196,6 +2202,7 @@ class TestPubSubTimeoutPropagation:
         assert messages[1]["data"] == b"msg2"
         assert messages[2]["data"] == b"msg3"
 
+    @pytest.mark.onlynoncluster
     def test_timeout_with_pattern_subscribe(self, r):
         """
         Test that timeout works correctly with pattern subscriptions.
@@ -2216,6 +2223,7 @@ class TestPubSubTimeoutPropagation:
         assert msg["type"] == "pmessage"
         assert msg["data"] == b"hello"
 
+    @pytest.mark.onlynoncluster
     def test_timeout_with_no_subscription(self, r):
         """
         Test that get_message with timeout returns None when subscribed but no messages.
