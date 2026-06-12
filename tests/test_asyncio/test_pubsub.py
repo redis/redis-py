@@ -1619,6 +1619,193 @@ class TestAsyncPubSubTimeoutPropagation:
 
 
 @pytest.mark.asyncio
+@pytest.mark.onlynoncluster
+class TestAsyncPubSubBlockingListen:
+    """
+    Tests that PubSub.listen() and parse_response(block=True) block
+    indefinitely waiting for a message, ignoring the connection's
+    configured socket_timeout. Regression tests for the issue where
+    listen() would raise TimeoutError once socket_timeout elapsed.
+
+    Retries are disabled on the subscriber so a TimeoutError from the
+    blocking read surfaces immediately instead of being silently retried
+    by the client's default retry policy (which would mask the bug).
+    """
+
+    SOCKET_TIMEOUT = 0.3
+    PUBLISH_DELAY = SOCKET_TIMEOUT * 3
+
+    async def _make_subscriber(self, create_redis):
+        from redis.asyncio.retry import Retry
+        from redis.backoff import NoBackoff
+
+        return await create_redis(
+            socket_timeout=self.SOCKET_TIMEOUT,
+            retry=Retry(NoBackoff(), 0),
+            retry_on_timeout=False,
+        )
+
+    async def test_listen_blocks_longer_than_socket_timeout(self, create_redis):
+        """
+        listen() must keep blocking past socket_timeout. Configure a very
+        short socket_timeout, then publish after a delay that exceeds it,
+        and assert listen() yields the message instead of raising
+        TimeoutError.
+        """
+        r = await self._make_subscriber(create_redis)
+        publisher = await create_redis()
+        p = r.pubsub()
+        await p.subscribe("foo")
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None and msg["type"] == "subscribe"
+
+        async def publish_after_delay():
+            await asyncio.sleep(self.PUBLISH_DELAY)
+            await publisher.publish("foo", "hello")
+
+        task = asyncio.create_task(publish_after_delay())
+
+        start = asyncio.get_running_loop().time()
+        msg = await p.listen().__anext__()
+        elapsed = asyncio.get_running_loop().time() - start
+        assert msg["type"] == "message"
+        assert msg["data"] == b"hello"
+        # Should have blocked past socket_timeout to receive the message.
+        assert elapsed > self.SOCKET_TIMEOUT
+        await task
+        await p.aclose()
+
+    async def test_get_message_block_indefinitely_past_socket_timeout(
+        self, create_redis
+    ):
+        """
+        get_message(timeout=None) must block past socket_timeout.
+        """
+        r = await self._make_subscriber(create_redis)
+        publisher = await create_redis()
+        p = r.pubsub()
+        await p.subscribe("foo")
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        async def publish_after_delay():
+            await asyncio.sleep(self.PUBLISH_DELAY)
+            await publisher.publish("foo", "delayed")
+
+        task = asyncio.create_task(publish_after_delay())
+
+        start = asyncio.get_running_loop().time()
+        msg = await p.get_message(timeout=None)
+        elapsed = asyncio.get_running_loop().time() - start
+        assert msg is not None
+        assert msg["type"] == "message"
+        assert msg["data"] == b"delayed"
+        assert elapsed > self.SOCKET_TIMEOUT
+        await task
+        await p.aclose()
+
+    async def test_parse_response_block_true_blocks_past_socket_timeout(
+        self, create_redis
+    ):
+        """
+        parse_response(block=True) must block past socket_timeout.
+        """
+        r = await self._make_subscriber(create_redis)
+        publisher = await create_redis()
+        p = r.pubsub(ignore_subscribe_messages=True)
+        await p.subscribe("foo")
+        # Drain the subscribe ack before calling parse_response directly.
+        await wait_for_message(p, timeout=1.0)
+
+        async def publish_after_delay():
+            await asyncio.sleep(self.PUBLISH_DELAY)
+            await publisher.publish("foo", "raw")
+
+        task = asyncio.create_task(publish_after_delay())
+
+        start = asyncio.get_running_loop().time()
+        response = await p.parse_response(block=True)
+        elapsed = asyncio.get_running_loop().time() - start
+        # Response is the raw pubsub frame [b"message", b"foo", b"raw"].
+        assert response is not None
+        assert response[0] == b"message"
+        assert response[-1] == b"raw"
+        assert elapsed > self.SOCKET_TIMEOUT
+        await task
+        await p.aclose()
+
+    async def test_blocking_listen_does_not_mutate_socket_timeout(
+        self, create_redis
+    ):
+        """
+        A blocking read must not mutate the connection's configured
+        socket_timeout. Otherwise reconnect/AUTH/HELLO/resubscribe paths
+        triggered by retries inside _execute would inherit no timeout and
+        could hang indefinitely. The fix uses a per-read sentinel rather
+        than clearing socket_timeout for the duration of the call.
+        """
+        r = await self._make_subscriber(create_redis)
+        publisher = await create_redis()
+        p = r.pubsub()
+        await p.subscribe("foo")
+        await wait_for_message(p, timeout=1.0)
+
+        orig_timeout = p.connection.socket_timeout
+        assert orig_timeout == self.SOCKET_TIMEOUT
+
+        # Sample socket_timeout while the blocking read is in progress, to
+        # catch any mutation that happens only for the duration of the call.
+        async def sample_timeout_during_read():
+            # Yield a few times so the get_message read is in flight.
+            for _ in range(10):
+                await asyncio.sleep(0)
+            assert p.connection.socket_timeout == orig_timeout
+
+        async def publish_after_delay():
+            await asyncio.sleep(self.PUBLISH_DELAY)
+            await publisher.publish("foo", "msg")
+
+        sample_task = asyncio.create_task(sample_timeout_during_read())
+        publish_task = asyncio.create_task(publish_after_delay())
+
+        msg = await p.get_message(timeout=None)
+        await sample_task
+        assert msg is not None and msg["data"] == b"msg"
+        assert p.connection.socket_timeout == orig_timeout
+        await publish_task
+        await p.aclose()
+
+    async def test_block_indefinitely_does_not_alter_subsequent_reads(
+        self, create_redis
+    ):
+        """
+        After a blocking read returns, a follow-up non-blocking read must
+        still honor the configured ``socket_timeout`` (i.e. the per-read
+        ``block_indefinitely`` does not bleed into later operations and
+        does not require mutating any connection-wide state).
+        """
+        r = await self._make_subscriber(create_redis)
+        publisher = await create_redis()
+        p = r.pubsub()
+        await p.subscribe("foo")
+        await wait_for_message(p, timeout=1.0)
+
+        # First a blocking read.
+        await publisher.publish("foo", "first")
+        msg = await p.get_message(timeout=None)
+        assert msg is not None and msg["data"] == b"first"
+
+        # Then a non-blocking read with a short timeout and no message.
+        # If block_indefinitely leaked, this would block past the timeout.
+        start = asyncio.get_running_loop().time()
+        msg = await p.get_message(timeout=0.1)
+        elapsed = asyncio.get_running_loop().time() - start
+        assert msg is None
+        assert elapsed < 0.5
+        await p.aclose()
+
+
+@pytest.mark.asyncio
 class TestPubSubHandleMessageMetrics:
     """Tests for handle_message recording pubsub metrics."""
 
