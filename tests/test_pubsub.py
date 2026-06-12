@@ -2247,6 +2247,7 @@ class TestPubSubTimeoutPropagation:
             for k, v in r.connection_pool.connection_kwargs.items()
             if not k.startswith(("maint_", "orig_")) and k != "connection_class"
         }
+        kwargs.pop("socket_timeout", None)
         client = redis.Redis(socket_timeout=0.5, **kwargs)
         p = client.pubsub()
         p.subscribe("foo")

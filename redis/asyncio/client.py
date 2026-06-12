@@ -1461,6 +1461,8 @@ class PubSub:
             )
             if response is not None:
                 yield response
+            elif timeout is not None:
+                return
 
     async def get_message(
         self, ignore_subscribe_messages: bool = False, timeout: Optional[float] = 0.0
