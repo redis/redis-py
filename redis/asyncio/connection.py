@@ -2232,33 +2232,25 @@ class AsyncMaintNotificationsAbstractConnectionPool:
         can move between active/free lists and escape handling.
         """
         async with self._get_pool_lock():
-            # This hook mirrors the sync BlockingConnectionPool behavior:
-            # blocking pools can pause connection creation/release while a
-            # MOVING notification rewrites pool and connection state. Regular
-            # pools do not expose set_in_maintenance, so this is a no-op there.
-            await self._set_in_maintenance(True)
-            try:
-                self._update_connections_settings_without_locking(
-                    state=MaintenanceState.MOVING,
-                    maintenance_notification_hash=hash(notification),
-                    relaxed_timeout=config.relaxed_timeout,
-                    host_address=notification.new_node_host,
-                    matching_address=moving_address_src,
-                    matching_pattern="connected_address",
-                    update_notification_hash=True,
-                    include_free_connections=True,
+            self._update_connections_settings_without_locking(
+                state=MaintenanceState.MOVING,
+                maintenance_notification_hash=hash(notification),
+                relaxed_timeout=config.relaxed_timeout,
+                host_address=notification.new_node_host,
+                matching_address=moving_address_src,
+                matching_pattern="connected_address",
+                update_notification_hash=True,
+                include_free_connections=True,
+            )
+
+            if run_proactive_reconnect:
+                await self._run_proactive_reconnect_without_locking(
+                    moving_address_src
                 )
 
-                if run_proactive_reconnect:
-                    await self._run_proactive_reconnect_without_locking(
-                        moving_address_src
-                    )
-
-                self.update_connection_kwargs(
-                    **_build_moving_connection_kwargs(notification, config)
-                )
-            finally:
-                await self._set_in_maintenance(False)
+            self.update_connection_kwargs(
+                **_build_moving_connection_kwargs(notification, config)
+            )
 
     async def run_proactive_reconnect(
         self,
@@ -2349,14 +2341,6 @@ class AsyncMaintNotificationsAbstractConnectionPool:
         )
         if exc:
             raise exc
-
-    async def _set_in_maintenance(self, in_maintenance: bool) -> None:
-        set_in_maintenance = getattr(self, "set_in_maintenance", None)
-        if not callable(set_in_maintenance):
-            return
-        result = set_in_maintenance(in_maintenance)
-        if inspect.isawaitable(result):
-            await result
 
 
 class ConnectionPool(
