@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import copy
 import inspect
 import socket
@@ -11,6 +12,7 @@ from itertools import chain
 from types import MappingProxyType
 from typing import (
     Any,
+    AsyncIterator,
     Callable,
     Iterable,
     List,
@@ -2232,25 +2234,32 @@ class AsyncMaintNotificationsAbstractConnectionPool:
         can move between active/free lists and escape handling.
         """
         async with self._get_pool_lock():
-            self._update_connections_settings_without_locking(
-                state=MaintenanceState.MOVING,
-                maintenance_notification_hash=hash(notification),
-                relaxed_timeout=config.relaxed_timeout,
-                host_address=notification.new_node_host,
-                matching_address=moving_address_src,
-                matching_pattern="connected_address",
-                update_notification_hash=True,
-                include_free_connections=True,
-            )
-
-            if run_proactive_reconnect:
-                await self._run_proactive_reconnect_without_locking(
-                    moving_address_src
+            # Opt BlockingConnectionPool into serializing its get/release
+            # with this critical section. Other pools do not define
+            # set_in_maintenance and this is a no-op for them.
+            self._set_in_maintenance(True)
+            try:
+                self._update_connections_settings_without_locking(
+                    state=MaintenanceState.MOVING,
+                    maintenance_notification_hash=hash(notification),
+                    relaxed_timeout=config.relaxed_timeout,
+                    host_address=notification.new_node_host,
+                    matching_address=moving_address_src,
+                    matching_pattern="connected_address",
+                    update_notification_hash=True,
+                    include_free_connections=True,
                 )
 
-            self.update_connection_kwargs(
-                **_build_moving_connection_kwargs(notification, config)
-            )
+                if run_proactive_reconnect:
+                    await self._run_proactive_reconnect_without_locking(
+                        moving_address_src
+                    )
+
+                self.update_connection_kwargs(
+                    **_build_moving_connection_kwargs(notification, config)
+                )
+            finally:
+                self._set_in_maintenance(False)
 
     async def run_proactive_reconnect(
         self,
@@ -2341,6 +2350,12 @@ class AsyncMaintNotificationsAbstractConnectionPool:
         )
         if exc:
             raise exc
+
+    def _set_in_maintenance(self, in_maintenance: bool) -> None:
+        """Flip the pool's maintenance flag if it exposes one (BlockingConnectionPool)."""
+        set_in_maintenance = getattr(self, "set_in_maintenance", None)
+        if callable(set_in_maintenance):
+            set_in_maintenance(in_maintenance)
 
 
 class ConnectionPool(
@@ -2663,6 +2678,7 @@ class ConnectionPool(
                 await connection.disconnect()
 
             self._available_connections.append(connection)
+
         await self._event_dispatcher.dispatch_async(
             AsyncAfterConnectionReleasedEvent(connection)
         )
@@ -2816,6 +2832,28 @@ class BlockingConnectionPool(ConnectionPool):
         )
         self._condition = asyncio.Condition()
         self.timeout = timeout
+        self._in_maintenance = False
+
+    def set_in_maintenance(self, in_maintenance: bool) -> None:
+        """
+        Toggle the pool's maintenance mode.
+
+        While maintenance mode is on, ``get_connection`` and ``release``
+        serialize their pool mutations through ``self._lock`` so they cannot
+        interleave with a MOVING notification handler that is currently
+        rewriting pool state under the same lock. Outside of maintenance the
+        mutations skip the lock, since their critical sections are pure-Python
+        and already atomic under asyncio's single-threaded scheduling.
+        """
+        self._in_maintenance = in_maintenance
+
+    @contextlib.asynccontextmanager
+    async def _maybe_pool_lock(self) -> AsyncIterator[None]:
+        if self._in_maintenance:
+            async with self._lock:
+                yield
+        else:
+            yield
 
     @deprecated_args(
         args_to_warn=["*"],
@@ -2831,7 +2869,7 @@ class BlockingConnectionPool(ConnectionPool):
             async with self._condition:
                 async with async_timeout(self.timeout):
                     await self._condition.wait_for(self.can_get_connection)
-                    async with self._lock:
+                    async with self._maybe_pool_lock():
                         # Track connection count before to detect if a new connection is created
                         connections_before = len(self._available_connections) + len(
                             self._in_use_connections

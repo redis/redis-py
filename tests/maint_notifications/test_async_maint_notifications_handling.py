@@ -1305,6 +1305,75 @@ async def test_async_pool_handler_schedules_delayed_reconnect_for_unknown_target
 
 
 @pytest.mark.asyncio
+async def test_blocking_pool_locks_get_only_during_maintenance():
+    pool = BlockingConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True
+        ),
+    )
+
+    real_lock = pool._lock
+    pool._lock = MagicMock(wraps=real_lock)
+
+    fake_conn = MagicMock()
+    fake_conn.connect = AsyncMock()
+    fake_conn.can_read = AsyncMock(return_value=False)
+    fake_conn.should_reconnect = MagicMock(return_value=False)
+    fake_conn.re_auth = AsyncMock()
+    pool._available_connections.append(fake_conn)
+
+    # Outside maintenance: get_connection does not acquire _lock,
+    # but release() still does (it goes through ConnectionPool.release).
+    conn = await pool.get_connection()
+    await pool.release(conn)
+    assert pool._lock.__aenter__.call_count == 1
+
+    # Inside maintenance: get_connection now also acquires _lock.
+    pool.set_in_maintenance(True)
+    try:
+        conn = await pool.get_connection()
+        await pool.release(conn)
+    finally:
+        pool.set_in_maintenance(False)
+    assert pool._lock.__aenter__.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_apply_moving_notification_toggles_set_in_maintenance():
+    pool = BlockingConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True
+        ),
+    )
+    observed = []
+    original = pool.set_in_maintenance
+
+    def spy(value: bool) -> None:
+        observed.append(value)
+        original(value)
+
+    pool.set_in_maintenance = spy  # type: ignore[assignment]
+
+    notification = NodeMovingNotification(
+        id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=5
+    )
+    await pool.apply_moving_notification(
+        notification=notification,
+        config=pool._maint_notifications_pool_handler.config,
+        moving_address_src=None,
+        run_proactive_reconnect=False,
+    )
+
+    assert observed == [True, False]
+
+
+@pytest.mark.asyncio
 async def test_cancel_scheduled_tasks_cancels_pending_and_awaits():
     config = MaintNotificationsConfig(enabled=True, proactive_reconnect=True)
     handler = AsyncMaintNotificationsPoolHandler(MagicMock(), config)
