@@ -1627,15 +1627,7 @@ class TestAsyncPubSubTimeoutPropagation:
         Fixes redis/redis-py#4098.
         """
         # Use a short socket timeout to simulate the Redis 8.0 default.
-        # Reuse the fixture's connection kwargs so the test targets the same
-        # Redis instance the fixture is using.
-        kwargs = {
-            k: v
-            for k, v in r.connection_pool.connection_kwargs.items()
-            if not k.startswith(("maint_", "orig_")) and k != "connection_class"
-        }
-        kwargs.pop("socket_timeout", None)
-        client = redis.Redis(socket_timeout=0.5, **kwargs)
+        client = redis.Redis(socket_timeout=0.5)
         p = client.pubsub()
         await p.subscribe("foo")
         # Read subscription message
@@ -1677,13 +1669,7 @@ class TestAsyncPubSubTimeoutPropagation:
         Test that listen(timeout=X) returns after the specified timeout
         when no message arrives.
         """
-        kwargs = {
-            k: v
-            for k, v in r.connection_pool.connection_kwargs.items()
-            if not k.startswith(("maint_", "orig_")) and k != "connection_class"
-        }
-        kwargs.pop("socket_timeout", None)
-        client = redis.Redis(socket_timeout=0.5, **kwargs)
+        client = redis.Redis(socket_timeout=0.5)
         p = client.pubsub()
         await p.subscribe("foo")
         # Read subscription message
@@ -1709,13 +1695,7 @@ class TestAsyncPubSubTimeoutPropagation:
         """
         Test that listen(timeout=None) blocks indefinitely until a message arrives.
         """
-        kwargs = {
-            k: v
-            for k, v in r.connection_pool.connection_kwargs.items()
-            if not k.startswith(("maint_", "orig_")) and k != "connection_class"
-        }
-        kwargs.pop("socket_timeout", None)
-        client = redis.Redis(socket_timeout=0.5, **kwargs)
+        client = redis.Redis(socket_timeout=0.5)
         p = client.pubsub()
         await p.subscribe("foo")
         # Read subscription message
