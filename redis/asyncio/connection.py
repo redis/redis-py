@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import inspect
+import logging
 import socket
 import sys
 import time
@@ -259,14 +260,17 @@ class AbstractConnection:
 
         try:
             p = int(protocol)
+            self._protocol_specified_explicitly = True
         except TypeError:
             p = DEFAULT_RESP_VERSION
+            self._protocol_specified_explicitly = False
         except ValueError:
             raise ConnectionError("protocol must be an integer")
         else:
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
         self.protocol = p
+        self.handshake_metadata = None
         self.legacy_responses = legacy_responses
         if parser_class != _AsyncHiredisParser:
             # The Python parsers are protocol-specific; hiredis supports both.
@@ -461,6 +465,79 @@ class AbstractConnection:
         """Initialize the connection, authenticate and select a database"""
         await self.on_connect_check_health(check_health=True)
 
+    async def _do_resp2_auth(self, cred_provider, auth_args=None) -> None:
+        """Authenticate via standalone AUTH (RESP2 path).
+
+        If auth_args is provided, uses them directly (avoids redundant
+        credential fetching for the straight RESP2 path where credentials
+        were never mutated). If not provided, fetches fresh credentials
+        from the provider (used by the HELLO fallback path to avoid
+        using HELLO-mutated credentials with injected "default").
+        Falls back to single-arg AUTH if the server is Redis < 6.0
+        and rejects two-arg AUTH with "wrong number of arguments".
+        See https://github.com/andymccurdy/redis-py/issues/1274
+        """
+        if auth_args is None:
+            auth_args = await cred_provider.get_credentials_async()
+        # avoid checking health here -- PING will fail if we try
+        # to check the health prior to the AUTH
+        await self.send_command("AUTH", *auth_args, check_health=False)
+        try:
+            auth_response = await self.read_response()
+        except AuthenticationWrongNumberOfArgsError:
+            # a username and password were specified but the Redis
+            # server seems to be < 6.0.0 which expects a single password
+            # arg. retry auth with just the password.
+            await self.send_command("AUTH", auth_args[-1], check_health=False)
+            auth_response = await self.read_response()
+
+        if str_if_bytes(auth_response) != "OK":
+            raise AuthenticationError("Invalid Username or Password")
+
+    async def _fallback_to_resp2(self, error, parser, cred_provider=None):
+        """Handle HELLO failure by falling back to RESP2.
+
+        Validates the error is a recoverable "unknown command" or "NOPROTO",
+        checks that fallback is allowed (not explicitly configured, no
+        RESP3-dependent features active), downgrades parser and protocol,
+        emits a warning, and optionally re-authenticates via standalone AUTH.
+
+        Args:
+            error: The ResponseError from the failed HELLO command.
+            parser: The original parser (for preserving EXCEPTION_CLASSES).
+            cred_provider: If provided, re-authenticate after downgrade
+                using fresh credentials from this provider.
+
+        Raises:
+            ResponseError: If the error is not recoverable or fallback
+                is not permitted.
+        """
+        err_msg = str(error).lower()
+        if "unknown" not in err_msg and "noproto" not in err_msg:
+            raise error
+        if self._protocol_specified_explicitly or (
+            getattr(self, "maint_notifications_config", None)
+            and self.maint_notifications_config.enabled is True
+        ):
+            raise error
+        logger = logging.getLogger(__name__)
+        logger.warning(
+            "Server/proxy at %s does not support HELLO (RESP%s). "
+            "Falling back to RESP2. To silence this warning, "
+            "set protocol=2 explicitly or upgrade your "
+            "server/proxy.",
+            self._host_error(),
+            self.protocol,
+        )
+        if isinstance(self._parser, _AsyncRESP3Parser):
+            self.set_parser(_AsyncRESP2Parser)
+            self._parser.EXCEPTION_CLASSES = parser.EXCEPTION_CLASSES
+            self._parser.on_connect(self)
+        self.protocol = 2
+        self.handshake_metadata = {}
+        if cred_provider is not None:
+            await self._do_resp2_auth(cred_provider)
+
     async def on_connect_check_health(self, check_health: bool = True) -> None:
         self._parser.on_connect(self)
         parser = self._parser
@@ -474,8 +551,7 @@ class AbstractConnection:
             )
             auth_args = await cred_provider.get_credentials_async()
 
-            # if resp version is specified and we have auth args,
-            # we need to send them via HELLO
+            # RESP3 with credentials: authenticate inline via HELLO 3 AUTH ...
         if auth_args and self.protocol not in [2, "2"]:
             if isinstance(self._parser, _AsyncRESP2Parser):
                 self.set_parser(_AsyncRESP3Parser)
@@ -489,30 +565,22 @@ class AbstractConnection:
             await self.send_command(
                 "HELLO", self.protocol, "AUTH", *auth_args, check_health=False
             )
-            response = await self.read_response()
-            if response.get(b"proto") != int(self.protocol) and response.get(
-                "proto"
-            ) != int(self.protocol):
-                raise ConnectionError("Invalid RESP version")
+            try:
+                self.handshake_metadata = await self.read_response()
+                if self.handshake_metadata.get(
+                    b"proto"
+                ) != int(self.protocol) and self.handshake_metadata.get(
+                    "proto"
+                ) != int(self.protocol):
+                    raise ConnectionError("Invalid RESP version")
+            except ResponseError as e:
+                await self._fallback_to_resp2(e, parser, cred_provider=cred_provider)
         # avoid checking health here -- PING will fail if we try
         # to check the health prior to the AUTH
         elif auth_args:
-            await self.send_command("AUTH", *auth_args, check_health=False)
+            await self._do_resp2_auth(cred_provider, auth_args=auth_args)
 
-            try:
-                auth_response = await self.read_response()
-            except AuthenticationWrongNumberOfArgsError:
-                # a username and password were specified but the Redis
-                # server seems to be < 6.0.0 which expects a single password
-                # arg. retry auth with just the password.
-                # https://github.com/andymccurdy/redis-py/issues/1274
-                await self.send_command("AUTH", auth_args[-1], check_health=False)
-                auth_response = await self.read_response()
-
-            if str_if_bytes(auth_response) != "OK":
-                raise AuthenticationError("Invalid Username or Password")
-
-        # if resp version is specified, switch to it
+        # RESP3 without credentials: send bare HELLO to upgrade protocol
         elif self.protocol not in [2, "2"]:
             if isinstance(self._parser, _AsyncRESP2Parser):
                 self.set_parser(_AsyncRESP3Parser)
@@ -520,11 +588,15 @@ class AbstractConnection:
                 self._parser.EXCEPTION_CLASSES = parser.EXCEPTION_CLASSES
                 self._parser.on_connect(self)
             await self.send_command("HELLO", self.protocol, check_health=check_health)
-            response = await self.read_response()
-            # if response.get(b"proto") != self.protocol and response.get(
-            #     "proto"
-            # ) != self.protocol:
-            #     raise ConnectionError("Invalid RESP version")
+            try:
+                self.handshake_metadata = await self.read_response()
+                if (
+                    self.handshake_metadata.get(b"proto") != self.protocol
+                    and self.handshake_metadata.get("proto") != self.protocol
+                ):
+                    raise ConnectionError("Invalid RESP version")
+            except ResponseError as e:
+                await self._fallback_to_resp2(e, parser)
 
         # if a client_name is given, set it
         if self.client_name:
