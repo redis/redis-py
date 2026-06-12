@@ -227,6 +227,14 @@ class AsyncMaintNotificationsPoolHandler:
         await asyncio.sleep(delay)
         await callback(*args)
 
+    async def cancel_scheduled_tasks(self) -> None:
+        if not self._scheduled_tasks:
+            return
+        tasks = tuple(self._scheduled_tasks)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
     @staticmethod
     def _log_scheduled_task_result(task: asyncio.Task[None]) -> None:
         try:

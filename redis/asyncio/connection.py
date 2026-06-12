@@ -1845,6 +1845,11 @@ class AsyncMaintNotificationsAbstractConnectionPool:
         else:
             self._maint_notifications_pool_handler = None
 
+    async def _on_close(self) -> None:
+        """Hook invoked from the pool's ``aclose()`` before the pool is shut down."""
+        if self._maint_notifications_pool_handler is not None:
+            await self._maint_notifications_pool_handler.cancel_scheduled_tasks()
+
     @property
     @abstractmethod
     def connection_kwargs(self) -> dict[str, Any]:
@@ -2724,6 +2729,7 @@ class ConnectionPool(
 
     async def aclose(self) -> None:
         """Close the pool, disconnecting all connections"""
+        await self._on_close()
         await self.disconnect()
 
     def set_retry(self, retry: "Retry") -> None:

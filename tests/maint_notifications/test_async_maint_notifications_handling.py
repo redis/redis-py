@@ -1305,6 +1305,84 @@ async def test_async_pool_handler_schedules_delayed_reconnect_for_unknown_target
 
 
 @pytest.mark.asyncio
+async def test_cancel_scheduled_tasks_cancels_pending_and_awaits():
+    config = MaintNotificationsConfig(enabled=True, proactive_reconnect=True)
+    handler = AsyncMaintNotificationsPoolHandler(MagicMock(), config)
+
+    callback = AsyncMock()
+    handler._schedule(60, callback)
+    handler._schedule(60, callback)
+    tasks = tuple(handler._scheduled_tasks)
+    assert len(tasks) == 2
+
+    await handler.cancel_scheduled_tasks()
+
+    for task in tasks:
+        assert task.done()
+        assert task.cancelled()
+    callback.assert_not_awaited()
+    assert handler._scheduled_tasks == set()
+
+
+@pytest.mark.asyncio
+async def test_cancel_scheduled_tasks_noop_when_empty():
+    config = MaintNotificationsConfig(enabled=True, proactive_reconnect=True)
+    handler = AsyncMaintNotificationsPoolHandler(MagicMock(), config)
+    await handler.cancel_scheduled_tasks()
+    assert handler._scheduled_tasks == set()
+
+
+@pytest.mark.asyncio
+async def test_pool_aclose_cancels_handler_scheduled_tasks():
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True
+        ),
+    )
+    handler = pool._maint_notifications_pool_handler
+    assert handler is not None
+
+    callback = AsyncMock()
+    handler._schedule(60, callback)
+    handler._schedule(60, callback)
+    tasks = tuple(handler._scheduled_tasks)
+    assert len(tasks) == 2
+
+    await pool.aclose()
+
+    for task in tasks:
+        assert task.cancelled()
+    callback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pool_disconnect_does_not_cancel_scheduled_tasks():
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True
+        ),
+    )
+    handler = pool._maint_notifications_pool_handler
+    assert handler is not None
+
+    handler._schedule(60, AsyncMock())
+    tasks = tuple(handler._scheduled_tasks)
+
+    try:
+        await pool.disconnect()
+        for task in tasks:
+            assert not task.done()
+    finally:
+        await handler.cancel_scheduled_tasks()
+
+
+@pytest.mark.asyncio
 async def test_async_pool_ensure_connection_allows_pending_push_when_enabled():
     pool = ConnectionPool(
         host=DEFAULT_HOST,
