@@ -1734,9 +1734,7 @@ class TestAsyncPubSubBlockingListen:
         await task
         await p.aclose()
 
-    async def test_blocking_listen_does_not_mutate_socket_timeout(
-        self, create_redis
-    ):
+    async def test_blocking_listen_does_not_mutate_socket_timeout(self, create_redis):
         """
         A blocking read must not mutate the connection's configured
         socket_timeout. Otherwise reconnect/AUTH/HELLO/resubscribe paths
