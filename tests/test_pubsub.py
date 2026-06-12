@@ -2230,6 +2230,7 @@ class TestPubSubTimeoutPropagation:
         msg = p.get_message(timeout=0.1)
         assert msg is None
 
+    @pytest.mark.onlynoncluster
     def test_listen_blocks_until_message_despite_socket_timeout(self, r):
         """
         Test that listen() blocks indefinitely until a message arrives,
