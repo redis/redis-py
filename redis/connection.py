@@ -3189,7 +3189,11 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             except (ConnectionError, TimeoutError, OSError):
                 connection.disconnect()
                 connection.connect()
-                if connection.can_read():
+                if (
+                    connection.can_read()
+                    and self.cache is None
+                    and not self.maint_notifications_enabled()
+                ):
                     raise ConnectionError("Connection not ready")
         except BaseException:
             # release the connection back to the pool so that we don't
@@ -3625,12 +3629,20 @@ class BlockingConnectionPool(ConnectionPool):
             # pool before all data has been read or the socket has been
             # closed. either way, reconnect and verify everything is good.
             try:
-                if connection.can_read():
+                if (
+                    connection.can_read()
+                    and self.cache is None
+                    and not self.maint_notifications_enabled()
+                ):
                     raise ConnectionError("Connection has data")
             except (ConnectionError, TimeoutError, OSError):
                 connection.disconnect()
                 connection.connect()
-                if connection.can_read():
+                if (
+                    connection.can_read()
+                    and self.cache is None
+                    and not self.maint_notifications_enabled()
+                ):
                     raise ConnectionError("Connection not ready")
         except BaseException:
             # release the connection back to the pool so that we don't leak it

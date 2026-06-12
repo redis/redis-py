@@ -2660,7 +2660,7 @@ class ConnectionPool(
         except (ConnectionError, TimeoutError, OSError):
             await connection.disconnect()
             await connection.connect()
-            if await connection.can_read():
+            if await connection.can_read() and not self.maint_notifications_enabled():
                 raise ConnectionError("Connection not ready") from None
 
     async def release(self, connection: AbstractConnection):

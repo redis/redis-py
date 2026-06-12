@@ -16,6 +16,7 @@ from redis.asyncio.maint_notifications import (
     AsyncMaintNotificationsConnectionHandler,
     AsyncMaintNotificationsPoolHandler,
 )
+from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import RedisError, ResponseError
 from redis.maint_notifications import (
     EndpointType,
@@ -1319,6 +1320,32 @@ async def test_async_pool_ensure_connection_allows_pending_push_when_enabled():
     await pool.ensure_connection(connection)
 
     connection.disconnect.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled, raises", [(True, False), (False, True)])
+async def test_async_pool_ensure_connection_handles_pending_push_after_reconnect(
+    enabled, raises
+):
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=MaintNotificationsConfig(enabled=enabled),
+    )
+    connection = MagicMock()
+    connection.connect = AsyncMock()
+    connection.can_read = AsyncMock(side_effect=[RedisConnectionError("closed"), True])
+    connection.disconnect = AsyncMock()
+
+    if raises:
+        with pytest.raises(RedisConnectionError, match="Connection not ready"):
+            await pool.ensure_connection(connection)
+    else:
+        await pool.ensure_connection(connection)
+
+    assert connection.connect.await_count == 2
+    connection.disconnect.assert_awaited_once()
 
 
 @pytest.mark.asyncio
