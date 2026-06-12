@@ -1617,7 +1617,6 @@ class TestAsyncPubSubTimeoutPropagation:
         assert msg is None
         await p.aclose()
 
-    @pytest.mark.asyncio
     @pytest.mark.onlynoncluster
     async def test_listen_blocks_until_message_despite_socket_timeout(self, r):
         """
@@ -1667,6 +1666,80 @@ class TestAsyncPubSubTimeoutPropagation:
         assert messages[0]["data"] == b"delayed_message"
         # Should have waited at least 1 second, proving listen() ignored socket_timeout
         assert elapsed >= 0.9
+        await task
+        await p.aclose()
+        await client.aclose()
+
+    @pytest.mark.onlynoncluster
+    async def test_listen_with_timeout_parameter(self, r):
+        """
+        Test that listen(timeout=X) returns after the specified timeout
+        when no message arrives.
+        """
+        kwargs = {
+            k: v
+            for k, v in r.connection_pool.connection_kwargs.items()
+            if not k.startswith(("maint_", "orig_")) and k != "connection_class"
+        }
+        client = redis.Redis(socket_timeout=0.5, **kwargs)
+        p = client.pubsub()
+        await p.subscribe("foo")
+        # Read subscription message
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+        assert msg["type"] == "subscribe"
+
+        # listen with timeout should return None after timeout expires
+        start = asyncio.get_running_loop().time()
+        messages = []
+        async for msg in p.listen(timeout=0.1):
+            messages.append(msg)
+            break
+        elapsed = asyncio.get_running_loop().time() - start
+        assert len(messages) == 0
+        assert elapsed < 0.5
+        assert elapsed >= 0.05
+        await p.aclose()
+        await client.aclose()
+
+    @pytest.mark.onlynoncluster
+    async def test_listen_timeout_none_blocks_indefinitely(self, r):
+        """
+        Test that listen(timeout=None) blocks indefinitely until a message arrives.
+        """
+        kwargs = {
+            k: v
+            for k, v in r.connection_pool.connection_kwargs.items()
+            if not k.startswith(("maint_", "orig_")) and k != "connection_class"
+        }
+        client = redis.Redis(socket_timeout=0.5, **kwargs)
+        p = client.pubsub()
+        await p.subscribe("foo")
+        # Read subscription message
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+        assert msg["type"] == "subscribe"
+
+        start_publishing = asyncio.Event()
+
+        async def publish_after_delay():
+            await start_publishing.wait()
+            await asyncio.sleep(0.2)
+            await client.publish("foo", "delayed_message")
+
+        task = asyncio.create_task(publish_after_delay())
+
+        start = asyncio.get_running_loop().time()
+        start_publishing.set()
+        messages = []
+        async for msg in p.listen(timeout=None):
+            messages.append(msg)
+            break
+        elapsed = asyncio.get_running_loop().time() - start
+        assert len(messages) == 1
+        assert messages[0]["type"] == "message"
+        assert messages[0]["data"] == b"delayed_message"
+        assert elapsed >= 0.15
         await task
         await p.aclose()
         await client.aclose()
