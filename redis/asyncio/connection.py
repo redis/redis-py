@@ -742,7 +742,7 @@ class AbstractConnection:
     async def read_response(
         self,
         disable_decoding: bool = False,
-        timeout: Optional[float] = None,
+        timeout: Union[float, object] = SENTINEL,
         *,
         disconnect_on_error: bool = True,
         push_request: Optional[bool] = False,
@@ -797,7 +797,7 @@ class AbstractConnection:
                     disable_decoding=disable_decoding
                 )
         except asyncio.TimeoutError:
-            if timeout is not None:
+            if timeout is not SENTINEL:
                 # user requested timeout, return None. Operation can be retried
                 return None
             # it was a self.socket_timeout error.
