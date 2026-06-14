@@ -12,6 +12,11 @@ from .base import (
 )
 from .socket import SERVER_CLOSED_CONNECTION_ERROR
 
+# Maximum nesting depth for aggregate RESP types (arrays, sets, maps).
+# A malicious or misbehaving server can craft deeply nested replies that
+# exhaust the Python call stack.  Guard against this by bounding recursion.
+_MAX_PARSE_DEPTH = 256
+
 
 class _RESP3Parser(_RESPBase, PushNotificationsParser):
     """RESP3 protocol implementation"""
@@ -61,7 +66,12 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
         disable_decoding=False,
         push_request=False,
         timeout: Union[float, object] = SENTINEL,
+        _depth: int = 0,
     ):
+        if _depth > _MAX_PARSE_DEPTH:
+            raise InvalidResponse(
+                f"Exceeded maximum response nesting depth ({_MAX_PARSE_DEPTH})"
+            )
         raw = self._buffer.readline(timeout=timeout)
         if not raw:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
@@ -107,7 +117,11 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
         # array response
         elif byte == b"*":
             response = [
-                self._read_response(disable_decoding=disable_decoding, timeout=timeout)
+                self._read_response(
+                    disable_decoding=disable_decoding,
+                    timeout=timeout,
+                    _depth=_depth + 1,
+                )
                 for _ in range(int(response))
             ]
         # set response
@@ -115,7 +129,11 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
             # redis can return unhashable types (like dict) in a set,
             # so we return sets as list, all the time, for predictability
             response = [
-                self._read_response(disable_decoding=disable_decoding, timeout=timeout)
+                self._read_response(
+                    disable_decoding=disable_decoding,
+                    timeout=timeout,
+                    _depth=_depth + 1,
+                )
                 for _ in range(int(response))
             ]
         # map response
@@ -126,12 +144,15 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
             resp_dict = {}
             for _ in range(int(response)):
                 key = self._read_response(
-                    disable_decoding=disable_decoding, timeout=timeout
+                    disable_decoding=disable_decoding,
+                    timeout=timeout,
+                    _depth=_depth + 1,
                 )
                 resp_dict[key] = self._read_response(
                     disable_decoding=disable_decoding,
                     push_request=push_request,
                     timeout=timeout,
+                    _depth=_depth + 1,
                 )
             response = resp_dict
         # push response
@@ -141,6 +162,7 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
                     disable_decoding=disable_decoding,
                     push_request=push_request,
                     timeout=timeout,
+                    _depth=_depth + 1,
                 )
                 for _ in range(int(response))
             ]
@@ -153,6 +175,7 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
             return self._read_response(
                 disable_decoding=disable_decoding,
                 push_request=push_request,
+                _depth=_depth + 1,
             )
         else:
             raise InvalidResponse(f"Protocol Error: {raw!r}")
@@ -190,8 +213,15 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
         return response
 
     async def _read_response(
-        self, disable_decoding: bool = False, push_request: bool = False
+        self,
+        disable_decoding: bool = False,
+        push_request: bool = False,
+        _depth: int = 0,
     ) -> Union[EncodableT, ResponseError, None]:
+        if _depth > _MAX_PARSE_DEPTH:
+            raise InvalidResponse(
+                f"Exceeded maximum response nesting depth ({_MAX_PARSE_DEPTH})"
+            )
         if not self._stream or not self.encoder:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         raw = await self._readline()
@@ -241,7 +271,11 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
         # array response
         elif byte == b"*":
             response = [
-                (await self._read_response(disable_decoding=disable_decoding))
+                (
+                    await self._read_response(
+                        disable_decoding=disable_decoding, _depth=_depth + 1
+                    )
+                )
                 for _ in range(int(response))
             ]
         # set response
@@ -249,7 +283,11 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
             # redis can return unhashable types (like dict) in a set,
             # so we always convert to a list, to have predictable return types
             response = [
-                (await self._read_response(disable_decoding=disable_decoding))
+                (
+                    await self._read_response(
+                        disable_decoding=disable_decoding, _depth=_depth + 1
+                    )
+                )
                 for _ in range(int(response))
             ]
         # map response
@@ -259,9 +297,13 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
             # became defined to be left-right in version 3.8
             resp_dict = {}
             for _ in range(int(response)):
-                key = await self._read_response(disable_decoding=disable_decoding)
+                key = await self._read_response(
+                    disable_decoding=disable_decoding, _depth=_depth + 1
+                )
                 resp_dict[key] = await self._read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
+                    disable_decoding=disable_decoding,
+                    push_request=push_request,
+                    _depth=_depth + 1,
                 )
             response = resp_dict
         # push response
@@ -269,7 +311,9 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
             response = [
                 (
                     await self._read_response(
-                        disable_decoding=disable_decoding, push_request=push_request
+                        disable_decoding=disable_decoding,
+                        push_request=push_request,
+                        _depth=_depth + 1,
                     )
                 )
                 for _ in range(int(response))
@@ -277,7 +321,9 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
             response = await self.handle_push_response(response)
             if not push_request:
                 return await self._read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
+                    disable_decoding=disable_decoding,
+                    push_request=push_request,
+                    _depth=_depth + 1,
                 )
             else:
                 return response

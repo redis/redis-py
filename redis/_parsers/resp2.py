@@ -6,6 +6,11 @@ from ..utils import SENTINEL
 from .base import _AsyncRESPBase, _RESPBase
 from .socket import SERVER_CLOSED_CONNECTION_ERROR
 
+# Maximum nesting depth for aggregate RESP types (arrays, sets, maps).
+# A malicious or misbehaving server can craft deeply nested replies that
+# exhaust the Python call stack.  Guard against this by bounding recursion.
+_MAX_PARSE_DEPTH = 256
+
 
 class _RESP2Parser(_RESPBase):
     """RESP2 protocol implementation"""
@@ -27,8 +32,15 @@ class _RESP2Parser(_RESPBase):
             return result
 
     def _read_response(
-        self, disable_decoding=False, timeout: Union[float, object] = SENTINEL
+        self,
+        disable_decoding=False,
+        timeout: Union[float, object] = SENTINEL,
+        _depth: int = 0,
     ):
+        if _depth > _MAX_PARSE_DEPTH:
+            raise InvalidResponse(
+                f"Exceeded maximum response nesting depth ({_MAX_PARSE_DEPTH})"
+            )
         raw = self._buffer.readline(timeout=timeout)
         if not raw:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
@@ -64,7 +76,11 @@ class _RESP2Parser(_RESPBase):
             return None
         elif byte == b"*":
             response = [
-                self._read_response(disable_decoding=disable_decoding, timeout=timeout)
+                self._read_response(
+                    disable_decoding=disable_decoding,
+                    timeout=timeout,
+                    _depth=_depth + 1,
+                )
                 for i in range(int(response))
             ]
         else:
@@ -92,8 +108,14 @@ class _AsyncRESP2Parser(_AsyncRESPBase):
         return response
 
     async def _read_response(
-        self, disable_decoding: bool = False
+        self,
+        disable_decoding: bool = False,
+        _depth: int = 0,
     ) -> Union[EncodableT, ResponseError, None]:
+        if _depth > _MAX_PARSE_DEPTH:
+            raise InvalidResponse(
+                f"Exceeded maximum response nesting depth ({_MAX_PARSE_DEPTH})"
+            )
         raw = await self._readline()
         response: Any
         byte, response = raw[:1], raw[1:]
@@ -128,7 +150,7 @@ class _AsyncRESP2Parser(_AsyncRESPBase):
             return None
         elif byte == b"*":
             response = [
-                (await self._read_response(disable_decoding))
+                (await self._read_response(disable_decoding, _depth=_depth + 1))
                 for _ in range(int(response))  # noqa
             ]
         else:
