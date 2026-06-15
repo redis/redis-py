@@ -1680,26 +1680,28 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
     async def reset(self):
         self.command_stack = []
         self.scripts = set()
-        # make sure to reset the connection state in the event that we were
-        # watching something
-        if self.watching and self.connection:
-            try:
-                # call this manually since our unwatch or
-                # immediate_execute_command methods can call reset()
-                await self.connection.send_command("UNWATCH")
-                await self.connection.read_response()
-            except ConnectionError:
-                # disconnect will also remove any previous WATCHes
-                if self.connection:
-                    await self.connection.disconnect()
-        # clean up the other instance attributes
-        self.watching = False
-        self.explicit_transaction = False
-        # we can safely return the connection to the pool here since we're
-        # sure we're no longer WATCHing anything
-        if self.connection:
-            await self.connection_pool.release(self.connection)
-            self.connection = None
+        try:
+            # make sure to reset the connection state in the event that we were
+            # watching something
+            if self.watching and self.connection:
+                try:
+                    # call this manually since our unwatch or
+                    # immediate_execute_command methods can call reset()
+                    await self.connection.send_command("UNWATCH")
+                    await self.connection.read_response()
+                except ConnectionError:
+                    # disconnect will also remove any previous WATCHes
+                    if self.connection:
+                        await self.connection.disconnect()
+            # clean up the other instance attributes
+            self.watching = False
+            self.explicit_transaction = False
+        finally:
+            # we can safely return the connection to the pool here since we're
+            # sure we're no longer WATCHing anything
+            if self.connection:
+                await self.connection_pool.release(self.connection)
+                self.connection = None
 
     async def aclose(self) -> None:
         """Alias for reset(), a standard method name for cleanup"""
