@@ -2231,6 +2231,128 @@ class TestPubSubTimeoutPropagation:
         assert msg is None
 
 
+@pytest.mark.onlynoncluster
+class TestPubSubBlockingListen:
+    """
+    Tests that PubSub.listen() and parse_response(block=True) block
+    indefinitely waiting for a message, ignoring the connection's
+    configured socket_timeout. Regression tests for the issue where
+    listen() would raise TimeoutError once socket_timeout elapsed.
+
+    Retries are disabled on the subscriber so a TimeoutError from the
+    blocking read surfaces immediately instead of being silently retried
+    by the client's default retry policy (which would mask the bug).
+    """
+
+    SOCKET_TIMEOUT = 0.3
+    PUBLISH_DELAY = SOCKET_TIMEOUT * 3
+
+    def _make_client(self, request, no_retry=False, **kwargs):
+        if no_retry:
+            from redis.backoff import NoBackoff
+            from redis.retry import Retry
+
+            kwargs.setdefault("retry", Retry(NoBackoff(), 0))
+            kwargs.setdefault("retry_on_timeout", False)
+        return _get_client(
+            redis.Redis, request, single_connection_client=False, **kwargs
+        )
+
+    def test_listen_blocks_longer_than_socket_timeout(self, request):
+        """
+        listen() must keep blocking past socket_timeout. Configure a very
+        short socket_timeout, then publish after a delay that exceeds it,
+        and assert listen() yields the message instead of raising
+        TimeoutError.
+        """
+        r = self._make_client(
+            request, socket_timeout=self.SOCKET_TIMEOUT, no_retry=True
+        )
+        publisher = self._make_client(request)
+        p = r.pubsub()
+        p.subscribe("foo")
+        msg = wait_for_message(p, timeout=1.0)
+        assert msg is not None and msg["type"] == "subscribe"
+
+        def publish_after_delay():
+            time.sleep(self.PUBLISH_DELAY)
+            publisher.publish("foo", "hello")
+
+        thread = threading.Thread(target=publish_after_delay, daemon=True)
+        thread.start()
+
+        start = time.monotonic()
+        msg = next(p.listen())
+        elapsed = time.monotonic() - start
+        assert msg["type"] == "message"
+        assert msg["data"] == b"hello"
+        # Should have blocked past socket_timeout to receive the message.
+        assert elapsed > self.SOCKET_TIMEOUT
+        thread.join(timeout=1.0)
+        p.close()
+
+    def test_get_message_block_indefinitely_past_socket_timeout(self, request):
+        """
+        get_message(timeout=None) must block past socket_timeout.
+        """
+        r = self._make_client(
+            request, socket_timeout=self.SOCKET_TIMEOUT, no_retry=True
+        )
+        publisher = self._make_client(request)
+        p = r.pubsub()
+        p.subscribe("foo")
+        msg = wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        def publish_after_delay():
+            time.sleep(self.PUBLISH_DELAY)
+            publisher.publish("foo", "delayed")
+
+        thread = threading.Thread(target=publish_after_delay, daemon=True)
+        thread.start()
+
+        start = time.monotonic()
+        msg = p.get_message(timeout=None)
+        elapsed = time.monotonic() - start
+        assert msg is not None
+        assert msg["type"] == "message"
+        assert msg["data"] == b"delayed"
+        assert elapsed > self.SOCKET_TIMEOUT
+        thread.join(timeout=1.0)
+        p.close()
+
+    def test_parse_response_block_true_blocks_past_socket_timeout(self, request):
+        """
+        parse_response(block=True) must block past socket_timeout.
+        """
+        r = self._make_client(
+            request, socket_timeout=self.SOCKET_TIMEOUT, no_retry=True
+        )
+        publisher = self._make_client(request)
+        p = r.pubsub(ignore_subscribe_messages=True)
+        p.subscribe("foo")
+        # Drain the subscribe ack before calling parse_response directly.
+        wait_for_message(p, timeout=1.0)
+
+        def publish_after_delay():
+            time.sleep(self.PUBLISH_DELAY)
+            publisher.publish("foo", "raw")
+
+        thread = threading.Thread(target=publish_after_delay, daemon=True)
+        thread.start()
+
+        start = time.monotonic()
+        response = p.parse_response(block=True)
+        elapsed = time.monotonic() - start
+        # Response is the raw pubsub frame [b"message", b"foo", b"raw"].
+        assert response is not None
+        assert response[0] == b"message"
+        assert response[-1] == b"raw"
+        assert elapsed > self.SOCKET_TIMEOUT
+        thread.join(timeout=1.0)
+        p.close()
+
+
 class TestClusterPubSubTimeoutPropagation:
     """
     Tests for timeout propagation in ClusterPubSub for sharded pubsub.
