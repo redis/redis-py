@@ -754,7 +754,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             self.connection_pool.release(conn)
 
         if self.auto_close_connection_pool:
-            self.connection_pool.disconnect()
+            self.connection_pool.close()
 
     def _send_command_parse_response(self, conn, command_name, *args, **options):
         """
@@ -846,13 +846,15 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             raise
 
         finally:
-            if conn and conn.should_reconnect():
-                self._close_connection(conn)
-                conn.connect()
-            if self._single_connection_client:
-                self.single_connection_lock.release()
-            if not self.connection:
-                pool.release(conn)
+            try:
+                if conn and conn.should_reconnect():
+                    self._close_connection(conn)
+                    conn.connect()
+            finally:
+                if self._single_connection_client:
+                    self.single_connection_lock.release()
+                if not self.connection:
+                    pool.release(conn)
 
     def parse_response(self, connection, command_name, **options):
         """Parses a response from the Redis server"""

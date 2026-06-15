@@ -1,7 +1,7 @@
 import socket
 import threading
 from typing import List, Union
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from time import sleep
@@ -16,6 +16,7 @@ from redis.connection import (
     BlockingConnectionPool,
     MaintenanceState,
 )
+from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import ResponseError
 from redis.maint_notifications import (
     EndpointType,
@@ -626,6 +627,40 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
 
         self._validate_connection_handlers(conn, pool_handler, self.config)
 
+    def test_moving_update_with_disabled_relaxed_timeout_preserves_timeouts(self):
+        config = MaintNotificationsConfig(
+            enabled=True,
+            proactive_reconnect=True,
+            relaxed_timeout=-1,
+        )
+        pool = ConnectionPool(
+            host=DEFAULT_ADDRESS.split(":")[0],
+            port=int(DEFAULT_ADDRESS.split(":")[1]),
+            protocol=3,
+            maint_notifications_config=config,
+        )
+        connection = Connection(
+            host=DEFAULT_ADDRESS.split(":")[0],
+            port=int(DEFAULT_ADDRESS.split(":")[1]),
+            protocol=3,
+            maint_notifications_config=config,
+        )
+
+        pool.update_connection_settings(
+            connection,
+            state=MaintenanceState.MOVING,
+            maintenance_notification_hash=hash(MOVING_NOTIFICATION),
+            host_address=AFTER_MOVING_ADDRESS.split(":")[0],
+            relaxed_timeout=config.relaxed_timeout,
+            update_notification_hash=True,
+        )
+
+        assert connection.maintenance_state == MaintenanceState.MOVING
+        assert connection.maintenance_notification_hash == hash(MOVING_NOTIFICATION)
+        assert connection.host == AFTER_MOVING_ADDRESS.split(":")[0]
+        assert connection.socket_timeout == DEFAULT_SOCKET_TIMEOUT
+        assert connection.socket_connect_timeout == DEFAULT_SOCKET_CONNECT_TIMEOUT
+
     def test_maint_handler_init_for_existing_connections(self):
         """Test that maintenance notification handlers are properly set on existing and new connections
         when configuration is enabled after client creation."""
@@ -708,6 +743,47 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
         finally:
             if hasattr(test_pool, "disconnect"):
                 test_pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    @pytest.mark.parametrize("enabled, raises", [(True, False), (False, True)])
+    def test_pool_get_connection_handles_pending_push_after_reconnect(
+        self, pool_class, enabled, raises
+    ):
+        max_connections = 3 if pool_class == BlockingConnectionPool else 10
+        pool = pool_class(
+            host=DEFAULT_ADDRESS.split(":")[0],
+            port=int(DEFAULT_ADDRESS.split(":")[1]),
+            max_connections=max_connections,
+            protocol=3,
+            maint_notifications_config=MaintNotificationsConfig(enabled=enabled),
+        )
+        connection = MagicMock()
+        connection.pid = pool.pid
+        connection.can_read.side_effect = [RedisConnectionError("closed"), True]
+        connection.should_reconnect.return_value = False
+
+        if pool_class == BlockingConnectionPool:
+            pool.pool.get_nowait()
+            pool.pool.put_nowait(connection)
+            pool._connections.append(connection)
+        else:
+            pool._available_connections.append(connection)
+
+        returned_connection = None
+        try:
+            if raises:
+                with pytest.raises(RedisConnectionError, match="Connection not ready"):
+                    pool.get_connection()
+            else:
+                returned_connection = pool.get_connection()
+                assert returned_connection is connection
+
+            assert connection.connect.call_count == 2
+            connection.disconnect.assert_called_once()
+        finally:
+            if returned_connection is connection:
+                pool.release(connection)
+            pool.disconnect()
 
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_redis_operations_with_mock_sockets(self, pool_class):
