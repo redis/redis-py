@@ -3170,35 +3170,50 @@ class TransactionStrategy(AbstractStrategy):
     async def reset(self):
         self._command_queue = []
 
-        # make sure to reset the connection state in the event that we were
-        # watching something
-        if self._transaction_connection:
-            try:
-                if self._watching:
-                    # call this manually since our unwatch or
-                    # immediate_execute_command methods can call reset()
-                    await self._transaction_connection.send_command("UNWATCH")
-                    await self._transaction_connection.read_response()
-                # we can safely return the connection to the pool here since we're
-                # sure we're no longer WATCHing anything
-                await self._transaction_node.disconnect_if_needed(
-                    self._transaction_connection
+        try:
+            # make sure to reset the connection state in the event that we
+            # were watching something
+            if self._transaction_connection:
+                try:
+                    if self._watching:
+                        # call this manually since our unwatch or
+                        # immediate_execute_command methods can call reset()
+                        await self._transaction_connection.send_command("UNWATCH")
+                        await self._transaction_connection.read_response()
+                except self.CONNECTION_ERRORS:
+                    # disconnect will also remove any previous WATCHes
+                    if self._transaction_connection:
+                        await self._transaction_connection.disconnect()
+                except asyncio.CancelledError:
+                    # Disconnect so any unread UNWATCH reply does not get
+                    # served to the next caller that takes the connection.
+                    if self._transaction_connection:
+                        await self._transaction_connection.disconnect()
+                    raise
+                else:
+                    # On the happy path, honor lazy reconnect before release.
+                    await self._transaction_node.disconnect_if_needed(
+                        self._transaction_connection
+                    )
+        finally:
+            # Always return the connection to the node's free queue, even on
+            # cancellation, so cancelled resets do not leak pooled
+            # connections. Detach the reference before releasing so the
+            # strategy never holds a pointer to a returned connection.
+            # ClusterNode.release is synchronous, so no shield is required.
+            if self._transaction_connection and self._transaction_node:
+                connection, self._transaction_connection = (
+                    self._transaction_connection,
+                    None,
                 )
-                self._transaction_node.release(self._transaction_connection)
-                self._transaction_connection = None
-            except self.CONNECTION_ERRORS:
-                # disconnect will also remove any previous WATCHes
-                if self._transaction_connection and self._transaction_node:
-                    await self._transaction_connection.disconnect()
-                    self._transaction_node.release(self._transaction_connection)
-                    self._transaction_connection = None
-
-        # clean up the other instance attributes
-        self._transaction_node = None
-        self._watching = False
-        self._explicit_transaction = False
-        self._pipeline_slots = set()
-        self._executing = False
+                self._transaction_node.release(connection)
+            # clean up the other instance attributes
+            self._transaction_connection = None
+            self._transaction_node = None
+            self._watching = False
+            self._explicit_transaction = False
+            self._pipeline_slots = set()
+            self._executing = False
 
     def multi(self):
         if self._explicit_transaction:
