@@ -1,3 +1,4 @@
+import asyncio
 from unittest import mock
 
 import pytest
@@ -93,6 +94,37 @@ class TestPipeline:
                 await pipe.execute()
 
             assert await r.get("a") == b"bad"
+
+    @pytest.mark.onlynoncluster
+    async def test_pipeline_reset_releases_connection_when_cancelled(self, r):
+        # Regression test for https://github.com/redis/redis-py/issues/4121:
+        # cancelling reset() while it awaits the UNWATCH reply must still
+        # return the pooled connection to the pool.
+        await r.set("a", 0)
+
+        pool = r.connection_pool
+        pipe = r.pipeline()
+        await pipe.watch("a")
+        assert pipe.connection is not None
+        assert pipe.connection in pool._in_use_connections
+        leased = pipe.connection
+
+        # Block read_response on the UNWATCH reply so we can cancel mid-call.
+        started = asyncio.Event()
+
+        async def hang(*_args, **_kwargs):
+            started.set()
+            await asyncio.sleep(60)
+
+        with mock.patch.object(leased, "read_response", side_effect=hang):
+            task = asyncio.ensure_future(pipe.reset())
+            await started.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        assert pipe.connection is None
+        assert leased not in pool._in_use_connections
 
     async def test_exec_error_in_response(self, r):
         """
