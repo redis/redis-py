@@ -798,7 +798,7 @@ class Redis(
         if close_connection_pool or (
             close_connection_pool is None and self.auto_close_connection_pool
         ):
-            await self.connection_pool.disconnect()
+            await self.connection_pool.aclose()
 
     @deprecated_function(version="5.0.1", reason="Use aclose() instead", name="close")
     async def close(self, close_connection_pool: Optional[bool] = None) -> None:

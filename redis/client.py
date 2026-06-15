@@ -754,7 +754,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             self.connection_pool.release(conn)
 
         if self.auto_close_connection_pool:
-            self.connection_pool.disconnect()
+            self.connection_pool.close()
 
     def _send_command_parse_response(self, conn, command_name, *args, **options):
         """
