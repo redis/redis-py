@@ -539,10 +539,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.response_callbacks = kwargs["response_callbacks"]
         self.result_callbacks = self.__class__.RESULT_CALLBACKS.copy()
-        self.result_callbacks["CLUSTER SLOTS"] = (
-            lambda cmd, res, **kwargs: parse_cluster_slots(
-                list(res.values())[0], **kwargs
-            )
+        self.result_callbacks["CLUSTER SLOTS"] = lambda cmd, res, **kwargs: (
+            parse_cluster_slots(list(res.values())[0], **kwargs)
         )
 
         self._initialize = True
@@ -1228,7 +1226,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     connection=target_node,
                 )
             except AskError as e:
-                redirect_addr = get_node_name(host=e.host, port=e.port)
+                redirect_node = self.nodes_manager.get_or_create_node(e.host, e.port)
+                redirect_addr = redirect_node.name
                 asking = True
                 await self._record_command_metric(
                     command_name=command,
@@ -1820,6 +1819,21 @@ class NodesManager:
             raise DataError(
                 "get_node requires one of the following: 1. node name 2. host and port"
             )
+
+    def get_or_create_node(
+        self, host: str, port: int, server_type: str = PRIMARY
+    ) -> "ClusterNode":
+        node = self.get_node(host=host, port=port)
+
+        if node is not None:
+            if node.server_type != server_type:
+                node.server_type = server_type
+
+            return node
+
+        node = ClusterNode(host, port, server_type, **self.connection_kwargs)
+        self.set_nodes(self.nodes_cache, {node.name: node})
+        return node
 
     def set_nodes(
         self,

@@ -944,14 +944,16 @@ class RedisCluster(
             RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [
                 self.get_random_primary_or_all_nodes(command_name)
             ],
-            RequestPolicy.DEFAULT_KEYED: lambda command,
-            *args: self.get_nodes_from_slot(command, *args),
+            RequestPolicy.DEFAULT_KEYED: lambda command, *args: (
+                self.get_nodes_from_slot(command, *args)
+            ),
             RequestPolicy.DEFAULT_NODE: lambda: [self.get_default_node()],
             RequestPolicy.ALL_SHARDS: self.get_primaries,
             RequestPolicy.ALL_NODES: self.get_nodes,
             RequestPolicy.ALL_REPLICAS: self.get_replicas,
-            RequestPolicy.MULTI_SHARD: lambda *args,
-            **kwargs: self._split_multi_shard_command(*args, **kwargs),
+            RequestPolicy.MULTI_SHARD: lambda *args, **kwargs: (
+                self._split_multi_shard_command(*args, **kwargs)
+            ),
             RequestPolicy.SPECIAL: self.get_special_nodes,
             ResponsePolicy.DEFAULT_KEYLESS: lambda res: res,
             ResponsePolicy.DEFAULT_KEYED: lambda res: res,
@@ -1818,7 +1820,8 @@ class RedisCluster(
                         f"ASK error received for command {args_log_str}, on node {target_node.name}, "
                         f"and connection: {connection} using local socket address: {socket_address}, error: {e}"
                     )
-                redirect_addr = get_node_name(host=e.host, port=e.port)
+                redirect_node = self.nodes_manager.get_or_create_node(e.host, e.port)
+                redirect_addr = redirect_node.name
                 asking = True
 
                 self._record_command_metric(
@@ -2187,6 +2190,25 @@ class NodesManager:
                 return self.nodes_cache.get(node_name)
         else:
             return None
+
+    def get_or_create_node(
+        self, host: str, port: int, server_type: str = PRIMARY
+    ) -> "ClusterNode":
+        if host == "localhost":
+            host = socket.gethostbyname(host)
+
+        node_name = get_node_name(host, port)
+
+        with self._lock:
+            node = self.nodes_cache.get(node_name)
+
+            if node is None:
+                node = ClusterNode(host, port, server_type)
+                self.nodes_cache[node.name] = node
+            elif node.server_type != server_type:
+                node.server_type = server_type
+
+            return node
 
     def move_slot(self, e: Union[AskError, MovedError]):
         """
@@ -3473,14 +3495,16 @@ class ClusterPipeline(RedisCluster):
             RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [
                 self.get_random_primary_or_all_nodes(command_name)
             ],
-            RequestPolicy.DEFAULT_KEYED: lambda command,
-            *args: self.get_nodes_from_slot(command, *args),
+            RequestPolicy.DEFAULT_KEYED: lambda command, *args: (
+                self.get_nodes_from_slot(command, *args)
+            ),
             RequestPolicy.DEFAULT_NODE: lambda: [self.get_default_node()],
             RequestPolicy.ALL_SHARDS: self.get_primaries,
             RequestPolicy.ALL_NODES: self.get_nodes,
             RequestPolicy.ALL_REPLICAS: self.get_replicas,
-            RequestPolicy.MULTI_SHARD: lambda *args,
-            **kwargs: self._split_multi_shard_command(*args, **kwargs),
+            RequestPolicy.MULTI_SHARD: lambda *args, **kwargs: (
+                self._split_multi_shard_command(*args, **kwargs)
+            ),
             RequestPolicy.SPECIAL: self.get_special_nodes,
             ResponsePolicy.DEFAULT_KEYLESS: lambda res: res,
             ResponsePolicy.DEFAULT_KEYED: lambda res: res,
