@@ -115,14 +115,14 @@ def test_hiredis_can_read_checks_socket_readiness_without_reading():
 
 
 @pytest.mark.fixed_client
+@pytest.mark.skipif(
+    not hasattr(select, "poll"), reason="select.poll not available on this platform"
+)
 @pytest.mark.parametrize(
     "timeout,expected_poll_timeout",
     [(0, 0), (0.001, 1.0), (None, None)],
 )
 def test_hiredis_socket_can_read_uses_poll(timeout, expected_poll_timeout):
-    if not hasattr(select, "poll"):
-        pytest.skip("select.poll not available on this platform")
-
     sock = Mock(spec=["fileno"])
     poller = Mock()
     poller.poll.return_value = [(7, select.POLLIN)]
@@ -151,16 +151,18 @@ def test_hiredis_socket_can_read_falls_back_to_default_selector():
 
     selector.register.assert_called_once_with(sock, selectors.EVENT_READ)
     selector.select.assert_called_once_with(0.001)
+    # The selector must be used as a context manager so its fd is released; if
+    # the `with` block is dropped from the implementation, this catches it.
+    selector.__exit__.assert_called_once()
 
 
 @pytest.mark.fixed_client
+@pytest.mark.skipif(
+    not hasattr(select, "poll"),
+    reason="No select.poll; default selector falls back to select.select",
+)
 def test_hiredis_socket_can_read_handles_high_file_descriptor():
     fcntl = pytest.importorskip("fcntl")
-
-    if not hasattr(select, "poll"):
-        with selectors.DefaultSelector() as selector:
-            if isinstance(selector, selectors.SelectSelector):
-                pytest.skip("No poll and default selector uses select.select")
 
     read_fd, write_fd = os.pipe()
     high_read_fd = None
@@ -179,14 +181,19 @@ def test_hiredis_socket_can_read_handles_high_file_descriptor():
 
 
 @pytest.mark.fixed_client
+@pytest.mark.forked
+@pytest.mark.skipif(
+    not hasattr(select, "poll"), reason="select.poll not available on this platform"
+)
 def test_hiredis_socket_can_read_under_fd_exhaustion():
     # Readiness checks run on every connection acquisition, and fd pressure is
     # what pushes sockets onto high fds in the first place, so they must not
     # allocate file descriptors themselves. A per-check epoll/kqueue selector
     # raises OSError (EMFILE) here; the poll() implementation passes.
+    #
+    # RLIMIT_NOFILE is process-wide, so @pytest.mark.forked runs this in its own
+    # process to avoid starving other threads/tests of file descriptors.
     resource = pytest.importorskip("resource")
-    if not hasattr(select, "poll"):
-        pytest.skip("select.poll not available on this platform")
 
     readable, writable = socket.socketpair()
     empty_sock, peer = socket.socketpair()
