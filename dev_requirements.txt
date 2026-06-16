@@ -13,6 +13,7 @@ pytest-cov
 coverage<7.11.1
 pytest-cov==6.0.0 ; platform_python_implementation == "PyPy"
 coverage==7.6.12 ; platform_python_implementation == "PyPy"
+pytest-forked
 pytest-profiling==1.8.1
 pytest-timeout
 pytest-timeout==2.3.1 ; platform_python_implementation == "PyPy"
