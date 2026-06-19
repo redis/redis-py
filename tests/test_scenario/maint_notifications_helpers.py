@@ -65,6 +65,16 @@ class ClientValidations:
         )
 
         try:
+            if (
+                expected_state is not None
+                and test_conn.maintenance_state == expected_state
+            ):
+                logging.debug(
+                    f"Connection already in expected state {expected_state}, "
+                    f"returning immediately"
+                )
+                return
+
             while time.time() - start_time < timeout:
                 try:
                     if test_conn.can_read(timeout=0.2):

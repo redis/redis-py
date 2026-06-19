@@ -275,6 +275,7 @@ def _get_client_maint_notifications(
     enable_relaxed_timeout: bool = True,
     enable_proactive_reconnect: bool = True,
     disable_retries: bool = False,
+    auth_ssl_client_certs: bool = False,
     socket_timeout: Optional[float] = None,
     host_config: Optional[str] = None,
 ):
@@ -316,6 +317,11 @@ def _get_client_maint_notifications(
     tls_enabled = True if parsed.scheme == "rediss" else False
     logging.info(f"TLS enabled: {tls_enabled}")
 
+    tls_kwargs = {"ssl": tls_enabled}
+    if tls_enabled:
+        ssl_config = _prepare_ssl_certificates(auth_ssl_client_certs)
+        tls_kwargs.update(ssl_config)
+
     # Create Redis client with maintenance notifications config
     # This will automatically create the MaintNotificationsPoolHandler
     client = Redis(
@@ -324,12 +330,10 @@ def _get_client_maint_notifications(
         socket_timeout=CLIENT_TIMEOUT if socket_timeout is None else socket_timeout,
         username=username,
         password=password,
-        ssl=tls_enabled,
-        ssl_cert_reqs="none",
-        ssl_check_hostname=False,
         protocol=protocol,  # RESP3 required for push notifications
         maint_notifications_config=maintenance_config,
         retry=retry,
+        **tls_kwargs,
     )
     logging.info("Redis client created with maintenance notifications enabled")
     logging.info(f"Client uses Protocol: {client.connection_pool.get_protocol()}")

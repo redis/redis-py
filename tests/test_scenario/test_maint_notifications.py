@@ -597,6 +597,8 @@ class TestStandaloneClientPushNotificationsHandlingWithEffectTrigger(
         assert conn.socket_timeout == DEFAULT_STANDALONE_CLIENT_SOCKET_TIMEOUT
         assert conn._sock.gettimeout() == DEFAULT_STANDALONE_CLIENT_SOCKET_TIMEOUT
 
+        client_maint_notifications.connection_pool.release(conn)
+
         trigger_effect_thread.join()
         self.maintenance_ops_threads.remove(trigger_effect_thread)
 
@@ -1191,12 +1193,23 @@ class TestStandaloneClientPushNotificationsHandlingWithEffectTrigger(
             "Creating new client to connect to the same node - new connections to this node should receive the moving notification..."
         )
 
+        auth_ssl_client_certs_config_info = db_config.get(
+            "authentication_ssl_client_certs", None
+        )
+        auth_ssl_client_certs = (
+            True
+            if auth_ssl_client_certs_config_info
+            and auth_ssl_client_certs_config_info[0]["client_cert"] is not None
+            else False
+        )
+
         # create new client with new pool that should also receive the moving notification
         new_client = _get_client_maint_notifications(
             endpoints_config=db_endpoint_config,
             endpoint_type=endpoint_type,
             host_config=old_address,
             socket_timeout=DEFAULT_STANDALONE_CLIENT_SOCKET_TIMEOUT,
+            auth_ssl_client_certs=auth_ssl_client_certs,
         )
 
         # the moving notification will be consumed as
