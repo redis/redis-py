@@ -1255,7 +1255,11 @@ class PubSub:
                 read_timeout = timeout
             else:
                 conn.connect()
-                read_timeout = SENTINEL  # Use default socket timeout for blocking
+                # Block indefinitely waiting for a pubsub message. timeout=None
+                # makes the socket layer call sock.settimeout(None) for this read
+                # (and restore the original socket_timeout afterwards), so the
+                # configured socket_timeout does not abort the read.
+                read_timeout = None
             return conn.read_response(
                 disconnect_on_error=False, push_request=True, timeout=read_timeout
             )

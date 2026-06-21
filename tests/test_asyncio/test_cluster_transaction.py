@@ -1,4 +1,6 @@
+import asyncio
 from typing import Tuple
+from unittest import mock
 from unittest.mock import patch, Mock
 
 import pytest
@@ -110,6 +112,41 @@ class TestClusterTransaction:
             pipe.multi()
             pipe.set("a", int(a) + 1)
             assert await pipe.execute() == [True]
+
+    @pytest.mark.onlycluster
+    async def test_pipeline_reset_releases_connection_when_cancelled(self, r):
+        # Regression test for https://github.com/redis/redis-py/issues/4121
+        # (cluster variant): cancelling reset() while it awaits the UNWATCH
+        # reply must still return the node-pooled connection.
+        await r.set("a", 0)
+
+        pipe = r.pipeline(transaction=True)
+        await pipe.watch("a")
+
+        strategy = pipe._execution_strategy
+        leased = strategy._transaction_connection
+        node = strategy._transaction_node
+        assert leased is not None
+        assert node is not None
+        assert leased not in node._free
+
+        started = asyncio.Event()
+
+        async def hang(*_args, **_kwargs):
+            started.set()
+            await asyncio.sleep(60)
+
+        with mock.patch.object(leased, "read_response", side_effect=hang):
+            task = asyncio.ensure_future(pipe.reset())
+            await started.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        assert strategy._transaction_connection is None
+        assert strategy._transaction_node is None
+        assert strategy._watching is False
+        assert leased in node._free
 
     @pytest.mark.onlycluster
     async def test_retry_transaction_during_unfinished_slot_migration(self, r):
