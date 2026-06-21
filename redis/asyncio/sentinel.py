@@ -27,6 +27,10 @@ class SlaveNotFoundError(ConnectionError):
     pass
 
 
+ReplicaNotFoundError = SlaveNotFoundError
+ReplicaNotFound = ReplicaNotFoundError
+
+
 class SentinelManagedConnection(Connection):
     def __init__(self, **kwargs):
         self.connection_pool = kwargs.pop("connection_pool")
@@ -165,6 +169,10 @@ class SentinelConnectionPool(ConnectionPool):
         except MasterNotFoundError:
             pass
         raise SlaveNotFoundError(f"No slave found for {self.service_name!r}")
+
+    def rotate_replicas(self) -> AsyncIterator:
+        """Round-robin replica balancer"""
+        return self.rotate_slaves()
 
 
 class Sentinel(AsyncSentinelCommands):
@@ -318,6 +326,12 @@ class Sentinel(AsyncSentinelCommands):
             slaves_alive.append((slave["ip"], slave["port"]))
         return slaves_alive
 
+    def filter_replicas(
+        self, replicas: Iterable[Mapping]
+    ) -> Sequence[Tuple[EncodableT, EncodableT]]:
+        """Remove replicas that are in an ODOWN or SDOWN state"""
+        return self.filter_slaves(replicas)
+
     async def discover_slaves(
         self, service_name: str
     ) -> Sequence[Tuple[EncodableT, EncodableT]]:
@@ -331,6 +345,12 @@ class Sentinel(AsyncSentinelCommands):
             if slaves:
                 return slaves
         return []
+
+    async def discover_replicas(
+        self, service_name: str
+    ) -> Sequence[Tuple[EncodableT, EncodableT]]:
+        """Returns a list of alive replicas for service ``service_name``"""
+        return await self.discover_slaves(service_name)
 
     def master_for(
         self,
@@ -402,3 +422,20 @@ class Sentinel(AsyncSentinelCommands):
         connection_pool = connection_pool_class(service_name, self, **connection_kwargs)
         # The Redis object "owns" the pool
         return redis_class.from_pool(connection_pool)
+
+    def replica_for(
+        self,
+        service_name: str,
+        redis_class: Type[Redis] = Redis,
+        connection_pool_class: Type[SentinelConnectionPool] = SentinelConnectionPool,
+        **kwargs,
+    ):
+        """
+        Returns redis client instance for the ``service_name`` replica(s).
+        """
+        return self.slave_for(
+            service_name,
+            redis_class=redis_class,
+            connection_pool_class=connection_pool_class,
+            **kwargs,
+        )
