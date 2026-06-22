@@ -1393,6 +1393,7 @@ class TestClusterClientPushNotificationsWithEffectTriggerBase(
 
         self._bdb_name = db_config["name"]
         socket_timeout = DEFAULT_OSS_API_CLIENT_SOCKET_TIMEOUT
+        socket_connect_timeout = DEFAULT_OSS_API_CLIENT_SOCKET_TIMEOUT
 
         auth_ssl_client_certs_config_info = db_config.get(
             "authentication_ssl_client_certs", None
@@ -1409,6 +1410,7 @@ class TestClusterClientPushNotificationsWithEffectTriggerBase(
             endpoints_config=cluster_endpoint_config,
             disable_retries=True,
             socket_timeout=socket_timeout,
+            socket_connect_timeout=socket_connect_timeout,
             enable_maintenance_notifications=True,
             auth_ssl_client_certs=auth_ssl_client_certs,
         )

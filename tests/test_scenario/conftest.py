@@ -425,6 +425,7 @@ def get_cluster_client_maint_notifications(
     disable_retries: bool = False,
     auth_ssl_client_certs: bool = False,
     socket_timeout: Optional[float] = None,
+    socket_connect_timeout: Optional[float] = None,
 ):
     """Create Redis cluster client with maintenance notifications enabled."""
     # Get credentials from the configuration
@@ -476,8 +477,8 @@ def get_cluster_client_maint_notifications(
         port=port,
         socket_timeout=CLIENT_TIMEOUT if socket_timeout is None else socket_timeout,
         socket_connect_timeout=CLIENT_TIMEOUT
-        if socket_timeout is None
-        else socket_timeout,
+        if socket_connect_timeout is None
+        else socket_connect_timeout,
         username=username,
         password=password,
         protocol=protocol,  # RESP3 required for push notifications
