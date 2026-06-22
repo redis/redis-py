@@ -110,10 +110,10 @@ class AsyncREFaultInjector(AsyncFaultInjectorClient):
                 response.raise_for_status()
                 return await response.json()
 
-    async def _trigger_action(self, action_request: ActionRequest) -> Dict[str, Any]:
+    async def trigger_action(self, action_request: ActionRequest) -> Dict[str, Any]:
         return await self._make_request("POST", "/action", action_request.to_dict())
 
-    async def _get_action_status(self, action_id: str) -> Dict[str, Any]:
+    async def get_action_status(self, action_id: str) -> Dict[str, Any]:
         return await self._make_request("GET", f"/action/{action_id}")
 
     async def get_operation_result(
@@ -127,7 +127,7 @@ class AsyncREFaultInjector(AsyncFaultInjectorClient):
 
         while loop.time() - start_time < timeout:
             try:
-                status_result = await self._get_action_status(action_id)
+                status_result = await self.get_action_status(action_id)
                 operation_status = status_result.get("status", "unknown")
 
                 if operation_status in TaskStatuses.COMPLETED_STATUSES:
@@ -151,7 +151,7 @@ class AsyncREFaultInjector(AsyncFaultInjectorClient):
         bdb_config: Dict[str, Any],
     ) -> Dict[str, Any]:
         logging.debug(f"Creating database with config: {bdb_config}")
-        result = await self._trigger_action(
+        result = await self.trigger_action(
             ActionRequest(ActionType.CREATE_DATABASE, {"database_config": bdb_config})
         )
         action_id = result.get("action_id")
@@ -172,7 +172,7 @@ class AsyncREFaultInjector(AsyncFaultInjectorClient):
         bdb_id: int,
     ) -> Dict[str, Any]:
         logging.debug(f"Deleting database with id: {bdb_id}")
-        result = await self._trigger_action(
+        result = await self.trigger_action(
             ActionRequest(ActionType.DELETE_DATABASE, {"bdb_id": bdb_id})
         )
         action_id = result.get("action_id")
@@ -198,7 +198,7 @@ class AsyncREFaultInjector(AsyncFaultInjectorClient):
                     else self._current_db_id,
                 },
             )
-            trigger_result = await self._trigger_action(action)
+            trigger_result = await self.trigger_action(action)
             action_id = trigger_result.get("action_id")
             if not action_id:
                 raise ValueError(
@@ -285,7 +285,7 @@ class AsyncREFaultInjector(AsyncFaultInjectorClient):
         logging.debug(f"Executing {action_type.value} with parameters: {parameters}")
 
         try:
-            result = await self._trigger_action(ActionRequest(action_type, parameters))
+            result = await self.trigger_action(ActionRequest(action_type, parameters))
             logging.debug(f"Trigger effect action result: {result}")
             action_id = result.get("action_id")
             if not action_id:
