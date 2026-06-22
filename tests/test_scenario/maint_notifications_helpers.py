@@ -1,16 +1,17 @@
 import binascii
 import logging
 import time
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Union
 import pytest
 from redis import RedisCluster
 
 from redis.client import Redis
 from redis.connection import Connection
+from redis.maint_notifications import MaintenanceState
 from tests.test_scenario.fault_injector_client import (
     FaultInjectorClient,
-    NodeInfo,
     SlotMigrateEffects,
+    TopologyChangeStandaloneEffects,
 )
 
 
@@ -48,6 +49,7 @@ class ClientValidations:
         timeout: float = 120,
         fail_on_timeout: bool = True,
         connection: Optional[Connection] = None,
+        expected_state: Optional[MaintenanceState] = None,
     ):
         """Wait for a push notification to be received."""
         start_time = time.time()  # returns the time in seconds
@@ -63,6 +65,16 @@ class ClientValidations:
         )
 
         try:
+            if (
+                expected_state is not None
+                and test_conn.maintenance_state == expected_state
+            ):
+                logging.debug(
+                    f"Connection already in expected state {expected_state}, "
+                    f"returning immediately"
+                )
+                return
+
             while time.time() - start_time < timeout:
                 try:
                     if test_conn.can_read(timeout=0.2):
@@ -73,7 +85,11 @@ class ClientValidations:
                         )
                         if test_conn.should_reconnect():
                             logging.debug("Connection is marked for reconnect")
-                        return
+                        if (
+                            expected_state is None
+                            or test_conn.maintenance_state == expected_state
+                        ):
+                            return
                 except Exception as e:
                     logging.error(f"Error reading push notification: {e}")
                     break
@@ -104,68 +120,6 @@ class ClusterOperations:
         )
 
     @staticmethod
-    def find_target_node_and_empty_node(
-        fault_injector: FaultInjectorClient,
-        endpoint_config: Dict[str, Any],
-        force_cluster_info_refresh: bool = True,
-    ) -> Tuple[NodeInfo, NodeInfo]:
-        """Find the node with master shards and the node with no shards.
-
-        Returns:
-            tuple: (target_node, empty_node) where target_node has master shards
-                   and empty_node has no shards
-        """
-        return fault_injector.find_target_node_and_empty_node(
-            endpoint_config, force_cluster_info_refresh
-        )
-
-    @staticmethod
-    def find_endpoint_for_bind(
-        fault_injector: FaultInjectorClient,
-        endpoint_name: str,
-        force_cluster_info_refresh: bool = True,
-    ) -> str:
-        """Find the endpoint ID from cluster status.
-
-        Returns:
-            str: The endpoint ID (e.g., "1:1")
-        """
-        return fault_injector.find_endpoint_for_bind(
-            endpoint_name, force_cluster_info_refresh
-        )
-
-    @staticmethod
-    def execute_failover(
-        fault_injector: FaultInjectorClient,
-        endpoint_config: Dict[str, Any],
-        timeout: int = 60,
-    ) -> Dict[str, Any]:
-        """Execute failover command and wait for completion."""
-        return fault_injector.execute_failover(endpoint_config, timeout)
-
-    @staticmethod
-    def execute_migrate(
-        fault_injector: FaultInjectorClient,
-        endpoint_config: Dict[str, Any],
-        target_node: str,
-        empty_node: str,
-        skip_end_notification: bool = False,
-    ) -> str:
-        """Execute rladmin migrate command and wait for completion."""
-        return fault_injector.execute_migrate(
-            endpoint_config, target_node, empty_node, skip_end_notification
-        )
-
-    @staticmethod
-    def execute_rebind(
-        fault_injector: FaultInjectorClient,
-        endpoint_config: Dict[str, Any],
-        endpoint_id: str,
-    ) -> str:
-        """Execute rladmin bind endpoint command and wait for completion."""
-        return fault_injector.execute_rebind(endpoint_config, endpoint_id)
-
-    @staticmethod
     def get_slot_migrate_triggers(
         fault_injector: FaultInjectorClient,
         effect_name: SlotMigrateEffects,
@@ -174,10 +128,21 @@ class ClusterOperations:
         return fault_injector.get_slot_migrate_triggers(effect_name)
 
     @staticmethod
+    def get_topology_change_standalone_triggers(
+        fault_injector: FaultInjectorClient,
+        effect_name: TopologyChangeStandaloneEffects,
+    ) -> Dict[str, Any]:
+        """
+        Get available triggers(trigger name + db example config) for a
+        topology change for standalone client effect.
+        """
+        return fault_injector.get_topology_change_standalone_triggers(effect_name)
+
+    @staticmethod
     def trigger_effect(
         fault_injector: FaultInjectorClient,
         endpoint_config: Dict[str, Any],
-        effect_name: SlotMigrateEffects,
+        effect_name: SlotMigrateEffects | TopologyChangeStandaloneEffects,
         trigger_name: Optional[str] = None,
         source_node: Optional[str] = None,
         target_node: Optional[str] = None,
