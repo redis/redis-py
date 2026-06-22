@@ -277,7 +277,7 @@ class TestAsyncStandaloneClientPushNotificationsWithEffectTriggerBase(
         auth_ssl_client_certs = (
             True
             if auth_ssl_client_certs_config_info
-            and auth_ssl_client_certs_config_info[0]["client_cert"] is not None
+            and auth_ssl_client_certs_config_info[0].get("client_cert") is not None
             else False
         )
 
@@ -953,7 +953,7 @@ class TestAsyncStandaloneClientPushNotificationsHandlingWithEffectTrigger(
         auth_ssl_client_certs = (
             True
             if auth_ssl_client_certs_config_info
-            and auth_ssl_client_certs_config_info[0]["client_cert"] is not None
+            and auth_ssl_client_certs_config_info[0].get("client_cert") is not None
             else False
         )
 
