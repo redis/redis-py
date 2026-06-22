@@ -38,6 +38,8 @@ from tests.test_scenario.maint_notifications_helpers import (
     ClientValidations,
     ClusterOperations,
     KeyGenerationHelpers,
+    generate_params,
+    is_endpoint_configured_correctly,
 )
 
 logging.basicConfig(
@@ -152,43 +154,6 @@ class TestPushNotificationsBase:
                 matching_conns_count += 1
         assert matching_conns_count == expected_matching_conns_count
 
-    def _is_endpoint_configured_correctly(
-        self,
-        conn,
-        configured_endpoint_type: EndpointType,
-        fault_injector_client: FaultInjectorClient,
-    ) -> bool:
-        if isinstance(fault_injector_client, ProxyServerFaultInjector):
-            return True  # skip endpoint type validation when using proxy server
-
-        if configured_endpoint_type == EndpointType.NONE:
-            if conn.host != conn.orig_host_address:
-                logging.debug(
-                    f"Endpoint check failed: configured NONE but "
-                    f"host={conn.host!r} != orig_host_address={conn.orig_host_address!r}"
-                )
-                return False
-            return True
-
-        # configured_endpoint_type != EndpointType.NONE
-        if conn.host == conn.orig_host_address:
-            logging.debug(
-                f"Endpoint check failed: expected non-NONE endpoint type but "
-                f"host={conn.host!r} == orig_host_address={conn.orig_host_address!r}"
-            )
-            return False
-        actual_endpoint_type = conn.maint_notifications_config.get_endpoint_type(
-            conn.orig_host_address, conn
-        )
-        if configured_endpoint_type != actual_endpoint_type:
-            logging.debug(
-                f"Endpoint check failed: "
-                f"configured_endpoint_type={configured_endpoint_type!r} != "
-                f"actual_endpoint_type={actual_endpoint_type!r} for host={conn.host!r}"
-            )
-            return False
-        return True
-
     def _validate_moving_state(
         self,
         client: Redis,
@@ -203,7 +168,7 @@ class TestPushNotificationsBase:
         with client.connection_pool._lock:
             connections = self._get_all_connections_in_pool(client)
             for conn in connections:
-                endpoint_configured_correctly = self._is_endpoint_configured_correctly(
+                endpoint_configured_correctly = is_endpoint_configured_correctly(
                     conn, configured_endpoint_type, fault_injector_client
                 )
 
@@ -312,67 +277,6 @@ class TestPushNotificationsBase:
         assert matching_conns_count == expected_matching_conns_count
 
 
-def generate_params(
-    fault_injector_client: FaultInjectorClient,
-    effect_names: list[SlotMigrateEffects | TopologyChangeStandaloneEffects],
-    skip_combinations: list[tuple[SlotMigrateEffects, str]] = [],
-    endpoint_types: Optional[list[EndpointType]] = None,
-):
-    # params should produce list of tuples: (effect_name, trigger_name, bdb_config, bdb_name)
-    # when endpoint_types is provided, each tuple is expanded to include an endpoint_type,
-    # producing: (effect_name, trigger_name, bdb_config, bdb_name, endpoint_type)
-    params = []
-    try:
-        logging.info(f"Extracting params for test with effect_names: {effect_names}")
-        for effect_name in effect_names:
-            if isinstance(effect_name, SlotMigrateEffects):
-                triggers_data = ClusterOperations.get_slot_migrate_triggers(
-                    fault_injector_client, effect_name
-                )
-            else:
-                triggers_data = (
-                    ClusterOperations.get_topology_change_standalone_triggers(
-                        fault_injector_client, effect_name
-                    )
-                )
-
-            for trigger_info in triggers_data["triggers"]:
-                trigger = trigger_info["name"]
-                if (effect_name, trigger) in skip_combinations:
-                    continue
-                if trigger == "maintenance_mode":
-                    continue
-                trigger_requirements = trigger_info["requirements"]
-                for requirement in trigger_requirements:
-                    dbconfig = requirement["dbconfig"]
-                    if requirement.get("oss_cluster_api"):
-                        ip_type = requirement["oss_cluster_api"]["ip_type"]
-                        if ip_type == "internal":
-                            continue
-                    db_name_pattern = dbconfig.get("name").rsplit("-", 1)[0]
-                    dbconfig["name"] = (
-                        db_name_pattern  # this will ensure dbs will be deleted
-                    )
-
-                    if endpoint_types is not None:
-                        for endpoint_type in endpoint_types:
-                            params.append(
-                                (
-                                    effect_name,
-                                    trigger,
-                                    dbconfig,
-                                    db_name_pattern,
-                                    endpoint_type,
-                                )
-                            )
-                    else:
-                        params.append((effect_name, trigger, dbconfig, db_name_pattern))
-    except Exception as e:
-        logging.error(f"Failed to extract params for test: {e}")
-
-    return params
-
-
 class TestStanaloneClientPushNotificationsWithEffectTriggerBase(
     TestPushNotificationsBase
 ):
@@ -396,21 +300,19 @@ class TestStanaloneClientPushNotificationsWithEffectTriggerBase(
         auth_ssl_client_certs = (
             True
             if auth_ssl_client_certs_config_info
-            and auth_ssl_client_certs_config_info[0]["client_cert"] is not None
+            and auth_ssl_client_certs_config_info[0].get("client_cert") is not None
             else False
         )
 
-        standalone_client_maint_notifications = (
-            get_standalone_client_maint_notifications(
-                endpoints_config=db_endpoint_config,
-                disable_retries=True,
-                socket_timeout=socket_timeout,
-                enable_maintenance_notifications=True,
-                endpoint_type=endpoint_type,
-                auth_ssl_client_certs=auth_ssl_client_certs,
-            )
+        self._client = get_standalone_client_maint_notifications(
+            endpoints_config=db_endpoint_config,
+            disable_retries=True,
+            socket_timeout=socket_timeout,
+            enable_maintenance_notifications=True,
+            endpoint_type=endpoint_type,
+            auth_ssl_client_certs=auth_ssl_client_certs,
         )
-        return standalone_client_maint_notifications, db_endpoint_config
+        return self._client, db_endpoint_config
 
     @pytest.fixture(autouse=True)
     def setup_and_cleanup(
@@ -418,18 +320,23 @@ class TestStanaloneClientPushNotificationsWithEffectTriggerBase(
     ):
         self.maintenance_ops_threads = []
         self._bdb_name = None
+        self._client = None
 
         # Yield control to the test
         yield
 
         # Cleanup code - this will run even if the test fails
         logging.info("Starting cleanup...")
-        if self._bdb_name:
-            self.delete_prev_db(_FAULT_INJECTOR_STANDALONE_CLIENT, self._bdb_name)
+
+        if self._client is not None:
+            self._client.close()
 
         logging.info("Waiting for maintenance operations threads to finish...")
         for thread in self.maintenance_ops_threads:
             thread.join()
+
+        if self._bdb_name:
+            self.delete_prev_db(_FAULT_INJECTOR_STANDALONE_CLIENT, self._bdb_name)
 
         logging.info("Cleanup finished")
 
@@ -1199,7 +1106,7 @@ class TestStandaloneClientPushNotificationsHandlingWithEffectTrigger(
         auth_ssl_client_certs = (
             True
             if auth_ssl_client_certs_config_info
-            and auth_ssl_client_certs_config_info[0]["client_cert"] is not None
+            and auth_ssl_client_certs_config_info[0].get("client_cert") is not None
             else False
         )
 
@@ -1260,7 +1167,8 @@ class TestStandaloneClientPushNotificationsHandlingWithEffectTrigger(
         self._bdb_name = db_config["name"]
 
         logging.info("Creating client with disabled notifications.")
-        client = get_standalone_client_maint_notifications(
+        # self._client for teardown cleanup; local `client` used in the rest of this method.
+        self._client = client = get_standalone_client_maint_notifications(
             endpoints_config=db_endpoint_config,
             disable_retries=True,
             enable_maintenance_notifications=False,
@@ -1493,18 +1401,18 @@ class TestClusterClientPushNotificationsWithEffectTriggerBase(
         auth_ssl_client_certs = (
             True
             if auth_ssl_client_certs_config_info
-            and auth_ssl_client_certs_config_info[0]["client_cert"] is not None
+            and auth_ssl_client_certs_config_info[0].get("client_cert") is not None
             else False
         )
 
-        cluster_client_maint_notifications = get_cluster_client_maint_notifications(
+        self._client = get_cluster_client_maint_notifications(
             endpoints_config=cluster_endpoint_config,
             disable_retries=True,
             socket_timeout=socket_timeout,
             enable_maintenance_notifications=True,
             auth_ssl_client_certs=auth_ssl_client_certs,
         )
-        return cluster_client_maint_notifications, cluster_endpoint_config
+        return self._client, cluster_endpoint_config
 
     @pytest.fixture(autouse=True)
     def setup_and_cleanup(
@@ -1512,18 +1420,23 @@ class TestClusterClientPushNotificationsWithEffectTriggerBase(
     ):
         self.maintenance_ops_threads = []
         self._bdb_name = None
+        self._client = None
 
         # Yield control to the test
         yield
 
         # Cleanup code - this will run even if the test fails
         logging.info("Starting cleanup...")
-        if self._bdb_name:
-            self.delete_prev_db(_FAULT_INJECTOR_CLIENT_OSS_API, self._bdb_name)
+
+        if self._client is not None:
+            self._client.close()
 
         logging.info("Waiting for maintenance operations threads to finish...")
         for thread in self.maintenance_ops_threads:
             thread.join()
+
+        if self._bdb_name:
+            self.delete_prev_db(_FAULT_INJECTOR_CLIENT_OSS_API, self._bdb_name)
 
         logging.info("Cleanup finished")
 

@@ -435,7 +435,16 @@ class REFaultInjector(FaultInjectorClient):
         return self.MOVING_TTL
 
 
-class ProxyServerFaultInjector(FaultInjectorClient):
+class MockProxyFaultInjector:
+    """Marker mixin for proxy-server-based fault injectors (sync and async).
+
+    Used to skip endpoint-type validation in tests — the mock proxy doesn't
+    distinguish endpoint types, so any isinstance check against this class
+    means "we're running against a local proxy, skip the check".
+    """
+
+
+class ProxyServerFaultInjector(MockProxyFaultInjector, FaultInjectorClient):
     """Fault injector client for proxy server setup."""
 
     NODE_PORT_1 = 15379
