@@ -213,18 +213,23 @@ class AsyncMaintNotificationsPoolHandler:
         callback: _ScheduledCallback,
         *args: Any,
     ) -> None:
-        task = asyncio.create_task(self._run_after(delay, callback, *args))
+        # Record the absolute deadline now so that any lag between create_task
+        # and the task's first execution slice does not push the fire time out.
+        deadline = asyncio.get_running_loop().time() + delay
+        task = asyncio.create_task(self._run_after(deadline, callback, *args))
         self._scheduled_tasks.add(task)
         task.add_done_callback(self._scheduled_tasks.discard)
         task.add_done_callback(self._log_scheduled_task_result)
 
     async def _run_after(
         self,
-        delay: float,
+        deadline: float,
         callback: _ScheduledCallback,
         *args: Any,
     ) -> None:
-        await asyncio.sleep(delay)
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining > 0:
+            await asyncio.sleep(remaining)
         await callback(*args)
 
     async def cancel_scheduled_tasks(self) -> None:

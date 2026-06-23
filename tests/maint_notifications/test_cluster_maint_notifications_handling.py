@@ -409,35 +409,43 @@ class TestClusterMaintNotificationsHandler(TestClusterMaintNotificationsBase):
     def test_oss_maint_handler_propagation(self):
         """Test that OSSMaintNotificationsHandler is propagated to all connections."""
         cluster = self._create_cluster_client()
-        # Verify all nodes have the handler
-        for node in cluster.nodes_manager.nodes_cache.values():
-            assert node.redis_connection is not None
-            assert node.redis_connection.connection_pool is not None
-            for conn in (
-                *node.redis_connection.connection_pool._get_in_use_connections(),
-                *node.redis_connection.connection_pool._get_free_connections(),
-            ):
-                assert conn._oss_cluster_maint_notifications_handler is not None
-                self._validate_connection_handlers(
-                    conn, cluster, cluster.maint_notifications_config
-                )
+        try:
+            # Verify all nodes have the handler
+            for node in cluster.nodes_manager.nodes_cache.values():
+                assert node.redis_connection is not None
+                assert node.redis_connection.connection_pool is not None
+                for conn in (
+                    *node.redis_connection.connection_pool._get_in_use_connections(),
+                    *node.redis_connection.connection_pool._get_free_connections(),
+                ):
+                    assert conn._oss_cluster_maint_notifications_handler is not None
+                    self._validate_connection_handlers(
+                        conn, cluster, cluster.maint_notifications_config
+                    )
+        finally:
+            cluster.close()
 
     @skip_if_server_version_lt("7.4.0")
     def test_oss_maint_handler_propagation_cache_enabled(self):
         """Test that OSSMaintNotificationsHandler is propagated to all connections."""
         cluster = self._create_cluster_client(enable_cache=True)
-        # Verify all nodes have the handler
-        for node in cluster.nodes_manager.nodes_cache.values():
-            assert node.redis_connection is not None
-            assert node.redis_connection.connection_pool is not None
-            for conn in (
-                *node.redis_connection.connection_pool._get_in_use_connections(),
-                *node.redis_connection.connection_pool._get_free_connections(),
-            ):
-                assert conn._conn._oss_cluster_maint_notifications_handler is not None
-                self._validate_connection_handlers(
-                    conn._conn, cluster, cluster.maint_notifications_config
-                )
+        try:
+            # Verify all nodes have the handler
+            for node in cluster.nodes_manager.nodes_cache.values():
+                assert node.redis_connection is not None
+                assert node.redis_connection.connection_pool is not None
+                for conn in (
+                    *node.redis_connection.connection_pool._get_in_use_connections(),
+                    *node.redis_connection.connection_pool._get_free_connections(),
+                ):
+                    assert (
+                        conn._conn._oss_cluster_maint_notifications_handler is not None
+                    )
+                    self._validate_connection_handlers(
+                        conn._conn, cluster, cluster.maint_notifications_config
+                    )
+        finally:
+            cluster.close()
 
 
 class TestClusterMaintNotificationsHandlingBase(TestClusterMaintNotificationsBase):
@@ -604,31 +612,33 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
             relaxed_timeout=-1,  # This means the relaxed timeout is Disabled
         )
         cluster = self._create_cluster_client(maint_config=disabled_config)
+        try:
+            # warm up connection pools
+            self._warm_up_connection_pools(cluster, created_connections_count=3)
 
-        # warm up connection pools
-        self._warm_up_connection_pools(cluster, created_connections_count=3)
+            # send a notification to node 1
+            notification = RespTranslator.oss_maint_notification_to_resp(
+                "SMIGRATING 12 123,456,5000-7000"
+            )
+            self.proxy_helper.send_notification(notification)
 
-        # send a notification to node 1
-        notification = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATING 12 123,456,5000-7000"
-        )
-        self.proxy_helper.send_notification(notification)
-
-        # validate no timeout is relaxed on any connection
-        self._validate_connections_states(
-            self.cluster,
-            [
-                ConnectionStateExpectation(
-                    node_port=NODE_PORT_1, changed_connections_count=0
-                ),
-                ConnectionStateExpectation(
-                    node_port=NODE_PORT_2, changed_connections_count=0
-                ),
-                ConnectionStateExpectation(
-                    node_port=NODE_PORT_3, changed_connections_count=0
-                ),
-            ],
-        )
+            # validate no timeout is relaxed on any connection
+            self._validate_connections_states(
+                self.cluster,
+                [
+                    ConnectionStateExpectation(
+                        node_port=NODE_PORT_1, changed_connections_count=0
+                    ),
+                    ConnectionStateExpectation(
+                        node_port=NODE_PORT_2, changed_connections_count=0
+                    ),
+                    ConnectionStateExpectation(
+                        node_port=NODE_PORT_3, changed_connections_count=0
+                    ),
+                ],
+            )
+        finally:
+            cluster.close()
 
     def test_receive_smigrated_notification(self):
         """Test receiving an OSS maintenance completed notification."""

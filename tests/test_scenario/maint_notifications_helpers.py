@@ -7,9 +7,10 @@ from redis import RedisCluster
 
 from redis.client import Redis
 from redis.connection import Connection
-from redis.maint_notifications import MaintenanceState
+from redis.maint_notifications import EndpointType, MaintenanceState
 from tests.test_scenario.fault_injector_client import (
     FaultInjectorClient,
+    MockProxyFaultInjector,
     SlotMigrateEffects,
     TopologyChangeStandaloneEffects,
 )
@@ -252,3 +253,106 @@ class KeyGenerationHelpers:
                 keys.append(KeyGenerationHelpers.generate_key(slot_number, prefix))
 
         return keys
+
+
+def is_endpoint_configured_correctly(
+    conn,
+    configured_endpoint_type: EndpointType,
+    fault_injector_client,
+) -> bool:
+    """Return True if conn's host matches the expected endpoint type.
+
+    Always returns True for mock-proxy injectors — the proxy doesn't
+    distinguish endpoint types so there is nothing to validate.
+    """
+    if isinstance(fault_injector_client, MockProxyFaultInjector):
+        return True
+
+    if configured_endpoint_type == EndpointType.NONE:
+        if conn.host != conn.orig_host_address:
+            logging.debug(
+                f"Endpoint check failed: configured NONE but "
+                f"host={conn.host!r} != orig_host_address={conn.orig_host_address!r}"
+            )
+            return False
+        return True
+
+    if conn.host == conn.orig_host_address:
+        logging.debug(
+            f"Endpoint check failed: expected non-NONE endpoint type but "
+            f"host={conn.host!r} == orig_host_address={conn.orig_host_address!r}"
+        )
+        return False
+    actual_endpoint_type = conn.maint_notifications_config.get_endpoint_type(
+        conn.orig_host_address, conn
+    )
+    if configured_endpoint_type != actual_endpoint_type:
+        logging.debug(
+            f"Endpoint check failed: "
+            f"configured_endpoint_type={configured_endpoint_type!r} != "
+            f"actual_endpoint_type={actual_endpoint_type!r} for host={conn.host!r}"
+        )
+        return False
+    return True
+
+
+def generate_params(
+    fault_injector_client: FaultInjectorClient,
+    effect_names: list[SlotMigrateEffects | TopologyChangeStandaloneEffects],
+    skip_combinations: list[tuple[SlotMigrateEffects, str]] = [],
+    endpoint_types: Optional[list[EndpointType]] = None,
+):
+    """Build parametrize tuples for maint-notification scenario tests.
+
+    Returns a list of (effect_name, trigger, dbconfig, db_name) tuples, or
+    (effect_name, trigger, dbconfig, db_name, endpoint_type) when endpoint_types
+    is provided.
+    """
+    params = []
+    try:
+        logging.info(f"Extracting params for test with effect_names: {effect_names}")
+        for effect_name in effect_names:
+            if isinstance(effect_name, SlotMigrateEffects):
+                triggers_data = ClusterOperations.get_slot_migrate_triggers(
+                    fault_injector_client, effect_name
+                )
+            else:
+                triggers_data = (
+                    ClusterOperations.get_topology_change_standalone_triggers(
+                        fault_injector_client, effect_name
+                    )
+                )
+
+            for trigger_info in triggers_data["triggers"]:
+                trigger = trigger_info["name"]
+                if (effect_name, trigger) in skip_combinations:
+                    continue
+                if trigger == "maintenance_mode":
+                    continue
+                trigger_requirements = trigger_info["requirements"]
+                for requirement in trigger_requirements:
+                    dbconfig = requirement["dbconfig"]
+                    if requirement.get("oss_cluster_api"):
+                        ip_type = requirement["oss_cluster_api"]["ip_type"]
+                        if ip_type == "internal":
+                            continue
+                    db_name_pattern = dbconfig.get("name").rsplit("-", 1)[0]
+                    dbconfig["name"] = db_name_pattern
+
+                    if endpoint_types is not None:
+                        for endpoint_type in endpoint_types:
+                            params.append(
+                                (
+                                    effect_name,
+                                    trigger,
+                                    dbconfig,
+                                    db_name_pattern,
+                                    endpoint_type,
+                                )
+                            )
+                    else:
+                        params.append((effect_name, trigger, dbconfig, db_name_pattern))
+    except Exception as e:
+        logging.error(f"Failed to extract params for test: {e}")
+
+    return params
