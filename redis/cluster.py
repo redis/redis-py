@@ -3420,7 +3420,6 @@ class ClusterPipeline(RedisCluster):
         **kwargs,
     ):
         """ """
-        self.command_stack = []
         self.nodes_manager = nodes_manager
         self.commands_parser = commands_parser
         self.refresh_table_asap = False
@@ -3518,6 +3517,18 @@ class ClusterPipeline(RedisCluster):
     def __bool__(self):
         "Pipeline instances should  always evaluate to True on Python 3+"
         return True
+
+    @property
+    def command_stack(self):
+        """
+        Deprecated. Returns the commands currently queued on the pipeline.
+
+        Retained for backwards compatibility with code that introspects the
+        queued commands directly (for example APM/tracing integrations such as
+        Datadog's ``ddtrace``). The commands are owned by the underlying
+        execution strategy; prefer ``len(pipeline)`` to check the queue size.
+        """
+        return self._execution_strategy.command_queue
 
     def execute_command(self, *args, **kwargs):
         """
