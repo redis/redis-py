@@ -27,7 +27,6 @@ from redis.maint_notifications import (
     NodeMigratedNotification,
     NodeMigratingNotification,
     NodeMovingNotification,
-    OSSNodeMigratingNotification,
 )
 from redis.utils import SENTINEL
 
@@ -210,30 +209,6 @@ async def test_async_connection_handler_handles_failover_start_and_end():
     assert connection.maintenance_state == MaintenanceState.NONE
     assert connection.timeout_updates == [RELAXED_TIMEOUT, -1]
     assert relaxed_timeout_metric.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_async_connection_handler_ignores_oss_cluster_notifications():
-    config = MaintNotificationsConfig(enabled=True, relaxed_timeout=RELAXED_TIMEOUT)
-    connection = DummyAsyncConnection()
-    handler = AsyncMaintNotificationsConnectionHandler(connection, config)
-
-    with (
-        mock.patch(
-            "redis.asyncio.maint_notifications.record_maint_notification_count",
-            new=AsyncMock(),
-        ) as notification_count,
-        mock.patch(
-            "redis.asyncio.maint_notifications.record_connection_relaxed_timeout",
-            new=AsyncMock(),
-        ) as relaxed_timeout_metric,
-    ):
-        await handler.handle_notification(OSSNodeMigratingNotification(id=1))
-
-    assert connection.maintenance_state == MaintenanceState.NONE
-    assert connection.timeout_updates == []
-    notification_count.assert_awaited_once()
-    relaxed_timeout_metric.assert_not_awaited()
 
 
 @pytest.mark.asyncio

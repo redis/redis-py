@@ -514,14 +514,12 @@ class MaintNotificationsAbstractConnection:
             self._oss_cluster_maint_notifications_handler = (
                 oss_cluster_maint_notifications_handler
             )
-        else:
-            self._oss_cluster_maint_notifications_handler = None
-
-        # Set up OSS cluster handler to parser if available
-        if self._oss_cluster_maint_notifications_handler:
+            # Set up OSS cluster handler to parser
             parser.set_oss_cluster_maint_push_handler(
                 self._oss_cluster_maint_notifications_handler.handle_notification
             )
+        else:
+            self._oss_cluster_maint_notifications_handler = None
 
         # Set up pool handler to parser if available
         if self._maint_notifications_pool_handler:

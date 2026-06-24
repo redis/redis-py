@@ -13,7 +13,6 @@ from redis.maint_notifications import (
     MaintNotificationsConfig,
     NodeMovingNotification,
     OSSNodeMigratedNotification,
-    OSSNodeMigratingNotification,
     _get_maintenance_notification_name,
     _get_maintenance_notification_type,
     _should_skip_connection_timeout_update,
@@ -21,6 +20,7 @@ from redis.maint_notifications import (
 from redis.observability.attributes import get_pool_name
 
 if TYPE_CHECKING:
+    from redis.asyncio.cluster import RedisCluster
     from redis.asyncio.connection import AsyncMaintNotificationsAbstractConnection
 
 logger = logging.getLogger(__name__)
@@ -287,13 +287,6 @@ class AsyncMaintNotificationsConnectionHandler:
             maint_notification=maint_notification,
         )
 
-        if isinstance(
-            notification,
-            (OSSNodeMigratingNotification, OSSNodeMigratedNotification),
-        ):
-            logger.error(f"Unhandled notification type: {notification}")
-            return
-
         if notification_type is None:
             logger.error(f"Unhandled notification type: {notification}")
             return
@@ -361,3 +354,164 @@ class AsyncMaintNotificationsConnectionHandler:
                 maint_notification=maint_notification,
                 relaxed=False,
             )
+
+
+class AsyncOSSMaintNotificationsHandler:
+    """
+    Cluster-wide handler for OSS (open-source) cluster maintenance notifications.
+
+    Reacts to SMIGRATED (slot migration completed) push notifications and
+    triggers topology re-initialization via nodes_manager.initialize().
+
+    Lock discipline: acquires _lock to check/set _in_progress, then releases it
+    before await initialize() to prevent deadlock — initialize() may dispatch
+    commands whose responses contain new push notifications that re-enter
+    handle_notification, and asyncio.Lock is non-reentrant.
+    """
+
+    def __init__(
+        self,
+        cluster_client: "RedisCluster",
+        config: MaintNotificationsConfig,
+    ) -> None:
+        self.cluster_client = cluster_client
+        self.config = config
+        self._processed_notifications: set[MaintenanceNotification] = set()
+        self._in_progress: set[MaintenanceNotification] = set()
+        self._lock = asyncio.Lock()
+        self._background_tasks: set[asyncio.Task] = set()
+
+    def get_handler_for_connection(self) -> "AsyncOSSMaintNotificationsHandler":
+        # Copy all data that should be shared between connections
+        # but each connection should have its own handler
+        # since each connection can be in a different state
+        copy = AsyncOSSMaintNotificationsHandler(self.cluster_client, self.config)
+        copy._processed_notifications = self._processed_notifications
+        copy._in_progress = self._in_progress
+        copy._lock = self._lock
+        copy._background_tasks = self._background_tasks
+        return copy
+
+    async def remove_expired_notifications(self) -> None:
+        async with self._lock:
+            for n in tuple(self._processed_notifications):
+                if n.is_expired():
+                    self._processed_notifications.remove(n)
+
+    async def handle_notification(self, notification: MaintenanceNotification) -> None:
+        # Schedule as a background task so the parser's read path is not blocked.
+        # This also breaks the inline call chain that would cause deadlock: any push
+        # notification arriving while the task holds _lock during initialize() becomes
+        # a new task that simply waits for the lock instead of deadlocking.
+        task = asyncio.get_running_loop().create_task(
+            self._do_handle_notification(notification)
+        )
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+
+    async def _do_handle_notification(
+        self, notification: MaintenanceNotification
+    ) -> None:
+        if isinstance(notification, OSSNodeMigratedNotification):
+            await self.handle_oss_maintenance_completed_notification(notification)
+        else:
+            logger.error(f"Unhandled notification type: {notification}")
+
+    async def handle_oss_maintenance_completed_notification(
+        self, notification: OSSNodeMigratedNotification
+    ) -> None:
+        await self.remove_expired_notifications()
+
+        async with self._lock:
+            if (
+                notification in self._in_progress
+                or notification in self._processed_notifications
+            ):
+                # we are already handling this notification or it has already been processed
+                # we should skip in_progress notification since when we reinitialize the cluster
+                # we execute a CLUSTER SLOTS command that can use a different connection
+                # that has also has the notification and we don't want to
+                # process the same notification twice
+                return
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Handling SMIGRATED notification: {notification}")
+            self._in_progress.add(notification)
+
+            try:
+                # Extract the information about the src and destination nodes that are
+                # affected by the maintenance. nodes_to_slots_mapping structure:
+                # {
+                #     "src_host:port": [
+                #         {"dest_host:port": "slot_range"},
+                #         ...
+                #     ],
+                #     ...
+                # }
+                additional_startup_nodes_info = []
+                affected_nodes = set()
+                for (
+                    src_address,
+                    dest_mappings,
+                ) in notification.nodes_to_slots_mapping.items():
+                    src_host, src_port = src_address.split(":")
+                    src_node = self.cluster_client.nodes_manager.get_node(
+                        host=src_host, port=int(src_port)
+                    )
+                    if src_node is not None:
+                        affected_nodes.add(src_node)
+                    for dest_mapping in dest_mappings:
+                        for dest_address in dest_mapping.keys():
+                            dest_host, dest_port = dest_address.split(":")
+                            additional_startup_nodes_info.append(
+                                (dest_host, int(dest_port))
+                            )
+                # Updates the cluster slots cache with the new slots mapping
+                # This will also update the nodes cache with the new nodes mapping
+                await self.cluster_client.nodes_manager.initialize(
+                    additional_startup_nodes_info=additional_startup_nodes_info,
+                )
+
+                all_nodes = set(affected_nodes)
+                all_nodes = all_nodes.union(
+                    self.cluster_client.nodes_manager.nodes_cache.values()
+                )
+                for current_node in all_nodes:
+                    handoff_recorded = False
+                    if current_node in affected_nodes:
+                        # mark for reconnect all in-use connections to the node — this
+                        # forces them to disconnect after completing their current command
+                        free_set = set(current_node._free)
+                        for conn in current_node._connections:
+                            if conn not in free_set:
+                                add_debug_log_for_notification(
+                                    conn, "SMIGRATED - mark for reconnect"
+                                )
+                                conn.mark_for_reconnect()
+                        await record_connection_handoff(
+                            pool_name=f"{current_node.host}:{current_node.port}"
+                        )
+                        handoff_recorded = True
+                    else:
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(
+                                f"SMIGRATED: Node {current_node.name} not affected "
+                                f"by maintenance, skipping mark for reconnect"
+                            )
+                    if (
+                        current_node
+                        not in self.cluster_client.nodes_manager.nodes_cache.values()
+                    ):
+                        task = asyncio.get_running_loop().create_task(
+                            current_node.disconnect_free_connections()
+                        )
+                        self._background_tasks.add(task)
+                        task.add_done_callback(self._background_tasks.discard)
+                        if not handoff_recorded:
+                            await record_connection_handoff(
+                                pool_name=f"{current_node.host}:{current_node.port}"
+                            )
+
+                self._processed_notifications.add(notification)
+
+            finally:
+                self._in_progress.discard(notification)
