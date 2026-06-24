@@ -542,7 +542,7 @@ class RedisCluster(
         # so that a bad config doesn't leak an open NodesManager.
         if maint_notifications_config and not check_protocol_version(protocol, 3):
             raise RedisError(
-                "Maintenance notifications are not supported with RESP version 3"
+                "Maintenance notifications are only supported with RESP version 3"
             )
         if check_protocol_version(protocol, 3) and maint_notifications_config is None:
             maint_notifications_config = MaintNotificationsConfig()
