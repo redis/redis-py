@@ -221,6 +221,43 @@ def test_hiredis_socket_can_read_under_fd_exhaustion():
         peer.close()
 
 
+@pytest.mark.skipif(
+    not hasattr(select, "poll"), reason="select.poll not available on this platform"
+)
+def test_hiredis_socket_can_read_detects_closed_connection_via_peek():
+    """When poll() misses a half-closed EOF, MSG_PEEK recv still catches it."""
+    reader, writer = socket.socketpair()
+    try:
+        writer.sendall(b"x")
+        writer.close()
+        # drain the data so the socket has nothing to read — only EOF remains
+        reader.recv(1)
+
+        # Simulate poll() missing the EOF by returning an empty list.
+        empty_poller = Mock()
+        empty_poller.poll.return_value = []
+        with patch("redis._parsers.hiredis.select.poll", return_value=empty_poller):
+            with pytest.raises(redis.exceptions.ConnectionError):
+                _socket_can_read(reader, timeout=0)
+    finally:
+        reader.close()
+
+
+def test_hiredis_socket_can_read_detects_stale_eof_when_poll_reports_readable():
+    """When poll() reports readable due to EOF (stale connection), MSG_PEEK
+    should detect the lack of real data and raise ConnectionError (#4128)."""
+    reader, writer = socket.socketpair()
+    try:
+        writer.close()
+        # The peer is closed. poll() reports the reader as readable (EOF),
+        # but there is no application data — this is the stale-pooled-
+        # connection scenario from issue #4128.
+        with pytest.raises(redis.exceptions.ConnectionError):
+            _socket_can_read(reader, timeout=0)
+    finally:
+        reader.close()
+
+
 def test_hiredis_can_read_does_not_decide_disable_decoding():
     raw = b"\xe2\x98\x83"
     parser = make_hiredis_parser(

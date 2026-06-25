@@ -35,6 +35,7 @@ def _socket_can_read(sock, timeout: float) -> bool:
     # timeout=0 must be a non-blocking readiness check only; both branches
     # below are non-destructive and have no FD_SETSIZE limit (select.select
     # raises ValueError for fds >= 1024).
+    socket_readable = False
     if _HAS_POLL:
         # Prefer poll() over selectors.DefaultSelector: epoll/kqueue selectors
         # allocate a file descriptor per check and so fail with EMFILE under
@@ -46,10 +47,38 @@ def _socket_can_read(sock, timeout: float) -> bool:
         # POLLNVAL are always reported regardless of the registered mask, so
         # closed or errored sockets still count as readable, like select().
         poll_timeout = None if timeout is None else timeout * 1000
-        return bool(poller.poll(poll_timeout))
-    with selectors.DefaultSelector() as selector:
-        selector.register(sock, selectors.EVENT_READ)
-        return bool(selector.select(timeout))
+        if poller.poll(poll_timeout):
+            socket_readable = True
+    else:
+        with selectors.DefaultSelector() as selector:
+            selector.register(sock, selectors.EVENT_READ)
+            if selector.select(timeout):
+                socket_readable = True
+
+    # On a stale (half-closed) connection poll()/select() reports the
+    # socket as readable because a FIN/EOF is pending, even though there
+    # is no application data.  Peek at the socket without consuming data
+    # to distinguish a real response from a stale EOF -- the same thing
+    # the pure-Python SocketBuffer parser does (it calls recv() and
+    # checks for b"").
+    # Only applies to non-SSL plain sockets.
+    if timeout == 0 and hasattr(sock, "gettimeout") and not hasattr(sock, "pending"):
+        old_timeout = sock.gettimeout()
+        try:
+            sock.setblocking(False)
+            try:
+                data = sock.recv(1, socket.MSG_PEEK)
+                # b"" means EOF -- the peer has closed the connection.
+                if not data:
+                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+                return True
+            except BlockingIOError:
+                return False
+        finally:
+            sock.settimeout(old_timeout)
+    if socket_readable:
+        return True
+    return False
 
 
 class _HiredisReaderArgs(TypedDict, total=False):
