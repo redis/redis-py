@@ -253,3 +253,62 @@ class TestParseSpellcheckResp3:
         s = _make_search()
         # ``_parse_spellcheck`` short-circuits on ``res == 0``.
         assert s._parse_spellcheck_resp3(0) == {}
+
+
+@pytest.mark.fixed_client
+class TestParseInfoEmptyResults:
+    """Regression tests for FT.INFO parsers handling empty/None responses.
+
+    When a search query returns empty results or the index doesn't exist,
+    the FT.INFO response may be empty or None. These tests verify that all
+    info parsers handle these cases gracefully without raising exceptions.
+    """
+
+    def test_parse_info_empty_list(self):
+        """_parse_info returns empty dict for empty list."""
+        s = _make_search()
+        assert s._parse_info([]) == {}
+
+    def test_parse_info_none(self):
+        """_parse_info returns empty dict for None."""
+        s = _make_search()
+        assert s._parse_info(None) == {}
+
+    def test_parse_info_unified_empty_list(self):
+        """_parse_info_unified returns empty dict for empty list."""
+        s = _make_search()
+        assert s._parse_info_unified([]) == {}
+
+    def test_parse_info_unified_none(self):
+        """_parse_info_unified returns empty dict for None."""
+        s = _make_search()
+        assert s._parse_info_unified(None) == {}
+
+    def test_parse_info_resp3_to_legacy_none(self):
+        """_parse_info_resp3_to_legacy returns empty dict for None."""
+        s = _make_search()
+        assert s._parse_info_resp3_to_legacy(None) == {}
+
+    def test_parse_info_resp3_to_legacy_empty_dict(self):
+        """_parse_info_resp3_to_legacy returns empty dict for empty dict."""
+        s = _make_search()
+        assert s._parse_info_resp3_to_legacy({}) == {}
+
+    def test_parse_info_resp3_to_legacy_list_response(self):
+        """_parse_info_resp3_to_legacy returns list as-is for RESP2 format.
+
+        When using RedisCluster, FT.INFO may return a flat RESP2-style list
+        even though the default protocol version is RESP3.
+        """
+        s = _make_search()
+        res = [
+            "index_name", "myIndex",
+            "num_docs", "100",
+            "attributes", [
+                ["identifier", "name", "attribute", "name", "type", "TEXT"],
+            ],
+        ]
+        out = s._parse_info_resp3_to_legacy(res)
+        assert isinstance(out, list)
+        assert out[0] == "index_name"
+        assert out[1] == "myIndex"

@@ -256,6 +256,8 @@ class SearchCommands:
     # ---- RESP2 legacy parsers ----
 
     def _parse_info(self, res, **kwargs):
+        if not res:
+            return {}
         it = map(str_if_bytes, res)
         return dict(zip(it, it))
 
@@ -388,6 +390,8 @@ class SearchCommands:
         """Parse FT.INFO into the unified shape with ``attributes`` as a
         list of dicts so RESP2 output matches RESP3 output.
         """
+        if not res:
+            return {}
         it = map(str_if_bytes, res)
         info = dict(zip(it, it))
         if "attributes" in info and isinstance(info["attributes"], list):
@@ -869,7 +873,13 @@ class SearchCommands:
         """Parse RESP3 FT.INFO into the legacy RESP2 flat shape so
         ``legacy_responses=True`` on a RESP3 wire matches RESP2 output.
         """
+        if not res:
+            return {}
         info = self._to_string_recursive(res)
+        # If the response is already a list (RESP2 format from cluster),
+        # it's already in legacy format - return as-is.
+        if isinstance(info, list):
+            return info
         attrs = info.get("attributes")
         if isinstance(attrs, list):
             info["attributes"] = [
