@@ -1365,7 +1365,7 @@ class PubSub:
             patterns = self._normalize_keys(dict.fromkeys(parsed_args)).keys()
         else:
             parsed_args = []
-            patterns = self.patterns
+            patterns = list(self.patterns)
         self.pending_unsubscribe_patterns.update(patterns)
         return self.execute_command("PUNSUBSCRIBE", *parsed_args)
 
@@ -1402,7 +1402,7 @@ class PubSub:
             channels = self._normalize_keys(dict.fromkeys(parsed_args))
         else:
             parsed_args = []
-            channels = self.channels
+            channels = list(self.channels)
         self.pending_unsubscribe_channels.update(channels)
         return self.execute_command("UNSUBSCRIBE", *parsed_args)
 
@@ -1441,7 +1441,7 @@ class PubSub:
             args = list_or_args(args[0], args[1:])
             s_channels = self._normalize_keys(dict.fromkeys(args))
         else:
-            s_channels = self.shard_channels
+            s_channels = list(self.shard_channels)
         self.pending_unsubscribe_shard_channels.update(s_channels)
         return self.execute_command("SUNSUBSCRIBE", *args)
 
@@ -1584,10 +1584,10 @@ class PubSub:
             >>> task.cancel()
             >>> await task
         """
-        for channel, handler in self.channels.items():
+        for channel, handler in list(self.channels.items()):
             if handler is None:
                 raise PubSubError(f"Channel: '{channel}' has no handler registered")
-        for pattern, handler in self.patterns.items():
+        for pattern, handler in list(self.patterns.items()):
             if handler is None:
                 raise PubSubError(f"Pattern: '{pattern}' has no handler registered")
 
