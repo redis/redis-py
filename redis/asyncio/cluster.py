@@ -3504,7 +3504,7 @@ class ClusterPubSub(PubSub):
         # Redis with a ``CROSSSLOT`` error. Group by hash slot and emit one
         # ``SSUBSCRIBE`` per slot.
         by_slot: defaultdict[int, dict] = defaultdict(dict)
-        for k, v in self.shard_channels.items():
+        for k, v in list(self.shard_channels.items()):
             by_slot[key_slot(self.encoder.encode(k))][k] = v
         for subscriptions in by_slot.values():
             await self._resubscribe(subscriptions, self.ssubscribe)
