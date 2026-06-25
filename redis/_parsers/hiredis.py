@@ -119,7 +119,16 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
 
         if self._reader.has_data():
             return True
-        return _socket_can_read(self._sock, timeout)
+        if _socket_can_read(self._sock, timeout):
+            # poll()/select() report closed/errored sockets as readable
+            # (POLLHUP/POLLERR).  Read from the socket to distinguish
+            # "data available" from "connection closed by server".
+            # This mirrors the pure-Python _RESPBase.can_read() path
+            # which reads via SocketBuffer and raises ConnectionError
+            # when the peer has closed the connection (#4128).
+            self.read_from_socket(timeout=0, raise_on_timeout=False)
+            return self._reader.has_data()
+        return False
 
     def read_from_socket(self, timeout=SENTINEL, raise_on_timeout=True):
         sock = self._sock

@@ -105,13 +105,44 @@ def test_hiredis_can_read_detects_reader_data():
     assert parser.read_response() == b"OK"
 
 
-def test_hiredis_can_read_checks_socket_readiness_without_reading():
+def test_hiredis_can_read_reads_from_socket_to_detect_stale_connection():
+    """When _socket_can_read reports the socket is readable but the reader
+    has no buffered data, can_read() now reads from the socket to
+    distinguish "data available" from "connection closed by server".
+    This mirrors the pure-Python _RESPBase.can_read() behaviour and
+    prevents stale pooled connections from slipping through when
+    maintenance notifications are auto-enabled with RESP3 (#4128).
+    """
     parser = make_hiredis_parser(has_data=False)
 
-    with patch("redis._parsers.hiredis._socket_can_read", return_value=True) as ready:
-        assert parser.can_read(timeout=0) is True
+    with patch("redis._parsers.hiredis._socket_can_read", return_value=True):
+        with patch.object(parser, "read_from_socket") as mock_read:
+            # Simulate: read_from_socket feeds data → reader now has data
+            def side_effect(**kwargs):
+                parser._reader.has_data_value = True
 
-    ready.assert_called_once_with(parser._sock, 0)
+            mock_read.side_effect = side_effect
+            assert parser.can_read(timeout=0) is True
+            mock_read.assert_called_once_with(timeout=0, raise_on_timeout=False)
+
+
+def test_hiredis_can_read_raises_on_stale_connection():
+    """When _socket_can_read reports the socket is readable but the actual
+    read detects a closed connection (recv returns 0), can_read() should
+    propagate the ConnectionError so the pool can reconnect (#4128).
+    """
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    parser = make_hiredis_parser(has_data=False)
+
+    with patch("redis._parsers.hiredis._socket_can_read", return_value=True):
+        with patch.object(
+            parser,
+            "read_from_socket",
+            side_effect=RedisConnectionError("Connection closed by server."),
+        ):
+            with pytest.raises(RedisConnectionError):
+                parser.can_read(timeout=0)
 
 
 @pytest.mark.fixed_client
