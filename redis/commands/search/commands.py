@@ -870,6 +870,10 @@ class SearchCommands:
         ``legacy_responses=True`` on a RESP3 wire matches RESP2 output.
         """
         info = self._to_string_recursive(res)
+        # If the response is already a list (RESP2 format from cluster),
+        # it's already in legacy format - return as-is.
+        if isinstance(info, list):
+            return info
         attrs = info.get("attributes")
         if isinstance(attrs, list):
             info["attributes"] = [

@@ -253,3 +253,63 @@ class TestParseSpellcheckResp3:
         s = _make_search()
         # ``_parse_spellcheck`` short-circuits on ``res == 0``.
         assert s._parse_spellcheck_resp3(0) == {}
+
+
+@pytest.mark.fixed_client
+class TestParseInfoResp3ToLegacy:
+    """Regression tests for ``SearchCommands._parse_info_resp3_to_legacy``.
+
+    Issue #4104: When using ``RedisCluster``, ``FT.INFO`` returns a flat
+    RESP2-style list even though the default protocol version is RESP3.
+    The ``_parse_info_resp3_to_legacy`` parser assumed a dict and crashed
+    with ``AttributeError: 'list' object has no attribute 'get'``.
+    """
+
+    def test_resp3_dict_response_is_flattened(self):
+        """Standard RESP3 dict input: attributes with dicts are flattened."""
+        s = _make_search()
+        res = {
+            "index_name": "myIndex",
+            "num_docs": "100",
+            "attributes": [
+                {"identifier": "name", "attribute": "name", "type": "TEXT"},
+            ],
+        }
+        out = s._parse_info_resp3_to_legacy(res)
+        assert out["index_name"] == "myIndex"
+        assert out["num_docs"] == "100"
+        # attributes are flattened into key-value pairs
+        assert isinstance(out["attributes"], list)
+        assert isinstance(out["attributes"][0], list)
+
+    def test_resp2_list_response_from_cluster(self):
+        """Regression test for #4104: a flat list from RedisCluster is
+        returned as-is (already in legacy format)."""
+        s = _make_search()
+        res = [
+            "index_name", "myIndex",
+            "num_docs", "100",
+            "attributes", [
+                ["identifier", "name", "attribute", "name", "type", "TEXT"],
+            ],
+        ]
+        out = s._parse_info_resp3_to_legacy(res)
+        assert isinstance(out, list)
+        assert out[0] == "index_name"
+        assert out[1] == "myIndex"
+
+    def test_bytes_resp2_list_response_from_cluster(self):
+        """Bytes keys in the flat list are converted to strings."""
+        s = _make_search()
+        res = [
+            b"index_name", b"myIndex",
+            b"num_docs", b"100",
+            b"attributes", [
+                [b"identifier", b"name", b"attribute", b"name", b"type", b"TEXT"],
+            ],
+        ]
+        out = s._parse_info_resp3_to_legacy(res)
+        assert isinstance(out, list)
+        assert out[0] == "index_name"
+        assert out[1] == "myIndex"
+        assert out[2] == "num_docs"
