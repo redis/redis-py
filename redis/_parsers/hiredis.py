@@ -126,8 +126,8 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
             # This mirrors the pure-Python _RESPBase.can_read() path
             # which reads via SocketBuffer and raises ConnectionError
             # when the peer has closed the connection (#4128).
-            self.read_from_socket(timeout=0, raise_on_timeout=False)
-            return self._reader.has_data()
+            data_read = self.read_from_socket(timeout=0, raise_on_timeout=False)
+            return data_read or self._reader.has_data()
         return False
 
     def read_from_socket(self, timeout=SENTINEL, raise_on_timeout=True):
