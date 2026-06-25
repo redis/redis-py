@@ -29,46 +29,66 @@ class _RESP2Parser(_RESPBase):
     def _read_response(
         self, disable_decoding=False, timeout: Union[float, object] = SENTINEL
     ):
-        raw = self._buffer.readline(timeout=timeout)
-        if not raw:
-            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+        # Iterative stack-based parsing to avoid RecursionError on deeply nested arrays.
+        # Each stack entry: (remaining_count, results_list)
+        stack = []
+        response = None
 
-        byte, response = raw[:1], raw[1:]
+        while True:
+            raw = self._buffer.readline(timeout=timeout)
+            if not raw:
+                raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
-        # server returned an error
-        if byte == b"-":
-            response = response.decode("utf-8", errors="replace")
-            error = self.parse_error(response)
-            # if the error is a ConnectionError, raise immediately so the user
-            # is notified
-            if isinstance(error, ConnectionError):
-                raise error
-            # otherwise, we're dealing with a ResponseError that might belong
-            # inside a pipeline response. the connection's read_response()
-            # and/or the pipeline's execute() will raise this error if
-            # necessary, so just return the exception instance here.
-            return error
-        # single value
-        elif byte == b"+":
-            pass
-        # int value
-        elif byte == b":":
-            return int(response)
-        # bulk response
-        elif byte == b"$" and response == b"-1":
-            return None
-        elif byte == b"$":
-            response = self._buffer.read(int(response), timeout=timeout)
-        # multi-bulk response
-        elif byte == b"*" and response == b"-1":
-            return None
-        elif byte == b"*":
-            response = [
-                self._read_response(disable_decoding=disable_decoding, timeout=timeout)
-                for i in range(int(response))
-            ]
-        else:
-            raise InvalidResponse(f"Protocol Error: {raw!r}")
+            byte, response = raw[:1], raw[1:]
+
+            # server returned an error
+            if byte == b"-":
+                response = response.decode("utf-8", errors="replace")
+                error = self.parse_error(response)
+                # if the error is a ConnectionError, raise immediately so the user
+                # is notified
+                if isinstance(error, ConnectionError):
+                    raise error
+                # otherwise, we're dealing with a ResponseError that might belong
+                # inside a pipeline response. the connection's read_response()
+                # and/or the pipeline's execute() will raise this error if
+                # necessary, so just return the exception instance here.
+            # single value
+            elif byte == b"+":
+                pass
+            # int value
+            elif byte == b":":
+                response = int(response)
+            # bulk response
+            elif byte == b"$" and response == b"-1":
+                response = None
+            elif byte == b"$":
+                response = self._buffer.read(int(response), timeout=timeout)
+            # multi-bulk response
+            elif byte == b"*" and response == b"-1":
+                response = None
+            elif byte == b"*":
+                count = int(response)
+                if count == 0:
+                    response = []
+                else:
+                    stack.append((count, []))
+                    continue
+            else:
+                raise InvalidResponse(f"Protocol Error: {raw!r}")
+
+            while stack:
+                remaining, results = stack[-1]
+                results.append(response)
+                remaining -= 1
+                if remaining > 0:
+                    stack[-1] = (remaining, results)
+                    break
+                else:
+                    stack.pop()
+                    response = results
+            else:
+                break
 
         if disable_decoding is False:
             response = self.encoder.decode(response)
@@ -94,45 +114,64 @@ class _AsyncRESP2Parser(_AsyncRESPBase):
     async def _read_response(
         self, disable_decoding: bool = False
     ) -> Union[EncodableT, ResponseError, None]:
-        raw = await self._readline()
-        response: Any
-        byte, response = raw[:1], raw[1:]
+        # Iterative stack-based parsing to avoid RecursionError on deeply nested arrays.
+        # Each stack entry: (remaining_count, results_list)
+        stack = []
+        response: Any = None
 
-        # server returned an error
-        if byte == b"-":
-            response = response.decode("utf-8", errors="replace")
-            error = self.parse_error(response)
-            # if the error is a ConnectionError, raise immediately so the user
-            # is notified
-            if isinstance(error, ConnectionError):
-                self._clear()  # Successful parse
-                raise error
-            # otherwise, we're dealing with a ResponseError that might belong
-            # inside a pipeline response. the connection's read_response()
-            # and/or the pipeline's execute() will raise this error if
-            # necessary, so just return the exception instance here.
-            return error
-        # single value
-        elif byte == b"+":
-            pass
-        # int value
-        elif byte == b":":
-            return int(response)
-        # bulk response
-        elif byte == b"$" and response == b"-1":
-            return None
-        elif byte == b"$":
-            response = await self._read(int(response))
-        # multi-bulk response
-        elif byte == b"*" and response == b"-1":
-            return None
-        elif byte == b"*":
-            response = [
-                (await self._read_response(disable_decoding))
-                for _ in range(int(response))  # noqa
-            ]
-        else:
-            raise InvalidResponse(f"Protocol Error: {raw!r}")
+        while True:
+            raw = await self._readline()
+            byte, response = raw[:1], raw[1:]
+
+            # server returned an error
+            if byte == b"-":
+                response = response.decode("utf-8", errors="replace")
+                error = self.parse_error(response)
+                # if the error is a ConnectionError, raise immediately so the user
+                # is notified
+                if isinstance(error, ConnectionError):
+                    self._clear()  # Successful parse
+                    raise error
+                # otherwise, we're dealing with a ResponseError that might belong
+                # inside a pipeline response. the connection's read_response()
+                # and/or the pipeline's execute() will raise this error if
+                # necessary, so just return the exception instance here.
+            # single value
+            elif byte == b"+":
+                pass
+            # int value
+            elif byte == b":":
+                response = int(response)
+            # bulk response
+            elif byte == b"$" and response == b"-1":
+                response = None
+            elif byte == b"$":
+                response = await self._read(int(response))
+            # multi-bulk response
+            elif byte == b"*" and response == b"-1":
+                response = None
+            elif byte == b"*":
+                count = int(response)
+                if count == 0:
+                    response = []
+                else:
+                    stack.append((count, []))
+                    continue
+            else:
+                raise InvalidResponse(f"Protocol Error: {raw!r}")
+
+            while stack:
+                remaining, results = stack[-1]
+                results.append(response)
+                remaining -= 1
+                if remaining > 0:
+                    stack[-1] = (remaining, results)
+                    break
+                else:
+                    stack.pop()
+                    response = results
+            else:
+                break
 
         if disable_decoding is False:
             response = self.encoder.decode(response)
