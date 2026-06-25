@@ -59,9 +59,20 @@ class DummyHiredisReader:
         self.responses = [response]
         self.decoded_response = decoded_response
         self.has_data_value = has_data
+        self._buf_len = 0
 
     def has_data(self):
         return self.has_data_value
+
+    def len(self):
+        return self._buf_len
+
+    def feed(self, data, start=0, length=None):
+        if length is None:
+            length = len(data) - start
+        if length > 0:
+            self._buf_len += length
+            self.has_data_value = True
 
     def gets(self, *args):
         if self.responses:
@@ -107,11 +118,23 @@ def test_hiredis_can_read_detects_reader_data():
 
 def test_hiredis_can_read_checks_socket_readiness_without_reading():
     parser = make_hiredis_parser(has_data=False)
+    parser._sock.recv_into.return_value = 5
 
     with patch("redis._parsers.hiredis._socket_can_read", return_value=True) as ready:
         assert parser.can_read(timeout=0) is True
 
     ready.assert_called_once_with(parser._sock, 0)
+
+
+def test_hiredis_can_read_detects_stale_connection():
+    """When the socket is readable (EOF) but the reader has no data,
+    can_read should raise ConnectionError to signal a stale connection."""
+    parser = make_hiredis_parser(has_data=False)
+    parser._sock.recv_into.return_value = 0
+
+    with patch("redis._parsers.hiredis._socket_can_read", return_value=True):
+        with pytest.raises(ConnectionError, match="Connection closed by server"):
+            parser.can_read(timeout=0)
 
 
 @pytest.mark.fixed_client

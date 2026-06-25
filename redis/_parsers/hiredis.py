@@ -119,7 +119,19 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
 
         if self._reader.has_data():
             return True
-        return _socket_can_read(self._sock, timeout)
+        if _socket_can_read(self._sock, timeout):
+            # Socket appears readable. This could mean either data is
+            # available or the connection has been closed by the server
+            # (EOF), because poll()/select()/epoll() report EOF as
+            # "readable".  Do an actual non-blocking recv to distinguish
+            # the two cases — a closed socket yields 0 bytes and raises
+            # ConnectionError, matching the pure-Python parser behavior.
+            try:
+                self.read_from_socket(timeout=0, raise_on_timeout=False)
+            except ConnectionError:
+                raise
+            return self._reader.has_data()
+        return False
 
     def read_from_socket(self, timeout=SENTINEL, raise_on_timeout=True):
         sock = self._sock
@@ -257,9 +269,11 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         # connection state, not only whether application data can be read.
         if not self._connected:
             raise OSError("Buffer is closed.")
-        # EOF means the connection is closed and not safe to reuse.
-        if self._reader.has_data() or self._stream.at_eof():
+        if self._reader.has_data():
             return True
+        # EOF with no reader data means the server closed the connection.
+        if self._stream.at_eof():
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         # asyncio.StreamReader has no public non-destructive API for checking
         # buffered bytes. Preserve dirty-connection detection for hiredis; tests
         # with a real StreamReader guard this private buffer API in CI.
