@@ -119,6 +119,12 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
 
         if self._reader.has_data():
             return True
+        # After a partial read (gets() returns NOT_ENOUGH_DATA), has_data()
+        # resets to False but the reader still holds buffered bytes.  Check
+        # len() so the pool does not treat a connection with pending protocol
+        # data as clean.
+        if self._reader.len():
+            return True
         return _socket_can_read(self._sock, timeout)
 
     def read_from_socket(self, timeout=SENTINEL, raise_on_timeout=True):
@@ -259,6 +265,10 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
             raise OSError("Buffer is closed.")
         # EOF means the connection is closed and not safe to reuse.
         if self._reader.has_data() or self._stream.at_eof():
+            return True
+        # After a partial read (gets() returns NOT_ENOUGH_DATA), has_data()
+        # resets to False but the reader still holds buffered bytes.
+        if self._reader.len():
             return True
         # asyncio.StreamReader has no public non-destructive API for checking
         # buffered bytes. Preserve dirty-connection detection for hiredis; tests
