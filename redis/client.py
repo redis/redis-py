@@ -1589,13 +1589,13 @@ class PubSub:
         pubsub=None,
         sharded_pubsub: bool = False,
     ) -> "PubSubWorkerThread":
-        for channel, handler in self.channels.items():
+        for channel, handler in list(self.channels.items()):
             if handler is None:
                 raise PubSubError(f"Channel: '{channel}' has no handler registered")
-        for pattern, handler in self.patterns.items():
+        for pattern, handler in list(self.patterns.items()):
             if handler is None:
                 raise PubSubError(f"Pattern: '{pattern}' has no handler registered")
-        for s_channel, handler in self.shard_channels.items():
+        for s_channel, handler in list(self.shard_channels.items()):
             if handler is None:
                 raise PubSubError(
                     f"Shard Channel: '{s_channel}' has no handler registered"

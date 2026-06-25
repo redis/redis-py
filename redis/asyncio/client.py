@@ -1584,10 +1584,10 @@ class PubSub:
             >>> task.cancel()
             >>> await task
         """
-        for channel, handler in self.channels.items():
+        for channel, handler in list(self.channels.items()):
             if handler is None:
                 raise PubSubError(f"Channel: '{channel}' has no handler registered")
-        for pattern, handler in self.patterns.items():
+        for pattern, handler in list(self.patterns.items()):
             if handler is None:
                 raise PubSubError(f"Pattern: '{pattern}' has no handler registered")
 

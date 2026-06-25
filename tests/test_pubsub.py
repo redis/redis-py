@@ -3139,3 +3139,60 @@ class TestClusterPubSubSlotMigration:
         fresh_ps = self._make_node_pubsub({b"baz": None})
         pubsub.node_pubsub_mapping["127.0.0.1:7002"] = fresh_ps
         assert next(pubsub._pubsubs_generator) is fresh_ps
+
+
+class TestPubSubIterationSafety:
+    def test_run_in_thread_iteration_safe(self):
+        from redis.client import PubSub
+
+        pubsub = PubSub.__new__(PubSub)
+        pubsub.channels = {"ch1": lambda m: None, "ch2": lambda m: None}
+        pubsub.patterns = {"p*": lambda m: None}
+        pubsub.shard_channels = {"sc1": lambda m: None}
+
+        for channel, handler in list(pubsub.channels.items()):
+            if handler is None:
+                raise Exception(f"Channel: '{channel}' has no handler registered")
+            pubsub.channels["new_channel"] = lambda m: None
+
+        for pattern, handler in list(pubsub.patterns.items()):
+            if handler is None:
+                raise Exception(f"Pattern: '{pattern}' has no handler registered")
+            pubsub.patterns["new_pattern*"] = lambda m: None
+
+        for s_channel, handler in list(pubsub.shard_channels.items()):
+            if handler is None:
+                raise Exception(f"Shard Channel: '{s_channel}' has no handler registered")
+            pubsub.shard_channels["new_sc"] = lambda m: None
+
+    def test_run_iteration_safe_async(self):
+        from redis.asyncio.client import PubSub as AsyncPubSub
+
+        pubsub = AsyncPubSub.__new__(AsyncPubSub)
+        pubsub.channels = {"ch1": lambda m: None, "ch2": lambda m: None}
+        pubsub.patterns = {"p*": lambda m: None}
+
+        for channel, handler in list(pubsub.channels.items()):
+            if handler is None:
+                raise Exception(f"Channel: '{channel}' has no handler registered")
+            pubsub.channels["new_channel"] = lambda m: None
+
+        for pattern, handler in list(pubsub.patterns.items()):
+            if handler is None:
+                raise Exception(f"Pattern: '{pattern}' has no handler registered")
+            pubsub.patterns["new_pattern*"] = lambda m: None
+
+    def test_iteration_snapshot_independence(self):
+        from redis.client import PubSub
+
+        pubsub = PubSub.__new__(PubSub)
+        pubsub.channels = {"ch1": lambda m: None, "ch2": lambda m: None}
+
+        snapshot = list(pubsub.channels.items())
+        original_count = len(snapshot)
+
+        pubsub.channels["ch3"] = lambda m: None
+        del pubsub.channels["ch1"]
+
+        assert len(snapshot) == original_count
+        assert len(pubsub.channels) == 2
