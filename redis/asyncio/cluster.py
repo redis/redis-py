@@ -1657,12 +1657,16 @@ class ClusterNode:
     async def parse_response(
         self, connection: Connection, command: str, **kwargs: Any
     ) -> Any:
+        # Extract blocking timeout for blocking commands (BLPOP, BRPOP, etc.)
+        # This ensures the socket timeout is long enough to wait for the
+        # blocking command's timeout
+        blocking_timeout = kwargs.pop("_blocking_timeout", None)
         try:
             if NEVER_DECODE in kwargs:
                 response = await connection.read_response(disable_decoding=True)
                 kwargs.pop(NEVER_DECODE)
             else:
-                response = await connection.read_response()
+                response = await connection.read_response(timeout=blocking_timeout)
         except ResponseError:
             if EMPTY_RESPONSE in kwargs:
                 return kwargs[EMPTY_RESPONSE]
