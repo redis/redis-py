@@ -856,12 +856,16 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
     def parse_response(self, connection, command_name, **options):
         """Parses a response from the Redis server"""
+        # Extract blocking timeout for blocking commands (BLPOP, BRPOP, etc.)
+        # This ensures the socket timeout is long enough to wait for the
+        # blocking command's timeout
+        blocking_timeout = options.pop("_blocking_timeout", SENTINEL)
         try:
             if NEVER_DECODE in options:
                 response = connection.read_response(disable_decoding=True)
                 options.pop(NEVER_DECODE)
             else:
-                response = connection.read_response()
+                response = connection.read_response(timeout=blocking_timeout)
         except ResponseError:
             if EMPTY_RESPONSE in options:
                 return options[EMPTY_RESPONSE]
