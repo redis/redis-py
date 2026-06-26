@@ -10,6 +10,8 @@ from .socket import SERVER_CLOSED_CONNECTION_ERROR
 class _RESP2Parser(_RESPBase):
     """RESP2 protocol implementation"""
 
+    MAX_NESTING_DEPTH = 100
+
     def read_response(
         self, disable_decoding=False, timeout: Union[float, object] = SENTINEL
     ):
@@ -27,7 +29,10 @@ class _RESP2Parser(_RESPBase):
             return result
 
     def _read_response(
-        self, disable_decoding=False, timeout: Union[float, object] = SENTINEL
+        self,
+        disable_decoding=False,
+        timeout: Union[float, object] = SENTINEL,
+        _depth=0,
     ):
         raw = self._buffer.readline(timeout=timeout)
         if not raw:
@@ -63,8 +68,16 @@ class _RESP2Parser(_RESPBase):
         elif byte == b"*" and response == b"-1":
             return None
         elif byte == b"*":
+            if _depth >= self.MAX_NESTING_DEPTH:
+                raise InvalidResponse(
+                    f"Response nesting depth exceeded {self.MAX_NESTING_DEPTH}"
+                )
             response = [
-                self._read_response(disable_decoding=disable_decoding, timeout=timeout)
+                self._read_response(
+                    disable_decoding=disable_decoding,
+                    timeout=timeout,
+                    _depth=_depth + 1,
+                )
                 for i in range(int(response))
             ]
         else:
@@ -77,6 +90,8 @@ class _RESP2Parser(_RESPBase):
 
 class _AsyncRESP2Parser(_AsyncRESPBase):
     """Async class for the RESP2 protocol"""
+
+    MAX_NESTING_DEPTH = 100
 
     async def read_response(self, disable_decoding: bool = False):
         if not self._connected:
@@ -92,7 +107,7 @@ class _AsyncRESP2Parser(_AsyncRESPBase):
         return response
 
     async def _read_response(
-        self, disable_decoding: bool = False
+        self, disable_decoding: bool = False, _depth: int = 0
     ) -> Union[EncodableT, ResponseError, None]:
         raw = await self._readline()
         response: Any
@@ -127,8 +142,12 @@ class _AsyncRESP2Parser(_AsyncRESPBase):
         elif byte == b"*" and response == b"-1":
             return None
         elif byte == b"*":
+            if _depth >= self.MAX_NESTING_DEPTH:
+                raise InvalidResponse(
+                    f"Response nesting depth exceeded {self.MAX_NESTING_DEPTH}"
+                )
             response = [
-                (await self._read_response(disable_decoding))
+                (await self._read_response(disable_decoding, _depth=_depth + 1))
                 for _ in range(int(response))  # noqa
             ]
         else:
