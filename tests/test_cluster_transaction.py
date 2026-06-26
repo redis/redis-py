@@ -9,7 +9,7 @@ import redis
 from redis import CrossSlotTransactionError, ConnectionPool, RedisClusterException
 from redis.backoff import NoBackoff
 from redis.client import Redis
-from redis.cluster import PRIMARY, ClusterNode, RedisCluster
+from redis.cluster import PRIMARY, ClusterNode, PipelineCommand, RedisCluster
 from redis.observability import recorder
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
@@ -804,3 +804,29 @@ class TestClusterTransactionMetricsRecording:
         assert "server.address" in attrs
         assert "server.port" in attrs
         assert "db.namespace" in attrs
+
+    @pytest.mark.onlycluster
+    def test_pipeline_command_stack(self, r):
+        """Test that command_stack reflects queued commands in transactional pipeline."""
+        with r.pipeline(transaction=True) as tx:
+            assert len(tx.command_stack) == 0
+
+            tx.set("{foo}bar", "value1")
+            tx.set("{foo}baz", "value2")
+
+            assert len(tx.command_stack) == 2
+            assert tx.command_stack[0].args == ("SET", "{foo}bar", "value1")
+            assert tx.command_stack[1].args == ("SET", "{foo}baz", "value2")
+
+    @pytest.mark.onlycluster
+    def test_pipeline_command_stack_non_transactional(self, r):
+        """Test that command_stack reflects queued commands in non-transactional pipeline."""
+        with r.pipeline(transaction=False) as tx:
+            assert len(tx.command_stack) == 0
+
+            tx.set("{foo}bar", "value1")
+            tx.set("{foo}baz", "value2")
+
+            assert len(tx.command_stack) == 2
+            assert tx.command_stack[0].args == ("SET", "{foo}bar", "value1")
+            assert tx.command_stack[1].args == ("SET", "{foo}baz", "value2")
