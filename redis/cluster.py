@@ -1347,6 +1347,12 @@ class RedisCluster(
         else:
             nodes = policy_callback()
 
+        # Filter out None nodes that can occur during cluster topology
+        # changes (e.g. scale-down, failover) where in-memory slot/node
+        # caches become temporarily inconsistent.
+        if nodes:
+            nodes = [n for n in nodes if n is not None]
+
         if args[0].lower() == "ft.aggregate":
             self._aggregate_nodes = nodes
 
@@ -4357,6 +4363,12 @@ class PipelineStrategy(AbstractStrategy):
             nodes = policy_callback(args[0])
         else:
             nodes = policy_callback()
+
+        # Filter out None nodes that can occur during cluster topology
+        # changes (e.g. scale-down, failover) where in-memory slot/node
+        # caches become temporarily inconsistent.
+        if nodes:
+            nodes = [n for n in nodes if n is not None]
 
         if args[0].lower() == "ft.aggregate":
             self._aggregate_nodes = nodes

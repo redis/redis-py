@@ -824,6 +824,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         else:
             nodes = policy_callback()
 
+        # Filter out None nodes that can occur during cluster topology
+        # changes (e.g. scale-down, failover) where in-memory slot/node
+        # caches become temporarily inconsistent.
+        if nodes:
+            nodes = [n for n in nodes if n is not None]
+
         if command.lower() == "ft.aggregate":
             self._aggregate_nodes = nodes
 
