@@ -513,3 +513,126 @@ class TestRedisClientMetricsRecording:
             assert "error.type" in error_attrs
 
         recorder.reset_collector()
+
+
+class TestBlockingCommandTimeout:
+    """Tests for blocking command socket timeout adjustment."""
+
+    def test_get_blocking_timeout_brpop(self):
+        client = redis.Redis()
+        assert client._get_blocking_timeout("BRPOP", ["mykey", 8]) == 8.0
+        assert client._get_blocking_timeout("BRPOP", ["mykey", 0]) == 0.0
+        assert client._get_blocking_timeout("BRPOP", ["mykey"]) is None
+        assert client._get_blocking_timeout("BRPOP", []) is None
+
+    def test_get_blocking_timeout_blpop(self):
+        client = redis.Redis()
+        assert client._get_blocking_timeout("BLPOP", ["mykey", 10]) == 10.0
+
+    def test_get_blocking_timeout_bzpopmin(self):
+        client = redis.Redis()
+        assert client._get_blocking_timeout("BZPOPMIN", ["mykey", 5]) == 5.0
+
+    def test_get_blocking_timeout_bzpopmax(self):
+        client = redis.Redis()
+        assert client._get_blocking_timeout("BZPOPMAX", ["mykey", 3]) == 3.0
+
+    def test_get_blocking_timeout_brpoplpush(self):
+        client = redis.Redis()
+        assert client._get_blocking_timeout("BRPOPLPUSH", ["src", "dst", 7]) == 7.0
+        assert client._get_blocking_timeout("BRPOPLPUSH", ["src", "dst"]) is None
+
+    def test_get_blocking_timeout_blmove(self):
+        client = redis.Redis()
+        assert (
+            client._get_blocking_timeout("BLMOVE", ["src", "dst", "LEFT", "RIGHT", 6])
+            == 6.0
+        )
+        assert (
+            client._get_blocking_timeout("BLMOVE", ["src", "dst", "LEFT", "RIGHT"])
+            is None
+        )
+
+    def test_get_blocking_timeout_bzmpop(self):
+        client = redis.Redis()
+        assert client._get_blocking_timeout("BZMPOP", [4, 1, "mykey", "LEFT"]) == 4.0
+
+    def test_get_blocking_timeout_xread_block(self):
+        client = redis.Redis()
+        assert (
+            client._get_blocking_timeout(
+                "XREAD", ["COUNT", 10, "BLOCK", 5000, "STREAMS", "mystream", "0"]
+            )
+            == 5.0
+        )
+        assert (
+            client._get_blocking_timeout(
+                "XREAD", ["COUNT", 10, "STREAMS", "mystream", "0"]
+            )
+            is None
+        )
+
+    def test_get_blocking_timeout_xreadgroup_block(self):
+        client = redis.Redis()
+        assert (
+            client._get_blocking_timeout(
+                "XREADGROUP",
+                ["GROUP", "mygroup", "consumer1", "BLOCK", 3000, "STREAMS", "mystream", ">"],
+            )
+            == 3.0
+        )
+
+    def test_get_blocking_timeout_non_blocking(self):
+        client = redis.Redis()
+        assert client._get_blocking_timeout("GET", ["mykey"]) is None
+        assert client._get_blocking_timeout("SET", ["mykey", "value"]) is None
+        assert client._get_blocking_timeout("LPUSH", ["mykey", "value"]) is None
+
+    def test_get_blocking_timeout_case_insensitive(self):
+        client = redis.Redis()
+        assert client._get_blocking_timeout("brpop", ["mykey", 8]) == 8.0
+        assert client._get_blocking_timeout("BrPop", ["mykey", 8]) == 8.0
+
+    def test_send_command_extends_socket_timeout_for_blocking(self):
+        client = redis.Redis(socket_timeout=4)
+        conn = mock.MagicMock()
+        conn.socket_timeout = 4
+        conn.send_command = mock.MagicMock()
+        client.parse_response = mock.MagicMock(return_value=b"OK")
+
+        client._send_command_parse_response(conn, "BRPOP", "mykey", 8)
+
+        assert conn.socket_timeout == 4
+
+    def test_send_command_does_not_reduce_socket_timeout(self):
+        client = redis.Redis(socket_timeout=30)
+        conn = mock.MagicMock()
+        conn.socket_timeout = 30
+        conn.send_command = mock.MagicMock()
+        client.parse_response = mock.MagicMock(return_value=b"OK")
+
+        client._send_command_parse_response(conn, "BRPOP", "mykey", 8)
+
+        assert conn.socket_timeout == 30
+
+    def test_send_command_restores_socket_timeout_on_error(self):
+        client = redis.Redis(socket_timeout=4)
+        conn = mock.MagicMock()
+        conn.socket_timeout = 4
+        conn.send_command = mock.MagicMock(side_effect=Exception("fail"))
+
+        with pytest.raises(Exception, match="fail"):
+            client._send_command_parse_response(conn, "BRPOP", "mykey", 8)
+
+        assert conn.socket_timeout == 4
+
+    def test_send_command_no_change_for_non_blocking(self):
+        client = redis.Redis(socket_timeout=4)
+        conn = mock.MagicMock()
+        conn.socket_timeout = 4
+        conn.send_command = mock.MagicMock()
+        client.parse_response = mock.MagicMock(return_value=b"OK")
+
+        client._send_command_parse_response(conn, "GET", "mykey")
+
+        assert conn.socket_timeout == 4

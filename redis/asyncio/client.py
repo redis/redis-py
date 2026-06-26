@@ -773,12 +773,85 @@ class Redis(
         """
         await self.aclose(close_connection_pool)
 
+    _BLOCKING_COMMANDS_TIMEOUT_AT_END = frozenset(
+        ["BRPOP", "BLPOP", "BZPOPMIN", "BZPOPMAX"]
+    )
+
+    def _get_blocking_timeout(self, command_name, args):
+        """Extract blocking timeout (seconds) from a blocking command's args.
+        Returns None for non-blocking commands or when no timeout is present."""
+        cmd = command_name.upper() if isinstance(command_name, str) else command_name
+
+        if cmd in self._BLOCKING_COMMANDS_TIMEOUT_AT_END:
+            if args:
+                try:
+                    return float(args[-1])
+                except (ValueError, TypeError):
+                    return None
+            return None
+
+        if cmd == "BRPOPLPUSH":
+            # BRPOPLPUSH src dst timeout
+            if len(args) >= 3:
+                try:
+                    return float(args[2])
+                except (ValueError, TypeError):
+                    return None
+            return None
+
+        if cmd == "BLMOVE":
+            # BLMOVE src dst LEFT|RIGHT LEFT|RIGHT timeout
+            if len(args) >= 5:
+                try:
+                    return float(args[4])
+                except (ValueError, TypeError):
+                    return None
+            return None
+
+        if cmd == "BZMPOP":
+            # BZMPOP timeout numkeys key [key ...] LEFT|RIGHT [COUNT count]
+            if args:
+                try:
+                    return float(args[0])
+                except (ValueError, TypeError):
+                    return None
+            return None
+
+        if cmd in ("XREAD", "XREADGROUP"):
+            # XREAD [COUNT count] [BLOCK milliseconds] STREAMS ...
+            # XREADGROUP GROUP group consumer [COUNT count] [BLOCK milliseconds] ...
+            for i, arg in enumerate(args):
+                arg_str = (
+                    arg.upper() if isinstance(arg, bytes) else str(arg).upper()
+                )
+                if arg_str == "BLOCK":
+                    if i + 1 < len(args):
+                        try:
+                            return float(args[i + 1]) / 1000.0
+                        except (ValueError, TypeError):
+                            return None
+            return None
+
+        return None
+
     async def _send_command_parse_response(self, conn, command_name, *args, **options):
         """
         Send a command and parse the response
         """
-        await conn.send_command(*args)
-        return await self.parse_response(conn, command_name, **options)
+        blocking_timeout = self._get_blocking_timeout(command_name, args)
+        orig_socket_timeout = None
+        if blocking_timeout and blocking_timeout > 0:
+            orig_socket_timeout = conn.socket_timeout
+            required_timeout = blocking_timeout + 1
+            if orig_socket_timeout is None or required_timeout > orig_socket_timeout:
+                conn.socket_timeout = required_timeout
+
+        try:
+            await conn.send_command(*args)
+            return await self.parse_response(conn, command_name, **options)
+        finally:
+            if orig_socket_timeout is not None:
+                conn.socket_timeout = orig_socket_timeout
 
     async def _close_connection(
         self,
