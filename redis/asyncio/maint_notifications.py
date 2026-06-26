@@ -363,10 +363,18 @@ class AsyncOSSMaintNotificationsHandler:
     Reacts to SMIGRATED (slot migration completed) push notifications and
     triggers topology re-initialization via nodes_manager.initialize().
 
-    Lock discipline: acquires _lock to check/set _in_progress, then releases it
-    before await initialize() to prevent deadlock — initialize() may dispatch
-    commands whose responses contain new push notifications that re-enter
-    handle_notification, and asyncio.Lock is non-reentrant.
+    Lock discipline: _lock is held across the whole pool mutation, including
+    await initialize(), so the topology refresh and the subsequent connection
+    marking/disconnect happen as one atomic operation — releasing the lock
+    mid-mutation would let other tasks observe partial state.
+
+    Re-entrancy is not a deadlock risk here even though asyncio.Lock is
+    non-reentrant: initialize() may dispatch commands whose responses carry new
+    push notifications, but handle_notification schedules the actual handling as
+    a separate background task rather than calling into it inline, so the
+    re-entrant arrival never tries to re-acquire the lock on this call stack.
+    The cheap _in_progress/_processed dedup that gates that scheduling runs
+    without the lock — those sets are only mutated from the single event loop.
     """
 
     def __init__(
