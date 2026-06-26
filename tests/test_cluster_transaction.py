@@ -417,6 +417,34 @@ class TestClusterTransaction:
 
 
 @pytest.mark.onlycluster
+class TestClusterPipelineCommandStack:
+    def test_pipeline_command_stack(self, r):
+        with r.pipeline(transaction=False) as pipe:
+            pipe.set("foo", "value1")
+            pipe.set("baz", "value2")
+
+            assert len(pipe.command_stack) == 2
+            assert pipe.command_stack[0].args == ("SET", "foo", "value1")
+            assert pipe.command_stack[1].args == ("SET", "baz", "value2")
+
+    def test_transaction_command_stack(self, r):
+        with r.pipeline(transaction=True) as pipe:
+            pipe.set("foo", "value1")
+            pipe.set("baz", "value2")
+
+            assert len(pipe.command_stack) == 2
+            assert pipe.command_stack[0].args == ("SET", "foo", "value1")
+            assert pipe.command_stack[1].args == ("SET", "baz", "value2")
+
+    def test_command_stack_empty_after_execute(self, r):
+        with r.pipeline(transaction=False) as pipe:
+            pipe.set("foo", "value1")
+            pipe.execute()
+
+            assert not pipe.command_stack
+
+
+@pytest.mark.onlycluster
 class TestClusterTransactionMetricsRecording:
     """
     Integration tests that verify metrics are properly recorded

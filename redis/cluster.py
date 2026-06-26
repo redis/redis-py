@@ -3420,7 +3420,6 @@ class ClusterPipeline(RedisCluster):
         **kwargs,
     ):
         """ """
-        self.command_stack = []
         self.nodes_manager = nodes_manager
         self.commands_parser = commands_parser
         self.refresh_table_asap = False
@@ -3492,6 +3491,14 @@ class ClusterPipeline(RedisCluster):
             self._event_dispatcher = EventDispatcher()
         else:
             self._event_dispatcher = event_dispatcher
+
+    @property
+    def command_stack(self):
+        return self._execution_strategy.command_queue
+
+    @command_stack.setter
+    def command_stack(self, queue):
+        self._execution_strategy.command_queue = queue
 
     def __repr__(self):
         """ """
