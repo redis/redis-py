@@ -51,8 +51,6 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
                 try:
                     self._buffer.purge()
                 except AttributeError:
-                    # Buffer may have been set to None by another thread after
-                    # the check above; result is still valid so we don't raise
                     pass
             return result
 
@@ -82,14 +80,9 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
                     response = self._buffer.read(int(response), timeout=timeout)
                 response = response.decode("utf-8", errors="replace")
                 error = self.parse_error(response)
-                # if the error is a ConnectionError, raise immediately so the user
-                # is notified
                 if isinstance(error, ConnectionError):
                     raise error
-                # otherwise, we're dealing with a ResponseError that might belong
-                # inside a pipeline response. the connection's read_response()
-                # and/or the pipeline's execute() will raise this error if
-                # necessary, so just return the exception instance here.
+                response = error
             # single value
             elif byte == b"+":
                 pass
@@ -121,8 +114,6 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
                     continue
             # set response
             elif byte == b"~":
-                # redis can return unhashable types (like dict) in a set,
-                # so we return sets as list, all the time, for predictability
                 count = int(response)
                 if count == 0:
                     response = []
@@ -135,9 +126,6 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
                 if count == 0:
                     response = {}
                 else:
-                    # We cannot use a dict-comprehension to parse stream.
-                    # Evaluation order of key:val expression in dict comprehension only
-                    # became defined to be left-right in version 3.8
                     stack.append(('map', count, {}, None))
                     continue
             # push response
@@ -151,15 +139,16 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
             else:
                 raise InvalidResponse(f"Protocol Error: {raw!r}")
 
+            if disable_decoding is False and isinstance(response, bytes):
+                response = self.encoder.decode(response)
+
             while stack:
                 frame_type, remaining, container, pending_key = stack[-1]
                 if frame_type == 'map':
                     if pending_key is None:
-                        # This is a key - store it and continue reading value
                         stack[-1] = (frame_type, remaining, container, response)
                         break
                     else:
-                        # This is a value - store key-value pair
                         container[pending_key] = response
                         remaining -= 1
                         if remaining > 0:
@@ -208,14 +197,12 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
         self, disable_decoding: bool = False, push_request: bool = False
     ):
         if self._chunks:
-            # augment parsing buffer with previously read data
             self._buffer += b"".join(self._chunks)
             self._chunks.clear()
         self._pos = 0
         response = await self._read_response(
             disable_decoding=disable_decoding, push_request=push_request
         )
-        # Successfully parsing a response allows us to clear our parsing buffer
         self._clear()
         return response
 
@@ -242,15 +229,10 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
                     response = await self._read(int(response))
                 response = response.decode("utf-8", errors="replace")
                 error = self.parse_error(response)
-                # if the error is a ConnectionError, raise immediately so the user
-                # is notified
                 if isinstance(error, ConnectionError):
-                    self._clear()  # Successful parse
+                    self._clear()
                     raise error
-                # otherwise, we're dealing with a ResponseError that might belong
-                # inside a pipeline response. the connection's read_response()
-                # and/or the pipeline's execute() will raise this error if
-                # necessary, so just return the exception instance here.
+                response = error
             # single value
             elif byte == b"+":
                 pass
@@ -282,8 +264,6 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
                     continue
             # set response
             elif byte == b"~":
-                # redis can return unhashable types (like dict) in a set,
-                # so we always convert to a list, to have predictable return types
                 count = int(response)
                 if count == 0:
                     response = []
@@ -296,9 +276,6 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
                 if count == 0:
                     response = {}
                 else:
-                    # We cannot use a dict-comprehension to parse stream.
-                    # Evaluation order of key:val expression in dict comprehension only
-                    # became defined to be left-right in version 3.8
                     stack.append(('map', count, {}, None))
                     continue
             # push response
@@ -312,15 +289,16 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
             else:
                 raise InvalidResponse(f"Protocol Error: {raw!r}")
 
+            if disable_decoding is False and isinstance(response, bytes):
+                response = self.encoder.decode(response)
+
             while stack:
                 frame_type, remaining, container, pending_key = stack[-1]
                 if frame_type == 'map':
                     if pending_key is None:
-                        # This is a key - store it and continue reading value
                         stack[-1] = (frame_type, remaining, container, response)
                         break
                     else:
-                        # This is a value - store key-value pair
                         container[pending_key] = response
                         remaining -= 1
                         if remaining > 0:

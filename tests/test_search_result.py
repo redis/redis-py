@@ -284,7 +284,7 @@ class TestParseInfoResp3ToLegacy:
 
     def test_resp2_list_response_from_cluster(self):
         """Regression test for #4104: a flat list from RedisCluster is
-        returned as-is (already in legacy format)."""
+        converted to a dict (matching _parse_info behavior)."""
         s = _make_search()
         res = [
             "index_name", "myIndex",
@@ -294,9 +294,9 @@ class TestParseInfoResp3ToLegacy:
             ],
         ]
         out = s._parse_info_resp3_to_legacy(res)
-        assert isinstance(out, list)
-        assert out[0] == "index_name"
-        assert out[1] == "myIndex"
+        assert isinstance(out, dict)
+        assert out["index_name"] == "myIndex"
+        assert out["num_docs"] == "100"
 
     def test_bytes_resp2_list_response_from_cluster(self):
         """Bytes keys in the flat list are converted to strings."""
@@ -309,7 +309,6 @@ class TestParseInfoResp3ToLegacy:
             ],
         ]
         out = s._parse_info_resp3_to_legacy(res)
-        assert isinstance(out, list)
-        assert out[0] == "index_name"
-        assert out[1] == "myIndex"
-        assert out[2] == "num_docs"
+        assert isinstance(out, dict)
+        assert out["index_name"] == "myIndex"
+        assert out["num_docs"] == "100"
