@@ -356,6 +356,62 @@ def test_redis_client_default_driver_info():
     client.close()
 
 
+def test_hiredis_read_from_socket_handles_concurrent_disconnect():
+    """Regression test for #2967: read_from_socket should raise ConnectionError
+    (not AttributeError) when another thread disconnects the connection."""
+    parser = make_hiredis_parser()
+
+    # Simulate concurrent disconnect: _reader and _sock set to None
+    # (as happens when another thread calls connection.disconnect())
+    parser._reader = None
+
+    with pytest.raises(ConnectionError):
+        parser.read_from_socket()
+
+
+def test_hiredis_read_from_socket_handles_sock_becoming_none():
+    """Regression test for #2967: read_from_socket should raise ConnectionError
+    when _sock becomes None."""
+    parser = make_hiredis_parser()
+
+    parser._sock = None
+
+    with pytest.raises(ConnectionError):
+        parser.read_from_socket()
+
+
+def test_hiredis_read_response_handles_reader_becoming_none():
+    """Regression test for #2967: read_response should raise ConnectionError
+    when _reader becomes None (simulating concurrent disconnect)."""
+    parser = make_hiredis_parser()
+
+    # _reader is None — another thread already disconnected
+    parser._reader = None
+
+    with pytest.raises(ConnectionError):
+        parser.read_response()
+
+
+def test_hiredis_can_read_handles_concurrent_disconnect():
+    """Regression test for #2967: can_read should raise ConnectionError
+    when _sock or _reader becomes None."""
+    parser = make_hiredis_parser(has_data=False)
+    parser._sock = None
+
+    with pytest.raises(ConnectionError):
+        parser.can_read(timeout=0)
+
+
+def test_hiredis_can_read_handles_reader_becoming_none():
+    """Regression test for #2967: can_read should raise ConnectionError
+    when _reader becomes None."""
+    parser = make_hiredis_parser(has_data=False)
+    parser._reader = None
+
+    with pytest.raises(ConnectionError):
+        parser.can_read(timeout=0)
+
+
 @pytest.mark.fixed_client
 class TestConnection:
     def test_disconnect(self):
