@@ -860,6 +860,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         # This ensures the socket timeout is long enough to wait for the
         # blocking command's timeout
         blocking_timeout = options.pop("_blocking_timeout", SENTINEL)
+        # When the Redis server is told to block indefinitely (timeout=0),
+        # the client must also wait indefinitely rather than issuing a
+        # zero-second socket read.
+        if blocking_timeout == 0:
+            blocking_timeout = None
         try:
             if NEVER_DECODE in options:
                 response = connection.read_response(disable_decoding=True)
