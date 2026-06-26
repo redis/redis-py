@@ -122,6 +122,8 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
         return _socket_can_read(self._sock, timeout)
 
     def read_from_socket(self, timeout=SENTINEL, raise_on_timeout=True):
+        if not self._reader:
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         sock = self._sock
         custom_timeout = timeout is not SENTINEL
         try:

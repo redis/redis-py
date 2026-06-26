@@ -294,6 +294,17 @@ def test_hiredis_read_response_timeout_zero_maps_would_block_to_timeout():
         parser.read_response(timeout=0)
 
 
+def test_hiredis_read_from_socket_raises_when_reader_is_none():
+    """Regression: read_from_socket must raise ConnectionError if _reader is
+    None (e.g. on_disconnect was called by another thread).  Previously this
+    produced AttributeError: 'NoneType' object has no attribute 'feed'."""
+    parser = make_hiredis_parser()
+    parser._reader = None  # simulate on_disconnect clearing the reader
+
+    with pytest.raises(ConnectionError, match="Connection closed by server"):
+        parser.read_from_socket()
+
+
 def test_socket_buffer_timeout_zero_maps_would_block_to_timeout():
     sock = Mock()
     sock.recv.side_effect = BlockingIOError(
