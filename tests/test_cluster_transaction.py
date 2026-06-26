@@ -812,13 +812,21 @@ class TestClusterTransactionMetricsRecording:
         strategy's command_queue. This ensures backward compatibility with
         tracing libraries (e.g. Datadog) that inspect command_stack.
         """
+        import warnings
+
         with r.pipeline(transaction=True) as pipe:
             pipe.set("foo", "value1")
             pipe.set("baz", "value2")
 
-            assert len(pipe.command_stack) == 2
-            assert pipe.command_stack[0].args == ("SET", "foo", "value1")
-            assert pipe.command_stack[1].args == ("SET", "baz", "value2")
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                assert len(pipe.command_stack) == 2
+                assert pipe.command_stack[0].args == ("SET", "foo", "value1")
+                assert pipe.command_stack[1].args == ("SET", "baz", "value2")
+                # Verify deprecation warning was issued
+                assert len(w) == 3  # one for each command_stack access
+                assert issubclass(w[0].category, DeprecationWarning)
+                assert "command_stack is deprecated" in str(w[0].message)
 
     @pytest.mark.onlycluster
     def test_pipeline_command_stack_empty(self, r):
@@ -826,6 +834,13 @@ class TestClusterTransactionMetricsRecording:
         Test that command_stack property returns empty list when no
         commands have been queued.
         """
+        import warnings
+
         with r.pipeline(transaction=True) as pipe:
-            assert len(pipe.command_stack) == 0
-            assert pipe.command_stack == []
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                assert len(pipe.command_stack) == 0
+                assert pipe.command_stack == []
+                # Verify deprecation warning was issued
+                assert len(w) == 2  # one for each command_stack access
+                assert issubclass(w[0].category, DeprecationWarning)

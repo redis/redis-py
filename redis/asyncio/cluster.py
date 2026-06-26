@@ -2270,6 +2270,26 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         """Set a custom response callback on the cluster client."""
         self.cluster_client.set_response_callback(command, callback)
 
+    @property
+    def command_stack(self) -> List["PipelineCommand"]:
+        """
+        Returns the command stack from the current execution strategy.
+
+        This property is provided for backward compatibility with tracing
+        libraries (e.g. Datadog) that inspect the command stack. Commands
+        are now stored in the execution strategy's command_queue.
+
+        .. deprecated::
+            Use ``_execution_strategy.command_queue`` instead.
+        """
+        warnings.warn(
+            "ClusterPipeline.command_stack is deprecated and will be removed "
+            "in a future version. Use _execution_strategy.command_queue instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self._execution_strategy.command_queue
+
     async def initialize(self) -> "ClusterPipeline":
         await self._execution_strategy.initialize()
         return self
@@ -2497,6 +2517,11 @@ class AbstractStrategy(ExecutionStrategy):
     def __init__(self, pipe: ClusterPipeline) -> None:
         self._pipe: ClusterPipeline = pipe
         self._command_queue: List["PipelineCommand"] = []
+
+    @property
+    def command_queue(self) -> List["PipelineCommand"]:
+        """Return the command queue for backward compatibility."""
+        return self._command_queue
 
     async def initialize(self) -> "ClusterPipeline":
         if self._pipe.cluster_client._initialize:

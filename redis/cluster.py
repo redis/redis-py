@@ -4,6 +4,7 @@ import socket
 import sys
 import threading
 import time
+import warnings
 import weakref
 from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
@@ -3500,7 +3501,16 @@ class ClusterPipeline(RedisCluster):
         This property is provided for backward compatibility with tracing
         libraries (e.g. Datadog) that inspect the command stack. Commands
         are now stored in the execution strategy's command_queue.
+
+        .. deprecated::
+            Use ``_execution_strategy.command_queue`` instead.
         """
+        warnings.warn(
+            "ClusterPipeline.command_stack is deprecated and will be removed "
+            "in a future version. Use _execution_strategy.command_queue instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self._execution_strategy.command_queue
 
     def __repr__(self):
