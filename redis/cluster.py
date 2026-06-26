@@ -880,7 +880,11 @@ class RedisCluster(
         if (cache_config or cache) and not check_protocol_version(protocol, 3):
             raise RedisError("Client caching is only supported with RESP version 3")
 
-        if maint_notifications_config and not check_protocol_version(protocol, 3):
+        if (
+            maint_notifications_config
+            and maint_notifications_config.enabled
+            and not check_protocol_version(protocol, 3)
+        ):
             raise RedisError(
                 "Maintenance notifications are only supported with RESP version 3"
             )

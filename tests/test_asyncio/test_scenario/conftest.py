@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 import pytest
 import pytest_asyncio
 
-from redis.asyncio import Redis
+from redis.asyncio import Redis, RedisCluster
 from redis.asyncio.multidb.client import MultiDBClient
 from redis.asyncio.multidb.config import (
     DatabaseConfig,
@@ -44,6 +44,16 @@ class CheckActiveDatabaseChangedListener(AsyncEventListenerInterface):
 def fault_injector_client():
     if use_mock_proxy():
         return AsyncProxyServerFaultInjector(oss_cluster=False)
+    else:
+        url = os.getenv("FAULT_INJECTION_API_URL", "http://127.0.0.1:20324")
+        return AsyncREFaultInjector(url)
+
+
+@pytest.fixture()
+def fault_injector_client_oss_api():
+    """Async fault injector client targeting the OSS-cluster API."""
+    if use_mock_proxy():
+        return AsyncProxyServerFaultInjector(oss_cluster=True)
     else:
         url = os.getenv("FAULT_INJECTION_API_URL", "http://127.0.0.1:20324")
         return AsyncREFaultInjector(url)
@@ -134,6 +144,71 @@ def get_async_standalone_client_maint_notifications(
         disable_retries=disable_retries,
         auth_ssl_client_certs=auth_ssl_client_certs,
         socket_timeout=socket_timeout,
+    )
+
+
+def get_async_cluster_client_maint_notifications(
+    endpoints_config,
+    protocol: int = 3,
+    enable_maintenance_notifications: bool = True,
+    endpoint_type: Optional[EndpointType] = None,
+    enable_relaxed_timeout: bool = True,
+    enable_proactive_reconnect: bool = True,
+    disable_retries: bool = False,
+    auth_ssl_client_certs: bool = False,
+    socket_timeout: Optional[float] = None,
+    socket_connect_timeout: Optional[float] = None,
+) -> RedisCluster:
+    """Create async RedisCluster client with maintenance notifications enabled."""
+    username = endpoints_config.get("username")
+    password = endpoints_config.get("password")
+
+    endpoints = endpoints_config.get("endpoints", [])
+    if not endpoints:
+        raise ValueError("No endpoints found in configuration")
+
+    parsed = urlparse(endpoints[0])
+    host = parsed.hostname
+    port = parsed.port
+
+    if not host:
+        raise ValueError(f"Could not parse host from endpoint URL: {endpoints[0]}")
+    if port is None:
+        raise ValueError(f"Could not parse port from endpoint URL: {endpoints[0]}")
+
+    maintenance_config = MaintNotificationsConfig(
+        enabled=enable_maintenance_notifications,
+        proactive_reconnect=enable_proactive_reconnect,
+        relaxed_timeout=RELAXED_TIMEOUT if enable_relaxed_timeout else -1,
+        endpoint_type=endpoint_type,
+    )
+
+    if disable_retries:
+        retry = Retry(NoBackoff(), 0)
+    else:
+        retry = Retry(
+            backoff=ExponentialWithJitterBackoff(base=0.01, cap=1), retries=10
+        )
+
+    tls_enabled = parsed.scheme == "rediss"
+    tls_kwargs = {"ssl": tls_enabled}
+    if tls_enabled:
+        ssl_config = _prepare_ssl_certificates(auth_ssl_client_certs)
+        tls_kwargs.update(ssl_config)
+
+    return RedisCluster(
+        host=host,
+        port=port,
+        socket_timeout=CLIENT_TIMEOUT if socket_timeout is None else socket_timeout,
+        socket_connect_timeout=(
+            CLIENT_TIMEOUT if socket_connect_timeout is None else socket_connect_timeout
+        ),
+        username=username,
+        password=password,
+        protocol=protocol,
+        maint_notifications_config=maintenance_config,
+        retry=retry,
+        **tls_kwargs,
     )
 
 

@@ -2613,11 +2613,18 @@ class MaintNotificationsAbstractConnectionPool:
                 conn.disconnect()
             for conn in self._get_in_use_connections():
                 if oss_cluster_maint_notifications_handler:
+                    # Use set_maint_notifications_cluster_handler_for_connection
+                    # (not _configure_maintenance_notifications) so the parser is
+                    # obtained from the connection itself. _configure_* requires a
+                    # parser argument and would raise here; it would also reset the
+                    # connection's orig_* settings, which is wrong for an in-use
+                    # (active) connection. This mirrors the idle-connection branch
+                    # above and the pool-handler branches.
+                    conn.set_maint_notifications_cluster_handler_for_connection(
+                        oss_cluster_maint_notifications_handler
+                    )
                     conn.maint_notifications_config = (
                         oss_cluster_maint_notifications_handler.config
-                    )
-                    conn._configure_maintenance_notifications(
-                        oss_cluster_maint_notifications_handler=oss_cluster_maint_notifications_handler
                     )
                 elif maint_notifications_pool_handler:
                     conn.set_maint_notifications_pool_handler_for_connection(

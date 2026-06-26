@@ -540,7 +540,11 @@ class RedisCluster(
 
         # Validate maint_notifications_config before NodesManager is constructed
         # so that a bad config doesn't leak an open NodesManager.
-        if maint_notifications_config and not check_protocol_version(protocol, 3):
+        if (
+            maint_notifications_config
+            and maint_notifications_config.enabled
+            and not check_protocol_version(protocol, 3)
+        ):
             raise RedisError(
                 "Maintenance notifications are only supported with RESP version 3"
             )
@@ -1934,11 +1938,26 @@ class NodesManager:
 
         for name, node in new.items():
             if name in old:
-                # Preserve the existing node but mark connections for reconnect.
-                # This method is sync so we can't call disconnect_free_connections()
-                # which is async. Instead, we mark free connections for reconnect
-                # and they will be lazily disconnected when acquired via
-                # disconnect_if_needed() to avoid race conditions.
+                # Preserve the existing node but mark ALL its connections for
+                # reconnect on every topology refresh.
+                #
+                # Why recycle every preserved node's connections, not just the
+                # ones whose slots/role changed?
+                #   set_nodes only sees the old vs new node dicts; it does not
+                #   track which specific nodes had slot-ownership or role changes
+                #   during this refresh. Rather than try to diff that (and risk
+                #   serving a connection whose cached routing/READONLY state is
+                #   now stale), we conservatively refresh every preserved node.
+                #   Reconnect is lazy and cheap, so the extra churn is acceptable
+                #   in exchange for never serving a stale connection after a
+                #   topology change.
+                #
+                # Why mark-for-reconnect instead of disconnecting here?
+                #   set_nodes is sync but disconnect_free_connections() is async,
+                #   so we cannot disconnect inline. Marking both in-use and free
+                #   connections for reconnect lets them be lazily disconnected on
+                #   next acquire via disconnect_if_needed(), which avoids races.
+                #
                 # TODO: Make this method async in the next major release to allow
                 # immediate disconnection of free connections.
                 existing_node = old[name]

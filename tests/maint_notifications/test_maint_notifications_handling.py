@@ -27,6 +27,7 @@ from redis.maint_notifications import (
     NodeFailedOverNotification,
     MaintNotificationsPoolHandler,
     NodeMovingNotification,
+    OSSMaintNotificationsHandler,
 )
 
 
@@ -703,6 +704,46 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
         # Clean up connections
         test_redis_client.connection_pool.release(existing_conn)
         test_redis_client.connection_pool.release(new_conn)
+
+    def test_update_oss_handler_wires_existing_connections(self):
+        """update_maint_notifications_config wires an OSS cluster handler onto every
+        existing connection in the pool.
+
+        Each connection's parser receives the OSS cluster and maintenance push
+        handlers and the connection references the handler. In-use connections are
+        marked for reconnect; free connections are wired then disconnected.
+        """
+        config = MaintNotificationsConfig(enabled=True)
+        pool = ConnectionPool(
+            host=DEFAULT_ADDRESS.split(":")[0],
+            port=int(DEFAULT_ADDRESS.split(":")[1]),
+            protocol=3,
+            maint_notifications_config=config,
+        )
+        free_connection = pool.make_connection()
+        in_use_connection = pool.make_connection()
+        pool._available_connections.append(free_connection)
+        pool._in_use_connections.add(in_use_connection)
+
+        oss_handler = OSSMaintNotificationsHandler(MagicMock(), config)
+
+        pool.update_maint_notifications_config(
+            config, oss_cluster_maint_notifications_handler=oss_handler
+        )
+
+        # In-use connection: parser has the OSS + maintenance push handlers wired
+        # and the connection is marked for reconnect.
+        assert in_use_connection._oss_cluster_maint_notifications_handler is oss_handler
+        in_use_oss_func = in_use_connection._parser.oss_cluster_maint_push_handler_func
+        assert in_use_oss_func is not None
+        assert in_use_oss_func.__func__ is oss_handler.handle_notification.__func__
+        assert in_use_connection._parser.maintenance_push_handler_func is not None
+        assert in_use_connection.should_reconnect()
+
+        # Free connection — the idle OSS path, wired then disconnected.
+        assert free_connection._oss_cluster_maint_notifications_handler is oss_handler
+        assert free_connection._parser.oss_cluster_maint_push_handler_func is not None
+        assert free_connection._parser.maintenance_push_handler_func is not None
 
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_connection_pool_creation_with_maintenance_notifications(self, pool_class):

@@ -444,27 +444,15 @@ class AsyncMaintNotificationsAbstractConnection:
             # Stream might not be connected or peer address lookup might fail.
             pass
 
-        # Method 2: Fallback to DNS resolution of the host.
-        # This is less accurate but works when stream peer info is not available.
-        try:
-            host = getattr(self, "host", None)
-            port = getattr(self, "port", 6379)
-            if host:
-                # Use getaddrinfo to resolve the hostname to IP.
-                # This mimics what the connection would do during _connect().
-                addr_info = socket.getaddrinfo(
-                    host, port, socket.AF_UNSPEC, socket.SOCK_STREAM
-                )
-                if addr_info:
-                    # Return the IP from the first result.
-                    # addr_info[0] is (family, socktype, proto, canonname, sockaddr).
-                    # sockaddr[0] is the IP address.
-                    return str(addr_info[0][4][0])
-        except (AttributeError, OSError, socket.gaierror):
-            # DNS resolution might fail.
-            pass
-
-        return None
+        # Method 2: Fall back to the configured host (which may be an IP or an
+        # FQDN). We intentionally do NOT call socket.getaddrinfo() here: this
+        # method is only used for debug logging and runs on the event loop, so a
+        # blocking DNS resolution would stall it. During maintenance the debug-log
+        # path is invoked once per notification while connections are repeatedly
+        # disconnected/reconnected (so getpeername() returns None) — a blocking
+        # getaddrinfo on an FQDN host there can freeze the loop for seconds and
+        # trip unrelated connect timeouts.
+        return getattr(self, "host", None)
 
     @property
     def maintenance_state(self) -> MaintenanceState:
@@ -2167,11 +2155,18 @@ class AsyncMaintNotificationsAbstractConnectionPool:
 
             for conn in list(self._get_in_use_connections()):
                 if oss_cluster_maint_notifications_handler:
+                    # Use set_maint_notifications_cluster_handler_for_connection
+                    # (not _configure_maintenance_notifications) so the parser is
+                    # obtained from the connection itself. _configure_* requires a
+                    # parser argument and would raise here; it would also reset the
+                    # connection's orig_* settings, which is wrong for an in-use
+                    # (active) connection. This mirrors the idle-connection branch
+                    # above and the pool-handler branches.
+                    conn.set_maint_notifications_cluster_handler_for_connection(
+                        oss_cluster_maint_notifications_handler
+                    )
                     conn.maint_notifications_config = (
                         oss_cluster_maint_notifications_handler.config
-                    )
-                    conn._configure_maintenance_notifications(
-                        oss_cluster_maint_notifications_handler=oss_cluster_maint_notifications_handler
                     )
                 elif maint_notifications_pool_handler:
                     conn.set_maint_notifications_pool_handler_for_connection(
