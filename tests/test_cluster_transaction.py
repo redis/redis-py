@@ -9,7 +9,7 @@ import redis
 from redis import CrossSlotTransactionError, ConnectionPool, RedisClusterException
 from redis.backoff import NoBackoff
 from redis.client import Redis
-from redis.cluster import PRIMARY, ClusterNode, RedisCluster
+from redis.cluster import PRIMARY, ClusterNode, PipelineCommand, RedisCluster
 from redis.observability import recorder
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
@@ -804,3 +804,28 @@ class TestClusterTransactionMetricsRecording:
         assert "server.address" in attrs
         assert "server.port" in attrs
         assert "db.namespace" in attrs
+
+    @pytest.mark.onlycluster
+    def test_pipeline_command_stack_property(self, r):
+        """
+        Test that command_stack property correctly reflects the execution
+        strategy's command_queue. This ensures backward compatibility with
+        tracing libraries (e.g. Datadog) that inspect command_stack.
+        """
+        with r.pipeline(transaction=True) as pipe:
+            pipe.set("foo", "value1")
+            pipe.set("baz", "value2")
+
+            assert len(pipe.command_stack) == 2
+            assert pipe.command_stack[0].args == ("SET", "foo", "value1")
+            assert pipe.command_stack[1].args == ("SET", "baz", "value2")
+
+    @pytest.mark.onlycluster
+    def test_pipeline_command_stack_empty(self, r):
+        """
+        Test that command_stack property returns empty list when no
+        commands have been queued.
+        """
+        with r.pipeline(transaction=True) as pipe:
+            assert len(pipe.command_stack) == 0
+            assert pipe.command_stack == []

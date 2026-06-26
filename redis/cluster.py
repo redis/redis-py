@@ -3420,7 +3420,6 @@ class ClusterPipeline(RedisCluster):
         **kwargs,
     ):
         """ """
-        self.command_stack = []
         self.nodes_manager = nodes_manager
         self.commands_parser = commands_parser
         self.refresh_table_asap = False
@@ -3492,6 +3491,17 @@ class ClusterPipeline(RedisCluster):
             self._event_dispatcher = EventDispatcher()
         else:
             self._event_dispatcher = event_dispatcher
+
+    @property
+    def command_stack(self):
+        """
+        Returns the command stack from the current execution strategy.
+
+        This property is provided for backward compatibility with tracing
+        libraries (e.g. Datadog) that inspect the command stack. Commands
+        are now stored in the execution strategy's command_queue.
+        """
+        return self._execution_strategy.command_queue
 
     def __repr__(self):
         """ """
