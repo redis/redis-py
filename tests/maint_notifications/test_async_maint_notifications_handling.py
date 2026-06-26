@@ -476,6 +476,25 @@ async def test_async_pool_update_oss_handler_wires_existing_connections():
     assert free_connection._parser.oss_cluster_maint_push_handler_func is not None
     assert free_connection._parser.maintenance_push_handler_func is not None
 
+    # OSS cluster mode and pool-handler mode are mutually exclusive. The pool
+    # was created with the default (enabled) config, which wires a pool handler
+    # in __init__; switching to OSS mode must clear it from both the pool
+    # attribute and the shared connection kwargs so future connections are not
+    # configured with both handlers.
+    assert pool._maint_notifications_pool_handler is None
+    assert "maint_notifications_pool_handler" not in pool.connection_kwargs
+    assert (
+        pool.connection_kwargs.get("oss_cluster_maint_notifications_handler")
+        is oss_handler
+    )
+
+    # A connection created after the switch gets only the OSS cluster handler.
+    new_connection = pool.make_connection()
+    assert new_connection._maint_notifications_pool_handler is None
+    assert new_connection._parser.node_moving_push_handler_func is None
+    assert new_connection._oss_cluster_maint_notifications_handler is oss_handler
+    assert new_connection._parser.oss_cluster_maint_push_handler_func is not None
+
 
 @pytest.mark.asyncio
 async def test_async_handshake_sends_maint_notifications_command():

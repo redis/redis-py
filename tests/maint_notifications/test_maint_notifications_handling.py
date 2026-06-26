@@ -745,6 +745,25 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
         assert free_connection._parser.oss_cluster_maint_push_handler_func is not None
         assert free_connection._parser.maintenance_push_handler_func is not None
 
+        # OSS cluster mode and pool-handler mode are mutually exclusive. The pool
+        # was created with the default (enabled) config, which wires a pool
+        # handler in __init__; switching to OSS mode must clear it from both the
+        # pool attribute and the shared connection kwargs so future connections
+        # are not configured with both handlers.
+        assert pool._maint_notifications_pool_handler is None
+        assert "maint_notifications_pool_handler" not in pool.connection_kwargs
+        assert (
+            pool.connection_kwargs.get("oss_cluster_maint_notifications_handler")
+            is oss_handler
+        )
+
+        # A connection created after the switch gets only the OSS cluster handler.
+        new_connection = pool.make_connection()
+        assert new_connection._maint_notifications_pool_handler is None
+        assert new_connection._parser.node_moving_push_handler_func is None
+        assert new_connection._oss_cluster_maint_notifications_handler is oss_handler
+        assert new_connection._parser.oss_cluster_maint_push_handler_func is not None
+
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_connection_pool_creation_with_maintenance_notifications(self, pool_class):
         """Test that connection pools are created with maintenance notifications configuration."""

@@ -2021,6 +2021,11 @@ class AsyncMaintNotificationsAbstractConnectionPool:
             self._oss_cluster_maint_notifications_handler = (
                 oss_cluster_maint_notifications_handler
             )
+            # OSS cluster mode and pool-handler mode are mutually exclusive
+            # (see __init__). A pool created with the default RESP3 "auto"
+            # config wires a pool handler before this method runs; clear it so
+            # new and existing connections are not configured with both handlers.
+            self._maint_notifications_pool_handler = None
         else:
             if (
                 maint_notifications_config.enabled
@@ -2103,6 +2108,10 @@ class AsyncMaintNotificationsAbstractConnectionPool:
                     "maint_notifications_config": oss_cluster_maint_notifications_handler.config,
                 }
             )
+            # OSS cluster mode and pool-handler mode are mutually exclusive.
+            # Drop any pool handler a default (RESP3 "auto") pool creation may
+            # have wired so future connections are not configured with both.
+            self.connection_kwargs.pop("maint_notifications_pool_handler", None)
 
         # Store original connection parameters for maintenance notifications.
         if self.connection_kwargs.get("orig_host_address", None) is None:
