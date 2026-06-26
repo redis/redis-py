@@ -181,9 +181,12 @@ class AsyncMaintNotificationsAbstractRedisCluster:
             self._update_connection_kwargs_for_maint_notifications(
                 self._oss_cluster_maint_notifications_handler
             )
-            # DO NOT iterate existing nodes here — connections are created lazily
-            # via ClusterNode.acquire_connection() during nodes_manager.initialize(),
-            # which runs after __init__. The connection_kwargs injection is sufficient.
+            # Connections are created lazily via ClusterNode.acquire_connection()
+            # during nodes_manager.initialize() (which runs after __init__), so
+            # injecting into the shared connection_kwargs covers nodes discovered
+            # later. Startup nodes are the exception — they were built before this
+            # runs with their own kwargs snapshot — so the helper above also
+            # updates them directly.
         else:
             self._oss_cluster_maint_notifications_handler = None
 
@@ -191,12 +194,21 @@ class AsyncMaintNotificationsAbstractRedisCluster:
         self,
         oss_cluster_maint_notifications_handler: AsyncOSSMaintNotificationsHandler,
     ) -> None:
-        self.nodes_manager.connection_kwargs.update(
-            {
-                "oss_cluster_maint_notifications_handler": oss_cluster_maint_notifications_handler,
-                "maint_notifications_config": oss_cluster_maint_notifications_handler.config,
-            }
-        )
+        maint_kwargs = {
+            "oss_cluster_maint_notifications_handler": oss_cluster_maint_notifications_handler,
+            "maint_notifications_config": oss_cluster_maint_notifications_handler.config,
+        }
+        # Shared template used for every node created from now on (e.g. nodes
+        # discovered during nodes_manager.initialize()).
+        self.nodes_manager.connection_kwargs.update(maint_kwargs)
+        # Startup nodes were constructed before this mixin ran, so each one
+        # snapshotted connection_kwargs without the handler. Their connections
+        # are created lazily, so updating their per-node kwargs now is in time —
+        # otherwise initialize() opens the topology-discovery connection (CLUSTER
+        # SLOTS) on a startup node with no push handler wired and silently drops
+        # the maintenance notifications carried on that connection.
+        for node in self.nodes_manager.startup_nodes.values():
+            node.connection_kwargs.update(maint_kwargs)
 
 
 class RedisCluster(

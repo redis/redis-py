@@ -171,11 +171,20 @@ class TestAsyncClusterMaintNotificationsConfig(TestAsyncClusterMaintNotification
         cluster: "redis.RedisCluster",
         should_have_handler: bool = True,
     ) -> None:
-        """Validate the OSS cluster handler propagation to nodes' connection kwargs."""
-        nodes = list(cluster.nodes_manager.nodes_cache.values())
-        assert len(nodes) > 0, "Cluster should have at least one node"
+        """Validate the OSS cluster handler propagation to nodes' connection kwargs.
 
-        for node in nodes:
+        Covers both discovered nodes (nodes_cache, populated during initialize())
+        and startup nodes. Startup nodes are built before the maint mixin runs and
+        keep their own connection_kwargs snapshot, so they must be wired explicitly;
+        if they are not, initialize() opens its CLUSTER SLOTS discovery connection
+        on a startup node with no push handler and drops maintenance notifications.
+        """
+        nodes = list(cluster.nodes_manager.nodes_cache.values())
+        startup_nodes = list(cluster.nodes_manager.startup_nodes.values())
+        assert len(nodes) > 0, "Cluster should have at least one node"
+        assert len(startup_nodes) > 0, "Cluster should have at least one startup node"
+
+        for node in nodes + startup_nodes:
             handler = node.connection_kwargs.get(
                 "oss_cluster_maint_notifications_handler"
             )
@@ -315,6 +324,42 @@ class TestAsyncClusterMaintNotificationsConfig(TestAsyncClusterMaintNotification
                 startup_nodes=PROXY_CLUSTER_NODES,
                 maint_notifications_config=maint_config,
             )
+
+    async def test_handler_wired_on_startup_nodes_before_initialize(self):
+        """Startup nodes must carry the OSS handler before initialize() runs.
+
+        Regression test for the startup-node kwargs snapshot bug: startup
+        ClusterNodes are constructed before the maint mixin runs and keep their
+        own connection_kwargs copy. If the handler is injected only into the
+        shared nodes_manager.connection_kwargs, the startup nodes stay stale and
+        initialize() opens its CLUSTER SLOTS discovery connection with no push
+        handler wired, silently dropping maintenance notifications on it.
+
+        This must be asserted *before* initialize(): with the default
+        dynamic_startup_nodes=True, initialize() replaces startup_nodes with the
+        (handler-wired) discovered nodes, which would mask the original defect.
+        """
+        maint_config = MaintNotificationsConfig(enabled=True)
+        cluster = redis.RedisCluster(
+            protocol=3,
+            startup_nodes=PROXY_CLUSTER_NODES,
+            maint_notifications_config=maint_config,
+        )
+        try:
+            handler = cluster._oss_cluster_maint_notifications_handler
+            assert handler is not None
+
+            startup_nodes = list(cluster.nodes_manager.startup_nodes.values())
+            assert len(startup_nodes) == len(PROXY_CLUSTER_NODES)
+            for node in startup_nodes:
+                assert (
+                    node.connection_kwargs.get(
+                        "oss_cluster_maint_notifications_handler"
+                    )
+                    is handler
+                )
+        finally:
+            await cluster.aclose()
 
 
 @pytest.mark.asyncio
@@ -631,3 +676,98 @@ class TestAsyncClusterMaintNotificationsHandling(
                 ),
             ],
         )
+
+    async def test_smigrated_node_replacement_resets_topology_connection_configs(self):
+        """End-to-end node replacement over the proxy with three warmed-up nodes.
+
+        Start with three nodes, each with 3 connections created and used. An
+        SMIGRATING notification relaxes a connection on NODE_PORT_1, then an
+        SMIGRATED notification migrates all of NODE_PORT_1's slots to
+        NODE_PORT_NEW - so NODE_PORT_1 leaves the topology and NODE_PORT_NEW joins.
+
+        After the async handler drains, validate the end result:
+          * the topology was updated (NODE_PORT_NEW in, NODE_PORT_1 out);
+          * every node remaining in the topology has its connections back at the
+            default (non-relaxed) config - i.e. no connection is left in
+            MAINTENANCE / with a relaxed timeout;
+          * the replaced node's connections were cleaned up (each is either
+            disconnected or marked for reconnect, so none can serve a command
+            with the stale relaxed timeout).
+        """
+        await self._warm_up_connection_pools(self.cluster, created_connections_count=3)
+
+        # Grab the node that will be replaced before it leaves the topology.
+        removed_node = self.cluster.nodes_manager.get_node(
+            host=NODE_IP_PROXY, port=NODE_PORT_1
+        )
+        assert removed_node is not None
+        assert len(_node_all_connections(removed_node)) == 3
+
+        # 1) SMIGRATING relaxes a connection on NODE_PORT_1 (the migrating source).
+        self.proxy_helper.send_notification(
+            RespTranslator.oss_maint_notification_to_resp(
+                "SMIGRATING 12 123,456,5000-7000"
+            )
+        )
+        assert await self.cluster.set("anyprefix:{3}:k", "VAL") is True
+        self._validate_connections_states(
+            self.cluster,
+            [
+                ConnectionStateExpectation(
+                    NODE_PORT_1,
+                    changed_connections_count=1,
+                    state=MaintenanceState.MAINTENANCE,
+                    relaxed_timeout=self.config.relaxed_timeout,
+                ),
+                ConnectionStateExpectation(NODE_PORT_2, 0),
+                ConnectionStateExpectation(NODE_PORT_3, 0),
+            ],
+        )
+
+        # 2) SMIGRATED migrates all of NODE_PORT_1's slots to NODE_PORT_NEW, so
+        # NODE_PORT_1 is dropped from the topology and NODE_PORT_NEW is added.
+        self.proxy_helper.set_cluster_slots(
+            CLUSTER_SLOTS_INTERCEPTOR_NAME,
+            [
+                SlotsRange(NODE_IP_PROXY, NODE_PORT_NEW, 0, 5460),
+                SlotsRange(NODE_IP_PROXY, NODE_PORT_2, 5461, 10922),
+                SlotsRange(NODE_IP_PROXY, NODE_PORT_3, 10923, 16383),
+            ],
+        )
+        self.proxy_helper.send_notification(
+            RespTranslator.oss_maint_notification_to_resp(
+                f"SMIGRATED 13 {NODE_IP_PROXY}:{NODE_PORT_1} "
+                f"{NODE_IP_PROXY}:{NODE_PORT_NEW} 0-5460"
+            )
+        )
+        assert await self.cluster.set("anyprefix:{3}:k", "VAL") is True
+        await self._drain_maint_notification_tasks(self.cluster)
+
+        # Topology updated: new node joined, replaced node gone.
+        assert (
+            self.cluster.nodes_manager.get_node(
+                host=NODE_IP_PROXY, port=NODE_PORT_NEW
+            )
+            is not None
+        )
+        assert (
+            self.cluster.nodes_manager.get_node(host=NODE_IP_PROXY, port=NODE_PORT_1)
+            is None
+        )
+
+        # Every node remaining in the topology is back at the default config -
+        # no connection left relaxed / in MAINTENANCE.
+        self._validate_connections_states(
+            self.cluster,
+            [
+                ConnectionStateExpectation(NODE_PORT_NEW, 0),
+                ConnectionStateExpectation(NODE_PORT_2, 0),
+                ConnectionStateExpectation(NODE_PORT_3, 0),
+            ],
+        )
+
+        # The replaced node's connections were cleaned up: each is either
+        # disconnected (free connections) or marked for reconnect (in-use), so
+        # none can be reused with the stale relaxed timeout.
+        for conn in _node_all_connections(removed_node):
+            assert (not conn.is_connected) or conn.should_reconnect()
