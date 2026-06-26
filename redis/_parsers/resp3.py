@@ -90,6 +90,7 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
                 # inside a pipeline response. the connection's read_response()
                 # and/or the pipeline's execute() will raise this error if
                 # necessary, so just return the exception instance here.
+                response = error
             # single value
             elif byte == b"+":
                 pass
@@ -145,6 +146,9 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
                 count = int(response)
                 if count == 0:
                     response = self.handle_push_response([])
+                    if push_request:
+                        return response
+                    continue
                 else:
                     stack.append(('push', count, [], None))
                     continue
@@ -251,6 +255,7 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
                 # inside a pipeline response. the connection's read_response()
                 # and/or the pipeline's execute() will raise this error if
                 # necessary, so just return the exception instance here.
+                response = error
             # single value
             elif byte == b"+":
                 pass
@@ -306,6 +311,9 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
                 count = int(response)
                 if count == 0:
                     response = await self.handle_push_response([])
+                    if push_request:
+                        return response
+                    continue
                 else:
                     stack.append(('push', count, [], None))
                     continue

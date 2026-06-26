@@ -53,6 +53,7 @@ class _RESP2Parser(_RESPBase):
                 # inside a pipeline response. the connection's read_response()
                 # and/or the pipeline's execute() will raise this error if
                 # necessary, so just return the exception instance here.
+                response = error
             # single value
             elif byte == b"+":
                 pass
@@ -136,6 +137,7 @@ class _AsyncRESP2Parser(_AsyncRESPBase):
                 # inside a pipeline response. the connection's read_response()
                 # and/or the pipeline's execute() will raise this error if
                 # necessary, so just return the exception instance here.
+                response = error
             # single value
             elif byte == b"+":
                 pass
