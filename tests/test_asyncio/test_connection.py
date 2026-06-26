@@ -857,3 +857,72 @@ async def test_disconnect_no_current_task_calls_close(request):
             mock_on_disconnect.assert_called_once()
 
     assert not conn.is_connected
+
+
+async def test_read_response_retries_on_heap_corruption():
+    """
+    Regression test for issue #3748:
+    Python's asyncio event loop can raise RuntimeError("list changed size
+    during iteration") when rapid timeout scheduling occurs (e.g. PubSub
+    with small timeouts). The read_response method should retry the operation
+    when this specific error occurs.
+    """
+    conn = Connection(socket_timeout=5.0)
+    conn._connected = True
+
+    call_count = 0
+    expected_response = b"+OK\r\n"
+
+    async def mock_read_response(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 2:
+            raise RuntimeError(
+                "list changed size during iteration"
+            )
+        return expected_response
+
+    mock_parser = mock.MagicMock()
+    mock_parser.read_response = mock_read_response
+    conn._parser = mock_parser
+
+    response = await conn.read_response()
+    assert response == expected_response
+    assert call_count == 3
+
+
+async def test_read_response_raises_after_max_heap_retries():
+    """
+    Verify that RuntimeError is raised after all retries are exhausted
+    when the heap corruption error persists.
+    """
+    conn = Connection(socket_timeout=5.0)
+    conn._connected = True
+
+    async def mock_read_response_always_fails(*args, **kwargs):
+        raise RuntimeError("list changed size during iteration")
+
+    mock_parser = mock.MagicMock()
+    mock_parser.read_response = mock_read_response_always_fails
+    conn._parser = mock_parser
+
+    with pytest.raises(RuntimeError, match="list changed size during iteration"):
+        await conn.read_response()
+
+
+async def test_read_response_does_not_retry_other_runtime_errors():
+    """
+    Verify that other RuntimeError messages are not caught by the retry logic.
+    """
+    conn = Connection(socket_timeout=5.0)
+    conn._connected = True
+
+    async def mock_read_response_other_error(*args, **kwargs):
+        raise RuntimeError("some other error")
+
+    mock_parser = mock.MagicMock()
+    mock_parser.read_response = mock_read_response_other_error
+    conn._parser = mock_parser
+
+    with pytest.raises(RuntimeError, match="some other error"):
+        await conn.read_response()

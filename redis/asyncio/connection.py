@@ -777,44 +777,60 @@ class AbstractConnection:
         else:
             read_timeout = timeout if timeout is not None else self.socket_timeout
         host_error = self._host_error()
-        try:
-            if read_timeout is not None and self.protocol in ["3", 3]:
-                async with async_timeout(read_timeout):
+
+        # Retry loop to handle RuntimeError from asyncio's internal heap
+        # corruption when rapid timeout context creation/destruction occurs.
+        # See: https://github.com/python/cpython/issues/127200 and
+        # https://github.com/redis/redis-py/issues/3748
+        _max_heap_retries = 3
+        for _heap_retry in range(_max_heap_retries):
+            try:
+                if read_timeout is not None and self.protocol in ["3", 3]:
+                    async with async_timeout(read_timeout):
+                        response = await self._parser.read_response(
+                            disable_decoding=disable_decoding,
+                            push_request=push_request,
+                        )
+                elif read_timeout is not None:
+                    async with async_timeout(read_timeout):
+                        response = await self._parser.read_response(
+                            disable_decoding=disable_decoding
+                        )
+                elif self.protocol in ["3", 3]:
                     response = await self._parser.read_response(
-                        disable_decoding=disable_decoding, push_request=push_request
+                        disable_decoding=disable_decoding,
+                        push_request=push_request,
                     )
-            elif read_timeout is not None:
-                async with async_timeout(read_timeout):
+                else:
                     response = await self._parser.read_response(
                         disable_decoding=disable_decoding
                     )
-            elif self.protocol in ["3", 3]:
-                response = await self._parser.read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
+                break
+            except RuntimeError as e:
+                if "list changed size during iteration" in str(e):
+                    if _heap_retry < _max_heap_retries - 1:
+                        continue
+                raise
+            except asyncio.TimeoutError:
+                if timeout is not None:
+                    return None
+                if disconnect_on_error:
+                    await self.disconnect(nowait=True)
+                raise TimeoutError(f"Timeout reading from {host_error}")
+            except OSError as e:
+                if disconnect_on_error:
+                    await self.disconnect(nowait=True)
+                raise ConnectionError(
+                    f"Error while reading from {host_error} : {e.args}"
                 )
-            else:
-                response = await self._parser.read_response(
-                    disable_decoding=disable_decoding
-                )
-        except asyncio.TimeoutError:
-            if timeout is not None:
-                # user requested timeout, return None. Operation can be retried
-                return None
-            # it was a self.socket_timeout error.
-            if disconnect_on_error:
-                await self.disconnect(nowait=True)
-            raise TimeoutError(f"Timeout reading from {host_error}")
-        except OSError as e:
-            if disconnect_on_error:
-                await self.disconnect(nowait=True)
-            raise ConnectionError(f"Error while reading from {host_error} : {e.args}")
-        except BaseException:
-            # Also by default close in case of BaseException.  A lot of code
-            # relies on this behaviour when doing Command/Response pairs.
-            # See #1128.
-            if disconnect_on_error:
-                await self.disconnect(nowait=True)
-            raise
+            except BaseException:
+                if disconnect_on_error:
+                    await self.disconnect(nowait=True)
+                raise
+        else:
+            raise RuntimeError(
+                "Failed to read response after retries due to asyncio heap corruption"
+            )
 
         if self.health_check_interval:
             next_time = asyncio.get_running_loop().time() + self.health_check_interval
