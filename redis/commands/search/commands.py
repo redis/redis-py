@@ -876,10 +876,9 @@ class SearchCommands:
         if not res:
             return {}
         info = self._to_string_recursive(res)
-        # If the response is already a list (RESP2 format from cluster),
-        # it's already in legacy format - return as-is.
         if isinstance(info, list):
-            return info
+            it = map(str_if_bytes, info)
+            info = dict(zip(it, it))
         attrs = info.get("attributes")
         if isinstance(attrs, list):
             info["attributes"] = [

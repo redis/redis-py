@@ -295,7 +295,7 @@ class TestParseInfoEmptyResults:
         assert s._parse_info_resp3_to_legacy({}) == {}
 
     def test_parse_info_resp3_to_legacy_list_response(self):
-        """_parse_info_resp3_to_legacy returns list as-is for RESP2 format.
+        """_parse_info_resp3_to_legacy converts flat list to dict for RESP2 format.
 
         When using RedisCluster, FT.INFO may return a flat RESP2-style list
         even though the default protocol version is RESP3.
@@ -309,6 +309,6 @@ class TestParseInfoEmptyResults:
             ],
         ]
         out = s._parse_info_resp3_to_legacy(res)
-        assert isinstance(out, list)
-        assert out[0] == "index_name"
-        assert out[1] == "myIndex"
+        assert isinstance(out, dict)
+        assert out["index_name"] == "myIndex"
+        assert out["num_docs"] == "100"
