@@ -1508,4 +1508,128 @@ class TestBlockingConnectionPoolGetConnectionCount:
         assert idle_count == 2
         assert used_count == 0
 
-        pool.disconnect()
+
+class TestSendPackedCommandTimeoutReassertion:
+    """Tests that send_packed_command re-asserts socket timeout after health check."""
+
+    def test_send_packed_command_reasserts_timeout_after_health_check(self):
+        """
+        Verify that send_packed_command resets the socket timeout to the
+        configured socket_timeout before calling sendall, even when the
+        health check leaves the socket with a different timeout.
+
+        Regression test for https://github.com/redis/redis-py/issues/3741
+        """
+        conn = Connection(socket_timeout=5.0, health_check_interval=0)
+        conn._sock = mock.Mock()
+        conn._sock.gettimeout.return_value = 1.0  # stale timeout
+        conn.connect = mock.Mock()  # prevent real connect
+
+        # send_packed_command expects a list of byte chunks, not raw bytes.
+        # (raw bytes would be iterated byte-by-byte.)
+        packed = [b"*1\r\n$4\r\nPING\r\n"]
+        conn.send_packed_command(packed)
+
+        # The timeout should have been re-asserted to 5.0 before sendall
+        conn._sock.settimeout.assert_called_with(5.0)
+        conn._sock.sendall.assert_called_once_with(packed[0])
+
+    def test_send_packed_command_does_not_call_settimeout_when_already_correct(self):
+        """
+        When the socket already has the correct timeout, settimeout should
+        not be called unnecessarily.
+        """
+        conn = Connection(socket_timeout=5.0, health_check_interval=0)
+        conn._sock = mock.Mock()
+        conn._sock.gettimeout.return_value = 5.0  # correct timeout
+        conn.connect = mock.Mock()
+
+        packed = [b"*1\r\n$4\r\nPING\r\n"]
+        conn.send_packed_command(packed)
+
+        # settimeout should NOT have been called since timeout was already correct
+        conn._sock.settimeout.assert_not_called()
+        conn._sock.sendall.assert_called_once_with(packed[0])
+
+    def test_send_packed_command_reasserts_timeout_after_health_check_ping(self):
+        """
+        When health_check_interval > 0 and a health check runs, the socket
+        timeout should still be re-asserted before the actual command sendall.
+        """
+        conn = Connection(socket_timeout=5.0, health_check_interval=1)
+        conn._sock = mock.Mock()
+        conn._sock.gettimeout.return_value = 2.0  # stale timeout
+        conn.connect = mock.Mock()
+
+        # Mock the health check to avoid real PING/PONG
+        conn.check_health = mock.Mock()
+        # After check_health returns, gettimeout still returns stale value
+        conn._sock.gettimeout.return_value = 2.0
+
+        packed = [b"*3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\nbar\r\n"]
+        conn.send_packed_command(packed)
+
+        # check_health was called
+        conn.check_health.assert_called_once()
+        # The timeout was re-asserted to 5.0 before sendall
+        conn._sock.settimeout.assert_called_with(5.0)
+        conn._sock.sendall.assert_called_once_with(packed[0])
+
+
+class TestUpdateParserTimeoutResp2:
+    """Tests that update_parser_timeout correctly handles _RESP2Parser."""
+
+    def test_update_parser_timeout_updates_resp2_buffer(self):
+        """
+        Verify that update_parser_timeout updates SocketBuffer.socket_timeout
+        for _RESP2Parser connections.
+
+        Regression test for https://github.com/redis/redis-py/issues/3741
+        """
+        conn = Connection(socket_timeout=5.0, parser_class=_RESP2Parser)
+        # Manually set up the parser state without connecting
+        parser = _RESP2Parser(conn._socket_read_size)
+        mock_sock = mock.Mock()
+        parser._sock = mock_sock
+        parser._buffer = SocketBuffer(mock_sock, conn._socket_read_size, 5.0)
+        parser.encoder = conn.encoder
+        conn._parser = parser
+
+        # Verify initial timeout
+        assert parser._buffer.socket_timeout == 5.0
+
+        # Update the timeout
+        conn.update_parser_timeout(10.0)
+
+        # The SocketBuffer's timeout should be updated
+        assert parser._buffer.socket_timeout == 10.0
+
+    def test_update_parser_timeout_handles_resp3_parser(self):
+        """
+        Verify that update_parser_timeout still works for _RESP3Parser.
+        """
+        conn = Connection(socket_timeout=5.0, parser_class=_RESP3Parser)
+        parser = _RESP3Parser(conn._socket_read_size)
+        mock_sock = mock.Mock()
+        parser._sock = mock_sock
+        parser._buffer = SocketBuffer(mock_sock, conn._socket_read_size, 5.0)
+        parser.encoder = conn.encoder
+        conn._parser = parser
+
+        assert parser._buffer.socket_timeout == 5.0
+        conn.update_parser_timeout(10.0)
+        assert parser._buffer.socket_timeout == 10.0
+
+    def test_update_parser_timeout_handles_hiredis_parser(self):
+        """
+        Verify that update_parser_timeout still works for _HiredisParser.
+        """
+        if not HIREDIS_AVAILABLE:
+            pytest.skip("Hiredis not available")
+        conn = Connection(socket_timeout=5.0, parser_class=_HiredisParser)
+        parser = make_hiredis_parser()
+        parser._socket_timeout = 5.0
+        conn._parser = parser
+
+        conn.update_parser_timeout(10.0)
+        assert parser._socket_timeout == 10.0

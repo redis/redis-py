@@ -750,7 +750,7 @@ class MaintNotificationsAbstractConnection:
     def update_parser_timeout(self, timeout: Optional[float] = None):
         parser = self._get_parser()
         if parser and parser._buffer:
-            if isinstance(parser, _RESP3Parser) and timeout:
+            if isinstance(parser, (_RESP2Parser, _RESP3Parser)) and timeout:
                 parser._buffer.socket_timeout = timeout
             elif isinstance(parser, _HiredisParser):
                 parser._socket_timeout = timeout
@@ -1310,8 +1310,18 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         try:
             if isinstance(command, str):
                 command = [command]
+            # Re-assert the socket timeout before writing. The health check
+            # (above) may have triggered a disconnect/reconnect cycle, and
+            # concurrent operations (e.g. can_read from another thread) or
+            # maintenance-notification timeout changes can leave the socket
+            # with a stale timeout.  Guarding here ensures the write uses
+            # the configured socket_timeout regardless of what happened
+            # during the health check.
+            sock = self._sock
+            if sock.gettimeout() != self.socket_timeout:
+                sock.settimeout(self.socket_timeout)
             for item in command:
-                self._sock.sendall(item)
+                sock.sendall(item)
         except socket.timeout:
             self.disconnect()
             raise TimeoutError("Timeout writing to socket")
