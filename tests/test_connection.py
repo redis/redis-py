@@ -16,7 +16,7 @@ import pytest
 import redis
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
-from redis._parsers.hiredis import NOT_ENOUGH_DATA, _socket_can_read
+from redis._parsers.hiredis import NOT_ENOUGH_DATA, _socket_can_read, _socket_is_closed
 from redis._parsers.socket import SocketBuffer
 from redis.backoff import NoBackoff
 from redis.cache import (
@@ -105,13 +105,33 @@ def test_hiredis_can_read_detects_reader_data():
     assert parser.read_response() == b"OK"
 
 
-def test_hiredis_can_read_checks_socket_readiness_without_reading():
+def test_hiredis_can_read_returns_true_for_readable_open_socket():
+    # socket readable, reader empty, and not closed -> pending data/push, so
+    # can_read() reports readable without consuming anything.
     parser = make_hiredis_parser(has_data=False)
 
-    with patch("redis._parsers.hiredis._socket_can_read", return_value=True) as ready:
+    with (
+        patch("redis._parsers.hiredis._socket_can_read", return_value=True) as ready,
+        patch("redis._parsers.hiredis._socket_is_closed", return_value=False) as closed,
+    ):
         assert parser.can_read(timeout=0) is True
 
     ready.assert_called_once_with(parser._sock, 0)
+    closed.assert_called_once_with(parser._sock)
+
+
+def test_hiredis_can_read_raises_on_peer_closed_socket():
+    # regression for #4128: a peer-closed socket reads as ready but the reader
+    # has no buffered data. can_read() must raise ConnectionError so the pool
+    # recycles it, matching the pure-Python and async parsers.
+    parser = make_hiredis_parser(has_data=False)
+
+    with (
+        patch("redis._parsers.hiredis._socket_can_read", return_value=True),
+        patch("redis._parsers.hiredis._socket_is_closed", return_value=True),
+    ):
+        with pytest.raises(redis.ConnectionError):
+            parser.can_read(timeout=0)
 
 
 @pytest.mark.fixed_client
@@ -219,6 +239,39 @@ def test_hiredis_socket_can_read_under_fd_exhaustion():
         writable.close()
         empty_sock.close()
         peer.close()
+
+
+@pytest.mark.skipif(
+    not hasattr(select, "poll"), reason="select.poll not available on this platform"
+)
+def test_socket_is_closed_detects_peer_close():
+    # a peer-closed socket reads as ready (it yields EOF), so readiness alone
+    # cannot tell it apart from a socket holding pending data; _socket_is_closed()
+    # distinguishes them via POLLHUP without consuming data.
+    alive, peer = socket.socketpair()
+    closed, closing_peer = socket.socketpair()
+    try:
+        peer.sendall(b"pending push data")
+        closing_peer.close()
+
+        assert _socket_is_closed(alive) is False
+        assert _socket_is_closed(closed) is True
+    finally:
+        alive.close()
+        peer.close()
+        closed.close()
+
+
+def test_socket_is_closed_without_poll_reports_not_closed(monkeypatch):
+    # without select.poll (e.g. Windows) closed and has-data states are
+    # indistinguishable here, so we conservatively report not-closed.
+    monkeypatch.setattr("redis._parsers.hiredis._HAS_POLL", False)
+    closed, closing_peer = socket.socketpair()
+    try:
+        closing_peer.close()
+        assert _socket_is_closed(closed) is False
+    finally:
+        closed.close()
 
 
 def test_hiredis_can_read_does_not_decide_disable_decoding():
