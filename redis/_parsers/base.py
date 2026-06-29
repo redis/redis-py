@@ -534,7 +534,9 @@ class _AsyncRESPBase(AsyncBaseParser):
         self._active_read_timeout = None
 
     def _clear(self):
-        self._buffer = b""
+        """Clear parsed data but preserve unconsumed pipelined bytes."""
+        self._buffer = self._buffer[self._pos :]
+        self._pos = 0
         self._chunks.clear()
 
     def on_connect(self, connection):
@@ -543,7 +545,10 @@ class _AsyncRESPBase(AsyncBaseParser):
         if self._stream is None:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         self.encoder = connection.encoder
-        self._clear()
+        # Full reset on (re)connect — discard stale data from old connection
+        self._buffer = b""
+        self._pos = 0
+        self._chunks.clear()
         self._connected = True
 
     def on_disconnect(self):
