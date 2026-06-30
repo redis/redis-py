@@ -1,5 +1,8 @@
 import copy
+import os
 import platform
+import select
+import selectors
 import socket
 import ssl
 import threading
@@ -13,7 +16,7 @@ import pytest
 import redis
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
-from redis._parsers.hiredis import NOT_ENOUGH_DATA
+from redis._parsers.hiredis import NOT_ENOUGH_DATA, _socket_can_read
 from redis._parsers.socket import SocketBuffer
 from redis.backoff import NoBackoff
 from redis.cache import (
@@ -109,6 +112,113 @@ def test_hiredis_can_read_checks_socket_readiness_without_reading():
         assert parser.can_read(timeout=0) is True
 
     ready.assert_called_once_with(parser._sock, 0)
+
+
+@pytest.mark.fixed_client
+@pytest.mark.skipif(
+    not hasattr(select, "poll"), reason="select.poll not available on this platform"
+)
+@pytest.mark.parametrize(
+    "timeout,expected_poll_timeout",
+    [(0, 0), (0.001, 1.0), (None, None)],
+)
+def test_hiredis_socket_can_read_uses_poll(timeout, expected_poll_timeout):
+    sock = Mock(spec=["fileno"])
+    poller = Mock()
+    poller.poll.return_value = [(7, select.POLLIN)]
+
+    with patch("redis._parsers.hiredis.select.poll", return_value=poller):
+        assert _socket_can_read(sock, timeout=timeout) is True
+
+    poller.register.assert_called_once_with(sock, select.POLLIN)
+    poller.poll.assert_called_once_with(expected_poll_timeout)
+
+
+@pytest.mark.fixed_client
+def test_hiredis_socket_can_read_falls_back_to_default_selector():
+    sock = Mock(spec=["fileno"])
+    selector = MagicMock()
+    selector.select.return_value = [(sock, selectors.EVENT_READ)]
+    selector.__enter__.return_value = selector
+
+    with (
+        patch("redis._parsers.hiredis._HAS_POLL", False),
+        patch(
+            "redis._parsers.hiredis.selectors.DefaultSelector", return_value=selector
+        ),
+    ):
+        assert _socket_can_read(sock, timeout=0.001) is True
+
+    selector.register.assert_called_once_with(sock, selectors.EVENT_READ)
+    selector.select.assert_called_once_with(0.001)
+    # The selector must be used as a context manager so its fd is released; if
+    # the `with` block is dropped from the implementation, this catches it.
+    selector.__exit__.assert_called_once()
+
+
+@pytest.mark.fixed_client
+@pytest.mark.skipif(
+    not hasattr(select, "poll"),
+    reason="No select.poll; default selector falls back to select.select",
+)
+def test_hiredis_socket_can_read_handles_high_file_descriptor():
+    fcntl = pytest.importorskip("fcntl")
+
+    read_fd, write_fd = os.pipe()
+    high_read_fd = None
+    try:
+        try:
+            high_read_fd = fcntl.fcntl(read_fd, fcntl.F_DUPFD, 1024)
+        except OSError as exc:
+            pytest.skip(f"Could not allocate high file descriptor: {exc}")
+
+        assert _socket_can_read(high_read_fd, timeout=0) is False
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
+        if high_read_fd is not None and high_read_fd != read_fd:
+            os.close(high_read_fd)
+
+
+@pytest.mark.fixed_client
+@pytest.mark.forked
+@pytest.mark.skipif(
+    not hasattr(select, "poll"), reason="select.poll not available on this platform"
+)
+def test_hiredis_socket_can_read_under_fd_exhaustion():
+    # Readiness checks run on every connection acquisition, and fd pressure is
+    # what pushes sockets onto high fds in the first place, so they must not
+    # allocate file descriptors themselves. A per-check epoll/kqueue selector
+    # raises OSError (EMFILE) here; the poll() implementation passes.
+    #
+    # RLIMIT_NOFILE is process-wide, so @pytest.mark.forked runs this in its own
+    # process to avoid starving other threads/tests of file descriptors.
+    resource = pytest.importorskip("resource")
+
+    readable, writable = socket.socketpair()
+    empty_sock, peer = socket.socketpair()
+    writable.sendall(b"x")
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    held_fds = []
+    try:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (min(soft, 256), hard))
+        try:
+            while True:
+                held_fds.append(os.dup(0))
+        except OSError:
+            pass  # fd table is now full
+
+        assert _socket_can_read(readable, timeout=0) is True
+        assert _socket_can_read(empty_sock, timeout=0) is False
+    finally:
+        for fd in held_fds:
+            os.close(fd)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
+        readable.close()
+        writable.close()
+        empty_sock.close()
+        peer.close()
 
 
 def test_hiredis_can_read_does_not_decide_disable_decoding():

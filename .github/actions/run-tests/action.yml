@@ -31,6 +31,15 @@ inputs:
       Legacy aliases like "2-standalone" are also accepted.
     required: false
     default: 'all'
+  run-multidb-integration:
+    description: |
+      When 'true', also run the MultiDBClient (active-active) integration tests
+      after the main test run. A second cluster (the docker "multidb" profile's
+      cluster2) is started so the client can front two real clusters, in
+      addition to the two standalone servers already up. Enabled for a single
+      existing matrix cell so no extra CI runners are added.
+    required: false
+    default: 'false'
   repository:
     description: 'Repository to checkout'
     required: false
@@ -43,17 +52,17 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         repository: ${{ inputs.repository }}
         ref: ${{ inputs.ref }}
 
-    - uses: actions/setup-python@v5
+    - uses: actions/setup-python@v6
       with:
         python-version: ${{ inputs.python-version }}
         cache: 'pip'
 
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       if: ${{ inputs.parser-backend == 'hiredis' && inputs.hiredis-version == 'unstable' }}
       with:
         repository: redis/hiredis-py
@@ -115,8 +124,8 @@ runs:
 
           # Mapping of redis version to stack version
           declare -A redis_stack_version_mapping=(
-            ["7.4.4"]="rs-7.4.0-v5"
-            ["7.2.9"]="rs-7.2.0-v17"
+            ["7.4.9"]="rs-7.4.0-v8"
+            ["7.2.14"]="rs-7.2.0-v20"
           )
 
           if [[ -v redis_stack_version_mapping[$REDIS_VERSION] ]]; then
@@ -146,6 +155,15 @@ runs:
           echo "Using CLIENT_LIBS_TEST_IMAGE_TAG=$CLIENT_LIBS_TEST_IMAGE_TAG"
           invoke devenv --endpoints all
         fi
+
+        # Persist the resolved image tags so later steps start containers from
+        # the same Redis image as the rest of this environment. The
+        # multi-database integration step runs `docker compose up cluster2` in a
+        # fresh shell; without this it would fall back to compose's hard-coded
+        # default tag and could start the second cluster on a different Redis
+        # version than the first one.
+        echo "CLIENT_LIBS_TEST_IMAGE_TAG=${CLIENT_LIBS_TEST_IMAGE_TAG}" >> $GITHUB_ENV
+        echo "CLIENT_LIBS_TEST_STACK_IMAGE_TAG=${CLIENT_LIBS_TEST_STACK_IMAGE_TAG}" >> $GITHUB_ENV
 
         sleep 10 # time to settle
         echo "::endgroup::"
@@ -250,6 +268,38 @@ runs:
         fi
       shell: bash
 
+    - name: Run multi-database integration tests
+      # Folded into an existing matrix cell (see the `tests` job) so no extra CI
+      # runners are added. Brings up the second cluster (cluster2) on top of the
+      # already-running environment, then runs the MultiDBClient integration
+      # tests against two clusters and two standalone servers.
+      if: ${{ inputs.run-multidb-integration == 'true' }}
+      run: |
+        set -e
+
+        echo "::group::Starting second cluster (cluster2)"
+        # `--wait` blocks until cluster2's healthcheck reports healthy
+        # (cluster_state:ok) and fails fast if it becomes unhealthy or exits, so
+        # the tests never run against a cluster that did not actually form.
+        if ! docker compose up -d --wait --wait-timeout 120 cluster2; then
+          echo "::error::cluster2 did not become healthy; aborting before running the multi-database integration tests."
+          docker compose logs --no-color --tail 100 cluster2 || true
+          echo "::endgroup::"
+          exit 1
+        fi
+        echo "::endgroup::"
+
+        eventloop=""
+        if [ "${{inputs.event-loop}}" == "uvloop" ]; then
+          eventloop="--uvloop"
+        fi
+
+        echo "::group::Multi-database integration tests"
+        echo "Running MultiDBClient integration tests against two real Redis deployments (double-cluster and double-standalone)"
+        invoke multidb-integration-tests $eventloop
+        echo "::endgroup::"
+      shell: bash
+
     - name: Debug
       if: failure()
       run: |
@@ -261,7 +311,7 @@ runs:
       shell: bash
 
     - name: Upload test results and profiling data
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: pytest-results-redis_${{inputs.redis-version}}-python_${{inputs.python-version}}-parser_${{env.PARSER_BACKEND}}-el_${{inputs.event-loop}}-config_${{inputs.test-config}}
         path: |
@@ -272,6 +322,6 @@ runs:
         retention-days: 10
 
     - name: Upload codecov coverage
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v6
       with:
         fail_ci_if_error: false

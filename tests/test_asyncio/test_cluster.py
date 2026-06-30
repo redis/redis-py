@@ -12,7 +12,12 @@ import pytest
 import pytest_asyncio
 from _pytest.fixtures import FixtureRequest
 from redis._parsers import AsyncCommandsParser
-from redis.asyncio.cluster import ClusterNode, NodesManager, RedisCluster
+from redis.asyncio.cluster import (
+    ClusterNode,
+    NodesManager,
+    PipelineCommand,
+    RedisCluster,
+)
 from redis.asyncio.connection import Connection, SSLConnection, async_timeout
 from redis.asyncio.retry import Retry
 from redis.backoff import (
@@ -3502,6 +3507,125 @@ class TestNodesManager:
 @pytest.mark.fixed_client
 class TestClusterNodeConnectionHandling:
     """Tests for ClusterNode connection handling methods."""
+
+    class WriteFailingConnection:
+        def __init__(self, **kwargs: Any) -> None:
+            self.host = kwargs["host"]
+            self.port = kwargs["port"]
+            self.db = kwargs.get("db", 0)
+            self.is_connected = False
+            self.send_count = 0
+
+        def should_reconnect(self) -> bool:
+            return False
+
+        async def disconnect(self) -> None:
+            self.is_connected = False
+
+        def pack_command(self, *args: Any) -> bytes:
+            return b"packed-command"
+
+        def pack_commands(self, commands: Any) -> List[bytes]:
+            list(commands)
+            return [b"packed-commands"]
+
+        async def send_packed_command(self, command: Any) -> None:
+            self.send_count += 1
+            raise ConnectionError("simulated write failure")
+
+    async def test_execute_command_releases_connection_after_send_error(self) -> None:
+        node = ClusterNode(
+            default_host,
+            7000,
+            max_connections=1,
+            connection_class=self.WriteFailingConnection,
+        )
+
+        with pytest.raises(ConnectionError, match="simulated write failure"):
+            await node.execute_command("GET", "key")
+
+        assert len(node._connections) == 1
+        assert len(node._free) == 1
+        connection = node._connections[0]
+        assert node._free[0] is connection
+
+        with pytest.raises(ConnectionError, match="simulated write failure"):
+            await node.execute_command("GET", "key")
+
+        assert len(node._connections) == 1
+        assert len(node._free) == 1
+        assert node._free[0] is connection
+        assert connection.send_count == 2
+
+    async def test_execute_pipeline_releases_connection_after_send_error(self) -> None:
+        node = ClusterNode(
+            default_host,
+            7000,
+            max_connections=1,
+            connection_class=self.WriteFailingConnection,
+        )
+
+        with pytest.raises(ConnectionError, match="simulated write failure"):
+            await node.execute_pipeline([PipelineCommand(0, "GET", "key")])
+
+        assert len(node._connections) == 1
+        assert len(node._free) == 1
+        connection = node._connections[0]
+        assert node._free[0] is connection
+
+        with pytest.raises(ConnectionError, match="simulated write failure"):
+            await node.execute_pipeline([PipelineCommand(0, "GET", "key")])
+
+        assert len(node._connections) == 1
+        assert len(node._free) == 1
+        assert node._free[0] is connection
+        assert connection.send_count == 2
+
+    async def test_execute_command_releases_connection_after_disconnect_error(
+        self,
+    ) -> None:
+        node = ClusterNode(
+            default_host,
+            7000,
+            max_connections=1,
+            connection_class=self.WriteFailingConnection,
+        )
+
+        with mock.patch.object(
+            ClusterNode,
+            "disconnect_if_needed",
+            autospec=True,
+            side_effect=ConnectionError("simulated disconnect failure"),
+        ):
+            with pytest.raises(ConnectionError, match="simulated disconnect failure"):
+                await node.execute_command("GET", "key")
+
+        assert len(node._connections) == 1
+        assert len(node._free) == 1
+        assert node._free[0] is node._connections[0]
+
+    async def test_execute_pipeline_releases_connection_after_disconnect_error(
+        self,
+    ) -> None:
+        node = ClusterNode(
+            default_host,
+            7000,
+            max_connections=1,
+            connection_class=self.WriteFailingConnection,
+        )
+
+        with mock.patch.object(
+            ClusterNode,
+            "disconnect_if_needed",
+            autospec=True,
+            side_effect=ConnectionError("simulated disconnect failure"),
+        ):
+            with pytest.raises(ConnectionError, match="simulated disconnect failure"):
+                await node.execute_pipeline([PipelineCommand(0, "GET", "key")])
+
+        assert len(node._connections) == 1
+        assert len(node._free) == 1
+        assert node._free[0] is node._connections[0]
 
     async def test_update_active_connections_for_reconnect(self) -> None:
         """

@@ -494,11 +494,19 @@ class SearchCommands:
         else:
             data = res
 
+        if data is None:
+            data = {}
+        # On RESP3 connections with decode_responses=False the server's map
+        # keys arrive as bytes, so normalise structural keys to strings
+        # before lookup.  Mirrors ``Result.from_resp3``.
+        data = {str_if_bytes(k): v for k, v in data.items()}
+
         warnings = [str_if_bytes(w) for w in data.get("warning", [])]
         total = data.get("total_results", 0)
 
         rows = []
         for result_item in data.get("results", []):
+            result_item = {str_if_bytes(k): v for k, v in result_item.items()}
             extra_attrs = result_item.get("extra_attributes", {})
             # Convert dict to flat list [key, value, key, value, ...]
             # to match RESP2 row format consumers expect.
@@ -640,6 +648,10 @@ class SearchCommands:
         """
         if not isinstance(res, dict):
             return self._parse_spellcheck(res, **kwargs)
+        # On RESP3 connections with decode_responses=False the server's map
+        # keys arrive as bytes, so normalise the structural ``results`` key
+        # to a string before lookup.  Mirrors ``Result.from_resp3``.
+        res = {str_if_bytes(k): v for k, v in res.items()}
         corrections = {}
         results = res.get("results", {})
         for term, suggestions in results.items():
@@ -654,8 +666,11 @@ class SearchCommands:
                     score_str = str(score)
                     if score_str.endswith(".0"):
                         score_str = score_str[:-2]
+                    # Preserve ``suggestion`` as-is so it keeps the
+                    # ``decode_responses`` shape RESP2 would produce
+                    # (``str`` when decoded, ``bytes`` otherwise).
                     term_corrections.append(
-                        {"score": score_str, "suggestion": str(suggestion)}
+                        {"score": score_str, "suggestion": suggestion}
                     )
             if term_corrections:
                 corrections[term] = term_corrections

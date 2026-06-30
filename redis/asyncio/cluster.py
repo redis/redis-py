@@ -1702,47 +1702,52 @@ class ClusterNode:
     async def execute_command(self, *args: Any, **kwargs: Any) -> Any:
         # Acquire connection
         connection = self.acquire_connection()
-        # Handle lazy disconnect for connections marked for reconnect
-        await self.disconnect_if_needed(connection)
-
-        # Execute command
-        await connection.send_packed_command(connection.pack_command(*args))
-
-        # Read response
         try:
+            # Handle lazy disconnect for connections marked for reconnect
+            await self.disconnect_if_needed(connection)
+
+            # Execute command
+            await connection.send_packed_command(connection.pack_command(*args))
+
+            # Read response
             return await self.parse_response(connection, args[0], **kwargs)
         finally:
-            await self.disconnect_if_needed(connection)
-            # Release connection
-            self.release(connection)
+            try:
+                await self.disconnect_if_needed(connection)
+            finally:
+                # Release connection
+                self.release(connection)
 
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:
         # Acquire connection
         connection = self.acquire_connection()
-        # Handle lazy disconnect for connections marked for reconnect
-        await self.disconnect_if_needed(connection)
+        try:
+            # Handle lazy disconnect for connections marked for reconnect
+            await self.disconnect_if_needed(connection)
 
-        # Execute command
-        await connection.send_packed_command(
-            connection.pack_commands(cmd.args for cmd in commands)
-        )
+            # Execute command
+            await connection.send_packed_command(
+                connection.pack_commands(cmd.args for cmd in commands)
+            )
 
-        # Read responses
-        ret = False
-        for cmd in commands:
+            # Read responses
+            ret = False
+            for cmd in commands:
+                try:
+                    cmd.result = await self.parse_response(
+                        connection, cmd.args[0], **cmd.kwargs
+                    )
+                except Exception as e:
+                    cmd.result = e
+                    ret = True
+
+            return ret
+        finally:
             try:
-                cmd.result = await self.parse_response(
-                    connection, cmd.args[0], **cmd.kwargs
-                )
-            except Exception as e:
-                cmd.result = e
-                ret = True
-
-        # Release connection
-        await self.disconnect_if_needed(connection)
-        self.release(connection)
-
-        return ret
+                await self.disconnect_if_needed(connection)
+            finally:
+                # Release connection
+                self.release(connection)
 
     async def re_auth_callback(self, token: TokenInterface):
         tmp_queue = collections.deque()
@@ -3188,35 +3193,50 @@ class TransactionStrategy(AbstractStrategy):
     async def reset(self):
         self._command_queue = []
 
-        # make sure to reset the connection state in the event that we were
-        # watching something
-        if self._transaction_connection:
-            try:
-                if self._watching:
-                    # call this manually since our unwatch or
-                    # immediate_execute_command methods can call reset()
-                    await self._transaction_connection.send_command("UNWATCH")
-                    await self._transaction_connection.read_response()
-                # we can safely return the connection to the pool here since we're
-                # sure we're no longer WATCHing anything
-                await self._transaction_node.disconnect_if_needed(
-                    self._transaction_connection
+        try:
+            # make sure to reset the connection state in the event that we
+            # were watching something
+            if self._transaction_connection:
+                try:
+                    if self._watching:
+                        # call this manually since our unwatch or
+                        # immediate_execute_command methods can call reset()
+                        await self._transaction_connection.send_command("UNWATCH")
+                        await self._transaction_connection.read_response()
+                except self.CONNECTION_ERRORS:
+                    # disconnect will also remove any previous WATCHes
+                    if self._transaction_connection:
+                        await self._transaction_connection.disconnect()
+                except asyncio.CancelledError:
+                    # Disconnect so any unread UNWATCH reply does not get
+                    # served to the next caller that takes the connection.
+                    if self._transaction_connection:
+                        await self._transaction_connection.disconnect()
+                    raise
+                else:
+                    # On the happy path, honor lazy reconnect before release.
+                    await self._transaction_node.disconnect_if_needed(
+                        self._transaction_connection
+                    )
+        finally:
+            # Always return the connection to the node's free queue, even on
+            # cancellation, so cancelled resets do not leak pooled
+            # connections. Detach the reference before releasing so the
+            # strategy never holds a pointer to a returned connection.
+            # ClusterNode.release is synchronous, so no shield is required.
+            if self._transaction_connection and self._transaction_node:
+                connection, self._transaction_connection = (
+                    self._transaction_connection,
+                    None,
                 )
-                self._transaction_node.release(self._transaction_connection)
-                self._transaction_connection = None
-            except self.CONNECTION_ERRORS:
-                # disconnect will also remove any previous WATCHes
-                if self._transaction_connection and self._transaction_node:
-                    await self._transaction_connection.disconnect()
-                    self._transaction_node.release(self._transaction_connection)
-                    self._transaction_connection = None
-
-        # clean up the other instance attributes
-        self._transaction_node = None
-        self._watching = False
-        self._explicit_transaction = False
-        self._pipeline_slots = set()
-        self._executing = False
+                self._transaction_node.release(connection)
+            # clean up the other instance attributes
+            self._transaction_connection = None
+            self._transaction_node = None
+            self._watching = False
+            self._explicit_transaction = False
+            self._pipeline_slots = set()
+            self._executing = False
 
     def multi(self):
         if self._explicit_transaction:
