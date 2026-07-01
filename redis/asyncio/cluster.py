@@ -159,16 +159,11 @@ class AsyncMaintNotificationsAbstractRedisCluster:
         maint_notifications_config: MaintNotificationsConfig | None,
         **kwargs,
     ) -> None:
+        # The RESP3 requirement is validated in RedisCluster.__init__ before the
+        # NodesManager is constructed; this mixin is only ever run from there, so
+        # the config it receives has already been validated.
         is_protocol_supported = check_protocol_version(kwargs.get("protocol"), 3)
 
-        if (
-            maint_notifications_config
-            and maint_notifications_config.enabled
-            and not is_protocol_supported
-        ):
-            raise RedisError(
-                "Maintenance notifications handlers on connection are only supported with RESP version 3"
-            )
         if maint_notifications_config is None and is_protocol_supported:
             maint_notifications_config = MaintNotificationsConfig()
 

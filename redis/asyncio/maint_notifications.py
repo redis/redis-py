@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import logging
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -26,6 +27,25 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _ScheduledCallback = Callable[..., Awaitable[None]]
+
+
+def _log_task_exception(message: str, task: "asyncio.Task[Any]") -> None:
+    """Task done-callback that surfaces a failed task's exception in the logs.
+
+    Without it, an unhandled exception in a fire-and-forget task is only
+    reported by asyncio as a noisy "Task exception was never retrieved"
+    warning. Retrieving the exception here suppresses that warning and logs a
+    meaningful error instead. Cancellation is expected and left unlogged.
+
+    Bind ``message`` with ``functools.partial`` before passing to
+    ``add_done_callback`` (which supplies ``task``).
+    """
+    try:
+        exc = task.exception()
+    except asyncio.CancelledError:
+        return
+    if exc:
+        logger.error(message, exc_info=exc)
 
 
 def add_debug_log_for_notification(
@@ -219,7 +239,12 @@ class AsyncMaintNotificationsPoolHandler:
         task = asyncio.create_task(self._run_after(deadline, callback, *args))
         self._scheduled_tasks.add(task)
         task.add_done_callback(self._scheduled_tasks.discard)
-        task.add_done_callback(self._log_scheduled_task_result)
+        task.add_done_callback(
+            functools.partial(
+                _log_task_exception,
+                "Error handling scheduled maintenance notification",
+            )
+        )
 
     async def _run_after(
         self,
@@ -239,17 +264,6 @@ class AsyncMaintNotificationsPoolHandler:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-
-    @staticmethod
-    def _log_scheduled_task_result(task: asyncio.Task[None]) -> None:
-        try:
-            exc = task.exception()
-        except asyncio.CancelledError:
-            return
-        if exc:
-            logger.error(
-                "Error handling scheduled maintenance notification", exc_info=exc
-            )
 
 
 class AsyncMaintNotificationsConnectionHandler:
@@ -430,11 +444,27 @@ class AsyncOSSMaintNotificationsHandler:
         # This also breaks the inline call chain that would otherwise deadlock:
         # initialize() dispatches commands whose responses may carry more push
         # notifications; as a separate task it can run while this one awaits.
-        task = asyncio.get_running_loop().create_task(
-            self._do_handle_notification(notification)
-        )
-        self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
+        #
+        # If scheduling the task (or wiring its callbacks) fails, release the
+        # in-progress reservation made above. Otherwise the notification would be
+        # stuck in _in_progress forever - the dedup guard would skip it on every
+        # future arrival, and _do_handle_notification's finally (which normally
+        # clears it) never runs because the task was never started.
+        try:
+            task = asyncio.get_running_loop().create_task(
+                self._do_handle_notification(notification)
+            )
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+            task.add_done_callback(
+                functools.partial(
+                    _log_task_exception,
+                    "Error handling maintenance notification background task",
+                )
+            )
+        except Exception:
+            self._in_progress.discard(notification)
+            raise
 
     async def _do_handle_notification(
         self, notification: MaintenanceNotification
@@ -532,6 +562,13 @@ class AsyncOSSMaintNotificationsHandler:
                     )
                     self._background_tasks.add(task)
                     task.add_done_callback(self._background_tasks.discard)
+                    task.add_done_callback(
+                        functools.partial(
+                            _log_task_exception,
+                            "Error disconnecting free connections after "
+                            "maintenance notification",
+                        )
+                    )
                     if not handoff_recorded:
                         await record_connection_handoff(
                             pool_name=f"{current_node.host}:{current_node.port}"

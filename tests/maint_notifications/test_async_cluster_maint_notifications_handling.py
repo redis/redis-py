@@ -745,9 +745,7 @@ class TestAsyncClusterMaintNotificationsHandling(
 
         # Topology updated: new node joined, replaced node gone.
         assert (
-            self.cluster.nodes_manager.get_node(
-                host=NODE_IP_PROXY, port=NODE_PORT_NEW
-            )
+            self.cluster.nodes_manager.get_node(host=NODE_IP_PROXY, port=NODE_PORT_NEW)
             is not None
         )
         assert (
