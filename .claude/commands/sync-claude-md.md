@@ -1,5 +1,5 @@
 ---
-description: Audit CLAUDE.md against the current state of the repo and update it directly. Run when wrapping up a feature or after significant structural changes.
+description: Audit AGENTS.md (the canonical agent guide; CLAUDE.md is only an `@AGENTS.md` include) against the current state of the repo and update it directly. Run when wrapping up a feature or after significant structural changes.
 ---
 
 The full instructions for this command live in

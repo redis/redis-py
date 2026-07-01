@@ -84,6 +84,7 @@ the PR can be labeled correctly.
 
 ## sync/async note
 
-A single behavior change is frequently delivered as paired sync/async work but normally a single PR.
-If two separate PRs (one sync, one async) implement the same change, list both lines under the same
-category; do not merge them into one entry.
+A single behavior change is frequently delivered as paired sync/async work, usually in a single PR.
+If two separate PRs (one sync, one async) implement the same change, treat them as one change: group
+them onto a single line under the same category, with both PR numbers in one bracket group
+(`- <title> (#3434 #3456)`), per the grouping rule in `release-notes-template.md`.
