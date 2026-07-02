@@ -6,6 +6,7 @@ import selectors
 import socket
 import ssl
 import threading
+import time
 import types
 from errno import ECONNREFUSED, EWOULDBLOCK
 from typing import Any
@@ -260,6 +261,31 @@ def test_socket_is_closed_detects_peer_close():
         alive.close()
         peer.close()
         closed.close()
+
+
+@pytest.mark.skipif(
+    not hasattr(select, "POLLRDHUP"),
+    reason="POLLRDHUP is Linux-specific; graceful FIN reports POLLHUP elsewhere",
+)
+def test_socket_is_closed_detects_tcp_peer_half_close():
+    # on Linux a graceful peer close (FIN) reports POLLIN|POLLRDHUP and never
+    # POLLHUP, so _socket_is_closed() must register and check POLLRDHUP. a real
+    # TCP socket pair is required: the kernel (not a mock) produces the event,
+    # and AF_UNIX socketpairs set POLLHUP on close and would hide the gap. this
+    # fails on POLLHUP-only code.
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    client = socket.create_connection(listener.getsockname())
+    server, _ = listener.accept()
+    try:
+        assert _socket_is_closed(client) is False
+        server.close()  # graceful FIN
+        time.sleep(0.1)
+        assert _socket_is_closed(client) is True
+    finally:
+        client.close()
+        listener.close()
 
 
 def test_socket_is_closed_without_poll_reports_not_closed(monkeypatch):

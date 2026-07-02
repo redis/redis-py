@@ -27,6 +27,10 @@ NOT_ENOUGH_DATA = object()
 # select.poll() is unavailable on Windows; fall back to selectors there.
 _HAS_POLL = hasattr(select, "poll")
 
+# POLLRDHUP (Linux) reports a peer half-close (FIN) that POLLHUP does not cover.
+# It is absent on macOS/Windows, where 0 turns the masks that use it into no-ops.
+_POLLRDHUP = getattr(select, "POLLRDHUP", 0)
+
 
 def _socket_can_read(sock, timeout: float) -> bool:
     # SSL sockets can have decrypted bytes buffered above the OS socket layer.
@@ -55,19 +59,25 @@ def _socket_can_read(sock, timeout: float) -> bool:
 def _socket_is_closed(sock) -> bool:
     # A server-closed socket reads as ready (it yields EOF), so readiness alone
     # cannot tell it apart from a socket holding pending data. poll() can:
-    # POLLHUP/POLLERR/POLLNVAL flag a closed/errored socket while a live socket
+    # POLLHUP/POLLERR/POLLNVAL/POLLRDHUP flag a closed socket while a live socket
     # with buffered data reports POLLIN only. Polling is non-destructive, so any
     # pending push messages are left intact. Without poll() the two states are
     # indistinguishable here, so report not-closed.
+    #
+    # POLLRDHUP must be in the register mask or poll() won't report it: on Linux
+    # a graceful peer close (FIN) reports POLLIN|POLLRDHUP and never POLLHUP, so
+    # without it a closed connection is missed. macOS/Windows set POLLHUP on
+    # close instead, and _POLLRDHUP is 0 there.
     if not _HAS_POLL:
         return False
     poller = select.poll()
-    poller.register(sock, select.POLLIN)
+    poller.register(sock, select.POLLIN | _POLLRDHUP)
     events = poller.poll(0)
     if not events:
         return False
     _, revents = events[0]
-    return bool(revents & (select.POLLHUP | select.POLLERR | select.POLLNVAL))
+    closed_flags = select.POLLHUP | select.POLLERR | select.POLLNVAL | _POLLRDHUP
+    return bool(revents & closed_flags)
 
 
 class _HiredisReaderArgs(TypedDict, total=False):
