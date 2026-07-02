@@ -45,6 +45,20 @@ def parse_range_unified(response, **kwargs):
     return [[r[0], float(r[1])] for r in response]
 
 
+def parse_n_range(response, **kwargs):
+    """Parse the TS.NRANGE / TS.NREVRANGE response.
+
+    The wire shape is ``[[timestamp, [value_0, value_1, ...]], ...]`` where the
+    value array preserves input key order and ``values`` length equals the
+    number of queried keys. Rows are returned in server order (never re-sorted
+    or reversed), and a missing raw sample or missing aggregation bucket is kept
+    as ``float('nan')`` rather than converted to ``None``.
+    """
+    if not response:
+        return []
+    return [[int(row[0]), [float(v) for v in row[1]]] for row in response]
+
+
 def parse_get(response):
     """Parse get response. Used by TS.GET (legacy shape)."""
     if not response:

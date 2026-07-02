@@ -111,6 +111,9 @@ TimeSeriesSample = tuple[int, float] | list[int | float]
 TimeSeriesRangeResponse = list[TimeSeriesSample]
 TimeSeriesMRangeSeries = list[Any]
 TimeSeriesMRangeResponse = list[Any] | dict[bytes | str, TimeSeriesMRangeSeries]
+# Timestamp-major row ``[timestamp, [value_for_key_0, value_for_key_1, ...]]``
+# returned by TS.NRANGE / TS.NREVRANGE.
+TimeSeriesNRangeResponse = list[list[int | list[float]]]
 BloomScanDumpResponse = tuple[int, bytes | None]
 ModuleListResponse = list[bytes | int | float | str | None]
 BlockingZSetPopResponse = (
