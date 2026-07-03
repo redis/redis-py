@@ -38,7 +38,7 @@ jobs:
     name: Dependency audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: pypa/gh-action-pip-audit@v1.0.8
         with:
           inputs: dev_requirements.txt
@@ -52,7 +52,7 @@ jobs:
     name: Code linters
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.10"
@@ -102,7 +102,7 @@ jobs:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Run tests
         uses: ./.github/actions/run-tests
         with:
@@ -146,7 +146,7 @@ jobs:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Run tests
         uses: ./.github/actions/run-tests
         with:
@@ -188,7 +188,7 @@ jobs:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: PyPy Redis ${{ matrix.redis-version }}; ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Run tests
         uses: ./.github/actions/run-tests
         with:
@@ -228,7 +228,7 @@ jobs:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}} (${{ matrix.hiredis-version }}); EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Run tests
         uses: ./.github/actions/run-tests
         with:
@@ -268,7 +268,7 @@ jobs:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Run tests
         uses: ./.github/actions/run-tests
         with:
@@ -287,7 +287,7 @@ jobs:
       matrix:
         extension: ['tar.gz', 'whl']
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.10"
@@ -306,7 +306,7 @@ jobs:
       matrix:
         python-version: ['3.10', '3.11', '3.12', '3.13', '3.14', 'pypy-3.10', 'pypy-3.11']
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
