@@ -618,6 +618,15 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("2.8.12")
     @pytest.mark.onlynoncluster
+    async def test_client_kill_filter_by_type(self, r: redis.Redis):
+        # 'replica' and its legacy alias 'slave' are both accepted client types.
+        # With no matching clients connected the server returns a kill count of 0.
+        for client_type in ("master", "slave", "replica", "pubsub"):
+            resp = await r.client_kill_filter(_type=client_type)
+            assert isinstance(resp, int)
+
+    @skip_if_server_version_lt("2.8.12")
+    @pytest.mark.onlynoncluster
     async def test_client_kill_filter_by_id(self, r: redis.Redis, r2):
         await r.client_setname("redis-py-c1")
         await r2.client_setname("redis-py-c2")

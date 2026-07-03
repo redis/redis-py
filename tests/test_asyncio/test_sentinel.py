@@ -9,6 +9,7 @@ import redis.asyncio.sentinel
 from redis import exceptions
 from redis.asyncio.sentinel import (
     MasterNotFoundError,
+    ReplicaNotFoundError,
     Sentinel,
     SentinelConnectionPool,
     SlaveNotFoundError,
@@ -254,6 +255,78 @@ async def test_slave_round_robin(cluster, sentinel, master_ip):
     # Fallback to master
     assert await rotator.__anext__() == (master_ip, 6379)
     with pytest.raises(SlaveNotFoundError):
+        await rotator.__anext__()
+
+
+@pytest.mark.onlynoncluster
+def test_slave_not_found_error_is_replica_not_found_error():
+    # Backwards compatibility: the legacy SlaveNotFoundError is now a subclass of
+    # ReplicaNotFoundError, so an existing raise is catchable under either name.
+    assert issubclass(SlaveNotFoundError, ReplicaNotFoundError)
+    with pytest.raises(ReplicaNotFoundError):
+        raise SlaveNotFoundError("boom")
+    with pytest.raises(SlaveNotFoundError):
+        raise SlaveNotFoundError("boom")
+
+
+@pytest.mark.onlynoncluster
+async def test_filter_replicas_matches_filter_slaves(sentinel):
+    replicas = [
+        {"ip": "replica0", "port": 1, "is_odown": False, "is_sdown": False},
+        {"ip": "replica1", "port": 2, "is_odown": True, "is_sdown": False},
+    ]
+    assert sentinel.filter_replicas(replicas) == sentinel.filter_slaves(replicas)
+    assert sentinel.filter_replicas(replicas) == [("replica0", 1)]
+
+
+@pytest.mark.onlynoncluster
+async def test_discover_replicas(cluster, sentinel):
+    assert await sentinel.discover_replicas("mymaster") == []
+
+    cluster.slaves = [
+        {"ip": "replica0", "port": 1234, "is_odown": False, "is_sdown": False},
+        {"ip": "replica1", "port": 1234, "is_odown": False, "is_sdown": False},
+    ]
+    assert await sentinel.discover_replicas("mymaster") == [
+        ("replica0", 1234),
+        ("replica1", 1234),
+    ]
+    # identical behaviour to the legacy discover_slaves
+    assert await sentinel.discover_replicas(
+        "mymaster"
+    ) == await sentinel.discover_slaves("mymaster")
+
+
+@pytest.mark.onlynoncluster
+async def test_replica_for(cluster, sentinel):
+    cluster.slaves = [
+        {"ip": "127.0.0.1", "port": 6379, "is_odown": False, "is_sdown": False}
+    ]
+    async with sentinel.replica_for("mymaster", db=9) as replica:
+        assert await replica.ping()
+
+
+@pytest.mark.onlynoncluster
+async def test_replica_for_replica_not_found_error(cluster, sentinel):
+    cluster.master["is_odown"] = True
+    async with sentinel.replica_for("mymaster", db=9) as replica:
+        with pytest.raises(ReplicaNotFoundError):
+            await replica.ping()
+
+
+@pytest.mark.onlynoncluster
+async def test_replica_round_robin(cluster, sentinel, master_ip):
+    cluster.slaves = [
+        {"ip": "replica0", "port": 6379, "is_odown": False, "is_sdown": False},
+        {"ip": "replica1", "port": 6379, "is_odown": False, "is_sdown": False},
+    ]
+    pool = SentinelConnectionPool("mymaster", sentinel)
+    rotator = pool.rotate_replicas()
+    assert await rotator.__anext__() in (("replica0", 6379), ("replica1", 6379))
+    assert await rotator.__anext__() in (("replica0", 6379), ("replica1", 6379))
+    # Fallback to master
+    assert await rotator.__anext__() == (master_ip, 6379)
+    with pytest.raises(ReplicaNotFoundError):
         await rotator.__anext__()
 
 

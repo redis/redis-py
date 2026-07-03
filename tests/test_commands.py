@@ -825,6 +825,15 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.12")
+    def test_client_kill_filter_by_type(self, r):
+        # 'replica' and its legacy alias 'slave' are both accepted client types.
+        # With no matching clients connected the server returns a kill count of 0.
+        for client_type in ("master", "slave", "replica", "pubsub"):
+            resp = r.client_kill_filter(_type=client_type)
+            assert isinstance(resp, int)
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("2.8.12")
     def test_client_kill_filter_by_id(self, r, r2):
         r.client_setname("redis-py-c1")
         r2.client_setname("redis-py-c2")
