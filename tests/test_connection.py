@@ -135,6 +135,54 @@ def test_hiredis_can_read_raises_on_peer_closed_socket():
             parser.can_read(timeout=0)
 
 
+@pytest.mark.skipif(not HIREDIS_AVAILABLE, reason="hiredis is not installed")
+@pytest.mark.skipif(
+    not hasattr(select, "poll"), reason="select.poll not available on this platform"
+)
+def test_hiredis_can_read_consumes_pending_push_before_reporting_closed():
+    # a peer that sends push data and then closes reports the closed poll flags
+    # while the data is still buffered. can_read() must keep reporting readable
+    # so pending messages (e.g. cache invalidations) get processed, and only
+    # raise once the buffer is drained, matching the pure-Python parser which
+    # consumes buffered data before raising.
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    client = socket.create_connection(listener.getsockname())
+    server, _ = listener.accept()
+
+    parser = _HiredisParser(socket_read_size=65536)
+    connection = mock.Mock()
+    connection._sock = client
+    connection.socket_timeout = None
+    connection.encoder.encoding_errors = "strict"
+    connection.encoder.decode_responses = False
+    parser.on_connect(connection)
+    try:
+        server.sendall(b">3\r\n$7\r\nmessage\r\n$2\r\nch\r\n$5\r\nhello\r\n")
+        server.close()  # graceful FIN with the push message still buffered
+        time.sleep(0.1)
+
+        assert parser.can_read(timeout=0) is True
+        assert parser.read_response(push_request=True) == [b"message", b"ch", b"hello"]
+        with pytest.raises(redis.ConnectionError):
+            parser.can_read(timeout=0)
+    finally:
+        parser.on_disconnect()
+        client.close()
+        listener.close()
+
+
+def test_socket_is_closed_reports_not_closed_with_pending_ssl_data():
+    # SSL sockets buffer decrypted bytes above the OS socket layer; those must
+    # be processed before the connection can be treated as closed, like
+    # kernel-level pending data.
+    sock = Mock(spec=["pending", "fileno"])
+    sock.pending.return_value = 10
+
+    assert _socket_is_closed(sock) is False
+
+
 @pytest.mark.fixed_client
 @pytest.mark.skipif(
     not hasattr(select, "poll"), reason="select.poll not available on this platform"
@@ -282,6 +330,34 @@ def test_socket_is_closed_detects_tcp_peer_half_close():
         assert _socket_is_closed(client) is False
         server.close()  # graceful FIN
         time.sleep(0.1)
+        assert _socket_is_closed(client) is True
+    finally:
+        client.close()
+        listener.close()
+
+
+@pytest.mark.skipif(
+    not hasattr(select, "poll"), reason="select.poll not available on this platform"
+)
+def test_socket_is_closed_defers_close_until_pending_data_is_read():
+    # a peer that sends data and then closes reports the closed poll flags
+    # while unread bytes remain (POLLIN|POLLHUP on macOS, POLLIN|POLLRDHUP on
+    # Linux). that data may carry cache invalidations that must be processed
+    # before the connection is dropped, so _socket_is_closed() must report
+    # not-closed until the buffer is drained, without consuming anything.
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    client = socket.create_connection(listener.getsockname())
+    server, _ = listener.accept()
+    try:
+        server.sendall(b"pending invalidation")
+        server.close()  # graceful FIN with data still buffered
+        time.sleep(0.1)
+
+        assert _socket_is_closed(client) is False
+        # the MSG_PEEK confirmation must not consume the pending data
+        assert client.recv(65536) == b"pending invalidation"
         assert _socket_is_closed(client) is True
     finally:
         client.close()

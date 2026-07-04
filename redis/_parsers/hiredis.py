@@ -70,6 +70,10 @@ def _socket_is_closed(sock) -> bool:
     # close instead, and _POLLRDHUP is 0 there.
     if not _HAS_POLL:
         return False
+    # Decrypted TLS bytes buffered above the OS socket layer must be processed
+    # before the connection can be treated as closed, like kernel-level data.
+    if hasattr(sock, "pending") and sock.pending():
+        return False
     poller = select.poll()
     poller.register(sock, select.POLLIN | _POLLRDHUP)
     events = poller.poll(0)
@@ -77,7 +81,25 @@ def _socket_is_closed(sock) -> bool:
         return False
     _, revents = events[0]
     closed_flags = select.POLLHUP | select.POLLERR | select.POLLNVAL | _POLLRDHUP
-    return bool(revents & closed_flags)
+    if not (revents & closed_flags):
+        return False
+    # POLLHUP/POLLRDHUP can be reported while unread data is still buffered
+    # (the peer sent data, then closed). That data may carry cache
+    # invalidations that must be processed before the connection is dropped,
+    # so confirm with a non-destructive MSG_PEEK and report closed only once
+    # the buffer is drained.
+    try:
+        return sock.recv(1, socket.MSG_PEEK) == b""
+    except NONBLOCKING_EXCEPTIONS:
+        # Transient would-block: data may still arrive, keep the connection.
+        return False
+    except ValueError:
+        # SSL sockets do not support recv() flags; their buffered plaintext is
+        # covered by the pending() check above, so rely on the poll flags.
+        return True
+    except OSError:
+        # The socket is errored (POLLERR/POLLNVAL); nothing left to read.
+        return True
 
 
 class _HiredisReaderArgs(TypedDict, total=False):
