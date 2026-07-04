@@ -235,6 +235,18 @@ class TestConnectionPool:
             await pool.disconnect(inuse_connections=False)
             assert conn.is_connected
 
+    async def test_pool_context_manager(self):
+        pool = redis.ConnectionPool(connection_class=DummyConnection)
+
+        async with pool as entered:
+            assert entered is pool
+            conn = await pool.get_connection()
+            await conn.connect()
+            assert conn.is_connected
+
+        # exiting the context closes the pool, disconnecting all connections
+        assert not conn.is_connected
+
     @pytest.mark.fixed_client
     async def test_lock_not_held_during_connection_establishment(self):
         """

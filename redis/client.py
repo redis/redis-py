@@ -222,6 +222,20 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         Return a Redis client from the given connection pool.
         The Redis client will take ownership of the connection pool and
         close it when the Redis client is closed.
+
+        Because the client closes (disconnects all connections in) the pool
+        when it is closed or garbage-collected, the pool must not be shared
+        with other clients. Constructing multiple clients from the same pool
+        via ``from_pool`` -- for example one per request across threads -- is
+        not thread safe: when one client is closed it will disconnect
+        connections still in use by the others.
+
+        To share a single pool across clients, construct the pool explicitly
+        and manage its lifecycle instead. ``ConnectionPool`` supports the
+        context manager protocol for this::
+
+            with ConnectionPool.from_url(url) as pool:
+                r = Redis(connection_pool=pool)
         """
         client = cls(
             connection_pool=connection_pool,

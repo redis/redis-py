@@ -1705,6 +1705,12 @@ class ConnectionPool(ConnectionPoolInterface):
         """Close the pool, disconnecting all connections"""
         await self.disconnect()
 
+    async def __aenter__(self) -> "ConnectionPool":
+        return self
+
+    async def __aexit__(self, exc_type, exc_value, traceback) -> None:
+        await self.aclose()
+
     def set_retry(self, retry: "Retry") -> None:
         for conn in self._available_connections:
             conn.retry = retry

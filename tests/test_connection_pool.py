@@ -209,6 +209,18 @@ class TestConnectionPool:
         pool.disconnect(inuse_connections=False)
         assert conn._sock
 
+    def test_pool_context_manager(self):
+        pool = self.get_pool(connection_class=DummyConnection)
+
+        with pool as entered:
+            assert entered is pool
+            conn = pool.get_connection()
+            conn.connect()
+            assert conn._sock is not None
+
+        # exiting the context closes the pool, disconnecting all connections
+        assert conn._sock is None
+
 
 class TestBlockingConnectionPool:
     def get_pool(self, connection_kwargs=None, max_connections=10, timeout=20):

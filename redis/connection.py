@@ -3297,6 +3297,12 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         """Close the pool, disconnecting all connections"""
         self.disconnect()
 
+    def __enter__(self) -> "ConnectionPool":
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.close()
+
     def set_retry(self, retry: Retry) -> None:
         self.connection_kwargs.update({"retry": retry})
         for conn in self._available_connections:
