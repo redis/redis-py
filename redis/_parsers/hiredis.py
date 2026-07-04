@@ -58,16 +58,10 @@ def _socket_can_read(sock, timeout: float) -> bool:
 
 def _socket_is_closed(sock) -> bool:
     # A server-closed socket reads as ready (it yields EOF), so readiness alone
-    # cannot tell it apart from a socket holding pending data. poll() can:
-    # POLLHUP/POLLERR/POLLNVAL/POLLRDHUP flag a closed socket while a live socket
-    # with buffered data reports POLLIN only. Polling is non-destructive, so any
-    # pending push messages are left intact. Without poll() the two states are
-    # indistinguishable here, so report not-closed.
-    #
-    # POLLRDHUP must be in the register mask or poll() won't report it: on Linux
-    # a graceful peer close (FIN) reports POLLIN|POLLRDHUP and never POLLHUP, so
-    # without it a closed connection is missed. macOS/Windows set POLLHUP on
-    # close instead, and _POLLRDHUP is 0 there.
+    # cannot tell it apart from a socket holding pending data, and both checks
+    # here are non-destructive so pending push messages (e.g. cache
+    # invalidations) are left intact to be processed. Without poll() the two
+    # states are indistinguishable, so report not-closed.
     if not _HAS_POLL:
         return False
     # Decrypted TLS bytes buffered above the OS socket layer must be processed
@@ -80,14 +74,11 @@ def _socket_is_closed(sock) -> bool:
     if not events:
         return False
     _, revents = events[0]
-    closed_flags = select.POLLHUP | select.POLLERR | select.POLLNVAL | _POLLRDHUP
-    if not (revents & closed_flags):
-        return False
-    # POLLHUP/POLLRDHUP can be reported while unread data is still buffered
-    # (the peer sent data, then closed). That data may carry cache
-    # invalidations that must be processed before the connection is dropped,
-    # so confirm with a non-destructive MSG_PEEK and report closed only once
-    # the buffer is drained.
+    # A readable socket holds either data or EOF, and the poll flags alone
+    # cannot always tell which: POLLHUP/POLLRDHUP can be reported while unread
+    # data is still buffered (the peer sent data, then closed), and a drained
+    # closed socket reports plain POLLIN where POLLRDHUP is unavailable
+    # (PyPy). A non-destructive MSG_PEEK settles it: EOF peeks as b"".
     try:
         return sock.recv(1, socket.MSG_PEEK) == b""
     except NONBLOCKING_EXCEPTIONS:
@@ -95,8 +86,12 @@ def _socket_is_closed(sock) -> bool:
         return False
     except ValueError:
         # SSL sockets do not support recv() flags; their buffered plaintext is
-        # covered by the pending() check above, so rely on the poll flags.
-        return True
+        # covered by the pending() check above, so fall back to the poll
+        # flags. POLLRDHUP must be in the register mask or poll() won't
+        # report it: on Linux a graceful FIN reports POLLIN|POLLRDHUP and
+        # never POLLHUP. macOS/Windows set POLLHUP instead (_POLLRDHUP is 0).
+        closed_flags = select.POLLHUP | select.POLLERR | select.POLLNVAL | _POLLRDHUP
+        return bool(revents & closed_flags)
     except OSError:
         # The socket is errored (POLLERR/POLLNVAL); nothing left to read.
         return True

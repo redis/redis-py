@@ -312,15 +312,13 @@ def test_socket_is_closed_detects_peer_close():
 
 
 @pytest.mark.skipif(
-    not hasattr(select, "POLLRDHUP"),
-    reason="POLLRDHUP is Linux-specific; graceful FIN reports POLLHUP elsewhere",
+    not hasattr(select, "poll"), reason="select.poll not available on this platform"
 )
 def test_socket_is_closed_detects_tcp_peer_half_close():
     # on Linux a graceful peer close (FIN) reports POLLIN|POLLRDHUP and never
-    # POLLHUP, so _socket_is_closed() must register and check POLLRDHUP. a real
-    # TCP socket pair is required: the kernel (not a mock) produces the event,
-    # and AF_UNIX socketpairs set POLLHUP on close and would hide the gap. this
-    # fails on POLLHUP-only code.
+    # POLLHUP, so a POLLHUP-only flags check misses it. a real TCP socket pair
+    # is required: the kernel (not a mock) produces the event, and AF_UNIX
+    # socketpairs set POLLHUP on close and would hide the gap.
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
