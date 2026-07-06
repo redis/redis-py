@@ -5580,14 +5580,26 @@ class TestHybridSearch(SearchTestsBase):
             },
         ]
 
+        # The query only sorts by @price, so the order of rows sharing the same
+        # price (e.g. the two price=15 and the two price=16 groups) is not
+        # deterministic. Validate the price sort separately, then compare the
+        # groups order-independently by their unique (item_type, price) key.
+        def _row_key(row):
+            return (row["price"], row["item_type"])
+
+        def _assert_hybrid_results(results, warnings):
+            assert len(results) == 4
+            prices = [row["price"] for row in results]
+            assert prices == sorted(prices)
+            assert sorted(results, key=_row_key) == sorted(
+                expected_results, key=_row_key
+            )
+            assert warnings == []
+
         if expects_resp2_shape(client) or expects_unified_shape(client):
-            assert len(res.results) == 4
-            assert res.results == expected_results
-            assert res.warnings == []
+            _assert_hybrid_results(res.results, res.warnings)
         elif expects_resp3_shape(client):
-            assert len(res["results"]) == 4
-            assert res["results"] == expected_results
-            assert res["warnings"] == []
+            _assert_hybrid_results(res["results"], res["warnings"])
 
         postprocessing_config = HybridPostProcessingConfig()
         postprocessing_config.load("@color", "@price", "@size", "@item_type")
