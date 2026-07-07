@@ -447,6 +447,38 @@ def test_hiredis_read_response_timeout_zero_maps_would_block_to_timeout():
         parser.read_response(timeout=0)
 
 
+@pytest.mark.parametrize("cleared_attr", ["_reader", "_sock"])
+def test_hiredis_read_from_socket_raises_connection_error_when_disconnected(
+    cleared_attr,
+):
+    # regression for #4003: another thread may disconnect the connection while
+    # we are reading (e.g. a shared client closed via `with redis:`), which sets
+    # _sock and _reader to None. read_from_socket() must raise a descriptive,
+    # retryable ConnectionError rather than an AttributeError.
+    parser = make_hiredis_parser()
+    parser._sock.recv_into.return_value = 10
+    setattr(parser, cleared_attr, None)
+
+    with pytest.raises(ConnectionError, match="Connection closed by server"):
+        parser.read_from_socket()
+
+
+def test_hiredis_read_response_uses_local_reader_if_disconnected_mid_read():
+    # regression for #4003: if _reader is cleared by a concurrent disconnect
+    # after read_from_socket() returns, the in-flight read must still complete
+    # via the locally bound reader instead of raising AttributeError on .gets().
+    parser = make_hiredis_parser()
+    parser._reader.responses = [NOT_ENOUGH_DATA, b"OK"]
+
+    def fake_read_from_socket(*args, **kwargs):
+        parser._reader = None  # simulate on_disconnect() from another thread
+        return True
+
+    parser.read_from_socket = fake_read_from_socket
+
+    assert parser.read_response() == b"OK"
+
+
 def test_socket_buffer_timeout_zero_maps_would_block_to_timeout():
     sock = Mock()
     sock.recv.side_effect = BlockingIOError(
