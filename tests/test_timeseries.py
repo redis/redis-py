@@ -1747,3 +1747,164 @@ def test_mrevrange_groupby_multiple_aggregators_raises(client):
             groupby="type",
             reduce="max",
         )
+
+
+def _assert_nrange_rows(actual, expected):
+    """Compare TS.NRANGE responses treating NaN cells as equal by position."""
+    assert len(actual) == len(expected), (actual, expected)
+    for (a_ts, a_vals), (e_ts, e_vals) in zip(actual, expected):
+        assert a_ts == e_ts
+        assert len(a_vals) == len(e_vals)
+        for a, e in zip(a_vals, e_vals):
+            if isinstance(e, float) and math.isnan(e):
+                assert math.isnan(a), (actual, expected)
+            else:
+                assert a == e, (actual, expected)
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_nrange_raw_rows_and_missing_cells(client):
+    nan = float("nan")
+    client.ts().add("{s}:a", 10, 1.0)
+    client.ts().add("{s}:a", 20, 2.0)
+    client.ts().add("{s}:b", 20, 3.0)
+    client.ts().add("{s}:b", 30, 4.0)
+
+    # Forward: one row per distinct timestamp, values follow key order,
+    # missing cells are NaN.
+    res = client.ts().nrange(["{s}:a", "{s}:b"], from_time="-", to_time="+")
+    _assert_nrange_rows(res, [[10, [1.0, nan]], [20, [2.0, 3.0]], [30, [nan, 4.0]]])
+    assert all(len(row[1]) == 2 for row in res)
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_nrange_preserves_duplicate_keys(client):
+    client.ts().add("{s}:a", 10, 1.0)
+    client.ts().add("{s}:a", 20, 2.0)
+
+    # Duplicate keys produce repeated value columns and are not deduplicated.
+    res = client.ts().nrange(["{s}:a", "{s}:a"], from_time="-", to_time="+")
+    _assert_nrange_rows(res, [[10, [1.0, 1.0]], [20, [2.0, 2.0]]])
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_nrange_aggregation_one_per_key(client):
+    for ts, val in [(0, 1.0), (1, 2.0), (10, 3.0), (11, 4.0)]:
+        client.ts().add("{s}:a", ts, val)
+    for ts, val in [(0, 5.0), (1, 6.0), (10, 7.0), (11, 8.0)]:
+        client.ts().add("{s}:b", ts, val)
+
+    # One aggregator per key: max for {s}:a, min for {s}:b.
+    res = client.ts().nrange(
+        ["{s}:a", "{s}:b"],
+        from_time=0,
+        to_time=20,
+        aggregators=["max", "min"],
+        bucket_size_msec=10,
+    )
+    _assert_nrange_rows(res, [[0, [2.0, 5.0]], [10, [4.0, 7.0]]])
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_nrange_count_limits_rows(client):
+    for ts in range(5):
+        client.ts().add("{s}:a", ts, ts)
+    assert len(client.ts().nrange(["{s}:a"], from_time="-", to_time="+", count=2)) == 2
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_nrange_empty_result(client):
+    client.ts().create("{s}:a")
+    assert client.ts().nrange(["{s}:a"], from_time="-", to_time="+") == []
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_nrange_single_aggregator_applies_to_all_keys(client):
+    for ts, val in [(0, 1.0), (1, 2.0), (10, 3.0), (11, 4.0)]:
+        client.ts().add("{s}:a", ts, val)
+    for ts, val in [(0, 5.0), (1, 6.0), (10, 7.0), (11, 8.0)]:
+        client.ts().add("{s}:b", ts, val)
+
+    # A single aggregator string is expanded to one token per key; here
+    # "max" is applied to both series.
+    res = client.ts().nrange(
+        ["{s}:a", "{s}:b"],
+        from_time=0,
+        to_time=20,
+        aggregators="max",
+        bucket_size_msec=10,
+    )
+    _assert_nrange_rows(res, [[0, [2.0, 6.0]], [10, [4.0, 8.0]]])
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_nrange_aggregator_count_mismatch_raises(client):
+    # An aggregator list whose length differs from the key count is invalid.
+    with pytest.raises(redis.exceptions.DataError, match="one aggregator per key"):
+        client.ts().nrange(
+            ["{s}:a", "{s}:b"],
+            from_time=0,
+            to_time=1,
+            aggregators=["min"],
+            bucket_size_msec=10,
+        )
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_nrange_empty_keys_raises(client):
+    with pytest.raises(redis.exceptions.DataError, match="At least one key"):
+        client.ts().nrange([], from_time=0, to_time=1)
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_nrevrange_reverse_order(client):
+    nan = float("nan")
+    client.ts().add("{s}:a", 10, 1.0)
+    client.ts().add("{s}:a", 20, 2.0)
+    client.ts().add("{s}:b", 20, 3.0)
+    client.ts().add("{s}:b", 30, 4.0)
+
+    # Reverse: rows in decreasing-timestamp order, same NaN cells.
+    res = client.ts().nrevrange(["{s}:a", "{s}:b"], from_time="-", to_time="+")
+    _assert_nrange_rows(res, [[30, [nan, 4.0]], [20, [2.0, 3.0]], [10, [1.0, nan]]])
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_nrevrange_aggregation_one_per_key(client):
+    for ts, val in [(0, 1.0), (1, 2.0), (10, 3.0), (11, 4.0)]:
+        client.ts().add("{s}:a", ts, val)
+    for ts, val in [(0, 5.0), (1, 6.0), (10, 7.0), (11, 8.0)]:
+        client.ts().add("{s}:b", ts, val)
+
+    # One aggregator per key, rows in decreasing-timestamp order.
+    res = client.ts().nrevrange(
+        ["{s}:a", "{s}:b"],
+        from_time=0,
+        to_time=20,
+        aggregators=["max", "min"],
+        bucket_size_msec=10,
+    )
+    _assert_nrange_rows(res, [[10, [4.0, 7.0]], [0, [2.0, 5.0]]])
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_nrevrange_count_keeps_highest_timestamps(client):
+    for ts in range(5):
+        client.ts().add("{s}:a", ts, ts)
+    # COUNT is applied after the merge in decreasing-timestamp order, so the
+    # highest timestamps are kept (the opposite end from nrange).
+    res = client.ts().nrange(["{s}:a"], from_time="-", to_time="+", count=2)
+    _assert_nrange_rows(res, [[0, [0.0]], [1, [1.0]]])
+    res = client.ts().nrevrange(["{s}:a"], from_time="-", to_time="+", count=2)
+    _assert_nrange_rows(res, [[4, [4.0]], [3, [3.0]]])
