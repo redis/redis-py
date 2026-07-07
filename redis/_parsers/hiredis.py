@@ -1,4 +1,5 @@
 import select
+import selectors
 import socket
 from logging import getLogger
 from typing import Callable, List, Optional, TypedDict, Union
@@ -23,12 +24,32 @@ from .socket import (
 # return `False` or `None` for legitimate reasons from RESP payloads.
 NOT_ENOUGH_DATA = object()
 
+# select.poll() is unavailable on Windows; fall back to selectors there.
+_HAS_POLL = hasattr(select, "poll")
+
 
 def _socket_can_read(sock, timeout: float) -> bool:
     # SSL sockets can have decrypted bytes buffered above the OS socket layer.
     if hasattr(sock, "pending") and sock.pending():
         return True
-    return bool(select.select([sock], [], [], timeout)[0])
+    # timeout=0 must be a non-blocking readiness check only; both branches
+    # below are non-destructive and have no FD_SETSIZE limit (select.select
+    # raises ValueError for fds >= 1024).
+    if _HAS_POLL:
+        # Prefer poll() over selectors.DefaultSelector: epoll/kqueue selectors
+        # allocate a file descriptor per check and so fail with EMFILE under
+        # fd exhaustion - the very condition that pushes sockets onto high
+        # fds. poll() allocates nothing.
+        poller = select.poll()
+        poller.register(sock, select.POLLIN)
+        # poll() takes milliseconds (None blocks forever). POLLHUP/POLLERR/
+        # POLLNVAL are always reported regardless of the registered mask, so
+        # closed or errored sockets still count as readable, like select().
+        poll_timeout = None if timeout is None else timeout * 1000
+        return bool(poller.poll(poll_timeout))
+    with selectors.DefaultSelector() as selector:
+        selector.register(sock, selectors.EVENT_READ)
+        return bool(selector.select(timeout))
 
 
 class _HiredisReaderArgs(TypedDict, total=False):
@@ -102,14 +123,21 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
 
     def read_from_socket(self, timeout=SENTINEL, raise_on_timeout=True):
         sock = self._sock
+        reader = self._reader
+        # Another thread may disconnect this connection while we are here (e.g.
+        # a shared client closed via `with redis:`); on_disconnect() sets both
+        # _sock and _reader to None. Bind them locally and fail with a
+        # descriptive, retryable ConnectionError instead of an AttributeError.
+        if sock is None or reader is None:
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         custom_timeout = timeout is not SENTINEL
         try:
             if custom_timeout:
                 sock.settimeout(timeout)
-            bufflen = self._sock.recv_into(self._buffer)
+            bufflen = sock.recv_into(self._buffer)
             if bufflen == 0:
                 raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-            self._reader.feed(self._buffer, 0, bufflen)
+            reader.feed(self._buffer, 0, bufflen)
             # data was read from the socket and added to the buffer.
             # return True to indicate that data was read.
             return True
@@ -139,20 +167,24 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
         push_request=False,
         timeout: Union[float, object] = SENTINEL,
     ):
-        if not self._reader:
+        # Bind the reader locally so a concurrent disconnect that clears
+        # self._reader can't turn a later .gets() into an AttributeError;
+        # re-checking the attribute each time would still race.
+        reader = self._reader
+        if reader is None:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
         if disable_decoding:
-            response = self._reader.gets(False)
+            response = reader.gets(False)
         else:
-            response = self._reader.gets()
+            response = reader.gets()
 
         while response is NOT_ENOUGH_DATA:
             self.read_from_socket(timeout=timeout)
             if disable_decoding:
-                response = self._reader.gets(False)
+                response = reader.gets(False)
             else:
-                response = self._reader.gets()
+                response = reader.gets()
         # if the response is a ConnectionError or the response is a list and
         # the first item is a ConnectionError, raise it as something bad
         # happened
