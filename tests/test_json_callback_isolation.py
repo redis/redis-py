@@ -750,30 +750,30 @@ class TestAsyncJsonPipelineExecution:
 @pytest.mark.fixed_client
 def test_async_cluster_pipeline_json_does_not_crash_on_construction():
     """
-    Regression test: async ClusterPipeline has no cluster_response_callbacks
-    instance dict — creating a JSON sub-client from an async ClusterPipeline
-    must not raise AttributeError.
+    Regression test: JSON(async_cluster_pipeline) must not raise AttributeError.
 
-    Also verifies copy-on-write isolation: cluster_client.response_callbacks is
-    replaced with a fresh dict so ClusterNode instances (which share the
-    original dict) are not polluted by JSON callbacks (issue #3937 for async
-    cluster path).
+    For non-transactional pipelines (the default), JSON callbacks are applied
+    via a wrapper around strategy._execute — cluster_client.response_callbacks
+    is never touched, so neither it nor any ClusterNode instance is polluted
+    (issue #3937).
     """
-    # Simulate the shared dict that AsyncRedisCluster and ClusterNodes
-    # would all reference at construction time.
     shared_callbacks: dict = {"PING": lambda r: r}
 
     fake_cluster_client = mock.MagicMock()
     fake_cluster_client.response_callbacks = shared_callbacks
 
+    original_inner_execute = mock.AsyncMock(return_value=[])
+    fake_strategy = mock.MagicMock()
+    fake_strategy._execute = original_inner_execute
+
     fake_async_cluster_pipeline = mock.MagicMock(
         spec=redis.asyncio.cluster.ClusterPipeline
     )
-    # Async pipeline does NOT expose cluster_response_callbacks.
     del fake_async_cluster_pipeline.cluster_response_callbacks
     fake_async_cluster_pipeline.cluster_client = fake_cluster_client
+    fake_async_cluster_pipeline._transaction = None   # non-transactional
+    fake_async_cluster_pipeline._execution_strategy = fake_strategy
 
-    # Construction must succeed without AttributeError.
     try:
         from redis.commands.json import JSON
         j = JSON(fake_async_cluster_pipeline)
@@ -784,29 +784,20 @@ def test_async_cluster_pipeline_json_does_not_crash_on_construction():
             "cluster_response_callbacks directly."
         )
 
-    # --- copy-on-write isolation check ---
-    # cluster_client.response_callbacks must now be a NEW dict (not the
-    # shared original), so ClusterNode instances keep the unmodified table.
-    assert fake_cluster_client.response_callbacks is not shared_callbacks, (
-        "cluster_client.response_callbacks must be replaced with a private "
-        "copy so existing ClusterNode instances are not polluted (issue #3937)"
+    # cluster_client.response_callbacks must be completely untouched.
+    assert fake_cluster_client.response_callbacks is shared_callbacks, (
+        "cluster_client.response_callbacks must not be replaced for "
+        "non-transactional pipelines — that would pollute every ClusterNode "
+        "instance sharing the original dict (#3937)"
     )
-
-    # JSON callbacks must be present in the new private dict.
-    assert "JSON.GET" in fake_cluster_client.response_callbacks, (
-        "JSON.GET callback must be merged into the private copy of "
-        "cluster_client.response_callbacks for pipeline execution-time decoding"
-    )
-    assert "JSON.SET" in fake_cluster_client.response_callbacks, (
-        "JSON.SET callback must be merged into the private copy"
-    )
-
-    # The original shared dict must be unchanged.
     assert "JSON.GET" not in shared_callbacks, (
-        "JSON callbacks must NOT leak into the shared original dict "
-        "(would pollute ClusterNode instances — issue #3937)"
+        "JSON callbacks must not leak into the shared callbacks dict"
     )
-    assert list(shared_callbacks.keys()) == ["PING"], (
-        "shared_callbacks must be unmodified after JSON pipeline construction"
+
+    # strategy._execute must be replaced with a JSON-decoding wrapper so
+    # results are decoded after ClusterNode dispatch (the non-transactional path).
+    assert fake_strategy._execute is not original_inner_execute, (
+        "strategy._execute must be wrapped with a JSON-decoding wrapper for "
+        "non-transactional async cluster pipelines"
     )
 

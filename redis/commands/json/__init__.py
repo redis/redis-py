@@ -134,14 +134,44 @@ class _JSONBase(JSONCommands):
             client.cluster_response_callbacks.update(self._MODULE_CALLBACKS)
         elif isinstance(client, redis.asyncio.cluster.ClusterPipeline):
             # Async ClusterPipeline has no cluster_response_callbacks.
-            # Its cluster_client.response_callbacks is the same dict shared
-            # across all ClusterNode instances, so we copy it first to avoid
-            # polluting those nodes. The pipeline execution strategy reads
-            # from cluster_client.response_callbacks at execute-time, so the
-            # callbacks need to live there.
-            cc = client.cluster_client
-            cc.response_callbacks = dict(cc.response_callbacks)
-            cc.response_callbacks.update(self._MODULE_CALLBACKS)
+            # There are two execution paths depending on whether the pipeline
+            # is transactional (MULTI/EXEC) or not:
+            #
+            # Transactional: post-processing in TransactionStrategy.execute()
+            # reads cluster_client.response_callbacks (line 3153 in cluster.py).
+            # Copy it before merging so we don't pollute parent state (#3937).
+            #
+            # Non-transactional (default): each ClusterNode.execute_pipeline()
+            # decodes via ClusterNode.response_callbacks — the original shared
+            # dict we can't safely mutate. Wrap strategy._execute instead to
+            # apply JSON callbacks to results after node dispatch.
+            if client._transaction:
+                cc = client.cluster_client
+                cc.response_callbacks = dict(cc.response_callbacks)
+                cc.response_callbacks.update(self._MODULE_CALLBACKS)
+            else:
+                _callbacks = self._MODULE_CALLBACKS
+                _strategy = client._execution_strategy
+                _orig_execute = _strategy._execute
+
+                async def _json_decode_execute(
+                    cluster_client_arg, stack, raise_on_error=True, allow_redirections=True
+                ):
+                    results = await _orig_execute(
+                        cluster_client_arg, stack, raise_on_error, allow_redirections
+                    )
+                    return [
+                        (
+                            _callbacks[cmd.args[0].upper()](r)
+                            if cmd.args
+                            and cmd.args[0].upper() in _callbacks
+                            and not isinstance(r, Exception)
+                            else r
+                        )
+                        for r, cmd in zip(results, stack)
+                    ]
+
+                _strategy._execute = _json_decode_execute
 
         self.__encoder__ = encoder
         self.__decoder__ = decoder
