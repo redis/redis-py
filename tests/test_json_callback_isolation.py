@@ -740,3 +740,73 @@ class TestAsyncJsonPipelineExecution:
         assert results[2] == {"b": 2}, "JSON.GET should return decoded dict"
 
         await r.delete("json:async:test1", "json:async:test2")
+
+
+# =============================================================================
+# 8. ASYNC CLUSTER PIPELINE — construction must not raise AttributeError
+# =============================================================================
+
+
+@pytest.mark.fixed_client
+def test_async_cluster_pipeline_json_does_not_crash_on_construction():
+    """
+    Regression test: async ClusterPipeline has no cluster_response_callbacks
+    instance dict — creating a JSON sub-client from an async ClusterPipeline
+    must not raise AttributeError.
+
+    Also verifies copy-on-write isolation: cluster_client.response_callbacks is
+    replaced with a fresh dict so ClusterNode instances (which share the
+    original dict) are not polluted by JSON callbacks (issue #3937 for async
+    cluster path).
+    """
+    # Simulate the shared dict that AsyncRedisCluster and ClusterNodes
+    # would all reference at construction time.
+    shared_callbacks: dict = {"PING": lambda r: r}
+
+    fake_cluster_client = mock.MagicMock()
+    fake_cluster_client.response_callbacks = shared_callbacks
+
+    fake_async_cluster_pipeline = mock.MagicMock(
+        spec=redis.asyncio.cluster.ClusterPipeline
+    )
+    # Async pipeline does NOT expose cluster_response_callbacks.
+    del fake_async_cluster_pipeline.cluster_response_callbacks
+    fake_async_cluster_pipeline.cluster_client = fake_cluster_client
+
+    # Construction must succeed without AttributeError.
+    try:
+        from redis.commands.json import JSON
+        j = JSON(fake_async_cluster_pipeline)
+    except AttributeError as e:
+        pytest.fail(
+            f"JSON(async_cluster_pipeline) raised AttributeError: {e}\n"
+            "The async ClusterPipeline branch must not access "
+            "cluster_response_callbacks directly."
+        )
+
+    # --- copy-on-write isolation check ---
+    # cluster_client.response_callbacks must now be a NEW dict (not the
+    # shared original), so ClusterNode instances keep the unmodified table.
+    assert fake_cluster_client.response_callbacks is not shared_callbacks, (
+        "cluster_client.response_callbacks must be replaced with a private "
+        "copy so existing ClusterNode instances are not polluted (issue #3937)"
+    )
+
+    # JSON callbacks must be present in the new private dict.
+    assert "JSON.GET" in fake_cluster_client.response_callbacks, (
+        "JSON.GET callback must be merged into the private copy of "
+        "cluster_client.response_callbacks for pipeline execution-time decoding"
+    )
+    assert "JSON.SET" in fake_cluster_client.response_callbacks, (
+        "JSON.SET callback must be merged into the private copy"
+    )
+
+    # The original shared dict must be unchanged.
+    assert "JSON.GET" not in shared_callbacks, (
+        "JSON callbacks must NOT leak into the shared original dict "
+        "(would pollute ClusterNode instances — issue #3937)"
+    )
+    assert list(shared_callbacks.keys()) == ["PING"], (
+        "shared_callbacks must be unmodified after JSON pipeline construction"
+    )
+

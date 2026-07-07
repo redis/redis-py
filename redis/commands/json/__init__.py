@@ -115,35 +115,33 @@ class _JSONBase(JSONCommands):
             resp3_to_resp2_legacy=_RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS,
         )
 
-        # NOTE: JSON callbacks are intentionally NOT registered on the parent
-        # client's response_callbacks table.  Registering them there mutates the
-        # shared callback dict and causes bare execute_command("JSON.GET", ...)
-        # calls on the parent client to return decoded dicts even when
-        # decode_responses=False (issue #3937).
-        #
-        # Instead, each JSON sub-client instance intercepts execute_command via
-        # the execute_command() method defined on the JSON / AsyncJSON subclasses,
-        # applies _MODULE_CALLBACKS to the raw response, and leaves the parent
-        # client's response_callbacks untouched.
+        # Don't register JSON callbacks on the parent client — that would
+        # mutate the shared response_callbacks dict and break bare
+        # execute_command("JSON.GET") calls on the parent (issue #3937).
+        # Each JSON sub-client decodes responses itself in execute_command().
 
-        # FIX #3: When the JSON sub-client is created from a Pipeline (the
-        # r.pipeline().json() entry point), merge _MODULE_CALLBACKS into the
-        # pipeline's own response_callbacks so Pipeline.execute() can decode
-        # JSON.* responses at execution time.
-        # IMPORTANT: Pipeline.response_callbacks may be a shared reference to
-        # the parent client's dict.  We must replace it with a private copy
-        # before merging to avoid polluting the parent.
+        # When the client is a Pipeline (r.pipeline().json()), we do need
+        # callbacks merged in so Pipeline.execute() can decode at batch time.
+        # Always copy before merging to avoid polluting the parent's dict.
         if isinstance(client, (redis.client.Pipeline, redis.asyncio.client.Pipeline)):
             client.response_callbacks = dict(client.response_callbacks)
             client.response_callbacks.update(self._MODULE_CALLBACKS)
-        elif isinstance(
-            client,
-            (redis.cluster.ClusterPipeline, redis.asyncio.cluster.ClusterPipeline),
-        ):
+        elif isinstance(client, redis.cluster.ClusterPipeline):
+            # Copy cluster_response_callbacks so we don't touch the parent.
             client.cluster_response_callbacks = dict(
                 client.cluster_response_callbacks
             )
             client.cluster_response_callbacks.update(self._MODULE_CALLBACKS)
+        elif isinstance(client, redis.asyncio.cluster.ClusterPipeline):
+            # Async ClusterPipeline has no cluster_response_callbacks.
+            # Its cluster_client.response_callbacks is the same dict shared
+            # across all ClusterNode instances, so we copy it first to avoid
+            # polluting those nodes. The pipeline execution strategy reads
+            # from cluster_client.response_callbacks at execute-time, so the
+            # callbacks need to live there.
+            cc = client.cluster_client
+            cc.response_callbacks = dict(cc.response_callbacks)
+            cc.response_callbacks.update(self._MODULE_CALLBACKS)
 
         self.__encoder__ = encoder
         self.__decoder__ = decoder
