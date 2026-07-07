@@ -123,14 +123,21 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
 
     def read_from_socket(self, timeout=SENTINEL, raise_on_timeout=True):
         sock = self._sock
+        reader = self._reader
+        # Another thread may disconnect this connection while we are here (e.g.
+        # a shared client closed via `with redis:`); on_disconnect() sets both
+        # _sock and _reader to None. Bind them locally and fail with a
+        # descriptive, retryable ConnectionError instead of an AttributeError.
+        if sock is None or reader is None:
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         custom_timeout = timeout is not SENTINEL
         try:
             if custom_timeout:
                 sock.settimeout(timeout)
-            bufflen = self._sock.recv_into(self._buffer)
+            bufflen = sock.recv_into(self._buffer)
             if bufflen == 0:
                 raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-            self._reader.feed(self._buffer, 0, bufflen)
+            reader.feed(self._buffer, 0, bufflen)
             # data was read from the socket and added to the buffer.
             # return True to indicate that data was read.
             return True
@@ -160,20 +167,24 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
         push_request=False,
         timeout: Union[float, object] = SENTINEL,
     ):
-        if not self._reader:
+        # Bind the reader locally so a concurrent disconnect that clears
+        # self._reader can't turn a later .gets() into an AttributeError;
+        # re-checking the attribute each time would still race.
+        reader = self._reader
+        if reader is None:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
         if disable_decoding:
-            response = self._reader.gets(False)
+            response = reader.gets(False)
         else:
-            response = self._reader.gets()
+            response = reader.gets()
 
         while response is NOT_ENOUGH_DATA:
             self.read_from_socket(timeout=timeout)
             if disable_decoding:
-                response = self._reader.gets(False)
+                response = reader.gets(False)
             else:
-                response = self._reader.gets()
+                response = reader.gets()
         # if the response is a ConnectionError or the response is a list and
         # the first item is a ConnectionError, raise it as something bad
         # happened
