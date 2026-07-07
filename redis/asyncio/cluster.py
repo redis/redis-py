@@ -36,6 +36,14 @@ if TYPE_CHECKING:
         AsyncClusterKeyspaceNotifications,
     )
 
+from redis._defaults import (
+    DEFAULT_RETRY_BASE,
+    DEFAULT_RETRY_CAP,
+    DEFAULT_RETRY_COUNT,
+    DEFAULT_SOCKET_CONNECT_TIMEOUT,
+    DEFAULT_SOCKET_READ_SIZE,
+    DEFAULT_SOCKET_TIMEOUT,
+)
 from redis._parsers import AsyncCommandsParser, Encoder
 from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
 from redis._parsers.helpers import get_response_callbacks
@@ -218,6 +226,16 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         | Maximum number of connections per node. If there are no free connections & the
           maximum number of connections are already created, a
           :class:`~.MaxConnectionsError` is raised.
+    :param socket_keepalive:
+        | If ``True``, TCP keepalive is enabled for TCP socket connections.
+    :param socket_keepalive_options:
+        | Mapping of TCP keepalive socket option constants to values, for
+          example ``{socket.TCP_KEEPIDLE: 30}``. If left unspecified, redis-py
+          uses TCP keepalive defaults when ``socket_keepalive`` is enabled:
+          idle 30 seconds, interval 5 seconds, and 3 probes.
+          Platform-specific options that are not available are skipped.
+          Pass ``None`` or ``{}`` to avoid setting additional TCP keepalive
+          options.
     :param address_remap:
         | An optional callable which, when provided with an internal network
           address of a node, e.g. a `(host, port)` tuple, will return the address
@@ -309,55 +327,56 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
     )
     def __init__(
         self,
-        host: Optional[str] = None,
-        port: Union[str, int] = 6379,
+        host: str | None = None,
+        port: str | int = 6379,
         # Cluster related kwargs
-        startup_nodes: Optional[List["ClusterNode"]] = None,
+        startup_nodes: List["ClusterNode"] | None = None,
         require_full_coverage: bool = True,
         read_from_replicas: bool = False,
-        load_balancing_strategy: Optional[LoadBalancingStrategy] = None,
+        load_balancing_strategy: LoadBalancingStrategy | None = None,
         dynamic_startup_nodes: bool = True,
         reinitialize_steps: int = 5,
-        cluster_error_retry_attempts: int = 3,
-        max_connections: int = 2**31,
-        retry: Optional["Retry"] = None,
-        retry_on_error: Optional[List[Type[Exception]]] = None,
+        cluster_error_retry_attempts: int = DEFAULT_RETRY_COUNT,
+        max_connections: int = 100,
+        retry: Retry | None = None,
+        retry_on_error: List[Type[Exception]] | None = None,
         # Client related kwargs
-        db: Union[str, int] = 0,
-        path: Optional[str] = None,
-        credential_provider: Optional[CredentialProvider] = None,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
-        client_name: Optional[str] = None,
-        lib_name: Union[Optional[str], object] = SENTINEL,
-        lib_version: Union[Optional[str], object] = SENTINEL,
-        driver_info: Union[Optional["DriverInfo"], object] = SENTINEL,
+        db: str | int = 0,
+        path: str | None = None,
+        credential_provider: CredentialProvider | None = None,
+        username: str | None = None,
+        password: str | None = None,
+        client_name: str | None = None,
+        lib_name: str | object | None = SENTINEL,
+        lib_version: str | object | None = SENTINEL,
+        driver_info: DriverInfo | object | None = SENTINEL,
         # Encoding related kwargs
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
         decode_responses: bool = False,
         # Connection related kwargs
         health_check_interval: float = 0,
-        socket_connect_timeout: Optional[float] = None,
-        socket_keepalive: bool = False,
-        socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
-        socket_timeout: Optional[float] = None,
+        socket_timeout: float | None = DEFAULT_SOCKET_TIMEOUT,
+        socket_connect_timeout: float | None = DEFAULT_SOCKET_CONNECT_TIMEOUT,
+        socket_read_size: int = DEFAULT_SOCKET_READ_SIZE,
+        socket_keepalive: bool = True,
+        socket_keepalive_options: Mapping[int, int | bytes] | object | None = SENTINEL,
         # SSL related kwargs
         ssl: bool = False,
-        ssl_ca_certs: Optional[str] = None,
-        ssl_ca_data: Optional[str] = None,
-        ssl_cert_reqs: Union[str, VerifyMode] = "required",
-        ssl_include_verify_flags: Optional[List[VerifyFlags]] = None,
-        ssl_exclude_verify_flags: Optional[List[VerifyFlags]] = None,
-        ssl_certfile: Optional[str] = None,
+        ssl_ca_certs: str | None = None,
+        ssl_ca_data: str | None = None,
+        ssl_cert_reqs: "str | VerifyMode" = "required",
+        ssl_include_verify_flags: List["VerifyFlags"] | None = None,
+        ssl_exclude_verify_flags: List["VerifyFlags"] | None = None,
+        ssl_certfile: str | None = None,
         ssl_check_hostname: bool = True,
-        ssl_keyfile: Optional[str] = None,
-        ssl_min_version: Optional[TLSVersion] = None,
-        ssl_ciphers: Optional[str] = None,
-        protocol: Optional[int] = None,
+        ssl_keyfile: str | None = None,
+        ssl_min_version: "TLSVersion | None" = None,
+        ssl_ciphers: str | None = None,
+        protocol: int | None = None,
         legacy_responses: bool = True,
-        address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
-        event_dispatcher: Optional[EventDispatcher] = None,
+        address_remap: Callable[[Tuple[str, int]], Tuple[str, int]] | None = None,
+        event_dispatcher: EventDispatcher | None = None,
         policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver(),
     ) -> None:
         if db:
@@ -399,6 +418,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "socket_connect_timeout": socket_connect_timeout,
             "socket_keepalive": socket_keepalive,
             "socket_keepalive_options": socket_keepalive_options,
+            "socket_read_size": socket_read_size,
             "socket_timeout": socket_timeout,
             "protocol": protocol,
             "legacy_responses": legacy_responses,
@@ -430,7 +450,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             self.retry = retry
         else:
             self.retry = Retry(
-                backoff=ExponentialWithJitterBackoff(base=1, cap=10),
+                backoff=ExponentialWithJitterBackoff(
+                    base=DEFAULT_RETRY_BASE, cap=DEFAULT_RETRY_CAP
+                ),
                 retries=cluster_error_retry_attempts,
             )
         if retry_on_error:
@@ -1463,7 +1485,7 @@ class ClusterNode:
         port: Union[str, int],
         server_type: Optional[str] = None,
         *,
-        max_connections: int = 2**31,
+        max_connections: int = 100,
         connection_class: Type[Connection] = Connection,
         **connection_kwargs: Any,
     ) -> None:
@@ -1661,47 +1683,52 @@ class ClusterNode:
     async def execute_command(self, *args: Any, **kwargs: Any) -> Any:
         # Acquire connection
         connection = self.acquire_connection()
-        # Handle lazy disconnect for connections marked for reconnect
-        await self.disconnect_if_needed(connection)
-
-        # Execute command
-        await connection.send_packed_command(connection.pack_command(*args))
-
-        # Read response
         try:
+            # Handle lazy disconnect for connections marked for reconnect
+            await self.disconnect_if_needed(connection)
+
+            # Execute command
+            await connection.send_packed_command(connection.pack_command(*args))
+
+            # Read response
             return await self.parse_response(connection, args[0], **kwargs)
         finally:
-            await self.disconnect_if_needed(connection)
-            # Release connection
-            self.release(connection)
+            try:
+                await self.disconnect_if_needed(connection)
+            finally:
+                # Release connection
+                self.release(connection)
 
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:
         # Acquire connection
         connection = self.acquire_connection()
-        # Handle lazy disconnect for connections marked for reconnect
-        await self.disconnect_if_needed(connection)
+        try:
+            # Handle lazy disconnect for connections marked for reconnect
+            await self.disconnect_if_needed(connection)
 
-        # Execute command
-        await connection.send_packed_command(
-            connection.pack_commands(cmd.args for cmd in commands)
-        )
+            # Execute command
+            await connection.send_packed_command(
+                connection.pack_commands(cmd.args for cmd in commands)
+            )
 
-        # Read responses
-        ret = False
-        for cmd in commands:
+            # Read responses
+            ret = False
+            for cmd in commands:
+                try:
+                    cmd.result = await self.parse_response(
+                        connection, cmd.args[0], **cmd.kwargs
+                    )
+                except Exception as e:
+                    cmd.result = e
+                    ret = True
+
+            return ret
+        finally:
             try:
-                cmd.result = await self.parse_response(
-                    connection, cmd.args[0], **cmd.kwargs
-                )
-            except Exception as e:
-                cmd.result = e
-                ret = True
-
-        # Release connection
-        await self.disconnect_if_needed(connection)
-        self.release(connection)
-
-        return ret
+                await self.disconnect_if_needed(connection)
+            finally:
+                # Release connection
+                self.release(connection)
 
     async def re_auth_callback(self, token: TokenInterface):
         tmp_queue = collections.deque()
@@ -3143,35 +3170,50 @@ class TransactionStrategy(AbstractStrategy):
     async def reset(self):
         self._command_queue = []
 
-        # make sure to reset the connection state in the event that we were
-        # watching something
-        if self._transaction_connection:
-            try:
-                if self._watching:
-                    # call this manually since our unwatch or
-                    # immediate_execute_command methods can call reset()
-                    await self._transaction_connection.send_command("UNWATCH")
-                    await self._transaction_connection.read_response()
-                # we can safely return the connection to the pool here since we're
-                # sure we're no longer WATCHing anything
-                await self._transaction_node.disconnect_if_needed(
-                    self._transaction_connection
+        try:
+            # make sure to reset the connection state in the event that we
+            # were watching something
+            if self._transaction_connection:
+                try:
+                    if self._watching:
+                        # call this manually since our unwatch or
+                        # immediate_execute_command methods can call reset()
+                        await self._transaction_connection.send_command("UNWATCH")
+                        await self._transaction_connection.read_response()
+                except self.CONNECTION_ERRORS:
+                    # disconnect will also remove any previous WATCHes
+                    if self._transaction_connection:
+                        await self._transaction_connection.disconnect()
+                except asyncio.CancelledError:
+                    # Disconnect so any unread UNWATCH reply does not get
+                    # served to the next caller that takes the connection.
+                    if self._transaction_connection:
+                        await self._transaction_connection.disconnect()
+                    raise
+                else:
+                    # On the happy path, honor lazy reconnect before release.
+                    await self._transaction_node.disconnect_if_needed(
+                        self._transaction_connection
+                    )
+        finally:
+            # Always return the connection to the node's free queue, even on
+            # cancellation, so cancelled resets do not leak pooled
+            # connections. Detach the reference before releasing so the
+            # strategy never holds a pointer to a returned connection.
+            # ClusterNode.release is synchronous, so no shield is required.
+            if self._transaction_connection and self._transaction_node:
+                connection, self._transaction_connection = (
+                    self._transaction_connection,
+                    None,
                 )
-                self._transaction_node.release(self._transaction_connection)
-                self._transaction_connection = None
-            except self.CONNECTION_ERRORS:
-                # disconnect will also remove any previous WATCHes
-                if self._transaction_connection and self._transaction_node:
-                    await self._transaction_connection.disconnect()
-                    self._transaction_node.release(self._transaction_connection)
-                    self._transaction_connection = None
-
-        # clean up the other instance attributes
-        self._transaction_node = None
-        self._watching = False
-        self._explicit_transaction = False
-        self._pipeline_slots = set()
-        self._executing = False
+                self._transaction_node.release(connection)
+            # clean up the other instance attributes
+            self._transaction_connection = None
+            self._transaction_node = None
+            self._watching = False
+            self._explicit_transaction = False
+            self._pipeline_slots = set()
+            self._executing = False
 
     def multi(self):
         if self._explicit_transaction:

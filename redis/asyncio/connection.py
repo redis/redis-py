@@ -1,7 +1,7 @@
 import asyncio
 import copy
-import enum
 import inspect
+import math
 import socket
 import sys
 import time
@@ -82,12 +82,16 @@ from redis.typing import EncodableT
 from redis.utils import (
     DEFAULT_RESP_VERSION,
     HIREDIS_AVAILABLE,
+    SENTINEL,
     str_if_bytes,
 )
-from redis.utils import (
-    SENTINEL as DEFAULT_SENTINEL,
-)
 
+from .._defaults import (
+    DEFAULT_SOCKET_CONNECT_TIMEOUT,
+    DEFAULT_SOCKET_READ_SIZE,
+    DEFAULT_SOCKET_TIMEOUT,
+    get_default_socket_keepalive_options,
+)
 from .._parsers import (
     BaseParser,
     Encoder,
@@ -101,13 +105,6 @@ SYM_DOLLAR = b"$"
 SYM_CRLF = b"\r\n"
 SYM_LF = b"\n"
 SYM_EMPTY = b""
-
-
-class _Sentinel(enum.Enum):
-    sentinel = object()
-
-
-SENTINEL = _Sentinel.sentinel
 
 
 DefaultParser: Type[Union[_AsyncRESP2Parser, _AsyncRESP3Parser, _AsyncHiredisParser]]
@@ -168,30 +165,30 @@ class AbstractConnection:
     def __init__(
         self,
         *,
-        db: Union[str, int] = 0,
-        password: Optional[str] = None,
-        socket_timeout: Optional[float] = None,
-        socket_connect_timeout: Optional[float] = None,
+        db: str | int = 0,
+        password: str | None = None,
+        socket_timeout: float | None = DEFAULT_SOCKET_TIMEOUT,
+        socket_connect_timeout: float | None = DEFAULT_SOCKET_CONNECT_TIMEOUT,
         retry_on_timeout: bool = False,
-        retry_on_error: Union[list, _Sentinel] = SENTINEL,
+        retry_on_error: list | object = SENTINEL,
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
         decode_responses: bool = False,
         parser_class: Type[BaseParser] = DefaultParser,
-        socket_read_size: int = 65536,
+        socket_read_size: int = DEFAULT_SOCKET_READ_SIZE,
         health_check_interval: float = 0,
-        client_name: Optional[str] = None,
-        lib_name: Union[Optional[str], object] = DEFAULT_SENTINEL,
-        lib_version: Union[Optional[str], object] = DEFAULT_SENTINEL,
-        driver_info: Union[Optional[DriverInfo], object] = DEFAULT_SENTINEL,
-        username: Optional[str] = None,
-        retry: Optional[Retry] = None,
-        redis_connect_func: Optional[ConnectCallbackT] = None,
+        client_name: str | None = None,
+        lib_name: str | object | None = SENTINEL,
+        lib_version: str | object | None = SENTINEL,
+        driver_info: DriverInfo | object | None = SENTINEL,
+        username: str | None = None,
+        retry: Retry | None = None,
+        redis_connect_func: ConnectCallbackT | None = None,
         encoder_class: Type[Encoder] = Encoder,
-        credential_provider: Optional[CredentialProvider] = None,
-        protocol: Optional[int] = None,
+        credential_provider: CredentialProvider | None = None,
+        protocol: int | None = None,
         legacy_responses: bool = True,
-        event_dispatcher: Optional[EventDispatcher] = None,
+        event_dispatcher: EventDispatcher | None = None,
     ):
         """
         Initialize a new async Connection.
@@ -750,8 +747,35 @@ class AbstractConnection:
         disconnect_on_error: bool = True,
         push_request: Optional[bool] = False,
     ):
-        """Read the response from a previously sent command"""
-        read_timeout = timeout if timeout is not None else self.socket_timeout
+        """Read the response from a previously sent command.
+
+        ``timeout`` semantics:
+        - ``None`` (default): fall back to ``self.socket_timeout``.
+        - ``math.inf``: block indefinitely with no timeout. Used by PubSub
+          blocking reads (``listen()`` / ``get_message(timeout=None)`` /
+          ``parse_response(block=True)``) where the configured
+          ``socket_timeout`` must not abort the read.
+        - ``float``: apply that timeout in seconds for this single read.
+
+        TODO(next-major): replace the ``math.inf`` opt-in with a SENTINEL
+        default for ``timeout``. After that change, ``timeout=None`` will
+        mean "no timeout, block until a response arrives" (matching the
+        long-standing PubSub docstring contract) and the SENTINEL default
+        will be the value that falls back to ``self.socket_timeout``.
+        That swap is a breaking change, so it must wait for a major
+        release. Until then, callers that need an indefinitely blocking
+        read pass ``math.inf`` explicitly.
+        """
+        # TODO(next-major): drop the math.inf branch. Use SENTINEL as the
+        # default for ``timeout`` and treat ``timeout is None`` as the
+        # "no timeout" signal (matching the PubSub docstring contract).
+        # Match only positive infinity here. ``-math.inf`` is not a valid
+        # "block forever" signal and historically behaved as an already-
+        # expired timeout; preserve that.
+        if timeout == math.inf:
+            read_timeout = None
+        else:
+            read_timeout = timeout if timeout is not None else self.socket_timeout
         host_error = self._host_error()
         try:
             if read_timeout is not None and self.protocol in ["3", 3]:
@@ -905,15 +929,32 @@ class Connection(AbstractConnection):
         self,
         *,
         host: str = "localhost",
-        port: Union[str, int] = 6379,
-        socket_keepalive: bool = False,
-        socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
+        port: str | int = 6379,
+        socket_keepalive: bool = True,
+        socket_keepalive_options: Mapping[int, int | bytes] | object | None = SENTINEL,
         socket_type: int = 0,
         **kwargs,
     ):
+        """
+        Initialize a TCP connection.
+
+        Parameters
+        ----------
+        socket_keepalive : bool
+            If `True`, TCP keepalive is enabled for TCP socket connections.
+        socket_keepalive_options : Mapping[int, int | bytes] | object | None
+            Mapping of TCP keepalive socket option constants to values, for
+            example `{socket.TCP_KEEPIDLE: 30}`. If left unspecified, redis-py
+            uses TCP keepalive defaults when `socket_keepalive` is enabled:
+            idle 30 seconds, interval 5 seconds, and 3 probes. Platform-specific
+            options that are not available are skipped. Pass `None` or `{}` to
+            avoid setting additional TCP keepalive options.
+        """
         self.host = host
         self.port = int(port)
         self.socket_keepalive = socket_keepalive
+        if socket_keepalive_options is SENTINEL:
+            socket_keepalive_options = get_default_socket_keepalive_options()
         self.socket_keepalive_options = socket_keepalive_options or {}
         self.socket_type = socket_type
         super().__init__(**kwargs)
@@ -1185,6 +1226,7 @@ URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyTy
         "db": int,
         "socket_timeout": float,
         "socket_connect_timeout": float,
+        "socket_read_size": int,
         "socket_keepalive": to_bool,
         "retry_on_timeout": to_bool,
         "max_connections": int,
@@ -1192,6 +1234,7 @@ URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyTy
         "ssl_check_hostname": to_bool,
         "ssl_include_verify_flags": parse_ssl_verify_flags,
         "ssl_exclude_verify_flags": parse_ssl_verify_flags,
+        "ssl_min_version": int,
         "timeout": float,
         "protocol": int,
         "legacy_responses": to_bool,
@@ -1385,7 +1428,7 @@ class ConnectionPool(ConnectionPoolInterface):
         max_connections: Optional[int] = None,
         **connection_kwargs,
     ):
-        max_connections = max_connections or 2**31
+        max_connections = max_connections or 100
         if not isinstance(max_connections, int) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
 

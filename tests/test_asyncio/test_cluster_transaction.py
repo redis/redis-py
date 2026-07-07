@@ -1,4 +1,6 @@
+import asyncio
 from typing import Tuple
+from unittest import mock
 from unittest.mock import patch, Mock
 
 import pytest
@@ -112,6 +114,41 @@ class TestClusterTransaction:
             assert await pipe.execute() == [True]
 
     @pytest.mark.onlycluster
+    async def test_pipeline_reset_releases_connection_when_cancelled(self, r):
+        # Regression test for https://github.com/redis/redis-py/issues/4121
+        # (cluster variant): cancelling reset() while it awaits the UNWATCH
+        # reply must still return the node-pooled connection.
+        await r.set("a", 0)
+
+        pipe = r.pipeline(transaction=True)
+        await pipe.watch("a")
+
+        strategy = pipe._execution_strategy
+        leased = strategy._transaction_connection
+        node = strategy._transaction_node
+        assert leased is not None
+        assert node is not None
+        assert leased not in node._free
+
+        started = asyncio.Event()
+
+        async def hang(*_args, **_kwargs):
+            started.set()
+            await asyncio.sleep(60)
+
+        with mock.patch.object(leased, "read_response", side_effect=hang):
+            task = asyncio.ensure_future(pipe.reset())
+            await started.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        assert strategy._transaction_connection is None
+        assert strategy._transaction_node is None
+        assert strategy._watching is False
+        assert leased in node._free
+
+    @pytest.mark.onlycluster
     async def test_retry_transaction_during_unfinished_slot_migration(self, r):
         """
         When a transaction is triggered during a migration, MovedError
@@ -125,18 +162,25 @@ class TestClusterTransaction:
         slot = r.keyslot(key)
         node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
 
+        original_parse_response = ClusterNode.parse_response
         with (
-            patch.object(ClusterNode, "parse_response") as parse_response,
+            patch.object(
+                ClusterNode, "parse_response", autospec=True
+            ) as parse_response,
             patch.object(NodesManager, "move_slot") as manager_move_slot,
         ):
 
-            def ask_redirect_effect(connection, *args, **options):
-                if "MULTI" in args:
+            async def ask_redirect_effect(redis_node, connection, command, **options):
+                if command == "MULTI":
                     return
-                elif "EXEC" in args:
+                elif command == "EXEC":
                     raise redis.exceptions.ExecAbortError()
+                elif command in ("_", "SET"):
+                    raise redis.exceptions.AskError(f"{slot} {node_importing.name}")
 
-                raise redis.exceptions.AskError(f"{slot} {node_importing.name}")
+                return await original_parse_response(
+                    redis_node, connection, command, **options
+                )
 
             parse_response.side_effect = ask_redirect_effect
 

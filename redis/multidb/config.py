@@ -5,6 +5,7 @@ from typing import List, Optional, Type, Union
 import pybreaker
 
 from redis import ConnectionPool, Redis, RedisCluster
+from redis._defaults import DEFAULT_RETRY_BASE, DEFAULT_RETRY_CAP, DEFAULT_RETRY_COUNT
 from redis.asyncio.multidb.healthcheck import (
     DEFAULT_HEALTH_CHECK_DELAY,
     DEFAULT_HEALTH_CHECK_INTERVAL,
@@ -140,7 +141,10 @@ class MultiDbConfig:
     databases_config: List[DatabaseConfig]
     client_class: Type[Union[Redis, RedisCluster]] = Redis
     command_retry: Retry = Retry(
-        backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
+        backoff=ExponentialWithJitterBackoff(
+            base=DEFAULT_RETRY_BASE, cap=DEFAULT_RETRY_CAP
+        ),
+        retries=DEFAULT_RETRY_COUNT,
     )
     failure_detectors: Optional[List[FailureDetector]] = None
     min_num_failures: int = DEFAULT_MIN_NUM_FAILURES

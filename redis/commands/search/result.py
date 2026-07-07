@@ -111,12 +111,17 @@ class Result:
         instance = cls.__new__(cls)
         if res is None:
             res = {}
+        # On RESP3 connections with decode_responses=False the server's map
+        # keys arrive as bytes, so normalise them to strings before lookup
+        # to keep behaviour consistent with decode_responses=True.
+        res = {str_if_bytes(k): v for k, v in res.items()}
         instance.total = res.get("total_results", 0)
         instance.duration = duration
         instance.docs = []
         instance.warnings = [str_if_bytes(w) for w in res.get("warning", [])]
 
         for result_item in res.get("results", []):
+            result_item = {str_if_bytes(k): v for k, v in result_item.items()}
             doc_id = str_if_bytes(result_item.get("id", ""))
             score = None
             if with_scores and "score" in result_item:

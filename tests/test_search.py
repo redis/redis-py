@@ -43,7 +43,7 @@ from redis.commands.search.query import (
 )
 from redis.commands.search.result import Result
 from redis.commands.search.suggestion import Suggestion
-from redis.utils import safe_str
+from redis.utils import SENTINEL, safe_str
 
 from .conftest import (
     _get_client,
@@ -77,6 +77,29 @@ def _assert_search_result(client, result, expected_doc_ids):
         assert set([doc["id"] for doc in result["results"]]) == set(expected_doc_ids)
 
 
+def _search_total(client, result):
+    """
+    Return the number of matched documents in a search result, taking into
+    account the RESP version being used.
+    """
+    if expects_resp2_shape(client) or expects_unified_shape(client):
+        return result.total
+    return result["total_results"]
+
+
+# Languages RediSearch analyses with a Snowball stemmer.  For each case the
+# document stores ``doc_word`` (inside ``text``) and the query uses a different
+# surface form that shares the same stem in that language but NOT in English --
+# so a match proves the language stemmer is applied rather than a literal match.
+NON_ENGLISH_STEMMING_CASES = [
+    # (language, text, query, doc_word)
+    ("german", "Die Kinder spielen im Garten", "Kind", "Kinder"),
+    ("french", "Les chevaux courent vite", "cheval", "chevaux"),
+    ("spanish", "Nosotros hablamos mucho", "hablar", "hablamos"),
+    ("greek", "Οι άνθρωποι περπατούν", "άνθρωπος", "άνθρωποι"),
+]
+
+
 class SearchTestsBase:
     @staticmethod
     def waitForIndex(env, idx, timeout=None):
@@ -84,15 +107,28 @@ class SearchTestsBase:
         while True:
             try:
                 res = env.execute_command("FT.INFO", idx)
-                if int(res[res.index("indexing") + 1]) == 0:
+                # ``execute_command`` bypasses the search module's
+                # callbacks, so the response is the raw wire shape.
+                # With ``decode_responses=False`` the structural keys
+                # arrive as bytes; accept both forms.
+                try:
+                    i = res.index("indexing")
+                except ValueError:
+                    i = res.index(b"indexing")
+                if int(res[i + 1]) == 0:
                     break
             except ValueError:
                 break
             except AttributeError:
+                # RESP3 dict response.  Keys may be ``str`` or ``bytes``
+                # depending on ``decode_responses``.
+                indexing = res.get("indexing")
+                if indexing is None:
+                    indexing = res.get(b"indexing")
                 try:
-                    if int(res["indexing"]) == 0:
+                    if int(indexing) == 0:
                         break
-                except ValueError:
+                except (TypeError, ValueError):
                     break
             except ResponseError:
                 # index doesn't exist yet
@@ -1769,6 +1805,116 @@ class TestBaseSearchFunctionality(SearchTestsBase):
         assert len(client.info("search")) > 0
 
 
+class TestSearchLanguages(SearchTestsBase):
+    """Functional coverage for indexing and searching text in languages other
+    than English: Snowball stemming for several languages, query-time language
+    selection, the Chinese (friso) tokenizer and per-document ``LANGUAGE_FIELD``
+    routing."""
+
+    @pytest.mark.redismod
+    @pytest.mark.parametrize(
+        "language, text, query, doc_word",
+        NON_ENGLISH_STEMMING_CASES,
+    )
+    def test_search_non_english_stemming(self, client, language, text, query, doc_word):
+        """A query for a different inflection of ``doc_word`` matches when the
+        document is indexed with its own language stemmer, but not when the same
+        text is indexed as English -- proving the language setting is what drives
+        the stem match."""
+        # Index the document under its own language.
+        lang_def = IndexDefinition(prefix=["lang:"], language=language)
+        client.ft("idx_lang").create_index((TextField("txt"),), definition=lang_def)
+        client.hset("lang:1", mapping={"txt": text})
+
+        # Index the same text as English as a negative control.
+        en_def = IndexDefinition(prefix=["en:"], language="english")
+        client.ft("idx_en").create_index((TextField("txt"),), definition=en_def)
+        client.hset("en:1", mapping={"txt": text})
+
+        self.waitForIndex(client, "idx_lang")
+        self.waitForIndex(client, "idx_en")
+
+        # Same query in both cases -- only the index language differs.
+        q = Query(query).language(language).no_content()
+        assert _search_total(client, client.ft("idx_lang").search(q)) == 1
+        assert _search_total(client, client.ft("idx_en").search(q)) == 0
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("8.9.0")
+    def test_search_stemming_indonesian(self, client):
+        """The Indonesian stemmer reduces "membaca" to its root "baca", so a
+        query for the stem matches the indexed document.  The Indonesian
+        stemmer is only available on newer server versions."""
+        definition = IndexDefinition(prefix=["doc:"], language="indonesian")
+        client.ft("idx_id").create_index((TextField("content"),), definition=definition)
+        client.hset("doc:1", mapping={"content": "mereka membaca buku di perpustakaan"})
+        self.waitForIndex(client, "idx_id")
+
+        q = Query("baca").language("indonesian").no_content()
+        assert _search_total(client, client.ft("idx_id").search(q)) == 1
+
+    @pytest.mark.redismod
+    def test_search_query_language(self, client):
+        """``Query.language()`` controls how the *query* is stemmed.  The German
+        stemmer reduces "Kindern" to "kind" (matching the indexed document's
+        stem), while English analysis leaves it as "kindern" (no match).  The
+        query word is deliberately absent from the document text so the match
+        can only come from stemming, not from the indexed raw term."""
+        definition = IndexDefinition(prefix=["doc:"], language="german")
+        client.ft().create_index((TextField("txt"),), definition=definition)
+        client.hset("doc:1", mapping={"txt": "Die Kinder spielen im Garten"})
+        self.waitForIndex(client, "idx")
+
+        matched = client.ft().search(Query("Kindern").language("german").no_content())
+        assert _search_total(client, matched) == 1
+
+        missed = client.ft().search(Query("Kindern").language("english").no_content())
+        assert _search_total(client, missed) == 0
+
+    @pytest.mark.redismod
+    def test_search_chinese_tokenization(self, client):
+        """Chinese text has no whitespace word boundaries; only the ``chinese``
+        tokenizer (friso) segments it into terms so an inner term can be
+        matched.  Indexed as English the text stays a single token."""
+        text = "我喜欢编程"  # "I like programming"
+        term = "编程"  # "programming"
+
+        cn_def = IndexDefinition(prefix=["cn:"], language="chinese")
+        client.ft("idx_cn").create_index((TextField("txt"),), definition=cn_def)
+        client.hset("cn:1", mapping={"txt": text})
+
+        en_def = IndexDefinition(prefix=["en:"], language="english")
+        client.ft("idx_en").create_index((TextField("txt"),), definition=en_def)
+        client.hset("en:1", mapping={"txt": text})
+
+        self.waitForIndex(client, "idx_cn")
+        self.waitForIndex(client, "idx_en")
+
+        cn_res = client.ft("idx_cn").search(
+            Query(term).language("chinese").no_content()
+        )
+        assert _search_total(client, cn_res) == 1
+
+        en_res = client.ft("idx_en").search(Query(term).no_content())
+        assert _search_total(client, en_res) == 0
+
+    @pytest.mark.redismod
+    def test_search_language_field(self, client):
+        """``LANGUAGE_FIELD`` selects the stemmer per document from a document
+        field, so the German document's "Kinder" is stemmed to "kind" while the
+        English document is analysed with the English stemmer."""
+        definition = IndexDefinition(prefix=["doc:"], language_field="__lang")
+        client.ft().create_index((TextField("txt"),), definition=definition)
+        client.hset("doc:de", mapping={"txt": "Die Kinder spielen", "__lang": "german"})
+        client.hset("doc:en", mapping={"txt": "the children play", "__lang": "english"})
+        self.waitForIndex(client, "idx")
+
+        # "Kind" only reaches the German document, whose "Kinder" stems to "kind".
+        res = client.ft().search(Query("Kind").language("german").no_content())
+        assert _search_total(client, res) == 1
+        _assert_search_result(client, res, ["doc:de"])
+
+
 class TestScorers(SearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
@@ -3032,7 +3178,6 @@ class TestDifferentFieldTypesSearch(SearchTestsBase):
 class TestPipeline(SearchTestsBase):
     @pytest.mark.redismod
     @skip_if_redis_enterprise()
-    @skip_if_server_version_gte("8.7.0")  # Deactivate temporarily
     def test_search_commands_in_pipeline(self, client):
         p = client.ft().pipeline()
         p.create_index((TextField("txt"),))
@@ -3070,7 +3215,6 @@ class TestPipeline(SearchTestsBase):
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.4.0")
-    @skip_if_server_version_gte("8.7.0")  # Deactivate temporarily
     def test_hybrid_search_query_with_pipeline(self, client):
         p = client.ft().pipeline()
         p.create_index(
@@ -5436,14 +5580,26 @@ class TestHybridSearch(SearchTestsBase):
             },
         ]
 
+        # The query only sorts by @price, so the order of rows sharing the same
+        # price (e.g. the two price=15 and the two price=16 groups) is not
+        # deterministic. Validate the price sort separately, then compare the
+        # groups order-independently by their unique (item_type, price) key.
+        def _row_key(row):
+            return (row["price"], row["item_type"])
+
+        def _assert_hybrid_results(results, warnings):
+            assert len(results) == 4
+            prices = [row["price"] for row in results]
+            assert prices == sorted(prices)
+            assert sorted(results, key=_row_key) == sorted(
+                expected_results, key=_row_key
+            )
+            assert warnings == []
+
         if expects_resp2_shape(client) or expects_unified_shape(client):
-            assert len(res.results) == 4
-            assert res.results == expected_results
-            assert res.warnings == []
+            _assert_hybrid_results(res.results, res.warnings)
         elif expects_resp3_shape(client):
-            assert len(res["results"]) == 4
-            assert res["results"] == expected_results
-            assert res["warnings"] == []
+            _assert_hybrid_results(res["results"], res["warnings"])
 
         postprocessing_config = HybridPostProcessingConfig()
         postprocessing_config.load("@color", "@price", "@size", "@item_type")
@@ -5590,3 +5746,115 @@ class TestHybridSearch(SearchTestsBase):
                 assert item["description"] is not None
                 assert item["discount_10_percents"] is not None
                 assert item["additional_discount"] is not None
+
+
+# Parametrise the bytes-key regression tests over RESP2 and the
+# default protocol.  RESP2 uses ``_RedisCallbacksRESP2`` and anchors the
+# expected legacy output shape with ``decode_responses=False``.  The
+# default protocol (``SENTINEL`` -> not specified) leaves the wire on
+# RESP3 with the ``_RedisCallbacksRESP3toRESP2Legacy`` adapter selected,
+# which is where the bytes-key normalisation in ``_parse_search_resp3``,
+# ``_parse_aggregate_resp3`` and ``_parse_spellcheck_resp3`` lives.  An
+# explicit ``protocol=3`` would route through ``_RedisCallbacksRESP3``
+# instead and bypass the methods we want to test.
+_SEARCH_BYTES_PROTOCOLS = [
+    pytest.param(2, id="resp2"),
+    pytest.param(SENTINEL, id="default-resp3"),
+]
+
+
+def _make_bytes_search_client(request, stack_url, protocol):
+    kwargs = {
+        "decode_responses": False,
+        "from_url": stack_url,
+    }
+    if protocol is not SENTINEL:
+        kwargs["protocol"] = protocol
+    client = _get_client(redis.Redis, request, **kwargs)
+    client.flushdb()
+    return client
+
+
+class TestSearchResp3BytesKeys(SearchTestsBase):
+    """Regression tests for #4107.
+
+    With the default protocol (RESP3 on the wire) and
+    ``decode_responses=False`` the server's structural map keys arrive
+    as ``bytes`` (e.g. ``b"results"`` rather than ``"results"``).  The
+    RESP3->legacy-RESP2 search callbacks used to look those keys up as
+    plain strings, missed them, and silently produced empty results.
+    Each test is parametrised over ``protocol=2`` (anchors the legacy
+    output shape) and the default protocol (exercises the actual fixed
+    parsers in ``_RedisCallbacksRESP3toRESP2Legacy``).
+    """
+
+    @pytest.mark.redismod
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("protocol", _SEARCH_BYTES_PROTOCOLS)
+    def test_search_resp3_bytes_keys(self, request, stack_url, protocol):
+        client = _make_bytes_search_client(request, stack_url, protocol)
+        client.ft().create_index((TextField("title"), TextField("body")))
+        client.hset("doc1", mapping={"title": "hello", "body": "redis world"})
+        client.hset("doc2", mapping={"title": "hello", "body": "search world"})
+        self.waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
+
+        res = client.ft().search(Query("hello"))
+
+        # Before the fix the default-RESP3 case returned
+        # ``Result{0 total, docs: []}`` because ``Result.from_resp3``
+        # looked up the bytes-keyed map by ``str`` keys.  ``Result``
+        # always normalises the doc id with ``str_if_bytes`` so the id
+        # assertion stays in ``str`` form even with
+        # ``decode_responses=False``.
+        assert res.total == 2
+        assert {d.id for d in res.docs} == {"doc1", "doc2"}
+
+    @pytest.mark.redismod
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("protocol", _SEARCH_BYTES_PROTOCOLS)
+    def test_aggregate_resp3_bytes_keys(self, request, stack_url, protocol):
+        client = _make_bytes_search_client(request, stack_url, protocol)
+        client.ft().create_index((TextField("title"), TextField("parent")))
+        client.hset("doc1", mapping={"title": "alpha", "parent": "redis"})
+        client.hset("doc2", mapping={"title": "beta", "parent": "redis"})
+        client.hset("doc3", mapping={"title": "gamma", "parent": "redis"})
+        self.waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
+
+        req = aggregations.AggregateRequest("redis").group_by(
+            "@parent", reducers.count()
+        )
+        res = client.ft().aggregate(req)
+
+        # Before the fix the default-RESP3 case missed
+        # ``data.get("total_results")`` and ``data.get("results")``
+        # because the keys were ``bytes``, yielding ``total=0`` and
+        # ``rows=[]``.
+        assert len(res.rows) == 1
+        row = res.rows[0]
+        # Row content stays as bytes (matches RESP2 with
+        # decode_responses=False); only the structural map keys are
+        # normalised.
+        assert b"parent" in row
+        assert b"redis" in row
+
+    @pytest.mark.redismod
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("protocol", _SEARCH_BYTES_PROTOCOLS)
+    def test_spellcheck_resp3_bytes_keys(self, request, stack_url, protocol):
+        client = _make_bytes_search_client(request, stack_url, protocol)
+        client.ft().create_index((TextField("f1"),))
+        client.hset("doc1", mapping={"f1": "some valid content"})
+        client.hset("doc2", mapping={"f1": "very important"})
+        self.waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
+
+        res = client.ft().spellcheck("impornant")
+
+        # Before the fix the default-RESP3 case had
+        # ``res.get("results", {})`` miss the ``b"results"`` key and
+        # return an empty ``{}``.  Both protocols carry the term and
+        # suggestion through as bytes, matching
+        # ``_parse_spellcheck`` with ``decode_responses=False``.
+        assert b"impornant" in res
+        suggestions = res[b"impornant"]
+        assert suggestions
+        assert suggestions[0]["suggestion"] == b"important"

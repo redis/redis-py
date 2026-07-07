@@ -47,7 +47,7 @@ ocsp = [
     "requests>=2.31.0",
 ]
 jwt = [
-    "PyJWT>=2.12.0",
+    "PyJWT>=2.13.0",
 ]
 circuit_breaker = [
     "pybreaker>=1.4.0"
@@ -88,6 +88,7 @@ markers = [
     "experimental: run only experimental tests",
     "cp_integration: credential provider integration tests",
     "no_mock_connections: skip the autouse mock_health_check_connections fixture",
+    "multidb_integration: MultiDBClient integration tests requiring the docker 'multidb' profile (two clusters + two standalones)",
 ]
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"
