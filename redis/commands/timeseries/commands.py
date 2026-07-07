@@ -1083,6 +1083,7 @@ class TimeSeriesCommands:
         self._append_max_count(params, max_count)
 
         return self.execute_command(READ_CMD, *params, keys=[key])
+
     def __n_range_params(
         self,
         keys: List[KeyT],
