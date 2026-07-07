@@ -27,6 +27,10 @@ NOT_ENOUGH_DATA = object()
 # select.poll() is unavailable on Windows; fall back to selectors there.
 _HAS_POLL = hasattr(select, "poll")
 
+# POLLRDHUP (Linux) reports a peer half-close (FIN) that POLLHUP does not cover.
+# It is absent on macOS/Windows, where 0 turns the masks that use it into no-ops.
+_POLLRDHUP = getattr(select, "POLLRDHUP", 0)
+
 
 def _socket_can_read(sock, timeout: float) -> bool:
     # SSL sockets can have decrypted bytes buffered above the OS socket layer.
@@ -50,6 +54,47 @@ def _socket_can_read(sock, timeout: float) -> bool:
     with selectors.DefaultSelector() as selector:
         selector.register(sock, selectors.EVENT_READ)
         return bool(selector.select(timeout))
+
+
+def _socket_is_closed(sock) -> bool:
+    # A server-closed socket reads as ready (it yields EOF), so readiness alone
+    # cannot tell it apart from a socket holding pending data, and both checks
+    # here are non-destructive so pending push messages (e.g. cache
+    # invalidations) are left intact to be processed. Without poll() the two
+    # states are indistinguishable, so report not-closed.
+    if not _HAS_POLL:
+        return False
+    # Decrypted TLS bytes buffered above the OS socket layer must be processed
+    # before the connection can be treated as closed, like kernel-level data.
+    if hasattr(sock, "pending") and sock.pending():
+        return False
+    poller = select.poll()
+    poller.register(sock, select.POLLIN | _POLLRDHUP)
+    events = poller.poll(0)
+    if not events:
+        return False
+    _, revents = events[0]
+    # A readable socket holds either data or EOF, and the poll flags alone
+    # cannot always tell which: POLLHUP/POLLRDHUP can be reported while unread
+    # data is still buffered (the peer sent data, then closed), and a drained
+    # closed socket reports plain POLLIN where POLLRDHUP is unavailable
+    # (PyPy). A non-destructive MSG_PEEK settles it: EOF peeks as b"".
+    try:
+        return sock.recv(1, socket.MSG_PEEK) == b""
+    except NONBLOCKING_EXCEPTIONS:
+        # Transient would-block: data may still arrive, keep the connection.
+        return False
+    except ValueError:
+        # SSL sockets do not support recv() flags; their buffered plaintext is
+        # covered by the pending() check above, so fall back to the poll
+        # flags. POLLRDHUP must be in the register mask or poll() won't
+        # report it: on Linux a graceful FIN reports POLLIN|POLLRDHUP and
+        # never POLLHUP. macOS/Windows set POLLHUP instead (_POLLRDHUP is 0).
+        closed_flags = select.POLLHUP | select.POLLERR | select.POLLNVAL | _POLLRDHUP
+        return bool(revents & closed_flags)
+    except OSError:
+        # The socket is errored (POLLERR/POLLNVAL); nothing left to read.
+        return True
 
 
 class _HiredisReaderArgs(TypedDict, total=False):
@@ -119,18 +164,35 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
 
         if self._reader.has_data():
             return True
-        return _socket_can_read(self._sock, timeout)
+        if not _socket_can_read(self._sock, timeout):
+            return False
+        # the socket reports readable but the reader has no buffered data. a
+        # server-closed socket also reads as ready (it yields EOF), so tell the
+        # two apart with a non-destructive poll: a peer-closed socket must not be
+        # reused, while a readable-but-open socket may just hold a pending push.
+        # this mirrors how the pure-Python parser (recv -> b"") and the async
+        # parser (StreamReader.at_eof()) already signal a closed connection.
+        if _socket_is_closed(self._sock):
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+        return True
 
     def read_from_socket(self, timeout=SENTINEL, raise_on_timeout=True):
         sock = self._sock
+        reader = self._reader
+        # Another thread may disconnect this connection while we are here (e.g.
+        # a shared client closed via `with redis:`); on_disconnect() sets both
+        # _sock and _reader to None. Bind them locally and fail with a
+        # descriptive, retryable ConnectionError instead of an AttributeError.
+        if sock is None or reader is None:
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         custom_timeout = timeout is not SENTINEL
         try:
             if custom_timeout:
                 sock.settimeout(timeout)
-            bufflen = self._sock.recv_into(self._buffer)
+            bufflen = sock.recv_into(self._buffer)
             if bufflen == 0:
                 raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-            self._reader.feed(self._buffer, 0, bufflen)
+            reader.feed(self._buffer, 0, bufflen)
             # data was read from the socket and added to the buffer.
             # return True to indicate that data was read.
             return True
@@ -160,20 +222,24 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
         push_request=False,
         timeout: Union[float, object] = SENTINEL,
     ):
-        if not self._reader:
+        # Bind the reader locally so a concurrent disconnect that clears
+        # self._reader can't turn a later .gets() into an AttributeError;
+        # re-checking the attribute each time would still race.
+        reader = self._reader
+        if reader is None:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
         if disable_decoding:
-            response = self._reader.gets(False)
+            response = reader.gets(False)
         else:
-            response = self._reader.gets()
+            response = reader.gets()
 
         while response is NOT_ENOUGH_DATA:
             self.read_from_socket(timeout=timeout)
             if disable_decoding:
-                response = self._reader.gets(False)
+                response = reader.gets(False)
             else:
-                response = self._reader.gets()
+                response = reader.gets()
         # if the response is a ConnectionError or the response is a list and
         # the first item is a ConnectionError, raise it as something bad
         # happened
