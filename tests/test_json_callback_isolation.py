@@ -801,3 +801,86 @@ def test_async_cluster_pipeline_json_does_not_crash_on_construction():
         "non-transactional async cluster pipelines"
     )
 
+
+@pytest.mark.fixed_client
+@pytest.mark.asyncio
+async def test_async_cluster_pipeline_nontransactional_wrapper_actually_decodes():
+    """
+    End-to-end behavioral test: the _execute wrapper must actually decode
+    JSON command results for non-transactional async cluster pipelines.
+
+    Uses a real ClusterPipeline (not a MagicMock spec), mocks only the
+    inner _execute to inject known raw bytes, then asserts that the JSON
+    callbacks transform the result.
+    """
+    from redis.asyncio.cluster import ClusterPipeline, PipelineCommand, PipelineStrategy
+    from redis.commands.json import JSON
+
+    fake_rc = mock.MagicMock()
+    fake_rc.response_callbacks = {}
+
+    # Real pipeline — real PipelineStrategy
+    pipeline = ClusterPipeline(fake_rc)
+    strategy = pipeline._execution_strategy
+    assert isinstance(strategy, PipelineStrategy)
+
+    # Replace _execute on the strategy BEFORE JSON wrapping so the wrapper
+    # captures this mock as its inner callable.
+    mock_inner = mock.AsyncMock(return_value=[b'{"x": 1}', b"OK"])
+    strategy._execute = mock_inner
+
+    JSON(pipeline)  # installs the decoding wrapper around mock_inner
+
+    # Build two fake PipelineCommands: one JSON, one plain.
+    cmd_json = PipelineCommand(0, "JSON.GET", "mykey")
+    cmd_set  = PipelineCommand(1, "SET",      "k", "v")
+
+    result = await strategy._execute(fake_rc, [cmd_json, cmd_set])
+
+    assert result[0] == {"x": 1}, (
+        "JSON.GET result must be decoded to a Python dict by the _execute wrapper; "
+        f"got {result[0]!r}"
+    )
+    assert result[1] == b"OK", (
+        "Non-JSON command result must be passed through unchanged; "
+        f"got {result[1]!r}"
+    )
+    mock_inner.assert_called_once()
+
+
+@pytest.mark.fixed_client
+def test_async_cluster_pipeline_transactional_copies_callbacks():
+    """
+    End-to-end behavioral test: for a transactional async cluster pipeline,
+    JSON.__init__ must copy cluster_client.response_callbacks so that:
+    - the original shared dict (used by existing ClusterNode instances) is unmodified
+    - the copy held by cluster_client contains the JSON callbacks that
+      TransactionStrategy.execute() needs for post-processing
+    """
+    from redis.asyncio.cluster import ClusterPipeline, TransactionStrategy
+    from redis.commands.json import JSON
+
+    shared_cbs: dict = {"PING": lambda r: r}
+    fake_rc = mock.MagicMock()
+    fake_rc.response_callbacks = shared_cbs
+
+    # Real transactional pipeline — real TransactionStrategy
+    pipeline = ClusterPipeline(fake_rc, transaction=True)
+    assert isinstance(pipeline._execution_strategy, TransactionStrategy)
+
+    JSON(pipeline)
+
+    # cluster_client.response_callbacks must be a private copy
+    assert fake_rc.response_callbacks is not shared_cbs, (
+        "cluster_client.response_callbacks must be replaced with a private copy "
+        "for transactional pipelines so ClusterNode instances are not polluted (#3937)"
+    )
+    assert "JSON.GET" in fake_rc.response_callbacks, (
+        "JSON.GET must be present in the copied dict so TransactionStrategy.execute() "
+        "can decode JSON responses at EXEC time"
+    )
+    # Original shared dict must be unmodified
+    assert "JSON.GET" not in shared_cbs, (
+        "JSON callbacks must not appear in the original shared dict — "
+        "that would pollute all ClusterNode instances referencing it"
+    )
