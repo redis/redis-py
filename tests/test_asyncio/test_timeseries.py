@@ -13,6 +13,7 @@ from tests.conftest import (
     skip_if_server_version_lt,
     skip_ifmodversion_lt,
 )
+from tests.test_timeseries import _assert_nrange_rows
 
 KEY1 = "key1"
 KEY2 = "key2"
@@ -1415,3 +1416,152 @@ async def test_mrevrange_groupby_multiple_aggregators_raises(decoded_r: redis.Re
             groupby="type",
             reduce="max",
         )
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrange_raw_rows_and_missing_cells(decoded_r: redis.Redis):
+    nan = float("nan")
+    await decoded_r.ts().add("{s}:a", 10, 1.0)
+    await decoded_r.ts().add("{s}:a", 20, 2.0)
+    await decoded_r.ts().add("{s}:b", 20, 3.0)
+    await decoded_r.ts().add("{s}:b", 30, 4.0)
+
+    # Forward: one row per distinct timestamp, values follow key order,
+    # missing cells are NaN.
+    res = await decoded_r.ts().nrange(["{s}:a", "{s}:b"], from_time="-", to_time="+")
+    _assert_nrange_rows(res, [[10, [1.0, nan]], [20, [2.0, 3.0]], [30, [nan, 4.0]]])
+    assert all(len(row[1]) == 2 for row in res)
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrange_preserves_duplicate_keys(decoded_r: redis.Redis):
+    await decoded_r.ts().add("{s}:a", 10, 1.0)
+    await decoded_r.ts().add("{s}:a", 20, 2.0)
+
+    # Duplicate keys produce repeated value columns and are not deduplicated.
+    res = await decoded_r.ts().nrange(["{s}:a", "{s}:a"], from_time="-", to_time="+")
+    _assert_nrange_rows(res, [[10, [1.0, 1.0]], [20, [2.0, 2.0]]])
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrange_aggregation_one_per_key(decoded_r: redis.Redis):
+    for ts, val in [(0, 1.0), (1, 2.0), (10, 3.0), (11, 4.0)]:
+        await decoded_r.ts().add("{s}:a", ts, val)
+    for ts, val in [(0, 5.0), (1, 6.0), (10, 7.0), (11, 8.0)]:
+        await decoded_r.ts().add("{s}:b", ts, val)
+
+    # One aggregator per key: max for {s}:a, min for {s}:b.
+    res = await decoded_r.ts().nrange(
+        ["{s}:a", "{s}:b"],
+        from_time=0,
+        to_time=20,
+        aggregators=["max", "min"],
+        bucket_size_msec=10,
+    )
+    _assert_nrange_rows(res, [[0, [2.0, 5.0]], [10, [4.0, 7.0]]])
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrange_count_limits_rows(decoded_r: redis.Redis):
+    for ts in range(5):
+        await decoded_r.ts().add("{s}:a", ts, ts)
+    res = await decoded_r.ts().nrange(["{s}:a"], from_time="-", to_time="+", count=2)
+    assert len(res) == 2
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrange_empty_result(decoded_r: redis.Redis):
+    await decoded_r.ts().create("{s}:a")
+    assert await decoded_r.ts().nrange(["{s}:a"], from_time="-", to_time="+") == []
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrange_single_aggregator_applies_to_all_keys(decoded_r: redis.Redis):
+    for ts, val in [(0, 1.0), (1, 2.0), (10, 3.0), (11, 4.0)]:
+        await decoded_r.ts().add("{s}:a", ts, val)
+    for ts, val in [(0, 5.0), (1, 6.0), (10, 7.0), (11, 8.0)]:
+        await decoded_r.ts().add("{s}:b", ts, val)
+
+    # A single aggregator string is expanded to one token per key; here
+    # "max" is applied to both series.
+    res = await decoded_r.ts().nrange(
+        ["{s}:a", "{s}:b"],
+        from_time=0,
+        to_time=20,
+        aggregators="max",
+        bucket_size_msec=10,
+    )
+    _assert_nrange_rows(res, [[0, [2.0, 6.0]], [10, [4.0, 8.0]]])
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrange_aggregator_count_mismatch_raises(decoded_r: redis.Redis):
+    # An aggregator list whose length differs from the key count is invalid.
+    with pytest.raises(redis.DataError, match="one aggregator per key"):
+        await decoded_r.ts().nrange(
+            ["{s}:a", "{s}:b"],
+            from_time=0,
+            to_time=1,
+            aggregators=["min"],
+            bucket_size_msec=10,
+        )
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrange_empty_keys_raises(decoded_r: redis.Redis):
+    with pytest.raises(redis.DataError, match="At least one key"):
+        await decoded_r.ts().nrange([], from_time=0, to_time=1)
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrevrange_reverse_order(decoded_r: redis.Redis):
+    nan = float("nan")
+    await decoded_r.ts().add("{s}:a", 10, 1.0)
+    await decoded_r.ts().add("{s}:a", 20, 2.0)
+    await decoded_r.ts().add("{s}:b", 20, 3.0)
+    await decoded_r.ts().add("{s}:b", 30, 4.0)
+
+    # Reverse: rows in decreasing-timestamp order, same NaN cells.
+    res = await decoded_r.ts().nrevrange(["{s}:a", "{s}:b"], from_time="-", to_time="+")
+    _assert_nrange_rows(res, [[30, [nan, 4.0]], [20, [2.0, 3.0]], [10, [1.0, nan]]])
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrevrange_aggregation_one_per_key(decoded_r: redis.Redis):
+    for ts, val in [(0, 1.0), (1, 2.0), (10, 3.0), (11, 4.0)]:
+        await decoded_r.ts().add("{s}:a", ts, val)
+    for ts, val in [(0, 5.0), (1, 6.0), (10, 7.0), (11, 8.0)]:
+        await decoded_r.ts().add("{s}:b", ts, val)
+
+    # One aggregator per key, rows in decreasing-timestamp order.
+    res = await decoded_r.ts().nrevrange(
+        ["{s}:a", "{s}:b"],
+        from_time=0,
+        to_time=20,
+        aggregators=["max", "min"],
+        bucket_size_msec=10,
+    )
+    _assert_nrange_rows(res, [[10, [4.0, 7.0]], [0, [2.0, 5.0]]])
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrevrange_count_keeps_highest_timestamps(decoded_r: redis.Redis):
+    for ts in range(5):
+        await decoded_r.ts().add("{s}:a", ts, ts)
+    # COUNT is applied after the merge in decreasing-timestamp order, so the
+    # highest timestamps are kept (the opposite end from nrange).
+    res = await decoded_r.ts().nrange(["{s}:a"], from_time="-", to_time="+", count=2)
+    _assert_nrange_rows(res, [[0, [0.0]], [1, [1.0]]])
+    res = await decoded_r.ts().nrevrange(["{s}:a"], from_time="-", to_time="+", count=2)
+    _assert_nrange_rows(res, [[4, [4.0]], [3, [3.0]]])
