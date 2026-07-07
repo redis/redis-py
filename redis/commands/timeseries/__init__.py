@@ -22,6 +22,7 @@ from .commands import (
     MREVRANGE_CMD,
     QUERYINDEX_CMD,
     RANGE_CMD,
+    READ_CMD,
     REVRANGE_CMD,
     TimeSeriesCommands,
 )
@@ -56,6 +57,7 @@ class _TimeSeriesBase(TimeSeriesCommands):
             CREATE_CMD: bool_ok,
             CREATERULE_CMD: bool_ok,
             DELETERULE_CMD: bool_ok,
+            READ_CMD: parse_range_unified,
         }
 
         _RESP2_MODULE_CALLBACKS = {
@@ -78,6 +80,7 @@ class _TimeSeriesBase(TimeSeriesCommands):
             MRANGE_CMD: parse_m_range_unified,
             MREVRANGE_CMD: parse_m_range_unified,
             RANGE_CMD: parse_range_unified,
+            READ_CMD: parse_range_unified,
             REVRANGE_CMD: parse_range_unified,
         }
         _RESP3_UNIFIED_MODULE_CALLBACKS = {
