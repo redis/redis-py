@@ -6379,6 +6379,33 @@ class SetCommands(CommandsProtocol):
         return self.execute_command("SDIFF", *args, keys=args)
 
     @overload
+    def sdiffcard(
+        self: SyncClientProtocol, numkeys: int, keys: List[KeyT], limit: int = 0
+    ) -> int: ...
+
+    @overload
+    def sdiffcard(
+        self: AsyncClientProtocol, numkeys: int, keys: List[KeyT], limit: int = 0
+    ) -> Awaitable[int]: ...
+
+    def sdiffcard(
+        self, numkeys: int, keys: List[KeyT], limit: int = 0
+    ) -> int | Awaitable[int]:
+        """
+        Return the cardinality of the difference between the first set and all
+        the successive sets specified by ``keys``, without returning the
+        difference itself.
+
+        When LIMIT is provided (defaults to 0 and means unlimited), the returned
+        cardinality is capped at ``limit`` and the server may stop the
+        computation once the capped result is known.
+
+        For more information, see https://redis.io/commands/sdiffcard
+        """
+        args = [numkeys, *keys, "LIMIT", limit]
+        return self.execute_command("SDIFFCARD", *args, keys=keys)
+
+    @overload
     def sdiffstore(
         self: SyncClientProtocol, dest: str, keys: List, *args: List
     ) -> int: ...
@@ -6624,6 +6651,52 @@ class SetCommands(CommandsProtocol):
         """
         args = list_or_args(keys, args)
         return self.execute_command("SUNION", *args, keys=args)
+
+    @overload
+    def sunioncard(
+        self: SyncClientProtocol,
+        numkeys: int,
+        keys: List[KeyT],
+        limit: int = 0,
+        approx: bool = False,
+    ) -> int: ...
+
+    @overload
+    def sunioncard(
+        self: AsyncClientProtocol,
+        numkeys: int,
+        keys: List[KeyT],
+        limit: int = 0,
+        approx: bool = False,
+    ) -> Awaitable[int]: ...
+
+    def sunioncard(
+        self,
+        numkeys: int,
+        keys: List[KeyT],
+        limit: int = 0,
+        approx: bool = False,
+    ) -> int | Awaitable[int]:
+        """
+        Return the cardinality of the union of multiple sets specified by
+        ``keys``, without returning the union itself.
+
+        When ``approx`` is True, the ``APPROX`` option is sent and the server
+        returns an approximate cardinality computed using HyperLogLog.
+
+        When LIMIT is provided (defaults to 0 and means unlimited), the returned
+        cardinality is capped at ``limit``. In exact mode the result equals
+        ``limit`` when the real cardinality exceeds ``limit``; in approximate
+        mode the result will not exceed ``limit``. Options are emitted in the
+        canonical order ``APPROX`` before ``LIMIT``.
+
+        For more information, see https://redis.io/commands/sunioncard
+        """
+        pieces: list = [numkeys, *keys]
+        if approx:
+            pieces.append("APPROX")
+        pieces.extend(["LIMIT", limit])
+        return self.execute_command("SUNIONCARD", *pieces, keys=keys)
 
     @overload
     def sunionstore(
