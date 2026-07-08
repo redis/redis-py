@@ -4,6 +4,7 @@ import pytest
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 
 
+@pytest.mark.fixed_client
 class TestKeySlot:
     """Unit tests for the client-side cluster key-slot calculation.
 
