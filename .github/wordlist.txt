@@ -1,6 +1,7 @@
 ACL
 ai
 allowlist
+APIs
 APM
 ARGV
 BFCommands
@@ -112,6 +113,7 @@ booleans
 bysource
 charset
 claude
+codebase
 del
 dev
 dicts
