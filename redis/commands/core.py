@@ -3603,7 +3603,7 @@ class BasicKeyCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/blmove
         """
         params = [first_list, second_list, src, dest, timeout]
-        return self.execute_command("BLMOVE", *params)
+        return self.execute_command("BLMOVE", *params, BLOCKING_READ=True)
 
     @overload
     def mget(
@@ -4717,7 +4717,7 @@ class ListCommands(CommandsProtocol):
             timeout = 0
         keys = list_or_args(keys, None)
         keys.append(timeout)
-        return self.execute_command("BLPOP", *keys)
+        return self.execute_command("BLPOP", *keys, BLOCKING_READ=True)
 
     @overload
     def brpop(
@@ -4748,7 +4748,7 @@ class ListCommands(CommandsProtocol):
             timeout = 0
         keys = list_or_args(keys, None)
         keys.append(timeout)
-        return self.execute_command("BRPOP", *keys)
+        return self.execute_command("BRPOP", *keys, BLOCKING_READ=True)
 
     @overload
     def brpoplpush(
@@ -4775,7 +4775,9 @@ class ListCommands(CommandsProtocol):
         """
         if timeout is None:
             timeout = 0
-        return self.execute_command("BRPOPLPUSH", src, dst, timeout)
+        return self.execute_command(
+            "BRPOPLPUSH", src, dst, timeout, BLOCKING_READ=True
+        )
 
     @overload
     def blmpop(
@@ -4816,7 +4818,7 @@ class ListCommands(CommandsProtocol):
         """
         cmd_args = [timeout, numkeys, *args, direction, "COUNT", count]
 
-        return self.execute_command("BLMPOP", *cmd_args)
+        return self.execute_command("BLMPOP", *cmd_args, BLOCKING_READ=True)
 
     @overload
     def lmpop(
@@ -8398,7 +8400,7 @@ class SortedSetCommands(CommandsProtocol):
             timeout = 0
         keys = list_or_args(keys, None)
         keys.append(timeout)
-        return self.execute_command("BZPOPMAX", *keys)
+        return self.execute_command("BZPOPMAX", *keys, BLOCKING_READ=True)
 
     @overload
     def bzpopmin(
@@ -8429,7 +8431,7 @@ class SortedSetCommands(CommandsProtocol):
             timeout = 0
         keys: list[EncodableT] = list_or_args(keys, None)
         keys.append(timeout)
-        return self.execute_command("BZPOPMIN", *keys)
+        return self.execute_command("BZPOPMIN", *keys, BLOCKING_READ=True)
 
     @overload
     def zmpop(
@@ -8528,7 +8530,7 @@ class SortedSetCommands(CommandsProtocol):
             args.append("MAX")
         args.extend(["COUNT", count])
 
-        return self.execute_command("BZMPOP", *args)
+        return self.execute_command("BZMPOP", *args, BLOCKING_READ=True)
 
     def _zrange(
         self,

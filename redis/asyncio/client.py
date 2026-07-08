@@ -52,6 +52,7 @@ from redis.asyncio.observability.recorder import (
 from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.client import (
+    BLOCKING_READ,
     EMPTY_RESPONSE,
     NEVER_DECODE,
     AbstractRedis,
@@ -878,6 +879,9 @@ class Redis(
             if NEVER_DECODE in options:
                 response = await connection.read_response(disable_decoding=True)
                 options.pop(NEVER_DECODE)
+            elif BLOCKING_READ in options:
+                options.pop(BLOCKING_READ)
+                response = await connection.read_response(timeout=math.inf)
             else:
                 response = await connection.read_response()
         except ResponseError:

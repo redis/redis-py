@@ -1,5 +1,6 @@
 import copy
 import logging
+import math
 import re
 import threading
 import time
@@ -97,6 +98,11 @@ EMPTY_RESPONSE = "EMPTY_RESPONSE"
 
 # some responses (ie. dump) are binary, and just meant to never be decoded
 NEVER_DECODE = "NEVER_DECODE"
+
+# used by blocking commands (BLPOP, BRPOP, etc.) to signal that the read
+# timeout should be set to infinity, so that the socket_timeout does not
+# interfere with the command-level blocking timeout
+BLOCKING_READ = "BLOCKING_READ"
 
 
 logger = logging.getLogger(__name__)
@@ -860,6 +866,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             if NEVER_DECODE in options:
                 response = connection.read_response(disable_decoding=True)
                 options.pop(NEVER_DECODE)
+            elif BLOCKING_READ in options:
+                options.pop(BLOCKING_READ)
+                response = connection.read_response(timeout=math.inf)
             else:
                 response = connection.read_response()
         except ResponseError:

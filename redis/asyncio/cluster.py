@@ -1,6 +1,7 @@
 import asyncio
 import collections
 import logging
+import math
 import random
 import socket
 import threading
@@ -63,7 +64,12 @@ from redis.asyncio.observability.recorder import (
 from redis.asyncio.retry import Retry
 from redis.auth.token import TokenInterface
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
-from redis.client import EMPTY_RESPONSE, NEVER_DECODE, AbstractRedis
+from redis.client import (
+    BLOCKING_READ,
+    EMPTY_RESPONSE,
+    NEVER_DECODE,
+    AbstractRedis,
+)
 from redis.cluster import (
     PIPELINE_BLOCKED_COMMANDS,
     PRIMARY,
@@ -1661,6 +1667,9 @@ class ClusterNode:
             if NEVER_DECODE in kwargs:
                 response = await connection.read_response(disable_decoding=True)
                 kwargs.pop(NEVER_DECODE)
+            elif BLOCKING_READ in kwargs:
+                kwargs.pop(BLOCKING_READ)
+                response = await connection.read_response(timeout=math.inf)
             else:
                 response = await connection.read_response()
         except ResponseError:
