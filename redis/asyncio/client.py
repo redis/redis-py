@@ -228,8 +228,11 @@ class Redis(
         still in use by the others.
 
         To share a single pool across clients, construct the pool explicitly
-        and manage its lifecycle instead. ``ConnectionPool`` supports the
-        async context manager protocol for this::
+        and manage its lifecycle instead. Unlike ``from_pool``, the plain
+        ``Redis(connection_pool=pool)`` constructor does not take ownership of
+        the pool and will not close it, so a pool created this way can be
+        safely shared across clients. ``ConnectionPool`` supports the async
+        context manager protocol for this::
 
             async with ConnectionPool.from_url(url) as pool:
                 r = Redis(connection_pool=pool)

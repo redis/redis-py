@@ -1705,7 +1705,7 @@ class ConnectionPool(ConnectionPoolInterface):
         """Close the pool, disconnecting all connections"""
         await self.disconnect()
 
-    async def __aenter__(self) -> "ConnectionPool":
+    async def __aenter__(self: _CP) -> _CP:
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback) -> None:

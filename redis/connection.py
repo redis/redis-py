@@ -3297,7 +3297,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         """Close the pool, disconnecting all connections"""
         self.disconnect()
 
-    def __enter__(self) -> "ConnectionPool":
+    def __enter__(self: _CP) -> _CP:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
