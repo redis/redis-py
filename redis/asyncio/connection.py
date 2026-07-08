@@ -63,6 +63,7 @@ else:
 from redis.asyncio.maint_notifications import (
     AsyncMaintNotificationsConnectionHandler,
     AsyncMaintNotificationsPoolHandler,
+    AsyncOSSMaintNotificationsHandler,
 )
 from redis.asyncio.observability.recorder import (
     record_connection_closed,
@@ -163,6 +164,9 @@ class AsyncMaintNotificationsAbstractConnection:
         orig_host_address: str | None = None,
         orig_socket_timeout: float | None = None,
         orig_socket_connect_timeout: float | None = None,
+        oss_cluster_maint_notifications_handler: (
+            AsyncOSSMaintNotificationsHandler | None
+        ) = None,
         parser: BaseParser | None = None,
     ) -> None:
         self.maint_notifications_config = maint_notifications_config
@@ -175,6 +179,7 @@ class AsyncMaintNotificationsAbstractConnection:
             orig_host_address,
             orig_socket_timeout,
             orig_socket_connect_timeout,
+            oss_cluster_maint_notifications_handler,
             parser,
         )
 
@@ -221,6 +226,9 @@ class AsyncMaintNotificationsAbstractConnection:
         orig_host_address: str | None = None,
         orig_socket_timeout: float | None = None,
         orig_socket_connect_timeout: float | None = None,
+        oss_cluster_maint_notifications_handler: (
+            AsyncOSSMaintNotificationsHandler | None
+        ) = None,
         parser: BaseParser | None = None,
     ) -> None:
         if (
@@ -229,6 +237,7 @@ class AsyncMaintNotificationsAbstractConnection:
         ):
             self._maint_notifications_pool_handler = None
             self._maint_notifications_connection_handler = None
+            self._oss_cluster_maint_notifications_handler = None
             return
 
         if not parser:
@@ -253,10 +262,6 @@ class AsyncMaintNotificationsAbstractConnection:
                 maint_notifications_pool_handler.get_handler_for_connection()
             )
             self._maint_notifications_pool_handler.set_connection(self)
-            # Set up pool handler to parser
-            parser.set_node_moving_push_handler(
-                self._maint_notifications_pool_handler.handle_notification
-            )
         else:
             self._maint_notifications_pool_handler = None
 
@@ -265,6 +270,23 @@ class AsyncMaintNotificationsAbstractConnection:
                 self, self.maint_notifications_config
             )
         )
+
+        if oss_cluster_maint_notifications_handler:
+            self._oss_cluster_maint_notifications_handler = (
+                oss_cluster_maint_notifications_handler
+            )
+            parser.set_oss_cluster_maint_push_handler(
+                oss_cluster_maint_notifications_handler.handle_notification
+            )
+        else:
+            self._oss_cluster_maint_notifications_handler = None
+
+        # Set up pool handler to parser if available
+        if self._maint_notifications_pool_handler:
+            parser.set_node_moving_push_handler(
+                self._maint_notifications_pool_handler.handle_notification
+            )
+
         # Set up connection handler
         parser.set_maintenance_push_handler(
             self._maint_notifications_connection_handler.handle_notification
@@ -310,6 +332,33 @@ class AsyncMaintNotificationsAbstractConnection:
         else:
             self._maint_notifications_connection_handler.config = (
                 maint_notifications_pool_handler.config
+            )
+
+    def set_maint_notifications_cluster_handler_for_connection(
+        self,
+        oss_cluster_maint_notifications_handler: AsyncOSSMaintNotificationsHandler,
+    ) -> None:
+        parser = self._get_push_notifications_parser()
+        parser.set_oss_cluster_maint_push_handler(
+            oss_cluster_maint_notifications_handler.handle_notification
+        )
+        self._oss_cluster_maint_notifications_handler = (
+            oss_cluster_maint_notifications_handler
+        )
+
+        # Update maintenance notification connection handler if it doesn't exist
+        if not self._maint_notifications_connection_handler:
+            self._maint_notifications_connection_handler = (
+                AsyncMaintNotificationsConnectionHandler(
+                    self, oss_cluster_maint_notifications_handler.config
+                )
+            )
+            parser.set_maintenance_push_handler(
+                self._maint_notifications_connection_handler.handle_notification
+            )
+        else:
+            self._maint_notifications_connection_handler.config = (
+                oss_cluster_maint_notifications_handler.config
             )
 
     async def activate_maint_notifications_handling_if_enabled(
@@ -395,27 +444,15 @@ class AsyncMaintNotificationsAbstractConnection:
             # Stream might not be connected or peer address lookup might fail.
             pass
 
-        # Method 2: Fallback to DNS resolution of the host.
-        # This is less accurate but works when stream peer info is not available.
-        try:
-            host = getattr(self, "host", None)
-            port = getattr(self, "port", 6379)
-            if host:
-                # Use getaddrinfo to resolve the hostname to IP.
-                # This mimics what the connection would do during _connect().
-                addr_info = socket.getaddrinfo(
-                    host, port, socket.AF_UNSPEC, socket.SOCK_STREAM
-                )
-                if addr_info:
-                    # Return the IP from the first result.
-                    # addr_info[0] is (family, socktype, proto, canonname, sockaddr).
-                    # sockaddr[0] is the IP address.
-                    return str(addr_info[0][4][0])
-        except (AttributeError, OSError, socket.gaierror):
-            # DNS resolution might fail.
-            pass
-
-        return None
+        # Method 2: Fall back to the configured host (which may be an IP or an
+        # FQDN). We intentionally do NOT call socket.getaddrinfo() here: this
+        # method is only used for debug logging and runs on the event loop, so a
+        # blocking DNS resolution would stall it. During maintenance the debug-log
+        # path is invoked once per notification while connections are repeatedly
+        # disconnected/reconnected (so getpeername() returns None) — a blocking
+        # getaddrinfo on an FQDN host there can freeze the loop for seconds and
+        # trip unrelated connect timeouts.
+        return getattr(self, "host", None)
 
     @property
     def maintenance_state(self) -> MaintenanceState:
@@ -574,6 +611,9 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         orig_host_address: str | None = None,
         orig_socket_timeout: float | None = None,
         orig_socket_connect_timeout: float | None = None,
+        oss_cluster_maint_notifications_handler: (
+            AsyncOSSMaintNotificationsHandler | None
+        ) = None,
     ):
         """
         Initialize a new async Connection.
@@ -671,6 +711,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             orig_host_address,
             orig_socket_timeout,
             orig_socket_connect_timeout,
+            oss_cluster_maint_notifications_handler,
             self._parser,
         )
 
@@ -1816,6 +1857,9 @@ class AsyncMaintNotificationsAbstractConnectionPool:
     def __init__(
         self,
         maint_notifications_config: MaintNotificationsConfig | None = None,
+        oss_cluster_maint_notifications_handler: (
+            "AsyncOSSMaintNotificationsHandler | None"
+        ) = None,
         **kwargs: Any,
     ) -> None:
         protocol = kwargs.get("protocol")
@@ -1859,6 +1903,7 @@ class AsyncMaintNotificationsAbstractConnectionPool:
                         "without a host"
                     )
                 self._maint_notifications_pool_handler = None
+                self._oss_cluster_maint_notifications_handler = None
                 return
 
             if not is_protocol_supported:
@@ -1866,14 +1911,25 @@ class AsyncMaintNotificationsAbstractConnectionPool:
                     "Maintenance notifications handlers on connection are only supported with RESP version 3"
                 )
 
-            self._maint_notifications_pool_handler = AsyncMaintNotificationsPoolHandler(
-                self, maint_notifications_config
-            )
-            self._update_connection_kwargs_for_maint_notifications(
-                maint_notifications_pool_handler=self._maint_notifications_pool_handler
-            )
+            if oss_cluster_maint_notifications_handler:
+                self._oss_cluster_maint_notifications_handler = (
+                    oss_cluster_maint_notifications_handler
+                )
+                self._update_connection_kwargs_for_maint_notifications(
+                    oss_cluster_maint_notifications_handler=self._oss_cluster_maint_notifications_handler
+                )
+                self._maint_notifications_pool_handler = None
+            else:
+                self._oss_cluster_maint_notifications_handler = None
+                self._maint_notifications_pool_handler = (
+                    AsyncMaintNotificationsPoolHandler(self, maint_notifications_config)
+                )
+                self._update_connection_kwargs_for_maint_notifications(
+                    maint_notifications_pool_handler=self._maint_notifications_pool_handler
+                )
         else:
             self._maint_notifications_pool_handler = None
+            self._oss_cluster_maint_notifications_handler = None
 
     async def _on_close(self) -> None:
         """Hook invoked from the pool's ``aclose()`` before the pool is shut down."""
@@ -1927,16 +1983,24 @@ class AsyncMaintNotificationsAbstractConnectionPool:
             The maintenance notifications config is stored in the pool handler.
             If the pool handler is not set, the maintenance notifications are not enabled.
         """
-        maint_notifications_config = (
-            self._maint_notifications_pool_handler.config
-            if self._maint_notifications_pool_handler
-            else None
-        )
+        if self._oss_cluster_maint_notifications_handler:
+            maint_notifications_config = (
+                self._oss_cluster_maint_notifications_handler.config
+            )
+        else:
+            maint_notifications_config = (
+                self._maint_notifications_pool_handler.config
+                if self._maint_notifications_pool_handler
+                else None
+            )
         return maint_notifications_config and maint_notifications_config.enabled
 
     async def update_maint_notifications_config(
         self,
         maint_notifications_config: MaintNotificationsConfig,
+        oss_cluster_maint_notifications_handler: (
+            AsyncOSSMaintNotificationsHandler | None
+        ) = None,
     ) -> None:
         """
         Updates the maintenance notifications configuration.
@@ -1953,58 +2017,75 @@ class AsyncMaintNotificationsAbstractConnectionPool:
                 "Cannot disable maintenance notifications after enabling them"
             )
 
-        if (
-            maint_notifications_config.enabled
-            and not self._maintenance_notifications_supported()
-        ):
-            if maint_notifications_config.enabled is True:
-                # Unix sockets do not have a host endpoint for CLIENT
-                # MAINT_NOTIFICATIONS to describe.
-                if "path" in self.connection_kwargs:
-                    raise RedisError(
-                        "Maintenance notifications are not supported for "
-                        "Unix domain socket connections"
-                    )
-
-                # Custom connection classes must inherit the async maintenance
-                # mixin so handlers can update connection state safely.
-                if not self._maintenance_notifications_connection_class_supported():
-                    connection_class = getattr(self, "connection_class", None)
-                    connection_class_name = getattr(
-                        connection_class, "__name__", connection_class
-                    )
-                    raise RedisError(
-                        "Maintenance notifications are not supported for "
-                        f"connection class {connection_class_name}"
-                    )
-
-                # TCP-like connections still need a host to identify the
-                # endpoint that can move during maintenance.
-                raise RedisError(
-                    "Maintenance notifications are not supported for connections "
-                    "without a host"
-                )
-            self._maint_notifications_pool_handler = None
-            return
-
-        if not self._maint_notifications_pool_handler:
-            self._maint_notifications_pool_handler = AsyncMaintNotificationsPoolHandler(
-                self, maint_notifications_config
+        if oss_cluster_maint_notifications_handler:
+            self._oss_cluster_maint_notifications_handler = (
+                oss_cluster_maint_notifications_handler
             )
+            # OSS cluster mode and pool-handler mode are mutually exclusive
+            # (see __init__). A pool created with the default RESP3 "auto"
+            # config wires a pool handler before this method runs; clear it so
+            # new and existing connections are not configured with both handlers.
+            self._maint_notifications_pool_handler = None
         else:
-            self._maint_notifications_pool_handler.config = maint_notifications_config
+            if (
+                maint_notifications_config.enabled
+                and not self._maintenance_notifications_supported()
+            ):
+                if maint_notifications_config.enabled is True:
+                    # Unix sockets do not have a host endpoint for CLIENT
+                    # MAINT_NOTIFICATIONS to describe.
+                    if "path" in self.connection_kwargs:
+                        raise RedisError(
+                            "Maintenance notifications are not supported for "
+                            "Unix domain socket connections"
+                        )
+
+                    # Custom connection classes must inherit the async maintenance
+                    # mixin so handlers can update connection state safely.
+                    if not self._maintenance_notifications_connection_class_supported():
+                        connection_class = getattr(self, "connection_class", None)
+                        connection_class_name = getattr(
+                            connection_class, "__name__", connection_class
+                        )
+                        raise RedisError(
+                            "Maintenance notifications are not supported for "
+                            f"connection class {connection_class_name}"
+                        )
+
+                    # TCP-like connections still need a host to identify the
+                    # endpoint that can move during maintenance.
+                    raise RedisError(
+                        "Maintenance notifications are not supported for connections "
+                        "without a host"
+                    )
+                self._maint_notifications_pool_handler = None
+                return
+
+            if not self._maint_notifications_pool_handler:
+                self._maint_notifications_pool_handler = (
+                    AsyncMaintNotificationsPoolHandler(self, maint_notifications_config)
+                )
+            else:
+                self._maint_notifications_pool_handler.config = (
+                    maint_notifications_config
+                )
 
         self._update_connection_kwargs_for_maint_notifications(
-            maint_notifications_pool_handler=self._maint_notifications_pool_handler
+            maint_notifications_pool_handler=self._maint_notifications_pool_handler,
+            oss_cluster_maint_notifications_handler=self._oss_cluster_maint_notifications_handler,
         )
         await self._update_maint_notifications_configs_for_connections(
-            maint_notifications_pool_handler=self._maint_notifications_pool_handler
+            maint_notifications_pool_handler=self._maint_notifications_pool_handler,
+            oss_cluster_maint_notifications_handler=self._oss_cluster_maint_notifications_handler,
         )
 
     def _update_connection_kwargs_for_maint_notifications(
         self,
         maint_notifications_pool_handler: (
             AsyncMaintNotificationsPoolHandler | None
+        ) = None,
+        oss_cluster_maint_notifications_handler: (
+            AsyncOSSMaintNotificationsHandler | None
         ) = None,
     ) -> None:
         """
@@ -2020,6 +2101,17 @@ class AsyncMaintNotificationsAbstractConnectionPool:
                     "maint_notifications_config": maint_notifications_pool_handler.config,
                 }
             )
+        if oss_cluster_maint_notifications_handler:
+            self.connection_kwargs.update(
+                {
+                    "oss_cluster_maint_notifications_handler": oss_cluster_maint_notifications_handler,
+                    "maint_notifications_config": oss_cluster_maint_notifications_handler.config,
+                }
+            )
+            # OSS cluster mode and pool-handler mode are mutually exclusive.
+            # Drop any pool handler a default (RESP3 "auto") pool creation may
+            # have wired so future connections are not configured with both.
+            self.connection_kwargs.pop("maint_notifications_pool_handler", None)
 
         # Store original connection parameters for maintenance notifications.
         if self.connection_kwargs.get("orig_host_address", None) is None:
@@ -2042,29 +2134,61 @@ class AsyncMaintNotificationsAbstractConnectionPool:
         maint_notifications_pool_handler: (
             AsyncMaintNotificationsPoolHandler | None
         ) = None,
+        oss_cluster_maint_notifications_handler: (
+            AsyncOSSMaintNotificationsHandler | None
+        ) = None,
     ) -> None:
         """Update the maintenance notifications config for all connections in the pool."""
         async with self._get_pool_lock():
-            for conn in self._get_free_connections():
-                if not maint_notifications_pool_handler:
-                    raise ValueError("maint_notifications_pool_handler must be set")
-                conn.set_maint_notifications_pool_handler_for_connection(
-                    maint_notifications_pool_handler
-                )
-                conn.maint_notifications_config = (
-                    maint_notifications_pool_handler.config
-                )
+            for conn in list(self._get_free_connections()):
+                if oss_cluster_maint_notifications_handler:
+                    conn.set_maint_notifications_cluster_handler_for_connection(
+                        oss_cluster_maint_notifications_handler
+                    )
+                    conn.maint_notifications_config = (
+                        oss_cluster_maint_notifications_handler.config
+                    )
+                elif maint_notifications_pool_handler:
+                    conn.set_maint_notifications_pool_handler_for_connection(
+                        maint_notifications_pool_handler
+                    )
+                    conn.maint_notifications_config = (
+                        maint_notifications_pool_handler.config
+                    )
+                else:
+                    raise ValueError(
+                        "Either maint_notifications_pool_handler or "
+                        "oss_cluster_maint_notifications_handler must be set"
+                    )
                 await conn.disconnect()
 
-            for conn in self._get_in_use_connections():
-                if not maint_notifications_pool_handler:
-                    raise ValueError("maint_notifications_pool_handler must be set")
-                conn.set_maint_notifications_pool_handler_for_connection(
-                    maint_notifications_pool_handler
-                )
-                conn.maint_notifications_config = (
-                    maint_notifications_pool_handler.config
-                )
+            for conn in list(self._get_in_use_connections()):
+                if oss_cluster_maint_notifications_handler:
+                    # Use set_maint_notifications_cluster_handler_for_connection
+                    # (not _configure_maintenance_notifications) so the parser is
+                    # obtained from the connection itself. _configure_* requires a
+                    # parser argument and would raise here; it would also reset the
+                    # connection's orig_* settings, which is wrong for an in-use
+                    # (active) connection. This mirrors the idle-connection branch
+                    # above and the pool-handler branches.
+                    conn.set_maint_notifications_cluster_handler_for_connection(
+                        oss_cluster_maint_notifications_handler
+                    )
+                    conn.maint_notifications_config = (
+                        oss_cluster_maint_notifications_handler.config
+                    )
+                elif maint_notifications_pool_handler:
+                    conn.set_maint_notifications_pool_handler_for_connection(
+                        maint_notifications_pool_handler
+                    )
+                    conn.maint_notifications_config = (
+                        maint_notifications_pool_handler.config
+                    )
+                else:
+                    raise ValueError(
+                        "Either maint_notifications_pool_handler or "
+                        "oss_cluster_maint_notifications_handler must be set"
+                    )
                 conn.mark_for_reconnect()
 
     def _should_update_connection(

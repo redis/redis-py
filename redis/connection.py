@@ -514,14 +514,12 @@ class MaintNotificationsAbstractConnection:
             self._oss_cluster_maint_notifications_handler = (
                 oss_cluster_maint_notifications_handler
             )
-        else:
-            self._oss_cluster_maint_notifications_handler = None
-
-        # Set up OSS cluster handler to parser if available
-        if self._oss_cluster_maint_notifications_handler:
+            # Set up OSS cluster handler to parser
             parser.set_oss_cluster_maint_push_handler(
                 self._oss_cluster_maint_notifications_handler.handle_notification
             )
+        else:
+            self._oss_cluster_maint_notifications_handler = None
 
         # Set up pool handler to parser if available
         if self._maint_notifications_pool_handler:
@@ -2512,6 +2510,11 @@ class MaintNotificationsAbstractConnectionPool:
             self._oss_cluster_maint_notifications_handler = (
                 oss_cluster_maint_notifications_handler
             )
+            # OSS cluster mode and pool-handler mode are mutually exclusive
+            # (see __init__). A pool created with the default RESP3 "auto"
+            # config wires a pool handler before this method runs; clear it so
+            # new and existing connections are not configured with both handlers.
+            self._maint_notifications_pool_handler = None
         else:
             # first update pool settings
             if not self._maint_notifications_pool_handler:
@@ -2561,6 +2564,10 @@ class MaintNotificationsAbstractConnectionPool:
                     "maint_notifications_config": oss_cluster_maint_notifications_handler.config,
                 }
             )
+            # OSS cluster mode and pool-handler mode are mutually exclusive.
+            # Drop any pool handler a default (RESP3 "auto") pool creation may
+            # have wired so future connections are not configured with both.
+            self.connection_kwargs.pop("maint_notifications_pool_handler", None)
 
         # Store original connection parameters for maintenance notifications.
         if self.connection_kwargs.get("orig_host_address", None) is None:
@@ -2612,11 +2619,18 @@ class MaintNotificationsAbstractConnectionPool:
                 conn.disconnect()
             for conn in self._get_in_use_connections():
                 if oss_cluster_maint_notifications_handler:
+                    # Use set_maint_notifications_cluster_handler_for_connection
+                    # (not _configure_maintenance_notifications) so the parser is
+                    # obtained from the connection itself. _configure_* requires a
+                    # parser argument and would raise here; it would also reset the
+                    # connection's orig_* settings, which is wrong for an in-use
+                    # (active) connection. This mirrors the idle-connection branch
+                    # above and the pool-handler branches.
+                    conn.set_maint_notifications_cluster_handler_for_connection(
+                        oss_cluster_maint_notifications_handler
+                    )
                     conn.maint_notifications_config = (
                         oss_cluster_maint_notifications_handler.config
-                    )
-                    conn._configure_maintenance_notifications(
-                        oss_cluster_maint_notifications_handler=oss_cluster_maint_notifications_handler
                     )
                 elif maint_notifications_pool_handler:
                     conn.set_maint_notifications_pool_handler_for_connection(
