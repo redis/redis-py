@@ -28,6 +28,7 @@ from redis.maint_notifications import (
     NodeMigratedNotification,
     NodeMigratingNotification,
     NodeMovingNotification,
+    OSSNodeMigratedNotification,
 )
 from redis.utils import SENTINEL
 
@@ -494,6 +495,55 @@ async def test_async_pool_update_oss_handler_wires_existing_connections():
     assert new_connection._parser.node_moving_push_handler_func is None
     assert new_connection._oss_cluster_maint_notifications_handler is oss_handler
     assert new_connection._parser.oss_cluster_maint_push_handler_func is not None
+
+
+def _make_async_oss_handler():
+    cluster_client = MagicMock()
+    # Keep the affected-nodes set and the node-reconnect loop empty so the test
+    # focuses purely on how src/dest addresses are parsed.
+    cluster_client.nodes_manager.get_node.return_value = None
+    cluster_client.nodes_manager.nodes_cache.values.return_value = []
+    cluster_client.nodes_manager.initialize = AsyncMock()
+    config = MaintNotificationsConfig(enabled=True)
+    return AsyncOSSMaintNotificationsHandler(cluster_client, config), cluster_client
+
+
+@pytest.mark.asyncio
+async def test_async_handle_smigrated_parses_ipv4_addresses():
+    handler, cluster_client = _make_async_oss_handler()
+    notification = OSSNodeMigratedNotification(
+        id=1,
+        nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
+    )
+
+    await handler.handle_oss_maintenance_completed_notification(notification)
+
+    cluster_client.nodes_manager.get_node.assert_called_once_with(
+        host="127.0.0.1", port=6379
+    )
+    cluster_client.nodes_manager.initialize.assert_called_once_with(
+        additional_startup_nodes_info=[("127.0.0.1", 6380)],
+    )
+
+
+@pytest.mark.asyncio
+async def test_async_handle_smigrated_parses_ipv6_addresses():
+    handler, cluster_client = _make_async_oss_handler()
+    # IPv6 literals contain multiple colons; a naive split(":") would raise
+    # ValueError on the host/port unpack.
+    notification = OSSNodeMigratedNotification(
+        id=1,
+        nodes_to_slots_mapping={"2001:db8::1:6379": [{"2001:db8::2:6380": "1-100"}]},
+    )
+
+    await handler.handle_oss_maintenance_completed_notification(notification)
+
+    cluster_client.nodes_manager.get_node.assert_called_once_with(
+        host="2001:db8::1", port=6379
+    )
+    cluster_client.nodes_manager.initialize.assert_called_once_with(
+        additional_startup_nodes_info=[("2001:db8::2", 6380)],
+    )
 
 
 @pytest.mark.asyncio

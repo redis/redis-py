@@ -1124,16 +1124,6 @@ class OSSMaintNotificationsHandler:
         self._in_progress = set()
         self._lock = threading.RLock()
 
-    def get_handler_for_connection(self):
-        # Copy all data that should be shared between connections
-        # but each connection should have its own pool handler
-        # since each connection can be in a different state
-        copy = OSSMaintNotificationsHandler(self.cluster_client, self.config)
-        copy._processed_notifications = self._processed_notifications
-        copy._in_progress = self._in_progress
-        copy._lock = self._lock
-        return copy
-
     def remove_expired_notifications(self):
         with self._lock:
             for notification in tuple(self._processed_notifications):
@@ -1182,16 +1172,16 @@ class OSSMaintNotificationsHandler:
                 src_address,
                 dest_mappings,
             ) in notification.nodes_to_slots_mapping.items():
-                src_host, src_port = src_address.split(":")
+                src_host, src_port = src_address.rsplit(":", 1)
                 src_node = self.cluster_client.nodes_manager.get_node(
-                    host=src_host, port=src_port
+                    host=src_host, port=int(src_port)
                 )
                 if src_node is not None:
                     affected_nodes.add(src_node)
 
                 for dest_mapping in dest_mappings:
                     for dest_address in dest_mapping.keys():
-                        dest_host, dest_port = dest_address.split(":")
+                        dest_host, dest_port = dest_address.rsplit(":", 1)
                         additional_startup_nodes_info.append(
                             (dest_host, int(dest_port))
                         )

@@ -403,17 +403,6 @@ class AsyncOSSMaintNotificationsHandler:
         self._lock = asyncio.Lock()
         self._background_tasks: set[asyncio.Task] = set()
 
-    def get_handler_for_connection(self) -> "AsyncOSSMaintNotificationsHandler":
-        # Copy all data that should be shared between connections
-        # but each connection should have its own handler
-        # since each connection can be in a different state
-        copy = AsyncOSSMaintNotificationsHandler(self.cluster_client, self.config)
-        copy._processed_notifications = self._processed_notifications
-        copy._in_progress = self._in_progress
-        copy._lock = self._lock
-        copy._background_tasks = self._background_tasks
-        return copy
-
     async def remove_expired_notifications(self) -> None:
         async with self._lock:
             for n in tuple(self._processed_notifications):
@@ -509,7 +498,7 @@ class AsyncOSSMaintNotificationsHandler:
                 src_address,
                 dest_mappings,
             ) in notification.nodes_to_slots_mapping.items():
-                src_host, src_port = src_address.split(":")
+                src_host, src_port = src_address.rsplit(":", 1)
                 src_node = self.cluster_client.nodes_manager.get_node(
                     host=src_host, port=int(src_port)
                 )
@@ -517,7 +506,7 @@ class AsyncOSSMaintNotificationsHandler:
                     affected_nodes.add(src_node)
                 for dest_mapping in dest_mappings:
                     for dest_address in dest_mapping.keys():
-                        dest_host, dest_port = dest_address.split(":")
+                        dest_host, dest_port = dest_address.rsplit(":", 1)
                         additional_startup_nodes_info.append(
                             (dest_host, int(dest_port))
                         )
