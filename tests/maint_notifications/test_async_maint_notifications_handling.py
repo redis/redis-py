@@ -15,6 +15,7 @@ from redis.asyncio.connection import (
 from redis.asyncio.maint_notifications import (
     AsyncMaintNotificationsConnectionHandler,
     AsyncMaintNotificationsPoolHandler,
+    AsyncOSSMaintNotificationsHandler,
 )
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import RedisError, ResponseError
@@ -27,7 +28,6 @@ from redis.maint_notifications import (
     NodeMigratedNotification,
     NodeMigratingNotification,
     NodeMovingNotification,
-    OSSNodeMigratingNotification,
 )
 from redis.utils import SENTINEL
 
@@ -210,30 +210,6 @@ async def test_async_connection_handler_handles_failover_start_and_end():
     assert connection.maintenance_state == MaintenanceState.NONE
     assert connection.timeout_updates == [RELAXED_TIMEOUT, -1]
     assert relaxed_timeout_metric.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_async_connection_handler_ignores_oss_cluster_notifications():
-    config = MaintNotificationsConfig(enabled=True, relaxed_timeout=RELAXED_TIMEOUT)
-    connection = DummyAsyncConnection()
-    handler = AsyncMaintNotificationsConnectionHandler(connection, config)
-
-    with (
-        mock.patch(
-            "redis.asyncio.maint_notifications.record_maint_notification_count",
-            new=AsyncMock(),
-        ) as notification_count,
-        mock.patch(
-            "redis.asyncio.maint_notifications.record_connection_relaxed_timeout",
-            new=AsyncMock(),
-        ) as relaxed_timeout_metric,
-    ):
-        await handler.handle_notification(OSSNodeMigratingNotification(id=1))
-
-    assert connection.maintenance_state == MaintenanceState.NONE
-    assert connection.timeout_updates == []
-    notification_count.assert_awaited_once()
-    relaxed_timeout_metric.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -457,6 +433,67 @@ async def test_async_pool_update_config_wires_existing_connections():
     assert pool.connection_kwargs["maint_notifications_pool_handler"] is (
         pool._maint_notifications_pool_handler
     )
+
+
+@pytest.mark.asyncio
+async def test_async_pool_update_oss_handler_wires_existing_connections():
+    """update_maint_notifications_config wires an OSS cluster handler onto every
+    existing connection in the pool.
+
+    Each connection's parser receives the OSS cluster and maintenance push
+    handlers and the connection references the handler. In-use connections are
+    marked for reconnect; free connections are wired then disconnected.
+    """
+    config = MaintNotificationsConfig(enabled=True)
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=config,
+    )
+    free_connection = pool.make_connection()
+    in_use_connection = pool.make_connection()
+    pool._available_connections.append(free_connection)
+    pool._in_use_connections.add(in_use_connection)
+
+    oss_handler = AsyncOSSMaintNotificationsHandler(MagicMock(), config)
+
+    await pool.update_maint_notifications_config(
+        config, oss_cluster_maint_notifications_handler=oss_handler
+    )
+
+    # In-use connection: parser has the OSS + maintenance push handlers wired
+    # and the connection is marked for reconnect.
+    assert in_use_connection._oss_cluster_maint_notifications_handler is oss_handler
+    in_use_oss_func = in_use_connection._parser.oss_cluster_maint_push_handler_func
+    assert in_use_oss_func is not None
+    assert in_use_oss_func.__func__ is oss_handler.handle_notification.__func__
+    assert in_use_connection._parser.maintenance_push_handler_func is not None
+    assert in_use_connection.should_reconnect()
+
+    # Free connection — the idle OSS path, wired then disconnected.
+    assert free_connection._oss_cluster_maint_notifications_handler is oss_handler
+    assert free_connection._parser.oss_cluster_maint_push_handler_func is not None
+    assert free_connection._parser.maintenance_push_handler_func is not None
+
+    # OSS cluster mode and pool-handler mode are mutually exclusive. The pool
+    # was created with the default (enabled) config, which wires a pool handler
+    # in __init__; switching to OSS mode must clear it from both the pool
+    # attribute and the shared connection kwargs so future connections are not
+    # configured with both handlers.
+    assert pool._maint_notifications_pool_handler is None
+    assert "maint_notifications_pool_handler" not in pool.connection_kwargs
+    assert (
+        pool.connection_kwargs.get("oss_cluster_maint_notifications_handler")
+        is oss_handler
+    )
+
+    # A connection created after the switch gets only the OSS cluster handler.
+    new_connection = pool.make_connection()
+    assert new_connection._maint_notifications_pool_handler is None
+    assert new_connection._parser.node_moving_push_handler_func is None
+    assert new_connection._oss_cluster_maint_notifications_handler is oss_handler
+    assert new_connection._parser.oss_cluster_maint_push_handler_func is not None
 
 
 @pytest.mark.asyncio

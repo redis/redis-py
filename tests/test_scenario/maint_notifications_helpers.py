@@ -336,7 +336,7 @@ def generate_params(
                         ip_type = requirement["oss_cluster_api"]["ip_type"]
                         if ip_type == "internal":
                             continue
-                    db_name_pattern = dbconfig.get("name").rsplit("-", 1)[0]
+                    db_name_pattern = dbconfig.get("name").rsplit("-", 2)[0]
                     dbconfig["name"] = db_name_pattern
 
                     if endpoint_types is not None:

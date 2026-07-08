@@ -1,21 +1,24 @@
-"""Tests for Redis Enterprise maintenance push notifications — async standalone client."""
+"""Tests for Redis Enterprise maintenance push notifications — async client."""
 
 import asyncio
 import json
 import logging
+import random
 import time
 from typing import Any, Dict, List, Literal, Optional, Union
 
 import pytest
 import pytest_asyncio
 
-from redis.asyncio import Redis
+from redis.asyncio import Redis, RedisCluster
+from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.maint_notifications import (
     EndpointType,
     MaintenanceState,
 )
 from tests.test_asyncio.test_scenario.conftest import (
     _get_async_client_maint_notifications,
+    get_async_cluster_client_maint_notifications,
     get_async_standalone_client_maint_notifications,
 )
 from tests.test_asyncio.test_scenario.maint_notifications_helpers import (
@@ -24,6 +27,7 @@ from tests.test_asyncio.test_scenario.maint_notifications_helpers import (
 from tests.test_scenario.conftest import (
     CLIENT_TIMEOUT,
     RELAXED_TIMEOUT,
+    _FAULT_INJECTOR_CLIENT_OSS_API,
     _FAULT_INJECTOR_STANDALONE_CLIENT,
     use_mock_proxy,
 )
@@ -36,6 +40,7 @@ from tests.test_scenario.fault_injector_client import (
     TopologyChangeStandaloneEffects,
 )
 from tests.test_scenario.maint_notifications_helpers import (
+    KeyGenerationHelpers,
     generate_params,
     is_endpoint_configured_correctly,
 )
@@ -47,12 +52,16 @@ logging.basicConfig(
 )
 
 logging.getLogger("redis.asyncio.maint_notifications").setLevel(logging.DEBUG)
+logging.getLogger("redis.asyncio.cluster").setLevel(logging.DEBUG)
 
 STANDALONE_MAINT_TIMEOUT = 60
 SLOT_SHUFFLE_TIMEOUT = 120
+SMIGRATING_TIMEOUT = 20
+SMIGRATED_TIMEOUT = 40
 
 DEFAULT_BIND_TTL = 15
 DEFAULT_STANDALONE_CLIENT_SOCKET_TIMEOUT = 1
+DEFAULT_OSS_API_CLIENT_SOCKET_TIMEOUT = 1
 
 
 class TestAsyncPushNotificationsBase:
@@ -1190,6 +1199,542 @@ class TestAsyncStandaloneClientCommandsExecutionWithPushNotificationsWithEffectT
             expected_matching_conns_count=10,
             configured_timeout=DEFAULT_STANDALONE_CLIENT_SOCKET_TIMEOUT,
         )
+
+        error_items = []
+        while not errors.empty():
+            error_items.append(errors.get_nowait())
+        assert not error_items, f"Errors occurred in tasks: {error_items}"
+
+
+class TestAsyncClusterClientPushNotificationsWithEffectTriggerBase(
+    TestAsyncPushNotificationsBase
+):
+    async def setup_env(
+        self,
+        fault_injector_client: AsyncFaultInjectorClient,
+        db_config: Dict[str, Any],
+    ):
+        self._fault_injector = fault_injector_client
+        await self.delete_prev_db(fault_injector_client, db_config["name"])
+
+        cluster_endpoint_config = await self.create_db(fault_injector_client, db_config)
+        self._bdb_name = db_config["name"]
+
+        socket_timeout = DEFAULT_OSS_API_CLIENT_SOCKET_TIMEOUT
+        socket_connect_timeout = DEFAULT_OSS_API_CLIENT_SOCKET_TIMEOUT
+
+        auth_ssl_client_certs_config_info = db_config.get(
+            "authentication_ssl_client_certs", None
+        )
+        auth_ssl_client_certs = (
+            True
+            if auth_ssl_client_certs_config_info
+            and auth_ssl_client_certs_config_info[0].get("client_cert") is not None
+            else False
+        )
+
+        self._client = get_async_cluster_client_maint_notifications(
+            endpoints_config=cluster_endpoint_config,
+            disable_retries=True,
+            socket_timeout=socket_timeout,
+            socket_connect_timeout=socket_connect_timeout,
+            enable_maintenance_notifications=True,
+            auth_ssl_client_certs=auth_ssl_client_certs,
+        )
+        # The async cluster discovers its topology lazily.
+        await self._client.initialize()
+        return self._client, cluster_endpoint_config
+
+    async def _acquire_connected_connection(self, node):
+        """Acquire a connection from an async ClusterNode and connect it.
+
+        The async ClusterNode is its own pool. ``acquire_connection`` returns a
+        (possibly fresh) connection that is not yet connected; we connect it so
+        the maintenance push handlers are installed and the handshake is sent.
+        """
+        conn = node.acquire_connection()
+        await conn.connect()
+        return conn
+
+    async def _drain_maint_notification_tasks(self, client: RedisCluster):
+        """Wait for in-flight async OSS maintenance handling tasks to finish.
+
+        Unlike the sync client (where SMIGRATED handling completes inline while
+        reading the command response), the async client schedules the topology
+        update in a background task. Tests must drain these before asserting on
+        the resulting topology / connection state.
+        """
+        handler = client._oss_cluster_maint_notifications_handler
+        if handler is None:
+            return
+        for _ in range(100):
+            tasks = [t for t in handler._background_tasks if not t.done()]
+            if not tasks:
+                break
+            await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.sleep(0)
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def setup_and_cleanup(self):
+        self.maintenance_ops_tasks = []
+        self._bdb_name = None
+        self._fault_injector = None
+        self._client: RedisCluster | None = None
+
+        yield
+
+        logging.info("Starting cleanup...")
+
+        logging.info("Waiting for maintenance operation tasks to finish...")
+        if self.maintenance_ops_tasks:
+            await asyncio.gather(*self.maintenance_ops_tasks, return_exceptions=True)
+
+        if self._client is not None:
+            await self._client.aclose()
+
+        if self._bdb_name and self._fault_injector:
+            await self.delete_prev_db(self._fault_injector, self._bdb_name)
+
+        logging.info("Cleanup finished")
+
+
+class TestAsyncClusterClientPushNotificationsHandlingWithEffectTrigger(
+    TestAsyncClusterClientPushNotificationsWithEffectTriggerBase
+):
+    @pytest.mark.timeout(300)
+    @pytest.mark.parametrize(
+        "effect_name, trigger, db_config, db_name",
+        generate_params(
+            _FAULT_INJECTOR_CLIENT_OSS_API, [SlotMigrateEffects.SLOT_SHUFFLE]
+        ),
+    )
+    async def test_notification_handling_during_node_shuffle_no_node_replacement(
+        self,
+        fault_injector_client_oss_api: AsyncFaultInjectorClient,
+        effect_name: SlotMigrateEffects,
+        trigger: str,
+        db_config: dict[str, Any],
+        db_name: str,
+    ):
+        """Slots are moved between existing nodes; no node appears/disappears."""
+        logging.info(f"DB name: {db_name}")
+
+        client, cluster_endpoint_config = await self.setup_env(
+            fault_injector_client_oss_api, db_config
+        )
+
+        logging.info("Creating one connection in each node's pool.")
+        initial_cluster_nodes = client.nodes_manager.nodes_cache.copy()
+        in_use_connections = {}
+        for node in initial_cluster_nodes.values():
+            in_use_connections[node] = await self._acquire_connected_connection(node)
+
+        logging.info("Executing FI command that triggers the desired effect...")
+        trigger_task = asyncio.create_task(
+            self._trigger_effect(
+                fault_injector_client_oss_api,
+                cluster_endpoint_config,
+                effect_name,
+                trigger,
+            )
+        )
+        self.maintenance_ops_tasks.append(trigger_task)
+
+        logging.info("Waiting for SMIGRATING push notifications in all connections...")
+        for conn in in_use_connections.values():
+            await AsyncClientValidations.wait_push_notification(
+                client,
+                timeout=int(SLOT_SHUFFLE_TIMEOUT / 2),
+                connection=conn,
+            )
+
+        logging.info("Validating connection maintenance state...")
+        for conn in in_use_connections.values():
+            assert conn.maintenance_state == MaintenanceState.MAINTENANCE
+            assert conn.socket_timeout == RELAXED_TIMEOUT
+            assert conn.should_reconnect() is False
+
+        assert len(initial_cluster_nodes) == len(client.nodes_manager.nodes_cache)
+        for node_key in initial_cluster_nodes.keys():
+            assert node_key in client.nodes_manager.nodes_cache
+
+        logging.info("Waiting for SMIGRATED push notifications...")
+        con_to_read_smigrated = random.choice(list(in_use_connections.values()))
+        await AsyncClientValidations.wait_push_notification(
+            client,
+            timeout=SMIGRATED_TIMEOUT,
+            connection=con_to_read_smigrated,
+        )
+        # SMIGRATED handling runs in a background task in the async client.
+        await self._drain_maint_notification_tasks(client)
+
+        logging.info("Validating connection state after SMIGRATED ...")
+        updated_cluster_nodes = client.nodes_manager.nodes_cache.copy()
+        removed_nodes = set(initial_cluster_nodes.values()) - set(
+            updated_cluster_nodes.values()
+        )
+        assert len(removed_nodes) == 0
+        assert len(initial_cluster_nodes) == len(updated_cluster_nodes)
+
+        marked_conns_for_reconnect = 0
+        for conn in in_use_connections.values():
+            if conn.should_reconnect():
+                marked_conns_for_reconnect += 1
+        # Async-specific: unlike the sync client (which marks only the src node's
+        # connection), the async NodesManager.set_nodes marks ALL preserved nodes'
+        # in-use connections for reconnect on every initialize() — the cluster
+        # topology refresh triggered while handling SMIGRATED defers disconnection
+        # via lazy reconnect since set_nodes is sync. So at least the src node's
+        # connection is marked; in practice every held connection is.
+        assert marked_conns_for_reconnect >= 1
+
+        logging.info("Releasing connections back to the pool...")
+        for node, conn in in_use_connections.items():
+            node.release(conn)
+
+        await trigger_task
+        self.maintenance_ops_tasks.remove(trigger_task)
+
+    @pytest.mark.timeout(300)
+    @pytest.mark.parametrize(
+        "effect_name, trigger, db_config, db_name",
+        generate_params(
+            _FAULT_INJECTOR_CLIENT_OSS_API,
+            [SlotMigrateEffects.REMOVE_ADD],
+        ),
+    )
+    async def test_notification_handling_with_node_replace(
+        self,
+        fault_injector_client_oss_api: AsyncFaultInjectorClient,
+        effect_name: SlotMigrateEffects,
+        trigger: str,
+        db_config: dict[str, Any],
+        db_name: str,
+    ):
+        """A node is removed and a new node is added during slot movement."""
+        logging.info(f"DB name: {db_name}")
+
+        client, cluster_endpoint_config = await self.setup_env(
+            fault_injector_client_oss_api, db_config
+        )
+
+        logging.info("Creating one connection in each node's pool.")
+        initial_cluster_nodes = client.nodes_manager.nodes_cache.copy()
+        in_use_connections = {}
+        for node in initial_cluster_nodes.values():
+            in_use_connections[node] = await self._acquire_connected_connection(node)
+
+        logging.info("Executing FI command that triggers the desired effect...")
+        trigger_task = asyncio.create_task(
+            self._trigger_effect(
+                fault_injector_client_oss_api,
+                cluster_endpoint_config,
+                effect_name,
+                trigger,
+            )
+        )
+        self.maintenance_ops_tasks.append(trigger_task)
+
+        logging.info("Waiting for SMIGRATING push notifications in all connections...")
+        for conn in in_use_connections.values():
+            await AsyncClientValidations.wait_push_notification(
+                client,
+                timeout=SMIGRATING_TIMEOUT,
+                connection=conn,
+            )
+
+        logging.info("Validating connection maintenance state...")
+        for conn in in_use_connections.values():
+            assert conn.maintenance_state == MaintenanceState.MAINTENANCE
+            assert conn.socket_timeout == RELAXED_TIMEOUT
+            assert conn.should_reconnect() is False
+
+        assert len(initial_cluster_nodes) == len(client.nodes_manager.nodes_cache)
+
+        logging.info("Waiting for SMIGRATED push notifications...")
+        con_to_read_smigrated = random.choice(list(in_use_connections.values()))
+        await AsyncClientValidations.wait_push_notification(
+            client,
+            timeout=SMIGRATED_TIMEOUT,
+            connection=con_to_read_smigrated,
+        )
+        await self._drain_maint_notification_tasks(client)
+
+        logging.info("Validating connection state after SMIGRATED ...")
+        updated_cluster_nodes = client.nodes_manager.nodes_cache.copy()
+
+        removed_nodes = set(initial_cluster_nodes.values()) - set(
+            updated_cluster_nodes.values()
+        )
+        assert len(removed_nodes) == 1
+        removed_node = removed_nodes.pop()
+        assert removed_node is not None
+
+        added_nodes = set(updated_cluster_nodes.values()) - set(
+            initial_cluster_nodes.values()
+        )
+        assert len(added_nodes) == 1
+
+        conn = in_use_connections.get(removed_node)
+        # connection will be dropped, but it is marked for reconnect before
+        # being released; timeouts/state are not updated so are not checked
+        assert conn is not None
+        assert conn.should_reconnect() is True
+
+        logging.info("Releasing connections back to the pool...")
+        for node, conn in in_use_connections.items():
+            node.release(conn)
+
+        await trigger_task
+        self.maintenance_ops_tasks.remove(trigger_task)
+
+    @pytest.mark.timeout(300)
+    @pytest.mark.parametrize(
+        "effect_name, trigger, db_config, db_name",
+        generate_params(
+            _FAULT_INJECTOR_CLIENT_OSS_API,
+            [SlotMigrateEffects.REMOVE],
+        ),
+    )
+    async def test_notification_handling_with_node_remove(
+        self,
+        fault_injector_client_oss_api: AsyncFaultInjectorClient,
+        effect_name: SlotMigrateEffects,
+        trigger: str,
+        db_config: dict[str, Any],
+        db_name: str,
+    ):
+        """A node is removed during slot movement (no replacement added)."""
+        logging.info(f"DB name: {db_name}")
+
+        client, cluster_endpoint_config = await self.setup_env(
+            fault_injector_client_oss_api, db_config
+        )
+
+        logging.info("Creating one connection in each node's pool.")
+        initial_cluster_nodes = client.nodes_manager.nodes_cache.copy()
+        in_use_connections = {}
+        for node in initial_cluster_nodes.values():
+            in_use_connections[node] = await self._acquire_connected_connection(node)
+
+        logging.info("Executing FI command that triggers the desired effect...")
+        trigger_task = asyncio.create_task(
+            self._trigger_effect(
+                fault_injector_client_oss_api,
+                cluster_endpoint_config,
+                effect_name,
+                trigger,
+            )
+        )
+        self.maintenance_ops_tasks.append(trigger_task)
+
+        logging.info("Waiting for SMIGRATING push notifications in all connections...")
+        for conn in in_use_connections.values():
+            await AsyncClientValidations.wait_push_notification(
+                client,
+                timeout=int(SLOT_SHUFFLE_TIMEOUT / 2),
+                connection=conn,
+            )
+
+        logging.info("Validating connection maintenance state...")
+        for conn in in_use_connections.values():
+            assert conn.maintenance_state == MaintenanceState.MAINTENANCE
+            assert conn.socket_timeout == RELAXED_TIMEOUT
+            assert conn.should_reconnect() is False
+
+        assert len(initial_cluster_nodes) == len(client.nodes_manager.nodes_cache)
+
+        logging.info("Waiting for SMIGRATED push notifications...")
+        con_to_read_smigrated = random.choice(list(in_use_connections.values()))
+        await AsyncClientValidations.wait_push_notification(
+            client,
+            timeout=SMIGRATED_TIMEOUT,
+            connection=con_to_read_smigrated,
+        )
+        await self._drain_maint_notification_tasks(client)
+
+        logging.info("Validating connection state after SMIGRATED ...")
+        updated_cluster_nodes = client.nodes_manager.nodes_cache.copy()
+
+        removed_nodes = set(initial_cluster_nodes.values()) - set(
+            updated_cluster_nodes.values()
+        )
+        assert len(removed_nodes) == 1
+        removed_node = removed_nodes.pop()
+        assert removed_node is not None
+
+        assert len(initial_cluster_nodes) == len(updated_cluster_nodes) + 1
+
+        conn = in_use_connections.get(removed_node)
+        assert conn is not None
+        assert conn.should_reconnect() is True
+
+        # Async-specific: the async NodesManager.set_nodes marks all preserved
+        # nodes' in-use connections for reconnect on initialize() (lazy reconnect,
+        # since set_nodes is sync), in addition to the removed node's connection.
+        # So at least the removed node's connection is marked; in practice all are.
+        marked_conns_for_reconnect = 0
+        for conn in in_use_connections.values():
+            if conn.should_reconnect():
+                marked_conns_for_reconnect += 1
+        assert marked_conns_for_reconnect >= 1
+
+        logging.info("Releasing connections back to the pool...")
+        for node, conn in in_use_connections.items():
+            node.release(conn)
+
+        await trigger_task
+        self.maintenance_ops_tasks.remove(trigger_task)
+
+
+class TestAsyncClusterClientCommandsExecutionWithPushNotificationsWithEffectTrigger(
+    TestAsyncClusterClientPushNotificationsWithEffectTriggerBase
+):
+    @pytest.mark.timeout(300)
+    @pytest.mark.parametrize(
+        "effect_name, trigger, db_config, db_name",
+        generate_params(
+            _FAULT_INJECTOR_CLIENT_OSS_API,
+            [
+                SlotMigrateEffects.SLOT_SHUFFLE,
+                SlotMigrateEffects.REMOVE,
+                SlotMigrateEffects.ADD,
+            ],
+        ),
+    )
+    async def test_command_execution_during_slot_shuffle_no_node_replacement(
+        self,
+        fault_injector_client_oss_api: AsyncFaultInjectorClient,
+        effect_name: SlotMigrateEffects,
+        trigger: str,
+        db_config: dict[str, Any],
+        db_name: str,
+    ):
+        """Commands keep succeeding while slots migrate between nodes."""
+        logging.info(f"DB name: {db_name}")
+
+        client, cluster_endpoint_config = await self.setup_env(
+            fault_injector_client_oss_api, db_config
+        )
+
+        shards_count = db_config["shards_count"]
+        logging.info(f"Shards count: {shards_count}")
+
+        errors = asyncio.Queue()
+        if isinstance(fault_injector_client_oss_api, AsyncProxyServerFaultInjector):
+            execution_duration = 20
+        else:
+            execution_duration = 40
+
+        # Warm up the per-node connection pools with a single sequential pass over
+        # all shards before launching the concurrent load. The async client runs on
+        # one event loop, so a burst of concurrent cold connects to the (remote)
+        # cluster nodes would starve each other's connect-timeout budget and fail
+        # before any migration begins. Connecting sequentially gives each node an
+        # uncontended connect window; the concurrent tasks then reuse the pooled
+        # connections. (The sync test gets this for free via thread parallelism.)
+        logging.info("Warming up connection pools to all shards...")
+        warmup_keys = KeyGenerationHelpers.generate_keys_for_all_shards(
+            shards_count,
+            prefix=f"warmup_{effect_name}_{trigger}_key",
+        )
+        for key in warmup_keys:
+            await client.set(key, "value")
+            await client.get(key)
+
+        # Pre-generate each task's key set BEFORE launching the concurrent tasks.
+        # generate_keys_for_all_shards brute-forces CRC16 (~16k iterations/key) and
+        # is fully synchronous. Calling it inside each task would run that CPU work
+        # on the event loop right as the tasks start, stalling the single loop
+        # during the connection-establishment burst and causing spurious connect
+        # timeouts. (The sync test is immune: each worker is its own OS thread.)
+        task_names = [f"cmd_execution_{i}" for i in range(10)]
+        keys_by_task = {
+            name: KeyGenerationHelpers.generate_keys_for_all_shards(
+                shards_count,
+                prefix=f"{name}_{effect_name}_{trigger}_key",
+            )
+            for name in task_names
+        }
+
+        async def execute_commands(duration: int, task_name: str):
+            start = time.time()
+            executed_commands_count = 0
+            keys_for_all_shards = keys_by_task[task_name]
+            while time.time() - start < duration:
+                for key in keys_for_all_shards:
+                    try:
+                        await client.set(key, "value")
+                        await client.get(key)
+                        executed_commands_count += 2
+                    except Exception as e:
+                        logging.error(f"Error in task {task_name}: {e}")
+                        await errors.put(f"Command failed in task {task_name}: {e}")
+                await asyncio.sleep(0.001)
+            logging.debug(f"{task_name}: task ended")
+
+        tasks = [
+            asyncio.create_task(
+                execute_commands(execution_duration, name),
+                name=name,
+            )
+            for name in task_names
+        ]
+
+        logging.info("Waiting for tasks to start and have a few cycles executed ...")
+        await asyncio.sleep(3)
+
+        logging.info("Executing FI command that triggers the desired effect...")
+        trigger_task = asyncio.create_task(
+            self._trigger_effect(
+                fault_injector_client_oss_api,
+                cluster_endpoint_config,
+                effect_name,
+                trigger,
+            )
+        )
+        self.maintenance_ops_tasks.append(trigger_task)
+
+        await asyncio.gather(*tasks)
+
+        await trigger_task
+        self.maintenance_ops_tasks.remove(trigger_task)
+
+        # Drain any in-flight topology-update tasks before consuming buffers.
+        await self._drain_maint_notification_tasks(client)
+
+        # Consume all node connection buffers to validate no notifications were
+        # left unconsumed.
+        logging.info(
+            "Consuming all buffers to validate no notifications were left unconsumed..."
+        )
+        # Snapshot the node list before iterating: the awaits in this loop
+        # (sleep + read_response) yield to the event loop, where reading a push
+        # notification can schedule a background topology-update task that
+        # mutates nodes_cache (set_nodes with remove_old=True), causing
+        # "dictionary changed size during iteration". Same reason the inner loop
+        # snapshots node._connections.
+        for node in list(client.nodes_manager.nodes_cache.values()):
+            for conn in list(node._connections):
+                if conn.is_connected:
+                    # Async can_read() is non-blocking (it only checks the buffer),
+                    # unlike the sync can_read(timeout=...). Give any in-flight push
+                    # data a moment to land before draining the buffer.
+                    await asyncio.sleep(0.2)
+                    try:
+                        while await conn.can_read():
+                            await conn.read_response(push_request=True)
+                    except RedisConnectionError:
+                        # remove/failover migrations close connections to the
+                        # removed/failed-over node server-side. async can_read()
+                        # reports True on EOF (it also flags a closed/dirty
+                        # connection, not just buffered data), so the drain enters
+                        # read_response() and hits "Connection closed by server".
+                        # A closed connection has nothing left to drain — this is
+                        # expected during the migration, not an unconsumed push.
+                        pass
+            logging.info(f"Consumed all buffers for node: {node.name}")
+        logging.info("All buffers consumed.")
 
         error_items = []
         while not errors.empty():

@@ -1256,4 +1256,4 @@ class OSSMaintNotificationsHandler:
 
             # mark the notification as processed
             self._processed_notifications.add(notification)
-            self._in_progress.remove(notification)
+            self._in_progress.discard(notification)
