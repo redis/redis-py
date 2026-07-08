@@ -3606,6 +3606,124 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("BLMOVE", *params)
 
     @overload
+    def lmovem(
+        self: SyncClientProtocol,
+        first_list: str,
+        second_list: str,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> list[bytes | str] | None: ...
+
+    @overload
+    def lmovem(
+        self: AsyncClientProtocol,
+        first_list: str,
+        second_list: str,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> Awaitable[list[bytes | str] | None]: ...
+
+    def lmovem(
+        self,
+        first_list: str,
+        second_list: str,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> (list[bytes | str] | None) | Awaitable[list[bytes | str] | None]:
+        """
+        Atomically moves multiple elements from one end of the ``first_list``
+        to one end of the ``second_list``, returning the moved elements in
+        destination order.
+
+        ``src`` and ``dest`` are the ends to pop from / push to, either
+        ``LEFT`` (head) or ``RIGHT`` (tail).
+
+        When ``count`` is given, ``mode`` selects how many elements to move:
+        ``COUNT`` (the default) moves up to ``count`` elements, while
+        ``EXACTLY`` moves exactly ``count`` elements or nothing at all. When
+        ``count`` is not given a single element is moved.
+
+        ``ordering`` controls the order at the destination: ``OBO`` pushes each
+        element as it is popped (reversing block order, stack semantics) while
+        ``BULK`` preserves the original relative order (queue semantics).
+
+        Returns the array of moved elements, or ``None`` if nothing was moved.
+
+        For more information, see https://redis.io/commands/lmovem
+        """
+        pieces: list[EncodableT] = [first_list, second_list, src, dest]
+        if count is not None:
+            pieces.extend([mode or "COUNT", count])
+            if ordering is not None:
+                pieces.append(ordering)
+        return self.execute_command("LMOVEM", *pieces)
+
+    @overload
+    def blmovem(
+        self: SyncClientProtocol,
+        first_list: str,
+        second_list: str,
+        timeout: float,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> list[bytes | str] | None: ...
+
+    @overload
+    def blmovem(
+        self: AsyncClientProtocol,
+        first_list: str,
+        second_list: str,
+        timeout: float,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> Awaitable[list[bytes | str] | None]: ...
+
+    def blmovem(
+        self,
+        first_list: str,
+        second_list: str,
+        timeout: float,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> (list[bytes | str] | None) | Awaitable[list[bytes | str] | None]:
+        """
+        Blocking version of lmovem.
+
+        Blocks until elements are available to move or ``timeout`` (in seconds)
+        is reached; a ``timeout`` of ``0`` blocks indefinitely. With ``COUNT``
+        the command unblocks once at least one element is available and moves
+        ``min(count, available)``; with ``EXACTLY`` it blocks until the source
+        holds at least ``count`` elements, then moves exactly ``count``
+        atomically. On timeout ``None`` is returned and nothing is moved.
+
+        For more information, see https://redis.io/commands/blmovem
+        """
+        pieces: list[EncodableT] = [first_list, second_list, src, dest, timeout]
+        if count is not None:
+            pieces.extend([mode or "COUNT", count])
+            if ordering is not None:
+                pieces.append(ordering)
+        return self.execute_command("BLMOVEM", *pieces)
+
+    @overload
     def mget(
         self: SyncClientProtocol, keys: KeysT, *args: EncodableT
     ) -> list[bytes | str | None]: ...
