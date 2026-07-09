@@ -57,6 +57,40 @@ TITLES_CSV = os.path.abspath(
 )
 
 
+def _assert_search_result(client, result, expected_doc_ids):
+    """
+    Make sure the result of a search is as expected, taking into account the
+    RESP version being used.
+    """
+    if expects_resp2_shape(client) or expects_unified_shape(client):
+        assert set([doc.id for doc in result.docs]) == set(expected_doc_ids)
+    elif expects_resp3_shape(client):
+        assert set([doc["id"] for doc in result["results"]]) == set(expected_doc_ids)
+
+
+def _search_total(client, result):
+    """
+    Return the number of matched documents in a search result, taking into
+    account the RESP version being used.
+    """
+    if expects_resp2_shape(client) or expects_unified_shape(client):
+        return result.total
+    return result["total_results"]
+
+
+# Languages RediSearch analyses with a Snowball stemmer.  For each case the
+# document stores ``doc_word`` (inside ``text``) and the query uses a different
+# surface form that shares the same stem in that language but NOT in English --
+# so a match proves the language stemmer is applied rather than a literal match.
+NON_ENGLISH_STEMMING_CASES = [
+    # (language, text, query, doc_word)
+    ("german", "Die Kinder spielen im Garten", "Kind", "Kinder"),
+    ("french", "Les chevaux courent vite", "cheval", "chevaux"),
+    ("spanish", "Nosotros hablamos mucho", "hablar", "hablamos"),
+    ("greek", "Οι άνθρωποι περπατούν", "άνθρωπος", "άνθρωποι"),
+]
+
+
 class AsyncSearchTestsBase:
     @pytest_asyncio.fixture()
     async def decoded_r(self, create_redis, stack_url):
@@ -1196,6 +1230,138 @@ class TestBaseSearchFunctionality(AsyncSearchTestsBase):
         )
 
 
+class TestSearchLanguages(AsyncSearchTestsBase):
+    """Functional coverage for indexing and searching text in languages other
+    than English: Snowball stemming for several languages, query-time language
+    selection, the Chinese (friso) tokenizer and per-document ``LANGUAGE_FIELD``
+    routing."""
+
+    @pytest.mark.redismod
+    @pytest.mark.parametrize(
+        "language, text, query, doc_word",
+        NON_ENGLISH_STEMMING_CASES,
+    )
+    async def test_search_non_english_stemming(
+        self, decoded_r: redis.Redis, language, text, query, doc_word
+    ):
+        """A query for a different inflection of ``doc_word`` matches when the
+        document is indexed with its own language stemmer, but not when the same
+        text is indexed as English -- proving the language setting is what drives
+        the stem match."""
+        # Index the document under its own language.
+        lang_def = IndexDefinition(prefix=["lang:"], language=language)
+        await decoded_r.ft("idx_lang").create_index(
+            (TextField("txt"),), definition=lang_def
+        )
+        await decoded_r.hset("lang:1", mapping={"txt": text})
+
+        # Index the same text as English as a negative control.
+        en_def = IndexDefinition(prefix=["en:"], language="english")
+        await decoded_r.ft("idx_en").create_index(
+            (TextField("txt"),), definition=en_def
+        )
+        await decoded_r.hset("en:1", mapping={"txt": text})
+
+        await self.waitForIndex(decoded_r, "idx_lang")
+        await self.waitForIndex(decoded_r, "idx_en")
+
+        # Same query in both cases -- only the index language differs.
+        q = Query(query).language(language).no_content()
+        assert _search_total(decoded_r, await decoded_r.ft("idx_lang").search(q)) == 1
+        assert _search_total(decoded_r, await decoded_r.ft("idx_en").search(q)) == 0
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("8.9.0")
+    async def test_search_stemming_indonesian(self, decoded_r: redis.Redis):
+        """The Indonesian stemmer reduces "membaca" to its root "baca", so a
+        query for the stem matches the indexed document.  The Indonesian
+        stemmer is only available on newer server versions."""
+        definition = IndexDefinition(prefix=["doc:"], language="indonesian")
+        await decoded_r.ft("idx_id").create_index(
+            (TextField("content"),), definition=definition
+        )
+        await decoded_r.hset(
+            "doc:1", mapping={"content": "mereka membaca buku di perpustakaan"}
+        )
+        await self.waitForIndex(decoded_r, "idx_id")
+
+        q = Query("baca").language("indonesian").no_content()
+        assert _search_total(decoded_r, await decoded_r.ft("idx_id").search(q)) == 1
+
+    @pytest.mark.redismod
+    async def test_search_query_language(self, decoded_r: redis.Redis):
+        """``Query.language()`` controls how the *query* is stemmed.  The German
+        stemmer reduces "Kindern" to "kind" (matching the indexed document's
+        stem), while English analysis leaves it as "kindern" (no match).  The
+        query word is deliberately absent from the document text so the match
+        can only come from stemming, not from the indexed raw term."""
+        definition = IndexDefinition(prefix=["doc:"], language="german")
+        await decoded_r.ft().create_index((TextField("txt"),), definition=definition)
+        await decoded_r.hset("doc:1", mapping={"txt": "Die Kinder spielen im Garten"})
+        await self.waitForIndex(decoded_r, "idx")
+
+        matched = await decoded_r.ft().search(
+            Query("Kindern").language("german").no_content()
+        )
+        assert _search_total(decoded_r, matched) == 1
+
+        missed = await decoded_r.ft().search(
+            Query("Kindern").language("english").no_content()
+        )
+        assert _search_total(decoded_r, missed) == 0
+
+    @pytest.mark.redismod
+    async def test_search_chinese_tokenization(self, decoded_r: redis.Redis):
+        """Chinese text has no whitespace word boundaries; only the ``chinese``
+        tokenizer (friso) segments it into terms so an inner term can be
+        matched.  Indexed as English the text stays a single token."""
+        text = "我喜欢编程"  # "I like programming"
+        term = "编程"  # "programming"
+
+        cn_def = IndexDefinition(prefix=["cn:"], language="chinese")
+        await decoded_r.ft("idx_cn").create_index(
+            (TextField("txt"),), definition=cn_def
+        )
+        await decoded_r.hset("cn:1", mapping={"txt": text})
+
+        en_def = IndexDefinition(prefix=["en:"], language="english")
+        await decoded_r.ft("idx_en").create_index(
+            (TextField("txt"),), definition=en_def
+        )
+        await decoded_r.hset("en:1", mapping={"txt": text})
+
+        await self.waitForIndex(decoded_r, "idx_cn")
+        await self.waitForIndex(decoded_r, "idx_en")
+
+        cn_res = await decoded_r.ft("idx_cn").search(
+            Query(term).language("chinese").no_content()
+        )
+        assert _search_total(decoded_r, cn_res) == 1
+
+        en_res = await decoded_r.ft("idx_en").search(Query(term).no_content())
+        assert _search_total(decoded_r, en_res) == 0
+
+    @pytest.mark.redismod
+    async def test_search_language_field(self, decoded_r: redis.Redis):
+        """``LANGUAGE_FIELD`` selects the stemmer per document from a document
+        field, so the German document's "Kinder" is stemmed to "kind" while the
+        English document is analysed with the English stemmer."""
+        definition = IndexDefinition(prefix=["doc:"], language_field="__lang")
+        await decoded_r.ft().create_index((TextField("txt"),), definition=definition)
+        await decoded_r.hset(
+            "doc:de", mapping={"txt": "Die Kinder spielen", "__lang": "german"}
+        )
+        await decoded_r.hset(
+            "doc:en", mapping={"txt": "the children play", "__lang": "english"}
+        )
+        await self.waitForIndex(decoded_r, "idx")
+
+        # "Kind" only reaches the German document, whose "Kinder" stems to "kind".
+        res = await decoded_r.ft().search(Query("Kind").language("german").no_content())
+        assert _search_total(decoded_r, res) == 1
+        _assert_search_result(decoded_r, res, ["doc:de"])
+
+
 class TestScorers(AsyncSearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
@@ -1885,7 +2051,6 @@ class TestAggregations(AsyncSearchTestsBase):
 class TestPipeline(AsyncSearchTestsBase):
     @pytest.mark.redismod
     @skip_if_redis_enterprise()
-    @skip_if_server_version_gte("8.7.0")  # Deactivate temporarily
     async def test_search_commands_in_pipeline(self, decoded_r: redis.Redis):
         p = await decoded_r.ft().pipeline()
         p.create_index((TextField("txt"),))
@@ -1923,7 +2088,6 @@ class TestPipeline(AsyncSearchTestsBase):
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")
-    @skip_if_server_version_gte("8.7.0")  # Deactivate temporarily
     async def test_hybrid_search_query_with_pipeline(self, decoded_r: redis.Redis):
         p = decoded_r.ft().pipeline()
         p.create_index(

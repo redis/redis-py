@@ -7125,6 +7125,112 @@ class TestRedisCommands:
         # xread starting at the last message returns an empty list
         assert_resp_response(r, r.xread(streams={stream: m2}), [], {})
 
+    def _total_stream_entries(self, r, response):
+        """Count entries across all streams regardless of response shape."""
+        shape = expected_response_shape(r)
+        if shape == "legacy_resp2":
+            return sum(len(item[1]) for item in response)
+        elif shape == "legacy_resp3":
+            return sum(len(entries[0]) for entries in response.values())
+        else:
+            return sum(len(entries) for entries in response.values())
+
+    def test_xread_max_count_max_size_validation(self, r):
+        with pytest.raises(DataError):
+            r.xread(streams={"stream": 0}, max_count=0)
+        with pytest.raises(DataError):
+            r.xread(streams={"stream": 0}, max_count=-1)
+        with pytest.raises(DataError):
+            r.xread(streams={"stream": 0}, max_size=0)
+        # max_count must be >= count when both are provided
+        with pytest.raises(DataError):
+            r.xread(streams={"stream": 0}, count=5, max_count=3)
+
+    @skip_if_server_version_lt("8.9.0")
+    def test_xread_with_max_count(self, r):
+        stream = "stream"
+        for i in range(5):
+            r.xadd(stream, {"f": i})
+
+        # max_count caps the total number of returned entries
+        res = r.xread(streams={stream: 0}, max_count=2)
+        assert self._total_stream_entries(r, res) == 2
+
+    @skip_if_server_version_lt("8.9.0")
+    def test_xread_with_max_size(self, r):
+        stream = "stream"
+        r.xadd(stream, {"f": "v"})
+
+        # a generous soft cap returns the available entry
+        res = r.xread(streams={stream: 0}, max_size=65536)
+        assert self._total_stream_entries(r, res) == 1
+
+        # max_size is a soft cap: a single available entry that exceeds the cap
+        # is still returned rather than suppressed
+        res = r.xread(streams={stream: 0}, max_size=1)
+        assert self._total_stream_entries(r, res) == 1
+
+    @skip_if_server_version_lt("8.9.0")
+    def test_xread_max_count_cumulative_across_streams(self, r):
+        stream_1 = "stream1:{maxcount}"
+        stream_2 = "stream2:{maxcount}"
+        for i in range(3):
+            r.xadd(stream_1, {"f": i})
+        for i in range(3):
+            r.xadd(stream_2, {"f": i})
+
+        # count is per-stream (up to 3 each), max_count caps the cumulative
+        # reply; streams are served in caller order, so stream_1 contributes 3
+        # and stream_2 contributes 1
+        res = r.xread(streams={stream_1: 0, stream_2: 0}, count=3, max_count=4)
+        assert self._total_stream_entries(r, res) == 4
+
+    def test_xreadgroup_max_count_max_size_validation(self, r):
+        with pytest.raises(DataError):
+            r.xreadgroup("g", "c", streams={"stream": ">"}, max_count=0)
+        with pytest.raises(DataError):
+            r.xreadgroup("g", "c", streams={"stream": ">"}, max_size=-1)
+        with pytest.raises(DataError):
+            r.xreadgroup("g", "c", streams={"stream": ">"}, count=5, max_count=3)
+
+    @skip_if_server_version_lt("8.9.0")
+    def test_xreadgroup_with_max_count(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        for i in range(5):
+            r.xadd(stream, {"f": i})
+        r.xgroup_create(stream, group, 0)
+
+        # max_count caps the total number of returned entries
+        res = r.xreadgroup(group, consumer, streams={stream: ">"}, max_count=2)
+        assert self._total_stream_entries(r, res) == 2
+        r.xgroup_destroy(stream, group)
+
+    @skip_if_server_version_lt("8.9.0")
+    def test_xreadgroup_max_count_cumulative_across_streams(self, r):
+        stream_1 = "stream1:{grpmaxcount}"
+        stream_2 = "stream2:{grpmaxcount}"
+        group = "group"
+        consumer = "consumer"
+        for i in range(3):
+            r.xadd(stream_1, {"f": i})
+        for i in range(3):
+            r.xadd(stream_2, {"f": i})
+        r.xgroup_create(stream_1, group, 0)
+        r.xgroup_create(stream_2, group, 0)
+
+        res = r.xreadgroup(
+            group,
+            consumer,
+            streams={stream_1: ">", stream_2: ">"},
+            count=3,
+            max_count=4,
+        )
+        assert self._total_stream_entries(r, res) == 4
+        r.xgroup_destroy(stream_1, group)
+        r.xgroup_destroy(stream_2, group)
+
     @skip_if_server_version_lt("5.0.0")
     def test_xreadgroup(self, r):
         stream = "stream"
