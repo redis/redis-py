@@ -451,13 +451,14 @@ class AsyncMaintNotificationsAbstractConnection:
             pass
 
         # Method 2: Fall back to the configured host (which may be an IP or an
-        # FQDN). We intentionally do NOT call socket.getaddrinfo() here: this
-        # method is only used for debug logging and runs on the event loop, so a
-        # blocking DNS resolution would stall it. During maintenance the debug-log
-        # path is invoked once per notification while connections are repeatedly
-        # disconnected/reconnected (so getpeername() returns None) — a blocking
-        # getaddrinfo on an FQDN host there can freeze the loop for seconds and
-        # trip unrelated connect timeouts.
+        # FQDN). Unlike the sync client we intentionally do NOT call
+        # socket.getaddrinfo() here: this method runs on the event loop, so a
+        # blocking DNS resolution would stall it. On the endpoint-type handshake
+        # path (get_endpoint_type) getpeername() above always succeeds because the
+        # writer was just connected, so this fallback is only reached by the
+        # debug-log call sites during reconnects — where returning the host is
+        # fine. A blocking getaddrinfo on an FQDN host there can freeze the loop
+        # for seconds and trip unrelated connect timeouts.
         return getattr(self, "host", None)
 
     @property
