@@ -133,45 +133,78 @@ class _JSONBase(JSONCommands):
             )
             client.cluster_response_callbacks.update(self._MODULE_CALLBACKS)
         elif isinstance(client, redis.asyncio.cluster.ClusterPipeline):
-            # Async ClusterPipeline has no cluster_response_callbacks.
-            # There are two execution paths depending on whether the pipeline
-            # is transactional (MULTI/EXEC) or not:
+            # Async ClusterPipeline: never touch cluster_client.response_callbacks
+            # — it is shared across all ClusterNode instances and mutating it
+            # re-introduces #3937 for the async cluster path.
             #
-            # Transactional: post-processing in TransactionStrategy.execute()
-            # reads cluster_client.response_callbacks (line 3153 in cluster.py).
-            # Copy it before merging so we don't pollute parent state (#3937).
+            # Instead, wrap the strategy's execution method to post-process JSON
+            # results after dispatch, using a local closure over _MODULE_CALLBACKS.
+            # Only _json_path is forwarded to callbacks (mirrors the execute_command
+            # path); redis-internal kwargs like keys= are stripped.
             #
-            # Non-transactional (default): each ClusterNode.execute_pipeline()
-            # decodes via ClusterNode.response_callbacks — the original shared
-            # dict we can't safely mutate. Wrap strategy._execute instead to
-            # apply JSON callbacks to results after node dispatch.
-            if client._transaction:
-                cc = client.cluster_client
-                cc.response_callbacks = dict(cc.response_callbacks)
-                cc.response_callbacks.update(self._MODULE_CALLBACKS)
-            else:
-                _callbacks = self._MODULE_CALLBACKS
-                _strategy = client._execution_strategy
-                _orig_execute = _strategy._execute
+            # _json_callbacks_installed guards against double-wrapping when
+            # p.json() is called more than once on the same pipeline instance.
+            _strategy = client._execution_strategy
+            if not getattr(_strategy, "_json_callbacks_installed", False):
+                _strategy._json_callbacks_installed = True
+                _cbs = self._MODULE_CALLBACKS
 
-                async def _json_decode_execute(
-                    cluster_client_arg, stack, raise_on_error=True, allow_redirections=True
-                ):
-                    results = await _orig_execute(
-                        cluster_client_arg, stack, raise_on_error, allow_redirections
-                    )
-                    return [
-                        (
-                            _callbacks[cmd.args[0].upper()](r)
-                            if cmd.args
-                            and cmd.args[0].upper() in _callbacks
-                            and not isinstance(r, Exception)
-                            else r
+                def _decode_results(results, stack):
+                    out = []
+                    for r, cmd in zip(results, stack):
+                        if cmd.args and not isinstance(r, Exception):
+                            cmd_name = cmd.args[0]
+                            # Match the case-insensitive-lookup guard used in
+                            # JSON.execute_command / AsyncJSON.execute_command:
+                            # command names are always str in practice, but
+                            # guard against unexpected bytes/other types
+                            # rather than raising AttributeError on .upper().
+                            key = (
+                                cmd_name.upper()
+                                if isinstance(cmd_name, str)
+                                else cmd_name
+                            )
+                            if key in _cbs:
+                                cb_kwargs = {}
+                                if "_json_path" in cmd.kwargs:
+                                    cb_kwargs["_json_path"] = cmd.kwargs["_json_path"]
+                                r = _cbs[key](r, **cb_kwargs)
+                        out.append(r)
+                    return out
+
+                if not client._transaction:
+                    # Non-transactional (PipelineStrategy): results come from
+                    # ClusterNode.execute_pipeline() with no JSON decoding.
+                    _orig_execute = _strategy._execute
+
+                    async def _json_decode_execute(
+                        cluster_client_arg, stack,
+                        raise_on_error=True, allow_redirections=True,
+                    ):
+                        results = await _orig_execute(
+                            cluster_client_arg, stack,
+                            raise_on_error, allow_redirections,
                         )
-                        for r, cmd in zip(results, stack)
-                    ]
+                        return _decode_results(results, stack)
 
-                _strategy._execute = _json_decode_execute
+                    _strategy._execute = _json_decode_execute
+                else:
+                    # Transactional (TransactionStrategy): results come from
+                    # EXEC; non-JSON commands are already decoded but JSON
+                    # commands are not (no JSON callbacks on cluster_client).
+                    # Snapshot _command_queue at execute-time to match results.
+                    _orig_txn_execute = _strategy.execute
+
+                    async def _json_decode_txn_execute(
+                        raise_on_error=True, allow_redirections=True,
+                    ):
+                        cmd_queue = list(_strategy._command_queue)
+                        results = await _orig_txn_execute(
+                            raise_on_error, allow_redirections,
+                        )
+                        return _decode_results(results, cmd_queue)
+
+                    _strategy.execute = _json_decode_txn_execute
 
         self.__encoder__ = encoder
         self.__decoder__ = decoder

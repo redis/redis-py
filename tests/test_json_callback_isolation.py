@@ -747,58 +747,36 @@ class TestAsyncJsonPipelineExecution:
 # =============================================================================
 
 
+
 @pytest.mark.fixed_client
 def test_async_cluster_pipeline_json_does_not_crash_on_construction():
     """
-    Regression test: JSON(async_cluster_pipeline) must not raise AttributeError.
-
-    For non-transactional pipelines (the default), JSON callbacks are applied
-    via a wrapper around strategy._execute — cluster_client.response_callbacks
-    is never touched, so neither it nor any ClusterNode instance is polluted
-    (issue #3937).
+    Regression: JSON(async_cluster_pipeline) must not raise AttributeError,
+    and cluster_client.response_callbacks must never be touched (issue #3937).
     """
+    from redis.asyncio.cluster import ClusterPipeline, PipelineStrategy
+    from redis.commands.json import JSON
+
     shared_callbacks: dict = {"PING": lambda r: r}
+    fake_rc = mock.MagicMock()
+    fake_rc.response_callbacks = shared_callbacks
 
-    fake_cluster_client = mock.MagicMock()
-    fake_cluster_client.response_callbacks = shared_callbacks
-
-    original_inner_execute = mock.AsyncMock(return_value=[])
-    fake_strategy = mock.MagicMock()
-    fake_strategy._execute = original_inner_execute
-
-    fake_async_cluster_pipeline = mock.MagicMock(
-        spec=redis.asyncio.cluster.ClusterPipeline
-    )
-    del fake_async_cluster_pipeline.cluster_response_callbacks
-    fake_async_cluster_pipeline.cluster_client = fake_cluster_client
-    fake_async_cluster_pipeline._transaction = None   # non-transactional
-    fake_async_cluster_pipeline._execution_strategy = fake_strategy
+    pipeline = ClusterPipeline(fake_rc)
+    strategy = pipeline._execution_strategy
+    assert isinstance(strategy, PipelineStrategy)
 
     try:
-        from redis.commands.json import JSON
-        j = JSON(fake_async_cluster_pipeline)
+        JSON(pipeline)
     except AttributeError as e:
-        pytest.fail(
-            f"JSON(async_cluster_pipeline) raised AttributeError: {e}\n"
-            "The async ClusterPipeline branch must not access "
-            "cluster_response_callbacks directly."
-        )
+        pytest.fail(f"JSON(async_cluster_pipeline) raised AttributeError: {e}")
 
-    # cluster_client.response_callbacks must be completely untouched.
-    assert fake_cluster_client.response_callbacks is shared_callbacks, (
-        "cluster_client.response_callbacks must not be replaced for "
-        "non-transactional pipelines — that would pollute every ClusterNode "
-        "instance sharing the original dict (#3937)"
-    )
-    assert "JSON.GET" not in shared_callbacks, (
-        "JSON callbacks must not leak into the shared callbacks dict"
-    )
+    # shared dict must be completely untouched
+    assert fake_rc.response_callbacks is shared_callbacks
+    assert "JSON.GET" not in shared_callbacks
 
-    # strategy._execute must be replaced with a JSON-decoding wrapper so
-    # results are decoded after ClusterNode dispatch (the non-transactional path).
-    assert fake_strategy._execute is not original_inner_execute, (
-        "strategy._execute must be wrapped with a JSON-decoding wrapper for "
-        "non-transactional async cluster pipelines"
+    # strategy._execute must now be the decoding wrapper
+    assert getattr(strategy, "_json_callbacks_installed", False), (
+        "_json_callbacks_installed flag must be set after JSON() construction"
     )
 
 
@@ -806,12 +784,8 @@ def test_async_cluster_pipeline_json_does_not_crash_on_construction():
 @pytest.mark.asyncio
 async def test_async_cluster_pipeline_nontransactional_wrapper_actually_decodes():
     """
-    End-to-end behavioral test: the _execute wrapper must actually decode
-    JSON command results for non-transactional async cluster pipelines.
-
-    Uses a real ClusterPipeline (not a MagicMock spec), mocks only the
-    inner _execute to inject known raw bytes, then asserts that the JSON
-    callbacks transform the result.
+    Behavioral: the _execute wrapper decodes JSON results and passes
+    _json_path kwargs through to the callback.
     """
     from redis.asyncio.cluster import ClusterPipeline, PipelineCommand, PipelineStrategy
     from redis.commands.json import JSON
@@ -819,43 +793,64 @@ async def test_async_cluster_pipeline_nontransactional_wrapper_actually_decodes(
     fake_rc = mock.MagicMock()
     fake_rc.response_callbacks = {}
 
-    # Real pipeline — real PipelineStrategy
     pipeline = ClusterPipeline(fake_rc)
     strategy = pipeline._execution_strategy
     assert isinstance(strategy, PipelineStrategy)
 
-    # Replace _execute on the strategy BEFORE JSON wrapping so the wrapper
-    # captures this mock as its inner callable.
     mock_inner = mock.AsyncMock(return_value=[b'{"x": 1}', b"OK"])
     strategy._execute = mock_inner
 
-    JSON(pipeline)  # installs the decoding wrapper around mock_inner
+    JSON(pipeline)
 
-    # Build two fake PipelineCommands: one JSON, one plain.
     cmd_json = PipelineCommand(0, "JSON.GET", "mykey")
-    cmd_set  = PipelineCommand(1, "SET",      "k", "v")
+    cmd_set  = PipelineCommand(1, "SET", "k", "v")
 
     result = await strategy._execute(fake_rc, [cmd_json, cmd_set])
 
     assert result[0] == {"x": 1}, (
-        "JSON.GET result must be decoded to a Python dict by the _execute wrapper; "
-        f"got {result[0]!r}"
+        f"JSON.GET must be decoded to a dict; got {result[0]!r}"
     )
     assert result[1] == b"OK", (
-        "Non-JSON command result must be passed through unchanged; "
-        f"got {result[1]!r}"
+        f"Non-JSON command must pass through unchanged; got {result[1]!r}"
     )
     mock_inner.assert_called_once()
 
 
 @pytest.mark.fixed_client
-def test_async_cluster_pipeline_transactional_copies_callbacks():
+@pytest.mark.asyncio
+async def test_async_cluster_pipeline_double_json_call_does_not_double_decode():
     """
-    End-to-end behavioral test: for a transactional async cluster pipeline,
-    JSON.__init__ must copy cluster_client.response_callbacks so that:
-    - the original shared dict (used by existing ClusterNode instances) is unmodified
-    - the copy held by cluster_client contains the JSON callbacks that
-      TransactionStrategy.execute() needs for post-processing
+    Behavioral: calling p.json() twice must not stack wrappers and
+    double-decode results (e.g. decoding an already-decoded dict again).
+    """
+    from redis.asyncio.cluster import ClusterPipeline, PipelineCommand
+    from redis.commands.json import JSON
+
+    fake_rc = mock.MagicMock()
+    fake_rc.response_callbacks = {}
+
+    pipeline = ClusterPipeline(fake_rc)
+    mock_inner = mock.AsyncMock(return_value=[b'{"x": 1}'])
+    pipeline._execution_strategy._execute = mock_inner
+
+    JSON(pipeline)  # first call
+    JSON(pipeline)  # second call — must NOT stack another wrapper
+
+    cmd_json = PipelineCommand(0, "JSON.GET", "mykey")
+    result = await pipeline._execution_strategy._execute(fake_rc, [cmd_json])
+
+    assert result[0] == {"x": 1}, (
+        f"Result must be decoded exactly once; got {result[0]!r}"
+    )
+    # inner mock must have been called exactly once (not twice)
+    mock_inner.assert_called_once()
+
+
+@pytest.mark.fixed_client
+def test_async_cluster_pipeline_transactional_does_not_touch_shared_callbacks():
+    """
+    Behavioral: transactional async ClusterPipeline must NOT mutate
+    cluster_client.response_callbacks — wraps strategy.execute() instead.
     """
     from redis.asyncio.cluster import ClusterPipeline, TransactionStrategy
     from redis.commands.json import JSON
@@ -864,23 +859,130 @@ def test_async_cluster_pipeline_transactional_copies_callbacks():
     fake_rc = mock.MagicMock()
     fake_rc.response_callbacks = shared_cbs
 
-    # Real transactional pipeline — real TransactionStrategy
     pipeline = ClusterPipeline(fake_rc, transaction=True)
     assert isinstance(pipeline._execution_strategy, TransactionStrategy)
 
+    original_execute = pipeline._execution_strategy.execute
     JSON(pipeline)
 
-    # cluster_client.response_callbacks must be a private copy
-    assert fake_rc.response_callbacks is not shared_cbs, (
-        "cluster_client.response_callbacks must be replaced with a private copy "
-        "for transactional pipelines so ClusterNode instances are not polluted (#3937)"
+    # shared dict must still be the same object and unmodified
+    assert fake_rc.response_callbacks is shared_cbs, (
+        "cluster_client.response_callbacks must not be replaced (#3937)"
     )
-    assert "JSON.GET" in fake_rc.response_callbacks, (
-        "JSON.GET must be present in the copied dict so TransactionStrategy.execute() "
-        "can decode JSON responses at EXEC time"
-    )
-    # Original shared dict must be unmodified
     assert "JSON.GET" not in shared_cbs, (
-        "JSON callbacks must not appear in the original shared dict — "
-        "that would pollute all ClusterNode instances referencing it"
+        "JSON callbacks must not leak into the shared dict"
     )
+    # strategy.execute must have been wrapped
+    assert pipeline._execution_strategy.execute is not original_execute, (
+        "TransactionStrategy.execute must be wrapped for JSON decoding"
+    )
+    assert getattr(pipeline._execution_strategy, "_json_callbacks_installed", False)
+
+
+@pytest.mark.fixed_client
+@pytest.mark.asyncio
+async def test_async_cluster_pipeline_transactional_wrapper_actually_decodes():
+    """
+    End-to-end behavioral test: calling the wrapped TransactionStrategy.execute()
+    must actually decode JSON command results using the command queue snapshot,
+    not just prove the wrapper was installed.
+    """
+    from redis.asyncio.cluster import ClusterPipeline, PipelineCommand, TransactionStrategy
+    from redis.commands.json import JSON
+
+    fake_rc = mock.MagicMock()
+    fake_rc.response_callbacks = {}
+
+    pipeline = ClusterPipeline(fake_rc, transaction=True)
+    strategy = pipeline._execution_strategy
+    assert isinstance(strategy, TransactionStrategy)
+
+    # Replace the inner execute() BEFORE JSON wraps it, so our wrapper's
+    # closure captures this mock as `_orig_txn_execute`.
+    mock_inner_execute = mock.AsyncMock(return_value=[b'{"x": 1}', b"OK"])
+    strategy.execute = mock_inner_execute
+
+    JSON(pipeline)  # installs the decoding wrapper around mock_inner_execute
+
+    # Populate _command_queue the way real usage would via execute_command().
+    strategy._command_queue = [
+        PipelineCommand(0, "JSON.GET", "mykey"),
+        PipelineCommand(1, "SET", "k", "v"),
+    ]
+
+    result = await strategy.execute()
+
+    assert result[0] == {"x": 1}, (
+        f"JSON.GET result must be decoded to a dict by the wrapped execute(); "
+        f"got {result[0]!r}"
+    )
+    assert result[1] == b"OK", (
+        f"Non-JSON command result must pass through unchanged; got {result[1]!r}"
+    )
+    mock_inner_execute.assert_called_once()
+
+
+@pytest.mark.fixed_client
+@pytest.mark.asyncio
+async def test_async_cluster_pipeline_transactional_double_json_call_does_not_double_decode():
+    """
+    Behavioral: calling p.json() twice on a transactional pipeline must not
+    stack wrappers around TransactionStrategy.execute() and double-decode.
+    """
+    from redis.asyncio.cluster import ClusterPipeline, PipelineCommand
+    from redis.commands.json import JSON
+
+    fake_rc = mock.MagicMock()
+    fake_rc.response_callbacks = {}
+
+    pipeline = ClusterPipeline(fake_rc, transaction=True)
+    strategy = pipeline._execution_strategy
+
+    mock_inner_execute = mock.AsyncMock(return_value=[b'{"x": 1}'])
+    strategy.execute = mock_inner_execute
+
+    JSON(pipeline)  # first call — installs wrapper
+    JSON(pipeline)  # second call — must NOT stack another wrapper
+
+    strategy._command_queue = [PipelineCommand(0, "JSON.GET", "mykey")]
+    result = await strategy.execute()
+
+    assert result[0] == {"x": 1}, (
+        f"Result must be decoded exactly once; got {result[0]!r}"
+    )
+    mock_inner_execute.assert_called_once()
+
+
+@pytest.mark.fixed_client
+@pytest.mark.asyncio
+async def test_async_cluster_pipeline_decode_handles_non_string_command_name():
+    """
+    Robustness: if a PipelineCommand's args[0] is not a str (e.g. bytes),
+    the decode wrapper must not raise AttributeError from .upper() — it
+    should simply skip decoding for that command, mirroring the
+    isinstance(cmd, str) guard used in JSON.execute_command.
+    """
+    from redis.asyncio.cluster import ClusterPipeline, PipelineCommand, PipelineStrategy
+    from redis.commands.json import JSON
+
+    fake_rc = mock.MagicMock()
+    fake_rc.response_callbacks = {}
+
+    pipeline = ClusterPipeline(fake_rc)
+    strategy = pipeline._execution_strategy
+    assert isinstance(strategy, PipelineStrategy)
+
+    mock_inner = mock.AsyncMock(return_value=[b"raw-bytes-result"])
+    strategy._execute = mock_inner
+
+    JSON(pipeline)
+
+    cmd_bytes_name = PipelineCommand(0, b"JSON.GET", "mykey")
+    result = await strategy._execute(fake_rc, [cmd_bytes_name])
+
+    assert result[0] == b"raw-bytes-result", (
+        "Non-str command names must be passed through unmodified, not raise "
+        f"AttributeError; got {result[0]!r}"
+    )
+
+
