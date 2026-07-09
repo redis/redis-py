@@ -4294,6 +4294,21 @@ class TestRedisCommands:
         assert r.sdiff("a", "b") == {b"1"}
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    def test_sdiffcard(self, r):
+        r.sadd("s0", "a", "b", "c", "d", "e")
+        r.sadd("s1", "c", "d", "x")
+        r.sadd("s2", "e", "y")
+        # exact difference cardinality: {a, b}
+        assert r.sdiffcard(3, ["s0", "s1", "s2"]) == 2
+        # limited difference cardinality is capped at limit
+        assert r.sdiffcard(3, ["s0", "s1", "s2"], limit=1) == 1
+        # a missing subtrahend key does not affect the result
+        assert r.sdiffcard(2, ["s0", "missing"]) == 5
+        # a missing first key yields 0
+        assert r.sdiffcard(2, ["missing", "s0"]) == 0
+
+    @pytest.mark.onlynoncluster
     def test_sdiffstore(self, r):
         r.sadd("a", "1", "2", "3")
         assert r.sdiffstore("c", "a", "b") == 3
@@ -4395,6 +4410,22 @@ class TestRedisCommands:
         r.sadd("a", "1", "2")
         r.sadd("b", "2", "3")
         assert set(r.sunion("a", "b")) == {b"1", b"2", b"3"}
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    def test_sunioncard(self, r):
+        r.sadd("s1", "a", "b", "c")
+        r.sadd("s2", "c", "d")
+        # exact union cardinality: {a, b, c, d}
+        assert r.sunioncard(2, ["s1", "s2"]) == 4
+        # approximate union cardinality (still an integer reply)
+        assert r.sunioncard(2, ["s1", "s2"], approx=True) == 4
+        # a missing key is treated as an empty set
+        assert r.sunioncard(2, ["s1", "missing"]) == 3
+        # limited union cardinality is capped at limit in exact mode
+        assert r.sunioncard(2, ["s1", "s2"], limit=3) == 3
+        # APPROX combined with LIMIT does not exceed limit
+        assert r.sunioncard(2, ["s1", "s2"], limit=3, approx=True) <= 3
 
     @pytest.mark.onlynoncluster
     def test_sunionstore(self, r):
