@@ -118,6 +118,7 @@ READ_COMMANDS = frozenset(
         # Set Operations
         "SCARD",
         "SDIFF",
+        "SDIFFCARD",
         "SINTER",
         "SINTERCARD",
         "SISMEMBER",
@@ -125,6 +126,7 @@ READ_COMMANDS = frozenset(
         "SMEMBERS",
         "SRANDMEMBER",
         "SUNION",
+        "SUNIONCARD",
         "SSCAN",
         # Sorted Set Operations
         "ZCARD",

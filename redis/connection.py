@@ -658,9 +658,6 @@ class MaintNotificationsAbstractConnection:
         First tries to get the actual IP from the socket (most accurate),
         then falls back to DNS resolution if needed.
 
-        Args:
-            connection: The connection object to extract the IP from
-
         Returns:
             str: The resolved IP address, or None if it cannot be determined
         """
