@@ -57,7 +57,3 @@ class TestKeySlot:
     def test_custom_bucket_is_honored(self):
         assert key_slot(b"foo", 100) == crc_hqx(b"foo", 0) % 100
         assert 0 <= key_slot(b"123456789", 100) < 100
-
-
-if __name__ == "__main__":
-    raise SystemExit(pytest.main([__file__, "-v"]))
