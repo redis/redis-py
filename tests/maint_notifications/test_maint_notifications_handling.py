@@ -773,6 +773,57 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
         assert new_connection._oss_cluster_maint_notifications_handler is oss_handler
         assert new_connection._parser.oss_cluster_maint_push_handler_func is not None
 
+    def test_update_config_on_oss_pool_updates_oss_handler(self):
+        """A config-only update on a pool already in OSS cluster mode must update
+        the OSS handler's config instead of being silently discarded.
+
+        OSS cluster mode and pool-handler mode are mutually exclusive, so the
+        update must not create a pool handler; it must apply the new config to
+        the existing OSS handler and propagate it to connection kwargs and to
+        existing connections.
+        """
+        config = MaintNotificationsConfig(enabled=True)
+        pool = ConnectionPool(
+            host=DEFAULT_ADDRESS.split(":")[0],
+            port=int(DEFAULT_ADDRESS.split(":")[1]),
+            protocol=3,
+            maint_notifications_config=config,
+        )
+        free_connection = pool.make_connection()
+        pool._available_connections.append(free_connection)
+
+        oss_handler = OSSMaintNotificationsHandler(MagicMock(), config)
+        pool.update_maint_notifications_config(
+            config, oss_cluster_maint_notifications_handler=oss_handler
+        )
+
+        # Now issue a config-only update (no OSS handler passed).
+        new_config = MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True, relaxed_timeout=30
+        )
+        pool.update_maint_notifications_config(new_config)
+
+        # The new config must land on the existing OSS handler, and the pool must
+        # remain in OSS mode without an orphaned pool handler.
+        assert oss_handler.config is new_config
+        assert pool._oss_cluster_maint_notifications_handler is oss_handler
+        assert pool._maint_notifications_pool_handler is None
+        assert "maint_notifications_pool_handler" not in pool.connection_kwargs
+        assert pool.connection_kwargs.get("maint_notifications_config") is new_config
+
+        # Existing free connections must receive the new config, not the stale one.
+        assert free_connection.maint_notifications_config is new_config
+
+        # Disabling an already-enabled OSS pool is not allowed and must not be
+        # silently accepted by the config-only update path.
+        with pytest.raises(
+            ValueError, match="Cannot disable maintenance notifications"
+        ):
+            pool.update_maint_notifications_config(
+                MaintNotificationsConfig(enabled=False)
+            )
+        assert oss_handler.config is new_config
+
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_connection_pool_creation_with_maintenance_notifications(self, pool_class):
         """Test that connection pools are created with maintenance notifications configuration."""

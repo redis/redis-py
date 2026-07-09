@@ -2522,7 +2522,15 @@ class MaintNotificationsAbstractConnectionPool:
             self._maint_notifications_pool_handler = None
         else:
             # first update pool settings
-            if not self._maint_notifications_pool_handler:
+            if self._oss_cluster_maint_notifications_handler:
+                # Pool already in OSS cluster mode; update the OSS handler config
+                # instead of creating a mutually-exclusive pool handler (which
+                # would be silently ignored because the OSS handler wins priority
+                # in both update helpers below).
+                self._oss_cluster_maint_notifications_handler.config = (
+                    maint_notifications_config
+                )
+            elif not self._maint_notifications_pool_handler:
                 self._maint_notifications_pool_handler = MaintNotificationsPoolHandler(
                     self, maint_notifications_config
                 )
