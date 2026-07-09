@@ -14,6 +14,7 @@ from redis.maint_notifications import (
     MaintNotificationsConfig,
     NodeMovingNotification,
     OSSNodeMigratedNotification,
+    OSSNodeMigratingNotification,
     _get_maintenance_notification_name,
     _get_maintenance_notification_type,
     _should_skip_connection_timeout_update,
@@ -331,6 +332,11 @@ class AsyncMaintNotificationsConnectionHandler:
             tmp_relaxed_timeout=self.config.relaxed_timeout
         )
         self.connection.update_current_socket_timeout(self.config.relaxed_timeout)
+        if isinstance(notification, OSSNodeMigratingNotification):
+            # add the notification id to the set of processed start maint notifications
+            # this is used to skip the unrelaxing of the timeouts if we have received more than
+            # one start notification before the the final end notification
+            self.connection.add_maint_start_notification(notification.id)
 
         maint_notification = _get_maintenance_notification_name(notification)
         await record_connection_relaxed_timeout(
