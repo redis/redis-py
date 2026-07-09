@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import inspect
+import math
 import re
 import time
 import warnings
@@ -1276,7 +1277,21 @@ class PubSub:
         if not conn.is_connected:
             await conn.connect()
 
-        read_timeout = None if block else timeout
+        # Block=True: signal "no timeout" to conn.read_response via
+        # math.inf. The connection treats math.inf as the per-read
+        # opt-in for blocking indefinitely without falling back to
+        # self.socket_timeout. Reconnect/AUTH/HELLO/resubscribe
+        # operations performed by the retry layer continue to honor
+        # self.socket_timeout because they do not pass math.inf.
+        #
+        # TODO(next-major): when the async Connection.read_response
+        # default for ``timeout`` is changed to SENTINEL, passing
+        # ``timeout=None`` from this method will become the natural
+        # "no timeout" signal and the math.inf hand-off can be
+        # removed. That swap is a breaking change to the
+        # Connection.read_response signature so it must wait for a
+        # major release.
+        read_timeout = math.inf if block else timeout
         response = await self._execute(
             conn,
             conn.read_response,
@@ -1680,26 +1695,38 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
     async def reset(self):
         self.command_stack = []
         self.scripts = set()
-        # make sure to reset the connection state in the event that we were
-        # watching something
-        if self.watching and self.connection:
-            try:
-                # call this manually since our unwatch or
-                # immediate_execute_command methods can call reset()
-                await self.connection.send_command("UNWATCH")
-                await self.connection.read_response()
-            except ConnectionError:
-                # disconnect will also remove any previous WATCHes
-                if self.connection:
-                    await self.connection.disconnect()
-        # clean up the other instance attributes
-        self.watching = False
-        self.explicit_transaction = False
-        # we can safely return the connection to the pool here since we're
-        # sure we're no longer WATCHing anything
-        if self.connection:
-            await self.connection_pool.release(self.connection)
-            self.connection = None
+        try:
+            # make sure to reset the connection state in the event that we were
+            # watching something
+            if self.watching and self.connection:
+                try:
+                    # call this manually since our unwatch or
+                    # immediate_execute_command methods can call reset()
+                    await self.connection.send_command("UNWATCH")
+                    await self.connection.read_response()
+                except ConnectionError:
+                    # disconnect will also remove any previous WATCHes
+                    if self.connection:
+                        await self.connection.disconnect()
+                except asyncio.CancelledError:
+                    # Disconnect so any unread UNWATCH reply does not get
+                    # served to the next caller that takes the connection.
+                    if self.connection:
+                        await self.connection.disconnect()
+                    raise
+        finally:
+            self.watching = False
+            self.explicit_transaction = False
+            # We can safely return the connection to the pool here since we're
+            # sure we're no longer WATCHing anything. Detach self.connection
+            # before awaiting release: if a second cancel aborts the await,
+            # the pipeline must not be left holding a reference to a
+            # connection that is being returned to the pool. Shield the
+            # release itself so a second cancel cannot split the pool's
+            # internal in-use/available bookkeeping mid-update.
+            if self.connection:
+                connection, self.connection = self.connection, None
+                await asyncio.shield(self.connection_pool.release(connection))
 
     async def aclose(self) -> None:
         """Alias for reset(), a standard method name for cleanup"""

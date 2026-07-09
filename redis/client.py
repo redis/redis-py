@@ -398,10 +398,21 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
+                if (
+                    maint_notifications_config
+                    and maint_notifications_config.enabled is True
+                ):
+                    raise RedisError(
+                        "Maintenance notifications are not supported with Unix "
+                        "domain socket connections"
+                    )
                 kwargs.update(
                     {
                         "path": unix_socket_path,
                         "connection_class": UnixDomainSocketConnection,
+                        "maint_notifications_config": MaintNotificationsConfig(
+                            enabled=False
+                        ),
                     }
                 )
             else:
@@ -1244,7 +1255,11 @@ class PubSub:
                 read_timeout = timeout
             else:
                 conn.connect()
-                read_timeout = SENTINEL  # Use default socket timeout for blocking
+                # Block indefinitely waiting for a pubsub message. timeout=None
+                # makes the socket layer call sock.settimeout(None) for this read
+                # (and restore the original socket_timeout afterwards), so the
+                # configured socket_timeout does not abort the read.
+                read_timeout = None
             return conn.read_response(
                 disconnect_on_error=False, push_request=True, timeout=read_timeout
             )
