@@ -1,7 +1,6 @@
 import asyncio
 import copy
 import inspect
-import math
 import re
 import time
 import warnings
@@ -52,6 +51,7 @@ from redis.asyncio.observability.recorder import (
 from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.client import (
+    BLOCKING_READ,
     EMPTY_RESPONSE,
     NEVER_DECODE,
     AbstractRedis,
@@ -895,6 +895,9 @@ class Redis(
             if NEVER_DECODE in options:
                 response = await connection.read_response(disable_decoding=True)
                 options.pop(NEVER_DECODE)
+            elif BLOCKING_READ in options:
+                options.pop(BLOCKING_READ)
+                response = await connection.read_response(timeout=None)
             else:
                 response = await connection.read_response()
         except ResponseError:
@@ -1295,20 +1298,12 @@ class PubSub:
             await conn.connect()
 
         # Block=True: signal "no timeout" to conn.read_response via
-        # math.inf. The connection treats math.inf as the per-read
+        # timeout=None. The connection treats None as the per-read
         # opt-in for blocking indefinitely without falling back to
         # self.socket_timeout. Reconnect/AUTH/HELLO/resubscribe
         # operations performed by the retry layer continue to honor
-        # self.socket_timeout because they do not pass math.inf.
-        #
-        # TODO(next-major): when the async Connection.read_response
-        # default for ``timeout`` is changed to SENTINEL, passing
-        # ``timeout=None`` from this method will become the natural
-        # "no timeout" signal and the math.inf hand-off can be
-        # removed. That swap is a breaking change to the
-        # Connection.read_response signature so it must wait for a
-        # major release.
-        read_timeout = math.inf if block else timeout
+        # self.socket_timeout because they do not pass None.
+        read_timeout = None if block else timeout
         response = await self._execute(
             conn,
             conn.read_response,

@@ -748,34 +748,17 @@ class AbstractConnection:
         push_request: Optional[bool] = False,
     ):
         """Read the response from a previously sent command.
-
         ``timeout`` semantics:
-        - ``None`` (default): fall back to ``self.socket_timeout``.
-        - ``math.inf``: block indefinitely with no timeout. Used by PubSub
+        - ``None``: block indefinitely with no timeout. Used by PubSub
           blocking reads (``listen()`` / ``get_message(timeout=None)`` /
           ``parse_response(block=True)``) where the configured
           ``socket_timeout`` must not abort the read.
         - ``float``: apply that timeout in seconds for this single read.
-
-        TODO(next-major): replace the ``math.inf`` opt-in with a SENTINEL
-        default for ``timeout``. After that change, ``timeout=None`` will
-        mean "no timeout, block until a response arrives" (matching the
-        long-standing PubSub docstring contract) and the SENTINEL default
-        will be the value that falls back to ``self.socket_timeout``.
-        That swap is a breaking change, so it must wait for a major
-        release. Until then, callers that need an indefinitely blocking
-        read pass ``math.inf`` explicitly.
         """
-        # TODO(next-major): drop the math.inf branch. Use SENTINEL as the
-        # default for ``timeout`` and treat ``timeout is None`` as the
-        # "no timeout" signal (matching the PubSub docstring contract).
-        # Match only positive infinity here. ``-math.inf`` is not a valid
-        # "block forever" signal and historically behaved as an already-
-        # expired timeout; preserve that.
-        if timeout == math.inf:
+        if timeout is None:
             read_timeout = None
         else:
-            read_timeout = timeout if timeout is not None else self.socket_timeout
+            read_timeout = timeout
         host_error = self._host_error()
         try:
             if read_timeout is not None and self.protocol in ["3", 3]:
