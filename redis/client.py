@@ -1,6 +1,5 @@
 import copy
 import logging
-import math
 import re
 import threading
 import time
@@ -868,7 +867,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 options.pop(NEVER_DECODE)
             elif BLOCKING_READ in options:
                 options.pop(BLOCKING_READ)
-                response = connection.read_response(timeout=math.inf)
+                response = connection.read_response(timeout=None)
             else:
                 response = connection.read_response()
         except ResponseError:

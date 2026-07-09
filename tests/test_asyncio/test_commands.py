@@ -2484,6 +2484,42 @@ class TestRedisCommands:
         )
 
     @pytest.mark.onlynoncluster
+    async def test_blpop_with_socket_timeout(self, r: redis.Redis):
+        """Blocking commands must respect the command-level timeout, not
+        the connection's socket_timeout.  Regression test for #4172.
+        """
+        import threading
+
+        short_timeout_client = redis.asyncio.Redis(
+            host=r.connection_pool.connection_kwargs.get("host", "localhost"),
+            port=r.connection_pool.connection_kwargs.get("port", 6379),
+            db=r.connection_pool.connection_kwargs.get("db", 0),
+            socket_timeout=2,
+            decode_responses=False,
+        )
+        try:
+            # Push an item after a delay that exceeds socket_timeout
+            def push_after_delay():
+                import time
+                time.sleep(3)
+                r.rpush("blocking_key_async", "delayed_value")
+
+            t = threading.Thread(target=push_after_delay)
+            t.start()
+
+            # blpop with timeout=5 should block for ~3s until the item
+            # arrives, not raise TimeoutError after 2s
+            result = await short_timeout_client.blpop(
+                "blocking_key_async", timeout=5
+            )
+            t.join()
+            assert result is not None
+            assert result[0] == b"blocking_key_async"
+            assert result[1] == b"delayed_value"
+        finally:
+            await short_timeout_client.close()
+
+    @pytest.mark.onlynoncluster
     async def test_brpop(self, r: redis.Redis):
         await r.rpush("a", "1", "2")
         await r.rpush("b", "3", "4")

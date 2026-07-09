@@ -1,7 +1,6 @@
 import asyncio
 import collections
 import logging
-import math
 import random
 import socket
 import threading
@@ -1669,7 +1668,7 @@ class ClusterNode:
                 kwargs.pop(NEVER_DECODE)
             elif BLOCKING_READ in kwargs:
                 kwargs.pop(BLOCKING_READ)
-                response = await connection.read_response(timeout=math.inf)
+                response = await connection.read_response(timeout=None)
             else:
                 response = await connection.read_response()
         except ResponseError:
