@@ -8,7 +8,7 @@ from queue import Queue
 from threading import Thread
 import threading
 import time
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Union
 
 import pytest
 
@@ -33,11 +33,11 @@ from tests.test_scenario.fault_injector_client import (
     ProxyServerFaultInjector,
     SlotMigrateEffects,
 )
-from tests.test_scenario.maint_notifications_helpers import (
-    ClientValidations,
+from tests.test_scenario.common_scenario_helpers import (
     ClusterOperations,
     KeyGenerationHelpers,
 )
+from tests.test_scenario.maint_notifications_helpers import ClientValidations
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,33 +68,6 @@ class TestPushNotificationsBase:
     operations.
     """
 
-    def _trigger_effect(
-        self,
-        fault_injector_client: FaultInjectorClient,
-        endpoints_config: Dict[str, Any],
-        effect_name: SlotMigrateEffects,
-        trigger_name: Optional[str] = None,
-        target_node: Optional[str] = None,
-        empty_node: Optional[str] = None,
-        skip_end_notification: bool = False,
-        timeout: int = SLOT_SHUFFLE_TIMEOUT,
-    ):
-        trigger_effect_action_id = ClusterOperations.trigger_effect(
-            fault_injector=fault_injector_client,
-            endpoint_config=endpoints_config,
-            effect_name=effect_name,
-            trigger_name=trigger_name,
-            source_node=target_node,
-            target_node=empty_node,
-            skip_end_notification=skip_end_notification,
-        )
-
-        trigger_effect_result = fault_injector_client.get_operation_result(
-            trigger_effect_action_id,
-            timeout=timeout,
-        )
-        logging.debug(f"Action execution result: {trigger_effect_result}")
-
     def _execute_failover(
         self,
         fault_injector_client: FaultInjectorClient,
@@ -109,42 +82,6 @@ class TestPushNotificationsBase:
 
         logging.debug(f"Failover result: {failover_result}")
 
-    def _execute_migration(
-        self,
-        fault_injector_client: FaultInjectorClient,
-        endpoints_config: Dict[str, Any],
-        target_node: str,
-        empty_node: str,
-        skip_end_notification: bool = False,
-    ):
-        migrate_action_id = ClusterOperations.execute_migrate(
-            fault_injector=fault_injector_client,
-            endpoint_config=endpoints_config,
-            target_node=target_node,
-            empty_node=empty_node,
-            skip_end_notification=skip_end_notification,
-        )
-
-        migrate_result = fault_injector_client.get_operation_result(
-            migrate_action_id, timeout=MIGRATE_TIMEOUT
-        )
-        logging.debug(f"Migration result: {migrate_result}")
-
-    def _execute_bind(
-        self,
-        fault_injector_client: FaultInjectorClient,
-        endpoints_config: Dict[str, Any],
-        endpoint_id: str,
-    ):
-        bind_action_id = ClusterOperations.execute_rebind(
-            fault_injector_client, endpoints_config, endpoint_id
-        )
-
-        bind_result = fault_injector_client.get_operation_result(
-            bind_action_id, timeout=BIND_TIMEOUT
-        )
-        logging.debug(f"Bind result: {bind_result}")
-
     def _execute_migrate_bind_flow(
         self,
         fault_injector_client: FaultInjectorClient,
@@ -153,16 +90,16 @@ class TestPushNotificationsBase:
         empty_node: str,
         endpoint_id: str,
     ):
-        self._execute_migration(
-            fault_injector_client=fault_injector_client,
-            endpoints_config=endpoints_config,
+        ClusterOperations.execute_migrate(
+            fault_injector=fault_injector_client,
+            endpoint_config=endpoints_config,
             target_node=target_node,
             empty_node=empty_node,
             skip_end_notification=True,
         )
-        self._execute_bind(
-            fault_injector_client=fault_injector_client,
-            endpoints_config=endpoints_config,
+        ClusterOperations.execute_rebind(
+            fault_injector=fault_injector_client,
+            endpoint_config=endpoints_config,
             endpoint_id=endpoint_id,
         )
 
@@ -455,7 +392,7 @@ class TestStandaloneClientPushNotifications(TestPushNotificationsBase):
 
         logging.info("Executing rladmin migrate command...")
         migrate_thread = Thread(
-            target=self._execute_migration,
+            target=ClusterOperations.execute_migrate,
             name="migrate_thread",
             args=(
                 fault_injector_client,
@@ -493,7 +430,7 @@ class TestStandaloneClientPushNotifications(TestPushNotificationsBase):
         logging.info("Executing rladmin bind endpoint command...")
 
         bind_thread = Thread(
-            target=self._execute_bind,
+            target=ClusterOperations.execute_rebind,
             name="bind_thread",
             args=(fault_injector_client, endpoints_config, self.endpoint_id),
         )
@@ -554,7 +491,7 @@ class TestStandaloneClientPushNotifications(TestPushNotificationsBase):
 
         logging.info("Executing rladmin migrate command...")
         migrate_thread = Thread(
-            target=self._execute_migration,
+            target=ClusterOperations.execute_migrate,
             name="migrate_thread",
             args=(
                 fault_injector_client,
@@ -583,7 +520,7 @@ class TestStandaloneClientPushNotifications(TestPushNotificationsBase):
         logging.info("Executing rladmin bind endpoint command...")
 
         bind_thread = Thread(
-            target=self._execute_bind,
+            target=ClusterOperations.execute_rebind,
             name="bind_thread",
             args=(fault_injector_client, endpoints_config, self.endpoint_id),
         )
@@ -657,7 +594,7 @@ class TestStandaloneClientPushNotifications(TestPushNotificationsBase):
 
         logging.info("Executing rladmin migrate command...")
         migrate_thread = Thread(
-            target=self._execute_migration,
+            target=ClusterOperations.execute_migrate,
             name="migrate_thread",
             args=(
                 fault_injector_client,
@@ -688,7 +625,7 @@ class TestStandaloneClientPushNotifications(TestPushNotificationsBase):
         logging.info("Executing rladmin bind endpoint command...")
 
         bind_thread = Thread(
-            target=self._execute_bind,
+            target=ClusterOperations.execute_rebind,
             name="bind_thread",
             args=(fault_injector_client, endpoints_config, self.endpoint_id),
         )
@@ -758,7 +695,7 @@ class TestStandaloneClientPushNotifications(TestPushNotificationsBase):
 
         logging.info("Starting migration ...")
         migrate_thread = Thread(
-            target=self._execute_migration,
+            target=ClusterOperations.execute_migrate,
             name="migrate_thread",
             args=(
                 fault_injector_client,
@@ -801,7 +738,7 @@ class TestStandaloneClientPushNotifications(TestPushNotificationsBase):
 
         logging.info("Starting rebind...")
         bind_thread = Thread(
-            target=self._execute_bind,
+            target=ClusterOperations.execute_rebind,
             name="bind_thread",
             args=(fault_injector_client, endpoints_config, self.endpoint_id),
         )
@@ -881,7 +818,7 @@ class TestStandaloneClientPushNotifications(TestPushNotificationsBase):
 
         logging.info("Executing rladmin migrate command...")
         migrate_thread = Thread(
-            target=self._execute_migration,
+            target=ClusterOperations.execute_migrate,
             name="migrate_thread",
             args=(
                 fault_injector_client,
@@ -912,7 +849,7 @@ class TestStandaloneClientPushNotifications(TestPushNotificationsBase):
         logging.info("Executing rladmin bind endpoint command...")
 
         bind_thread = Thread(
-            target=self._execute_bind,
+            target=ClusterOperations.execute_rebind,
             name="bind_thread",
             args=(fault_injector_client, endpoints_config, self.endpoint_id),
         )
@@ -978,7 +915,7 @@ class TestStandaloneClientPushNotifications(TestPushNotificationsBase):
 
         logging.info("Executing rladmin migrate command...")
         migrate_thread = Thread(
-            target=self._execute_migration,
+            target=ClusterOperations.execute_migrate,
             name="migrate_thread",
             args=(
                 fault_injector_client,
@@ -1023,7 +960,7 @@ class TestStandaloneClientPushNotifications(TestPushNotificationsBase):
         logging.info("Executing rladmin bind endpoint command for cleanup...")
 
         bind_thread = Thread(
-            target=self._execute_bind,
+            target=ClusterOperations.execute_rebind,
             name="bind_thread",
             args=(fault_injector_client, endpoints_config, self.endpoint_id),
         )
@@ -1049,7 +986,7 @@ class TestStandaloneClientPushNotifications(TestPushNotificationsBase):
 
         logging.info("Executing rladmin migrate command...")
         migrate_thread = Thread(
-            target=self._execute_migration,
+            target=ClusterOperations.execute_migrate,
             name="migrate_thread",
             args=(
                 fault_injector_client,
@@ -1104,7 +1041,7 @@ class TestStandaloneClientPushNotifications(TestPushNotificationsBase):
         logging.info("Executing rladmin bind endpoint command...")
 
         bind_thread = Thread(
-            target=self._execute_bind,
+            target=ClusterOperations.execute_rebind,
             name="bind_thread",
             args=(fault_injector_client, endpoints_config, self.endpoint_id),
         )
@@ -1412,7 +1349,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
 
         logging.info("Executing FI command that triggers the desired effect...")
         trigger_effect_thread = Thread(
-            target=self._trigger_effect,
+            target=ClusterOperations.trigger_effect,
             name="trigger_effect_thread",
             args=(
                 fault_injector_client_oss_api,
@@ -1528,7 +1465,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
 
         logging.info("Executing FI command that triggers the desired effect...")
         trigger_effect_thread = Thread(
-            target=self._trigger_effect,
+            target=ClusterOperations.trigger_effect,
             name="trigger_effect_thread",
             args=(
                 fault_injector_client_oss_api,
@@ -1649,7 +1586,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
 
         logging.info("Executing FI command that triggers the desired effect...")
         trigger_effect_thread = Thread(
-            target=self._trigger_effect,
+            target=ClusterOperations.trigger_effect,
             name="trigger_effect_thread",
             args=(
                 fault_injector_client_oss_api,
@@ -1784,7 +1721,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
 
         logging.info("Executing FI command that triggers the desired effect...")
         trigger_effect_thread = Thread(
-            target=self._trigger_effect,
+            target=ClusterOperations.trigger_effect,
             name="trigger_effect_thread",
             args=(
                 fault_injector_client_oss_api,
@@ -1958,7 +1895,7 @@ class TestClusterClientCommandsExecutionWithPushNotificationsWithEffectTrigger(
 
         logging.info("Executing FI command that triggers the desired effect...")
         trigger_effect_thread = Thread(
-            target=self._trigger_effect,
+            target=ClusterOperations.trigger_effect,
             name="trigger_effect_thread",
             args=(
                 fault_injector_client_oss_api,

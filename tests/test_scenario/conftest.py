@@ -33,6 +33,7 @@ CLIENT_TIMEOUT = 5
 
 DEFAULT_ENDPOINT_NAME = "m-standard"
 DEFAULT_OSS_API_ENDPOINT_NAME = "maint-notifications-oss-api"
+DEFAULT_PUBSUB_ENDPOINT_NAME = "pubsub-oss-api"
 
 
 class CheckActiveDatabaseChangedListener(EventListenerInterface):
@@ -67,6 +68,14 @@ def endpoint_name(request):
 def cluster_endpoint_name(request):
     return request.config.getoption("--cluster-endpoint-name") or os.getenv(
         "REDIS_CLUSTER_ENDPOINT_NAME", DEFAULT_OSS_API_ENDPOINT_NAME
+    )
+
+
+@pytest.fixture()
+def pubsub_endpoint_name(request):
+    return request.config.getoption("--cluster-endpoint-name") or os.getenv(
+        "REDIS_PUBSUB_ENDPOINT_NAME",
+        os.getenv("REDIS_CLUSTER_ENDPOINT_NAME", DEFAULT_PUBSUB_ENDPOINT_NAME),
     )
 
 
@@ -118,6 +127,14 @@ def maint_notifications_cluster_bdb_config(cluster_endpoint_name: str):
     The bdb config is the same for all tests, but the database is created with a random name.
     """
     return get_bdbs_config(cluster_endpoint_name)
+
+
+@pytest.fixture()
+def pubsub_cluster_bdb_config(pubsub_endpoint_name: str):
+    """
+    Get the bdb config used by Pub/Sub scenario tests.
+    """
+    return get_bdbs_config(pubsub_endpoint_name)
 
 
 @pytest.fixture()

@@ -16,12 +16,20 @@ from redis.client import PubSub
 from redis.cluster import ClusterPubSub
 from redis.crc import key_slot
 from redis.event import EventDispatcher
-from redis.exceptions import ConnectionError, SlotNotCoveredError, TimeoutError
+from redis.exceptions import (
+    ConnectionError,
+    RedisError,
+    ResponseError,
+    SlotNotCoveredError,
+    TimeoutError,
+)
 from redis.observability import recorder
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
+from redis.utils import str_if_bytes
 
 from .conftest import (
+    REDIS_INFO,
     _get_client,
     is_resp2_connection,
     skip_if_redis_enterprise,
@@ -90,6 +98,322 @@ def make_subscribe_test_data(pubsub, type):
             "keys": ["f*", "b*", "uni" + chr(4456) + "*"],
         }
     assert False, f"invalid subscribe type: {type}"
+
+
+@pytest.mark.fixed_client
+class TestPubSubSubscriberModeProtocol:
+    DEFAULT_STANDALONE_URL = "redis://localhost:6379/0"
+    DEFAULT_CLUSTER_URL = "redis://localhost:16379/0"
+
+    def _get_resp2_client(self, request, cluster=False):
+        client = None
+        redis_url = self._get_url(request, cluster)
+        try:
+            if cluster:
+                client = redis.RedisCluster.from_url(
+                    redis_url,
+                    protocol=2,
+                    socket_connect_timeout=1,
+                    socket_timeout=1,
+                )
+            else:
+                client = redis.Redis.from_url(
+                    redis_url,
+                    protocol=2,
+                    socket_connect_timeout=1,
+                    socket_timeout=1,
+                )
+            client.ping()
+        except RedisError as exc:
+            self._close_client(client)
+            pytest.skip(
+                f"Redis {'cluster' if cluster else 'standalone'} unavailable: {exc}"
+            )
+
+        if not is_resp2_connection(client):
+            self._close_client(client)
+            pytest.skip("subscriber-mode command rejection is RESP2-specific")
+
+        request.addfinalizer(lambda: self._close_client(client))
+        return client
+
+    def _get_url(self, request, cluster):
+        if bool(REDIS_INFO.get("cluster_enabled", False)) == cluster:
+            return request.config.getoption("--redis-url")
+        if cluster:
+            return self.DEFAULT_CLUSTER_URL
+        return self.DEFAULT_STANDALONE_URL
+
+    def _close_client(self, client):
+        if client is None:
+            return
+        client.close()
+        if hasattr(client, "disconnect_connection_pools"):
+            client.disconnect_connection_pools()
+
+    def test_subscriber_mode_rejects_regular_command_after_subscribe(self, request):
+        r = self._get_resp2_client(request)
+        p = r.pubsub()
+        try:
+            p.subscribe("subscriber-mode")
+            assert wait_for_message(p)["type"] == "subscribe"
+
+            p.execute_command("SET", "should-not-run", "1")
+            with pytest.raises(ResponseError, match="only .* allowed|Can't execute"):
+                p.parse_response(block=False, timeout=1)
+        finally:
+            p.close()
+
+    def test_subscriber_mode_rejects_regular_command_after_psubscribe(self, request):
+        r = self._get_resp2_client(request)
+        p = r.pubsub()
+        try:
+            p.psubscribe("subscriber-*")
+            assert wait_for_message(p)["type"] == "psubscribe"
+
+            p.execute_command("SET", "should-not-run", "1")
+            with pytest.raises(ResponseError, match="only .* allowed|Can't execute"):
+                p.parse_response(block=False, timeout=1)
+        finally:
+            p.close()
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_subscriber_mode_rejects_regular_command_after_ssubscribe(self, request):
+        r = self._get_resp2_client(request, cluster=True)
+        channel = "subscriber-mode-{shard}"
+        node = r.get_node_from_key(channel)
+        p = r.pubsub()
+        try:
+            p.ssubscribe(channel)
+            assert wait_for_message(p, node=node)["type"] == "ssubscribe"
+
+            per_node_pubsub = p.node_pubsub_mapping[node.name]
+            per_node_pubsub.execute_command("SET", "should-not-run-{shard}", "1")
+            with pytest.raises(ResponseError, match="only .* allowed|Can't execute"):
+                per_node_pubsub.parse_response(block=False, timeout=1)
+        finally:
+            p.close()
+
+
+class TestPubSubCloseServerCleanup:
+    def _wait_for_result_to_match_expected(self, get_result, expected, timeout=2.0):
+        deadline = time.monotonic() + timeout
+        result = None
+        while time.monotonic() < deadline:
+            result = get_result()
+            if result == expected:
+                return
+            time.sleep(0.01)
+        assert result == expected
+
+    @pytest.mark.onlynoncluster
+    def test_close_while_subscribed_removes_numsub_entry(self, r):
+        channel = "close-cleanup"
+        p = r.pubsub()
+        try:
+            p.subscribe(channel)
+            assert wait_for_message(p)["type"] == "subscribe"
+            self._wait_for_result_to_match_expected(
+                lambda: r.pubsub_numsub(channel),
+                [(channel.encode(), 1)],
+            )
+        finally:
+            p.close()
+
+        assert p.connection is None
+        assert p.channels == {}
+        self._wait_for_result_to_match_expected(
+            lambda: r.pubsub_numsub(channel),
+            [(channel.encode(), 0)],
+        )
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_close_while_ssubscribed_removes_shardnumsub_entry(self, r):
+        channel = "close-cleanup-{shard}"
+        node = r.get_node_from_key(channel)
+        p = r.pubsub()
+        try:
+            p.ssubscribe(channel)
+            assert wait_for_message(p, node=node)["type"] == "ssubscribe"
+            self._wait_for_result_to_match_expected(
+                lambda: r.pubsub_shardnumsub(channel, target_nodes=node),
+                [(channel.encode(), 1)],
+            )
+        finally:
+            p.close()
+
+        assert p.node_pubsub_mapping == {}
+        assert p.shard_channels == {}
+        self._wait_for_result_to_match_expected(
+            lambda: r.pubsub_shardnumsub(channel, target_nodes=node),
+            [(channel.encode(), 0)],
+        )
+
+
+@pytest.mark.onlycluster
+@skip_if_server_version_lt("7.0.0")
+class TestClusterShardedPubSubDelivery:
+    def _wait_for_sharded_acks(
+        self, pubsub, count, node=None, message_type="ssubscribe"
+    ):
+        for _ in range(count):
+            message = wait_for_message(
+                pubsub,
+                timeout=2.0,
+                node=node,
+                func=None if node else pubsub.get_sharded_message,
+            )
+            assert message is not None
+            assert message["type"] == message_type
+
+    def _read_sharded_messages(self, pubsub, expected_count, timeout=5.0):
+        messages = []
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline and len(messages) < expected_count:
+            message = pubsub.get_sharded_message(timeout=0.05)
+            if message is not None and message["type"] == "smessage":
+                messages.append(message)
+        return messages
+
+    def test_multiple_sharded_subscribers_receive_all_messages(self, r):
+        channels = ["multi-sub-{shared}:0", "multi-sub-{shared}:1"]
+        subscriber_count = 2
+        message_count = 20
+        expected = set(range(message_count))
+        received = [defaultdict(set) for _ in range(subscriber_count)]
+        subscribers = [r.pubsub() for _ in range(subscriber_count)]
+
+        try:
+            for pubsub in subscribers:
+                pubsub.ssubscribe(*channels)
+                self._wait_for_sharded_acks(pubsub, len(channels))
+
+            for seq in range(message_count):
+                for channel in channels:
+                    assert r.spublish(channel, str(seq)) == subscriber_count
+
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline:
+                for index, pubsub in enumerate(subscribers):
+                    message = pubsub.get_sharded_message(timeout=0.01)
+                    if message is not None and message["type"] == "smessage":
+                        channel = str_if_bytes(message["channel"])
+                        received[index][channel].add(int(message["data"]))
+
+                if all(
+                    all(subscriber[channel] == expected for channel in channels)
+                    for subscriber in received
+                ):
+                    return
+
+            assert [
+                {channel: sorted(seqs) for channel, seqs in subscriber.items()}
+                for subscriber in received
+            ] == [
+                {channel: list(range(message_count)) for channel in channels}
+                for _ in range(subscriber_count)
+            ]
+        finally:
+            for pubsub in subscribers:
+                pubsub.close()
+
+    def test_duplicate_ssubscribe_delivers_each_message_once(self, r):
+        channel = "duplicate-ssubscribe-{shared}"
+        p = r.pubsub()
+        try:
+            p.ssubscribe(channel)
+            self._wait_for_sharded_acks(p, 1)
+
+            p.ssubscribe(channel)
+            maybe_ack = p.get_sharded_message(timeout=0.5)
+            assert maybe_ack is None or maybe_ack["type"] == "ssubscribe"
+
+            for seq in range(10):
+                assert r.spublish(channel, str(seq)) == 1
+
+            messages = self._read_sharded_messages(p, expected_count=10)
+            received = [int(message["data"]) for message in messages]
+
+            assert sorted(received) == list(range(10))
+            assert p.get_sharded_message(timeout=0.5) is None
+        finally:
+            p.close()
+
+    def test_no_messages_delivered_after_sunsubscribe(self, r):
+        kept = "still-subscribed-{shared}"
+        removed = "removed-{shared}"
+        p = r.pubsub()
+        try:
+            p.ssubscribe(kept, removed)
+            self._wait_for_sharded_acks(p, 2)
+
+            p.sunsubscribe(removed)
+            self._wait_for_sharded_acks(p, 1, message_type="sunsubscribe")
+
+            for seq in range(10):
+                assert r.spublish(kept, str(seq)) == 1
+                assert r.spublish(removed, str(seq)) == 0
+
+            messages = self._read_sharded_messages(p, expected_count=10)
+            delivered_channels = [
+                str_if_bytes(message["channel"]) for message in messages
+            ]
+
+            assert delivered_channels == [kept] * 10
+            assert p.get_sharded_message(timeout=0.5) is None
+        finally:
+            p.close()
+
+
+@pytest.mark.onlycluster
+@skip_if_server_version_lt("7.0.0")
+class TestClusterShardedPubSubConnectionLifecycle:
+    def _wait_for_ssubscribe_ack(self, pubsub):
+        message = wait_for_message(
+            pubsub,
+            timeout=2.0,
+            func=pubsub.get_sharded_message,
+        )
+        assert message is not None
+        assert message["type"] == "ssubscribe"
+
+    def test_cluster_sharded_pubsub_creates_connections_lazily(self, r):
+        channel = "lazy-connection-{shared}"
+        node = r.get_node_from_key(channel)
+        p = r.pubsub()
+        try:
+            assert p.node_pubsub_mapping == {}
+            assert p.connection is None
+
+            p.ssubscribe(channel)
+            self._wait_for_ssubscribe_ack(p)
+
+            assert list(p.node_pubsub_mapping) == [node.name]
+            assert p.node_pubsub_mapping[node.name].connection is not None
+        finally:
+            p.close()
+
+    def test_cluster_sharded_pubsub_reuses_connection_for_same_shard(self, r):
+        first = "reuse-1-{same-shard}"
+        second = "reuse-2-{same-shard}"
+        node = r.get_node_from_key(first)
+        assert node.name == r.get_node_from_key(second).name
+        p = r.pubsub()
+        try:
+            p.ssubscribe(first)
+            self._wait_for_ssubscribe_ack(p)
+            first_mapping = dict(p.node_pubsub_mapping)
+            first_pubsub = p.node_pubsub_mapping[node.name]
+
+            p.ssubscribe(second)
+            self._wait_for_ssubscribe_ack(p)
+
+            assert p.node_pubsub_mapping == first_mapping
+            assert p.node_pubsub_mapping[node.name] is first_pubsub
+            assert len(p.node_pubsub_mapping) == 1
+        finally:
+            p.close()
 
 
 class TestPubSubSubscribeUnsubscribe:

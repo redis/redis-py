@@ -34,7 +34,10 @@ class TaskStatuses:
 class ActionType(str, Enum):
     DMC_RESTART = "dmc_restart"
     FAILOVER = "failover"
+    NODE_FAILURE = "node_failure"
+    PROXY_FAILURE = "proxy_failure"
     RESHARD = "reshard"
+    SHARD_FAILURE = "shard_failure"
     CREATE_DATABASE = "create_database"
     DELETE_DATABASE = "delete_database"
     SEQUENCE_OF_ACTIONS = "sequence_of_actions"
