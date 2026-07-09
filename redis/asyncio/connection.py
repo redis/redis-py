@@ -779,15 +779,16 @@ class AbstractConnection:
         host_error = self._host_error()
         try:
             if read_timeout is not None and self.protocol in ["3", 3]:
-                async with async_timeout(read_timeout):
-                    response = await self._parser.read_response(
-                        disable_decoding=disable_decoding, push_request=push_request
-                    )
+                response = await self._parser.read_response(
+                    disable_decoding=disable_decoding,
+                    push_request=push_request,
+                    timeout=read_timeout,
+                )
             elif read_timeout is not None:
-                async with async_timeout(read_timeout):
-                    response = await self._parser.read_response(
-                        disable_decoding=disable_decoding
-                    )
+                response = await self._parser.read_response(
+                    disable_decoding=disable_decoding,
+                    timeout=read_timeout,
+                )
             elif self.protocol in ["3", 3]:
                 response = await self._parser.read_response(
                     disable_decoding=disable_decoding, push_request=push_request

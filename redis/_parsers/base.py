@@ -1,7 +1,13 @@
 import logging
+import sys
 from abc import ABC, abstractmethod
 from asyncio import IncompleteReadError, StreamReader
 from typing import Awaitable, Callable, List, Optional, Protocol, Union
+
+if sys.version_info >= (3, 11, 3):
+    from asyncio import timeout as async_timeout
+else:
+    from async_timeout import timeout as async_timeout
 
 from redis.maint_notifications import (
     MaintenanceNotification,
@@ -13,7 +19,6 @@ from redis.maint_notifications import (
     OSSNodeMigratedNotification,
     OSSNodeMigratingNotification,
 )
-from redis.utils import deprecated_function, safe_str
 
 from ..exceptions import (
     AskError,
@@ -36,6 +41,7 @@ from ..exceptions import (
     TryAgainError,
 )
 from ..typing import EncodableT
+from ..utils import SENTINEL, deprecated_function, safe_str
 from .encoders import Encoder
 from .socket import SERVER_CLOSED_CONNECTION_ERROR, SocketBuffer
 
@@ -183,7 +189,10 @@ class AsyncBaseParser(BaseParser):
         pass
 
     async def read_response(
-        self, disable_decoding: bool = False
+        self,
+        disable_decoding: bool = False,
+        push_request: bool = False,
+        timeout: Union[float, object] = SENTINEL,
     ) -> Union[EncodableT, ResponseError, None, List[EncodableT]]:
         raise NotImplementedError()
 
@@ -509,7 +518,9 @@ class _AsyncRESPBase(AsyncBaseParser):
         self._pos = 0
 
     def _clear(self):
-        self._buffer = b""
+        """Clear parsed data but preserve unconsumed pipelined bytes."""
+        self._buffer = self._buffer[self._pos :]
+        self._pos = 0
         self._chunks.clear()
 
     def on_connect(self, connection):
@@ -518,7 +529,10 @@ class _AsyncRESPBase(AsyncBaseParser):
         if self._stream is None:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         self.encoder = connection.encoder
-        self._clear()
+        # Full reset on (re)connect — discard stale data from old connection
+        self._buffer = b""
+        self._pos = 0
+        self._chunks.clear()
         self._connected = True
 
     def on_disconnect(self):
@@ -545,40 +559,65 @@ class _AsyncRESPBase(AsyncBaseParser):
         # parser and fail loudly if the private buffer API changes.
         return bool(self._stream._buffer) or self._stream.at_eof()
 
-    async def _read(self, length: int) -> bytes:
+    async def _read_from_stream(
+        self, timeout: Union[float, object] = SENTINEL, max_bytes: int = 0
+    ) -> bytes:
+        """
+        Read the next chunk from the underlying stream with an optional
+        per-read timeout.  This mirrors the sync client's per-recv timeout
+        semantics: each individual socket read gets its own timeout window.
+
+        ``max_bytes`` limits how many bytes may be returned. When 0, the
+        parser's ``_read_size`` is used.
+        """
+        stream = self._stream
+        if stream is None:
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+        size = max_bytes if max_bytes > 0 else self._read_size
+        if timeout is not SENTINEL and isinstance(timeout, (int, float)):
+            async with async_timeout(timeout):
+                return await stream.read(size)
+        return await stream.read(size)
+
+    async def _read(
+        self, length: int, timeout: Union[float, object] = SENTINEL
+    ) -> bytes:
         """
         Read `length` bytes of data.  These are assumed to be followed
         by a '\r\n' terminator which is subsequently discarded.
         """
         want = length + 2
         end = self._pos + want
-        if len(self._buffer) >= end:
-            result = self._buffer[self._pos : end - 2]
-        else:
-            tail = self._buffer[self._pos :]
+        while len(self._buffer) < end:
+            need = end - len(self._buffer)
             try:
-                data = await self._stream.readexactly(want - len(tail))
+                chunk = await self._read_from_stream(
+                    timeout=timeout, max_bytes=min(need, self._read_size)
+                )
             except IncompleteReadError as error:
                 raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from error
-            result = (tail + data)[:-2]
-            self._chunks.append(data)
-        self._pos += want
+            if not chunk:
+                raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+            self._buffer += chunk
+        result = self._buffer[self._pos : end - 2]
+        self._pos = end
         return result
 
-    async def _readline(self) -> bytes:
+    async def _readline(self, timeout: Union[float, object] = SENTINEL) -> bytes:
         """
         read an unknown number of bytes up to the next '\r\n'
         line separator, which is discarded.
         """
-        found = self._buffer.find(b"\r\n", self._pos)
-        if found >= 0:
-            result = self._buffer[self._pos : found]
-        else:
-            tail = self._buffer[self._pos :]
-            data = await self._stream.readline()
-            if not data.endswith(b"\r\n"):
+        while True:
+            found = self._buffer.find(b"\r\n", self._pos)
+            if found >= 0:
+                result = self._buffer[self._pos : found]
+                self._pos = found + 2
+                return result
+            try:
+                chunk = await self._read_from_stream(timeout=timeout)
+            except IncompleteReadError as error:
+                raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from error
+            if not chunk:
                 raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-            result = (tail + data)[:-2]
-            self._chunks.append(data)
-        self._pos += len(result) + 2
-        return result
+            self._buffer += chunk

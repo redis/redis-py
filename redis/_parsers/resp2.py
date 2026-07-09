@@ -78,7 +78,9 @@ class _RESP2Parser(_RESPBase):
 class _AsyncRESP2Parser(_AsyncRESPBase):
     """Async class for the RESP2 protocol"""
 
-    async def read_response(self, disable_decoding: bool = False):
+    async def read_response(
+        self, disable_decoding: bool = False, timeout: Union[float, object] = SENTINEL
+    ):
         if not self._connected:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         if self._chunks:
@@ -86,15 +88,17 @@ class _AsyncRESP2Parser(_AsyncRESPBase):
             self._buffer += b"".join(self._chunks)
             self._chunks.clear()
         self._pos = 0
-        response = await self._read_response(disable_decoding=disable_decoding)
+        response = await self._read_response(
+            disable_decoding=disable_decoding, timeout=timeout
+        )
         # Successfully parsing a response allows us to clear our parsing buffer
         self._clear()
         return response
 
     async def _read_response(
-        self, disable_decoding: bool = False
+        self, disable_decoding: bool = False, timeout: Union[float, object] = SENTINEL
     ) -> Union[EncodableT, ResponseError, None]:
-        raw = await self._readline()
+        raw = await self._readline(timeout=timeout)
         response: Any
         byte, response = raw[:1], raw[1:]
 
@@ -122,13 +126,17 @@ class _AsyncRESP2Parser(_AsyncRESPBase):
         elif byte == b"$" and response == b"-1":
             return None
         elif byte == b"$":
-            response = await self._read(int(response))
+            response = await self._read(int(response), timeout=timeout)
         # multi-bulk response
         elif byte == b"*" and response == b"-1":
             return None
         elif byte == b"*":
             response = [
-                (await self._read_response(disable_decoding))
+                (
+                    await self._read_response(
+                        disable_decoding=disable_decoding, timeout=timeout
+                    )
+                )
                 for _ in range(int(response))  # noqa
             ]
         else:

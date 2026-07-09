@@ -1,8 +1,14 @@
 import select
 import selectors
 import socket
+import sys
 from logging import getLogger
 from typing import Callable, List, Optional, TypedDict, Union
+
+if sys.version_info >= (3, 11, 3):
+    from asyncio import timeout as async_timeout
+else:
+    from async_timeout import timeout as async_timeout
 
 from ..exceptions import ConnectionError, InvalidResponse, RedisError, TimeoutError
 from ..typing import EncodableT
@@ -331,8 +337,12 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         # with a real StreamReader guard this private buffer API in CI.
         return bool(self._stream._buffer)
 
-    async def read_from_socket(self):
-        buffer = await self._stream.read(self._read_size)
+    async def read_from_socket(self, timeout: Union[float, object] = SENTINEL):
+        if timeout is not SENTINEL:
+            async with async_timeout(timeout):
+                buffer = await self._stream.read(self._read_size)
+        else:
+            buffer = await self._stream.read(self._read_size)
         if not buffer or not isinstance(buffer, bytes):
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
         self._reader.feed(buffer)
@@ -341,7 +351,10 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         return True
 
     async def read_response(
-        self, disable_decoding: bool = False, push_request: bool = False
+        self,
+        disable_decoding: bool = False,
+        push_request: bool = False,
+        timeout: Union[float, object] = SENTINEL,
     ) -> Union[EncodableT, List[EncodableT]]:
         # If `on_disconnect()` has been called, prohibit any more reads
         # even if they could happen because data might be present.
@@ -355,7 +368,7 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
             response = self._reader.gets()
 
         while response is NOT_ENOUGH_DATA:
-            await self.read_from_socket()
+            await self.read_from_socket(timeout=timeout)
             if disable_decoding:
                 response = self._reader.gets(False)
             else:
@@ -372,7 +385,9 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
             response = await self.handle_push_response(response)
             if not push_request:
                 return await self.read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
+                    disable_decoding=disable_decoding,
+                    push_request=push_request,
+                    timeout=timeout,
                 )
             else:
                 return response
