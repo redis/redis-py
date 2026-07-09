@@ -342,6 +342,12 @@ class AsyncMaintNotificationsAbstractConnection:
         parser.set_oss_cluster_maint_push_handler(
             oss_cluster_maint_notifications_handler.handle_notification
         )
+        # OSS cluster mode and pool-handler mode are mutually exclusive. Clear
+        # any node-moving/pool handler a default (RESP3 "auto") pool wired in
+        # __init__ so this existing connection is not configured with both.
+        parser.set_node_moving_push_handler(None)
+        self._maint_notifications_pool_handler = None
+
         self._oss_cluster_maint_notifications_handler = (
             oss_cluster_maint_notifications_handler
         )

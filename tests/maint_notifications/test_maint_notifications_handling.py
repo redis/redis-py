@@ -745,6 +745,15 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
         assert free_connection._parser.oss_cluster_maint_push_handler_func is not None
         assert free_connection._parser.maintenance_push_handler_func is not None
 
+        # Existing connections must not retain the orphaned pool-handler binding.
+        # A default (enabled) pool wires node_moving on each connection at
+        # __init__; switching to OSS mode must clear it so no existing connection
+        # is configured with both the node-moving and OSS cluster handlers.
+        assert in_use_connection._parser.node_moving_push_handler_func is None
+        assert in_use_connection._maint_notifications_pool_handler is None
+        assert free_connection._parser.node_moving_push_handler_func is None
+        assert free_connection._maint_notifications_pool_handler is None
+
         # OSS cluster mode and pool-handler mode are mutually exclusive. The pool
         # was created with the default (enabled) config, which wires a pool
         # handler in __init__; switching to OSS mode must clear it from both the
