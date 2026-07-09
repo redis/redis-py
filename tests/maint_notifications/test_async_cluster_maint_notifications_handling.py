@@ -470,7 +470,17 @@ class TestAsyncClusterMaintNotificationsHandling(
         cluster: "redis.RedisCluster",
         expected_states: List[ConnectionStateExpectation],
     ):
-        """Validate per-node connection maintenance state / relaxed timeout."""
+        """Validate per-node connection maintenance state / relaxed timeout.
+
+        A connection is counted as "changed" when it deviates from the default
+        (non-maintenance) config - i.e. its ``maintenance_state`` is not
+        ``NONE`` or its ``socket_timeout`` is not the default. For every node
+        with an expectation, exactly ``changed_connections_count`` connections
+        must be changed; a zero expectation therefore asserts that no connection
+        deviates from the default config. When a non-default state is expected,
+        the changed connections must additionally match the expected ``state`` /
+        ``relaxed_timeout``.
+        """
         default_maint_state = MaintenanceState.NONE
         default_timeout = None
         for node in list(cluster.nodes_manager.nodes_cache.values()):
@@ -478,16 +488,26 @@ class TestAsyncClusterMaintNotificationsHandling(
             if expected_state is None:
                 continue
             changed_connections_count = 0
+            matching_expected_count = 0
             for conn in _node_all_connections(node):
                 if (
                     conn.maintenance_state != default_maint_state
-                    and conn.maintenance_state == expected_state.state
-                ) or (
-                    conn.socket_timeout != default_timeout
-                    and conn.socket_timeout == expected_state.relaxed_timeout
+                    or conn.socket_timeout != default_timeout
                 ):
                     changed_connections_count += 1
+                if (
+                    conn.maintenance_state == expected_state.state
+                    and conn.socket_timeout == expected_state.relaxed_timeout
+                ):
+                    matching_expected_count += 1
             assert changed_connections_count == expected_state.changed_connections_count
+            if (
+                expected_state.state != default_maint_state
+                or expected_state.relaxed_timeout != default_timeout
+            ):
+                assert (
+                    matching_expected_count == expected_state.changed_connections_count
+                )
 
     def _validate_removed_node_connections(self, node: ClusterNode):
         """Validate connections in a removed node are disconnected / for reconnect."""
@@ -656,7 +676,12 @@ class TestAsyncClusterMaintNotificationsHandling(
         self._validate_connections_states(
             self.cluster,
             [
-                ConnectionStateExpectation(NODE_PORT_1),
+                ConnectionStateExpectation(
+                    NODE_PORT_1,
+                    changed_connections_count=1,
+                    state=MaintenanceState.MAINTENANCE,
+                    relaxed_timeout=self.config.relaxed_timeout,
+                ),
             ],
         )
 
