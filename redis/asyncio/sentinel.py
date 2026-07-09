@@ -28,7 +28,6 @@ class SlaveNotFoundError(ConnectionError):
 
 
 ReplicaNotFoundError = SlaveNotFoundError
-ReplicaNotFound = ReplicaNotFoundError
 
 
 class SentinelManagedConnection(Connection):
@@ -171,7 +170,11 @@ class SentinelConnectionPool(ConnectionPool):
         raise SlaveNotFoundError(f"No slave found for {self.service_name!r}")
 
     def rotate_replicas(self) -> AsyncIterator:
-        """Round-robin replica balancer"""
+        """Round-robin replica balancer.
+        
+        This is an alias for :py:meth:`rotate_slaves`,
+        using the preferred Redis 5.0+ terminology.
+        """
         return self.rotate_slaves()
 
 
@@ -329,7 +332,11 @@ class Sentinel(AsyncSentinelCommands):
     def filter_replicas(
         self, replicas: Iterable[Mapping]
     ) -> Sequence[Tuple[EncodableT, EncodableT]]:
-        """Remove replicas that are in an ODOWN or SDOWN state"""
+        """Remove replicas that are in an ODOWN or SDOWN state.
+        
+        This is an alias for :py:meth:`filter_slaves`,
+        using the preferred Redis 5.0+ terminology.
+        """
         return self.filter_slaves(replicas)
 
     async def discover_slaves(
@@ -349,7 +356,11 @@ class Sentinel(AsyncSentinelCommands):
     async def discover_replicas(
         self, service_name: str
     ) -> Sequence[Tuple[EncodableT, EncodableT]]:
-        """Returns a list of alive replicas for service ``service_name``"""
+        """Returns a list of alive replicas for service ``service_name``.
+        
+        This is an alias for :py:meth:`discover_slaves`,
+        using the preferred Redis 5.0+ terminology.
+        """
         return await self.discover_slaves(service_name)
 
     def master_for(
@@ -432,6 +443,9 @@ class Sentinel(AsyncSentinelCommands):
     ):
         """
         Returns redis client instance for the ``service_name`` replica(s).
+        
+        This is an alias for :py:meth:`slave_for`,
+        using the preferred Redis 5.0+ terminology.
         """
         return self.slave_for(
             service_name,

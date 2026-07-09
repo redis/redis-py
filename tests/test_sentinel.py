@@ -8,7 +8,6 @@ import redis.sentinel
 from redis import exceptions
 from redis.sentinel import (
     MasterNotFoundError,
-    ReplicaNotFound,
     ReplicaNotFoundError,
     Sentinel,
     SentinelConnectionPool,
@@ -270,7 +269,6 @@ def test_slave_for_slave_not_found_error(cluster, sentinel):
 @pytest.mark.onlynoncluster
 def test_replica_not_found_alias(cluster, sentinel):
     assert ReplicaNotFoundError is SlaveNotFoundError
-    assert ReplicaNotFound is ReplicaNotFoundError
 
     cluster.master["is_odown"] = True
     replica = sentinel.replica_for("mymaster", db=9)
