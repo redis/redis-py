@@ -1157,93 +1157,98 @@ class OSSMaintNotificationsHandler:
                 logger.debug(f"Handling SMIGRATED notification: {notification}")
             self._in_progress.add(notification)
 
-            # Extract the information about the src and destination nodes that are affected
-            # by the maintenance. nodes_to_slots_mapping structure:
-            # {
-            #     "src_host:port": [
-            #         {"dest_host:port": "slot_range"},
-            #         ...
-            #     ],
-            #     ...
-            # }
-            additional_startup_nodes_info = []
-            affected_nodes = set()
-            for (
-                src_address,
-                dest_mappings,
-            ) in notification.nodes_to_slots_mapping.items():
-                src_host, src_port = src_address.rsplit(":", 1)
-                src_node = self.cluster_client.nodes_manager.get_node(
-                    host=src_host, port=int(src_port)
+            try:
+                # Extract the information about the src and destination nodes that are affected
+                # by the maintenance. nodes_to_slots_mapping structure:
+                # {
+                #     "src_host:port": [
+                #         {"dest_host:port": "slot_range"},
+                #         ...
+                #     ],
+                #     ...
+                # }
+                additional_startup_nodes_info = []
+                affected_nodes = set()
+                for (
+                    src_address,
+                    dest_mappings,
+                ) in notification.nodes_to_slots_mapping.items():
+                    src_host, src_port = src_address.rsplit(":", 1)
+                    src_node = self.cluster_client.nodes_manager.get_node(
+                        host=src_host, port=int(src_port)
+                    )
+                    if src_node is not None:
+                        affected_nodes.add(src_node)
+
+                    for dest_mapping in dest_mappings:
+                        for dest_address in dest_mapping.keys():
+                            dest_host, dest_port = dest_address.rsplit(":", 1)
+                            additional_startup_nodes_info.append(
+                                (dest_host, int(dest_port))
+                            )
+
+                # Updates the cluster slots cache with the new slots mapping
+                # This will also update the nodes cache with the new nodes mapping
+                self.cluster_client.nodes_manager.initialize(
+                    disconnect_startup_nodes_pools=False,
+                    additional_startup_nodes_info=additional_startup_nodes_info,
                 )
-                if src_node is not None:
-                    affected_nodes.add(src_node)
 
-                for dest_mapping in dest_mappings:
-                    for dest_address in dest_mapping.keys():
-                        dest_host, dest_port = dest_address.rsplit(":", 1)
-                        additional_startup_nodes_info.append(
-                            (dest_host, int(dest_port))
-                        )
+                all_nodes = set(affected_nodes)
+                all_nodes = all_nodes.union(
+                    self.cluster_client.nodes_manager.nodes_cache.values()
+                )
 
-            # Updates the cluster slots cache with the new slots mapping
-            # This will also update the nodes cache with the new nodes mapping
-            self.cluster_client.nodes_manager.initialize(
-                disconnect_startup_nodes_pools=False,
-                additional_startup_nodes_info=additional_startup_nodes_info,
-            )
+                for current_node in all_nodes:
+                    if current_node.redis_connection is None:
+                        continue
+                    with current_node.redis_connection.connection_pool._lock:
+                        handoff_recorded = False
+                        if current_node in affected_nodes:
+                            # mark for reconnect all in use connections to the node - this will force them to
+                            # disconnect after they complete their current commands
+                            # Some of them might be used by sub sub and we don't know which ones - so we disconnect
+                            # all in flight connections after they are done with current command execution
+                            for conn in current_node.redis_connection.connection_pool._get_in_use_connections():
+                                add_debug_log_for_notification(
+                                    conn, "SMIGRATED - mark for reconnect"
+                                )
+                                conn.mark_for_reconnect()
 
-            all_nodes = set(affected_nodes)
-            all_nodes = all_nodes.union(
-                self.cluster_client.nodes_manager.nodes_cache.values()
-            )
-
-            for current_node in all_nodes:
-                if current_node.redis_connection is None:
-                    continue
-                with current_node.redis_connection.connection_pool._lock:
-                    handoff_recorded = False
-                    if current_node in affected_nodes:
-                        # mark for reconnect all in use connections to the node - this will force them to
-                        # disconnect after they complete their current commands
-                        # Some of them might be used by sub sub and we don't know which ones - so we disconnect
-                        # all in flight connections after they are done with current command execution
-                        for conn in current_node.redis_connection.connection_pool._get_in_use_connections():
-                            add_debug_log_for_notification(
-                                conn, "SMIGRATED - mark for reconnect"
-                            )
-                            conn.mark_for_reconnect()
-
-                        record_connection_handoff(
-                            pool_name=get_pool_name(
-                                current_node.redis_connection.connection_pool
-                            )
-                        )
-                        handoff_recorded = True
-                    else:
-                        if logger.isEnabledFor(logging.DEBUG):
-                            logger.debug(
-                                f"SMIGRATED: Node {current_node.name} not affected by maintenance, "
-                                f"skipping mark for reconnect"
-                            )
-
-                    if (
-                        current_node
-                        not in self.cluster_client.nodes_manager.nodes_cache.values()
-                    ):
-                        # disconnect all free connections to the node - this node will be dropped
-                        # from the cluster, so we don't need to revert the timeouts
-                        for conn in current_node.redis_connection.connection_pool._get_free_connections():
-                            conn.disconnect()
-
-                        # Only record handoff if not already recorded for this node
-                        if not handoff_recorded:
                             record_connection_handoff(
                                 pool_name=get_pool_name(
                                     current_node.redis_connection.connection_pool
                                 )
                             )
+                            handoff_recorded = True
+                        else:
+                            if logger.isEnabledFor(logging.DEBUG):
+                                logger.debug(
+                                    f"SMIGRATED: Node {current_node.name} not affected by maintenance, "
+                                    f"skipping mark for reconnect"
+                                )
 
-            # mark the notification as processed
-            self._processed_notifications.add(notification)
-            self._in_progress.discard(notification)
+                        if (
+                            current_node
+                            not in self.cluster_client.nodes_manager.nodes_cache.values()
+                        ):
+                            # disconnect all free connections to the node - this node will be dropped
+                            # from the cluster, so we don't need to revert the timeouts
+                            for conn in current_node.redis_connection.connection_pool._get_free_connections():
+                                conn.disconnect()
+
+                            # Only record handoff if not already recorded for this node
+                            if not handoff_recorded:
+                                record_connection_handoff(
+                                    pool_name=get_pool_name(
+                                        current_node.redis_connection.connection_pool
+                                    )
+                                )
+
+                # mark the notification as processed
+                self._processed_notifications.add(notification)
+            finally:
+                # Release the in-progress reservation. On success the notification
+                # is also in _processed_notifications (so it won't be re-handled);
+                # on failure it is not, allowing a later redelivery to retry.
+                self._in_progress.discard(notification)

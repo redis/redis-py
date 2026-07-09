@@ -28,6 +28,7 @@ from redis.maint_notifications import (
     MaintNotificationsPoolHandler,
     NodeMovingNotification,
     OSSMaintNotificationsHandler,
+    OSSNodeMigratedNotification,
 )
 
 
@@ -823,6 +824,50 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
                 MaintNotificationsConfig(enabled=False)
             )
         assert oss_handler.config is new_config
+
+    def test_smigrated_failure_releases_in_progress_for_retry(self):
+        """A SMIGRATED handling that raises must not leave the notification wedged
+        in _in_progress.
+
+        The in-progress reservation dedupes concurrent redeliveries of the same
+        notification (arriving on different connections). If handling raises
+        (e.g. nodes_manager.initialize() fails because startup nodes are briefly
+        unreachable mid-migration), the notification must be released so a later
+        redelivery can retry — otherwise the dedup guard skips it forever and the
+        topology is never refreshed from that notification.
+        """
+        config = MaintNotificationsConfig(enabled=True)
+        cluster_client = MagicMock()
+        cluster_client.nodes_manager.nodes_cache = {}
+        handler = OSSMaintNotificationsHandler(cluster_client, config)
+
+        notification = OSSNodeMigratedNotification(
+            id=5,
+            nodes_to_slots_mapping={
+                f"{DEFAULT_ADDRESS}": [{AFTER_MOVING_ADDRESS: "0-100"}]
+            },
+        )
+
+        # First delivery: initialize() fails, so handling raises.
+        cluster_client.nodes_manager.initialize.side_effect = RedisConnectionError(
+            "startup nodes unreachable"
+        )
+        with pytest.raises(RedisConnectionError):
+            handler.handle_oss_maintenance_completed_notification(notification)
+
+        # The notification is released from _in_progress and was not marked
+        # processed, so a redelivery is allowed to retry.
+        assert notification not in handler._in_progress
+        assert notification not in handler._processed_notifications
+
+        # Second delivery (retry): initialize() now succeeds, so handling
+        # completes and the notification is marked processed exactly once.
+        cluster_client.nodes_manager.initialize.side_effect = None
+        cluster_client.nodes_manager.get_node.return_value = None
+        handler.handle_oss_maintenance_completed_notification(notification)
+
+        assert notification not in handler._in_progress
+        assert notification in handler._processed_notifications
 
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_connection_pool_creation_with_maintenance_notifications(self, pool_class):
