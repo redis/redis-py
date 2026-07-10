@@ -2899,6 +2899,12 @@ class ConnectionPool(
         await self._on_close()
         await self.disconnect()
 
+    async def __aenter__(self: _CP) -> _CP:
+        return self
+
+    async def __aexit__(self, exc_type, exc_value, traceback) -> None:
+        await self.aclose()
+
     def set_retry(self, retry: "Retry") -> None:
         for conn in self._available_connections:
             conn.retry = retry
