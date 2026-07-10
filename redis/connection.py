@@ -2678,7 +2678,7 @@ class MaintNotificationsAbstractConnectionPool:
                 return False
         elif matching_pattern == "notification_hash":
             if (
-                matching_notification_hash
+                matching_notification_hash is not None
                 and conn.maintenance_notification_hash != matching_notification_hash
             ):
                 return False
