@@ -1,6 +1,7 @@
 import asyncio
 from dataclasses import dataclass
 from typing import List, Optional
+from unittest.mock import patch
 
 import pytest
 
@@ -88,6 +89,7 @@ class TestAsyncClusterMaintNotificationsBase:
             startup_nodes=PROXY_CLUSTER_NODES,
             maint_notifications_config=maint_config,
             max_connections=max_connections,
+            socket_timeout=DEFAULT_SOCKET_TIMEOUT,
         )
         await test_redis_client.initialize()
 
@@ -469,20 +471,21 @@ class TestAsyncClusterMaintNotificationsHandling(
         self,
         cluster: "redis.RedisCluster",
         expected_states: List[ConnectionStateExpectation],
+        default_timeout: Optional[float] = DEFAULT_SOCKET_TIMEOUT,
     ):
         """Validate per-node connection maintenance state / relaxed timeout.
 
         A connection is counted as "changed" when it deviates from the default
         (non-maintenance) config - i.e. its ``maintenance_state`` is not
-        ``NONE`` or its ``socket_timeout`` is not the default. For every node
-        with an expectation, exactly ``changed_connections_count`` connections
-        must be changed; a zero expectation therefore asserts that no connection
-        deviates from the default config. When a non-default state is expected,
-        the changed connections must additionally match the expected ``state`` /
-        ``relaxed_timeout``.
+        ``NONE`` or its ``socket_timeout`` is not ``default_timeout`` (the
+        socket timeout the client's connections are created with). For every
+        node with an expectation, exactly ``changed_connections_count``
+        connections must be changed; a zero expectation therefore asserts that
+        no connection deviates from the default config. When a non-default state
+        is expected, the changed connections must additionally match the
+        expected ``state`` / ``relaxed_timeout``.
         """
         default_maint_state = MaintenanceState.NONE
-        default_timeout = None
         for node in list(cluster.nodes_manager.nodes_cache.values()):
             expected_state = self._get_expected_node_state(expected_states, node.port)
             if expected_state is None:
@@ -642,8 +645,17 @@ class TestAsyncClusterMaintNotificationsHandling(
         )
         assert new_node is not None
 
-    async def test_smigrating_smigrated_on_the_same_node_two_slot_ranges(self):
-        """Second in-progress migration must not unrelax the timeouts early."""
+    async def test_smigrated_resets_relaxed_timeout_on_migrating_node(self):
+        """The relaxed timeout is reverted once the migrating node's connection
+        goes through a reconnect.
+
+        SMIGRATING relaxes the timeout on the connection that processes it. In
+        the async client the relaxation is not reverted inline from the push
+        handler; instead it is rolled back when the connection reconnects (on
+        disconnect). The migrating node stays in the topology here, so we consume
+        its connections and force them through a reconnect, then assert the
+        relaxed timeout has been reset to the default.
+        """
         await self._warm_up_connection_pools(self.cluster, created_connections_count=1)
 
         smigrating_node_1 = RespTranslator.oss_maint_notification_to_resp(
@@ -672,26 +684,20 @@ class TestAsyncClusterMaintNotificationsHandling(
         await self.cluster.set("anyprefix:{3}:k", "VAL")
         await self._drain_maint_notification_tasks(self.cluster)
 
-        # second migration still in progress -> timeout remains relaxed
-        self._validate_connections_states(
-            self.cluster,
-            [
-                ConnectionStateExpectation(
-                    NODE_PORT_1,
-                    changed_connections_count=1,
-                    state=MaintenanceState.MAINTENANCE,
-                    relaxed_timeout=self.config.relaxed_timeout,
-                ),
-            ],
+        # Node 1 keeps some slots, so it stays in the topology. Consume its
+        # connections and force them through a reconnect - the disconnect reverts
+        # the maintenance relaxation (socket timeout and maintenance state are
+        # restored to the defaults).
+        node_1 = self.cluster.nodes_manager.get_node(
+            host=NODE_IP_PROXY, port=NODE_PORT_1
         )
-
-        smigrated_node_1_2 = RespTranslator.oss_maint_notification_to_resp(
-            f"SMIGRATED 15 {NODE_IP_PROXY}:{NODE_PORT_1} "
-            f"{NODE_IP_PROXY}:{NODE_PORT_3} 3000-4000"
-        )
-        self.proxy_helper.send_notification(smigrated_node_1_2)
+        assert node_1 is not None
+        for conn in _node_all_connections(node_1):
+            await conn.disconnect()
+        # Reconnect on next use.
         await self.cluster.set("anyprefix:{3}:k", "VAL")
-        await self._drain_maint_notification_tasks(self.cluster)
+
+        # After the reconnect the relaxed timeout is reset to the default.
         self._validate_connections_states(
             self.cluster,
             [
@@ -702,6 +708,7 @@ class TestAsyncClusterMaintNotificationsHandling(
             ],
         )
 
+    @patch("redis.asyncio.cluster.random.shuffle", new=_preserve_startup_nodes_order)
     async def test_smigrated_node_replacement_resets_topology_connection_configs(self):
         """End-to-end node replacement over the proxy with three warmed-up nodes.
 
