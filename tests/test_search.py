@@ -2097,7 +2097,71 @@ class TestConfig(SearchTestsBase):
         assert "Syntax error" in str(err.value)
 
 
+# Documents shared by the COLLECT reducer tests. Some fruits deliberately omit
+# ``origin`` so the sparse-projection behavior can be exercised.
+COLLECT_FRUITS = {
+    "fruit:apple": {"color": "red", "name": "apple", "sweetness": 4, "origin": "usa"},
+    "fruit:strawberry": {"color": "red", "name": "strawberry", "sweetness": 3},
+    "fruit:cherry": {
+        "color": "red",
+        "name": "cherry",
+        "sweetness": 5,
+        "origin": "turkey",
+    },
+    "fruit:banana": {
+        "color": "yellow",
+        "name": "banana",
+        "sweetness": 4,
+        "origin": "ecuador",
+    },
+    "fruit:lemon": {"color": "yellow", "name": "lemon", "sweetness": 2},
+}
+
+
+def collect_entry_to_dict(entry):
+    """Normalize a single COLLECT entry to a dict.
+
+    RESP3 entries are maps already; RESP2 entries are flat
+    ``[key, value, key, value, ...]`` arrays.
+    """
+    if isinstance(entry, dict):
+        return entry
+    return {entry[i]: entry[i + 1] for i in range(0, len(entry), 2)}
+
+
+def collect_groups(client, res, alias, group_field="color"):
+    """Return ``{group_value: [entry_dict, ...]}`` from an FT.AGGREGATE COLLECT
+    result across all response shapes.
+
+    ``legacy_resp3`` returns a dict of results; the other shapes return an
+    ``AggregateResult`` whose rows are flat ``[key, value, ...]`` lists.
+    """
+    if expects_resp3_shape(client):
+        rows = [result["extra_attributes"] for result in res["results"]]
+    else:
+        rows = [{row[i]: row[i + 1] for i in range(0, len(row), 2)} for row in res.rows]
+    return {
+        attrs[group_field]: [collect_entry_to_dict(e) for e in attrs[alias]]
+        for attrs in rows
+    }
+
+
 class TestAggregations(SearchTestsBase):
+    def _setup_collect_index(self, client):
+        """Enable the preview feature and index the shared fruit documents."""
+        client.config_set("search-enable-unstable-features", "yes")
+        client.ft().create_index(
+            (
+                TextField("color"),
+                TextField("name"),
+                NumericField("sweetness"),
+                TextField("origin"),
+            )
+        )
+        for key, mapping in COLLECT_FRUITS.items():
+            client.hset(key, mapping=mapping)
+        self.waitForIndex(client, "idx")
+
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     def test_aggregations_groupby(self, client):
@@ -2354,6 +2418,259 @@ class TestAggregations(SearchTestsBase):
                 "RedisAI",
                 "RedisJson",
             ]
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    def test_aggregations_collect_sortby(self, client):
+        # COLLECT projects the named fields per group, ordered by SORTBY.
+        self._setup_collect_index(client)
+
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("*")
+            .group_by(
+                "@color",
+                reducers.collect(
+                    ["@name", "@sweetness"],
+                    sort_by=[aggregations.Desc("@sweetness")],
+                ).alias("fruits"),
+            )
+        )
+        groups = collect_groups(client, client.ft().aggregate(req), "fruits")
+
+        assert groups["red"] == [
+            {"name": "cherry", "sweetness": "5"},
+            {"name": "apple", "sweetness": "4"},
+            {"name": "strawberry", "sweetness": "3"},
+        ]
+        assert groups["yellow"] == [
+            {"name": "banana", "sweetness": "4"},
+            {"name": "lemon", "sweetness": "2"},
+        ]
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    def test_aggregations_collect_sortby_ascending(self, client):
+        # Bare sort names default to ascending order.
+        self._setup_collect_index(client)
+
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("*")
+            .group_by(
+                "@color",
+                reducers.collect(["@name"], sort_by="@sweetness").alias("fruits"),
+            )
+        )
+        groups = collect_groups(client, client.ft().aggregate(req), "fruits")
+
+        assert groups["red"] == [
+            {"name": "strawberry"},
+            {"name": "apple"},
+            {"name": "cherry"},
+        ]
+        assert groups["yellow"] == [{"name": "lemon"}, {"name": "banana"}]
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    def test_aggregations_collect_limit_top_n(self, client):
+        # SORTBY + LIMIT is a bounded top-N selection with an offset.
+        self._setup_collect_index(client)
+
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("*")
+            .group_by(
+                "@color",
+                reducers.collect(
+                    ["@name"],
+                    sort_by=[aggregations.Desc("@sweetness")],
+                    limit=(1, 1),
+                ).alias("fruits"),
+            )
+        )
+        groups = collect_groups(client, client.ft().aggregate(req), "fruits")
+
+        # red desc: cherry, apple, strawberry -> skip 1, take 1 -> apple
+        assert groups["red"] == [{"name": "apple"}]
+        # yellow desc: banana, lemon -> skip 1, take 1 -> lemon
+        assert groups["yellow"] == [{"name": "lemon"}]
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    def test_aggregations_collect_multiple_sort_keys(self, client):
+        # Multiple sort keys are applied left to right.
+        self._setup_collect_index(client)
+
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("*")
+            .group_by(
+                "@color",
+                reducers.collect(
+                    ["@name", "@sweetness"],
+                    sort_by=[
+                        aggregations.Desc("@sweetness"),
+                        aggregations.Asc("@name"),
+                    ],
+                ).alias("fruits"),
+            )
+        )
+        groups = collect_groups(client, client.ft().aggregate(req), "fruits")
+
+        assert groups["red"] == [
+            {"name": "cherry", "sweetness": "5"},
+            {"name": "apple", "sweetness": "4"},
+            {"name": "strawberry", "sweetness": "3"},
+        ]
+        assert groups["yellow"] == [
+            {"name": "banana", "sweetness": "4"},
+            {"name": "lemon", "sweetness": "2"},
+        ]
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    def test_aggregations_collect_sparse_projection(self, client):
+        # A field absent from a row is omitted from that entry (not NULL).
+        self._setup_collect_index(client)
+
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("*")
+            .group_by(
+                "@color",
+                reducers.collect(
+                    ["@name", "@origin"],
+                    sort_by=[aggregations.Desc("@sweetness")],
+                ).alias("fruits"),
+            )
+        )
+        groups = collect_groups(client, client.ft().aggregate(req), "fruits")
+
+        # strawberry and lemon have no ``origin`` -> the key is omitted.
+        assert groups["red"] == [
+            {"name": "cherry", "origin": "turkey"},
+            {"name": "apple", "origin": "usa"},
+            {"name": "strawberry"},
+        ]
+        assert groups["yellow"] == [
+            {"name": "banana", "origin": "ecuador"},
+            {"name": "lemon"},
+        ]
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    def test_aggregations_collect_key_field(self, client):
+        # ``@__key`` can be projected when carried into the pipeline via LOAD.
+        self._setup_collect_index(client)
+
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("@__key", "@name")
+            .group_by(
+                "@color",
+                reducers.collect(["@name", "@__key"], sort_by="@name").alias("fruits"),
+            )
+        )
+        groups = collect_groups(client, client.ft().aggregate(req), "fruits")
+
+        assert groups["red"] == [
+            {"name": "apple", "__key": "fruit:apple"},
+            {"name": "cherry", "__key": "fruit:cherry"},
+            {"name": "strawberry", "__key": "fruit:strawberry"},
+        ]
+        assert groups["yellow"] == [
+            {"name": "banana", "__key": "fruit:banana"},
+            {"name": "lemon", "__key": "fruit:lemon"},
+        ]
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    def test_aggregations_collect_fields_all(self, client):
+        # FIELDS * is stage-local: after GROUPBY only the group key is present.
+        self._setup_collect_index(client)
+
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("*")
+            .group_by("@color", reducers.collect("*").alias("fruits"))
+        )
+        groups = collect_groups(client, client.ft().aggregate(req), "fruits")
+
+        assert len(groups["red"]) == 3
+        assert len(groups["yellow"]) == 2
+        assert all(entry == {"color": "red"} for entry in groups["red"])
+        assert all(entry == {"color": "yellow"} for entry in groups["yellow"])
+
+    @pytest.mark.parametrize("bad_fields", [[], (), "", "   "])
+    def test_aggregations_collect_invalid_fields(self, bad_fields):
+        # Empty or blank field selectors are local API misuse and are rejected
+        # client-side with a ValueError before any command is sent.
+        with pytest.raises(ValueError):
+            reducers.collect(bad_fields)
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    def test_aggregations_collect_single_str_field(self, client):
+        # A single field may be passed as a bare string; the client wraps it as
+        # a one-field projection.
+        self._setup_collect_index(client)
+
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("*")
+            .group_by(
+                "@color",
+                reducers.collect("@name", sort_by="@sweetness").alias("fruits"),
+            )
+        )
+        groups = collect_groups(client, client.ft().aggregate(req), "fruits")
+
+        assert groups["red"] == [
+            {"name": "strawberry"},
+            {"name": "apple"},
+            {"name": "cherry"},
+        ]
+        assert groups["yellow"] == [{"name": "lemon"}, {"name": "banana"}]
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    def test_aggregations_collect_field_names_without_prefix(self, client):
+        # Field and sort names may be supplied without a leading "@"; the client
+        # normalizes them on the wire (the server requires the prefix).
+        self._setup_collect_index(client)
+
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("*")
+            .group_by(
+                "@color",
+                reducers.collect(
+                    ["name", "sweetness"],
+                    sort_by=[aggregations.Desc("sweetness")],
+                ).alias("fruits"),
+            )
+        )
+        groups = collect_groups(client, client.ft().aggregate(req), "fruits")
+
+        assert groups["red"] == [
+            {"name": "cherry", "sweetness": "5"},
+            {"name": "apple", "sweetness": "4"},
+            {"name": "strawberry", "sweetness": "3"},
+        ]
+        assert groups["yellow"] == [
+            {"name": "banana", "sweetness": "4"},
+            {"name": "lemon", "sweetness": "2"},
+        ]
 
     @pytest.mark.redismod
     def test_aggregations_sort_by_and_limit(self, client):
