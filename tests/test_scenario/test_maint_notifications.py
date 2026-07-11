@@ -67,10 +67,15 @@ SLOT_SHUFFLE_TIMEOUT = 300
 # the command-execution workers are left running (their join then hangs to the pytest cap). Cover
 # the FI's slowest reshard (ASM scale = 600s).
 RESHARD_OP_TIMEOUT = 600
-# Per-test cap for the OSS-cluster reshard tests: must exceed RESHARD_OP_TIMEOUT so a legitimately
-# slow ASM scale runs to completion instead of being killed mid-reshard (only bites on the slow
-# path; fast reshards are unaffected).
-RESHARD_TEST_TIMEOUT = 660
+# Default op-wait for non-reshard (standalone / single-window) triggers: comfortably under the
+# standalone tests' 300s pytest cap so a stuck FI poll can't outlive the cap and block teardown on
+# thread.join(). The reshard tests pass RESHARD_OP_TIMEOUT explicitly.
+DEFAULT_TRIGGER_OP_TIMEOUT = 180
+# Per-test cap for the OSS-cluster reshard tests: must exceed the worst-case reshard wall time =
+# the trigger op-wait (RESHARD_OP_TIMEOUT) plus the post-join node-cache drain (SMIGRATED_TIMEOUT),
+# with margin, so a legitimately slow ASM scale runs to completion instead of being killed mid-way.
+# Only bites on the slow path; fast reshards are unaffected.
+RESHARD_TEST_TIMEOUT = RESHARD_OP_TIMEOUT + SMIGRATED_TIMEOUT + 180
 
 DEFAULT_BIND_TTL = 15
 DEFAULT_STANDALONE_CLIENT_SOCKET_TIMEOUT = 1
@@ -124,7 +129,7 @@ class TestPushNotificationsBase:
         target_node: Optional[str] = None,
         empty_node: Optional[str] = None,
         skip_end_notification: bool = False,
-        timeout: int = RESHARD_OP_TIMEOUT,
+        timeout: int = DEFAULT_TRIGGER_OP_TIMEOUT,
     ):
         trigger_effect_action_id = ClusterOperations.trigger_effect(
             fault_injector=fault_injector_client,
@@ -1454,14 +1459,12 @@ class TestClusterClientPushNotificationsWithEffectTriggerBase(
                     # A connection to a node being removed may error; that is expected.
                     pass
             time.sleep(0.5)
-        # Best-effort: the caller asserts the exact delta next, which will fail loudly if the
-        # cache never reconciled. Log so a timeout here is not silent.
-        logging.warning(
-            "Node cache did not reach %s (delta %s) within %ss; current size=%s",
-            expected,
-            expected_delta,
-            timeout,
-            len(client.nodes_manager.nodes_cache),
+        # Fail explicitly on a drain timeout so it surfaces as a clear "node cache did not
+        # reconcile" error, rather than silently returning and letting the caller's exact-delta
+        # assertion fail later with a misleading node-count message.
+        pytest.fail(
+            f"Node cache did not reach {expected} (delta {expected_delta}) within {timeout}s; "
+            f"current size={len(client.nodes_manager.nodes_cache)}"
         )
 
     @pytest.fixture(autouse=True)
@@ -1541,6 +1544,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                 effect_name,
                 trigger,
             ),
+            kwargs={"timeout": RESHARD_OP_TIMEOUT},
         )
         self.maintenance_ops_threads.append(trigger_effect_thread)
         trigger_effect_thread.start()
@@ -1657,6 +1661,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                 effect_name,
                 trigger,
             ),
+            kwargs={"timeout": RESHARD_OP_TIMEOUT},
         )
         self.maintenance_ops_threads.append(trigger_effect_thread)
         trigger_effect_thread.start()
@@ -1778,6 +1783,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                 effect_name,
                 trigger,
             ),
+            kwargs={"timeout": RESHARD_OP_TIMEOUT},
         )
         self.maintenance_ops_threads.append(trigger_effect_thread)
         trigger_effect_thread.start()
@@ -1910,6 +1916,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                 effect_name,
                 trigger,
             ),
+            kwargs={"timeout": RESHARD_OP_TIMEOUT},
         )
         self.maintenance_ops_threads.append(trigger_effect_thread)
         trigger_effect_thread.start()
@@ -1927,6 +1934,17 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
             assert conn.maintenance_state == MaintenanceState.MAINTENANCE
             assert conn._sock.gettimeout() == RELAXED_TIMEOUT
             assert conn.should_reconnect() is False
+
+        # During SMIGRATING (before reconciliation) the added node is not in the cache yet: the
+        # cache size is unchanged and every initial node key is still present. Mirrors the same
+        # invariant asserted by test_notification_handling_with_node_remove.
+        assert len(initial_cluster_nodes) == len(
+            cluster_client_maint_notifications.nodes_manager.nodes_cache
+        )
+        for node_key in initial_cluster_nodes.keys():
+            assert (
+                node_key in cluster_client_maint_notifications.nodes_manager.nodes_cache
+            )
 
         logging.info("Waiting for SMIGRATED push notifications...")
         con_to_read_smigrated = random.choice(list(in_use_connections.values()))
@@ -2049,6 +2067,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                 effect_name,
                 trigger,
             ),
+            kwargs={"timeout": RESHARD_OP_TIMEOUT},
         )
 
         self.maintenance_ops_threads.append(trigger_effect_thread)
@@ -2223,6 +2242,7 @@ class TestClusterClientCommandsExecutionWithPushNotificationsWithEffectTrigger(
                 effect_name,
                 trigger,
             ),
+            kwargs={"timeout": RESHARD_OP_TIMEOUT},
         )
         self.maintenance_ops_threads.append(trigger_effect_thread)
         trigger_effect_thread.start()
