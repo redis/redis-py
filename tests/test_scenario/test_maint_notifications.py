@@ -55,9 +55,22 @@ logging.getLogger("redis.cluster").setLevel(logging.DEBUG)
 
 STANDALONE_MAINT_TIMEOUT = 60
 SMIGRATING_TIMEOUT = 20
-SMIGRATED_TIMEOUT = 40
+# SMIGRATED / slot-shuffle waits sized for the FI's real reshard budget: the fault injector
+# blocks on the reshard up to 300s (slot-shuffle migrate_slots) / 600s (ASM scale). Sizing the
+# client below that turned slow-but-successful reshards into false failures. Raising a timeout
+# only affects the failure path (it waits longer before failing), so it is free on green runs.
+SMIGRATED_TIMEOUT = 120
 
-SLOT_SHUFFLE_TIMEOUT = 120
+SLOT_SHUFFLE_TIMEOUT = 300
+
+# The trigger thread must not give up before the FI finishes the reshard, otherwise it dies and
+# the command-execution workers are left running (their join then hangs to the pytest cap). Cover
+# the FI's slowest reshard (ASM scale = 600s).
+RESHARD_OP_TIMEOUT = 600
+# Per-test cap for the OSS-cluster reshard tests: must exceed RESHARD_OP_TIMEOUT so a legitimately
+# slow ASM scale runs to completion instead of being killed mid-reshard (only bites on the slow
+# path; fast reshards are unaffected).
+RESHARD_TEST_TIMEOUT = 660
 
 DEFAULT_BIND_TTL = 15
 DEFAULT_STANDALONE_CLIENT_SOCKET_TIMEOUT = 1
@@ -111,7 +124,7 @@ class TestPushNotificationsBase:
         target_node: Optional[str] = None,
         empty_node: Optional[str] = None,
         skip_end_notification: bool = False,
-        timeout: int = SLOT_SHUFFLE_TIMEOUT,
+        timeout: int = RESHARD_OP_TIMEOUT,
     ):
         trigger_effect_action_id = ClusterOperations.trigger_effect(
             fault_injector=fault_injector_client,
@@ -1481,7 +1494,7 @@ class TestClusterClientPushNotificationsWithEffectTriggerBase(
 class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
     TestClusterClientPushNotificationsWithEffectTriggerBase
 ):
-    @pytest.mark.timeout(300)  # 5 minutes timeout for this test
+    @pytest.mark.timeout(RESHARD_TEST_TIMEOUT)  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
     @pytest.mark.parametrize(
         "effect_name, trigger, db_config, db_name",
         generate_params(
@@ -1593,7 +1606,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
         trigger_effect_thread.join()
         self.maintenance_ops_threads.remove(trigger_effect_thread)
 
-    @pytest.mark.timeout(300)  # 5 minutes timeout for this test
+    @pytest.mark.timeout(RESHARD_TEST_TIMEOUT)  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
     @pytest.mark.parametrize(
         "effect_name, trigger, db_config, db_name",
         generate_params(
@@ -1714,7 +1727,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
         trigger_effect_thread.join()
         self.maintenance_ops_threads.remove(trigger_effect_thread)
 
-    @pytest.mark.timeout(300)  # 5 minutes timeout for this test
+    @pytest.mark.timeout(RESHARD_TEST_TIMEOUT)  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
     @pytest.mark.parametrize(
         "effect_name, trigger, db_config, db_name",
         generate_params(
@@ -1848,7 +1861,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                 continue
             node.redis_connection.connection_pool.release(conn)
 
-    @pytest.mark.timeout(300)  # 5 minutes timeout for this test
+    @pytest.mark.timeout(RESHARD_TEST_TIMEOUT)  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
     @pytest.mark.parametrize(
         "effect_name, trigger, db_config, db_name",
         generate_params(
@@ -1958,7 +1971,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                 continue
             node.redis_connection.connection_pool.release(conn)
 
-    @pytest.mark.timeout(300)  # 5 minutes timeout for this test
+    @pytest.mark.timeout(RESHARD_TEST_TIMEOUT)  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
     @pytest.mark.skipif(
         use_mock_proxy(),
         reason="Mock proxy doesn't support sending notifications to new connections.",
@@ -2116,7 +2129,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
 class TestClusterClientCommandsExecutionWithPushNotificationsWithEffectTrigger(
     TestClusterClientPushNotificationsWithEffectTriggerBase
 ):
-    @pytest.mark.timeout(300)  # 5 minutes timeout for this test
+    @pytest.mark.timeout(RESHARD_TEST_TIMEOUT)  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
     @pytest.mark.parametrize(
         "effect_name, trigger, db_config, db_name",
         generate_params(
