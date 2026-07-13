@@ -321,6 +321,18 @@ async def test_repr_correctly_represents_connection_object(sentinel):
     )
 
 
+@pytest.mark.onlynoncluster
+async def test_aclose(cluster, sentinel):
+    sentinel.sentinels = [mock.AsyncMock() for _ in range(2)]
+
+    async with sentinel as entered:
+        assert entered is sentinel
+
+    # exiting the context closes every sentinel client and its pool
+    for s in sentinel.sentinels:
+        s.aclose.assert_awaited_once()
+
+
 # Tests against real sentinel instances
 @pytest.mark.onlynoncluster
 async def test_get_sentinels(deployed_sentinel):

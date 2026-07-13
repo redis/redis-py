@@ -294,6 +294,23 @@ class Sentinel(SentinelCommands):
             f"(sentinels=[{','.join(sentinel_addresses)}])>"
         )
 
+    def close(self) -> None:
+        """
+        Close all sentinel clients created by this Sentinel and their
+        connection pools.
+
+        Clients returned by ``master_for``/``slave_for`` are owned by the
+        caller and are not closed here.
+        """
+        for sentinel in self.sentinels:
+            sentinel.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
     def check_master_state(self, state, service_name):
         if not state["is_master"] or state["is_sdown"] or state["is_odown"]:
             return False

@@ -303,6 +303,18 @@ def test_auto_close_pool(cluster, sentinel, method_name):
     pool.disconnect()
 
 
+@pytest.mark.onlynoncluster
+def test_close(cluster, sentinel):
+    sentinel.sentinels = [mock.Mock() for _ in range(2)]
+
+    with sentinel as entered:
+        assert entered is sentinel
+
+    # exiting the context closes every sentinel client and its pool
+    for s in sentinel.sentinels:
+        s.close.assert_called_once()
+
+
 # Tests against real sentinel instances
 @pytest.mark.onlynoncluster
 def test_get_sentinels(deployed_sentinel):
