@@ -5,7 +5,16 @@ import re
 import threading
 import time
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Union,
+)
 
 from redis.observability.attributes import get_pool_name
 from redis.observability.recorder import (
@@ -42,6 +51,7 @@ class EndpointType(enum.Enum):
 
 
 if TYPE_CHECKING:
+    from redis.asyncio.connection import AsyncMaintNotificationsAbstractConnection
     from redis.connection import (
         MaintNotificationsAbstractConnection,
         MaintNotificationsAbstractConnectionPool,
@@ -675,7 +685,9 @@ class MaintNotificationsConfig:
         return self.relaxed_timeout != -1
 
     def get_endpoint_type(
-        self, host: str, connection: "MaintNotificationsAbstractConnection"
+        self,
+        host: str,
+        connection: "MaintNotificationsAbstractConnection | AsyncMaintNotificationsAbstractConnection",
     ) -> EndpointType:
         """
         Determine the appropriate endpoint type for CLIENT MAINT_NOTIFICATIONS command.
@@ -729,6 +741,86 @@ class MaintNotificationsConfig:
         return EndpointType.INTERNAL_FQDN if is_private else EndpointType.EXTERNAL_FQDN
 
 
+_MAINTENANCE_START_NOTIFICATION_TYPES = (
+    NodeMigratingNotification,
+    NodeFailingOverNotification,
+    OSSNodeMigratingNotification,
+)
+_MAINTENANCE_COMPLETED_NOTIFICATION_TYPES = (
+    NodeMigratedNotification,
+    NodeFailedOverNotification,
+    OSSNodeMigratedNotification,
+)
+
+
+def _get_maintenance_notification_type(
+    notification: MaintenanceNotification,
+) -> Optional[int]:
+    if notification.__class__ in _MAINTENANCE_START_NOTIFICATION_TYPES:
+        return 1
+    if notification.__class__ in _MAINTENANCE_COMPLETED_NOTIFICATION_TYPES:
+        return 0
+    return None
+
+
+def _get_maintenance_notification_name(
+    notification: MaintenanceNotification,
+) -> str:
+    return notification_types_mapping.get(notification.__class__, "")
+
+
+def _should_skip_connection_timeout_update(
+    maintenance_state: MaintenanceState,
+    config: MaintNotificationsConfig,
+) -> bool:
+    return (
+        maintenance_state == MaintenanceState.MOVING
+        or not config.is_relaxed_timeouts_enabled()
+    )
+
+
+def _build_moving_connection_kwargs(
+    notification: NodeMovingNotification,
+    config: MaintNotificationsConfig,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "maintenance_state": MaintenanceState.MOVING,
+        "maintenance_notification_hash": hash(notification),
+    }
+    if notification.new_node_host is not None:
+        # the host is not updated if the new node host is None
+        # this happens when the MOVING push notification does not contain
+        # the new node host - in this case we only update the timeouts
+        kwargs["host"] = notification.new_node_host
+    if config.is_relaxed_timeouts_enabled():
+        kwargs.update(
+            {
+                "socket_timeout": config.relaxed_timeout,
+                "socket_connect_timeout": config.relaxed_timeout,
+            }
+        )
+    return kwargs
+
+
+def _build_moving_cleanup_connection_kwargs(
+    connection_kwargs: Mapping[str, Any],
+    notification_hash: int,
+) -> Optional[dict[str, Any]]:
+    # if the current maintenance_notification_hash in kwargs is not matching the notification
+    # it means there has been a new moving notification after this one
+    # and we don't need to revert the kwargs yet
+    if connection_kwargs.get("maintenance_notification_hash") != notification_hash:
+        return None
+
+    return {
+        "maintenance_state": MaintenanceState.NONE,
+        "maintenance_notification_hash": None,
+        "host": connection_kwargs.get("orig_host_address"),
+        "socket_timeout": connection_kwargs.get("orig_socket_timeout"),
+        "socket_connect_timeout": connection_kwargs.get("orig_socket_connect_timeout"),
+    }
+
+
 class MaintNotificationsPoolHandler:
     def __init__(
         self,
@@ -774,6 +866,7 @@ class MaintNotificationsPoolHandler:
             and not self.config.is_relaxed_timeouts_enabled()
         ):
             return
+
         with self._lock:
             if notification in self._processed_notifications:
                 # nothing to do in the connection pool handling
@@ -782,79 +875,58 @@ class MaintNotificationsPoolHandler:
                 return
 
             with self.pool._lock:
-                logger.debug(
-                    f"Handling node MOVING notification: {notification}, "
-                    f"with connection: {self.connection}, connected to ip "
-                    f"{self.connection.get_resolved_ip() if self.connection else None}"
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        f"Handling node MOVING notification: {notification}, "
+                        f"with connection: {self.connection}, connected to ip "
+                        f"{self.connection.get_resolved_ip() if self.connection else None}"
+                    )
+                # Get the current connected address - if any
+                # This is the address that is being moved
+                # and we need to handle only connections
+                # connected to the same address
+                moving_address_src = (
+                    self.connection.getpeername() if self.connection else None
                 )
-                if (
-                    self.config.proactive_reconnect
-                    or self.config.is_relaxed_timeouts_enabled()
-                ):
-                    # Get the current connected address - if any
-                    # This is the address that is being moved
-                    # and we need to handle only connections
-                    # connected to the same address
-                    moving_address_src = (
-                        self.connection.getpeername() if self.connection else None
-                    )
 
-                    if getattr(self.pool, "set_in_maintenance", False):
-                        # Set pool in maintenance mode - executed only if
-                        # BlockingConnectionPool is used
-                        self.pool.set_in_maintenance(True)
+                if getattr(self.pool, "set_in_maintenance", False):
+                    # Set pool in maintenance mode - executed only if
+                    # BlockingConnectionPool is used
+                    self.pool.set_in_maintenance(True)
 
-                    # Update maintenance state, timeout and optionally host address
-                    # connection settings for matching connections
-                    self.pool.update_connections_settings(
-                        state=MaintenanceState.MOVING,
-                        maintenance_notification_hash=hash(notification),
-                        relaxed_timeout=self.config.relaxed_timeout,
-                        host_address=notification.new_node_host,
-                        matching_address=moving_address_src,
-                        matching_pattern="connected_address",
-                        update_notification_hash=True,
-                        include_free_connections=True,
-                    )
+                # Update maintenance state, timeout and optionally host address
+                # connection settings for matching connections
+                self.pool.update_connections_settings(
+                    state=MaintenanceState.MOVING,
+                    maintenance_notification_hash=hash(notification),
+                    relaxed_timeout=self.config.relaxed_timeout,
+                    host_address=notification.new_node_host,
+                    matching_address=moving_address_src,
+                    matching_pattern="connected_address",
+                    update_notification_hash=True,
+                    include_free_connections=True,
+                )
 
-                    if self.config.proactive_reconnect:
-                        if notification.new_node_host is not None:
-                            self.run_proactive_reconnect(moving_address_src)
-                        else:
-                            threading.Timer(
-                                notification.ttl / 2,
-                                self.run_proactive_reconnect,
-                                args=(moving_address_src,),
-                            ).start()
-
-                    # Update config for new connections:
-                    # Set state to MOVING
-                    # update host
-                    # if relax timeouts are enabled - update timeouts
-                    kwargs: dict = {
-                        "maintenance_state": MaintenanceState.MOVING,
-                        "maintenance_notification_hash": hash(notification),
-                    }
+                if self.config.proactive_reconnect:
                     if notification.new_node_host is not None:
-                        # the host is not updated if the new node host is None
-                        # this happens when the MOVING push notification does not contain
-                        # the new node host - in this case we only update the timeouts
-                        kwargs.update(
-                            {
-                                "host": notification.new_node_host,
-                            }
-                        )
-                    if self.config.is_relaxed_timeouts_enabled():
-                        kwargs.update(
-                            {
-                                "socket_timeout": self.config.relaxed_timeout,
-                                "socket_connect_timeout": self.config.relaxed_timeout,
-                            }
-                        )
-                    self.pool.update_connection_kwargs(**kwargs)
+                        self.run_proactive_reconnect(moving_address_src)
+                    else:
+                        threading.Timer(
+                            notification.ttl / 2,
+                            self.run_proactive_reconnect,
+                            args=(moving_address_src,),
+                        ).start()
 
-                    if getattr(self.pool, "set_in_maintenance", False):
-                        self.pool.set_in_maintenance(False)
+                # Update config for new connections:
+                # Set state to MOVING
+                # update host
+                # if relax timeouts are enabled - update timeouts
+                self.pool.update_connection_kwargs(
+                    **_build_moving_connection_kwargs(notification, self.config)
+                )
+
+                if getattr(self.pool, "set_in_maintenance", False):
+                    self.pool.set_in_maintenance(False)
 
             threading.Timer(
                 notification.ttl,
@@ -894,32 +966,16 @@ class MaintNotificationsPoolHandler:
         notification_hash = hash(notification)
 
         with self._lock:
-            logger.debug(
-                f"Reverting temporary changes related to notification: {notification}, "
-                f"with connection: {self.connection}, connected to ip "
-                f"{self.connection.get_resolved_ip() if self.connection else None}"
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    f"Reverting temporary changes related to notification: {notification}, "
+                    f"with connection: {self.connection}, connected to ip "
+                    f"{self.connection.get_resolved_ip() if self.connection else None}"
+                )
+            kwargs = _build_moving_cleanup_connection_kwargs(
+                self.pool.connection_kwargs, notification_hash
             )
-            # if the current maintenance_notification_hash in kwargs is not matching the notification
-            # it means there has been a new moving notification after this one
-            # and we don't need to revert the kwargs yet
-            if (
-                self.pool.connection_kwargs.get("maintenance_notification_hash")
-                == notification_hash
-            ):
-                orig_host = self.pool.connection_kwargs.get("orig_host_address")
-                orig_socket_timeout = self.pool.connection_kwargs.get(
-                    "orig_socket_timeout"
-                )
-                orig_connect_timeout = self.pool.connection_kwargs.get(
-                    "orig_socket_connect_timeout"
-                )
-                kwargs: dict = {
-                    "maintenance_state": MaintenanceState.NONE,
-                    "maintenance_notification_hash": None,
-                    "host": orig_host,
-                    "socket_timeout": orig_socket_timeout,
-                    "socket_connect_timeout": orig_connect_timeout,
-                }
+            if kwargs is not None:
                 self.pool.update_connection_kwargs(**kwargs)
 
             with self.pool._lock:
@@ -972,9 +1028,10 @@ class MaintNotificationsConnectionHandler:
         return repr(self.connection)
 
     def handle_notification(self, notification: MaintenanceNotification):
-        # get the notification type by checking its class in the _NOTIFICATION_TYPES dict
-        notification_type = self._NOTIFICATION_TYPES.get(notification.__class__, None)
-        maint_notification = notification_types_mapping.get(notification.__class__, "")
+        # get the notification type by checking its class
+        # 1 for start, 0 for end notification type, None for unknown
+        notification_type = _get_maintenance_notification_type(notification)
+        maint_notification = _get_maintenance_notification_name(notification)
 
         record_maint_notification_count(
             server_address=self.connection.host,
@@ -1000,9 +1057,8 @@ class MaintNotificationsConnectionHandler:
     ):
         add_debug_log_for_notification(self.connection, notification)
 
-        if (
-            self.connection.maintenance_state == MaintenanceState.MOVING
-            or not self.config.is_relaxed_timeouts_enabled()
+        if _should_skip_connection_timeout_update(
+            self.connection.maintenance_state, self.config
         ):
             return
 
@@ -1018,20 +1074,20 @@ class MaintNotificationsConnectionHandler:
             # one start notification before the the final end notification
             self.connection.add_maint_start_notification(notification.id)
 
-        maint_notification = notification_types_mapping.get(notification.__class__, "")
+        maint_notification = _get_maintenance_notification_name(notification)
         record_connection_relaxed_timeout(
             connection_name=self._get_pool_name(),
             maint_notification=maint_notification,
             relaxed=True,
         )
 
-    def handle_maintenance_completed_notification(self, **kwargs):
+    def handle_maintenance_completed_notification(self, **kwargs: Any) -> None:
         # Only reset timeouts if state is not MOVING and relaxed timeouts are enabled
-        if (
-            self.connection.maintenance_state == MaintenanceState.MOVING
-            or not self.config.is_relaxed_timeouts_enabled()
+        if _should_skip_connection_timeout_update(
+            self.connection.maintenance_state, self.config
         ):
             return
+
         notification = None
         if kwargs.get("notification"):
             notification = kwargs["notification"]
@@ -1048,9 +1104,7 @@ class MaintNotificationsConnectionHandler:
         self.connection.reset_received_notifications()
 
         if notification:
-            maint_notification = notification_types_mapping.get(
-                notification.__class__, ""
-            )
+            maint_notification = _get_maintenance_notification_name(notification)
             record_connection_relaxed_timeout(
                 connection_name=self._get_pool_name(),
                 maint_notification=maint_notification,
@@ -1069,16 +1123,6 @@ class OSSMaintNotificationsHandler:
         self._processed_notifications = set()
         self._in_progress = set()
         self._lock = threading.RLock()
-
-    def get_handler_for_connection(self):
-        # Copy all data that should be shared between connections
-        # but each connection should have its own pool handler
-        # since each connection can be in a different state
-        copy = OSSMaintNotificationsHandler(self.cluster_client, self.config)
-        copy._processed_notifications = self._processed_notifications
-        copy._in_progress = self._in_progress
-        copy._lock = self._lock
-        return copy
 
     def remove_expired_notifications(self):
         with self._lock:
@@ -1113,93 +1157,98 @@ class OSSMaintNotificationsHandler:
                 logger.debug(f"Handling SMIGRATED notification: {notification}")
             self._in_progress.add(notification)
 
-            # Extract the information about the src and destination nodes that are affected
-            # by the maintenance. nodes_to_slots_mapping structure:
-            # {
-            #     "src_host:port": [
-            #         {"dest_host:port": "slot_range"},
-            #         ...
-            #     ],
-            #     ...
-            # }
-            additional_startup_nodes_info = []
-            affected_nodes = set()
-            for (
-                src_address,
-                dest_mappings,
-            ) in notification.nodes_to_slots_mapping.items():
-                src_host, src_port = src_address.split(":")
-                src_node = self.cluster_client.nodes_manager.get_node(
-                    host=src_host, port=src_port
+            try:
+                # Extract the information about the src and destination nodes that are affected
+                # by the maintenance. nodes_to_slots_mapping structure:
+                # {
+                #     "src_host:port": [
+                #         {"dest_host:port": "slot_range"},
+                #         ...
+                #     ],
+                #     ...
+                # }
+                additional_startup_nodes_info = []
+                affected_nodes = set()
+                for (
+                    src_address,
+                    dest_mappings,
+                ) in notification.nodes_to_slots_mapping.items():
+                    src_host, src_port = src_address.rsplit(":", 1)
+                    src_node = self.cluster_client.nodes_manager.get_node(
+                        host=src_host, port=int(src_port)
+                    )
+                    if src_node is not None:
+                        affected_nodes.add(src_node)
+
+                    for dest_mapping in dest_mappings:
+                        for dest_address in dest_mapping.keys():
+                            dest_host, dest_port = dest_address.rsplit(":", 1)
+                            additional_startup_nodes_info.append(
+                                (dest_host, int(dest_port))
+                            )
+
+                # Updates the cluster slots cache with the new slots mapping
+                # This will also update the nodes cache with the new nodes mapping
+                self.cluster_client.nodes_manager.initialize(
+                    disconnect_startup_nodes_pools=False,
+                    additional_startup_nodes_info=additional_startup_nodes_info,
                 )
-                if src_node is not None:
-                    affected_nodes.add(src_node)
 
-                for dest_mapping in dest_mappings:
-                    for dest_address in dest_mapping.keys():
-                        dest_host, dest_port = dest_address.split(":")
-                        additional_startup_nodes_info.append(
-                            (dest_host, int(dest_port))
-                        )
+                all_nodes = set(affected_nodes)
+                all_nodes = all_nodes.union(
+                    self.cluster_client.nodes_manager.nodes_cache.values()
+                )
 
-            # Updates the cluster slots cache with the new slots mapping
-            # This will also update the nodes cache with the new nodes mapping
-            self.cluster_client.nodes_manager.initialize(
-                disconnect_startup_nodes_pools=False,
-                additional_startup_nodes_info=additional_startup_nodes_info,
-            )
+                for current_node in all_nodes:
+                    if current_node.redis_connection is None:
+                        continue
+                    with current_node.redis_connection.connection_pool._lock:
+                        handoff_recorded = False
+                        if current_node in affected_nodes:
+                            # mark for reconnect all in use connections to the node - this will force them to
+                            # disconnect after they complete their current commands
+                            # Some of them might be used by sub sub and we don't know which ones - so we disconnect
+                            # all in flight connections after they are done with current command execution
+                            for conn in current_node.redis_connection.connection_pool._get_in_use_connections():
+                                add_debug_log_for_notification(
+                                    conn, "SMIGRATED - mark for reconnect"
+                                )
+                                conn.mark_for_reconnect()
 
-            all_nodes = set(affected_nodes)
-            all_nodes = all_nodes.union(
-                self.cluster_client.nodes_manager.nodes_cache.values()
-            )
-
-            for current_node in all_nodes:
-                if current_node.redis_connection is None:
-                    continue
-                with current_node.redis_connection.connection_pool._lock:
-                    handoff_recorded = False
-                    if current_node in affected_nodes:
-                        # mark for reconnect all in use connections to the node - this will force them to
-                        # disconnect after they complete their current commands
-                        # Some of them might be used by sub sub and we don't know which ones - so we disconnect
-                        # all in flight connections after they are done with current command execution
-                        for conn in current_node.redis_connection.connection_pool._get_in_use_connections():
-                            add_debug_log_for_notification(
-                                conn, "SMIGRATED - mark for reconnect"
-                            )
-                            conn.mark_for_reconnect()
-
-                        record_connection_handoff(
-                            pool_name=get_pool_name(
-                                current_node.redis_connection.connection_pool
-                            )
-                        )
-                        handoff_recorded = True
-                    else:
-                        if logger.isEnabledFor(logging.DEBUG):
-                            logger.debug(
-                                f"SMIGRATED: Node {current_node.name} not affected by maintenance, "
-                                f"skipping mark for reconnect"
-                            )
-
-                    if (
-                        current_node
-                        not in self.cluster_client.nodes_manager.nodes_cache.values()
-                    ):
-                        # disconnect all free connections to the node - this node will be dropped
-                        # from the cluster, so we don't need to revert the timeouts
-                        for conn in current_node.redis_connection.connection_pool._get_free_connections():
-                            conn.disconnect()
-
-                        # Only record handoff if not already recorded for this node
-                        if not handoff_recorded:
                             record_connection_handoff(
                                 pool_name=get_pool_name(
                                     current_node.redis_connection.connection_pool
                                 )
                             )
+                            handoff_recorded = True
+                        else:
+                            if logger.isEnabledFor(logging.DEBUG):
+                                logger.debug(
+                                    f"SMIGRATED: Node {current_node.name} not affected by maintenance, "
+                                    f"skipping mark for reconnect"
+                                )
 
-            # mark the notification as processed
-            self._processed_notifications.add(notification)
-            self._in_progress.remove(notification)
+                        if (
+                            current_node
+                            not in self.cluster_client.nodes_manager.nodes_cache.values()
+                        ):
+                            # disconnect all free connections to the node - this node will be dropped
+                            # from the cluster, so we don't need to revert the timeouts
+                            for conn in current_node.redis_connection.connection_pool._get_free_connections():
+                                conn.disconnect()
+
+                            # Only record handoff if not already recorded for this node
+                            if not handoff_recorded:
+                                record_connection_handoff(
+                                    pool_name=get_pool_name(
+                                        current_node.redis_connection.connection_pool
+                                    )
+                                )
+
+                # mark the notification as processed
+                self._processed_notifications.add(notification)
+            finally:
+                # Release the in-progress reservation. On success the notification
+                # is also in _processed_notifications (so it won't be re-handled);
+                # on failure it is not, allowing a later redelivery to retry.
+                self._in_progress.discard(notification)
