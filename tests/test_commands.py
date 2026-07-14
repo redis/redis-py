@@ -534,6 +534,8 @@ class TestRedisCommands:
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
+    # Redis Enterprise manages ACLs itself and disallows ACL SETUSER here.
+    @skip_if_redis_enterprise()
     def test_acl_modules_commands(self, r, request):
         default_username = "default"
         username = "redis-py-user"
@@ -597,6 +599,8 @@ class TestRedisCommands:
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
+    # Redis Enterprise manages ACLs itself and disallows ACL SETUSER here.
+    @skip_if_redis_enterprise()
     def test_acl_modules_category_commands(self, r, request):
         default_username = "default"
         username = "redis-py-user"
@@ -752,6 +756,9 @@ class TestRedisCommands:
         )
 
     @skip_if_server_version_lt("7.2.0")
+    # Exercises a default localhost client for the deprecated lib_name/lib_version
+    # params, which cannot target a remote managed Redis Enterprise endpoint.
+    @skip_if_redis_enterprise()
     def test_client_setinfo(self, r: redis.Redis):
         from redis.utils import get_lib_version
 
@@ -956,6 +963,8 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
+    # Redis Enterprise does not allow the CLIENT NO-EVICT admin command.
+    @skip_if_redis_enterprise()
     def test_client_no_evict(self, r):
         assert r.client_no_evict("ON")
         with pytest.raises(TypeError):
@@ -1811,6 +1820,9 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
+    # Redis Enterprise exposes a single logical database, so copying across DB
+    # indexes is not supported.
+    @skip_if_redis_enterprise()
     def test_copy_to_another_database(self, request):
         r0 = _get_client(redis.Redis, request, db=0)
         r1 = _get_client(redis.Redis, request, db=1)
@@ -8179,12 +8191,16 @@ class TestRedisCommands:
         with pytest.raises(NotImplementedError):
             r.latency_doctor()
 
+    # Redis Enterprise restricts the LATENCY admin subcommands.
+    @skip_if_redis_enterprise()
     def test_latency_history(self, r: redis.Redis):
         assert r.latency_history("command") == []
 
+    @skip_if_redis_enterprise()
     def test_latency_latest(self, r: redis.Redis):
         assert r.latency_latest() == []
 
+    @skip_if_redis_enterprise()
     def test_latency_reset(self, r: redis.Redis):
         assert r.latency_reset() == 0
 
