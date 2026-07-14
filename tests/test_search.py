@@ -198,6 +198,8 @@ class SearchTestsBase:
 
 class TestBaseSearchFunctionality(SearchTestsBase):
     @pytest.mark.redismod
+    # FT.DEL is not available on Redis Enterprise's search module.
+    @skip_if_redis_enterprise()
     def test_client(self, client):
         num_docs = 500
         self.createIndex(client.ft(), num_docs=num_docs)
@@ -5793,6 +5795,8 @@ class TestSearchResp3BytesKeys(SearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("protocol", _SEARCH_BYTES_PROTOCOLS)
+    # Redis Enterprise's search module returns a different RESP3 result shape here.
+    @skip_if_redis_enterprise()
     def test_search_resp3_bytes_keys(self, request, stack_url, protocol):
         client = _make_bytes_search_client(request, stack_url, protocol)
         client.ft().create_index((TextField("title"), TextField("body")))
@@ -5814,6 +5818,8 @@ class TestSearchResp3BytesKeys(SearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("protocol", _SEARCH_BYTES_PROTOCOLS)
+    # Redis Enterprise's search module returns a different RESP3 result shape here.
+    @skip_if_redis_enterprise()
     def test_aggregate_resp3_bytes_keys(self, request, stack_url, protocol):
         client = _make_bytes_search_client(request, stack_url, protocol)
         client.ft().create_index((TextField("title"), TextField("parent")))
@@ -5842,6 +5848,8 @@ class TestSearchResp3BytesKeys(SearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("protocol", _SEARCH_BYTES_PROTOCOLS)
+    # Redis Enterprise's search module returns a different RESP3 result shape here.
+    @skip_if_redis_enterprise()
     def test_spellcheck_resp3_bytes_keys(self, request, stack_url, protocol):
         client = _make_bytes_search_client(request, stack_url, protocol)
         client.ft().create_index((TextField("f1"),))

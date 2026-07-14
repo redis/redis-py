@@ -682,6 +682,9 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
+    # Redis Enterprise fronts the database with a proxy, so CLIENT LIST does not
+    # report the same per-connection client set.
+    @skip_if_redis_enterprise()
     def test_client_list_client_id(self, r, request):
         clients = r.client_list()
         clients = r.client_list(client_id=[clients[0]["id"]])
@@ -1201,6 +1204,8 @@ class TestRedisCommands:
         assert r.select(9)
 
     @pytest.mark.onlynoncluster
+    # Redis Enterprise's SLOWLOG GET entries omit the client_address field.
+    @skip_if_redis_enterprise()
     def test_slowlog_get(self, r, slowlog):
         assert r.slowlog_reset()
         unicode_string = chr(3456) + "abcd" + chr(3421)
@@ -8397,6 +8402,9 @@ class TestRedisCommands:
         assert b"FULLRESYNC" in res
 
     @pytest.mark.onlynoncluster
+    # Timing-sensitive regression test that needs a co-located low-latency server;
+    # it is unreliable against a remote managed Redis Enterprise endpoint.
+    @skip_if_redis_enterprise()
     def test_interrupted_command(self, r: redis.Redis):
         """
         Regression test for issue #1128:  An Un-handled BaseException

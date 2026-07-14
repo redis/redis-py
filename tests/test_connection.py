@@ -631,6 +631,10 @@ class TestConnection:
             assert _connect.call_count == 1
             self.clear(conn)
 
+    # Client-internal test: builds a default localhost Connection and mocks the
+    # socket to count handshake retries, so it needs a co-located server rather
+    # than a remote managed Redis Enterprise endpoint.
+    @skip_if_redis_enterprise()
     def test_connect_with_retries(self):
         """
         Validate that retries occur for the entire connect+handshake flow when OSError
