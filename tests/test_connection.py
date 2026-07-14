@@ -51,7 +51,7 @@ from redis.observability.attributes import (
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE, SENTINEL
 
-from .conftest import skip_if_server_version_lt
+from .conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 from .mocks import MockSocket
 
 
@@ -600,6 +600,9 @@ class TestConnection:
     def clear(self, conn):
         conn.retry_on_error.clear()
 
+    # Client-internal test: builds a default localhost Connection, so it cannot
+    # target a remote managed Redis Enterprise endpoint.
+    @skip_if_redis_enterprise()
     def test_retry_connect_on_timeout_error(self):
         """Test that the _connect function is retried in case of a timeout"""
         conn = Connection(retry_on_timeout=True, retry=Retry(NoBackoff(), 3))
@@ -734,6 +737,8 @@ def test_pack_command(Class):
 
 
 @pytest.mark.fixed_client
+# Hardcodes a localhost URL, so it cannot target a remote managed Redis Enterprise endpoint.
+@skip_if_redis_enterprise()
 def test_create_single_connection_client_from_url():
     client = redis.Redis.from_url(
         "redis://localhost:6379/0?", single_connection_client=True

@@ -780,6 +780,9 @@ class TestRedisCommands:
         assert info["lib-ver"] == "1234"
 
     @skip_if_server_version_lt("7.2.0")
+    # Exercises a default localhost client, which cannot target a remote managed
+    # Redis Enterprise endpoint.
+    @skip_if_redis_enterprise()
     def test_client_setinfo_with_driver_info(self, r: redis.Redis):
         from redis import DriverInfo
         from redis.utils import get_lib_version
@@ -1011,6 +1014,8 @@ class TestRedisCommands:
         # assert data['maxmemory'].isdigit()
 
     @skip_if_server_version_lt("7.0.0")
+    # Redis Enterprise does not expose the same CONFIG GET parameter set (e.g. maxmemory).
+    @skip_if_redis_enterprise()
     def test_config_get_multi_params(self, r: redis.Redis):
         res = r.config_get("*max-*-entries*", "maxmemory")
         assert "maxmemory" in res
@@ -1045,6 +1050,8 @@ class TestRedisCommands:
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
+    # Redis Enterprise exposes a different module CONFIG surface (e.g. search-timeout).
+    @skip_if_redis_enterprise()
     def test_config_get_for_modules(self, r: redis.Redis):
         search_module_configs = r.config_get("search-*")
         assert "search-timeout" in search_module_configs
@@ -1060,6 +1067,8 @@ class TestRedisCommands:
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
+    # FT.CONFIG is not available on Redis Enterprise (managed search config).
+    @skip_if_redis_enterprise()
     def test_config_set_for_search_module(self, r: redis.Redis):
         initial_default_search_dialect = r.config_get("*")["search-default-dialect"]
         try:
@@ -1117,6 +1126,8 @@ class TestRedisCommands:
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
+    # Redis Enterprise reports a different INFO modules section shape.
+    @skip_if_redis_enterprise()
     def test_info_with_modules(self, r: redis.Redis):
         res = r.info(section="everything")
         assert "modules" in res

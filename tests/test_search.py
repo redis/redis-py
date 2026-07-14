@@ -2042,6 +2042,8 @@ class TestConfig(SearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.9.0")
+    # Redis Enterprise rejects CONFIG SET for the removed FT.CONFIG "timeout" param.
+    @skip_if_redis_enterprise()
     def test_config_with_removed_ftconfig(self, client):
         assert client.config_set("timeout", "100")
         with pytest.raises(redis.ResponseError):
