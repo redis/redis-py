@@ -859,6 +859,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         # Extract blocking timeout for blocking commands (BLPOP, BRPOP, etc.)
         # This ensures the socket timeout is long enough to wait for the
         # blocking command's timeout
+        # Default SENTINEL means "no blocking override" so read_response uses
+        # the configured socket_timeout. Unlike async, timeout=None here means
+        # block forever (settimeout(None)), so Redis timeout=0 maps to None.
         blocking_timeout = options.pop("_blocking_timeout", SENTINEL)
         # When the Redis server is told to block indefinitely (timeout=0),
         # the client must also wait indefinitely rather than issuing a

@@ -1,6 +1,7 @@
 import asyncio
 import collections
 import logging
+import math
 import random
 import socket
 import threading
@@ -1660,12 +1661,15 @@ class ClusterNode:
         # Extract blocking timeout for blocking commands (BLPOP, BRPOP, etc.)
         # This ensures the socket timeout is long enough to wait for the
         # blocking command's timeout
+        # Default None means "no blocking override" so read_response falls
+        # back to connection.socket_timeout. This differs from the sync client,
+        # where the default is SENTINEL and timeout=None means block forever.
         blocking_timeout = kwargs.pop("_blocking_timeout", None)
-        # When the Redis server is told to block indefinitely (timeout=0),
-        # the client must also wait indefinitely rather than issuing a
-        # zero-second socket read.
+        # Redis timeout=0 means block indefinitely on the server. Async
+        # Connection.read_response treats timeout=None as "use socket_timeout"
+        # and timeout=math.inf as "block with no timeout", so map 0 -> inf.
         if blocking_timeout == 0:
-            blocking_timeout = None
+            blocking_timeout = math.inf
         try:
             if NEVER_DECODE in kwargs:
                 response = await connection.read_response(disable_decoding=True)
