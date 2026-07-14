@@ -56,6 +56,7 @@ from redis.asyncio.connection import (
     parse_url,
 )
 from redis.asyncio.lock import Lock
+from redis.asyncio.maint_notifications import AsyncOSSMaintNotificationsHandler
 from redis.asyncio.observability.recorder import (
     record_error_count,
     record_operation_duration,
@@ -111,6 +112,7 @@ from redis.exceptions import (
     TryAgainError,
     WatchError,
 )
+from redis.maint_notifications import MaintNotificationsConfig
 from redis.typing import (
     AnyKeyT,
     ChannelT,
@@ -122,6 +124,7 @@ from redis.typing import (
 from redis.utils import (
     SENTINEL,
     SSL_AVAILABLE,
+    check_protocol_version,
     deprecated_args,
     deprecated_function,
     safe_str,
@@ -143,7 +146,72 @@ TargetNodesT = TypeVar(
 )
 
 
-class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommands):
+class AsyncMaintNotificationsAbstractRedisCluster:
+    """
+    Mixin for async cluster maintenance notifications handling.
+
+    Intended to be used with multiple inheritance alongside RedisCluster.
+    All logic related to cluster-level maintenance notifications is encapsulated here.
+    """
+
+    def __init__(
+        self,
+        maint_notifications_config: MaintNotificationsConfig | None,
+        **kwargs,
+    ) -> None:
+        # The RESP3 requirement is validated in RedisCluster.__init__ before the
+        # NodesManager is constructed; this mixin is only ever run from there, so
+        # the config it receives has already been validated.
+        is_protocol_supported = check_protocol_version(kwargs.get("protocol"), 3)
+
+        if maint_notifications_config is None and is_protocol_supported:
+            maint_notifications_config = MaintNotificationsConfig()
+
+        self.maint_notifications_config = maint_notifications_config
+
+        if self.maint_notifications_config and self.maint_notifications_config.enabled:
+            self._oss_cluster_maint_notifications_handler = (
+                AsyncOSSMaintNotificationsHandler(self, self.maint_notifications_config)
+            )
+            self._update_connection_kwargs_for_maint_notifications(
+                self._oss_cluster_maint_notifications_handler
+            )
+            # Connections are created lazily via ClusterNode.acquire_connection()
+            # during nodes_manager.initialize() (which runs after __init__), so
+            # injecting into the shared connection_kwargs covers nodes discovered
+            # later. Startup nodes are the exception — they were built before this
+            # runs with their own kwargs snapshot — so the helper above also
+            # updates them directly.
+        else:
+            self._oss_cluster_maint_notifications_handler = None
+
+    def _update_connection_kwargs_for_maint_notifications(
+        self,
+        oss_cluster_maint_notifications_handler: AsyncOSSMaintNotificationsHandler,
+    ) -> None:
+        maint_kwargs = {
+            "oss_cluster_maint_notifications_handler": oss_cluster_maint_notifications_handler,
+            "maint_notifications_config": oss_cluster_maint_notifications_handler.config,
+        }
+        # Shared template used for every node created from now on (e.g. nodes
+        # discovered during nodes_manager.initialize()).
+        self.nodes_manager.connection_kwargs.update(maint_kwargs)
+        # Startup nodes were constructed before this mixin ran, so each one
+        # snapshotted connection_kwargs without the handler. Their connections
+        # are created lazily, so updating their per-node kwargs now is in time —
+        # otherwise initialize() opens the topology-discovery connection (CLUSTER
+        # SLOTS) on a startup node with no push handler wired and silently drops
+        # the maintenance notifications carried on that connection.
+        for node in self.nodes_manager.startup_nodes.values():
+            node.connection_kwargs.update(maint_kwargs)
+
+
+class RedisCluster(
+    AbstractRedis,
+    AbstractRedisCluster,
+    AsyncMaintNotificationsAbstractRedisCluster,
+    AsyncRedisClusterCommands,
+):
     """
     Create a new RedisCluster client.
 
@@ -294,6 +362,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
     __slots__ = (
         "_initialize",
         "_lock",
+        "maint_notifications_config",
+        "_oss_cluster_maint_notifications_handler",
         "retry",
         "command_flags",
         "commands_parser",
@@ -378,6 +448,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         address_remap: Callable[[Tuple[str, int]], Tuple[str, int]] | None = None,
         event_dispatcher: EventDispatcher | None = None,
         policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver(),
+        maint_notifications_config: MaintNotificationsConfig | None = None,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -474,6 +545,22 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             kwargs["response_callbacks"]["CLUSTER SHARDS"] = parse_cluster_shards
         self.connection_kwargs = kwargs
 
+        # Validate maint_notifications_config before NodesManager is constructed
+        # so that a bad config doesn't leak an open NodesManager.
+        if (
+            maint_notifications_config
+            and maint_notifications_config.enabled
+            and not check_protocol_version(protocol, 3)
+        ):
+            raise RedisError(
+                "Maintenance notifications are only supported with RESP version 3"
+            )
+        if check_protocol_version(protocol, 3) and maint_notifications_config is None:
+            maint_notifications_config = MaintNotificationsConfig()
+        # Initialize to None so aclose() and any error-path code never sees an
+        # unset slot, even if __init__ raises before the mixin runs.
+        self._oss_cluster_maint_notifications_handler = None
+
         if startup_nodes:
             passed_nodes = []
             for node in startup_nodes:
@@ -499,6 +586,11 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             dynamic_startup_nodes=dynamic_startup_nodes,
             address_remap=address_remap,
             event_dispatcher=self._event_dispatcher,
+        )
+        AsyncMaintNotificationsAbstractRedisCluster.__init__(
+            self,
+            maint_notifications_config=maint_notifications_config,
+            protocol=protocol,
         )
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self.read_from_replicas = read_from_replicas
@@ -588,6 +680,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             async with self._lock:
                 if not self._initialize:
                     self._initialize = True
+                    if self._oss_cluster_maint_notifications_handler:
+                        tasks = list(
+                            self._oss_cluster_maint_notifications_handler._background_tasks
+                        )
+                        for task in tasks:
+                            task.cancel()
+                        await asyncio.gather(*tasks, return_exceptions=True)
                     await self.nodes_manager.aclose()
                     await self.nodes_manager.aclose("startup_nodes")
 
@@ -1846,11 +1945,26 @@ class NodesManager:
 
         for name, node in new.items():
             if name in old:
-                # Preserve the existing node but mark connections for reconnect.
-                # This method is sync so we can't call disconnect_free_connections()
-                # which is async. Instead, we mark free connections for reconnect
-                # and they will be lazily disconnected when acquired via
-                # disconnect_if_needed() to avoid race conditions.
+                # Preserve the existing node but mark ALL its connections for
+                # reconnect on every topology refresh.
+                #
+                # Why recycle every preserved node's connections, not just the
+                # ones whose slots/role changed?
+                #   set_nodes only sees the old vs new node dicts; it does not
+                #   track which specific nodes had slot-ownership or role changes
+                #   during this refresh. Rather than try to diff that (and risk
+                #   serving a connection whose cached routing/READONLY state is
+                #   now stale), we conservatively refresh every preserved node.
+                #   Reconnect is lazy and cheap, so the extra churn is acceptable
+                #   in exchange for never serving a stale connection after a
+                #   topology change.
+                #
+                # Why mark-for-reconnect instead of disconnecting here?
+                #   set_nodes is sync but disconnect_free_connections() is async,
+                #   so we cannot disconnect inline. Marking both in-use and free
+                #   connections for reconnect lets them be lazily disconnected on
+                #   next acquire via disconnect_if_needed(), which avoids races.
+                #
                 # TODO: Make this method async in the next major release to allow
                 # immediate disconnection of free connections.
                 existing_node = old[name]

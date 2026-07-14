@@ -41,6 +41,7 @@ from tests.conftest import (
     expects_resp2_shape,
     expects_resp3_shape,
     expects_unified_shape,
+    get_protocol_version,
     skip_if_redis_enterprise,
     skip_if_resp_version,
     skip_if_server_version_gte,
@@ -173,6 +174,9 @@ class AsyncSearchTestsBase:
 
 
 class TestBaseSearchFunctionality(AsyncSearchTestsBase):
+    _SEARCH_TIMEOUT_DIM = 8192
+    _SEARCH_TIMEOUT_DOCS = 1500
+
     @pytest.mark.redismod
     async def test_client(self, decoded_r: redis.Redis):
         num_docs = 500
@@ -1172,6 +1176,106 @@ class TestBaseSearchFunctionality(AsyncSearchTestsBase):
         q2 = Query("foo").timeout("not_a_number")
         with pytest.raises(redis.ResponseError):
             await decoded_r.ft().search(q2)
+
+    async def _create_search_timeout_index(self, decoded_r: redis.Redis):
+        await decoded_r.ft().create_index(
+            (
+                TextField("description"),
+                VectorField(
+                    "embedding",
+                    "FLAT",
+                    {
+                        "TYPE": "FLOAT32",
+                        "DIM": self._SEARCH_TIMEOUT_DIM,
+                        "DISTANCE_METRIC": "L2",
+                    },
+                ),
+            ),
+            definition=IndexDefinition(prefix=["search-timeout-item:"]),
+        )
+        await AsyncSearchTestsBase.waitForIndex(decoded_r, "idx")
+
+    async def _add_data_for_search_timeout(self, decoded_r: redis.Redis):
+        vectors = [
+            np.full(self._SEARCH_TIMEOUT_DIM, value, dtype=np.float32).tobytes()
+            for value in (0.1, 0.2, 0.3, 0.4, 0.5)
+        ]
+        pipeline = decoded_r.pipeline()
+        batch_size = 250
+        for i in range(self._SEARCH_TIMEOUT_DOCS):
+            pipeline.hset(
+                f"search-timeout-item:{i}",
+                mapping={
+                    "description": "red shoes",
+                    "embedding": vectors[i % len(vectors)],
+                },
+            )
+            if (i + 1) % batch_size == 0:
+                await pipeline.execute()
+                pipeline = decoded_r.pipeline()
+        await pipeline.execute()
+
+    @pytest.mark.redismod
+    @pytest.mark.timeout(60)
+    async def test_search_query_with_timeout(self, decoded_r: redis.Redis):
+        await self._create_search_timeout_index(decoded_r)
+        await self._add_data_for_search_timeout(decoded_r)
+
+        query_vector = np.full(
+            self._SEARCH_TIMEOUT_DIM, 0.25, dtype=np.float32
+        ).tobytes()
+        query = Query(f"*=>[KNN {self._SEARCH_TIMEOUT_DOCS} @embedding $vec]").timeout(
+            1
+        )
+        res = await decoded_r.ft().search(query, query_params={"vec": query_vector})
+
+        if expects_resp3_shape(decoded_r):
+            warnings = res.get("warning", [])
+            total = res["total_results"]
+        else:
+            warnings = res.warnings
+            total = res.total
+
+        # A timed-out search still returns a well-formed (partial) result.
+        assert isinstance(total, int) and total >= 0
+
+        if int(get_protocol_version(decoded_r)) == 3:
+            # Only the RESP3 wire carries the server timeout warning.
+            assert any(
+                "Timeout limit was reached" in safe_str(warning) for warning in warnings
+            )
+        else:
+            # The RESP2 wire does not carry the warning field on FT.SEARCH.
+            assert warnings == []
+
+    @pytest.mark.redismod
+    @pytest.mark.timeout(60)
+    @skip_if_server_version_lt("8.9.0")
+    async def test_search_query_with_timeout_fail_policy(self, decoded_r: redis.Redis):
+        await self._create_search_timeout_index(decoded_r)
+        await self._add_data_for_search_timeout(decoded_r)
+
+        query_vector = np.full(
+            self._SEARCH_TIMEOUT_DIM, 0.25, dtype=np.float32
+        ).tobytes()
+        query = Query(f"*=>[KNN {self._SEARCH_TIMEOUT_DOCS} @embedding $vec]").timeout(
+            1
+        )
+
+        # ``search-on-timeout`` controls whether a timed-out query returns the
+        # partial results collected so far (``return``, the default) or fails
+        # the command (``fail``).  Capture the original value so it is always
+        # restored, even if the assertion below raises.
+        config = await decoded_r.config_get("search-on-timeout")
+        original = config["search-on-timeout"]
+        try:
+            assert await decoded_r.config_set("search-on-timeout", "fail")
+            # With the ``fail`` policy the server aborts the timed-out search
+            # instead of returning partial results.
+            with pytest.raises(redis.ResponseError):
+                await decoded_r.ft().search(query, query_params={"vec": query_vector})
+        finally:
+            await decoded_r.config_set("search-on-timeout", original)
 
     @pytest.mark.redismod
     @skip_if_resp_version(3)
