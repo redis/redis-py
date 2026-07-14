@@ -3,6 +3,7 @@ import warnings
 import pytest
 from redis.utils import (
     DEFAULT_RESP_VERSION,
+    SENTINEL,
     check_protocol_version,
     compare_versions,
     deprecated_function,
@@ -56,6 +57,11 @@ class TestCheckProtocolVersion:
         assert check_protocol_version(None, DEFAULT_RESP_VERSION) is True
         other = 2 if DEFAULT_RESP_VERSION == 3 else 3
         assert check_protocol_version(None, other) is False
+
+    def test_sentinel_resolves_to_default(self):
+        assert check_protocol_version(SENTINEL, DEFAULT_RESP_VERSION) is True
+        other = 2 if DEFAULT_RESP_VERSION == 3 else 3
+        assert check_protocol_version(SENTINEL, other) is False
 
     @pytest.mark.parametrize("protocol", [3, "3"])
     def test_resp3_matches(self, protocol):
