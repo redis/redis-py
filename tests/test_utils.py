@@ -209,7 +209,7 @@ class TestStrIfBytes:
 
     def test_replaces_invalid_utf8(self):
         # Undecodable bytes are replaced rather than raising.
-        assert str_if_bytes(b"\xff") == "ï¿½"
+        assert str_if_bytes(b"\xff") == "�"
 
 
 @pytest.mark.fixed_client
