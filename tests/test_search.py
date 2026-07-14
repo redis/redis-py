@@ -50,6 +50,7 @@ from .conftest import (
     expects_resp2_shape,
     expects_resp3_shape,
     expects_unified_shape,
+    get_protocol_version,
     skip_if_redis_enterprise,
     skip_if_resp_version,
     skip_if_server_version_gte,
@@ -197,6 +198,9 @@ class SearchTestsBase:
 
 
 class TestBaseSearchFunctionality(SearchTestsBase):
+    _SEARCH_TIMEOUT_DIM = 8192
+    _SEARCH_TIMEOUT_DOCS = 1500
+
     @pytest.mark.redismod
     def test_client(self, client):
         num_docs = 500
@@ -1515,6 +1519,105 @@ class TestBaseSearchFunctionality(SearchTestsBase):
         q2 = Query("foo").timeout("not_a_number")
         with pytest.raises(redis.ResponseError):
             r.ft().search(q2)
+
+    def _create_search_timeout_index(self, client):
+        client.ft().create_index(
+            (
+                TextField("description"),
+                VectorField(
+                    "embedding",
+                    "FLAT",
+                    {
+                        "TYPE": "FLOAT32",
+                        "DIM": self._SEARCH_TIMEOUT_DIM,
+                        "DISTANCE_METRIC": "L2",
+                    },
+                ),
+            ),
+            definition=IndexDefinition(prefix=["search-timeout-item:"]),
+        )
+        SearchTestsBase.waitForIndex(client, "idx")
+
+    def _add_data_for_search_timeout(self, client):
+        vectors = [
+            np.full(self._SEARCH_TIMEOUT_DIM, value, dtype=np.float32).tobytes()
+            for value in (0.1, 0.2, 0.3, 0.4, 0.5)
+        ]
+        pipeline = client.pipeline()
+        batch_size = 250
+        for i in range(self._SEARCH_TIMEOUT_DOCS):
+            pipeline.hset(
+                f"search-timeout-item:{i}",
+                mapping={
+                    "description": "red shoes",
+                    "embedding": vectors[i % len(vectors)],
+                },
+            )
+            if (i + 1) % batch_size == 0:
+                pipeline.execute()
+                pipeline = client.pipeline()
+        pipeline.execute()
+
+    @pytest.mark.redismod
+    @pytest.mark.timeout(60)
+    def test_search_query_with_timeout(self, client):
+        self._create_search_timeout_index(client)
+        self._add_data_for_search_timeout(client)
+
+        query_vector = np.full(
+            self._SEARCH_TIMEOUT_DIM, 0.25, dtype=np.float32
+        ).tobytes()
+        query = Query(f"*=>[KNN {self._SEARCH_TIMEOUT_DOCS} @embedding $vec]").timeout(
+            1
+        )
+        res = client.ft().search(query, query_params={"vec": query_vector})
+
+        if expects_resp3_shape(client):
+            warnings = res.get("warning", [])
+            total = res["total_results"]
+        else:
+            warnings = res.warnings
+            total = res.total
+
+        # A timed-out search still returns a well-formed (partial) result.
+        assert isinstance(total, int) and total >= 0
+
+        if int(get_protocol_version(client)) == 3:
+            # Only the RESP3 wire carries the server timeout warning.
+            assert any(
+                "Timeout limit was reached" in safe_str(warning) for warning in warnings
+            )
+        else:
+            # The RESP2 wire does not carry the warning field on FT.SEARCH.
+            assert warnings == []
+
+    @pytest.mark.redismod
+    @pytest.mark.timeout(60)
+    @skip_if_server_version_lt("8.9.0")
+    def test_search_query_with_timeout_fail_policy(self, client):
+        self._create_search_timeout_index(client)
+        self._add_data_for_search_timeout(client)
+
+        query_vector = np.full(
+            self._SEARCH_TIMEOUT_DIM, 0.25, dtype=np.float32
+        ).tobytes()
+        query = Query(f"*=>[KNN {self._SEARCH_TIMEOUT_DOCS} @embedding $vec]").timeout(
+            1
+        )
+
+        # ``search-on-timeout`` controls whether a timed-out query returns the
+        # partial results collected so far (``return``, the default) or fails
+        # the command (``fail``).  Capture the original value so it is always
+        # restored, even if the assertion below raises.
+        original = client.config_get("search-on-timeout")["search-on-timeout"]
+        try:
+            assert client.config_set("search-on-timeout", "fail")
+            # With the ``fail`` policy the server aborts the timed-out search
+            # instead of returning partial results.
+            with pytest.raises(redis.ResponseError):
+                client.ft().search(query, query_params={"vec": query_vector})
+        finally:
+            client.config_set("search-on-timeout", original)
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.2.0")
