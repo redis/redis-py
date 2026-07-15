@@ -1,3 +1,4 @@
+import os
 import socket
 from unittest import mock
 
@@ -257,6 +258,46 @@ def test_slave_round_robin(cluster, sentinel, master_ip):
     assert next(rotator) == (master_ip, 6379)
     with pytest.raises(SlaveNotFoundError):
         next(rotator)
+
+
+@pytest.mark.onlynoncluster
+def test_master_failover_reclaims_discarded_connection_slot():
+    master_a = ("master-a", 6379)
+    master_b = ("master-b", 6379)
+
+    class FakeConnection:
+        def __init__(self, **kwargs):
+            self.host, self.port = master_a
+            self.pid = os.getpid()
+
+        def connect(self):
+            pass
+
+        def disconnect(self):
+            pass
+
+        def can_read(self, timeout=0):
+            return False
+
+        def should_reconnect(self):
+            return False
+
+    pool = SentinelConnectionPool(
+        "mymaster",
+        mock.MagicMock(),
+        connection_class=FakeConnection,
+        max_connections=2,
+    )
+    pool.proxy.master_address = master_a
+
+    for _ in range(pool.max_connections):
+        connection = pool.get_connection()
+        pool.proxy.master_address = master_b
+        pool.release(connection)
+        pool.proxy.master_address = master_a
+
+    assert pool._created_connections == 0
+    pool.get_connection()
 
 
 @pytest.mark.onlynoncluster

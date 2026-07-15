@@ -3301,10 +3301,11 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             else:
                 # Pool doesn't own this connection, do not add it back
                 # to the pool.
-                # The created connections count should not be changed,
-                # because the connection was not created by the pool.
                 # Still need to decrement USED since it was counted in get_connection()
                 connection.disconnect()
+                # Subclasses can reject a connection created by this pool.
+                if connection.pid == self.pid:
+                    self._created_connections -= 1
                 record_connection_count(
                     pool_name="unknown_pool",
                     connection_state=ConnectionState.USED,
