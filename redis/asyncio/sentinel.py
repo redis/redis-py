@@ -269,11 +269,19 @@ class Sentinel(AsyncSentinelCommands):
         Close all sentinel clients created by this Sentinel and their
         connection pools.
 
+        Each client is closed independently: if one raises, the remaining
+        clients are still closed and the first error is re-raised afterwards.
+
         Clients returned by ``master_for``/``slave_for`` are owned by the
         caller and are not closed here.
         """
-        for sentinel in self.sentinels:
-            await sentinel.aclose()
+        resp = await asyncio.gather(
+            *(sentinel.aclose() for sentinel in self.sentinels),
+            return_exceptions=True,
+        )
+        exc = next((r for r in resp if isinstance(r, BaseException)), None)
+        if exc:
+            raise exc
 
     async def __aenter__(self) -> "Sentinel":
         return self

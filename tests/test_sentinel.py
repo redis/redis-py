@@ -315,6 +315,30 @@ def test_close(cluster, sentinel):
         s.close.assert_called_once()
 
 
+@pytest.mark.onlynoncluster
+def test_close_error_still_closes_remaining_clients(cluster, sentinel):
+    sentinel.sentinels = [mock.Mock() for _ in range(3)]
+    sentinel.sentinels[0].close.side_effect = Exception("sentinel down")
+
+    with pytest.raises(Exception, match="sentinel down"):
+        sentinel.close()
+
+    # the failing client must not prevent closing the others
+    for s in sentinel.sentinels:
+        s.close.assert_called_once()
+
+
+@pytest.mark.onlynoncluster
+def test_close_idempotent(cluster, sentinel):
+    sentinel.sentinels = [mock.Mock() for _ in range(2)]
+
+    sentinel.close()
+    sentinel.close()
+
+    for s in sentinel.sentinels:
+        assert s.close.call_count == 2
+
+
 # Tests against real sentinel instances
 @pytest.mark.onlynoncluster
 def test_get_sentinels(deployed_sentinel):

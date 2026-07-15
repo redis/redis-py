@@ -333,6 +333,30 @@ async def test_aclose(cluster, sentinel):
         s.aclose.assert_awaited_once()
 
 
+@pytest.mark.onlynoncluster
+async def test_aclose_error_still_closes_remaining_clients(cluster, sentinel):
+    sentinel.sentinels = [mock.AsyncMock() for _ in range(3)]
+    sentinel.sentinels[0].aclose.side_effect = Exception("sentinel down")
+
+    with pytest.raises(Exception, match="sentinel down"):
+        await sentinel.aclose()
+
+    # the failing client must not prevent closing the others
+    for s in sentinel.sentinels:
+        s.aclose.assert_awaited_once()
+
+
+@pytest.mark.onlynoncluster
+async def test_aclose_idempotent(cluster, sentinel):
+    sentinel.sentinels = [mock.AsyncMock() for _ in range(2)]
+
+    await sentinel.aclose()
+    await sentinel.aclose()
+
+    for s in sentinel.sentinels:
+        assert s.aclose.await_count == 2
+
+
 # Tests against real sentinel instances
 @pytest.mark.onlynoncluster
 async def test_get_sentinels(deployed_sentinel):

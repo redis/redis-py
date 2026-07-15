@@ -299,11 +299,21 @@ class Sentinel(SentinelCommands):
         Close all sentinel clients created by this Sentinel and their
         connection pools.
 
+        Each client is closed independently: if one raises, the remaining
+        clients are still closed and the first error is re-raised afterwards.
+
         Clients returned by ``master_for``/``slave_for`` are owned by the
         caller and are not closed here.
         """
+        exc = None
         for sentinel in self.sentinels:
-            sentinel.close()
+            try:
+                sentinel.close()
+            except Exception as e:
+                if exc is None:
+                    exc = e
+        if exc:
+            raise exc
 
     def __enter__(self):
         return self
