@@ -1695,10 +1695,17 @@ def collect_groups(client, res, alias, group_field="color"):
 
 
 class TestAggregations(AsyncSearchTestsBase):
-    async def _setup_collect_index(self, client):
-        """Enable the preview feature and index the shared fruit documents."""
-        await client.config_set("search-enable-unstable-features", "yes")
-        await client.ft().create_index(
+    @pytest_asyncio.fixture
+    async def collect_index(self, decoded_r):
+        """Enable the preview feature and index the shared fruit documents.
+
+        Restores ``search-enable-unstable-features`` to its original value on
+        teardown so the preview flag does not leak into other tests.
+        """
+        config = await decoded_r.config_get("search-enable-unstable-features")
+        original = config["search-enable-unstable-features"]
+        await decoded_r.config_set("search-enable-unstable-features", "yes")
+        await decoded_r.ft().create_index(
             (
                 TextField("color"),
                 TextField("name"),
@@ -1707,8 +1714,10 @@ class TestAggregations(AsyncSearchTestsBase):
             )
         )
         for key, mapping in COLLECT_FRUITS.items():
-            await client.hset(key, mapping=mapping)
-        await self.waitForIndex(client, "idx")
+            await decoded_r.hset(key, mapping=mapping)
+        await self.waitForIndex(decoded_r, "idx")
+        yield
+        await decoded_r.config_set("search-enable-unstable-features", original)
 
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
@@ -2026,10 +2035,10 @@ class TestAggregations(AsyncSearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.9.0")
-    async def test_aggregations_collect_sortby(self, decoded_r: redis.Redis):
+    async def test_aggregations_collect_sortby(
+        self, decoded_r: redis.Redis, collect_index
+    ):
         # COLLECT projects the named fields per group, ordered by SORTBY.
-        await self._setup_collect_index(decoded_r)
-
         req = (
             aggregations.AggregateRequest("*")
             .load("*")
@@ -2058,16 +2067,18 @@ class TestAggregations(AsyncSearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.9.0")
-    async def test_aggregations_collect_sortby_ascending(self, decoded_r: redis.Redis):
-        # Bare sort names default to ascending order.
-        await self._setup_collect_index(decoded_r)
-
+    async def test_aggregations_collect_sortby_ascending(
+        self, decoded_r: redis.Redis, collect_index
+    ):
+        # An ``Asc`` directive orders the collected entries in ascending order.
         req = (
             aggregations.AggregateRequest("*")
             .load("*")
             .group_by(
                 "@color",
-                reducers.collect(["@name"], sort_by="@sweetness").alias("fruits"),
+                reducers.collect(
+                    ["@name"], sort_by=[aggregations.Asc("@sweetness")]
+                ).alias("fruits"),
             )
         )
         groups = collect_groups(
@@ -2084,10 +2095,10 @@ class TestAggregations(AsyncSearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.9.0")
-    async def test_aggregations_collect_limit_top_n(self, decoded_r: redis.Redis):
+    async def test_aggregations_collect_limit_top_n(
+        self, decoded_r: redis.Redis, collect_index
+    ):
         # SORTBY + LIMIT is a bounded top-N selection with an offset.
-        await self._setup_collect_index(decoded_r)
-
         req = (
             aggregations.AggregateRequest("*")
             .load("*")
@@ -2113,11 +2124,9 @@ class TestAggregations(AsyncSearchTestsBase):
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.9.0")
     async def test_aggregations_collect_multiple_sort_keys(
-        self, decoded_r: redis.Redis
+        self, decoded_r: redis.Redis, collect_index
     ):
         # Multiple sort keys are applied left to right.
-        await self._setup_collect_index(decoded_r)
-
         req = (
             aggregations.AggregateRequest("*")
             .load("*")
@@ -2149,10 +2158,10 @@ class TestAggregations(AsyncSearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.9.0")
-    async def test_aggregations_collect_sparse_projection(self, decoded_r: redis.Redis):
+    async def test_aggregations_collect_sparse_projection(
+        self, decoded_r: redis.Redis, collect_index
+    ):
         # A field absent from a row is omitted from that entry (not NULL).
-        await self._setup_collect_index(decoded_r)
-
         req = (
             aggregations.AggregateRequest("*")
             .load("*")
@@ -2182,16 +2191,18 @@ class TestAggregations(AsyncSearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.9.0")
-    async def test_aggregations_collect_key_field(self, decoded_r: redis.Redis):
+    async def test_aggregations_collect_key_field(
+        self, decoded_r: redis.Redis, collect_index
+    ):
         # ``@__key`` can be projected when carried into the pipeline via LOAD.
-        await self._setup_collect_index(decoded_r)
-
         req = (
             aggregations.AggregateRequest("*")
             .load("@__key", "@name")
             .group_by(
                 "@color",
-                reducers.collect(["@name", "@__key"], sort_by="@name").alias("fruits"),
+                reducers.collect(
+                    ["@name", "@__key"], sort_by=[aggregations.Asc("@name")]
+                ).alias("fruits"),
             )
         )
         groups = collect_groups(
@@ -2211,10 +2222,10 @@ class TestAggregations(AsyncSearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.9.0")
-    async def test_aggregations_collect_fields_all(self, decoded_r: redis.Redis):
+    async def test_aggregations_collect_fields_all(
+        self, decoded_r: redis.Redis, collect_index
+    ):
         # FIELDS * is stage-local: after GROUPBY only the group key is present.
-        await self._setup_collect_index(decoded_r)
-
         req = (
             aggregations.AggregateRequest("*")
             .load("*")
@@ -2229,27 +2240,33 @@ class TestAggregations(AsyncSearchTestsBase):
         assert all(entry == {"color": "red"} for entry in groups["red"])
         assert all(entry == {"color": "yellow"} for entry in groups["yellow"])
 
-    @pytest.mark.parametrize("bad_fields", [[], (), "", "   "])
+    @pytest.mark.parametrize(
+        "bad_fields",
+        [[], (), "", "   ", ["   "], ["name", ""], ["name", "   "]],
+    )
     def test_aggregations_collect_invalid_fields(self, bad_fields):
         # Empty or blank field selectors are local API misuse and are rejected
-        # client-side with a ValueError before any command is sent.
+        # client-side with a ValueError before any command is sent. A blank
+        # entry anywhere in the list is rejected too, not just an empty list.
         with pytest.raises(ValueError):
             reducers.collect(bad_fields)
 
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.9.0")
-    async def test_aggregations_collect_single_str_field(self, decoded_r: redis.Redis):
+    async def test_aggregations_collect_single_str_field(
+        self, decoded_r: redis.Redis, collect_index
+    ):
         # A single field may be passed as a bare string; the client wraps it as
         # a one-field projection.
-        await self._setup_collect_index(decoded_r)
-
         req = (
             aggregations.AggregateRequest("*")
             .load("*")
             .group_by(
                 "@color",
-                reducers.collect("@name", sort_by="@sweetness").alias("fruits"),
+                reducers.collect(
+                    "@name", sort_by=[aggregations.Asc("@sweetness")]
+                ).alias("fruits"),
             )
         )
         groups = collect_groups(
@@ -2267,12 +2284,10 @@ class TestAggregations(AsyncSearchTestsBase):
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.9.0")
     async def test_aggregations_collect_field_names_without_prefix(
-        self, decoded_r: redis.Redis
+        self, decoded_r: redis.Redis, collect_index
     ):
         # Field and sort names may be supplied without a leading "@"; the client
         # normalizes them on the wire (the server requires the prefix).
-        await self._setup_collect_index(decoded_r)
-
         req = (
             aggregations.AggregateRequest("*")
             .load("*")

@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Iterable, Union
 
 from .aggregation import Asc, Desc, Reducer, SortDirection
 
@@ -202,26 +202,25 @@ class collect(Reducer):
 
     def __init__(
         self,
-        fields: Union[str, list[str]] = "*",
+        fields: str | Iterable[str] = "*",
         distinct: bool = False,
-        sort_by: Union[str, Asc, Desc, list[Union[str, Asc, Desc]], None] = None,
-        limit: Union[tuple[int, int], None] = None,
+        sort_by: Asc | Desc | Iterable[Asc | Desc] | None = None,
+        limit: tuple[int, int] | None = None,
     ) -> None:
         """
         ### Parameters
 
         - **fields**: The fields to project from each collected row. Either the
             literal ``"*"`` (project every field present in the pipeline at this
-            stage) or a field name / list of field names. Names are normalized
-            to a single leading ``@`` on the wire; output map keys are the bare
-            names.
+            stage) or a field name / iterable of field names. Names are
+            normalized to a single leading ``@`` on the wire; output map keys
+            are the bare names.
         - **distinct**: When ``True``, emit ``DISTINCT`` to deduplicate entries
             with identical projected fields. Forward-compatible: this option is
             not yet implemented by the server and currently produces a server
             error when sent.
-        - **sort_by**: One field name, an ``Asc``/``Desc`` instance, or a list
-            of them, used to order the collected entries within each group.
-            Bare names default to ascending order.
+        - **sort_by**: An ``Asc``/``Desc`` instance or an iterable of them, used
+            to order the collected entries within each group.
         - **limit**: An ``(offset, count)`` pair. Returns at most ``count``
             entries per group after skipping ``offset``. With ``sort_by`` this
             acts as a top-N selection.
@@ -232,18 +231,11 @@ class collect(Reducer):
         if fields == "*":
             args += ["FIELDS", "*"]
         else:
-            if isinstance(fields, str):
-                if not fields.strip():
-                    raise ValueError(
-                        "collect fields must be '*' or a non-empty list of names"
-                    )
-                names = [fields]
-            else:
-                names = list(fields)
-                if not names:
-                    raise ValueError(
-                        "collect fields must be '*' or a non-empty list of names"
-                    )
+            names = [fields] if isinstance(fields, str) else list(fields)
+            if not names or any(not n.strip() for n in names):
+                raise ValueError(
+                    "collect fields must be '*' or a non-empty list of names"
+                )
             names = [_ensure_at_prefix(n) for n in names]
             args += ["FIELDS", str(len(names))] + names
 
@@ -253,15 +245,10 @@ class collect(Reducer):
 
         # SORTBY (optional)
         if sort_by is not None:
-            sort_fields = (
-                [sort_by] if isinstance(sort_by, (str, Asc, Desc)) else sort_by
-            )
+            sort_fields = [sort_by] if isinstance(sort_by, (Asc, Desc)) else sort_by
             sort_args: list[str] = []
             for f in sort_fields:
-                if isinstance(f, (Asc, Desc)):
-                    sort_args += [_ensure_at_prefix(f.field), f.DIRSTRING]
-                else:
-                    sort_args += [_ensure_at_prefix(f)]
+                sort_args += [_ensure_at_prefix(f.field), f.DIRSTRING]
             if not sort_args:
                 raise ValueError("collect sort_by must contain at least one field")
             args += ["SORTBY", str(len(sort_args))] + sort_args

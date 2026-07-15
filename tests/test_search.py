@@ -2250,8 +2250,15 @@ def collect_groups(client, res, alias, group_field="color"):
 
 
 class TestAggregations(SearchTestsBase):
-    def _setup_collect_index(self, client):
-        """Enable the preview feature and index the shared fruit documents."""
+    @pytest.fixture
+    def collect_index(self, client):
+        """Enable the preview feature and index the shared fruit documents.
+
+        Restores ``search-enable-unstable-features`` to its original value on
+        teardown so the preview flag does not leak into other tests.
+        """
+        config = client.config_get("search-enable-unstable-features")
+        original = config["search-enable-unstable-features"]
         client.config_set("search-enable-unstable-features", "yes")
         client.ft().create_index(
             (
@@ -2264,6 +2271,8 @@ class TestAggregations(SearchTestsBase):
         for key, mapping in COLLECT_FRUITS.items():
             client.hset(key, mapping=mapping)
         self.waitForIndex(client, "idx")
+        yield
+        client.config_set("search-enable-unstable-features", original)
 
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
@@ -2525,10 +2534,8 @@ class TestAggregations(SearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.9.0")
-    def test_aggregations_collect_sortby(self, client):
+    def test_aggregations_collect_sortby(self, client, collect_index):
         # COLLECT projects the named fields per group, ordered by SORTBY.
-        self._setup_collect_index(client)
-
         req = (
             aggregations.AggregateRequest("*")
             .load("*")
@@ -2555,16 +2562,16 @@ class TestAggregations(SearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.9.0")
-    def test_aggregations_collect_sortby_ascending(self, client):
-        # Bare sort names default to ascending order.
-        self._setup_collect_index(client)
-
+    def test_aggregations_collect_sortby_ascending(self, client, collect_index):
+        # An ``Asc`` directive orders the collected entries in ascending order.
         req = (
             aggregations.AggregateRequest("*")
             .load("*")
             .group_by(
                 "@color",
-                reducers.collect(["@name"], sort_by="@sweetness").alias("fruits"),
+                reducers.collect(
+                    ["@name"], sort_by=[aggregations.Asc("@sweetness")]
+                ).alias("fruits"),
             )
         )
         groups = collect_groups(client, client.ft().aggregate(req), "fruits")
@@ -2579,10 +2586,8 @@ class TestAggregations(SearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.9.0")
-    def test_aggregations_collect_limit_top_n(self, client):
+    def test_aggregations_collect_limit_top_n(self, client, collect_index):
         # SORTBY + LIMIT is a bounded top-N selection with an offset.
-        self._setup_collect_index(client)
-
         req = (
             aggregations.AggregateRequest("*")
             .load("*")
@@ -2605,10 +2610,8 @@ class TestAggregations(SearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.9.0")
-    def test_aggregations_collect_multiple_sort_keys(self, client):
+    def test_aggregations_collect_multiple_sort_keys(self, client, collect_index):
         # Multiple sort keys are applied left to right.
-        self._setup_collect_index(client)
-
         req = (
             aggregations.AggregateRequest("*")
             .load("*")
@@ -2638,10 +2641,8 @@ class TestAggregations(SearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.9.0")
-    def test_aggregations_collect_sparse_projection(self, client):
+    def test_aggregations_collect_sparse_projection(self, client, collect_index):
         # A field absent from a row is omitted from that entry (not NULL).
-        self._setup_collect_index(client)
-
         req = (
             aggregations.AggregateRequest("*")
             .load("*")
@@ -2669,16 +2670,16 @@ class TestAggregations(SearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.9.0")
-    def test_aggregations_collect_key_field(self, client):
+    def test_aggregations_collect_key_field(self, client, collect_index):
         # ``@__key`` can be projected when carried into the pipeline via LOAD.
-        self._setup_collect_index(client)
-
         req = (
             aggregations.AggregateRequest("*")
             .load("@__key", "@name")
             .group_by(
                 "@color",
-                reducers.collect(["@name", "@__key"], sort_by="@name").alias("fruits"),
+                reducers.collect(
+                    ["@name", "@__key"], sort_by=[aggregations.Asc("@name")]
+                ).alias("fruits"),
             )
         )
         groups = collect_groups(client, client.ft().aggregate(req), "fruits")
@@ -2696,10 +2697,8 @@ class TestAggregations(SearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.9.0")
-    def test_aggregations_collect_fields_all(self, client):
+    def test_aggregations_collect_fields_all(self, client, collect_index):
         # FIELDS * is stage-local: after GROUPBY only the group key is present.
-        self._setup_collect_index(client)
-
         req = (
             aggregations.AggregateRequest("*")
             .load("*")
@@ -2712,27 +2711,31 @@ class TestAggregations(SearchTestsBase):
         assert all(entry == {"color": "red"} for entry in groups["red"])
         assert all(entry == {"color": "yellow"} for entry in groups["yellow"])
 
-    @pytest.mark.parametrize("bad_fields", [[], (), "", "   "])
+    @pytest.mark.parametrize(
+        "bad_fields",
+        [[], (), "", "   ", ["   "], ["name", ""], ["name", "   "]],
+    )
     def test_aggregations_collect_invalid_fields(self, bad_fields):
         # Empty or blank field selectors are local API misuse and are rejected
-        # client-side with a ValueError before any command is sent.
+        # client-side with a ValueError before any command is sent. A blank
+        # entry anywhere in the list is rejected too, not just an empty list.
         with pytest.raises(ValueError):
             reducers.collect(bad_fields)
 
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.9.0")
-    def test_aggregations_collect_single_str_field(self, client):
+    def test_aggregations_collect_single_str_field(self, client, collect_index):
         # A single field may be passed as a bare string; the client wraps it as
         # a one-field projection.
-        self._setup_collect_index(client)
-
         req = (
             aggregations.AggregateRequest("*")
             .load("*")
             .group_by(
                 "@color",
-                reducers.collect("@name", sort_by="@sweetness").alias("fruits"),
+                reducers.collect(
+                    "@name", sort_by=[aggregations.Asc("@sweetness")]
+                ).alias("fruits"),
             )
         )
         groups = collect_groups(client, client.ft().aggregate(req), "fruits")
@@ -2747,11 +2750,11 @@ class TestAggregations(SearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.9.0")
-    def test_aggregations_collect_field_names_without_prefix(self, client):
+    def test_aggregations_collect_field_names_without_prefix(
+        self, client, collect_index
+    ):
         # Field and sort names may be supplied without a leading "@"; the client
         # normalizes them on the wire (the server requires the prefix).
-        self._setup_collect_index(client)
-
         req = (
             aggregations.AggregateRequest("*")
             .load("*")
