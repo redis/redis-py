@@ -2,17 +2,18 @@ from datetime import datetime
 import warnings
 import pytest
 from redis.utils import (
-    DEFAULT_RESP_VERSION,
-    SENTINEL,
     check_protocol_version,
     compare_versions,
-    deprecated_function,
+    decode_field_value,
+    DEFAULT_RESP_VERSION,
     deprecated_args,
+    deprecated_function,
     ensure_string,
-    experimental_method,
     experimental_args,
+    experimental_method,
     format_error_message,
     safe_str,
+    SENTINEL,
     str_if_bytes,
 )
 
@@ -248,3 +249,32 @@ class TestFormatErrorMessage:
         assert format_error_message("host:1", Exception("code", "detail")) == (
             "Error code connecting to host:1. detail."
         )
+
+
+@pytest.mark.fixed_client
+class TestDecodeFieldValue:
+    def test_non_bytes_value_returned_unchanged(self):
+        assert decode_field_value("already-str") == "already-str"
+
+    def test_bytes_default_decoded_to_str(self):
+        assert decode_field_value(b"hi") == "hi"
+
+    def test_per_field_encoding_is_applied(self):
+        result = decode_field_value(
+            b"caf\xe9", key="k", field_encodings={"k": "latin-1"}
+        )
+        assert result == "caf\xe9"
+
+    def test_none_encoding_keeps_raw_bytes(self):
+        assert (
+            decode_field_value(b"raw", key="k", field_encodings={"k": None}) == b"raw"
+        )
+
+    def test_key_absent_from_encodings_uses_default(self):
+        assert (
+            decode_field_value(b"hi", key="x", field_encodings={"k": "utf-8"}) == "hi"
+        )
+
+    def test_undecodable_bytes_use_replacement_character(self):
+        result = decode_field_value(b"\xff", key="k", field_encodings={"k": "utf-8"})
+        assert result == "�"
