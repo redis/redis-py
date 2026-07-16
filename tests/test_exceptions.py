@@ -1,3 +1,5 @@
+import pytest
+
 from redis.exceptions import (
     CrossSlotTransactionError,
     InvalidPipelineStack,
@@ -6,6 +8,8 @@ from redis.exceptions import (
     RedisClusterException,
     SlotNotCoveredError,
 )
+
+pytestmark = pytest.mark.fixed_client
 
 
 class TestLockError:
