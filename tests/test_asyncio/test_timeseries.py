@@ -515,6 +515,130 @@ async def test_multi_range(decoded_r: redis.Redis):
         assert {"Test": "This", "team": "ny"} == res[KEY1][0]
 
 
+def _mrange_returned_keys(decoded_r, res):
+    """Return the set of series key names in a TS.MRANGE/MREVRANGE reply,
+    normalizing the RESP2 (list of single-key dicts) and RESP3/unified
+    (dict keyed by name) shapes."""
+    if expects_resp2_shape(decoded_r):
+        return {next(iter(entry)) for entry in res}
+    return set(res.keys())
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_mrange_exclude_empty(decoded_r: redis.Redis):
+    await decoded_r.ts().create("s", labels={"sensor": "1", "type": "demo"})
+    await decoded_r.ts().create("t", labels={"sensor": "1", "type": "demo"})
+    await decoded_r.ts().create("u", labels={"sensor": "1", "type": "demo"})
+    await decoded_r.ts().madd(
+        [
+            ("s", 100, 100),
+            ("t", 100, 100),
+            ("s", 200, 200),
+            ("t", 300, 300),
+            ("s", 400, 400),
+            ("t", 400, 400),
+            ("u", 2000, 2000),
+        ]
+    )
+
+    # Without EXCLUDEEMPTY, "u" matches the filter but has no samples in range.
+    res = await decoded_r.ts().mrange("-", 500, filters=["sensor=1"])
+    assert {"s", "t", "u"} == _mrange_returned_keys(decoded_r, res)
+
+    # With EXCLUDEEMPTY, "u" is omitted from the top-level reply.
+    res = await decoded_r.ts().mrange(
+        "-", 500, filters=["sensor=1"], exclude_empty=True
+    )
+    assert {"s", "t"} == _mrange_returned_keys(decoded_r, res)
+
+    # Composing with WITHLABELS should not change the exclusion behavior.
+    res = await decoded_r.ts().mrange(
+        "-", 500, filters=["sensor=1"], with_labels=True, exclude_empty=True
+    )
+    assert {"s", "t"} == _mrange_returned_keys(decoded_r, res)
+
+    # Composing with AGGREGATION should still omit the empty series.
+    res = await decoded_r.ts().mrange(
+        "-",
+        500,
+        filters=["sensor=1"],
+        aggregation_type="min",
+        bucket_size_msec=100,
+        exclude_empty=True,
+    )
+    assert {"s", "t"} == _mrange_returned_keys(decoded_r, res)
+
+    # When every matching series is empty, no series is reported (an empty
+    # top-level reply; shape is [] in RESP2 and {} in RESP3).
+    res = await decoded_r.ts().mrange(1, 50, filters=["sensor=1"], exclude_empty=True)
+    assert 0 == len(res)
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_mrevrange_exclude_empty(decoded_r: redis.Redis):
+    await decoded_r.ts().create("s", labels={"sensor": "1", "type": "demo"})
+    await decoded_r.ts().create("t", labels={"sensor": "1", "type": "demo"})
+    await decoded_r.ts().create("u", labels={"sensor": "1", "type": "demo"})
+    await decoded_r.ts().madd(
+        [
+            ("s", 100, 100),
+            ("t", 100, 100),
+            ("s", 200, 200),
+            ("t", 300, 300),
+            ("s", 400, 400),
+            ("t", 400, 400),
+            ("u", 2000, 2000),
+        ]
+    )
+
+    res = await decoded_r.ts().mrevrange("-", 500, filters=["sensor=1"])
+    assert {"s", "t", "u"} == _mrange_returned_keys(decoded_r, res)
+
+    res = await decoded_r.ts().mrevrange(
+        "-", 500, filters=["sensor=1"], exclude_empty=True
+    )
+    assert {"s", "t"} == _mrange_returned_keys(decoded_r, res)
+
+    # All matching series empty -> empty top-level reply ([] in RESP2, {} in RESP3).
+    res = await decoded_r.ts().mrevrange(
+        1, 50, filters=["sensor=1"], exclude_empty=True
+    )
+    assert 0 == len(res)
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+async def test_mrange_exclude_empty_with_groupby_raises(decoded_r: redis.Redis):
+    # EXCLUDEEMPTY is mutually exclusive with GROUPBY. This is validated
+    # client-side, so it does not require server support.
+    with pytest.raises(
+        redis.DataError, match="EXCLUDEEMPTY is not allowed with GROUPBY"
+    ):
+        await decoded_r.ts().mrange(
+            "-",
+            500,
+            filters=["sensor=1"],
+            groupby="type",
+            reduce="max",
+            exclude_empty=True,
+        )
+    with pytest.raises(
+        redis.DataError, match="EXCLUDEEMPTY is not allowed with GROUPBY"
+    ):
+        await decoded_r.ts().mrevrange(
+            "-",
+            500,
+            filters=["sensor=1"],
+            groupby="type",
+            reduce="max",
+            exclude_empty=True,
+        )
+
+
 @pytest.mark.onlynoncluster
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.10.0", "timeseries")

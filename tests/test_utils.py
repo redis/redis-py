@@ -5,6 +5,7 @@ from redis.exceptions import DataError
 from redis.utils import (
     check_protocol_version,
     compare_versions,
+    decode_field_value,
     DEFAULT_RESP_VERSION,
     deprecated_args,
     deprecated_function,
@@ -316,3 +317,32 @@ class TestTruncateText:
         # ``break_long_words`` does not apply to this case), so it drops the word
         # entirely and returns just the placeholder.
         assert truncate_text("a" * 200) == "..."
+
+
+@pytest.mark.fixed_client
+class TestDecodeFieldValue:
+    def test_non_bytes_value_returned_unchanged(self):
+        assert decode_field_value("already-str") == "already-str"
+
+    def test_bytes_default_decoded_to_str(self):
+        assert decode_field_value(b"hi") == "hi"
+
+    def test_per_field_encoding_is_applied(self):
+        result = decode_field_value(
+            b"caf\xe9", key="k", field_encodings={"k": "latin-1"}
+        )
+        assert result == "caf\xe9"
+
+    def test_none_encoding_keeps_raw_bytes(self):
+        assert (
+            decode_field_value(b"raw", key="k", field_encodings={"k": None}) == b"raw"
+        )
+
+    def test_key_absent_from_encodings_uses_default(self):
+        assert (
+            decode_field_value(b"hi", key="x", field_encodings={"k": "utf-8"}) == "hi"
+        )
+
+    def test_undecodable_bytes_use_replacement_character(self):
+        result = decode_field_value(b"\xff", key="k", field_encodings={"k": "utf-8"})
+        assert result == "�"
