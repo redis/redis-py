@@ -144,7 +144,11 @@ class SentinelConnectionPoolProxy:
         raise SlaveNotFoundError(f"No slave found for {self.service_name!r}")
 
     def rotate_replicas(self):
-        "Round-robin replica balancer"
+        """Round-robin replica balancer.
+
+        This is an alias for :py:meth:`rotate_slaves`,
+        using the preferred Redis 5.0+ terminology.
+        """
         return self.rotate_slaves()
 
 
@@ -209,7 +213,11 @@ class SentinelConnectionPool(ConnectionPool):
         return self.proxy.rotate_slaves()
 
     def rotate_replicas(self):
-        "Round-robin replica balancer"
+        """Round-robin replica balancer.
+
+        This is an alias for :py:meth:`rotate_slaves`,
+        using the preferred Redis 5.0+ terminology.
+        """
         return self.rotate_slaves()
 
 
