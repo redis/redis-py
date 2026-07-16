@@ -8,6 +8,7 @@ from .conftest import (
     _get_client,
     assert_resp_response,
     expected_response_shape,
+    skip_if_redis_enterprise,
     skip_ifmodversion_lt,
 )
 
@@ -120,6 +121,9 @@ def test_bf_insert(client):
 
 
 @pytest.mark.redismod
+# BF.SCANDUMP/LOADCHUNK does not complete against Redis Enterprise's bloom module
+# (the scandump cursor loop times out).
+@skip_if_redis_enterprise()
 def test_bf_scandump_and_loadchunk(client):
     # Store a filter
     client.bf().create("myBloom", "0.0001", "1000")

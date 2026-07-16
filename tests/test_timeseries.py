@@ -686,6 +686,124 @@ def test_mrange(client):
         assert {"Test": "This", "team": "ny"} == res["1"][0]
 
 
+def _mrange_returned_keys(client, res):
+    """Return the set of series key names in a TS.MRANGE/MREVRANGE reply,
+    normalizing the RESP2 (list of single-key dicts) and RESP3/unified
+    (dict keyed by name) shapes."""
+    if expects_resp2_shape(client):
+        return {next(iter(entry)) for entry in res}
+    return set(res.keys())
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_mrange_exclude_empty(client):
+    client.ts().create("s", labels={"sensor": "1", "type": "demo"})
+    client.ts().create("t", labels={"sensor": "1", "type": "demo"})
+    client.ts().create("u", labels={"sensor": "1", "type": "demo"})
+    client.ts().madd(
+        [
+            ("s", 100, 100),
+            ("t", 100, 100),
+            ("s", 200, 200),
+            ("t", 300, 300),
+            ("s", 400, 400),
+            ("t", 400, 400),
+            ("u", 2000, 2000),
+        ]
+    )
+
+    # Without EXCLUDEEMPTY, "u" matches the filter but has no samples in range.
+    res = client.ts().mrange("-", 500, filters=["sensor=1"])
+    assert {"s", "t", "u"} == _mrange_returned_keys(client, res)
+
+    # With EXCLUDEEMPTY, "u" is omitted from the top-level reply.
+    res = client.ts().mrange("-", 500, filters=["sensor=1"], exclude_empty=True)
+    assert {"s", "t"} == _mrange_returned_keys(client, res)
+
+    # Composing with WITHLABELS should not change the exclusion behavior.
+    res = client.ts().mrange(
+        "-", 500, filters=["sensor=1"], with_labels=True, exclude_empty=True
+    )
+    assert {"s", "t"} == _mrange_returned_keys(client, res)
+
+    # Composing with AGGREGATION should still omit the empty series.
+    res = client.ts().mrange(
+        "-",
+        500,
+        filters=["sensor=1"],
+        aggregation_type="min",
+        bucket_size_msec=100,
+        exclude_empty=True,
+    )
+    assert {"s", "t"} == _mrange_returned_keys(client, res)
+
+    # When every matching series is empty, no series is reported (an empty
+    # top-level reply; shape is [] in RESP2 and {} in RESP3).
+    res = client.ts().mrange(1, 50, filters=["sensor=1"], exclude_empty=True)
+    assert 0 == len(res)
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_mrevrange_exclude_empty(client):
+    client.ts().create("s", labels={"sensor": "1", "type": "demo"})
+    client.ts().create("t", labels={"sensor": "1", "type": "demo"})
+    client.ts().create("u", labels={"sensor": "1", "type": "demo"})
+    client.ts().madd(
+        [
+            ("s", 100, 100),
+            ("t", 100, 100),
+            ("s", 200, 200),
+            ("t", 300, 300),
+            ("s", 400, 400),
+            ("t", 400, 400),
+            ("u", 2000, 2000),
+        ]
+    )
+
+    res = client.ts().mrevrange("-", 500, filters=["sensor=1"])
+    assert {"s", "t", "u"} == _mrange_returned_keys(client, res)
+
+    res = client.ts().mrevrange("-", 500, filters=["sensor=1"], exclude_empty=True)
+    assert {"s", "t"} == _mrange_returned_keys(client, res)
+
+    # All matching series empty -> empty top-level reply ([] in RESP2, {} in RESP3).
+    res = client.ts().mrevrange(1, 50, filters=["sensor=1"], exclude_empty=True)
+    assert 0 == len(res)
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+def test_mrange_exclude_empty_with_groupby_raises(client):
+    # EXCLUDEEMPTY is mutually exclusive with GROUPBY. This is validated
+    # client-side, so it does not require server support.
+    with pytest.raises(
+        redis.DataError, match="EXCLUDEEMPTY is not allowed with GROUPBY"
+    ):
+        client.ts().mrange(
+            "-",
+            500,
+            filters=["sensor=1"],
+            groupby="type",
+            reduce="max",
+            exclude_empty=True,
+        )
+    with pytest.raises(
+        redis.DataError, match="EXCLUDEEMPTY is not allowed with GROUPBY"
+    ):
+        client.ts().mrevrange(
+            "-",
+            500,
+            filters=["sensor=1"],
+            groupby="type",
+            reduce="max",
+            exclude_empty=True,
+        )
+
+
 @pytest.mark.onlynoncluster
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.10.0", "timeseries")
