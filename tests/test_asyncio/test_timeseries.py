@@ -365,6 +365,94 @@ async def test_rev_range(decoded_r: redis.Redis):
     )
 
 
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_read(decoded_r: redis.Redis):
+    await decoded_r.ts().create(1)
+    await decoded_r.ts().add(1, 100, 1.0)
+    await decoded_r.ts().add(1, 200, 2.0)
+    await decoded_r.ts().add(1, 300, 3.0)
+
+    # Read everything at or after the cursor. TS.READ always returns the same
+    # unified sample shape (list of [timestamp, value]) regardless of protocol.
+    assert await decoded_r.ts().read(1, 0) == [[100, 1.0], [200, 2.0], [300, 3.0]]
+
+    # The cursor is inclusive.
+    assert await decoded_r.ts().read(1, 200) == [[200, 2.0], [300, 3.0]]
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_read_max_count(decoded_r: redis.Redis):
+    await decoded_r.ts().create(1)
+    await decoded_r.ts().add(1, 100, 1.0)
+    await decoded_r.ts().add(1, 200, 2.0)
+    await decoded_r.ts().add(1, 300, 3.0)
+
+    # Bounded paging: read the oldest max_count, then page from last_ts + 1.
+    assert await decoded_r.ts().read(1, "-", max_count=2) == [[100, 1.0], [200, 2.0]]
+    assert await decoded_r.ts().read(1, 201, max_count=2) == [[300, 3.0]]
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_read_sentinels(decoded_r: redis.Redis):
+    await decoded_r.ts().create(1)
+    await decoded_r.ts().add(1, 100, 1.0)
+    await decoded_r.ts().add(1, 200, 2.0)
+    await decoded_r.ts().add(1, 300, 3.0)
+
+    # `+` resolves to the latest sample, inclusive; returned even without BLOCK.
+    assert await decoded_r.ts().read(1, "+") == [[300, 3.0]]
+
+    # `-` reads from the earliest sample.
+    assert len(await decoded_r.ts().read(1, "-")) == 3
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_read_empty(decoded_r: redis.Redis):
+    await decoded_r.ts().create(1)
+    await decoded_r.ts().add(1, 100, 1.0)
+
+    # A cursor past the newest sample yields an empty (successful) reply.
+    assert [] == await decoded_r.ts().read(1, 301)
+    # A missing key is also an empty reply, not an error.
+    assert [] == await decoded_r.ts().read("missing", 0)
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_read_block(decoded_r: redis.Redis):
+    await decoded_r.ts().create(1)
+    await decoded_r.ts().add(1, 100, 1.0)
+    await decoded_r.ts().add(1, 200, 2.0)
+    await decoded_r.ts().add(1, 300, 3.0)
+
+    # min_count is already met, so the blocking call returns immediately.
+    res = await decoded_r.ts().read(1, 0, block_milliseconds=1000, block_min_count=1)
+    assert len(res) == 3
+
+    # min_count cannot be reached; after the timeout the available samples flush.
+    res = await decoded_r.ts().read(1, 101, block_milliseconds=100, block_min_count=10)
+    assert res == [[200, 2.0], [300, 3.0]]
+
+    # A blocking timeout with nothing available is a successful empty reply.
+    assert [] == await decoded_r.ts().read(
+        1, 301, block_milliseconds=100, block_min_count=1
+    )
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_read_block_min_count_requires_milliseconds(decoded_r: redis.Redis):
+    # BLOCK is all-or-nothing: min_count without milliseconds is invalid usage.
+    with pytest.raises(
+        redis.DataError, match="block_min_count requires block_milliseconds"
+    ):
+        await decoded_r.ts().read(1, 0, block_min_count=5)
+
+
 @pytest.mark.onlynoncluster
 @pytest.mark.redismod
 async def test_multi_range(decoded_r: redis.Redis):
@@ -425,6 +513,130 @@ async def test_multi_range(decoded_r: redis.Redis):
         )
         assert res is not None
         assert {"Test": "This", "team": "ny"} == res[KEY1][0]
+
+
+def _mrange_returned_keys(decoded_r, res):
+    """Return the set of series key names in a TS.MRANGE/MREVRANGE reply,
+    normalizing the RESP2 (list of single-key dicts) and RESP3/unified
+    (dict keyed by name) shapes."""
+    if expects_resp2_shape(decoded_r):
+        return {next(iter(entry)) for entry in res}
+    return set(res.keys())
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_mrange_exclude_empty(decoded_r: redis.Redis):
+    await decoded_r.ts().create("s", labels={"sensor": "1", "type": "demo"})
+    await decoded_r.ts().create("t", labels={"sensor": "1", "type": "demo"})
+    await decoded_r.ts().create("u", labels={"sensor": "1", "type": "demo"})
+    await decoded_r.ts().madd(
+        [
+            ("s", 100, 100),
+            ("t", 100, 100),
+            ("s", 200, 200),
+            ("t", 300, 300),
+            ("s", 400, 400),
+            ("t", 400, 400),
+            ("u", 2000, 2000),
+        ]
+    )
+
+    # Without EXCLUDEEMPTY, "u" matches the filter but has no samples in range.
+    res = await decoded_r.ts().mrange("-", 500, filters=["sensor=1"])
+    assert {"s", "t", "u"} == _mrange_returned_keys(decoded_r, res)
+
+    # With EXCLUDEEMPTY, "u" is omitted from the top-level reply.
+    res = await decoded_r.ts().mrange(
+        "-", 500, filters=["sensor=1"], exclude_empty=True
+    )
+    assert {"s", "t"} == _mrange_returned_keys(decoded_r, res)
+
+    # Composing with WITHLABELS should not change the exclusion behavior.
+    res = await decoded_r.ts().mrange(
+        "-", 500, filters=["sensor=1"], with_labels=True, exclude_empty=True
+    )
+    assert {"s", "t"} == _mrange_returned_keys(decoded_r, res)
+
+    # Composing with AGGREGATION should still omit the empty series.
+    res = await decoded_r.ts().mrange(
+        "-",
+        500,
+        filters=["sensor=1"],
+        aggregation_type="min",
+        bucket_size_msec=100,
+        exclude_empty=True,
+    )
+    assert {"s", "t"} == _mrange_returned_keys(decoded_r, res)
+
+    # When every matching series is empty, no series is reported (an empty
+    # top-level reply; shape is [] in RESP2 and {} in RESP3).
+    res = await decoded_r.ts().mrange(1, 50, filters=["sensor=1"], exclude_empty=True)
+    assert 0 == len(res)
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_mrevrange_exclude_empty(decoded_r: redis.Redis):
+    await decoded_r.ts().create("s", labels={"sensor": "1", "type": "demo"})
+    await decoded_r.ts().create("t", labels={"sensor": "1", "type": "demo"})
+    await decoded_r.ts().create("u", labels={"sensor": "1", "type": "demo"})
+    await decoded_r.ts().madd(
+        [
+            ("s", 100, 100),
+            ("t", 100, 100),
+            ("s", 200, 200),
+            ("t", 300, 300),
+            ("s", 400, 400),
+            ("t", 400, 400),
+            ("u", 2000, 2000),
+        ]
+    )
+
+    res = await decoded_r.ts().mrevrange("-", 500, filters=["sensor=1"])
+    assert {"s", "t", "u"} == _mrange_returned_keys(decoded_r, res)
+
+    res = await decoded_r.ts().mrevrange(
+        "-", 500, filters=["sensor=1"], exclude_empty=True
+    )
+    assert {"s", "t"} == _mrange_returned_keys(decoded_r, res)
+
+    # All matching series empty -> empty top-level reply ([] in RESP2, {} in RESP3).
+    res = await decoded_r.ts().mrevrange(
+        1, 50, filters=["sensor=1"], exclude_empty=True
+    )
+    assert 0 == len(res)
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+async def test_mrange_exclude_empty_with_groupby_raises(decoded_r: redis.Redis):
+    # EXCLUDEEMPTY is mutually exclusive with GROUPBY. This is validated
+    # client-side, so it does not require server support.
+    with pytest.raises(
+        redis.DataError, match="EXCLUDEEMPTY is not allowed with GROUPBY"
+    ):
+        await decoded_r.ts().mrange(
+            "-",
+            500,
+            filters=["sensor=1"],
+            groupby="type",
+            reduce="max",
+            exclude_empty=True,
+        )
+    with pytest.raises(
+        redis.DataError, match="EXCLUDEEMPTY is not allowed with GROUPBY"
+    ):
+        await decoded_r.ts().mrevrange(
+            "-",
+            500,
+            filters=["sensor=1"],
+            groupby="type",
+            reduce="max",
+            exclude_empty=True,
+        )
 
 
 @pytest.mark.onlynoncluster

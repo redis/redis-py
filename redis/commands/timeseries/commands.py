@@ -33,6 +33,7 @@ NRANGE_CMD = "TS.NRANGE"
 NREVRANGE_CMD = "TS.NREVRANGE"
 QUERYINDEX_CMD = "TS.QUERYINDEX"
 RANGE_CMD = "TS.RANGE"
+READ_CMD = "TS.READ"
 REVRANGE_CMD = "TS.REVRANGE"
 
 
@@ -996,6 +997,93 @@ class TimeSeriesCommands:
         )
         return self.execute_command(REVRANGE_CMD, *params, keys=[key])
 
+    @overload
+    def read(
+        self: SyncClientProtocol,
+        key: KeyT,
+        timestamp: int | str,
+        block_milliseconds: int | None = None,
+        block_min_count: int | None = None,
+        max_count: int | None = None,
+    ) -> TimeSeriesRangeResponse: ...
+
+    @overload
+    def read(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        timestamp: int | str,
+        block_milliseconds: int | None = None,
+        block_min_count: int | None = None,
+        max_count: int | None = None,
+    ) -> Awaitable[TimeSeriesRangeResponse]: ...
+
+    def read(
+        self,
+        key: KeyT,
+        timestamp: int | str,
+        block_milliseconds: int | None = None,
+        block_min_count: int | None = None,
+        max_count: int | None = None,
+    ) -> TimeSeriesRangeResponse | Awaitable[TimeSeriesRangeResponse]:
+        """
+        Read a batch of samples with timestamps at or after `timestamp`, in
+        ascending timestamp order.
+
+        Without blocking, returns immediately with whatever qualifies (possibly an
+        empty list). With the `block_milliseconds` group, waits until at least
+        `block_min_count` qualifying samples exist or until the timeout elapses.
+        This allows consuming historical and newly-appended samples continuously,
+        in batches, without polling `TS.RANGE`.
+
+        For more information see https://redis.io/commands/ts.read/
+
+        Args:
+            key:
+                Key name for the time series (a regular series or a compaction
+                destination).
+            timestamp:
+                Inclusive cursor. Samples with `timestamp >= timestamp` qualify.
+                A non-negative integer (Unix milliseconds, `0` reads from the
+                beginning) or one of the sentinels `-` (earliest), `+` (latest
+                existing sample, inclusive) or `$` (only samples added after the
+                command is received). Sentinels are sent to the server as-is and
+                resolved server-side; `$` is only meaningful together with
+                `block_milliseconds`, since nothing can qualify at execution time
+                without blocking.
+            block_milliseconds:
+                Opt into blocking. Maximum time to wait, in whole milliseconds;
+                a non-negative integer where `0` means wait indefinitely. When
+                `None` (default) the command does not block.
+            block_min_count:
+                The unblock threshold: the call returns once this many samples
+                qualify. A positive integer, defaulting to `1` when blocking is
+                requested. Only used when `block_milliseconds` is set; the value is
+                always emitted on the wire inside the BLOCK group.
+            max_count:
+                Reply cap, a positive integer. When more samples qualify than
+                `max_count`, the oldest `max_count` are returned so callers can page
+                forward. `None` (default) means unlimited.
+
+        Returns:
+            A list of `[timestamp, value]` samples in ascending timestamp order.
+            An empty list is a successful reply (returned when nothing qualifies,
+            or when a blocking call times out with nothing available).
+
+        .. warning::
+            A blocking call keeps the connection parked for up to
+            `block_milliseconds`. The client's `socket_timeout` still applies: with
+            the default (5 seconds) a longer block raises `TimeoutError` before the
+            server replies. When using `block_milliseconds`, configure the client
+            with a `socket_timeout` larger than the block window (or `None`), as with
+            other blocking commands. This command must not be retried automatically
+            after an empty or partial reply.
+        """
+        params: list[EncodableT] = [key, timestamp]
+        self._append_block(params, block_milliseconds, block_min_count)
+        self._append_max_count(params, max_count)
+
+        return self.execute_command(READ_CMD, *params, keys=[key])
+
     def __n_range_params(
         self,
         keys: List[KeyT],
@@ -1304,6 +1392,7 @@ class TimeSeriesCommands:
         latest: bool | None,
         bucket_timestamp: str | None,
         empty: bool | None,
+        exclude_empty: bool | None,
     ):
         """Create TS.MRANGE and TS.MREVRANGE arguments."""
         if (
@@ -1314,6 +1403,8 @@ class TimeSeriesCommands:
             raise DataError(
                 "GROUPBY is not allowed when multiple aggregators are specified"
             )
+        if exclude_empty and groupby is not None:
+            raise DataError("EXCLUDEEMPTY is not allowed with GROUPBY")
         params: list[EncodableT] = [from_time, to_time]
         self._append_latest(params, latest)
         self._append_filer_by_ts(params, filter_by_ts)
@@ -1324,6 +1415,7 @@ class TimeSeriesCommands:
         self._append_aggregation(params, aggregation_type, bucket_size_msec)
         self._append_bucket_timestamp(params, bucket_timestamp)
         self._append_empty(params, empty)
+        self._append_exclude_empty(params, exclude_empty)
         params.extend(["FILTER"])
         params += filters
         self._append_groupby_reduce(params, groupby, reduce)
@@ -1349,6 +1441,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> TimeSeriesMRangeResponse: ...
 
     @overload
@@ -1371,6 +1464,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> Awaitable[TimeSeriesMRangeResponse]: ...
 
     def mrange(
@@ -1392,6 +1486,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> TimeSeriesMRangeResponse | Awaitable[TimeSeriesMRangeResponse]:
         """
         Query a range across multiple time-series by filters in forward direction.
@@ -1448,6 +1543,9 @@ class TimeSeriesCommands:
                 `+`, `high`, `~`, `mid`].
             empty:
                 Reports aggregations for empty buckets.
+            exclude_empty:
+                Omit matching series whose reported samples array is empty for the
+                queried range and options. Must not be combined with `groupby`.
         """
         params = self.__mrange_params(
             aggregation_type,
@@ -1467,6 +1565,7 @@ class TimeSeriesCommands:
             latest,
             bucket_timestamp,
             empty,
+            exclude_empty,
         )
 
         return self.execute_command(
@@ -1493,6 +1592,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> TimeSeriesMRangeResponse: ...
 
     @overload
@@ -1515,6 +1615,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> Awaitable[TimeSeriesMRangeResponse]: ...
 
     def mrevrange(
@@ -1536,6 +1637,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> TimeSeriesMRangeResponse | Awaitable[TimeSeriesMRangeResponse]:
         """
         Query a range across multiple time-series by filters in reverse direction.
@@ -1592,6 +1694,9 @@ class TimeSeriesCommands:
                 `+`, `high`, `~`, `mid`].
             empty:
                 Reports aggregations for empty buckets.
+            exclude_empty:
+                Omit matching series whose reported samples array is empty for the
+                queried range and options. Must not be combined with `groupby`.
         """
         params = self.__mrange_params(
             aggregation_type,
@@ -1611,6 +1716,7 @@ class TimeSeriesCommands:
             latest,
             bucket_timestamp,
             empty,
+            exclude_empty,
         )
 
         return self.execute_command(
@@ -1786,6 +1892,35 @@ class TimeSeriesCommands:
             params.extend(["COUNT", count])
 
     @staticmethod
+    def _append_block(
+        params: list[EncodableT],
+        block_milliseconds: int | None,
+        block_min_count: int | None,
+    ):
+        """Append the BLOCK group to params.
+
+        The BLOCK group is all-or-nothing: when blocking is requested
+        (`block_milliseconds` is set), both `milliseconds` and `min_count` are
+        always emitted, with `min_count` defaulting to 1. There is no standalone
+        MIN_COUNT keyword in this command.
+        """
+        if block_milliseconds is None:
+            if block_min_count is not None:
+                raise DataError(
+                    "block_min_count requires block_milliseconds to be set; the "
+                    "BLOCK group is all-or-nothing."
+                )
+            return
+        min_count = 1 if block_min_count is None else block_min_count
+        params.extend(["BLOCK", block_milliseconds, min_count])
+
+    @staticmethod
+    def _append_max_count(params: list[EncodableT], max_count: int | None):
+        """Append MAX_COUNT property to params."""
+        if max_count is not None:
+            params.extend(["MAX_COUNT", max_count])
+
+    @staticmethod
     def _append_timestamp(params: list[EncodableT], timestamp: int | None):
         """Append TIMESTAMP property to params."""
         if timestamp is not None:
@@ -1892,6 +2027,12 @@ class TimeSeriesCommands:
         """Append EMPTY property to params."""
         if empty:
             params.append("EMPTY")
+
+    @staticmethod
+    def _append_exclude_empty(params: list[EncodableT], exclude_empty: bool | None):
+        """Append EXCLUDEEMPTY property to params."""
+        if exclude_empty:
+            params.append("EXCLUDEEMPTY")
 
     @staticmethod
     def _append_insertion_filters(

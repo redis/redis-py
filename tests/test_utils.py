@@ -2,13 +2,19 @@ from datetime import datetime
 import warnings
 import pytest
 from redis.utils import (
-    DEFAULT_RESP_VERSION,
     check_protocol_version,
     compare_versions,
-    deprecated_function,
+    decode_field_value,
+    DEFAULT_RESP_VERSION,
     deprecated_args,
-    experimental_method,
+    deprecated_function,
+    ensure_string,
     experimental_args,
+    experimental_method,
+    format_error_message,
+    safe_str,
+    SENTINEL,
+    str_if_bytes,
 )
 
 
@@ -52,6 +58,11 @@ class TestCheckProtocolVersion:
         assert check_protocol_version(None, DEFAULT_RESP_VERSION) is True
         other = 2 if DEFAULT_RESP_VERSION == 3 else 3
         assert check_protocol_version(None, other) is False
+
+    def test_sentinel_resolves_to_default(self):
+        assert check_protocol_version(SENTINEL, DEFAULT_RESP_VERSION) is True
+        other = 2 if DEFAULT_RESP_VERSION == 3 else 3
+        assert check_protocol_version(SENTINEL, other) is False
 
     @pytest.mark.parametrize("protocol", [3, "3"])
     def test_resp3_matches(self, protocol):
@@ -184,3 +195,86 @@ class TestExperimentalArgs:
             result = func_no_args()
             assert result == "no_args"
             assert len(w) == 0
+
+
+@pytest.mark.fixed_client
+class TestStrIfBytes:
+    def test_decodes_bytes(self):
+        assert str_if_bytes(b"hello") == "hello"
+
+    def test_passes_str_through(self):
+        assert str_if_bytes("hello") == "hello"
+
+    def test_replaces_invalid_utf8(self):
+        # Undecodable bytes are replaced rather than raising.
+        assert str_if_bytes(b"\xff") == "�"
+
+
+@pytest.mark.fixed_client
+class TestSafeStr:
+    def test_stringifies_non_string_values(self):
+        assert safe_str(123) == "123"
+        assert safe_str(None) == "None"
+
+    def test_decodes_bytes_first(self):
+        assert safe_str(b"ab") == "ab"
+
+
+@pytest.mark.fixed_client
+class TestEnsureString:
+    def test_decodes_bytes(self):
+        assert ensure_string(b"key") == "key"
+
+    def test_passes_str_through(self):
+        assert ensure_string("key") == "key"
+
+    def test_rejects_other_types(self):
+        with pytest.raises(TypeError, match="string or bytes"):
+            ensure_string(5)
+
+
+@pytest.mark.fixed_client
+class TestFormatErrorMessage:
+    def test_no_args(self):
+        assert format_error_message("host:1", Exception()) == (
+            "Error connecting to host:1."
+        )
+
+    def test_single_arg(self):
+        assert format_error_message("host:1", Exception("boom")) == (
+            "Error boom connecting to host:1."
+        )
+
+    def test_two_args(self):
+        assert format_error_message("host:1", Exception("code", "detail")) == (
+            "Error code connecting to host:1. detail."
+        )
+
+
+@pytest.mark.fixed_client
+class TestDecodeFieldValue:
+    def test_non_bytes_value_returned_unchanged(self):
+        assert decode_field_value("already-str") == "already-str"
+
+    def test_bytes_default_decoded_to_str(self):
+        assert decode_field_value(b"hi") == "hi"
+
+    def test_per_field_encoding_is_applied(self):
+        result = decode_field_value(
+            b"caf\xe9", key="k", field_encodings={"k": "latin-1"}
+        )
+        assert result == "caf\xe9"
+
+    def test_none_encoding_keeps_raw_bytes(self):
+        assert (
+            decode_field_value(b"raw", key="k", field_encodings={"k": None}) == b"raw"
+        )
+
+    def test_key_absent_from_encodings_uses_default(self):
+        assert (
+            decode_field_value(b"hi", key="x", field_encodings={"k": "utf-8"}) == "hi"
+        )
+
+    def test_undecodable_bytes_use_replacement_character(self):
+        result = decode_field_value(b"\xff", key="k", field_encodings={"k": "utf-8"})
+        assert result == "�"

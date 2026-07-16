@@ -534,6 +534,8 @@ class TestRedisCommands:
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
+    # Redis Enterprise manages ACLs itself and disallows ACL SETUSER here.
+    @skip_if_redis_enterprise()
     def test_acl_modules_commands(self, r, request):
         default_username = "default"
         username = "redis-py-user"
@@ -597,6 +599,8 @@ class TestRedisCommands:
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
+    # Redis Enterprise manages ACLs itself and disallows ACL SETUSER here.
+    @skip_if_redis_enterprise()
     def test_acl_modules_category_commands(self, r, request):
         default_username = "default"
         username = "redis-py-user"
@@ -678,6 +682,9 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
+    # Redis Enterprise fronts the database with a proxy, so CLIENT LIST does not
+    # report the same per-connection client set.
+    @skip_if_redis_enterprise()
     def test_client_list_client_id(self, r, request):
         clients = r.client_list()
         clients = r.client_list(client_id=[clients[0]["id"]])
@@ -752,6 +759,9 @@ class TestRedisCommands:
         )
 
     @skip_if_server_version_lt("7.2.0")
+    # Exercises a default localhost client for the deprecated lib_name/lib_version
+    # params, which cannot target a remote managed Redis Enterprise endpoint.
+    @skip_if_redis_enterprise()
     def test_client_setinfo(self, r: redis.Redis):
         from redis.utils import get_lib_version
 
@@ -773,6 +783,9 @@ class TestRedisCommands:
         assert info["lib-ver"] == "1234"
 
     @skip_if_server_version_lt("7.2.0")
+    # Exercises a default localhost client, which cannot target a remote managed
+    # Redis Enterprise endpoint.
+    @skip_if_redis_enterprise()
     def test_client_setinfo_with_driver_info(self, r: redis.Redis):
         from redis import DriverInfo
         from redis.utils import get_lib_version
@@ -962,6 +975,8 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
+    # Redis Enterprise does not allow the CLIENT NO-EVICT admin command.
+    @skip_if_redis_enterprise()
     def test_client_no_evict(self, r):
         assert r.client_no_evict("ON")
         with pytest.raises(TypeError):
@@ -1008,6 +1023,8 @@ class TestRedisCommands:
         # assert data['maxmemory'].isdigit()
 
     @skip_if_server_version_lt("7.0.0")
+    # Redis Enterprise does not expose the same CONFIG GET parameter set (e.g. maxmemory).
+    @skip_if_redis_enterprise()
     def test_config_get_multi_params(self, r: redis.Redis):
         res = r.config_get("*max-*-entries*", "maxmemory")
         assert "maxmemory" in res
@@ -1042,6 +1059,8 @@ class TestRedisCommands:
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
+    # Redis Enterprise exposes a different module CONFIG surface (e.g. search-timeout).
+    @skip_if_redis_enterprise()
     def test_config_get_for_modules(self, r: redis.Redis):
         search_module_configs = r.config_get("search-*")
         assert "search-timeout" in search_module_configs
@@ -1057,6 +1076,8 @@ class TestRedisCommands:
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
+    # FT.CONFIG is not available on Redis Enterprise (managed search config).
+    @skip_if_redis_enterprise()
     def test_config_set_for_search_module(self, r: redis.Redis):
         initial_default_search_dialect = r.config_get("*")["search-default-dialect"]
         try:
@@ -1114,6 +1135,8 @@ class TestRedisCommands:
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
+    # Redis Enterprise reports a different INFO modules section shape.
+    @skip_if_redis_enterprise()
     def test_info_with_modules(self, r: redis.Redis):
         res = r.info(section="everything")
         assert "modules" in res
@@ -1187,6 +1210,8 @@ class TestRedisCommands:
         assert r.select(9)
 
     @pytest.mark.onlynoncluster
+    # Redis Enterprise's SLOWLOG GET entries omit the client_address field.
+    @skip_if_redis_enterprise()
     def test_slowlog_get(self, r, slowlog):
         assert r.slowlog_reset()
         unicode_string = chr(3456) + "abcd" + chr(3421)
@@ -1817,6 +1842,9 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
+    # Redis Enterprise exposes a single logical database, so copying across DB
+    # indexes is not supported.
+    @skip_if_redis_enterprise()
     def test_copy_to_another_database(self, request):
         r0 = _get_client(redis.Redis, request, db=0)
         r1 = _get_client(redis.Redis, request, db=1)
@@ -4300,6 +4328,21 @@ class TestRedisCommands:
         assert r.sdiff("a", "b") == {b"1"}
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    def test_sdiffcard(self, r):
+        r.sadd("s0", "a", "b", "c", "d", "e")
+        r.sadd("s1", "c", "d", "x")
+        r.sadd("s2", "e", "y")
+        # exact difference cardinality: {a, b}
+        assert r.sdiffcard(3, ["s0", "s1", "s2"]) == 2
+        # limited difference cardinality is capped at limit
+        assert r.sdiffcard(3, ["s0", "s1", "s2"], limit=1) == 1
+        # a missing subtrahend key does not affect the result
+        assert r.sdiffcard(2, ["s0", "missing"]) == 5
+        # a missing first key yields 0
+        assert r.sdiffcard(2, ["missing", "s0"]) == 0
+
+    @pytest.mark.onlynoncluster
     def test_sdiffstore(self, r):
         r.sadd("a", "1", "2", "3")
         assert r.sdiffstore("c", "a", "b") == 3
@@ -4401,6 +4444,22 @@ class TestRedisCommands:
         r.sadd("a", "1", "2")
         r.sadd("b", "2", "3")
         assert set(r.sunion("a", "b")) == {b"1", b"2", b"3"}
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    def test_sunioncard(self, r):
+        r.sadd("s1", "a", "b", "c")
+        r.sadd("s2", "c", "d")
+        # exact union cardinality: {a, b, c, d}
+        assert r.sunioncard(2, ["s1", "s2"]) == 4
+        # approximate union cardinality (still an integer reply)
+        assert r.sunioncard(2, ["s1", "s2"], approx=True) == 4
+        # a missing key is treated as an empty set
+        assert r.sunioncard(2, ["s1", "missing"]) == 3
+        # limited union cardinality is capped at limit in exact mode
+        assert r.sunioncard(2, ["s1", "s2"], limit=3) == 3
+        # APPROX combined with LIMIT does not exceed limit
+        assert r.sunioncard(2, ["s1", "s2"], limit=3, approx=True) <= 3
 
     @pytest.mark.onlynoncluster
     def test_sunionstore(self, r):
@@ -7131,6 +7190,112 @@ class TestRedisCommands:
         # xread starting at the last message returns an empty list
         assert_resp_response(r, r.xread(streams={stream: m2}), [], {})
 
+    def _total_stream_entries(self, r, response):
+        """Count entries across all streams regardless of response shape."""
+        shape = expected_response_shape(r)
+        if shape == "legacy_resp2":
+            return sum(len(item[1]) for item in response)
+        elif shape == "legacy_resp3":
+            return sum(len(entries[0]) for entries in response.values())
+        else:
+            return sum(len(entries) for entries in response.values())
+
+    def test_xread_max_count_max_size_validation(self, r):
+        with pytest.raises(DataError):
+            r.xread(streams={"stream": 0}, max_count=0)
+        with pytest.raises(DataError):
+            r.xread(streams={"stream": 0}, max_count=-1)
+        with pytest.raises(DataError):
+            r.xread(streams={"stream": 0}, max_size=0)
+        # max_count must be >= count when both are provided
+        with pytest.raises(DataError):
+            r.xread(streams={"stream": 0}, count=5, max_count=3)
+
+    @skip_if_server_version_lt("8.9.0")
+    def test_xread_with_max_count(self, r):
+        stream = "stream"
+        for i in range(5):
+            r.xadd(stream, {"f": i})
+
+        # max_count caps the total number of returned entries
+        res = r.xread(streams={stream: 0}, max_count=2)
+        assert self._total_stream_entries(r, res) == 2
+
+    @skip_if_server_version_lt("8.9.0")
+    def test_xread_with_max_size(self, r):
+        stream = "stream"
+        r.xadd(stream, {"f": "v"})
+
+        # a generous soft cap returns the available entry
+        res = r.xread(streams={stream: 0}, max_size=65536)
+        assert self._total_stream_entries(r, res) == 1
+
+        # max_size is a soft cap: a single available entry that exceeds the cap
+        # is still returned rather than suppressed
+        res = r.xread(streams={stream: 0}, max_size=1)
+        assert self._total_stream_entries(r, res) == 1
+
+    @skip_if_server_version_lt("8.9.0")
+    def test_xread_max_count_cumulative_across_streams(self, r):
+        stream_1 = "stream1:{maxcount}"
+        stream_2 = "stream2:{maxcount}"
+        for i in range(3):
+            r.xadd(stream_1, {"f": i})
+        for i in range(3):
+            r.xadd(stream_2, {"f": i})
+
+        # count is per-stream (up to 3 each), max_count caps the cumulative
+        # reply; streams are served in caller order, so stream_1 contributes 3
+        # and stream_2 contributes 1
+        res = r.xread(streams={stream_1: 0, stream_2: 0}, count=3, max_count=4)
+        assert self._total_stream_entries(r, res) == 4
+
+    def test_xreadgroup_max_count_max_size_validation(self, r):
+        with pytest.raises(DataError):
+            r.xreadgroup("g", "c", streams={"stream": ">"}, max_count=0)
+        with pytest.raises(DataError):
+            r.xreadgroup("g", "c", streams={"stream": ">"}, max_size=-1)
+        with pytest.raises(DataError):
+            r.xreadgroup("g", "c", streams={"stream": ">"}, count=5, max_count=3)
+
+    @skip_if_server_version_lt("8.9.0")
+    def test_xreadgroup_with_max_count(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        for i in range(5):
+            r.xadd(stream, {"f": i})
+        r.xgroup_create(stream, group, 0)
+
+        # max_count caps the total number of returned entries
+        res = r.xreadgroup(group, consumer, streams={stream: ">"}, max_count=2)
+        assert self._total_stream_entries(r, res) == 2
+        r.xgroup_destroy(stream, group)
+
+    @skip_if_server_version_lt("8.9.0")
+    def test_xreadgroup_max_count_cumulative_across_streams(self, r):
+        stream_1 = "stream1:{grpmaxcount}"
+        stream_2 = "stream2:{grpmaxcount}"
+        group = "group"
+        consumer = "consumer"
+        for i in range(3):
+            r.xadd(stream_1, {"f": i})
+        for i in range(3):
+            r.xadd(stream_2, {"f": i})
+        r.xgroup_create(stream_1, group, 0)
+        r.xgroup_create(stream_2, group, 0)
+
+        res = r.xreadgroup(
+            group,
+            consumer,
+            streams={stream_1: ">", stream_2: ">"},
+            count=3,
+            max_count=4,
+        )
+        assert self._total_stream_entries(r, res) == 4
+        r.xgroup_destroy(stream_1, group)
+        r.xgroup_destroy(stream_2, group)
+
     @skip_if_server_version_lt("5.0.0")
     def test_xreadgroup(self, r):
         stream = "stream"
@@ -8048,12 +8213,16 @@ class TestRedisCommands:
         with pytest.raises(NotImplementedError):
             r.latency_doctor()
 
+    # Redis Enterprise restricts the LATENCY admin subcommands.
+    @skip_if_redis_enterprise()
     def test_latency_history(self, r: redis.Redis):
         assert r.latency_history("command") == []
 
+    @skip_if_redis_enterprise()
     def test_latency_latest(self, r: redis.Redis):
         assert r.latency_latest() == []
 
+    @skip_if_redis_enterprise()
     def test_latency_reset(self, r: redis.Redis):
         assert r.latency_reset() == 0
 
@@ -8239,6 +8408,9 @@ class TestRedisCommands:
         assert b"FULLRESYNC" in res
 
     @pytest.mark.onlynoncluster
+    # Timing-sensitive regression test that needs a co-located low-latency server;
+    # it is unreliable against a remote managed Redis Enterprise endpoint.
+    @skip_if_redis_enterprise()
     def test_interrupted_command(self, r: redis.Redis):
         """
         Regression test for issue #1128:  An Un-handled BaseException
