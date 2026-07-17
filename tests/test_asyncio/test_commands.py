@@ -616,6 +616,12 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             await r.client_kill_filter(_type="caster")  # type: ignore
 
+    async def test_client_kill_filter_accepts_replica_type(self, r: redis.Redis):
+        with patch.object(r, "execute_command", AsyncMock(return_value=1)) as command:
+            assert await r.client_kill_filter(_type="REPLICA") == 1
+
+        command.assert_awaited_once_with("CLIENT KILL", b"TYPE", "REPLICA")
+
     @skip_if_server_version_lt("2.8.12")
     @pytest.mark.onlynoncluster
     async def test_client_kill_filter_by_id(self, r: redis.Redis, r2):

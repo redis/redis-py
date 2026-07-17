@@ -836,6 +836,12 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             r.client_kill_filter(_type="caster")
 
+    def test_client_kill_filter_accepts_replica_type(self, r):
+        with mock.patch.object(r, "execute_command", return_value=1) as execute_command:
+            assert r.client_kill_filter(_type="REPLICA") == 1
+
+        execute_command.assert_called_once_with("CLIENT KILL", b"TYPE", "REPLICA")
+
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.12")
     def test_client_kill_filter_by_id(self, r, r2):
