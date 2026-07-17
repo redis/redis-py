@@ -1392,6 +1392,7 @@ class TimeSeriesCommands:
         latest: bool | None,
         bucket_timestamp: str | None,
         empty: bool | None,
+        exclude_empty: bool | None,
     ):
         """Create TS.MRANGE and TS.MREVRANGE arguments."""
         if (
@@ -1402,6 +1403,8 @@ class TimeSeriesCommands:
             raise DataError(
                 "GROUPBY is not allowed when multiple aggregators are specified"
             )
+        if exclude_empty and groupby is not None:
+            raise DataError("EXCLUDEEMPTY is not allowed with GROUPBY")
         params: list[EncodableT] = [from_time, to_time]
         self._append_latest(params, latest)
         self._append_filer_by_ts(params, filter_by_ts)
@@ -1412,6 +1415,7 @@ class TimeSeriesCommands:
         self._append_aggregation(params, aggregation_type, bucket_size_msec)
         self._append_bucket_timestamp(params, bucket_timestamp)
         self._append_empty(params, empty)
+        self._append_exclude_empty(params, exclude_empty)
         params.extend(["FILTER"])
         params += filters
         self._append_groupby_reduce(params, groupby, reduce)
@@ -1437,6 +1441,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> TimeSeriesMRangeResponse: ...
 
     @overload
@@ -1459,6 +1464,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> Awaitable[TimeSeriesMRangeResponse]: ...
 
     def mrange(
@@ -1480,6 +1486,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> TimeSeriesMRangeResponse | Awaitable[TimeSeriesMRangeResponse]:
         """
         Query a range across multiple time-series by filters in forward direction.
@@ -1536,6 +1543,9 @@ class TimeSeriesCommands:
                 `+`, `high`, `~`, `mid`].
             empty:
                 Reports aggregations for empty buckets.
+            exclude_empty:
+                Omit matching series whose reported samples array is empty for the
+                queried range and options. Must not be combined with `groupby`.
         """
         params = self.__mrange_params(
             aggregation_type,
@@ -1555,6 +1565,7 @@ class TimeSeriesCommands:
             latest,
             bucket_timestamp,
             empty,
+            exclude_empty,
         )
 
         return self.execute_command(
@@ -1581,6 +1592,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> TimeSeriesMRangeResponse: ...
 
     @overload
@@ -1603,6 +1615,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> Awaitable[TimeSeriesMRangeResponse]: ...
 
     def mrevrange(
@@ -1624,6 +1637,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> TimeSeriesMRangeResponse | Awaitable[TimeSeriesMRangeResponse]:
         """
         Query a range across multiple time-series by filters in reverse direction.
@@ -1680,6 +1694,9 @@ class TimeSeriesCommands:
                 `+`, `high`, `~`, `mid`].
             empty:
                 Reports aggregations for empty buckets.
+            exclude_empty:
+                Omit matching series whose reported samples array is empty for the
+                queried range and options. Must not be combined with `groupby`.
         """
         params = self.__mrange_params(
             aggregation_type,
@@ -1699,6 +1716,7 @@ class TimeSeriesCommands:
             latest,
             bucket_timestamp,
             empty,
+            exclude_empty,
         )
 
         return self.execute_command(
@@ -2009,6 +2027,12 @@ class TimeSeriesCommands:
         """Append EMPTY property to params."""
         if empty:
             params.append("EMPTY")
+
+    @staticmethod
+    def _append_exclude_empty(params: list[EncodableT], exclude_empty: bool | None):
+        """Append EXCLUDEEMPTY property to params."""
+        if exclude_empty:
+            params.append("EXCLUDEEMPTY")
 
     @staticmethod
     def _append_insertion_filters(
