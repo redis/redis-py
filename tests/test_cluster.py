@@ -2002,7 +2002,7 @@ class TestClusterRedisCommands:
     def test_cluster_lmovem_crossslot(self, r):
         # source and destination on different slots -> cannot be dispatched
         with pytest.raises(RedisClusterException) as ex:
-            r.lmovem("a", "b", "LEFT", "RIGHT", count=2)
+            r.lmovem("a", "b", "LEFT", "RIGHT", count=2, ordering="BULK")
         assert "all keys must map to the same key slot" in str(ex.value)
 
     @skip_if_server_version_lt("8.9.0")
@@ -2016,7 +2016,7 @@ class TestClusterRedisCommands:
     @skip_if_server_version_lt("8.9.0")
     def test_cluster_blmovem_crossslot(self, r):
         with pytest.raises(RedisClusterException) as ex:
-            r.blmovem("a", "b", 1, "LEFT", "RIGHT", count=2)
+            r.blmovem("a", "b", 1, "LEFT", "RIGHT", count=2, ordering="BULK")
         assert "all keys must map to the same key slot" in str(ex.value)
 
     def test_cluster_msetnx(self, r):

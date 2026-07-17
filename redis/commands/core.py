@@ -3654,17 +3654,25 @@ class BasicKeyCommands(CommandsProtocol):
 
         ``ordering`` controls the order at the destination: ``OBO`` pushes each
         element as it is popped (reversing block order, stack semantics) while
-        ``BULK`` preserves the original relative order (queue semantics).
+        ``BULK`` preserves the original relative order (queue semantics). It is
+        required whenever ``count`` is given.
 
         Returns the array of moved elements, or ``None`` if nothing was moved.
 
         For more information, see https://redis.io/commands/lmovem
         """
+        if count is None:
+            if mode is not None or ordering is not None:
+                raise DataError(
+                    "``count`` is required when ``mode`` or ``ordering`` is set"
+                )
+        elif ordering is None:
+            raise DataError(
+                "``ordering`` (OBO or BULK) is required when ``count`` is set"
+            )
         pieces: list[EncodableT] = [first_list, second_list, src, dest]
         if count is not None:
-            pieces.extend([mode or "COUNT", count])
-            if ordering is not None:
-                pieces.append(ordering)
+            pieces.extend([mode or "COUNT", count, ordering])
         return self.execute_command("LMOVEM", *pieces)
 
     @overload
@@ -3714,13 +3722,23 @@ class BasicKeyCommands(CommandsProtocol):
         holds at least ``count`` elements, then moves exactly ``count``
         atomically. On timeout ``None`` is returned and nothing is moved.
 
+        As with ``lmovem``, ``ordering`` (OBO or BULK) is required whenever
+        ``count`` is given.
+
         For more information, see https://redis.io/commands/blmovem
         """
+        if count is None:
+            if mode is not None or ordering is not None:
+                raise DataError(
+                    "``count`` is required when ``mode`` or ``ordering`` is set"
+                )
+        elif ordering is None:
+            raise DataError(
+                "``ordering`` (OBO or BULK) is required when ``count`` is set"
+            )
         pieces: list[EncodableT] = [first_list, second_list, src, dest, timeout]
         if count is not None:
-            pieces.extend([mode or "COUNT", count])
-            if ordering is not None:
-                pieces.append(ordering)
+            pieces.extend([mode or "COUNT", count, ordering])
         return self.execute_command("BLMOVEM", *pieces)
 
     @overload

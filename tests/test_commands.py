@@ -2448,18 +2448,28 @@ class TestRedisCommands:
         assert r.lmovem("a", "b") == [b"1"]
         # COUNT with OBO ordering: pushed one-by-one -> reversed block order
         assert r.lmovem("a", "b", "LEFT", "LEFT", count=3, ordering="OBO") == [
-            b"2",
-            b"3",
             b"4",
+            b"3",
+            b"2",
         ]
-        # up to count, fewer available
-        assert r.lmovem("a", "b", "LEFT", "LEFT", count=5) == [b"5"]
+        # up to count, fewer available; BULK preserves relative order
+        assert r.lmovem("a", "b", "LEFT", "LEFT", count=5, ordering="BULK") == [b"5"]
         # empty source moves nothing
-        assert r.lmovem("a", "b", count=2) is None
-        # EXACTLY with too few elements moves nothing
+        assert r.lmovem("a", "b", count=2, ordering="BULK") is None
+        # EXACTLY with too few elements moves nothing (nil reply, source untouched)
         r.rpush("names", "john")
-        with pytest.raises(redis.ResponseError):
-            r.lmovem("names", "processed", "LEFT", "RIGHT", count=2, mode="EXACTLY")
+        assert (
+            r.lmovem(
+                "names",
+                "processed",
+                "LEFT",
+                "RIGHT",
+                count=2,
+                mode="EXACTLY",
+                ordering="BULK",
+            )
+            is None
+        )
         assert r.lrange("names", 0, -1) == [b"john"]
         # EXACTLY with enough elements, BULK preserves order
         r.rpush("names", "doe")
@@ -2472,6 +2482,11 @@ class TestRedisCommands:
             mode="EXACTLY",
             ordering="BULK",
         ) == [b"john", b"doe"]
+        # ordering is mandatory whenever count is given (and vice versa)
+        with pytest.raises(redis.DataError):
+            r.lmovem("a", "b", count=2)
+        with pytest.raises(redis.DataError):
+            r.lmovem("a", "b", ordering="BULK")
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.9.0")
@@ -2483,9 +2498,13 @@ class TestRedisCommands:
             b"3",
             b"4",
         ]
+        # up to count, fewer available
+        assert r.blmovem("a", "b", 1, count=5, ordering="BULK") == [b"5"]
         # timeout with empty source returns None
-        assert r.blmovem("a", "b", 1, count=5) == [b"5"]
-        assert r.blmovem("foo", "bar", 1, count=2) is None
+        assert r.blmovem("foo", "bar", 1, count=2, ordering="BULK") is None
+        # ordering is mandatory whenever count is given
+        with pytest.raises(redis.DataError):
+            r.blmovem("a", "b", 1, count=2)
 
     @pytest.mark.onlynoncluster
     def test_mset(self, r):
