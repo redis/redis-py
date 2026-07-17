@@ -756,7 +756,7 @@ class ManagementCommands(CommandsProtocol):
         Disconnects client(s) using a variety of filter options
         :param _id: Kills a client by its unique ID field
         :param _type: Kills a client by type where type is one of 'normal',
-        'master', 'slave' or 'pubsub'
+        'master', 'slave', 'replica' or 'pubsub'
         :param addr: Kills a client by its 'address:port'
         :param skipme: If True, then the client calling the command
         will not get killed even if it is identified by one of the filter
@@ -767,7 +767,7 @@ class ManagementCommands(CommandsProtocol):
         """
         args = []
         if _type is not None:
-            client_types = ("normal", "master", "slave", "pubsub")
+            client_types = ("normal", "master", "slave", "replica", "pubsub")
             if str(_type).lower() not in client_types:
                 raise DataError(f"CLIENT KILL type must be one of {client_types!r}")
             args.extend((b"TYPE", _type))
