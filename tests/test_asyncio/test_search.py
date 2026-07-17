@@ -43,7 +43,6 @@ from tests.conftest import (
     expects_unified_shape,
     get_protocol_version,
     skip_if_redis_enterprise,
-    skip_if_resp_version,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_ifmodversion_lt,
@@ -1278,7 +1277,6 @@ class TestBaseSearchFunctionality(AsyncSearchTestsBase):
             await decoded_r.config_set("search-on-timeout", original)
 
     @pytest.mark.redismod
-    @skip_if_resp_version(3)
     async def test_binary_and_text_fields(self, decoded_r: redis.Redis):
         fake_vec = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
 
@@ -1313,23 +1311,27 @@ class TestBaseSearchFunctionality(AsyncSearchTestsBase):
             .return_field("first_name")
         )
         result = await decoded_r.ft(index_name).search(query=query, query_params={})
-        docs = result.docs
 
-        if len(docs) == 0:
-            hash_content = await decoded_r.hget(f"{index_name}:1", "first_name")
-        assert len(docs) > 0, (
-            f"Returned search results are empty. Result: {result}; Hash: {hash_content}"
-        )
+        if expects_resp3_shape(decoded_r):
+            # protocol=3 + legacy_responses=True returns the native RESP3 dict;
+            # text fields are decoded while the binary field is kept as bytes.
+            results = result["results"]
+            assert len(results) > 0, f"Returned search results are empty: {result}"
+            attributes = results[0]["extra_attributes"]
+        else:
+            docs = result.docs
+            assert len(docs) > 0, f"Returned search results are empty: {result}"
+            attributes = docs[0]
 
         decoded_vec_from_search_results = np.frombuffer(
-            docs[0]["vector_emb"], dtype=np.float32
+            attributes["vector_emb"], dtype=np.float32
         )
 
         assert np.array_equal(decoded_vec_from_search_results, fake_vec), (
             "The vectors are not equal"
         )
 
-        assert docs[0]["first_name"] == mixed_data["first_name"], (
+        assert attributes["first_name"] == mixed_data["first_name"], (
             "The text field is not decoded correctly"
         )
 
@@ -3930,7 +3932,7 @@ class TestHybridSearch(AsyncSearchTestsBase):
             warnings = res["warnings"]
             assert res["execution_time"] > 0
 
-        assert any(
+        all_match = all(
             safe_str(warning)
             in {
                 "Timeout limit was reached (VSIM)",
@@ -3938,6 +3940,8 @@ class TestHybridSearch(AsyncSearchTestsBase):
             }
             for warning in warnings
         )
+
+        assert all_match, f"Not all warnings are matching expected values: {warnings}"
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")

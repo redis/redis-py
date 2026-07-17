@@ -52,7 +52,6 @@ from .conftest import (
     expects_unified_shape,
     get_protocol_version,
     skip_if_redis_enterprise,
-    skip_if_resp_version,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_ifmodversion_lt,
@@ -1355,7 +1354,6 @@ class TestBaseSearchFunctionality(SearchTestsBase):
             assert "telmatosaurus" == total["results"][0]["extra_attributes"]["txt"]
 
     @pytest.mark.redismod
-    @skip_if_resp_version(3)
     def test_binary_and_text_fields(self, client):
         fake_vec = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
 
@@ -1390,16 +1388,28 @@ class TestBaseSearchFunctionality(SearchTestsBase):
             .return_field("vector_emb", decode_field=False)
             .return_field("first_name")
         )
-        docs = client.ft(index_name).search(query=query, query_params={}).docs
+        result = client.ft(index_name).search(query=query, query_params={})
+
+        if expects_resp3_shape(client):
+            # protocol=3 + legacy_responses=True returns the native RESP3 dict;
+            # text fields are decoded while the binary field is kept as bytes.
+            results = result["results"]
+            assert len(results) > 0, f"Returned search results are empty: {result}"
+            attributes = results[0]["extra_attributes"]
+        else:
+            docs = result.docs
+            assert len(docs) > 0, f"Returned search results are empty: {result}"
+            attributes = docs[0]
+
         decoded_vec_from_search_results = np.frombuffer(
-            docs[0]["vector_emb"], dtype=np.float32
+            attributes["vector_emb"], dtype=np.float32
         )
 
         assert np.array_equal(decoded_vec_from_search_results, fake_vec), (
             "The vectors are not equal"
         )
 
-        assert docs[0]["first_name"] == mixed_data["first_name"], (
+        assert attributes["first_name"] == mixed_data["first_name"], (
             "The text field is not decoded correctly"
         )
 
@@ -5933,7 +5943,7 @@ class TestHybridSearch(SearchTestsBase):
             warnings = res["warnings"]
             assert res["execution_time"] > 0
 
-        assert any(
+        all_match = all(
             safe_str(warning)
             in {
                 "Timeout limit was reached (VSIM)",
@@ -5941,6 +5951,7 @@ class TestHybridSearch(SearchTestsBase):
             }
             for warning in warnings
         )
+        assert all_match, f"Not all warning are matching the pattern: {warnings}"
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")
