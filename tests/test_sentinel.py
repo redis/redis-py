@@ -260,6 +260,7 @@ def test_slave_round_robin(cluster, sentinel, master_ip):
         next(rotator)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.onlynoncluster
 def test_master_failover_reclaims_discarded_connection_slot():
     master_a = ("master-a", 6379)

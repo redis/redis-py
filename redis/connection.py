@@ -3303,7 +3303,10 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 # to the pool.
                 # Still need to decrement USED since it was counted in get_connection()
                 connection.disconnect()
-                # Subclasses can reject a connection created by this pool.
+                # Subclasses such as SentinelConnectionPool can override
+                # owns_connection() with a comparison different from local PID
+                # ownership. When such a subclass rejects a connection, also require
+                # connection.pid == self.pid before reclaiming its slot.
                 if connection.pid == self.pid:
                     self._created_connections -= 1
                 record_connection_count(
