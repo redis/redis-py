@@ -5943,6 +5943,8 @@ class TestHybridSearch(SearchTestsBase):
             warnings = res["warnings"]
             assert res["execution_time"] > 0
 
+        assert warnings, f"Expected timeout warnings but none were returned: {warnings}"
+
         all_match = all(
             safe_str(warning)
             in {
