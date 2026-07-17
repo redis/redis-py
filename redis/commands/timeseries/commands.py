@@ -32,6 +32,7 @@ MREVRANGE_CMD = "TS.MREVRANGE"
 NRANGE_CMD = "TS.NRANGE"
 NREVRANGE_CMD = "TS.NREVRANGE"
 QUERYINDEX_CMD = "TS.QUERYINDEX"
+QUERYLABELS_CMD = "TS.QUERYLABELS"
 RANGE_CMD = "TS.RANGE"
 READ_CMD = "TS.READ"
 REVRANGE_CMD = "TS.REVRANGE"
@@ -1839,6 +1840,73 @@ class TimeSeriesCommands:
         For more information see https://redis.io/commands/ts.queryindex/
         """
         return self.execute_command(QUERYINDEX_CMD, *filters)
+
+    @overload
+    def querylabels(
+        self: SyncClientProtocol,
+        label: str | None = None,
+        filters: list[str] | None = None,
+    ) -> list[bytes | str]: ...
+
+    @overload
+    def querylabels(
+        self: AsyncClientProtocol,
+        label: str | None = None,
+        filters: list[str] | None = None,
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def querylabels(
+        self, label: str | None = None, filters: list[str] | None = None
+    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+        """
+        Get label metadata for the time series matching `filters`.
+
+        The single `TS.QUERYLABELS` request is built from the supplied
+        arguments:
+
+        - When `label` is omitted (``None``), the ``LABELS`` form is issued and
+          the reply is the set of all label names present on the matching (and
+          readable) series, including the label names used in the filter
+          itself.
+        - When `label` is given, the ``VALUES`` form is issued and the reply is
+          the set of all values assigned to `label` across the matching series.
+          `label` is matched byte-exactly and is passed to the server without
+          any normalization; a series that does not carry `label`, and a
+          `label` that matches no series, contribute nothing (an empty reply,
+          not an error).
+
+        The reply is unordered and already deduplicated by the server. When
+        `filters` is omitted (``None``), all indexed series are queried; filter
+        expressions use the same language as `TS.QUERYINDEX` and are passed
+        verbatim, while an explicitly empty collection raises a `DataError`.
+
+        For more information see https://redis.io/commands/ts.querylabels/
+        """
+        if label is None:
+            params: list[EncodableT] = ["LABELS"]
+        else:
+            params = ["VALUES", label]
+        self._append_filter_expressions(params, filters)
+        return self.execute_command(QUERYLABELS_CMD, *params)
+
+    @staticmethod
+    def _append_filter_expressions(params: list[EncodableT], filters: list[str] | None):
+        """Append the optional FILTER clause for TS.QUERYLABELS.
+
+        ``None`` omits ``FILTER`` entirely (the documented all-series query);
+        an explicitly empty collection is a local usage error, since silently
+        widening to all series would be surprising. Expressions are passed
+        through verbatim, without parsing, reordering, or normalizing.
+        """
+        if filters is None:
+            return
+        if not filters:
+            raise DataError(
+                "filters cannot be an empty collection; pass None to query "
+                "all indexed series."
+            )
+        params.append("FILTER")
+        params.extend(filters)
 
     @staticmethod
     def _append_uncompressed(params: list[EncodableT], uncompressed: bool | None):
