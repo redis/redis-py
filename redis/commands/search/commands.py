@@ -1,6 +1,6 @@
 import itertools
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Union
 
 from redis._parsers.helpers import pairs_to_dict
 from redis.client import NEVER_DECODE, Pipeline
@@ -57,6 +57,7 @@ TAGVALS_CMD = "FT.TAGVALS"
 ALIAS_ADD_CMD = "FT.ALIASADD"
 ALIAS_UPDATE_CMD = "FT.ALIASUPDATE"
 ALIAS_DEL_CMD = "FT.ALIASDEL"
+ALIAS_LIST_CMD = "FT.ALIASLIST"
 INFO_CMD = "FT.INFO"
 SUGADD_COMMAND = "FT.SUGADD"
 SUGDEL_COMMAND = "FT.SUGDEL"
@@ -109,6 +110,7 @@ class SearchCommands:
             SPELLCHECK_CMD: self._parse_spellcheck,
             CONFIG_CMD: self._parse_config_get,
             SYNDUMP_CMD: self._parse_syndump,
+            ALIAS_LIST_CMD: self._parse_aliaslist,
         }
         # Explicit ``protocol=3`` + ``legacy_responses=True`` keeps the
         # pre-existing native RESP3 surface.  SEARCH and HYBRID both use
@@ -119,6 +121,7 @@ class SearchCommands:
         self._RESP3_MODULE_CALLBACKS = {
             SEARCH_CMD: self._parse_search_resp3_native,
             HYBRID_CMD: self._parse_hybrid_search_resp3_native,
+            ALIAS_LIST_CMD: self._parse_aliaslist,
         }
         # ``protocol=None`` + ``legacy_responses=True`` (the v8 default):
         # the wire is RESP3 but the Python surface mirrors RESP2 legacy
@@ -133,6 +136,7 @@ class SearchCommands:
             SPELLCHECK_CMD: self._parse_spellcheck_resp3,
             CONFIG_CMD: self._parse_config_get_resp3_to_legacy,
             SYNDUMP_CMD: self._parse_syndump_resp3,
+            ALIAS_LIST_CMD: self._parse_aliaslist,
         }
         # Search pipelines historically returned raw wire responses in
         # legacy mode.  The default connection now uses RESP3 on the wire,
@@ -155,6 +159,7 @@ class SearchCommands:
             SPELLCHECK_CMD: self._parse_spellcheck,
             CONFIG_CMD: self._parse_config_get_unified,
             SYNDUMP_CMD: self._parse_syndump_unified,
+            ALIAS_LIST_CMD: self._parse_aliaslist,
         }
         # ``legacy_responses=False`` + RESP3 wire: keeps the native RESP3
         # shape for commands whose unified shape diverges from the
@@ -260,6 +265,11 @@ class SearchCommands:
     def _parse_info(self, res, **kwargs):
         it = map(str_if_bytes, res)
         return dict(zip(it, it))
+
+    def _parse_aliaslist(self, res, **kwargs):
+        # RESP2 replies with an array and RESP3 with a set; both are decoded
+        # into a list by the parsers, so normalize to an unordered ``set``.
+        return set(res) if res else set()
 
     def _parse_search(self, res, **kwargs):
         return Result(
@@ -1649,6 +1659,21 @@ class SearchCommands:
         """  # noqa
         return self.execute_command(ALIAS_DEL_CMD, alias)
 
+    def aliaslist(self) -> Set[str]:
+        """
+        List all aliases associated with the current index as an unordered set.
+
+        The index must be the name of an index created with ``FT.CREATE``; an
+        alias name is not accepted as a substitute. Returns an empty set when
+        the index exists but has no aliases.
+
+        For more information see `FT.ALIASLIST <https://redis.io/commands/ft.aliaslist>`_.
+        """  # noqa
+        res = self.execute_command(ALIAS_LIST_CMD, self.index_name)
+        if isinstance(res, Pipeline):
+            return res
+        return self._parse_results(ALIAS_LIST_CMD, res)
+
     def sugadd(self, key, *suggestions, **kwargs):
         """
         Add suggestion terms to the AutoCompleter engine. Each suggestion has
@@ -1793,6 +1818,21 @@ class AsyncSearchCommands(SearchCommands):
 
         res = await self.execute_command(INFO_CMD, self.index_name)
         return self._parse_results(INFO_CMD, res)
+
+    async def aliaslist(self) -> Set[str]:
+        """
+        List all aliases associated with the current index as an unordered set.
+
+        The index must be the name of an index created with ``FT.CREATE``; an
+        alias name is not accepted as a substitute. Returns an empty set when
+        the index exists but has no aliases.
+
+        For more information see `FT.ALIASLIST <https://redis.io/commands/ft.aliaslist>`_.
+        """  # noqa
+        res = await self.execute_command(ALIAS_LIST_CMD, self.index_name)
+        if isinstance(res, Pipeline):
+            return res
+        return self._parse_results(ALIAS_LIST_CMD, res)
 
     async def search(
         self,

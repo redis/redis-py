@@ -936,6 +936,41 @@ class TestBaseSearchFunctionality(AsyncSearchTestsBase):
             _ = (await alias_client2.search("*")).docs[0]
 
     @pytest.mark.redismod
+    @skip_if_server_version_lt("8.9.0")
+    async def test_aliaslist(self, decoded_r: redis.Redis):
+        index = decoded_r.ft("aliaslistidx")
+        await index.create_index((TextField("txt"),))
+
+        # An existing index with no aliases returns an empty set, not an error.
+        assert await index.aliaslist() == set()
+
+        # Aliases are returned as an unordered collection.
+        await index.aliasadd("alias1")
+        await index.aliasadd("alias2")
+        aliases = await index.aliaslist()
+        assert isinstance(aliases, set)
+        assert aliases == {"alias1", "alias2"}
+
+        # FT.ALIASUPDATE moving an alias to another index removes it from the
+        # previous index's listing.
+        index2 = decoded_r.ft("aliaslistidx2")
+        await index2.create_index((TextField("txt"),))
+        await index2.aliasupdate("alias1")
+        assert await index.aliaslist() == {"alias2"}
+        assert await index2.aliaslist() == {"alias1"}
+
+        # FT.ALIASDEL removes the alias from the listing.
+        await index.aliasdel("alias2")
+        assert await index.aliaslist() == set()
+
+        # A missing index and an alias name supplied as the index both fail
+        # with the index-not-found error; the client must not resolve aliases.
+        with pytest.raises(redis.ResponseError):
+            await decoded_r.ft("nonexistent_aliaslist_index").aliaslist()
+        with pytest.raises(redis.ResponseError):
+            await decoded_r.ft("alias1").aliaslist()
+
+    @pytest.mark.redismod
     async def test_tags(self, decoded_r: redis.Redis):
         await decoded_r.ft().create_index((TextField("txt"), TagField("tags")))
         tags = "foo,foo bar,hello;world"
