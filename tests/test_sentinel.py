@@ -9,6 +9,7 @@ import redis.sentinel
 from redis import exceptions
 from redis.sentinel import (
     MasterNotFoundError,
+    ReplicaNotFoundError,
     Sentinel,
     SentinelConnectionPool,
     SlaveNotFoundError,
@@ -217,6 +218,19 @@ def test_discover_slaves(cluster, sentinel):
 
 
 @pytest.mark.onlynoncluster
+def test_discover_replicas(cluster, sentinel):
+    assert sentinel.discover_replicas("mymaster") == []
+
+    cluster.slaves = [
+        {"ip": "slave0", "port": 1234, "is_odown": False, "is_sdown": False},
+        {"ip": "slave1", "port": 1234, "is_odown": True, "is_sdown": False},
+    ]
+
+    assert sentinel.filter_replicas(cluster.slaves) == [("slave0", 1234)]
+    assert sentinel.discover_replicas("mymaster") == [("slave0", 1234)]
+
+
+@pytest.mark.onlynoncluster
 def test_master_for(sentinel, master_ip):
     master = sentinel.master_for("mymaster", db=9)
     assert master.ping()
@@ -237,11 +251,30 @@ def test_slave_for(cluster, sentinel):
 
 
 @pytest.mark.onlynoncluster
+def test_replica_for(cluster, sentinel):
+    cluster.slaves = [
+        {"ip": "127.0.0.1", "port": 6379, "is_odown": False, "is_sdown": False}
+    ]
+    replica = sentinel.replica_for("mymaster", db=9)
+    assert replica.ping()
+
+
+@pytest.mark.onlynoncluster
 def test_slave_for_slave_not_found_error(cluster, sentinel):
     cluster.master["is_odown"] = True
     slave = sentinel.slave_for("mymaster", db=9)
     with pytest.raises(SlaveNotFoundError):
         slave.ping()
+
+
+@pytest.mark.onlynoncluster
+def test_replica_not_found_alias(cluster, sentinel):
+    assert ReplicaNotFoundError is SlaveNotFoundError
+
+    cluster.master["is_odown"] = True
+    replica = sentinel.replica_for("mymaster", db=9)
+    with pytest.raises(ReplicaNotFoundError):
+        replica.ping()
 
 
 @pytest.mark.onlynoncluster
@@ -302,6 +335,22 @@ def test_master_failover_reclaims_discarded_connection_slot():
 
 
 @pytest.mark.onlynoncluster
+def test_replica_round_robin(cluster, sentinel, master_ip):
+    cluster.slaves = [
+        {"ip": "slave0", "port": 6379, "is_odown": False, "is_sdown": False},
+        {"ip": "slave1", "port": 6379, "is_odown": False, "is_sdown": False},
+    ]
+    pool = SentinelConnectionPool("mymaster", sentinel)
+    rotator = pool.rotate_replicas()
+    assert next(rotator) in (("slave0", 6379), ("slave1", 6379))
+    assert next(rotator) in (("slave0", 6379), ("slave1", 6379))
+    # Fallback to master
+    assert next(rotator) == (master_ip, 6379)
+    with pytest.raises(ReplicaNotFoundError):
+        next(rotator)
+
+
+@pytest.mark.onlynoncluster
 def test_ckquorum(sentinel):
     resp = sentinel.sentinel_ckquorum("mymaster")
     assert resp is True
@@ -321,7 +370,7 @@ def test_reset(cluster, sentinel):
 
 
 @pytest.mark.onlynoncluster
-@pytest.mark.parametrize("method_name", ["master_for", "slave_for"])
+@pytest.mark.parametrize("method_name", ["master_for", "slave_for", "replica_for"])
 def test_auto_close_pool(cluster, sentinel, method_name):
     """
     Check that the connection pool created by the sentinel client is
