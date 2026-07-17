@@ -171,7 +171,7 @@ class SentinelConnectionPool(ConnectionPool):
 
     def rotate_replicas(self) -> AsyncIterator:
         """Round-robin replica balancer.
-        
+
         This is an alias for :py:meth:`rotate_slaves`,
         using the preferred Redis 5.0+ terminology.
         """
@@ -358,7 +358,7 @@ class Sentinel(AsyncSentinelCommands):
         self, replicas: Iterable[Mapping]
     ) -> Sequence[Tuple[EncodableT, EncodableT]]:
         """Remove replicas that are in an ODOWN or SDOWN state.
-        
+
         This is an alias for :py:meth:`filter_slaves`,
         using the preferred Redis 5.0+ terminology.
         """
@@ -382,7 +382,7 @@ class Sentinel(AsyncSentinelCommands):
         self, service_name: str
     ) -> Sequence[Tuple[EncodableT, EncodableT]]:
         """Returns a list of alive replicas for service ``service_name``.
-        
+
         This is an alias for :py:meth:`discover_slaves`,
         using the preferred Redis 5.0+ terminology.
         """
@@ -468,7 +468,7 @@ class Sentinel(AsyncSentinelCommands):
     ):
         """
         Returns redis client instance for the ``service_name`` replica(s).
-        
+
         This is an alias for :py:meth:`slave_for`,
         using the preferred Redis 5.0+ terminology.
         """

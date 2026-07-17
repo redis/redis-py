@@ -394,7 +394,7 @@ class Sentinel(SentinelCommands):
 
     def filter_replicas(self, replicas):
         """Remove replicas that are in an ODOWN or SDOWN state.
-        
+
         This is an alias for :py:meth:`filter_slaves`,
         using the preferred Redis 5.0+ terminology.
         """
@@ -414,7 +414,7 @@ class Sentinel(SentinelCommands):
 
     def discover_replicas(self, service_name):
         """Returns a list of alive replicas for service ``service_name``.
-        
+
         This is an alias for :py:meth:`discover_slaves`,
         using the preferred Redis 5.0+ terminology.
         """
@@ -498,7 +498,7 @@ class Sentinel(SentinelCommands):
     ):
         """
         Returns redis client instance for the ``service_name`` replica(s).
-        
+
         This is an alias for :py:meth:`slave_for`,
         using the preferred Redis 5.0+ terminology.
         """
