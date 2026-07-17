@@ -3301,10 +3301,14 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             else:
                 # Pool doesn't own this connection, do not add it back
                 # to the pool.
-                # The created connections count should not be changed,
-                # because the connection was not created by the pool.
                 # Still need to decrement USED since it was counted in get_connection()
                 connection.disconnect()
+                # Subclasses such as SentinelConnectionPool can override
+                # owns_connection() with a comparison different from local PID
+                # ownership. When such a subclass rejects a connection, also require
+                # connection.pid == self.pid before reclaiming its slot.
+                if connection.pid == self.pid:
+                    self._created_connections -= 1
                 record_connection_count(
                     pool_name="unknown_pool",
                     connection_state=ConnectionState.USED,
