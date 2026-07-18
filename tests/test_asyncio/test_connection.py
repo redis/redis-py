@@ -92,12 +92,12 @@ def test_connection_uses_hiredis_command_packer(monkeypatch):
         calls.append(args)
         return b"packed"
 
-    monkeypatch.setattr("redis.asyncio.connection.hiredis.pack_command", pack_command)
+    monkeypatch.setattr("redis.connection.hiredis.pack_command", pack_command)
     connection = Connection()
 
     assert isinstance(connection._command_packer, HiredisRespSerializer)
     assert connection.pack_command("SET", "key", "value") == [b"packed"]
-    assert calls == [(b"SET", "key", "value")]
+    assert calls == [(b"SET", b"key", b"value")]
 
 
 def test_connection_uses_python_command_packer_without_hiredis(monkeypatch):
@@ -106,6 +106,15 @@ def test_connection_uses_python_command_packer_without_hiredis(monkeypatch):
 
     assert connection._command_packer is None
     assert connection.pack_command("PING") == [b"*1\r\n$4\r\nPING\r\n"]
+
+
+@pytest.mark.parametrize("protocol", [2, 3])
+def test_async_pack_command_respects_connection_encoding(protocol):
+    connection = Connection(encoding="latin-1", protocol=protocol)
+
+    assert connection.pack_command("SET", "key", "café") == [
+        b"*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$4\r\ncaf\xe9\r\n"
+    ]
 
 
 @pytest.mark.parametrize(

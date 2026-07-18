@@ -74,6 +74,7 @@ from redis.asyncio.observability.recorder import (
 )
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
+from redis.connection import HiredisRespSerializer
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import (
     AuthenticationError,
@@ -117,9 +118,6 @@ from .._parsers import (
     _AsyncRESP3Parser,
 )
 
-if HIREDIS_AVAILABLE:
-    import hiredis
-
 SYM_STAR = b"*"
 SYM_DOLLAR = b"$"
 SYM_CRLF = b"\r\n"
@@ -131,26 +129,6 @@ if HIREDIS_AVAILABLE:
     DefaultParser = _AsyncHiredisParser
 else:
     DefaultParser = _AsyncRESP3Parser
-
-
-class HiredisRespSerializer:
-    def __init__(self, fallback):
-        self._fallback = fallback
-
-    def pack(self, *args: EncodableT) -> List[bytes]:
-        """Pack a series of arguments into the Redis protocol"""
-        if any(isinstance(arg, memoryview) for arg in args):
-            return self._fallback(*args)
-        if isinstance(args[0], str):
-            args = tuple(args[0].encode().split()) + args[1:]
-        elif b" " in args[0]:
-            args = tuple(args[0].split()) + args[1:]
-        args = tuple(bytes(arg) if isinstance(arg, bytearray) else arg for arg in args)
-        try:
-            return [hiredis.pack_command(args)]
-        except TypeError:
-            _, value, traceback = sys.exc_info()
-            raise DataError(value).with_traceback(traceback)
 
 
 class ConnectCallbackProtocol(Protocol):
@@ -713,7 +691,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         self._buffer_cutoff = 6000
         self._re_auth_token: Optional[TokenInterface] = None
         self._command_packer = (
-            HiredisRespSerializer(self._pack_command_python)
+            HiredisRespSerializer(self._pack_command_python, self.encoder.encode)
             if HIREDIS_AVAILABLE
             else None
         )
