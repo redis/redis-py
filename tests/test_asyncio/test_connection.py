@@ -1,4 +1,5 @@
 import asyncio
+import os
 import socket
 import ssl
 import types
@@ -17,6 +18,7 @@ from redis._parsers import (
 from redis._parsers.hiredis import NOT_ENOUGH_DATA
 from redis.asyncio import ConnectionPool, Redis
 from redis.asyncio.connection import (
+    BlockingConnectionPool,
     Connection,
     SSLConnection,
     UnixDomainSocketConnection,
@@ -25,6 +27,7 @@ from redis.asyncio.connection import (
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
+from redis.observability.attributes import ConnectionState, get_pool_name
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
 
@@ -872,3 +875,117 @@ async def test_disconnect_no_current_task_calls_close(request):
             mock_on_disconnect.assert_called_once()
 
     assert not conn.is_connected
+
+
+class _DummyAsyncConnection:
+    """Minimal async connection stub for pool metric tests (no real socket)."""
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.pid = os.getpid()
+        self._sock = None
+
+    async def connect(self):
+        self._sock = mock.MagicMock()
+
+    async def disconnect(self, *args, **kwargs):
+        self._sock = None
+
+    async def can_read(self, *args, **kwargs):
+        return False
+
+    def should_reconnect(self):
+        return False
+
+    def mark_for_reconnect(self):
+        pass
+
+    def set_re_auth_token(self, *args, **kwargs):
+        pass
+
+    async def re_auth(self, *args, **kwargs):
+        pass
+
+
+def _async_pool_metric_calls(mock_fn, pool_name):
+    """Extract (state, delta) tuples from record_connection_count calls for a pool."""
+    result = []
+    for c in mock_fn.call_args_list:
+        p = c.kwargs.get("pool_name", c.args[0] if c.args else None)
+        if p != pool_name:
+            continue
+        state = c.kwargs.get("connection_state", c.args[1] if len(c.args) > 1 else None)
+        counter = c.kwargs.get("counter", c.args[2] if len(c.args) > 2 else 1)
+        result.append((state, counter))
+    return result
+
+
+def _async_net(calls):
+    """Return (idle_net, used_net) from a list of (state, delta) tuples."""
+    idle = sum(d for s, d in calls if s == ConnectionState.IDLE)
+    used = sum(d for s, d in calls if s == ConnectionState.USED)
+    return idle, used
+
+
+class TestAsyncBlockingConnectionPoolMetricCount:
+    """db.client.connection.count accuracy for async BlockingConnectionPool.
+
+    get_connection() must record the acquire-side transition so it balances the
+    USED -1 / IDLE +1 recorded in release(). Without it, every acquire/release
+    cycle drifts USED -1 / IDLE +1 (regression: heavy async + Sentinel apps saw
+    the counter run to large -used / +idle values over time).
+    """
+
+    def _pool(self, max_connections=10):
+        return BlockingConnectionPool(
+            connection_class=_DummyAsyncConnection,
+            max_connections=max_connections,
+            timeout=0.1,
+        )
+
+    @patch("redis.asyncio.connection.record_connection_count")
+    async def test_new_connection_records_only_used(self, mock_rec):
+        pool = self._pool()
+        pn = get_pool_name(pool)
+        mock_rec.reset_mock()
+
+        conn = await pool.get_connection()
+
+        idle_net, used_net = _async_net(_async_pool_metric_calls(mock_rec, pn))
+        assert idle_net == 0, f"New conn should not touch IDLE, got {idle_net}"
+        assert used_net == 1
+        await pool.release(conn)
+
+    @patch("redis.asyncio.connection.record_connection_count")
+    async def test_reused_connection_transitions_idle_to_used(self, mock_rec):
+        pool = self._pool()
+        pn = get_pool_name(pool)
+        conn = await pool.get_connection()
+        await pool.release(conn)
+        mock_rec.reset_mock()
+
+        conn2 = await pool.get_connection()
+        assert conn2 is conn
+
+        idle_net, used_net = _async_net(_async_pool_metric_calls(mock_rec, pn))
+        assert idle_net == -1
+        assert used_net == 1
+        await pool.release(conn2)
+
+    @patch("redis.asyncio.connection.record_connection_count")
+    async def test_full_lifecycle_nets_to_zero(self, mock_rec):
+        """acquire -> release cycles must not drift the counter."""
+        pool = self._pool()
+        pn = get_pool_name(pool)
+        mock_rec.reset_mock()
+
+        for _ in range(5):
+            conn = await pool.get_connection()
+            await pool.release(conn)
+
+        idle_net, used_net = _async_net(_async_pool_metric_calls(mock_rec, pn))
+        # reset()/__del__ record IDLE -len(available) for the idle connections
+        # still pooled; account for that so the whole lifecycle nets to zero.
+        idle_net -= len(pool._available_connections)
+        assert idle_net == 0, f"Lifecycle IDLE should net 0, got {idle_net}"
+        assert used_net == 0, f"Lifecycle USED should net 0, got {used_net}"

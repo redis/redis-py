@@ -3056,6 +3056,32 @@ class BlockingConnectionPool(ConnectionPool):
         except asyncio.TimeoutError as err:
             raise ConnectionError("No connection available.") from err
 
+        # Record state transition for observability. This mirrors the base
+        # ConnectionPool.get_connection() and balances the USED -1 / IDLE +1
+        # recorded in release(); without it the counter drifts USED -1 / IDLE +1
+        # per acquire/release cycle. Recorded before ensure_connection() so the
+        # counters stay balanced if it fails and release() is called.
+        pool_name = get_pool_name(self)
+        if is_created:
+            # New connection created and acquired: just USED +1
+            await record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.USED,
+                counter=1,
+            )
+        else:
+            # Existing connection acquired from pool: IDLE -> USED
+            await record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.IDLE,
+                counter=-1,
+            )
+            await record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.USED,
+                counter=1,
+            )
+
         # We now perform the connection check outside of the lock.
         try:
             await self.ensure_connection(connection)
