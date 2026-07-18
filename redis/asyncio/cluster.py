@@ -824,16 +824,22 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         else:
             nodes = policy_callback()
 
-        # Filter out None nodes that can occur during cluster topology
-        # changes (e.g. scale-down, failover) where in-memory slot/node
-        # caches become temporarily inconsistent.
-        if nodes:
-            nodes = [n for n in nodes if n is not None]
+        # None entries can appear during topology changes when the
+        # in-memory slot/node cache is temporarily inconsistent. Silently
+        # dropping them is unsafe for multi-node / broadcast commands
+        # (partial success with no error). Mark the cluster for reinit and
+        # raise a retryable error so execute_command retries cleanly.
+        if nodes and any(n is None for n in nodes):
+            self._initialize = True
+            raise ClusterDownError(
+                "Cluster node mapping returned None during a topology "
+                "change; reinitialized topology for retry"
+            )
 
         if command.lower() == "ft.aggregate":
             self._aggregate_nodes = nodes
 
-        return nodes
+        return nodes or []
 
     async def _determine_slot(self, command: str, *args: Any) -> int:
         if self.command_flags.get(command) == SLOT_ID:

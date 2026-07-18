@@ -1347,16 +1347,22 @@ class RedisCluster(
         else:
             nodes = policy_callback()
 
-        # Filter out None nodes that can occur during cluster topology
-        # changes (e.g. scale-down, failover) where in-memory slot/node
-        # caches become temporarily inconsistent.
-        if nodes:
-            nodes = [n for n in nodes if n is not None]
+        # None entries can appear during topology changes when the
+        # in-memory slot/node cache is temporarily inconsistent. Silently
+        # dropping them is unsafe for multi-node / broadcast commands
+        # (partial success with no error). Reinitialize and raise a
+        # retryable error so execute_command retries on a fresh view.
+        if nodes and any(n is None for n in nodes):
+            self.nodes_manager.initialize()
+            raise ClusterDownError(
+                "Cluster node mapping returned None during a topology "
+                "change; reinitialized topology for retry"
+            )
 
         if args[0].lower() == "ft.aggregate":
             self._aggregate_nodes = nodes
 
-        return nodes
+        return nodes or []
 
     def _should_reinitialized(self):
         # To reinitialize the cluster on every MOVED error,
@@ -4364,16 +4370,19 @@ class PipelineStrategy(AbstractStrategy):
         else:
             nodes = policy_callback()
 
-        # Filter out None nodes that can occur during cluster topology
-        # changes (e.g. scale-down, failover) where in-memory slot/node
-        # caches become temporarily inconsistent.
-        if nodes:
-            nodes = [n for n in nodes if n is not None]
+        # See RedisCluster._determine_nodes: do not silently drop None
+        # targets (unsafe for multi-node / broadcast commands).
+        if nodes and any(n is None for n in nodes):
+            self._pipe.nodes_manager.initialize()
+            raise ClusterDownError(
+                "Cluster node mapping returned None during a topology "
+                "change; reinitialized topology for retry"
+            )
 
         if args[0].lower() == "ft.aggregate":
             self._aggregate_nodes = nodes
 
-        return nodes
+        return nodes or []
 
     def multi(self):
         raise RedisClusterException(

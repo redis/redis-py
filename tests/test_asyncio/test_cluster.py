@@ -1108,11 +1108,11 @@ class TestRedisClusterObj:
         assert n_used > 1
 
     @pytest.mark.onlycluster
-    async def test_determine_nodes_filters_none_nodes(self):
+    async def test_determine_nodes_rejects_none_nodes(self):
         """
-        Test that _determine_nodes filters out None values from the node list.
-        This can occur during cluster topology changes (scale-down, failover)
-        where in-memory slot/node caches become temporarily inconsistent.
+        None entries must not be silently filtered (unsafe for multi-node
+        commands). Async path marks the client for reinitialization and raises
+        ClusterDownError so execute_command retries on a fresh topology.
         """
         from redis._parsers.commands import RequestPolicy
 
@@ -1121,29 +1121,28 @@ class TestRedisClusterObj:
         assert len(primaries) > 0
         valid_node = primaries[0]
 
-        # PING maps to DEFAULT_NODE policy via command_flags.
-        # Simulate a transient None from get_default_node during topology change.
         original_callback = r._policies_callback_mapping[
             RequestPolicy.DEFAULT_NODE
         ]
         r._policies_callback_mapping[RequestPolicy.DEFAULT_NODE] = (
             lambda: [None, valid_node, None]
         )
+        r._initialize = False
         try:
-            nodes = await r._determine_nodes(
-                "PING", request_policy=RequestPolicy.DEFAULT_NODE
-            )
-            assert nodes == [valid_node]
-            assert None not in nodes
+            with pytest.raises(ClusterDownError, match="node mapping returned None"):
+                await r._determine_nodes(
+                    "PING", request_policy=RequestPolicy.DEFAULT_NODE
+                )
+            assert r._initialize is True
         finally:
             r._policies_callback_mapping[
                 RequestPolicy.DEFAULT_NODE
             ] = original_callback
 
     @pytest.mark.onlycluster
-    async def test_determine_nodes_returns_empty_when_all_none(self):
+    async def test_determine_nodes_rejects_all_none_nodes(self):
         """
-        Test that _determine_nodes returns an empty list when all nodes are None.
+        An all-None node list is also a stale-topology signal.
         """
         from redis._parsers.commands import RequestPolicy
 
@@ -1155,11 +1154,13 @@ class TestRedisClusterObj:
         r._policies_callback_mapping[RequestPolicy.DEFAULT_NODE] = (
             lambda: [None, None]
         )
+        r._initialize = False
         try:
-            nodes = await r._determine_nodes(
-                "PING", request_policy=RequestPolicy.DEFAULT_NODE
-            )
-            assert nodes == []
+            with pytest.raises(ClusterDownError, match="node mapping returned None"):
+                await r._determine_nodes(
+                    "PING", request_policy=RequestPolicy.DEFAULT_NODE
+                )
+            assert r._initialize is True
         finally:
             r._policies_callback_mapping[
                 RequestPolicy.DEFAULT_NODE
