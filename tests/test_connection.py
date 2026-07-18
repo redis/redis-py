@@ -1742,9 +1742,7 @@ def _pool_metric_calls(mock_fn, pool_name):
         p = c.kwargs.get("pool_name", c.args[0] if c.args else None)
         if p != pool_name:
             continue
-        state = c.kwargs.get(
-            "connection_state", c.args[1] if len(c.args) > 1 else None
-        )
+        state = c.kwargs.get("connection_state", c.args[1] if len(c.args) > 1 else None)
         counter = c.kwargs.get("counter", c.args[2] if len(c.args) > 2 else 1)
         result.append((state, counter))
     return result
@@ -1824,24 +1822,20 @@ class TestConnectionPoolMetricCount:
         assert used_net == 0, f"Lifecycle USED should net 0, got {used_net}"
 
     @patch("redis.connection.record_connection_count")
-    def test_release_unowned_uses_real_pool_name(self, mock_rec):
-        """release() with owns_connection()=False must use the real pool name."""
+    def test_release_unowned_does_not_record(self, mock_rec):
+        """release() of a connection the pool no longer owns (e.g. inherited by
+        a forked child) must not record connection.count. Fork-time accounting
+        is owned by reset()/__del__; recording here would double-count."""
         pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
-        pn = get_pool_name(pool)
-        mock_rec.reset_mock()
 
         conn = pool.get_connection()
         mock_rec.reset_mock()
-        conn.pid = -1  # simulate fork
+        conn.pid = -1  # simulate a connection inherited across a fork
         pool.release(conn)
 
-        used_decs = [
-            c for c in mock_rec.call_args_list
-            if c.kwargs.get("connection_state") == ConnectionState.USED
-            and c.kwargs.get("counter", 1) == -1
-        ]
-        assert len(used_decs) == 1
-        assert used_decs[0].kwargs["pool_name"] == pn
+        assert mock_rec.call_args_list == [], (
+            "unowned release must not record connection.count"
+        )
 
 
 class TestBlockingConnectionPoolMetricCount:
@@ -1849,7 +1843,9 @@ class TestBlockingConnectionPoolMetricCount:
 
     def _pool(self):
         return BlockingConnectionPool(
-            connection_class=_DummyConnection, max_connections=10, timeout=0.1,
+            connection_class=_DummyConnection,
+            max_connections=10,
+            timeout=0.1,
         )
 
     @patch("redis.connection.record_connection_count")
@@ -1870,7 +1866,9 @@ class TestBlockingConnectionPoolMetricCount:
     def test_release_full_queue_decrements_used(self, mock_rec):
         """When queue is full, release() must still decrement USED."""
         pool = BlockingConnectionPool(
-            connection_class=_DummyConnection, max_connections=1, timeout=0.1,
+            connection_class=_DummyConnection,
+            max_connections=1,
+            timeout=0.1,
         )
         pn = get_pool_name(pool)
         mock_rec.reset_mock()
@@ -1891,7 +1889,9 @@ class TestBlockingConnectionPoolMetricCount:
         """A connection dropped on a full queue must be removed from
         _connections so a later reset() does not decrement USED again."""
         pool = BlockingConnectionPool(
-            connection_class=_DummyConnection, max_connections=1, timeout=0.1,
+            connection_class=_DummyConnection,
+            max_connections=1,
+            timeout=0.1,
         )
         pn = get_pool_name(pool)
 
@@ -1911,9 +1911,10 @@ class TestBlockingConnectionPoolMetricCount:
         assert idle_net == 0, f"reset() must not touch IDLE, got {idle_net}"
 
     @patch("redis.connection.record_connection_count")
-    def test_release_unowned_uses_real_pool_name(self, mock_rec):
+    def test_release_unowned_does_not_record(self, mock_rec):
+        """Unowned (inherited-across-fork) release must not record; fork-time
+        accounting is owned by reset()/__del__."""
         pool = self._pool()
-        pn = get_pool_name(pool)
         mock_rec.reset_mock()
 
         conn = pool.get_connection()
@@ -1921,10 +1922,6 @@ class TestBlockingConnectionPoolMetricCount:
         conn.pid = -1
         pool.release(conn)
 
-        used_decs = [
-            c for c in mock_rec.call_args_list
-            if c.kwargs.get("connection_state") == ConnectionState.USED
-            and c.kwargs.get("counter", 1) == -1
-        ]
-        assert len(used_decs) == 1
-        assert used_decs[0].kwargs["pool_name"] == pn
+        assert mock_rec.call_args_list == [], (
+            "unowned release must not record connection.count"
+        )
