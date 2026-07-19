@@ -616,6 +616,12 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             await r.client_kill_filter(_type="caster")  # type: ignore
 
+    async def test_client_kill_filter_accepts_replica_type(self, r: redis.Redis):
+        with patch.object(r, "execute_command", AsyncMock(return_value=1)) as command:
+            assert await r.client_kill_filter(_type="REPLICA") == 1
+
+        command.assert_awaited_once_with("CLIENT KILL", b"TYPE", "REPLICA")
+
     @skip_if_server_version_lt("2.8.12")
     @pytest.mark.onlynoncluster
     async def test_client_kill_filter_by_id(self, r: redis.Redis, r2):
@@ -2537,6 +2543,72 @@ class TestRedisCommands:
         await r.rpush("a", "1", "2", "3")
         assert await r.llen("a") == 3
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    async def test_lmovem(self, r: redis.Redis):
+        await r.rpush("a", "1", "2", "3", "4", "5")
+        # single element (no count block), still an array reply
+        assert await r.lmovem("a", "b") == [b"1"]
+        # COUNT with OBO ordering: pushed one-by-one -> reversed block order
+        assert await r.lmovem("a", "b", "LEFT", "LEFT", count=3, ordering="OBO") == [
+            b"4",
+            b"3",
+            b"2",
+        ]
+        # up to count, fewer available; BULK preserves relative order
+        assert await r.lmovem("a", "b", "LEFT", "LEFT", count=5, ordering="BULK") == [
+            b"5"
+        ]
+        # empty source moves nothing
+        assert await r.lmovem("a", "b", count=2, ordering="BULK") is None
+        # EXACTLY with too few elements moves nothing (nil reply, source untouched)
+        await r.rpush("names", "john")
+        assert (
+            await r.lmovem(
+                "names",
+                "processed",
+                "LEFT",
+                "RIGHT",
+                count=2,
+                mode="EXACTLY",
+                ordering="BULK",
+            )
+            is None
+        )
+        assert await r.lrange("names", 0, -1) == [b"john"]
+        # EXACTLY with enough elements, BULK preserves order
+        await r.rpush("names", "doe")
+        assert await r.lmovem(
+            "names",
+            "processed",
+            "LEFT",
+            "RIGHT",
+            count=2,
+            mode="EXACTLY",
+            ordering="BULK",
+        ) == [b"john", b"doe"]
+        # ordering is mandatory whenever count is given (and vice versa)
+        with pytest.raises(DataError):
+            await r.lmovem("a", "b", count=2)
+        with pytest.raises(DataError):
+            await r.lmovem("a", "b", ordering="BULK")
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    async def test_blmovem(self, r: redis.Redis):
+        await r.rpush("a", "1", "2", "3", "4", "5")
+        assert await r.blmovem("a", "b", 1) == [b"1"]
+        assert await r.blmovem(
+            "a", "b", 1, "LEFT", "LEFT", count=3, ordering="BULK"
+        ) == [b"2", b"3", b"4"]
+        # up to count, fewer available
+        assert await r.blmovem("a", "b", 1, count=5, ordering="BULK") == [b"5"]
+        # timeout with empty source returns None
+        assert await r.blmovem("foo", "bar", 1, count=2, ordering="BULK") is None
+        # ordering is mandatory whenever count is given
+        with pytest.raises(DataError):
+            await r.blmovem("a", "b", 1, count=2)
+
     async def test_lpop(self, r: redis.Redis):
         await r.rpush("a", "1", "2", "3")
         assert await r.lpop("a") == b"1"
@@ -3337,6 +3409,21 @@ class TestRedisCommands:
         assert await r.sdiff("a", "b") == {b"1"}
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    async def test_sdiffcard(self, r: redis.Redis):
+        await r.sadd("s0", "a", "b", "c", "d", "e")
+        await r.sadd("s1", "c", "d", "x")
+        await r.sadd("s2", "e", "y")
+        # exact difference cardinality: {a, b}
+        assert await r.sdiffcard(3, ["s0", "s1", "s2"]) == 2
+        # limited difference cardinality is capped at limit
+        assert await r.sdiffcard(3, ["s0", "s1", "s2"], limit=1) == 1
+        # a missing subtrahend key does not affect the result
+        assert await r.sdiffcard(2, ["s0", "missing"]) == 5
+        # a missing first key yields 0
+        assert await r.sdiffcard(2, ["missing", "s0"]) == 0
+
+    @pytest.mark.onlynoncluster
     async def test_sdiffstore(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
         assert await r.sdiffstore("c", "a", "b") == 3
@@ -3424,6 +3511,22 @@ class TestRedisCommands:
         await r.sadd("a", "1", "2")
         await r.sadd("b", "2", "3")
         assert set(await r.sunion("a", "b")) == {b"1", b"2", b"3"}
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    async def test_sunioncard(self, r: redis.Redis):
+        await r.sadd("s1", "a", "b", "c")
+        await r.sadd("s2", "c", "d")
+        # exact union cardinality: {a, b, c, d}
+        assert await r.sunioncard(2, ["s1", "s2"]) == 4
+        # approximate union cardinality (still an integer reply)
+        assert await r.sunioncard(2, ["s1", "s2"], approx=True) == 4
+        # a missing key is treated as an empty set
+        assert await r.sunioncard(2, ["s1", "missing"]) == 3
+        # limited union cardinality is capped at limit in exact mode
+        assert await r.sunioncard(2, ["s1", "s2"], limit=3) == 3
+        # APPROX combined with LIMIT does not exceed limit
+        assert await r.sunioncard(2, ["s1", "s2"], limit=3, approx=True) <= 3
 
     @pytest.mark.onlynoncluster
     async def test_sunionstore(self, r: redis.Redis):
@@ -5303,6 +5406,112 @@ class TestRedisCommands:
             {strem_name: [expected_entries]},
             {strem_name: expected_entries},
         )
+
+    def _total_stream_entries(self, r, response):
+        """Count entries across all streams regardless of response shape."""
+        shape = expected_response_shape(r)
+        if shape == "legacy_resp2":
+            return sum(len(item[1]) for item in response)
+        elif shape == "legacy_resp3":
+            return sum(len(entries[0]) for entries in response.values())
+        else:
+            return sum(len(entries) for entries in response.values())
+
+    async def test_xread_max_count_max_size_validation(self, r: redis.Redis):
+        with pytest.raises(DataError):
+            await r.xread(streams={"stream": 0}, max_count=0)
+        with pytest.raises(DataError):
+            await r.xread(streams={"stream": 0}, max_count=-1)
+        with pytest.raises(DataError):
+            await r.xread(streams={"stream": 0}, max_size=0)
+        # max_count must be >= count when both are provided
+        with pytest.raises(DataError):
+            await r.xread(streams={"stream": 0}, count=5, max_count=3)
+
+    @skip_if_server_version_lt("8.9.0")
+    async def test_xread_with_max_count(self, r: redis.Redis):
+        stream = "stream"
+        for i in range(5):
+            await r.xadd(stream, {"f": i})
+
+        # max_count caps the total number of returned entries
+        res = await r.xread(streams={stream: 0}, max_count=2)
+        assert self._total_stream_entries(r, res) == 2
+
+    @skip_if_server_version_lt("8.9.0")
+    async def test_xread_with_max_size(self, r: redis.Redis):
+        stream = "stream"
+        await r.xadd(stream, {"f": "v"})
+
+        # a generous soft cap returns the available entry
+        res = await r.xread(streams={stream: 0}, max_size=65536)
+        assert self._total_stream_entries(r, res) == 1
+
+        # max_size is a soft cap: a single available entry that exceeds the cap
+        # is still returned rather than suppressed
+        res = await r.xread(streams={stream: 0}, max_size=1)
+        assert self._total_stream_entries(r, res) == 1
+
+    @skip_if_server_version_lt("8.9.0")
+    async def test_xread_max_count_cumulative_across_streams(self, r: redis.Redis):
+        stream_1 = "stream1:{maxcount}"
+        stream_2 = "stream2:{maxcount}"
+        for i in range(3):
+            await r.xadd(stream_1, {"f": i})
+        for i in range(3):
+            await r.xadd(stream_2, {"f": i})
+
+        # count is per-stream (up to 3 each), max_count caps the cumulative
+        # reply; streams are served in caller order, so stream_1 contributes 3
+        # and stream_2 contributes 1
+        res = await r.xread(streams={stream_1: 0, stream_2: 0}, count=3, max_count=4)
+        assert self._total_stream_entries(r, res) == 4
+
+    async def test_xreadgroup_max_count_max_size_validation(self, r: redis.Redis):
+        with pytest.raises(DataError):
+            await r.xreadgroup("g", "c", streams={"stream": ">"}, max_count=0)
+        with pytest.raises(DataError):
+            await r.xreadgroup("g", "c", streams={"stream": ">"}, max_size=-1)
+        with pytest.raises(DataError):
+            await r.xreadgroup("g", "c", streams={"stream": ">"}, count=5, max_count=3)
+
+    @skip_if_server_version_lt("8.9.0")
+    async def test_xreadgroup_with_max_count(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        for i in range(5):
+            await r.xadd(stream, {"f": i})
+        await r.xgroup_create(stream, group, 0)
+
+        # max_count caps the total number of returned entries
+        res = await r.xreadgroup(group, consumer, streams={stream: ">"}, max_count=2)
+        assert self._total_stream_entries(r, res) == 2
+        await r.xgroup_destroy(stream, group)
+
+    @skip_if_server_version_lt("8.9.0")
+    async def test_xreadgroup_max_count_cumulative_across_streams(self, r: redis.Redis):
+        stream_1 = "stream1:{grpmaxcount}"
+        stream_2 = "stream2:{grpmaxcount}"
+        group = "group"
+        consumer = "consumer"
+        for i in range(3):
+            await r.xadd(stream_1, {"f": i})
+        for i in range(3):
+            await r.xadd(stream_2, {"f": i})
+        await r.xgroup_create(stream_1, group, 0)
+        await r.xgroup_create(stream_2, group, 0)
+
+        res = await r.xreadgroup(
+            group,
+            consumer,
+            streams={stream_1: ">", stream_2: ">"},
+            count=3,
+            max_count=4,
+        )
+        assert self._total_stream_entries(r, res) == 4
+        await r.xgroup_destroy(stream_1, group)
+        await r.xgroup_destroy(stream_2, group)
 
     @skip_if_server_version_lt("5.0.0")
     async def test_xreadgroup(self, r: redis.Redis):

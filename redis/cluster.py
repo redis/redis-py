@@ -340,17 +340,12 @@ class MaintNotificationsAbstractRedisCluster:
         maint_notifications_config: Optional[MaintNotificationsConfig],
         **kwargs,
     ):
-        # Initialize maintenance notifications
+        # Initialize maintenance notifications.
+        # The RESP3 requirement is validated in RedisCluster.__init__ before the
+        # NodesManager is constructed; this mixin is only ever run from there, so
+        # the config it receives has already been validated.
         is_protocol_supported = check_protocol_version(kwargs.get("protocol"), 3)
 
-        if (
-            maint_notifications_config
-            and maint_notifications_config.enabled
-            and not is_protocol_supported
-        ):
-            raise RedisError(
-                "Maintenance notifications handlers on connection are only supported with RESP version 3"
-            )
         if maint_notifications_config is None and is_protocol_supported:
             maint_notifications_config = MaintNotificationsConfig()
 
@@ -880,7 +875,11 @@ class RedisCluster(
         if (cache_config or cache) and not check_protocol_version(protocol, 3):
             raise RedisError("Client caching is only supported with RESP version 3")
 
-        if maint_notifications_config and not check_protocol_version(protocol, 3):
+        if (
+            maint_notifications_config
+            and maint_notifications_config.enabled
+            and not check_protocol_version(protocol, 3)
+        ):
             raise RedisError(
                 "Maintenance notifications are only supported with RESP version 3"
             )

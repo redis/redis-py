@@ -110,7 +110,9 @@ class LockError(RedisError, ValueError):
     # NOTE: For backwards compatibility, this class derives from ValueError.
     # This was originally chosen to behave like threading.Lock.
 
-    def __init__(self, message=None, lock_name=None):
+    def __init__(
+        self, message: str | None = None, lock_name: str | None = None
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.lock_name = lock_name
@@ -144,7 +146,7 @@ class RedisClusterException(Exception):
     Base exception for the RedisCluster client
     """
 
-    def __init__(self, *args):
+    def __init__(self, *args: object) -> None:
         super().__init__(*args)
         self.error_type = ExceptionType.SERVER
 

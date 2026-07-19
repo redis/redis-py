@@ -551,6 +551,92 @@ def test_revrange_empty(client: redis.Redis):
     assert_resp_response(client, res, resp2_expected, resp3_expected)
 
 
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_read(client):
+    client.ts().create(1)
+    client.ts().add(1, 100, 1.0)
+    client.ts().add(1, 200, 2.0)
+    client.ts().add(1, 300, 3.0)
+
+    # Read everything at or after the cursor. TS.READ always returns the same
+    # unified sample shape (list of [timestamp, value]) regardless of protocol.
+    assert client.ts().read(1, 0) == [[100, 1.0], [200, 2.0], [300, 3.0]]
+
+    # The cursor is inclusive.
+    assert client.ts().read(1, 200) == [[200, 2.0], [300, 3.0]]
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_read_max_count(client):
+    client.ts().create(1)
+    client.ts().add(1, 100, 1.0)
+    client.ts().add(1, 200, 2.0)
+    client.ts().add(1, 300, 3.0)
+
+    # Bounded paging: read the oldest max_count, then page from last_ts + 1.
+    assert client.ts().read(1, "-", max_count=2) == [[100, 1.0], [200, 2.0]]
+    assert client.ts().read(1, 201, max_count=2) == [[300, 3.0]]
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_read_sentinels(client):
+    client.ts().create(1)
+    client.ts().add(1, 100, 1.0)
+    client.ts().add(1, 200, 2.0)
+    client.ts().add(1, 300, 3.0)
+
+    # `+` resolves to the latest sample, inclusive; returned even without BLOCK.
+    assert client.ts().read(1, "+") == [[300, 3.0]]
+
+    # `-` reads from the earliest sample.
+    assert len(client.ts().read(1, "-")) == 3
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_read_empty(client):
+    client.ts().create(1)
+    client.ts().add(1, 100, 1.0)
+
+    # A cursor past the newest sample yields an empty (successful) reply.
+    assert [] == client.ts().read(1, 301)
+    # A missing key is also an empty reply, not an error.
+    assert [] == client.ts().read("missing", 0)
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_read_block(client):
+    client.ts().create(1)
+    client.ts().add(1, 100, 1.0)
+    client.ts().add(1, 200, 2.0)
+    client.ts().add(1, 300, 3.0)
+
+    # min_count is already met, so the blocking call returns immediately.
+    res = client.ts().read(1, 0, block_milliseconds=1000, block_min_count=1)
+    assert 3 == len(res)
+
+    # min_count cannot be reached; after the timeout the available samples flush.
+    res = client.ts().read(1, 101, block_milliseconds=100, block_min_count=10)
+    assert res == [[200, 2.0], [300, 3.0]]
+
+    # A blocking timeout with nothing available is a successful empty reply.
+    assert [] == client.ts().read(1, 301, block_milliseconds=100, block_min_count=1)
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_read_block_min_count_requires_milliseconds(client):
+    # BLOCK is all-or-nothing: min_count without milliseconds is invalid usage.
+    with pytest.raises(
+        redis.exceptions.DataError, match="block_min_count requires block_milliseconds"
+    ):
+        client.ts().read(1, 0, block_min_count=5)
+
+
 @pytest.mark.onlynoncluster
 @pytest.mark.redismod
 def test_mrange(client):
@@ -598,6 +684,124 @@ def test_mrange(client):
         assert {} == res["1"][0]
         res = client.ts().mrange(0, 200, filters=["Test=This"], with_labels=True)
         assert {"Test": "This", "team": "ny"} == res["1"][0]
+
+
+def _mrange_returned_keys(client, res):
+    """Return the set of series key names in a TS.MRANGE/MREVRANGE reply,
+    normalizing the RESP2 (list of single-key dicts) and RESP3/unified
+    (dict keyed by name) shapes."""
+    if expects_resp2_shape(client):
+        return {next(iter(entry)) for entry in res}
+    return set(res.keys())
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_mrange_exclude_empty(client):
+    client.ts().create("s", labels={"sensor": "1", "type": "demo"})
+    client.ts().create("t", labels={"sensor": "1", "type": "demo"})
+    client.ts().create("u", labels={"sensor": "1", "type": "demo"})
+    client.ts().madd(
+        [
+            ("s", 100, 100),
+            ("t", 100, 100),
+            ("s", 200, 200),
+            ("t", 300, 300),
+            ("s", 400, 400),
+            ("t", 400, 400),
+            ("u", 2000, 2000),
+        ]
+    )
+
+    # Without EXCLUDEEMPTY, "u" matches the filter but has no samples in range.
+    res = client.ts().mrange("-", 500, filters=["sensor=1"])
+    assert {"s", "t", "u"} == _mrange_returned_keys(client, res)
+
+    # With EXCLUDEEMPTY, "u" is omitted from the top-level reply.
+    res = client.ts().mrange("-", 500, filters=["sensor=1"], exclude_empty=True)
+    assert {"s", "t"} == _mrange_returned_keys(client, res)
+
+    # Composing with WITHLABELS should not change the exclusion behavior.
+    res = client.ts().mrange(
+        "-", 500, filters=["sensor=1"], with_labels=True, exclude_empty=True
+    )
+    assert {"s", "t"} == _mrange_returned_keys(client, res)
+
+    # Composing with AGGREGATION should still omit the empty series.
+    res = client.ts().mrange(
+        "-",
+        500,
+        filters=["sensor=1"],
+        aggregation_type="min",
+        bucket_size_msec=100,
+        exclude_empty=True,
+    )
+    assert {"s", "t"} == _mrange_returned_keys(client, res)
+
+    # When every matching series is empty, no series is reported (an empty
+    # top-level reply; shape is [] in RESP2 and {} in RESP3).
+    res = client.ts().mrange(1, 50, filters=["sensor=1"], exclude_empty=True)
+    assert 0 == len(res)
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_mrevrange_exclude_empty(client):
+    client.ts().create("s", labels={"sensor": "1", "type": "demo"})
+    client.ts().create("t", labels={"sensor": "1", "type": "demo"})
+    client.ts().create("u", labels={"sensor": "1", "type": "demo"})
+    client.ts().madd(
+        [
+            ("s", 100, 100),
+            ("t", 100, 100),
+            ("s", 200, 200),
+            ("t", 300, 300),
+            ("s", 400, 400),
+            ("t", 400, 400),
+            ("u", 2000, 2000),
+        ]
+    )
+
+    res = client.ts().mrevrange("-", 500, filters=["sensor=1"])
+    assert {"s", "t", "u"} == _mrange_returned_keys(client, res)
+
+    res = client.ts().mrevrange("-", 500, filters=["sensor=1"], exclude_empty=True)
+    assert {"s", "t"} == _mrange_returned_keys(client, res)
+
+    # All matching series empty -> empty top-level reply ([] in RESP2, {} in RESP3).
+    res = client.ts().mrevrange(1, 50, filters=["sensor=1"], exclude_empty=True)
+    assert 0 == len(res)
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+def test_mrange_exclude_empty_with_groupby_raises(client):
+    # EXCLUDEEMPTY is mutually exclusive with GROUPBY. This is validated
+    # client-side, so it does not require server support.
+    with pytest.raises(
+        redis.DataError, match="EXCLUDEEMPTY is not allowed with GROUPBY"
+    ):
+        client.ts().mrange(
+            "-",
+            500,
+            filters=["sensor=1"],
+            groupby="type",
+            reduce="max",
+            exclude_empty=True,
+        )
+    with pytest.raises(
+        redis.DataError, match="EXCLUDEEMPTY is not allowed with GROUPBY"
+    ):
+        client.ts().mrevrange(
+            "-",
+            500,
+            filters=["sensor=1"],
+            groupby="type",
+            reduce="max",
+            exclude_empty=True,
+        )
 
 
 @pytest.mark.onlynoncluster

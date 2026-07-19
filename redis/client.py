@@ -222,6 +222,23 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         Return a Redis client from the given connection pool.
         The Redis client will take ownership of the connection pool and
         close it when the Redis client is closed.
+
+        Because the client closes (disconnects all connections in) the pool
+        when it is closed or garbage-collected, the pool must not be shared
+        with other clients. Constructing multiple clients from the same pool
+        via ``from_pool`` -- for example one per request across threads -- is
+        not thread safe: when one client is closed it will disconnect
+        connections still in use by the others.
+
+        To share a single pool across clients, construct the pool explicitly
+        and manage its lifecycle instead. Unlike ``from_pool``, the plain
+        ``Redis(connection_pool=pool)`` constructor does not take ownership of
+        the pool and will not close it, so a pool created this way can be
+        safely shared across clients. ``ConnectionPool`` supports the context
+        manager protocol for this::
+
+            with ConnectionPool.from_url(url) as pool:
+                r = Redis(connection_pool=pool)
         """
         client = cls(
             connection_pool=connection_pool,
@@ -754,7 +771,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             self.connection_pool.release(conn)
 
         if self.auto_close_connection_pool:
-            self.connection_pool.disconnect()
+            self.connection_pool.close()
 
     def _send_command_parse_response(self, conn, command_name, *args, **options):
         """
@@ -846,13 +863,15 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             raise
 
         finally:
-            if conn and conn.should_reconnect():
-                self._close_connection(conn)
-                conn.connect()
-            if self._single_connection_client:
-                self.single_connection_lock.release()
-            if not self.connection:
-                pool.release(conn)
+            try:
+                if conn and conn.should_reconnect():
+                    self._close_connection(conn)
+                    conn.connect()
+            finally:
+                if self._single_connection_client:
+                    self.single_connection_lock.release()
+                if not self.connection:
+                    pool.release(conn)
 
     def parse_response(self, connection, command_name, **options):
         """Parses a response from the Redis server"""
