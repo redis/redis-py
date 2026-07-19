@@ -174,7 +174,7 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
             return self._read_response(
                 disable_decoding=disable_decoding,
                 push_request=push_request,
-                _depth=_depth + 1,
+                _depth=_depth,
             )
         else:
             raise InvalidResponse(f"Protocol Error: {raw!r}")
@@ -313,7 +313,7 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
             if not push_request:
                 return await self._read_response(
                     disable_decoding=disable_decoding, push_request=push_request,
-                    _depth=_depth + 1,
+                    _depth=_depth,
                 )
             else:
                 return response

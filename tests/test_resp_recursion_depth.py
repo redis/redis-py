@@ -185,3 +185,60 @@ class TestRESP3AsyncDepthLimit:
 
         with pytest.raises(InvalidResponse, match="nesting depth exceeds"):
             await parser._read_response()
+
+
+class TestRESP3PushContinuation:
+    """Push notifications are top-level replies, not nested.
+
+    A burst of push notifications before the command response should NOT
+    trip the depth guard. Each push continuation reads the next top-level
+    reply at the same depth level (depth preserved, not incremented).
+    """
+
+    def test_sync_burst_pushes_not_nested(self):
+        """250 push notifications then OK -- must not raise InvalidResponse."""
+        num_pushes = 250
+        # Each push: >1\r\n (1-element push array) followed by item +ok\r\n
+        lines = []
+        for _ in range(num_pushes):
+            lines.append(b">1\r\n")
+            lines.append(b"+ok\r\n")
+        lines.append(b"+DONE\r\n")  # final command response
+
+        parser = _make_sync_resp3_parser()
+        call_count = [0]
+
+        def mock_readline(timeout=None):
+            idx = call_count[0]
+            call_count[0] += 1
+            return lines[idx]
+
+        parser._buffer.readline = mock_readline
+
+        # Should return the final "+DONE" response, not raise
+        result = parser.read_response()
+        assert result == "DONE"
+
+    def test_sync_push_then_nested_still_trips_guard(self):
+        """Push followed by deeply nested array should still raise."""
+        num_pushes = 5
+        lines = []
+        for _ in range(num_pushes):
+            lines.append(b">1\r\n")
+            lines.append(b"+ok\r\n")
+        # After pushes, a deeply nested array
+        depth = 250
+        lines.extend([b"*1\r\n"] * depth + [b"+OK\r\n"])
+
+        parser = _make_sync_resp3_parser()
+        call_count = [0]
+
+        def mock_readline(timeout=None):
+            idx = call_count[0]
+            call_count[0] += 1
+            return lines[idx]
+
+        parser._buffer.readline = mock_readline
+
+        with pytest.raises(InvalidResponse, match="nesting depth exceeds"):
+            parser.read_response()
