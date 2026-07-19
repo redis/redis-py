@@ -13,8 +13,11 @@ from .base import (
 from .socket import SERVER_CLOSED_CONNECTION_ERROR
 
 # Maximum nesting depth for RESP aggregate replies to prevent RecursionError
-# from malicious or malformed responses. 512 is well above any legitimate use.
-_MAX_RESP_DEPTH = 512
+# from malicious or malformed responses. On Python 3.10/3.11 each nested array
+# adds both an _read_response frame and a list-comprehension frame, so the
+# default recursion limit (1000) is hit around depth ~500.  Keep the cap well
+# below that threshold.
+_MAX_RESP_DEPTH = 200
 
 
 class _RESP3Parser(_RESPBase, PushNotificationsParser):

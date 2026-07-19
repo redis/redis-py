@@ -37,7 +37,8 @@ def _make_sync_resp3_parser():
 class TestRESP2SyncDepthLimit:
     def test_deeply_nested_array_raises_invalid_response(self):
         """Malicious server sending deeply nested *1\\r\\n arrays."""
-        depth = 600  # exceeds _MAX_RESP_DEPTH = 512
+        depth = 250  # exceeds _MAX_RESP_DEPTH = 200 but stays well below
+                     # the default recursion limit (~1000 frames)
         lines = [b"*1\r\n"] * depth + [b"+OK\r\n"]
 
         parser = _make_sync_resp2_parser()
@@ -74,7 +75,7 @@ class TestRESP2SyncDepthLimit:
 class TestRESP3SyncDepthLimit:
     def test_deeply_nested_array_raises_invalid_response(self):
         """RESP3 deeply nested array."""
-        depth = 600
+        depth = 250  # exceeds _MAX_RESP_DEPTH = 200
         lines = [b"*1\r\n"] * depth + [b"+OK\r\n"]
 
         parser = _make_sync_resp3_parser()
@@ -92,7 +93,7 @@ class TestRESP3SyncDepthLimit:
 
     def test_deeply_nested_set_raises_invalid_response(self):
         """RESP3 deeply nested set (~1\\r\\n)."""
-        depth = 600
+        depth = 250  # exceeds _MAX_RESP_DEPTH = 200
         lines = [b"~1\r\n"] * depth + [b"+OK\r\n"]
 
         parser = _make_sync_resp3_parser()
@@ -115,7 +116,7 @@ class TestRESP3SyncDepthLimit:
         key read, and one recursive val read.  For N nesting levels we need
         N header lines + 1 leaf key + N val lines = 2N + 1 total lines.
         """
-        depth = 550  # well above _MAX_RESP_DEPTH = 512
+        depth = 250  # exceeds _MAX_RESP_DEPTH = 200
         lines = [b"%1\r\n"] * depth + [b"+k"] + [b"+v"] * depth
 
         parser = _make_sync_resp3_parser()
@@ -136,7 +137,7 @@ class TestRESP3SyncDepthLimit:
 class TestRESP2AsyncDepthLimit:
     async def test_deeply_nested_array_raises_invalid_response(self):
         """Async RESP2 deeply nested array."""
-        depth = 600
+        depth = 250  # exceeds _MAX_RESP_DEPTH = 200
         lines = [b"*1\r\n"] * depth + [b"+OK"]
 
         parser = _AsyncRESP2Parser.__new__(_AsyncRESP2Parser)
@@ -162,7 +163,7 @@ class TestRESP2AsyncDepthLimit:
 class TestRESP3AsyncDepthLimit:
     async def test_deeply_nested_array_raises_invalid_response(self):
         """Async RESP3 deeply nested array."""
-        depth = 600
+        depth = 250  # exceeds _MAX_RESP_DEPTH = 200
         lines = [b"*1\r\n"] * depth + [b"+OK"]
 
         parser = _AsyncRESP3Parser.__new__(_AsyncRESP3Parser)
