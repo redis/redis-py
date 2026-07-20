@@ -8,6 +8,13 @@ from invoke import run, task
 if not hasattr(inspect, "getargspec"):
     inspect.getargspec = inspect.getfullargspec
 
+JUNIT_RESULTS_DIR = "junit-results"
+
+
+def _ensure_junit_results_dir():
+    """Create the directory that holds the pytest ``--junit-xml`` reports."""
+    os.makedirs(JUNIT_RESULTS_DIR, exist_ok=True)
+
 
 @task
 def devenv(c, endpoints="all"):
@@ -101,6 +108,7 @@ def tests(c, uvloop=False, protocol="", legacy_responses=True, profile=False):
 @task
 def fixed_client_tests(c, uvloop=False, profile=False):
     """Run tests that use the fixed client fixture."""
+    _ensure_junit_results_dir()
     profile_arg = "--profile" if profile else ""
     if uvloop:
         run(
@@ -123,6 +131,7 @@ def standalone_tests(
     extra_markers="",
 ):
     """Run tests against a standalone redis instance"""
+    _ensure_junit_results_dir()
     profile_arg = "--profile" if profile else ""
     redis_mod_url = f"--redis-mod-url={redis_mod_url}" if redis_mod_url else ""
     extra_markers = f" and {extra_markers}" if extra_markers else ""
@@ -144,6 +153,7 @@ def standalone_tests(
 @task
 def cluster_tests(c, uvloop=False, protocol="", legacy_responses=True, profile=False):
     """Run tests against a redis cluster"""
+    _ensure_junit_results_dir()
     profile_arg = "--profile" if profile else ""
     cluster_url = "redis://localhost:16379/0"
     cluster_tls_url = "rediss://localhost:27379/0"
@@ -174,6 +184,7 @@ def multidb_integration_tests(c, uvloop=False, profile=False):
     (16379, 16385) and both standalone servers (6379, 6479) are reachable.
     Variants whose endpoints are not reachable are skipped.
     """
+    _ensure_junit_results_dir()
     profile_arg = "--profile" if profile else ""
     uvloop_arg = "--uvloop" if uvloop else ""
     run(

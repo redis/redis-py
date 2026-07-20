@@ -316,7 +316,8 @@ runs:
       shell: bash
 
     - name: Normalize JUnit XML for metrics
-      if: always() && inputs.otlp-auth-token != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      if: ${{ !cancelled() && inputs.otlp-auth-token != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      continue-on-error: true
       run: |
         python - <<'PY'
         import glob
@@ -333,7 +334,8 @@ runs:
       shell: bash
 
     - name: Self Report Metrics
-      if: always() && inputs.otlp-auth-token != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      if: ${{ !cancelled() && inputs.otlp-auth-token != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      continue-on-error: true
       uses: redis-developer/cae-otel-ci-visibility@v2
       with:
         junit-xml-folder: "junit-results"
