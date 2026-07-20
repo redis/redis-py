@@ -23,17 +23,18 @@ def _nativestr_dict(d):
 
 
 def parse_query_labels(response, **kwargs):
-    """Normalize the TS.QUERYLABELS reply to a list of unique strings.
+    """Normalize the TS.QUERYLABELS reply to a ``set`` of unique strings.
 
     The reply is a flat array under RESP2 and a set under RESP3; both are
-    surfaced as a Python ``list`` so the collection type is identical across
-    protocols. Elements are kept byte-exact (never coerced or normalized) and
+    surfaced as a Python ``set`` so the collection type is identical across
+    protocols and reflects that the server returns a unique, unordered
+    collection. Elements are kept byte-exact (never coerced or normalized) and
     the server already deduplicates them. A missing reply maps to an empty
-    list so an empty result is a normal success rather than an error.
+    ``set`` so an empty result is a normal success rather than an error.
     """
     if response is None:
-        return []
-    return list(response)
+        return set()
+    return set(response)
 
 
 def parse_range(response, **kwargs):

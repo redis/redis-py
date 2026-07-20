@@ -1119,7 +1119,7 @@ async def test_query_labels(decoded_r: redis.Redis):
     # LABELS mode with a filter returns the union of label names across the
     # matching series, including the label used in the filter itself.
     labels = await decoded_r.ts().querylabels(filters=["type=sensor"])
-    assert isinstance(labels, list)
+    assert isinstance(labels, set)
     assert sorted(labels) == ["location", "sensortype", "type"]
 
     # Omitting the filter queries all indexed series.
@@ -1130,7 +1130,18 @@ async def test_query_labels(decoded_r: redis.Redis):
     ]
 
     # A filter that matches nothing is a normal empty reply, not an error.
-    assert await decoded_r.ts().querylabels(filters=["type=missing"]) == []
+    assert await decoded_r.ts().querylabels(filters=["type=missing"]) == set()
+
+    # `filters` accepts any iterable, not just a list (a tuple and a single-pass
+    # generator both work).
+    assert sorted(await decoded_r.ts().querylabels(filters=("type=sensor",))) == [
+        "location",
+        "sensortype",
+        "type",
+    ]
+    assert sorted(
+        await decoded_r.ts().querylabels(filters=(f for f in ["type=sensor"]))
+    ) == ["location", "sensortype", "type"]
 
 
 @pytest.mark.onlynoncluster
@@ -1143,7 +1154,7 @@ async def test_query_label_values(decoded_r: redis.Redis):
 
     # VALUES mode returns the deduplicated union of a label's values.
     values = await decoded_r.ts().querylabels("location", filters=["type=sensor"])
-    assert isinstance(values, list)
+    assert isinstance(values, set)
     assert sorted(values) == ["Kitchen", "LivingRoom"]
 
     # Omitting the filter collects values across all indexed series.
@@ -1155,12 +1166,13 @@ async def test_query_label_values(decoded_r: redis.Redis):
 
     # A label carried by no matching series yields an empty reply.
     assert (
-        await decoded_r.ts().querylabels("nonexistent", filters=["type=sensor"]) == []
+        await decoded_r.ts().querylabels("nonexistent", filters=["type=sensor"])
+        == set()
     )
 
     # Values are byte-exact strings and are never coerced to numbers.
     await decoded_r.ts().create(4, labels={"type": "sensor", "code": "123"})
-    assert await decoded_r.ts().querylabels("code", filters=["type=sensor"]) == ["123"]
+    assert await decoded_r.ts().querylabels("code", filters=["type=sensor"]) == {"123"}
 
 
 @pytest.mark.onlynoncluster

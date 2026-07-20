@@ -1,4 +1,4 @@
-from typing import Any, Awaitable, Dict, List, Tuple, overload
+from typing import Any, Awaitable, Dict, Iterable, List, Tuple, overload
 
 from redis.exceptions import DataError
 from redis.typing import (
@@ -1845,19 +1845,19 @@ class TimeSeriesCommands:
     def querylabels(
         self: SyncClientProtocol,
         label: str | None = None,
-        filters: list[str] | None = None,
-    ) -> list[bytes | str]: ...
+        filters: Iterable[str] | None = None,
+    ) -> set[bytes | str]: ...
 
     @overload
     def querylabels(
         self: AsyncClientProtocol,
         label: str | None = None,
-        filters: list[str] | None = None,
-    ) -> Awaitable[list[bytes | str]]: ...
+        filters: Iterable[str] | None = None,
+    ) -> Awaitable[set[bytes | str]]: ...
 
     def querylabels(
-        self, label: str | None = None, filters: list[str] | None = None
-    ) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+        self, label: str | None = None, filters: Iterable[str] | None = None
+    ) -> set[bytes | str] | Awaitable[set[bytes | str]]:
         """
         Get label metadata for the time series matching `filters`.
 
@@ -1875,10 +1875,11 @@ class TimeSeriesCommands:
           `label` that matches no series, contribute nothing (an empty reply,
           not an error).
 
-        The reply is unordered and already deduplicated by the server. When
-        `filters` is omitted (``None``), all indexed series are queried; filter
-        expressions use the same language as `TS.QUERYINDEX` and are passed
-        verbatim, while an explicitly empty collection raises a `DataError`.
+        The reply is unordered and already deduplicated by the server, so it is
+        returned as a Python ``set``. When `filters` is omitted (``None``), all
+        indexed series are queried; filter expressions use the same language as
+        `TS.QUERYINDEX` and are passed verbatim, while an explicitly empty
+        collection raises a `DataError`.
 
         For more information see https://redis.io/commands/ts.querylabels/
         """
@@ -1890,16 +1891,21 @@ class TimeSeriesCommands:
         return self.execute_command(QUERYLABELS_CMD, *params)
 
     @staticmethod
-    def _append_filter_expressions(params: list[EncodableT], filters: list[str] | None):
+    def _append_filter_expressions(
+        params: list[EncodableT], filters: Iterable[str] | None
+    ):
         """Append the optional FILTER clause for TS.QUERYLABELS.
 
         ``None`` omits ``FILTER`` entirely (the documented all-series query);
         an explicitly empty collection is a local usage error, since silently
-        widening to all series would be surprising. Expressions are passed
-        through verbatim, without parsing, reordering, or normalizing.
+        widening to all series would be surprising. Any iterable is accepted and
+        materialized once so single-pass iterators are handled correctly.
+        Expressions are passed through verbatim, without parsing, reordering, or
+        normalizing.
         """
         if filters is None:
             return
+        filters = list(filters)
         if not filters:
             raise DataError(
                 "filters cannot be an empty collection; pass None to query "
