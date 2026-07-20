@@ -2619,6 +2619,40 @@ class TestPipeline(AsyncSearchTestsBase):
 
 class TestSearchWithVamana(AsyncSearchTestsBase):
     # SVS-VAMANA Async Tests
+    @pytest.mark.fixed_client
+    def test_vector_field_rerank(self):
+        # Pure serialization check: VectorField builds the FT.CREATE args with
+        # no server round-trip, so this test needs no Redis and is not gated.
+        # RERANK is a boolean key-value attribute for HNSW vector fields on
+        # disk-backed (Flex / Auto-Tiering) deployments, where it is mandatory.
+        # It toggles the exact FP32 rerank pass over the approximate candidates
+        # returned by the on-disk graph traversal. It flows through the generic
+        # ``attributes`` dict as the string "TRUE"/"FALSE" (a bare flag is
+        # rejected by the server, and Python bools are rejected by the client
+        # encoder), and the attribute-count token accounts for the extra pair.
+        # Field construction has no I/O, so this mirrors the sync serialization
+        # test and is not an async test.
+        field = VectorField(
+            "v",
+            "HNSW",
+            {"TYPE": "FLOAT32", "DIM": 128, "DISTANCE_METRIC": "L2", "RERANK": "TRUE"},
+        )
+        assert field.args[0] == "VECTOR"
+        assert field.args[1] == "HNSW"
+        assert field.args[2] == 8  # 4 attribute pairs -> 8 tokens
+        assert "RERANK" in field.args
+        assert "TRUE" in field.args
+
+        # MS2 also accepts RERANK FALSE (opt out of the rerank pass).
+        field = VectorField(
+            "v",
+            "HNSW",
+            {"TYPE": "FLOAT32", "DIM": 128, "DISTANCE_METRIC": "L2", "RERANK": "FALSE"},
+        )
+        assert field.args[2] == 8
+        assert "RERANK" in field.args
+        assert "FALSE" in field.args
+
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.1.224")
     async def test_async_svs_vamana_basic_functionality(self, decoded_r: redis.Redis):
