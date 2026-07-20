@@ -534,6 +534,8 @@ class TestRedisCommands:
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
+    # Redis Enterprise manages ACLs itself and disallows ACL SETUSER here.
+    @skip_if_redis_enterprise()
     def test_acl_modules_commands(self, r, request):
         default_username = "default"
         username = "redis-py-user"
@@ -597,6 +599,8 @@ class TestRedisCommands:
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
+    # Redis Enterprise manages ACLs itself and disallows ACL SETUSER here.
+    @skip_if_redis_enterprise()
     def test_acl_modules_category_commands(self, r, request):
         default_username = "default"
         username = "redis-py-user"
@@ -678,6 +682,9 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
+    # Redis Enterprise fronts the database with a proxy, so CLIENT LIST does not
+    # report the same per-connection client set.
+    @skip_if_redis_enterprise()
     def test_client_list_client_id(self, r, request):
         clients = r.client_list()
         clients = r.client_list(client_id=[clients[0]["id"]])
@@ -752,6 +759,9 @@ class TestRedisCommands:
         )
 
     @skip_if_server_version_lt("7.2.0")
+    # Exercises a default localhost client for the deprecated lib_name/lib_version
+    # params, which cannot target a remote managed Redis Enterprise endpoint.
+    @skip_if_redis_enterprise()
     def test_client_setinfo(self, r: redis.Redis):
         from redis.utils import get_lib_version
 
@@ -773,6 +783,9 @@ class TestRedisCommands:
         assert info["lib-ver"] == "1234"
 
     @skip_if_server_version_lt("7.2.0")
+    # Exercises a default localhost client, which cannot target a remote managed
+    # Redis Enterprise endpoint.
+    @skip_if_redis_enterprise()
     def test_client_setinfo_with_driver_info(self, r: redis.Redis):
         from redis import DriverInfo
         from redis.utils import get_lib_version
@@ -822,6 +835,12 @@ class TestRedisCommands:
         # invalid type
         with pytest.raises(exceptions.DataError):
             r.client_kill_filter(_type="caster")
+
+    def test_client_kill_filter_accepts_replica_type(self, r):
+        with mock.patch.object(r, "execute_command", return_value=1) as execute_command:
+            assert r.client_kill_filter(_type="REPLICA") == 1
+
+        execute_command.assert_called_once_with("CLIENT KILL", b"TYPE", "REPLICA")
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.12")
@@ -956,6 +975,8 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
+    # Redis Enterprise does not allow the CLIENT NO-EVICT admin command.
+    @skip_if_redis_enterprise()
     def test_client_no_evict(self, r):
         assert r.client_no_evict("ON")
         with pytest.raises(TypeError):
@@ -1002,6 +1023,8 @@ class TestRedisCommands:
         # assert data['maxmemory'].isdigit()
 
     @skip_if_server_version_lt("7.0.0")
+    # Redis Enterprise does not expose the same CONFIG GET parameter set (e.g. maxmemory).
+    @skip_if_redis_enterprise()
     def test_config_get_multi_params(self, r: redis.Redis):
         res = r.config_get("*max-*-entries*", "maxmemory")
         assert "maxmemory" in res
@@ -1036,6 +1059,8 @@ class TestRedisCommands:
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
+    # Redis Enterprise exposes a different module CONFIG surface (e.g. search-timeout).
+    @skip_if_redis_enterprise()
     def test_config_get_for_modules(self, r: redis.Redis):
         search_module_configs = r.config_get("search-*")
         assert "search-timeout" in search_module_configs
@@ -1051,6 +1076,8 @@ class TestRedisCommands:
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
+    # FT.CONFIG is not available on Redis Enterprise (managed search config).
+    @skip_if_redis_enterprise()
     def test_config_set_for_search_module(self, r: redis.Redis):
         initial_default_search_dialect = r.config_get("*")["search-default-dialect"]
         try:
@@ -1108,6 +1135,8 @@ class TestRedisCommands:
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
+    # Redis Enterprise reports a different INFO modules section shape.
+    @skip_if_redis_enterprise()
     def test_info_with_modules(self, r: redis.Redis):
         res = r.info(section="everything")
         assert "modules" in res
@@ -1181,6 +1210,8 @@ class TestRedisCommands:
         assert r.select(9)
 
     @pytest.mark.onlynoncluster
+    # Redis Enterprise's SLOWLOG GET entries omit the client_address field.
+    @skip_if_redis_enterprise()
     def test_slowlog_get(self, r, slowlog):
         assert r.slowlog_reset()
         unicode_string = chr(3456) + "abcd" + chr(3421)
@@ -1811,6 +1842,9 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
+    # Redis Enterprise exposes a single logical database, so copying across DB
+    # indexes is not supported.
+    @skip_if_redis_enterprise()
     def test_copy_to_another_database(self, request):
         r0 = _get_client(redis.Redis, request, db=0)
         r1 = _get_client(redis.Redis, request, db=1)
@@ -2411,6 +2445,72 @@ class TestRedisCommands:
         r.rpush("a", "one", "two", "three", "four")
         assert r.blmove("a", "b", 5)
         assert r.blmove("a", "b", 1, "RIGHT", "LEFT")
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    def test_lmovem(self, r):
+        r.rpush("a", "1", "2", "3", "4", "5")
+        # single element (no count block), still an array reply
+        assert r.lmovem("a", "b") == [b"1"]
+        # COUNT with OBO ordering: pushed one-by-one -> reversed block order
+        assert r.lmovem("a", "b", "LEFT", "LEFT", count=3, ordering="OBO") == [
+            b"4",
+            b"3",
+            b"2",
+        ]
+        # up to count, fewer available; BULK preserves relative order
+        assert r.lmovem("a", "b", "LEFT", "LEFT", count=5, ordering="BULK") == [b"5"]
+        # empty source moves nothing
+        assert r.lmovem("a", "b", count=2, ordering="BULK") is None
+        # EXACTLY with too few elements moves nothing (nil reply, source untouched)
+        r.rpush("names", "john")
+        assert (
+            r.lmovem(
+                "names",
+                "processed",
+                "LEFT",
+                "RIGHT",
+                count=2,
+                mode="EXACTLY",
+                ordering="BULK",
+            )
+            is None
+        )
+        assert r.lrange("names", 0, -1) == [b"john"]
+        # EXACTLY with enough elements, BULK preserves order
+        r.rpush("names", "doe")
+        assert r.lmovem(
+            "names",
+            "processed",
+            "LEFT",
+            "RIGHT",
+            count=2,
+            mode="EXACTLY",
+            ordering="BULK",
+        ) == [b"john", b"doe"]
+        # ordering is mandatory whenever count is given (and vice versa)
+        with pytest.raises(redis.DataError):
+            r.lmovem("a", "b", count=2)
+        with pytest.raises(redis.DataError):
+            r.lmovem("a", "b", ordering="BULK")
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    def test_blmovem(self, r):
+        r.rpush("a", "1", "2", "3", "4", "5")
+        assert r.blmovem("a", "b", 1) == [b"1"]
+        assert r.blmovem("a", "b", 1, "LEFT", "LEFT", count=3, ordering="BULK") == [
+            b"2",
+            b"3",
+            b"4",
+        ]
+        # up to count, fewer available
+        assert r.blmovem("a", "b", 1, count=5, ordering="BULK") == [b"5"]
+        # timeout with empty source returns None
+        assert r.blmovem("foo", "bar", 1, count=2, ordering="BULK") is None
+        # ordering is mandatory whenever count is given
+        with pytest.raises(redis.DataError):
+            r.blmovem("a", "b", 1, count=2)
 
     @pytest.mark.onlynoncluster
     def test_mset(self, r):
@@ -8179,12 +8279,16 @@ class TestRedisCommands:
         with pytest.raises(NotImplementedError):
             r.latency_doctor()
 
+    # Redis Enterprise restricts the LATENCY admin subcommands.
+    @skip_if_redis_enterprise()
     def test_latency_history(self, r: redis.Redis):
         assert r.latency_history("command") == []
 
+    @skip_if_redis_enterprise()
     def test_latency_latest(self, r: redis.Redis):
         assert r.latency_latest() == []
 
+    @skip_if_redis_enterprise()
     def test_latency_reset(self, r: redis.Redis):
         assert r.latency_reset() == 0
 
@@ -8370,6 +8474,9 @@ class TestRedisCommands:
         assert b"FULLRESYNC" in res
 
     @pytest.mark.onlynoncluster
+    # Timing-sensitive regression test that needs a co-located low-latency server;
+    # it is unreliable against a remote managed Redis Enterprise endpoint.
+    @skip_if_redis_enterprise()
     def test_interrupted_command(self, r: redis.Redis):
         """
         Regression test for issue #1128:  An Un-handled BaseException

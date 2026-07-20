@@ -9,6 +9,7 @@ import redis.asyncio.sentinel
 from redis import exceptions
 from redis.asyncio.sentinel import (
     MasterNotFoundError,
+    ReplicaNotFoundError,
     Sentinel,
     SentinelConnectionPool,
     SlaveNotFoundError,
@@ -214,6 +215,19 @@ async def test_discover_slaves(cluster, sentinel):
 
 
 @pytest.mark.onlynoncluster
+async def test_discover_replicas(cluster, sentinel):
+    assert await sentinel.discover_replicas("mymaster") == []
+
+    cluster.slaves = [
+        {"ip": "slave0", "port": 1234, "is_odown": False, "is_sdown": False},
+        {"ip": "slave1", "port": 1234, "is_odown": True, "is_sdown": False},
+    ]
+
+    assert sentinel.filter_replicas(cluster.slaves) == [("slave0", 1234)]
+    assert await sentinel.discover_replicas("mymaster") == [("slave0", 1234)]
+
+
+@pytest.mark.onlynoncluster
 async def test_master_for(cluster, sentinel, master_ip):
     async with sentinel.master_for("mymaster", db=9) as master:
         assert await master.ping()
@@ -234,11 +248,30 @@ async def test_slave_for(cluster, sentinel):
 
 
 @pytest.mark.onlynoncluster
+async def test_replica_for(cluster, sentinel):
+    cluster.slaves = [
+        {"ip": "127.0.0.1", "port": 6379, "is_odown": False, "is_sdown": False}
+    ]
+    async with sentinel.replica_for("mymaster", db=9) as replica:
+        assert await replica.ping()
+
+
+@pytest.mark.onlynoncluster
 async def test_slave_for_slave_not_found_error(cluster, sentinel):
     cluster.master["is_odown"] = True
     async with sentinel.slave_for("mymaster", db=9) as slave:
         with pytest.raises(SlaveNotFoundError):
             await slave.ping()
+
+
+@pytest.mark.onlynoncluster
+async def test_replica_not_found_alias(cluster, sentinel):
+    assert ReplicaNotFoundError is SlaveNotFoundError
+
+    cluster.master["is_odown"] = True
+    async with sentinel.replica_for("mymaster", db=9) as replica:
+        with pytest.raises(ReplicaNotFoundError):
+            await replica.ping()
 
 
 @pytest.mark.onlynoncluster
@@ -254,6 +287,22 @@ async def test_slave_round_robin(cluster, sentinel, master_ip):
     # Fallback to master
     assert await rotator.__anext__() == (master_ip, 6379)
     with pytest.raises(SlaveNotFoundError):
+        await rotator.__anext__()
+
+
+@pytest.mark.onlynoncluster
+async def test_replica_round_robin(cluster, sentinel, master_ip):
+    cluster.slaves = [
+        {"ip": "slave0", "port": 6379, "is_odown": False, "is_sdown": False},
+        {"ip": "slave1", "port": 6379, "is_odown": False, "is_sdown": False},
+    ]
+    pool = SentinelConnectionPool("mymaster", sentinel)
+    rotator = pool.rotate_replicas()
+    assert await rotator.__anext__() in (("slave0", 6379), ("slave1", 6379))
+    assert await rotator.__anext__() in (("slave0", 6379), ("slave1", 6379))
+    # Fallback to master
+    assert await rotator.__anext__() == (master_ip, 6379)
+    with pytest.raises(ReplicaNotFoundError):
         await rotator.__anext__()
 
 
@@ -277,7 +326,7 @@ async def test_reset(cluster, sentinel):
 
 
 @pytest.mark.onlynoncluster
-@pytest.mark.parametrize("method_name", ["master_for", "slave_for"])
+@pytest.mark.parametrize("method_name", ["master_for", "slave_for", "replica_for"])
 async def test_auto_close_pool(cluster, sentinel, method_name):
     """
     Check that the connection pool created by the sentinel client is
@@ -319,6 +368,42 @@ async def test_repr_correctly_represents_connection_object(sentinel):
         str(connection)
         == "<redis.asyncio.sentinel.SentinelManagedConnection,host=127.0.0.1,port=6379)>"  # noqa: E501
     )
+
+
+@pytest.mark.onlynoncluster
+async def test_aclose(cluster, sentinel):
+    sentinel.sentinels = [mock.AsyncMock() for _ in range(2)]
+
+    async with sentinel as entered:
+        assert entered is sentinel
+
+    # exiting the context closes every sentinel client and its pool
+    for s in sentinel.sentinels:
+        s.aclose.assert_awaited_once()
+
+
+@pytest.mark.onlynoncluster
+async def test_aclose_error_still_closes_remaining_clients(cluster, sentinel):
+    sentinel.sentinels = [mock.AsyncMock() for _ in range(3)]
+    sentinel.sentinels[0].aclose.side_effect = Exception("sentinel down")
+
+    with pytest.raises(Exception, match="sentinel down"):
+        await sentinel.aclose()
+
+    # the failing client must not prevent closing the others
+    for s in sentinel.sentinels:
+        s.aclose.assert_awaited_once()
+
+
+@pytest.mark.onlynoncluster
+async def test_aclose_idempotent(cluster, sentinel):
+    sentinel.sentinels = [mock.AsyncMock() for _ in range(2)]
+
+    await sentinel.aclose()
+    await sentinel.aclose()
+
+    for s in sentinel.sentinels:
+        assert s.aclose.await_count == 2
 
 
 # Tests against real sentinel instances

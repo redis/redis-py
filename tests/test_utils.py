@@ -1,15 +1,23 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import warnings
 import pytest
+from redis.exceptions import DataError
 from redis.utils import (
-    DEFAULT_RESP_VERSION,
-    SENTINEL,
     check_protocol_version,
     compare_versions,
-    deprecated_function,
+    decode_field_value,
+    DEFAULT_RESP_VERSION,
     deprecated_args,
-    experimental_method,
+    deprecated_function,
+    ensure_string,
     experimental_args,
+    experimental_method,
+    extract_expire_flags,
+    format_error_message,
+    safe_str,
+    SENTINEL,
+    str_if_bytes,
+    truncate_text,
 )
 
 
@@ -190,3 +198,151 @@ class TestExperimentalArgs:
             result = func_no_args()
             assert result == "no_args"
             assert len(w) == 0
+
+
+@pytest.mark.fixed_client
+class TestStrIfBytes:
+    def test_decodes_bytes(self):
+        assert str_if_bytes(b"hello") == "hello"
+
+    def test_passes_str_through(self):
+        assert str_if_bytes("hello") == "hello"
+
+    def test_replaces_invalid_utf8(self):
+        # Undecodable bytes are replaced rather than raising.
+        assert str_if_bytes(b"\xff") == "�"
+
+
+@pytest.mark.fixed_client
+class TestSafeStr:
+    def test_stringifies_non_string_values(self):
+        assert safe_str(123) == "123"
+        assert safe_str(None) == "None"
+
+    def test_decodes_bytes_first(self):
+        assert safe_str(b"ab") == "ab"
+
+
+@pytest.mark.fixed_client
+class TestEnsureString:
+    def test_decodes_bytes(self):
+        assert ensure_string(b"key") == "key"
+
+    def test_passes_str_through(self):
+        assert ensure_string("key") == "key"
+
+    def test_rejects_other_types(self):
+        with pytest.raises(TypeError, match="string or bytes"):
+            ensure_string(5)
+
+
+@pytest.mark.fixed_client
+class TestFormatErrorMessage:
+    def test_no_args(self):
+        assert format_error_message("host:1", Exception()) == (
+            "Error connecting to host:1."
+        )
+
+    def test_single_arg(self):
+        assert format_error_message("host:1", Exception("boom")) == (
+            "Error boom connecting to host:1."
+        )
+
+    def test_two_args(self):
+        assert format_error_message("host:1", Exception("code", "detail")) == (
+            "Error code connecting to host:1. detail."
+        )
+
+
+@pytest.mark.fixed_client
+class TestExtractExpireFlags:
+    def test_no_flags_returns_empty(self):
+        assert extract_expire_flags() == []
+
+    def test_ex_as_int(self):
+        assert extract_expire_flags(ex=10) == ["EX", 10]
+
+    def test_ex_as_timedelta_uses_total_seconds(self):
+        assert extract_expire_flags(ex=timedelta(minutes=1)) == ["EX", 60]
+
+    def test_ex_as_digit_string(self):
+        assert extract_expire_flags(ex="60") == ["EX", 60]
+
+    def test_ex_invalid_raises(self):
+        with pytest.raises(DataError):
+            extract_expire_flags(ex="not-a-number")
+
+    def test_px_as_int(self):
+        assert extract_expire_flags(px=500) == ["PX", 500]
+
+    def test_px_as_timedelta_uses_milliseconds(self):
+        assert extract_expire_flags(px=timedelta(seconds=2)) == ["PX", 2000]
+
+    def test_exat_as_int(self):
+        assert extract_expire_flags(exat=1700000000) == ["EXAT", 1700000000]
+
+    def test_exat_as_datetime_uses_timestamp(self):
+        when = datetime(2023, 11, 14, 22, 13, 20, tzinfo=timezone.utc)
+        assert extract_expire_flags(exat=when) == ["EXAT", int(when.timestamp())]
+
+    def test_pxat_as_int(self):
+        assert extract_expire_flags(pxat=1700000000000) == ["PXAT", 1700000000000]
+
+    def test_ex_takes_precedence_over_px(self):
+        # The flags are checked in order; ex wins when several are given.
+        assert extract_expire_flags(ex=5, px=999) == ["EX", 5]
+
+
+@pytest.mark.fixed_client
+class TestTruncateText:
+    def test_short_text_unchanged(self):
+        assert truncate_text("hi") == "hi"
+
+    def test_long_text_gets_ellipsis(self):
+        result = truncate_text("hello world this is long", 10)
+        assert result == "hello..."
+        assert len(result) <= 10
+
+    def test_default_max_length_truncates_long_text(self):
+        # Every real call site relies on the default width of 100; make sure a
+        # text longer than that is shortened without an explicit width argument.
+        text = "word " * 40  # 200 characters
+        result = truncate_text(text)
+        assert len(result) <= 100
+        assert result.endswith("...")
+
+    def test_single_long_token_collapses_to_placeholder(self):
+        # A single unbroken token wider than ``max_length``: ``textwrap.shorten``
+        # has no whitespace to truncate on and does not split within a word (its
+        # ``break_long_words`` does not apply to this case), so it drops the word
+        # entirely and returns just the placeholder.
+        assert truncate_text("a" * 200) == "..."
+
+
+@pytest.mark.fixed_client
+class TestDecodeFieldValue:
+    def test_non_bytes_value_returned_unchanged(self):
+        assert decode_field_value("already-str") == "already-str"
+
+    def test_bytes_default_decoded_to_str(self):
+        assert decode_field_value(b"hi") == "hi"
+
+    def test_per_field_encoding_is_applied(self):
+        result = decode_field_value(
+            b"caf\xe9", key="k", field_encodings={"k": "latin-1"}
+        )
+        assert result == "caf\xe9"
+
+    def test_none_encoding_keeps_raw_bytes(self):
+        assert (
+            decode_field_value(b"raw", key="k", field_encodings={"k": None}) == b"raw"
+        )
+
+    def test_key_absent_from_encodings_uses_default(self):
+        assert (
+            decode_field_value(b"hi", key="x", field_encodings={"k": "utf-8"}) == "hi"
+        )
+
+    def test_undecodable_bytes_use_replacement_character(self):
+        result = decode_field_value(b"\xff", key="k", field_encodings={"k": "utf-8"})
+        assert result == "�"

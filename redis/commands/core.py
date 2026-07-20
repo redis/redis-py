@@ -756,7 +756,7 @@ class ManagementCommands(CommandsProtocol):
         Disconnects client(s) using a variety of filter options
         :param _id: Kills a client by its unique ID field
         :param _type: Kills a client by type where type is one of 'normal',
-        'master', 'slave' or 'pubsub'
+        'master', 'slave', 'replica' or 'pubsub'
         :param addr: Kills a client by its 'address:port'
         :param skipme: If True, then the client calling the command
         will not get killed even if it is identified by one of the filter
@@ -767,7 +767,7 @@ class ManagementCommands(CommandsProtocol):
         """
         args = []
         if _type is not None:
-            client_types = ("normal", "master", "slave", "pubsub")
+            client_types = ("normal", "master", "slave", "replica", "pubsub")
             if str(_type).lower() not in client_types:
                 raise DataError(f"CLIENT KILL type must be one of {client_types!r}")
             args.extend((b"TYPE", _type))
@@ -3604,6 +3604,142 @@ class BasicKeyCommands(CommandsProtocol):
         """
         params = [first_list, second_list, src, dest, timeout]
         return self.execute_command("BLMOVE", *params)
+
+    @overload
+    def lmovem(
+        self: SyncClientProtocol,
+        first_list: str,
+        second_list: str,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> list[bytes | str] | None: ...
+
+    @overload
+    def lmovem(
+        self: AsyncClientProtocol,
+        first_list: str,
+        second_list: str,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> Awaitable[list[bytes | str] | None]: ...
+
+    def lmovem(
+        self,
+        first_list: str,
+        second_list: str,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> (list[bytes | str] | None) | Awaitable[list[bytes | str] | None]:
+        """
+        Atomically moves multiple elements from one end of the ``first_list``
+        to one end of the ``second_list``, returning the moved elements in
+        destination order.
+
+        ``src`` and ``dest`` are the ends to pop from / push to, either
+        ``LEFT`` (head) or ``RIGHT`` (tail).
+
+        When ``count`` is given, ``mode`` selects how many elements to move:
+        ``COUNT`` (the default) moves up to ``count`` elements, while
+        ``EXACTLY`` moves exactly ``count`` elements or nothing at all. When
+        ``count`` is not given a single element is moved.
+
+        ``ordering`` controls the order at the destination: ``OBO`` pushes each
+        element as it is popped (reversing block order, stack semantics) while
+        ``BULK`` preserves the original relative order (queue semantics). It is
+        required whenever ``count`` is given.
+
+        Returns the array of moved elements, or ``None`` if nothing was moved.
+
+        For more information, see https://redis.io/commands/lmovem
+        """
+        if count is None:
+            if mode is not None or ordering is not None:
+                raise DataError(
+                    "``count`` is required when ``mode`` or ``ordering`` is set"
+                )
+        elif ordering is None:
+            raise DataError(
+                "``ordering`` (OBO or BULK) is required when ``count`` is set"
+            )
+        pieces: list[EncodableT] = [first_list, second_list, src, dest]
+        if count is not None:
+            pieces.extend([mode or "COUNT", count, ordering])
+        return self.execute_command("LMOVEM", *pieces)
+
+    @overload
+    def blmovem(
+        self: SyncClientProtocol,
+        first_list: str,
+        second_list: str,
+        timeout: float,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> list[bytes | str] | None: ...
+
+    @overload
+    def blmovem(
+        self: AsyncClientProtocol,
+        first_list: str,
+        second_list: str,
+        timeout: float,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> Awaitable[list[bytes | str] | None]: ...
+
+    def blmovem(
+        self,
+        first_list: str,
+        second_list: str,
+        timeout: float,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> (list[bytes | str] | None) | Awaitable[list[bytes | str] | None]:
+        """
+        Blocking version of lmovem.
+
+        Blocks until elements are available to move or ``timeout`` (in seconds)
+        is reached; a ``timeout`` of ``0`` blocks indefinitely. With ``COUNT``
+        the command unblocks once at least one element is available and moves
+        ``min(count, available)``; with ``EXACTLY`` it blocks until the source
+        holds at least ``count`` elements, then moves exactly ``count``
+        atomically. On timeout ``None`` is returned and nothing is moved.
+
+        As with ``lmovem``, ``ordering`` (OBO or BULK) is required whenever
+        ``count`` is given.
+
+        For more information, see https://redis.io/commands/blmovem
+        """
+        if count is None:
+            if mode is not None or ordering is not None:
+                raise DataError(
+                    "``count`` is required when ``mode`` or ``ordering`` is set"
+                )
+        elif ordering is None:
+            raise DataError(
+                "``ordering`` (OBO or BULK) is required when ``count`` is set"
+            )
+        pieces: list[EncodableT] = [first_list, second_list, src, dest, timeout]
+        if count is not None:
+            pieces.extend([mode or "COUNT", count, ordering])
+        return self.execute_command("BLMOVEM", *pieces)
 
     @overload
     def mget(
