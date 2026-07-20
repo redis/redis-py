@@ -111,11 +111,13 @@ class SearchCommands:
             SYNDUMP_CMD: self._parse_syndump,
         }
         # Explicit ``protocol=3`` + ``legacy_responses=True`` keeps the
-        # pre-existing native RESP3 surface.  The only registered callback
-        # is for experimental HYBRID, which normalizes the native shape.
-        # FT.PROFILE stays on the old direct ``_parse_results`` special
-        # case and is not registered as a response callback.
+        # pre-existing native RESP3 surface.  SEARCH and HYBRID both use
+        # ``NEVER_DECODE`` (their results may contain binary field values),
+        # so their native callbacks decode only the structural keys and keep
+        # field values as bytes.  FT.PROFILE stays on the old direct
+        # ``_parse_results`` special case and is not registered as a callback.
         self._RESP3_MODULE_CALLBACKS = {
+            SEARCH_CMD: self._parse_search_resp3_native,
             HYBRID_CMD: self._parse_hybrid_search_resp3_native,
         }
         # ``protocol=None`` + ``legacy_responses=True`` (the v8 default):
@@ -480,6 +482,45 @@ class SearchCommands:
             with_scores=getattr(query, "_with_scores", False),
             field_encodings=getattr(query, "_return_fields_decode_as", None),
         )
+
+    def _parse_search_resp3_native(self, res, **kwargs):
+        """Normalise the RESP3 FT.SEARCH map while preserving its native shape.
+
+        ``protocol=3`` + ``legacy_responses=True`` keeps the RESP3 dict
+        surface.  FT.SEARCH uses ``NEVER_DECODE`` (its results may contain
+        binary field values such as vector embeddings), so the wire hands
+        back raw bytes.  Decode the structural keys and the field values here
+        instead of at the wire: text values are decoded leniently while
+        binary fields flagged via ``return_field(..., decode_field=False)``
+        are preserved as raw bytes.  This keeps the previously decoded native
+        surface intact and no longer crashes on non-UTF-8 field data.
+        """
+        if not isinstance(res, dict):
+            return res
+        query = kwargs.get("query")
+        field_encodings = getattr(query, "_return_fields_decode_as", None)
+        res = {str_if_bytes(k): v for k, v in res.items()}
+        if "results" in res:
+            results = []
+            for item in res["results"]:
+                if not isinstance(item, dict):
+                    results.append(item)
+                    continue
+                item = {str_if_bytes(k): v for k, v in item.items()}
+                if "id" in item:
+                    item["id"] = str_if_bytes(item["id"])
+                extra = item.get("extra_attributes")
+                if isinstance(extra, dict):
+                    decoded = {}
+                    for k, v in extra.items():
+                        k = str_if_bytes(k)
+                        decoded[k] = decode_field_value(v, k, field_encodings)
+                    item["extra_attributes"] = decoded
+                results.append(item)
+            res["results"] = results
+        if "warning" in res:
+            res["warning"] = [str_if_bytes(w) for w in res["warning"]]
+        return res
 
     def _parse_aggregate_resp3(self, res, **kwargs):
         """Parse RESP3 FT.AGGREGATE response into an AggregateResult object."""
@@ -1267,9 +1308,10 @@ class SearchCommands:
         args, query = self._mk_query_args(query, query_params=query_params)
         st = time.monotonic()
 
-        options = {}
-        if not check_protocol_version(get_protocol_version(self.client), 3):
-            options[NEVER_DECODE] = True
+        # FT.SEARCH results may contain binary field values (e.g. vector
+        # embeddings), so always request raw bytes from the wire and let the
+        # search-layer parsers decode per-field.  Mirrors ``hybrid_search``.
+        options = {NEVER_DECODE: True}
         if isinstance(self, Pipeline):
             options["query"] = query
             options["duration"] = 0
@@ -1771,9 +1813,10 @@ class AsyncSearchCommands(SearchCommands):
         args, query = self._mk_query_args(query, query_params=query_params)
         st = time.monotonic()
 
-        options = {}
-        if not check_protocol_version(get_protocol_version(self.client), 3):
-            options[NEVER_DECODE] = True
+        # FT.SEARCH results may contain binary field values (e.g. vector
+        # embeddings), so always request raw bytes from the wire and let the
+        # search-layer parsers decode per-field.  Mirrors ``hybrid_search``.
+        options = {NEVER_DECODE: True}
         if isinstance(self, Pipeline):
             options["query"] = query
             options["duration"] = 0
