@@ -2582,6 +2582,30 @@ class TestPipeline(AsyncSearchTestsBase):
             )
 
     @pytest.mark.redismod
+    @skip_if_redis_enterprise()
+    @skip_if_server_version_lt("8.9.0")
+    async def test_aliaslist_in_pipeline(self, decoded_r: redis.Redis):
+        index = decoded_r.ft("aliaslistpipeidx")
+        await index.create_index((TextField("txt"),))
+
+        # An empty listing normalizes to ``set()`` through the pipeline, not
+        # the raw ``[]`` wire response.
+        p = index.pipeline()
+        await p.aliaslist()
+        res = await p.execute()
+        assert isinstance(res[0], set)
+        assert res[0] == set()
+
+        # Aliases are returned as an unordered set, matching the direct call.
+        await index.aliasadd("alias1")
+        await index.aliasadd("alias2")
+        p = index.pipeline()
+        await p.aliaslist()
+        res = await p.execute()
+        assert isinstance(res[0], set)
+        assert res[0] == {"alias1", "alias2"}
+
+    @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")
     async def test_hybrid_search_query_with_pipeline(self, decoded_r: redis.Redis):
         p = decoded_r.ft().pipeline()

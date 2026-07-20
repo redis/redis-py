@@ -3718,6 +3718,30 @@ class TestPipeline(SearchTestsBase):
             )
 
     @pytest.mark.redismod
+    @skip_if_redis_enterprise()
+    @skip_if_server_version_lt("8.9.0")
+    def test_aliaslist_in_pipeline(self, client):
+        index = client.ft("aliaslistpipeidx")
+        index.create_index((TextField("txt"),))
+
+        # An empty listing normalizes to ``set()`` through the pipeline, not
+        # the raw ``[]`` wire response.
+        p = index.pipeline()
+        p.aliaslist()
+        res = p.execute()
+        assert isinstance(res[0], set)
+        assert res[0] == set()
+
+        # Aliases are returned as an unordered set, matching the direct call.
+        index.aliasadd("alias1")
+        index.aliasadd("alias2")
+        p = index.pipeline()
+        p.aliaslist()
+        res = p.execute()
+        assert isinstance(res[0], set)
+        assert res[0] == {"alias1", "alias2"}
+
+    @pytest.mark.redismod
     @skip_if_server_version_lt("8.4.0")
     def test_hybrid_search_query_with_pipeline(self, client):
         p = client.ft().pipeline()

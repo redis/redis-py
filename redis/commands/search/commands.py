@@ -145,6 +145,14 @@ class SearchCommands:
         self._RESP3_TO_RESP2_LEGACY_PIPELINE_CALLBACKS = {
             SEARCH_CMD: self._pipeline_parse_search_resp3_to_legacy,
             HYBRID_CMD: self._pipeline_parse_hybrid_search_resp3_to_legacy,
+            ALIAS_LIST_CMD: self._parse_aliaslist,
+        }
+        # ``protocol=2`` + ``legacy_responses=True`` pipelines otherwise return
+        # raw wire responses.  ``FT.ALIASLIST`` is a new command with no pre-v8
+        # raw pipeline shape to preserve, so it is still normalized to a ``set``
+        # to match the direct-call behavior and the documented return type.
+        self._RESP2_LEGACY_PIPELINE_CALLBACKS = {
+            ALIAS_LIST_CMD: self._parse_aliaslist,
         }
         # ``legacy_responses=False`` + RESP2 wire: enhanced RESP2 parsers
         # producing the unified shape (``attributes`` as list of dicts,
