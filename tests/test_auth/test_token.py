@@ -46,7 +46,7 @@ class TestToken:
             "key": "value",
         }
         encoded = jwt.encode(token, "secret", algorithm="HS256")
-        jwt_token = JWToken(encoded)
+        jwt_token = JWToken(encoded, key="secret", algorithms=["HS256"])
 
         assert jwt_token.ttl() == pytest.approx(100000, 10)
         assert jwt_token.is_expired() is False
@@ -65,7 +65,7 @@ class TestToken:
             "key": "value",
         }
         encoded = jwt.encode(token, "secret", algorithm="HS256")
-        jwt_token = JWToken(encoded)
+        jwt_token = JWToken(encoded, key="secret", algorithms=["HS256"])
 
         assert jwt_token.ttl() == -1
         assert jwt_token.is_expired() is False
@@ -74,4 +74,38 @@ class TestToken:
         with pytest.raises(InvalidTokenSchemaErr):
             token = {"key": "value"}
             encoded = jwt.encode(token, "secret", algorithm="HS256")
-            JWToken(encoded)
+            JWToken(encoded, key="secret", algorithms=["HS256"])
+
+    def test_jwt_token_with_audience(self):
+        jwt = pytest.importorskip("jwt")
+
+        token = {
+            "exp": datetime.now(timezone.utc).timestamp() + 100,
+            "iat": datetime.now(timezone.utc).timestamp(),
+            "aud": "test-audience",
+            "key": "value",
+        }
+        encoded = jwt.encode(token, "secret", algorithm="HS256")
+        jwt_token = JWToken(encoded, key="secret", algorithms=["HS256"])
+
+        assert jwt_token.try_get("aud") == "test-audience"
+        assert jwt_token.try_get("key") == "value"
+        assert jwt_token.is_expired() is False
+
+    def test_jwt_token_with_nbf(self):
+        jwt = pytest.importorskip("jwt")
+
+        token = {
+            "exp": datetime.now(timezone.utc).timestamp() + 100,
+            "iat": datetime.now(timezone.utc).timestamp(),
+            "nbf": datetime.now(timezone.utc).timestamp() - 10,
+            "key": "value",
+        }
+        encoded = jwt.encode(token, "secret", algorithm="HS256")
+        jwt_token = JWToken(encoded, key="secret", algorithms=["HS256"])
+
+        assert jwt_token.try_get("nbf") == pytest.approx(
+            datetime.now(timezone.utc).timestamp() - 10, 1
+        )
+        assert jwt_token.try_get("key") == "value"
+        assert jwt_token.is_expired() is False

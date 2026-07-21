@@ -78,7 +78,28 @@ class SimpleToken(TokenInterface):
 class JWToken(TokenInterface):
     REQUIRED_FIELDS = {"exp"}
 
-    def __init__(self, token: str):
+    def __init__(
+        self, token: str, key: str | None = None, algorithms: list[str] | None = None
+    ):
+        """Initialize a JWT token wrapper.
+
+        Args:
+            token: The encoded JWT string.
+            key: The secret key to verify the token signature. If None,
+                signature verification is skipped (backward compatibility).
+            algorithms: A list of allowed algorithms. Required when key is
+                provided.
+
+        Raises:
+            ImportError: If the PyJWT library is not installed.
+            ValueError: If key is provided but algorithms is None.
+            InvalidTokenSchemaErr: If required fields are missing.
+
+        Note:
+            The old unsafe initialization path (key=None) is still available
+            for backward compatibility. It disables signature verification
+            but still validates the token expiration.
+        """
         try:
             import jwt
         except ImportError as ie:
@@ -86,11 +107,34 @@ class JWToken(TokenInterface):
                 f"The PyJWT library is required for {self.__class__.__name__}.",
             ) from ie
         self._value = token
-        self._decoded = jwt.decode(
-            self._value,
-            options={"verify_signature": False},
-            algorithms=[jwt.get_unverified_header(self._value).get("alg")],
-        )
+        if key is not None:
+            if algorithms is None:
+                raise ValueError(
+                    "algorithms must be provided when key is specified"
+                )
+            unverified_claims = jwt.decode(
+                self._value,
+                options={"verify_signature": False},
+                algorithms=algorithms,
+            )
+            options = {"verify_aud": False, "verify_nbf": False}
+            if unverified_claims.get("exp") == -1:
+                options["verify_exp"] = False
+            self._decoded = jwt.decode(
+                self._value,
+                key,
+                algorithms=algorithms,
+                options=options,
+            )
+        else:
+            if algorithms is None:
+                header = jwt.get_unverified_header(self._value)
+                algorithms = [header["alg"]]
+            self._decoded = jwt.decode(
+                self._value,
+                options={"verify_signature": False},
+                algorithms=algorithms,
+            )
         self._validate_token()
 
     def is_expired(self) -> bool:

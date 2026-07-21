@@ -794,7 +794,7 @@ def mock_identity_provider() -> IdentityProviderInterface:
     mock_provider = Mock(spec=IdentityProviderInterface)
     token = {"exp": datetime.now(timezone.utc).timestamp() + 3600, "oid": "username"}
     encoded = jwt.encode(token, "secret", algorithm="HS256")
-    jwt_token = JWToken(encoded)
+    jwt_token = JWToken(encoded, key="secret", algorithms=["HS256"])
     mock_provider.request_token.return_value = jwt_token
     return mock_provider
 
