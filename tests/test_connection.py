@@ -47,6 +47,7 @@ from redis.observability.attributes import (
     DB_CLIENT_CONNECTION_POOL_NAME,
     DB_CLIENT_CONNECTION_STATE,
     ConnectionState,
+    get_pool_name,
 )
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE, SENTINEL
@@ -1703,3 +1704,224 @@ class TestBlockingConnectionPoolGetConnectionCount:
         assert used_count == 0
 
         pool.disconnect()
+
+
+class _DummyConnection:
+    """Minimal connection stub for pool metric tests (no real socket)."""
+
+    description_format = "DummyConnection<>"
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.pid = os.getpid()
+        self._sock = None
+
+    def connect(self):
+        self._sock = MagicMock()
+
+    def disconnect(self):
+        self._sock = None
+
+    def can_read(self):
+        return False
+
+    def should_reconnect(self):
+        return False
+
+    def re_auth(self):
+        pass
+
+
+def _pool_metric_calls(mock_fn, pool_name):
+    """Extract (state, delta) tuples from record_connection_count calls for a pool.
+
+    Filters by pool_name to avoid interference from GC of other pools.
+    """
+    result = []
+    for c in mock_fn.call_args_list:
+        p = c.kwargs.get("pool_name", c.args[0] if c.args else None)
+        if p != pool_name:
+            continue
+        state = c.kwargs.get("connection_state", c.args[1] if len(c.args) > 1 else None)
+        counter = c.kwargs.get("counter", c.args[2] if len(c.args) > 2 else 1)
+        result.append((state, counter))
+    return result
+
+
+def _net(calls):
+    """Return (idle_net, used_net) from a list of (state, delta) tuples."""
+    idle = sum(d for s, d in calls if s == ConnectionState.IDLE)
+    used = sum(d for s, d in calls if s == ConnectionState.USED)
+    return idle, used
+
+
+class TestConnectionPoolMetricCount:
+    """Tests for db.client.connection.count UpDownCounter accuracy.
+
+    Verifies that get_connection / release produce balanced IDLE and USED
+    counter updates across ConnectionPool and BlockingConnectionPool.
+    """
+
+    @patch("redis.connection.record_connection_count")
+    def test_new_connection_records_only_used(self, mock_rec):
+        """A new connection should record USED +1 only (never was idle)."""
+        pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
+        pn = get_pool_name(pool)
+        mock_rec.reset_mock()
+
+        conn = pool.get_connection()
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert idle_net == 0, f"New conn should not touch IDLE, got {idle_net}"
+        assert used_net == 1
+        pool.release(conn)
+
+    @patch("redis.connection.record_connection_count")
+    def test_reused_connection_transitions_idle_to_used(self, mock_rec):
+        """A reused connection should record IDLE -1, USED +1."""
+        pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
+        pn = get_pool_name(pool)
+        conn = pool.get_connection()
+        pool.release(conn)
+        mock_rec.reset_mock()
+
+        conn2 = pool.get_connection()
+        assert conn2 is conn
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert idle_net == -1
+        assert used_net == 1
+        pool.release(conn2)
+
+    @patch("redis.connection.record_connection_count")
+    def test_full_lifecycle_nets_to_zero(self, mock_rec):
+        """create -> use -> release -> reuse -> release -> destroy = net 0."""
+        pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
+        pn = get_pool_name(pool)
+        mock_rec.reset_mock()
+
+        conn = pool.get_connection()
+        pool.release(conn)
+        conn = pool.get_connection()
+        pool.release(conn)
+
+        # Simulate destruction (what __del__ / reset does)
+        idle_count = len(pool._available_connections)
+        if idle_count:
+            mock_rec(
+                pool_name=pn,
+                connection_state=ConnectionState.IDLE,
+                counter=-idle_count,
+            )
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert idle_net == 0, f"Lifecycle IDLE should net 0, got {idle_net}"
+        assert used_net == 0, f"Lifecycle USED should net 0, got {used_net}"
+
+    @patch("redis.connection.record_connection_count")
+    def test_release_unowned_does_not_record(self, mock_rec):
+        """release() of a connection the pool no longer owns (e.g. inherited by
+        a forked child) must not record connection.count. Fork-time accounting
+        is owned by reset()/__del__; recording here would double-count."""
+        pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
+
+        conn = pool.get_connection()
+        mock_rec.reset_mock()
+        conn.pid = -1  # simulate a connection inherited across a fork
+        pool.release(conn)
+
+        assert mock_rec.call_args_list == [], (
+            "unowned release must not record connection.count"
+        )
+
+
+class TestBlockingConnectionPoolMetricCount:
+    """Same metric-count tests for BlockingConnectionPool."""
+
+    def _pool(self):
+        return BlockingConnectionPool(
+            connection_class=_DummyConnection,
+            max_connections=10,
+            timeout=0.1,
+        )
+
+    @patch("redis.connection.record_connection_count")
+    def test_new_connection_records_only_used(self, mock_rec):
+        pool = self._pool()
+        pn = get_pool_name(pool)
+        mock_rec.reset_mock()
+
+        conn = pool.get_connection()
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert idle_net == 0
+        assert used_net == 1
+        pool.release(conn)
+
+    @patch("redis.connection.record_connection_count")
+    def test_release_full_queue_decrements_used(self, mock_rec):
+        """When queue is full, release() must still decrement USED."""
+        pool = BlockingConnectionPool(
+            connection_class=_DummyConnection,
+            max_connections=1,
+            timeout=0.1,
+        )
+        pn = get_pool_name(pool)
+        mock_rec.reset_mock()
+
+        conn = pool.get_connection()
+        mock_rec.reset_mock()
+
+        pool.pool.put_nowait(None)  # fill the queue
+        pool.release(conn)
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert used_net == -1, f"USED must be decremented, got {used_net}"
+        assert idle_net == 0, f"IDLE must not increase for dropped conn, got {idle_net}"
+
+    @patch("redis.connection.record_connection_count")
+    def test_release_full_queue_no_double_decrement_on_reset(self, mock_rec):
+        """A connection dropped on a full queue must be removed from
+        _connections so a later reset() does not decrement USED again."""
+        pool = BlockingConnectionPool(
+            connection_class=_DummyConnection,
+            max_connections=1,
+            timeout=0.1,
+        )
+        pn = get_pool_name(pool)
+
+        conn = pool.get_connection()
+        pool.pool.put_nowait(None)  # fill the queue
+        pool.release(conn)
+
+        # The dropped connection must no longer be tracked.
+        assert conn not in pool._connections
+
+        mock_rec.reset_mock()
+        pool.reset()
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert used_net == 0, f"reset() must not decrement USED again, got {used_net}"
+        assert idle_net == 0, f"reset() must not touch IDLE, got {idle_net}"
+
+    @patch("redis.connection.record_connection_count")
+    def test_release_unowned_does_not_record(self, mock_rec):
+        """Unowned (inherited-across-fork) release must not record; fork-time
+        accounting is owned by reset()/__del__."""
+        pool = self._pool()
+        mock_rec.reset_mock()
+
+        conn = pool.get_connection()
+        mock_rec.reset_mock()
+        conn.pid = -1
+        pool.release(conn)
+
+        assert mock_rec.call_args_list == [], (
+            "unowned release must not record connection.count"
+        )
