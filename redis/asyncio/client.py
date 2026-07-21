@@ -931,12 +931,24 @@ class Redis(
         self, connection: Connection, command_name: Union[str, bytes], **options
     ):
         """Parses a response from the Redis server"""
+        # Extract blocking timeout for blocking commands (BLPOP, BRPOP, etc.)
+        # This ensures the socket timeout is long enough to wait for the
+        # blocking command's timeout
+        # Default None means "no blocking override" so read_response falls
+        # back to connection.socket_timeout. This differs from the sync client,
+        # where the default is SENTINEL and timeout=None means block forever.
+        blocking_timeout = options.pop("_blocking_timeout", None)
+        # Redis timeout=0 means block indefinitely on the server. Async
+        # Connection.read_response treats timeout=None as "use socket_timeout"
+        # and timeout=math.inf as "block with no timeout", so map 0 -> inf.
+        if blocking_timeout == 0:
+            blocking_timeout = math.inf
         try:
             if NEVER_DECODE in options:
                 response = await connection.read_response(disable_decoding=True)
                 options.pop(NEVER_DECODE)
             else:
-                response = await connection.read_response()
+                response = await connection.read_response(timeout=blocking_timeout)
         except ResponseError:
             if EMPTY_RESPONSE in options:
                 return options[EMPTY_RESPONSE]
