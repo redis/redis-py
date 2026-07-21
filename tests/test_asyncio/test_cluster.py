@@ -1107,6 +1107,65 @@ class TestRedisClusterObj:
         n_used = sum((1 if p.n_connections else 0) for p in proxies)
         assert n_used > 1
 
+    @pytest.mark.onlycluster
+    async def test_determine_nodes_rejects_none_nodes(self):
+        """
+        None entries must not be silently filtered (unsafe for multi-node
+        commands). Async path marks the client for reinitialization and raises
+        ClusterDownError so execute_command retries on a fresh topology.
+        """
+        from redis._parsers.commands import RequestPolicy
+
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        primaries = r.get_primaries()
+        assert len(primaries) > 0
+        valid_node = primaries[0]
+
+        original_callback = r._policies_callback_mapping[
+            RequestPolicy.DEFAULT_NODE
+        ]
+        r._policies_callback_mapping[RequestPolicy.DEFAULT_NODE] = (
+            lambda: [None, valid_node, None]
+        )
+        r._initialize = False
+        try:
+            with pytest.raises(ClusterDownError, match="node mapping returned None"):
+                await r._determine_nodes(
+                    "PING", request_policy=RequestPolicy.DEFAULT_NODE
+                )
+            assert r._initialize is True
+        finally:
+            r._policies_callback_mapping[
+                RequestPolicy.DEFAULT_NODE
+            ] = original_callback
+
+    @pytest.mark.onlycluster
+    async def test_determine_nodes_rejects_all_none_nodes(self):
+        """
+        An all-None node list is also a stale-topology signal.
+        """
+        from redis._parsers.commands import RequestPolicy
+
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+
+        original_callback = r._policies_callback_mapping[
+            RequestPolicy.DEFAULT_NODE
+        ]
+        r._policies_callback_mapping[RequestPolicy.DEFAULT_NODE] = (
+            lambda: [None, None]
+        )
+        r._initialize = False
+        try:
+            with pytest.raises(ClusterDownError, match="node mapping returned None"):
+                await r._determine_nodes(
+                    "PING", request_policy=RequestPolicy.DEFAULT_NODE
+                )
+            assert r._initialize is True
+        finally:
+            r._policies_callback_mapping[
+                RequestPolicy.DEFAULT_NODE
+            ] = original_callback
+
 
 @pytest.mark.onlycluster
 class TestClusterRedisCommands:
