@@ -2400,6 +2400,18 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
     def __len__(self) -> int:
         return len(self._execution_strategy)
 
+    @property
+    def command_stack(self) -> List["PipelineCommand"]:
+        """
+        Deprecated. Returns the commands currently queued on the pipeline.
+
+        Retained for backwards compatibility with code that introspects the
+        queued commands directly (for example APM/tracing integrations such as
+        Datadog's ``ddtrace``). The commands are owned by the underlying
+        execution strategy; prefer ``len(pipeline)`` to check the queue size.
+        """
+        return self._execution_strategy.command_queue
+
     def execute_command(
         self, *args: Union[KeyT, EncodableT], **kwargs: Any
     ) -> "ClusterPipeline":
@@ -2504,6 +2516,12 @@ class PipelineCommand:
 
 
 class ExecutionStrategy(ABC):
+    @property
+    @abstractmethod
+    def command_queue(self) -> List["PipelineCommand"]:
+        """The commands currently queued on the pipeline."""
+        pass
+
     @abstractmethod
     async def initialize(self) -> "ClusterPipeline":
         """
@@ -2607,6 +2625,10 @@ class AbstractStrategy(ExecutionStrategy):
     def __init__(self, pipe: ClusterPipeline) -> None:
         self._pipe: ClusterPipeline = pipe
         self._command_queue: List["PipelineCommand"] = []
+
+    @property
+    def command_queue(self) -> List["PipelineCommand"]:
+        return self._command_queue
 
     async def initialize(self) -> "ClusterPipeline":
         if self._pipe.cluster_client._initialize:
