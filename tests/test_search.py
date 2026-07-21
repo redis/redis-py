@@ -3429,6 +3429,38 @@ class TestDifferentFieldTypesSearch(SearchTestsBase):
         with pytest.raises(Exception):
             r.ft().create_index((VectorField("v", "SORT", {}),))
 
+    @pytest.mark.fixed_client
+    def test_vector_field_rerank(self):
+        # Pure serialization check: VectorField builds the FT.CREATE args with
+        # no server round-trip, so this test needs no Redis and is not gated.
+        # RERANK is a boolean key-value attribute for HNSW vector fields on
+        # disk-backed (Flex / Auto-Tiering) deployments, where it is mandatory.
+        # It toggles the exact FP32 rerank pass over the approximate candidates
+        # returned by the on-disk graph traversal. It flows through the generic
+        # ``attributes`` dict as the string "TRUE"/"FALSE" (a bare flag is
+        # rejected by the server, and Python bools are rejected by the client
+        # encoder), and the attribute-count token accounts for the extra pair.
+        field = VectorField(
+            "v",
+            "HNSW",
+            {"TYPE": "FLOAT32", "DIM": 128, "DISTANCE_METRIC": "L2", "RERANK": "TRUE"},
+        )
+        assert field.args[0] == "VECTOR"
+        assert field.args[1] == "HNSW"
+        assert field.args[2] == 8  # 4 attribute pairs -> 8 tokens
+        assert "RERANK" in field.args
+        assert "TRUE" in field.args
+
+        # MS2 also accepts RERANK FALSE (opt out of the rerank pass).
+        field = VectorField(
+            "v",
+            "HNSW",
+            {"TYPE": "FLOAT32", "DIM": 128, "DISTANCE_METRIC": "L2", "RERANK": "FALSE"},
+        )
+        assert field.args[2] == 8
+        assert "RERANK" in field.args
+        assert "FALSE" in field.args
+
     @pytest.mark.redismod
     @skip_ifmodversion_lt("2.4.3", "search")
     def test_text_params(self, client):
