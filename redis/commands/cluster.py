@@ -165,6 +165,7 @@ READ_COMMANDS = frozenset(
         "JSON.STRLEN",
         "JSON.TYPE",
         # RediSearch Module
+        "FT.ALIASLIST",
         "FT.EXPLAIN",
         "FT.INFO",
         "FT.PROFILE",

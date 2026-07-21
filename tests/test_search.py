@@ -894,6 +894,66 @@ class TestBaseSearchFunctionality(SearchTestsBase):
             _ = alias_client2.search("*").docs[0]
 
     @pytest.mark.redismod
+    @skip_if_server_version_lt("8.9.0")
+    def test_aliaslist(self, client):
+        index = client.ft("aliaslistidx")
+        index.create_index((TextField("txt"),))
+
+        # An existing index with no aliases returns an empty set, not an error.
+        assert index.aliaslist() == set()
+
+        # Aliases are returned as an unordered collection.
+        index.aliasadd("alias1")
+        index.aliasadd("alias2")
+        aliases = index.aliaslist()
+        assert isinstance(aliases, set)
+        assert aliases == {"alias1", "alias2"}
+
+        # FT.ALIASUPDATE moving an alias to another index removes it from the
+        # previous index's listing.
+        index2 = client.ft("aliaslistidx2")
+        index2.create_index((TextField("txt"),))
+        index2.aliasupdate("alias1")
+        assert index.aliaslist() == {"alias2"}
+        assert index2.aliaslist() == {"alias1"}
+
+        # FT.ALIASDEL removes the alias from the listing.
+        index.aliasdel("alias2")
+        assert index.aliaslist() == set()
+
+        # A missing index and an alias name supplied as the index both fail
+        # with the index-not-found error; the client must not resolve aliases.
+        with pytest.raises(redis.ResponseError):
+            client.ft("nonexistent_aliaslist_index").aliaslist()
+        with pytest.raises(redis.ResponseError):
+            client.ft("alias1").aliaslist()
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("8.9.0")
+    @skip_if_redis_enterprise()
+    def test_aliaslist_decode_responses_false(self, request, stack_url):
+        # ``decode_responses`` is not part of the CI protocol/legacy matrix,
+        # so pin only that here and let the harness supply the protocol x
+        # legacy combinations (as it does for ``test_aliaslist`` above).
+        client = _get_client(
+            redis.Redis, request, decode_responses=False, from_url=stack_url
+        )
+        index = client.ft("aliaslistbytesidx")
+        index.create_index((TextField("txt"),))
+
+        # ``aliasadd`` accepts a ``KeyT`` (str | bytes | memoryview); mix a
+        # ``str`` and a ``bytes`` alias to exercise the widened input type.
+        index.aliasadd("alias1")
+        index.aliasadd(b"alias2")
+
+        # Alias names are user data, so with ``decode_responses=False`` they
+        # are returned as ``bytes`` (honoring the flag, like FT.TAGVALS /
+        # FT.DICTDUMP) rather than being force-decoded to ``str``.
+        aliases = index.aliaslist()
+        assert isinstance(aliases, set)
+        assert aliases == {b"alias1", b"alias2"}
+
+    @pytest.mark.redismod
     def test_textfield_sortable_nostem(self, client):
         # Creating the index definition with sortable and no_stem
         client.ft().create_index((TextField("txt", sortable=True, no_stem=True),))
@@ -3681,6 +3741,30 @@ class TestPipeline(SearchTestsBase):
                 == res[3]["results"][1]["extra_attributes"]
                 == {"txt": "foo bar"}
             )
+
+    @pytest.mark.redismod
+    @skip_if_redis_enterprise()
+    @skip_if_server_version_lt("8.9.0")
+    def test_aliaslist_in_pipeline(self, client):
+        index = client.ft("aliaslistpipeidx")
+        index.create_index((TextField("txt"),))
+
+        # An empty listing normalizes to ``set()`` through the pipeline, not
+        # the raw ``[]`` wire response.
+        p = index.pipeline()
+        p.aliaslist()
+        res = p.execute()
+        assert isinstance(res[0], set)
+        assert res[0] == set()
+
+        # Aliases are returned as an unordered set, matching the direct call.
+        index.aliasadd("alias1")
+        index.aliasadd("alias2")
+        p = index.pipeline()
+        p.aliaslist()
+        res = p.execute()
+        assert isinstance(res[0], set)
+        assert res[0] == {"alias1", "alias2"}
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.4.0")

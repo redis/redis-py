@@ -936,6 +936,64 @@ class TestBaseSearchFunctionality(AsyncSearchTestsBase):
             _ = (await alias_client2.search("*")).docs[0]
 
     @pytest.mark.redismod
+    @skip_if_server_version_lt("8.9.0")
+    async def test_aliaslist(self, decoded_r: redis.Redis):
+        index = decoded_r.ft("aliaslistidx")
+        await index.create_index((TextField("txt"),))
+
+        # An existing index with no aliases returns an empty set, not an error.
+        assert await index.aliaslist() == set()
+
+        # Aliases are returned as an unordered collection.
+        await index.aliasadd("alias1")
+        await index.aliasadd("alias2")
+        aliases = await index.aliaslist()
+        assert isinstance(aliases, set)
+        assert aliases == {"alias1", "alias2"}
+
+        # FT.ALIASUPDATE moving an alias to another index removes it from the
+        # previous index's listing.
+        index2 = decoded_r.ft("aliaslistidx2")
+        await index2.create_index((TextField("txt"),))
+        await index2.aliasupdate("alias1")
+        assert await index.aliaslist() == {"alias2"}
+        assert await index2.aliaslist() == {"alias1"}
+
+        # FT.ALIASDEL removes the alias from the listing.
+        await index.aliasdel("alias2")
+        assert await index.aliaslist() == set()
+
+        # A missing index and an alias name supplied as the index both fail
+        # with the index-not-found error; the client must not resolve aliases.
+        with pytest.raises(redis.ResponseError):
+            await decoded_r.ft("nonexistent_aliaslist_index").aliaslist()
+        with pytest.raises(redis.ResponseError):
+            await decoded_r.ft("alias1").aliaslist()
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("8.9.0")
+    @skip_if_redis_enterprise()
+    async def test_aliaslist_decode_responses_false(self, create_redis, stack_url):
+        # ``decode_responses`` is not part of the CI protocol/legacy matrix,
+        # so pin only that here and let the harness supply the protocol x
+        # legacy combinations (as it does for ``test_aliaslist`` above).
+        client = await create_redis(decode_responses=False, url=stack_url)
+        index = client.ft("aliaslistbytesidx")
+        await index.create_index((TextField("txt"),))
+
+        # ``aliasadd`` accepts a ``KeyT`` (str | bytes | memoryview); mix a
+        # ``str`` and a ``bytes`` alias to exercise the widened input type.
+        await index.aliasadd("alias1")
+        await index.aliasadd(b"alias2")
+
+        # Alias names are user data, so with ``decode_responses=False`` they
+        # are returned as ``bytes`` (honoring the flag, like FT.TAGVALS /
+        # FT.DICTDUMP) rather than being force-decoded to ``str``.
+        aliases = await index.aliaslist()
+        assert isinstance(aliases, set)
+        assert aliases == {b"alias1", b"alias2"}
+
+    @pytest.mark.redismod
     async def test_tags(self, decoded_r: redis.Redis):
         await decoded_r.ft().create_index((TextField("txt"), TagField("tags")))
         tags = "foo,foo bar,hello;world"
@@ -2545,6 +2603,30 @@ class TestPipeline(AsyncSearchTestsBase):
                 == res[3]["results"][1]["extra_attributes"]
                 == {"txt": "foo bar"}
             )
+
+    @pytest.mark.redismod
+    @skip_if_redis_enterprise()
+    @skip_if_server_version_lt("8.9.0")
+    async def test_aliaslist_in_pipeline(self, decoded_r: redis.Redis):
+        index = decoded_r.ft("aliaslistpipeidx")
+        await index.create_index((TextField("txt"),))
+
+        # An empty listing normalizes to ``set()`` through the pipeline, not
+        # the raw ``[]`` wire response.
+        p = index.pipeline()
+        await p.aliaslist()
+        res = await p.execute()
+        assert isinstance(res[0], set)
+        assert res[0] == set()
+
+        # Aliases are returned as an unordered set, matching the direct call.
+        await index.aliasadd("alias1")
+        await index.aliasadd("alias2")
+        p = index.pipeline()
+        await p.aliaslist()
+        res = await p.execute()
+        assert isinstance(res[0], set)
+        assert res[0] == {"alias1", "alias2"}
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")

@@ -528,6 +528,7 @@ class AbstractRedisCluster:
             "FT.ALIASADD",
             "FT.ALIASUPDATE",
             "FT.ALIASDEL",
+            "FT.ALIASLIST",
             "FT.TAGVALS",
             "FT.SUGADD",
             "FT.SUGGET",
