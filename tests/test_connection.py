@@ -574,6 +574,35 @@ class TestConnection:
         mock_sock.close.assert_called_once()
         assert conn._sock is None
 
+    def test_connect_breaks_exception_reference_cycle(self):
+        """
+        On connection failure, _connect must not leave its frame retaining the
+        raised exception.
+        The exception's traceback references the frame, so a retained local
+        would form a cycle only reclaimable by the GC.
+        The finally clause in _connect breaks it by clearing the local.
+        """
+        conn = Connection(host="localhost", port=6379)
+        addr_info = (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 6379))
+        with (
+            patch.object(socket, "getaddrinfo", return_value=[addr_info]),
+            patch.object(socket, "socket") as socket_factory,
+        ):
+            socket_factory.return_value.connect.side_effect = OSError("refused")
+            with pytest.raises(OSError) as exc_info:
+                conn._connect()
+
+        # Locate the _connect frame in the propagated traceback and confirm its
+        # err local was cleared, proving no exception<->frame cycle survives.
+        connect_frame = None
+        tb = exc_info.value.__traceback__
+        while tb is not None:
+            if tb.tb_frame.f_code.co_name == "_connect":
+                connect_frame = tb.tb_frame
+            tb = tb.tb_next
+        assert connect_frame is not None
+        assert connect_frame.f_locals.get("err") is None
+
     @pytest.mark.parametrize(
         "connection_kwargs",
         [
