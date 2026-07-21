@@ -971,6 +971,29 @@ class TestBaseSearchFunctionality(AsyncSearchTestsBase):
             await decoded_r.ft("alias1").aliaslist()
 
     @pytest.mark.redismod
+    @skip_if_server_version_lt("8.9.0")
+    @skip_if_redis_enterprise()
+    async def test_aliaslist_decode_responses_false(self, create_redis, stack_url):
+        # ``decode_responses`` is not part of the CI protocol/legacy matrix,
+        # so pin only that here and let the harness supply the protocol x
+        # legacy combinations (as it does for ``test_aliaslist`` above).
+        client = await create_redis(decode_responses=False, url=stack_url)
+        index = client.ft("aliaslistbytesidx")
+        await index.create_index((TextField("txt"),))
+
+        # ``aliasadd`` accepts a ``KeyT`` (str | bytes | memoryview); mix a
+        # ``str`` and a ``bytes`` alias to exercise the widened input type.
+        await index.aliasadd("alias1")
+        await index.aliasadd(b"alias2")
+
+        # Alias names are user data, so with ``decode_responses=False`` they
+        # are returned as ``bytes`` (honoring the flag, like FT.TAGVALS /
+        # FT.DICTDUMP) rather than being force-decoded to ``str``.
+        aliases = await index.aliaslist()
+        assert isinstance(aliases, set)
+        assert aliases == {b"alias1", b"alias2"}
+
+    @pytest.mark.redismod
     async def test_tags(self, decoded_r: redis.Redis):
         await decoded_r.ft().create_index((TextField("txt"), TagField("tags")))
         tags = "foo,foo bar,hello;world"

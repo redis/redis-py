@@ -11,6 +11,7 @@ from redis.commands.search.hybrid_query import (
     HybridQuery,
 )
 from redis.commands.search.hybrid_result import HybridCursorResult, HybridResult
+from redis.typing import KeyT
 from redis.utils import (
     check_protocol_version,
     decode_field_value,
@@ -276,7 +277,12 @@ class SearchCommands:
 
     def _parse_aliaslist(self, res, **kwargs):
         # RESP2 replies with an array and RESP3 with a set; both are decoded
-        # into a list by the parsers, so normalize to an unordered ``set``.
+        # into a list/set by the parsers, so normalize to an unordered ``set``.
+        # Alias names are user data, so they honor ``decode_responses`` (``str``
+        # when decoding is enabled, ``bytes`` when it is not) — matching the
+        # passthrough behavior of FT.TAGVALS and FT.DICTDUMP rather than being
+        # force-decoded like the structural map keys handled by the other
+        # search parsers.
         return set(res) if res else set()
 
     def _parse_search(self, res, **kwargs):
@@ -1629,7 +1635,7 @@ class SearchCommands:
 
         return self.execute_command(TAGVALS_CMD, self.index_name, tagfield)
 
-    def aliasadd(self, alias: str):
+    def aliasadd(self, alias: KeyT):
         """
         Alias a search index - will fail if alias already exists
 
@@ -1642,7 +1648,7 @@ class SearchCommands:
 
         return self.execute_command(ALIAS_ADD_CMD, alias, self.index_name)
 
-    def aliasupdate(self, alias: str):
+    def aliasupdate(self, alias: KeyT):
         """
         Updates an alias - will fail if alias does not already exist
 
@@ -1655,7 +1661,7 @@ class SearchCommands:
 
         return self.execute_command(ALIAS_UPDATE_CMD, alias, self.index_name)
 
-    def aliasdel(self, alias: str):
+    def aliasdel(self, alias: KeyT):
         """
         Removes an alias to a search index
 
@@ -1667,13 +1673,15 @@ class SearchCommands:
         """  # noqa
         return self.execute_command(ALIAS_DEL_CMD, alias)
 
-    def aliaslist(self) -> Set[str]:
+    def aliaslist(self) -> Set[str | bytes]:
         """
         List all aliases associated with the current index as an unordered set.
 
         The index must be the name of an index created with ``FT.CREATE``; an
         alias name is not accepted as a substitute. Returns an empty set when
-        the index exists but has no aliases.
+        the index exists but has no aliases. Alias names honor
+        ``decode_responses`` (``str`` when decoding is enabled, ``bytes``
+        otherwise).
 
         For more information see `FT.ALIASLIST <https://redis.io/commands/ft.aliaslist>`_.
         """  # noqa
@@ -1827,13 +1835,15 @@ class AsyncSearchCommands(SearchCommands):
         res = await self.execute_command(INFO_CMD, self.index_name)
         return self._parse_results(INFO_CMD, res)
 
-    async def aliaslist(self) -> Set[str]:
+    async def aliaslist(self) -> Set[str | bytes]:
         """
         List all aliases associated with the current index as an unordered set.
 
         The index must be the name of an index created with ``FT.CREATE``; an
         alias name is not accepted as a substitute. Returns an empty set when
-        the index exists but has no aliases.
+        the index exists but has no aliases. Alias names honor
+        ``decode_responses`` (``str`` when decoding is enabled, ``bytes``
+        otherwise).
 
         For more information see `FT.ALIASLIST <https://redis.io/commands/ft.aliaslist>`_.
         """  # noqa
