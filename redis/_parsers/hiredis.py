@@ -349,17 +349,18 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         if not self._connected:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
 
+        reader = self._reader
         if disable_decoding:
-            response = self._reader.gets(False)
+            response = reader.gets(False)
         else:
-            response = self._reader.gets()
+            response = reader.gets()
 
         while response is NOT_ENOUGH_DATA:
             await self.read_from_socket()
             if disable_decoding:
-                response = self._reader.gets(False)
+                response = reader.gets(False)
             else:
-                response = self._reader.gets()
+                response = reader.gets()
 
         # if the response is a ConnectionError or the response is a list and
         # the first item is a ConnectionError, raise it as something bad

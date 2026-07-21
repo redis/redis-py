@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime
 
 from redis.utils import str_if_bytes
 
@@ -11,7 +11,7 @@ def timestamp_to_datetime(response):
         response = int(response)
     except ValueError:
         return None
-    return datetime.datetime.fromtimestamp(response)
+    return datetime.fromtimestamp(response)
 
 
 def parse_debug_object(response):
@@ -875,7 +875,7 @@ def float_or_none(response):
 
 
 def bool_ok(response, **options):
-    return str_if_bytes(response) == "OK"
+    return response in (b"OK", "OK")
 
 
 def parse_zadd(response, **options):
@@ -1259,7 +1259,7 @@ def parse_pubsub_numsub(response, **options):
 def parse_client_kill(response, **options):
     if isinstance(response, int):
         return response
-    return str_if_bytes(response) == "OK"
+    return bool_ok(response)
 
 
 def parse_acl_getuser(response, **options):
@@ -1451,7 +1451,7 @@ def parse_set_result(response, **options):
         # Redis will return a getCommand result.
         # See `setGenericCommand` in t_string.c
         return response
-    return response and str_if_bytes(response) == "OK"
+    return response and bool_ok(response)
 
 
 def parse_function_list_unified(response, **options):

@@ -189,26 +189,29 @@ class BasePolicyResolver(PolicyResolver):
         self._fallback = fallback
 
     def resolve(self, command_name: str) -> Optional[CommandPolicies]:
-        parts = command_name.split(".")
+        parts = command_name.split(".", 2)
 
         if len(parts) > 2:
             raise ValueError(f"Wrong command or module name: {command_name}")
 
         module, command = parts if len(parts) == 2 else ("core", parts[0])
 
-        if self._policies.get(module, None) is None:
+        module_policies = self._policies.get(module, None)
+
+        if module_policies is None:
             if self._fallback is not None:
                 return self._fallback.resolve(command_name)
             else:
                 return None
 
-        if self._policies.get(module).get(command, None) is None:
+        command_policy = module_policies.get(command, None)
+        if command_policy is None:
             if self._fallback is not None:
                 return self._fallback.resolve(command_name)
             else:
                 return None
 
-        return self._policies.get(module).get(command)
+        return command_policy
 
     @abstractmethod
     def with_fallback(self, fallback: "PolicyResolver") -> "PolicyResolver":
@@ -227,26 +230,28 @@ class AsyncBasePolicyResolver(AsyncPolicyResolver):
         self._fallback = fallback
 
     async def resolve(self, command_name: str) -> Optional[CommandPolicies]:
-        parts = command_name.split(".")
+        parts = command_name.split(".", 2)
 
         if len(parts) > 2:
             raise ValueError(f"Wrong command or module name: {command_name}")
 
         module, command = parts if len(parts) == 2 else ("core", parts[0])
 
-        if self._policies.get(module, None) is None:
+        module_policies = self._policies.get(module, None)
+        if module_policies is None:
             if self._fallback is not None:
                 return await self._fallback.resolve(command_name)
             else:
                 return None
 
-        if self._policies.get(module).get(command, None) is None:
+        command_policy = module_policies.get(command, None)
+        if command_policy is None:
             if self._fallback is not None:
                 return await self._fallback.resolve(command_name)
             else:
                 return None
 
-        return self._policies.get(module).get(command)
+        return command_policy
 
     @abstractmethod
     def with_fallback(self, fallback: "AsyncPolicyResolver") -> "AsyncPolicyResolver":
