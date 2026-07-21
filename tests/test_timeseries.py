@@ -1274,6 +1274,97 @@ def test_query_index(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("8.9.0")
+def test_query_labels(client):
+    client.ts().create(
+        1, labels={"type": "sensor", "location": "LivingRoom", "sensortype": "temp"}
+    )
+    client.ts().create(
+        2, labels={"type": "sensor", "location": "Kitchen", "sensortype": "temp"}
+    )
+    client.ts().create(3, labels={"type": "gauge", "location": "BedRoom"})
+
+    # LABELS mode with a filter returns the union of label names across the
+    # matching series, including the label used in the filter itself.
+    labels = client.ts().querylabels(filters=["type=sensor"])
+    assert isinstance(labels, set)
+    assert sorted(labels) == ["location", "sensortype", "type"]
+
+    # Omitting the filter queries all indexed series.
+    assert sorted(client.ts().querylabels()) == [
+        "location",
+        "sensortype",
+        "type",
+    ]
+
+    # A filter that matches nothing is a normal empty reply, not an error.
+    assert client.ts().querylabels(filters=["type=missing"]) == set()
+
+    # `filters` accepts any iterable, not just a list (a tuple and a single-pass
+    # generator both work).
+    assert sorted(client.ts().querylabels(filters=("type=sensor",))) == [
+        "location",
+        "sensortype",
+        "type",
+    ]
+    assert sorted(client.ts().querylabels(filters=(f for f in ["type=sensor"]))) == [
+        "location",
+        "sensortype",
+        "type",
+    ]
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("8.9.0")
+def test_query_label_values(client):
+    client.ts().create(1, labels={"type": "sensor", "location": "LivingRoom"})
+    client.ts().create(2, labels={"type": "sensor", "location": "Kitchen"})
+    client.ts().create(3, labels={"type": "gauge", "location": "BedRoom"})
+
+    # VALUES mode returns the deduplicated union of a label's values.
+    values = client.ts().querylabels("location", filters=["type=sensor"])
+    assert isinstance(values, set)
+    assert sorted(values) == ["Kitchen", "LivingRoom"]
+
+    # Omitting the filter collects values across all indexed series.
+    assert sorted(client.ts().querylabels("location")) == [
+        "BedRoom",
+        "Kitchen",
+        "LivingRoom",
+    ]
+
+    # A label carried by no matching series yields an empty reply.
+    assert client.ts().querylabels("nonexistent", filters=["type=sensor"]) == set()
+
+    # Values are byte-exact strings and are never coerced to numbers.
+    client.ts().create(4, labels={"type": "sensor", "code": "123"})
+    assert client.ts().querylabels("code", filters=["type=sensor"]) == {"123"}
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("8.9.0")
+def test_query_labels_empty_filters_raises(client):
+    # An explicitly empty filter collection is a local usage error; pass None
+    # (omit the argument) to query all indexed series instead.
+    with pytest.raises(redis.DataError):
+        client.ts().querylabels(filters=[])
+    with pytest.raises(redis.DataError):
+        client.ts().querylabels("location", filters=[])
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("8.9.0")
+def test_query_labels_server_errors(client):
+    # Server-side filter parsing errors surface unchanged as ResponseError.
+    with pytest.raises(redis.ResponseError):
+        client.ts().querylabels("location", filters=["badexpr"])
+
+
+@pytest.mark.redismod
 def test_pipeline(client):
     pipeline = client.ts().pipeline()
     pipeline.create("with_pipeline")

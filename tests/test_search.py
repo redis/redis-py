@@ -52,7 +52,6 @@ from .conftest import (
     expects_unified_shape,
     get_protocol_version,
     skip_if_redis_enterprise,
-    skip_if_resp_version,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_ifmodversion_lt,
@@ -1355,7 +1354,6 @@ class TestBaseSearchFunctionality(SearchTestsBase):
             assert "telmatosaurus" == total["results"][0]["extra_attributes"]["txt"]
 
     @pytest.mark.redismod
-    @skip_if_resp_version(3)
     def test_binary_and_text_fields(self, client):
         fake_vec = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
 
@@ -1390,16 +1388,28 @@ class TestBaseSearchFunctionality(SearchTestsBase):
             .return_field("vector_emb", decode_field=False)
             .return_field("first_name")
         )
-        docs = client.ft(index_name).search(query=query, query_params={}).docs
+        result = client.ft(index_name).search(query=query, query_params={})
+
+        if expects_resp3_shape(client):
+            # protocol=3 + legacy_responses=True returns the native RESP3 dict;
+            # text fields are decoded while the binary field is kept as bytes.
+            results = result["results"]
+            assert len(results) > 0, f"Returned search results are empty: {result}"
+            attributes = results[0]["extra_attributes"]
+        else:
+            docs = result.docs
+            assert len(docs) > 0, f"Returned search results are empty: {result}"
+            attributes = docs[0]
+
         decoded_vec_from_search_results = np.frombuffer(
-            docs[0]["vector_emb"], dtype=np.float32
+            attributes["vector_emb"], dtype=np.float32
         )
 
         assert np.array_equal(decoded_vec_from_search_results, fake_vec), (
             "The vectors are not equal"
         )
 
-        assert docs[0]["first_name"] == mixed_data["first_name"], (
+        assert attributes["first_name"] == mixed_data["first_name"], (
             "The text field is not decoded correctly"
         )
 
@@ -3418,6 +3428,38 @@ class TestDifferentFieldTypesSearch(SearchTestsBase):
         # not supported algorithm
         with pytest.raises(Exception):
             r.ft().create_index((VectorField("v", "SORT", {}),))
+
+    @pytest.mark.fixed_client
+    def test_vector_field_rerank(self):
+        # Pure serialization check: VectorField builds the FT.CREATE args with
+        # no server round-trip, so this test needs no Redis and is not gated.
+        # RERANK is a boolean key-value attribute for HNSW vector fields on
+        # disk-backed (Flex / Auto-Tiering) deployments, where it is mandatory.
+        # It toggles the exact FP32 rerank pass over the approximate candidates
+        # returned by the on-disk graph traversal. It flows through the generic
+        # ``attributes`` dict as the string "TRUE"/"FALSE" (a bare flag is
+        # rejected by the server, and Python bools are rejected by the client
+        # encoder), and the attribute-count token accounts for the extra pair.
+        field = VectorField(
+            "v",
+            "HNSW",
+            {"TYPE": "FLOAT32", "DIM": 128, "DISTANCE_METRIC": "L2", "RERANK": "TRUE"},
+        )
+        assert field.args[0] == "VECTOR"
+        assert field.args[1] == "HNSW"
+        assert field.args[2] == 8  # 4 attribute pairs -> 8 tokens
+        assert "RERANK" in field.args
+        assert "TRUE" in field.args
+
+        # MS2 also accepts RERANK FALSE (opt out of the rerank pass).
+        field = VectorField(
+            "v",
+            "HNSW",
+            {"TYPE": "FLOAT32", "DIM": 128, "DISTANCE_METRIC": "L2", "RERANK": "FALSE"},
+        )
+        assert field.args[2] == 8
+        assert "RERANK" in field.args
+        assert "FALSE" in field.args
 
     @pytest.mark.redismod
     @skip_ifmodversion_lt("2.4.3", "search")
@@ -5933,7 +5975,9 @@ class TestHybridSearch(SearchTestsBase):
             warnings = res["warnings"]
             assert res["execution_time"] > 0
 
-        assert any(
+        assert warnings, f"Expected timeout warnings but none were returned: {warnings}"
+
+        all_match = all(
             safe_str(warning)
             in {
                 "Timeout limit was reached (VSIM)",
@@ -5941,6 +5985,7 @@ class TestHybridSearch(SearchTestsBase):
             }
             for warning in warnings
         )
+        assert all_match, f"Not all warning are matching the pattern: {warnings}"
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")
