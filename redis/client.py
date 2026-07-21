@@ -9,6 +9,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    Iterable,
     List,
     Literal,
     Mapping,
@@ -62,6 +63,7 @@ from redis.exceptions import (
     ResponseError,
     WatchError,
 )
+from redis.himport import HImportConfig
 from redis.lock import Lock
 from redis.maint_notifications import (
     MaintNotificationsConfig,
@@ -315,6 +317,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         maint_notifications_config: MaintNotificationsConfig | None = None,
         oss_cluster_maint_notifications_handler: OSSMaintNotificationsHandler
         | None = None,
+        himport_schemas: Mapping[str, Iterable[str]] | None = None,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -494,6 +497,12 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "oss_cluster_maint_notifications_handler": oss_cluster_maint_notifications_handler,
                         }
                     )
+                # The pool builds the HImportConfig from the schemas (see
+                # ConnectionPool.__init__) and owns it; the client never holds a
+                # mutable reference, so the registry is mutated only via the HIMPORT
+                # command methods.
+                if himport_schemas is not None:
+                    kwargs.update({"himport_schemas": himport_schemas})
             connection_pool = ConnectionPool(**kwargs)
             self._event_dispatcher.dispatch(
                 AfterPooledConnectionsInstantiationEvent(
@@ -548,6 +557,14 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     def get_connection_kwargs(self) -> Dict:
         """Get the connection's key-word arguments"""
         return self.connection_pool.connection_kwargs
+
+    @property
+    def himport_config(self) -> Optional[HImportConfig]:
+        """The client's HIMPORT fieldset registry, or ``None`` if not configured.
+
+        Read-only: the registry is mutated only through the HIMPORT command methods.
+        """
+        return self.connection_pool.himport_config
 
     def get_retry(self) -> Optional[Retry]:
         return self.get_connection_kwargs().get("retry")

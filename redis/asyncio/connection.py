@@ -85,6 +85,7 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
+from redis.himport import HImportConfig
 from redis.maint_notifications import (
     MaintenanceState,
     MaintNotificationsConfig,
@@ -621,6 +622,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         oss_cluster_maint_notifications_handler: (
             AsyncOSSMaintNotificationsHandler | None
         ) = None,
+        himport_config: HImportConfig | None = None,
     ):
         """
         Initialize a new async Connection.
@@ -709,6 +711,16 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             elif self.protocol == 2 and parser_class == _AsyncRESP3Parser:
                 parser_class = _AsyncRESP2Parser
         self.set_parser(parser_class)
+
+        # HIMPORT client-side state. `himport_config` is the shared client-level
+        # registry (or None). `_himport_prepared` maps fieldset name -> the version
+        # this connection last prepared on the server; `_himport_reconciled_revision`
+        # is the config revision this connection last reconciled discards against.
+        # These are populated here for propagation only and are not used yet.
+        self.himport_config = himport_config
+        self._himport_prepared: dict[str, int] = {}
+        self._himport_reconciled_revision: int = 0
+
         AsyncMaintNotificationsAbstractConnection.__init__(
             self,
             maint_notifications_config,
@@ -2603,6 +2615,17 @@ class ConnectionPool(
         self.connection_class = connection_class
         self._connection_kwargs = connection_kwargs
         self.max_connections = max_connections
+
+        # Resolve the HIMPORT config. A pre-built ``himport_config`` (shared, e.g.
+        # from the cluster client) takes precedence; otherwise build one from a
+        # ``himport_schemas`` dict. The resolved config stays in ``connection_kwargs``
+        # so it reaches every connection, while ``himport_schemas`` is consumed here.
+        himport_config = connection_kwargs.get("himport_config")
+        himport_schemas = connection_kwargs.pop("himport_schemas", None)
+        if himport_config is None and himport_schemas is not None:
+            himport_config = HImportConfig(himport_schemas)
+            connection_kwargs["himport_config"] = himport_config
+        self.himport_config = himport_config
 
         self._available_connections: List[AbstractConnection] = []
         self._in_use_connections: Set[AbstractConnection] = set()

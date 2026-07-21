@@ -81,6 +81,7 @@ from redis.exceptions import (
     ResponseError,
     WatchError,
 )
+from redis.himport import HImportConfig
 from redis.maint_notifications import MaintNotificationsConfig
 from redis.observability.attributes import PubSubDirection
 from redis.typing import ChannelT, EncodableT, KeyT, PubSubHandler, Subscription
@@ -308,6 +309,7 @@ class Redis(
         legacy_responses: bool = True,
         event_dispatcher: EventDispatcher | None = None,
         maint_notifications_config: MaintNotificationsConfig | None = None,
+        himport_schemas: Mapping[str, Iterable[str]] | None = None,
     ):
         """
         Initialize a new Redis client.
@@ -464,6 +466,11 @@ class Redis(
                         "maint_notifications_config": maint_notifications_config,
                     }
                 )
+            # The pool builds the HImportConfig from the schemas (see
+            # ConnectionPool.__init__) and owns it; the client never holds a mutable
+            # reference, so the registry is mutated only via the HIMPORT command methods.
+            if himport_schemas is not None:
+                kwargs.update({"himport_schemas": himport_schemas})
             # This arg only used if no pool is passed in
             self.auto_close_connection_pool = auto_close_connection_pool
             connection_pool = ConnectionPool(**kwargs)
@@ -537,6 +544,14 @@ class Redis(
     def get_connection_kwargs(self):
         """Get the connection's key-word arguments"""
         return self.connection_pool.connection_kwargs
+
+    @property
+    def himport_config(self) -> Optional[HImportConfig]:
+        """The client's HIMPORT fieldset registry, or ``None`` if not configured.
+
+        Read-only: the registry is mutated only through the HIMPORT command methods.
+        """
+        return self.connection_pool.himport_config
 
     def get_retry(self) -> Optional[Retry]:
         return self.get_connection_kwargs().get("retry")

@@ -1,7 +1,17 @@
+import asyncio
+import inspect
+
 import pytest
 
+import redis.asyncio.cluster as async_cluster_mod
+import redis.cluster as cluster_mod
+from redis import Redis
+from redis.asyncio import Redis as AsyncRedis
+from redis.asyncio.connection import ConnectionPool as AsyncConnectionPool
+from redis.connection import BlockingConnectionPool, ConnectionPool
 from redis.exceptions import DataError
 from redis.himport import FieldsetOrigin, HImportConfig, HImportFieldset
+from redis.sentinel import Sentinel, SentinelConnectionPool
 
 
 @pytest.mark.fixed_client
@@ -259,3 +269,104 @@ class TestHImportConfig:
         text = repr(cfg)
         assert "fs" in text
         assert "INIT" in text
+
+
+@pytest.mark.fixed_client
+class TestHImportPropagationSync:
+    """Data propagation: client -> pool -> connection (standalone + sentinel)."""
+
+    def test_pool_builds_config_from_schemas(self):
+        pool = ConnectionPool(himport_schemas={"shared": ["a", "b"]})
+        assert isinstance(pool.himport_config, HImportConfig)
+        assert pool.himport_config.get("shared").fields == ("a", "b")
+        conn = pool.make_connection()
+        # Same shared object reaches the connection, plus empty per-conn state.
+        assert conn.himport_config is pool.himport_config
+        assert conn._himport_prepared == {}
+        assert conn._himport_reconciled_revision == 0
+
+    def test_pool_accepts_prebuilt_config_internally(self):
+        # Internal channel (used by the cluster to share one object): a pre-built
+        # himport_config passed via connection_kwargs is used as-is, not rebuilt.
+        cfg = HImportConfig({"x": ["1"]})
+        pool = ConnectionPool(himport_config=cfg)
+        assert pool.himport_config is cfg
+        assert pool.make_connection().himport_config is cfg
+
+    def test_pool_none_when_unconfigured(self):
+        pool = ConnectionPool()
+        assert pool.himport_config is None
+        assert pool.make_connection().himport_config is None
+
+    def test_blocking_pool_resolves(self):
+        pool = BlockingConnectionPool(himport_schemas={"s": ["a"]})
+        assert pool.himport_config.get("s").fields == ("a",)
+        assert pool.make_connection().himport_config is pool.himport_config
+
+    def test_redis_property_and_propagation(self):
+        r = Redis(himport_schemas={"shared": ["name", "email"]})
+        assert r.himport_config is r.connection_pool.himport_config
+        assert r.himport_config.get("shared").fields == ("name", "email")
+
+    def test_redis_unconfigured_is_none(self):
+        assert Redis().himport_config is None
+
+    def test_redis_has_no_public_himport_config_param(self):
+        # himport_config (the object) is internal-only; the sole public knob is the
+        # schemas dict, so the client never holds a caller-supplied mutable config.
+        assert "himport_config" not in inspect.signature(Redis.__init__).parameters
+
+    def test_sentinel_pool_resolves_via_connection_kwargs(self):
+        # Sentinel needs no edits: himport_schemas rides in connection_kwargs and
+        # the base pool (via SentinelConnectionPool) resolves it.
+        s = Sentinel([("127.0.0.1", 26379)], himport_schemas={"s": ["a"]})
+        assert s.connection_kwargs.get("himport_schemas") == {"s": ["a"]}
+        pool = SentinelConnectionPool("mymaster", s, himport_schemas={"s": ["a"]})
+        assert pool.himport_config.get("s").fields == ("a",)
+
+
+@pytest.mark.fixed_client
+class TestHImportPropagationAsync:
+    """Async mirror of the standalone propagation checks."""
+
+    def test_async_pool_and_client(self):
+        async def run():
+            pool = AsyncConnectionPool(himport_schemas={"s": ["a", "b"]})
+            assert pool.himport_config.get("s").fields == ("a", "b")
+            conn = pool.make_connection()
+            assert conn.himport_config is pool.himport_config
+            assert conn._himport_prepared == {}
+            assert conn._himport_reconciled_revision == 0
+
+            r = AsyncRedis(himport_schemas={"s": ["a"]})
+            assert r.himport_config is r.connection_pool.himport_config
+            assert r.himport_config.get("s").fields == ("a",)
+
+            assert AsyncRedis().himport_config is None
+
+        asyncio.run(run())
+
+
+@pytest.mark.fixed_client
+class TestHImportClusterWiring:
+    """Cluster wiring guards (offline). Full topology behavior is covered by the
+    cluster suite; here we assert the plumbing that makes propagation possible."""
+
+    def test_nodes_manager_accepts_shared_config(self):
+        # The one shared config is threaded to nodes via NodesManager (and injected
+        # onto each node pool), not through connection_kwargs.
+        params = inspect.signature(cluster_mod.NodesManager.__init__).parameters
+        assert "himport_config" in params
+
+    def test_sync_cluster_single_public_param(self):
+        params = inspect.signature(cluster_mod.RedisCluster.__init__).parameters
+        assert "himport_schemas" in params
+        assert "himport_config" not in params
+
+    def test_async_cluster_single_public_param(self):
+        params = inspect.signature(async_cluster_mod.RedisCluster.__init__).parameters
+        assert "himport_schemas" in params
+        assert "himport_config" not in params
+
+    def test_async_cluster_has_himport_slot(self):
+        assert "himport_config" in async_cluster_mod.RedisCluster.__slots__

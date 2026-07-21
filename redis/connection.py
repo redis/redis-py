@@ -55,6 +55,7 @@ from .exceptions import (
     ResponseError,
     TimeoutError,
 )
+from .himport import HImportConfig
 from .maint_notifications import (
     MaintenanceState,
     MaintNotificationsConfig,
@@ -841,6 +842,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         oss_cluster_maint_notifications_handler: Optional[
             OSSMaintNotificationsHandler
         ] = None,
+        himport_config: Optional[HImportConfig] = None,
     ):
         """
         Initialize a new Connection.
@@ -938,6 +940,15 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
 
         self._command_packer = self._construct_command_packer(command_packer)
         self._should_reconnect = False
+
+        # HIMPORT client-side state. `himport_config` is the shared client-level
+        # registry (or None). `_himport_prepared` maps fieldset name -> the version
+        # this connection last prepared on the server; `_himport_reconciled_revision`
+        # is the config revision this connection last reconciled discards against.
+        # These are populated here for propagation only and are not used yet.
+        self.himport_config = himport_config
+        self._himport_prepared: dict[str, int] = {}
+        self._himport_reconciled_revision: int = 0
 
         # Set up maintenance notifications
         MaintNotificationsAbstractConnection.__init__(
@@ -2980,6 +2991,17 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
         connection_kwargs.pop("cache", None)
         connection_kwargs.pop("cache_config", None)
+
+        # Resolve the HIMPORT config. A pre-built ``himport_config`` (shared, e.g.
+        # from the cluster client) takes precedence; otherwise build one from a
+        # ``himport_schemas`` dict. The resolved config stays in ``connection_kwargs``
+        # so it reaches every connection, while ``himport_schemas`` is consumed here.
+        himport_config = connection_kwargs.get("himport_config")
+        himport_schemas = connection_kwargs.pop("himport_schemas", None)
+        if himport_config is None and himport_schemas is not None:
+            himport_config = HImportConfig(himport_schemas)
+            connection_kwargs["himport_config"] = himport_config
+        self.himport_config = himport_config
 
         # a lock to protect the critical section in _checkpid().
         # this lock is acquired when the process id changes, such as

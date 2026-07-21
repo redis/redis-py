@@ -20,6 +20,7 @@ from typing import (
     Deque,
     Dict,
     Generator,
+    Iterable,
     List,
     Literal,
     Mapping,
@@ -112,6 +113,7 @@ from redis.exceptions import (
     TryAgainError,
     WatchError,
 )
+from redis.himport import HImportConfig
 from redis.maint_notifications import MaintNotificationsConfig
 from redis.typing import (
     AnyKeyT,
@@ -364,6 +366,7 @@ class RedisCluster(
         "_lock",
         "maint_notifications_config",
         "_oss_cluster_maint_notifications_handler",
+        "himport_config",
         "retry",
         "command_flags",
         "commands_parser",
@@ -449,6 +452,7 @@ class RedisCluster(
         event_dispatcher: EventDispatcher | None = None,
         policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver(),
         maint_notifications_config: MaintNotificationsConfig | None = None,
+        himport_schemas: Mapping[str, Iterable[str]] | None = None,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -543,6 +547,18 @@ class RedisCluster(
             )
         else:
             kwargs["response_callbacks"]["CLUSTER SHARDS"] = parse_cluster_shards
+
+        # Build the client-level HIMPORT config once and share the same object with
+        # every node connection. It rides in connection_kwargs -> ClusterNode ->
+        # each node's Connection, so the fieldset registry is shared cluster-wide.
+        # (Async has no per-node Redis client, so the object flows via connection_kwargs
+        # directly to the Connection, which is internal plumbing, not a public param.)
+        self.himport_config = (
+            HImportConfig(himport_schemas) if himport_schemas is not None else None
+        )
+        if self.himport_config is not None:
+            kwargs["himport_config"] = self.himport_config
+
         self.connection_kwargs = kwargs
 
         # Validate maint_notifications_config before NodesManager is constructed

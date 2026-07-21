@@ -17,8 +17,10 @@ from typing import (
     Any,
     Callable,
     Dict,
+    Iterable,
     List,
     Literal,
+    Mapping,
     Optional,
     Set,
     Tuple,
@@ -73,6 +75,7 @@ from redis.exceptions import (
     TryAgainError,
     WatchError,
 )
+from redis.himport import HImportConfig
 from redis.lock import Lock
 from redis.maint_notifications import (
     MaintNotificationsConfig,
@@ -712,6 +715,7 @@ class RedisCluster(
         event_dispatcher: Optional[EventDispatcher] = None,
         policy_resolver: PolicyResolver = StaticPolicyResolver(),
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+        himport_schemas: Optional[Mapping[str, Iterable[str]]] = None,
         **kwargs,
     ):
         """
@@ -887,6 +891,15 @@ class RedisCluster(
         if check_protocol_version(protocol, 3) and maint_notifications_config is None:
             maint_notifications_config = MaintNotificationsConfig()
 
+        # Build the client-level HIMPORT config once and share the same object with
+        # every node pool, so the fieldset registry is shared cluster-wide. It is handed
+        # to the NodesManager and injected onto each node's pool in create_redis_node;
+        # it is deliberately NOT forwarded through connection_kwargs, so nodes reuse the
+        # one shared object rather than each rebuilding its own from the schemas.
+        self.himport_config = (
+            HImportConfig(himport_schemas) if himport_schemas is not None else None
+        )
+
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.node_flags = self.__class__.NODE_FLAGS.copy()
         self.read_from_replicas = read_from_replicas
@@ -909,6 +922,7 @@ class RedisCluster(
             cache_config=cache_config,
             event_dispatcher=self._event_dispatcher,
             maint_notifications_config=maint_notifications_config,
+            himport_config=self.himport_config,
             **kwargs,
         )
 
@@ -2121,8 +2135,13 @@ class NodesManager:
         cache_factory: Optional[CacheFactoryInterface] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+        himport_config: Optional[HImportConfig] = None,
         **kwargs,
     ):
+        # Shared, cluster-wide HIMPORT config object, injected onto every node's pool
+        # in create_redis_node (not forwarded through connection_kwargs, so all nodes
+        # reuse the one object rather than rebuilding it per node).
+        self.himport_config = himport_config
         self.nodes_cache: dict[str, ClusterNode] = {}
         self.slots_cache: dict[int, list[ClusterNode]] = {}
         self.startup_nodes: dict[str, ClusterNode] = {n.name: n for n in startup_nodes}
@@ -2403,6 +2422,12 @@ class NodesManager:
                 retry=node_retry_config,
                 **kwargs,
             )
+        # Share the one cluster-wide HIMPORT config with this node's pool. Injected
+        # here (rather than forwarded via connection_kwargs) so every node reuses the
+        # same object; the node has no connections yet, so this is safe.
+        if self.himport_config is not None:
+            r.connection_pool.himport_config = self.himport_config
+            r.connection_pool.connection_kwargs["himport_config"] = self.himport_config
         return r
 
     def _get_or_create_cluster_node(self, host, port, role, tmp_nodes_cache):
