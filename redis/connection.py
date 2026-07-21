@@ -609,21 +609,24 @@ class MaintNotificationsAbstractConnection:
                 oss_cluster_maint_notifications_handler.config
             )
 
-    def activate_maint_notifications_handling_if_enabled(self, check_health=True):
-        # Send maintenance notifications handshake if RESP3 is active
+    def _should_enable_maint_notifications(self) -> bool:
+        # Maintenance notifications are sent only if RESP3 is active
         # and maintenance notifications are enabled
-        # and we have a host to determine the endpoint type from
-        # When the maint_notifications_config enabled mode is "auto",
-        # we just log a warning if the handshake fails
-        # When the mode is enabled=True, we raise an exception in case of failure
+        # and we have a host to determine the endpoint type from.
         host = getattr(self, "host", None)
-        if (
+        return bool(
             check_protocol_version(self.get_protocol(), 3)
             and self.maint_notifications_config
             and self.maint_notifications_config.enabled
             and self._maint_notifications_connection_handler
             and host is not None
-        ):
+        )
+
+    def activate_maint_notifications_handling_if_enabled(self, check_health=True):
+        # When the maint_notifications_config enabled mode is "auto",
+        # we just log a warning if the handshake fails
+        # When the mode is enabled=True, we raise an exception in case of failure
+        if self._should_enable_maint_notifications():
             self._enable_maintenance_notifications(
                 maint_notifications_config=self.maint_notifications_config,
                 check_health=check_health,
@@ -632,28 +635,69 @@ class MaintNotificationsAbstractConnection:
     def _enable_maintenance_notifications(
         self, maint_notifications_config: MaintNotificationsConfig, check_health=True
     ):
+        # Kept for callers that enable maintenance notifications outside of the
+        # connection handshake. During on_connect the send and the response
+        # handling are split (see _send_maint_notifications_command /
+        # _handle_maint_notifications_response) so the reply can be pipelined
+        # with the rest of the handshake.
+        self._send_maint_notifications_command(
+            maint_notifications_config, check_health=check_health
+        )
+        self._handle_maint_notifications_response(maint_notifications_config)
+
+    def _maint_notifications_command_args(
+        self, maint_notifications_config: MaintNotificationsConfig
+    ):
+        host = getattr(self, "host", None)
+        if host is None:
+            raise ValueError(
+                "Cannot enable maintenance notifications for connection"
+                " object that doesn't have a host attribute."
+            )
+        endpoint_type = maint_notifications_config.get_endpoint_type(host, self)
+        return (
+            "CLIENT",
+            "MAINT_NOTIFICATIONS",
+            "ON",
+            "moving-endpoint-type",
+            endpoint_type.value,
+        )
+
+    def _send_maint_notifications_command(
+        self, maint_notifications_config: MaintNotificationsConfig, check_health=True
+    ):
+        self.send_command(
+            *self._maint_notifications_command_args(maint_notifications_config),
+            check_health=check_health,
+        )
+
+    def _add_maint_notifications_to_handshake(self, deferred_reads, check_health=True):
+        # If maintenance notifications are enabled for this connection, send the
+        # CLIENT MAINT_NOTIFICATIONS command as part of the pipelined handshake tail
+        # and defer reading its reply (appended to deferred_reads), rather than paying
+        # its own round-trip. When enabled == "auto" a failure is logged and swallowed;
+        # when enabled is True it raises.
+        if not self._should_enable_maint_notifications():
+            return
+        maint_notifications_config = self.maint_notifications_config
+        self._send_maint_notifications_command(
+            maint_notifications_config, check_health=check_health
+        )
+        deferred_reads.append(
+            lambda: self._handle_maint_notifications_response(
+                maint_notifications_config
+            )
+        )
+
+    def _handle_maint_notifications_response(
+        self, maint_notifications_config: MaintNotificationsConfig
+    ):
         try:
-            host = getattr(self, "host", None)
-            if host is None:
-                raise ValueError(
-                    "Cannot enable maintenance notifications for connection"
-                    " object that doesn't have a host attribute."
+            response = self.read_response()
+            if not response or str_if_bytes(response) != "OK":
+                raise ResponseError(
+                    "The server doesn't support maintenance notifications"
                 )
-            else:
-                endpoint_type = maint_notifications_config.get_endpoint_type(host, self)
-                self.send_command(
-                    "CLIENT",
-                    "MAINT_NOTIFICATIONS",
-                    "ON",
-                    "moving-endpoint-type",
-                    endpoint_type.value,
-                    check_health=check_health,
-                )
-                response = self.read_response()
-                if not response or str_if_bytes(response) != "OK":
-                    raise ResponseError(
-                        "The server doesn't support maintenance notifications"
-                    )
         except Exception as e:
             if (
                 isinstance(e, ResponseError)
@@ -1172,54 +1216,80 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             ):
                 raise ConnectionError("Invalid RESP version")
 
-        # Activate maintenance notifications for this connection
-        # if enabled in the configuration
-        # This is a no-op if maintenance notifications are not enabled
-        self.activate_maint_notifications_handling_if_enabled(check_health=check_health)
+        # The tail of the handshake (optional CLIENT MAINT_NOTIFICATIONS, then
+        # CLIENT SETNAME / SETINFO / SELECT) does not affect control flow -- the replies
+        # are only validated or discarded. So we pipeline it: send every command first
+        # (without blocking on a reply between them), then read the replies back in send
+        # order. All requests are on the wire before we block on the first read, so the
+        # whole tail costs a single round-trip instead of one per command. This mirrors
+        # the async stack (redis/asyncio/connection.py). AUTH/HELLO stays a separate
+        # round-trip above because its reply drives the RESP2->RESP3 parser upgrade, the
+        # pre-6.0 AUTH retry, and proto validation.
+        #
+        # deferred_reads holds one zero-arg handler per command sent below; each reads
+        # exactly one reply (in send order) and validates it. Per-command check_health
+        # reproduces the original behavior: at most one health PING/PONG fires before the
+        # first tail command (only when no HELLO/AUTH ran, e.g. RESP2 no-auth), and it is
+        # self-contained so it never desyncs the pipelined replies.
+        deferred_reads = []
+
+        # Maintenance notifications (RESP3-only, opt-in) go first when enabled, so their
+        # reply is pipelined with the rest of the tail.
+        self._add_maint_notifications_to_handshake(deferred_reads, check_health)
 
         # if a client_name is given, set it
         if self.client_name:
             self.send_command(
+                "CLIENT", "SETNAME", self.client_name, check_health=check_health
+            )
+
+            def _read_setname_response():
+                if str_if_bytes(self.read_response()) != "OK":
+                    raise ConnectionError("Error setting client name")
+
+            deferred_reads.append(_read_setname_response)
+
+        # Set the library name and version from driver_info. Older servers may not
+        # support CLIENT SETINFO, so any ResponseError to these replies is swallowed.
+        def _read_setinfo_response():
+            try:
+                self.read_response()
+            except ResponseError:
+                pass
+
+        if self.driver_info and self.driver_info.formatted_name:
+            self.send_command(
                 "CLIENT",
-                "SETNAME",
-                self.client_name,
+                "SETINFO",
+                "LIB-NAME",
+                self.driver_info.formatted_name,
                 check_health=check_health,
             )
-            if str_if_bytes(self.read_response()) != "OK":
-                raise ConnectionError("Error setting client name")
+            deferred_reads.append(_read_setinfo_response)
 
-        # Set the library name and version from driver_info
-        try:
-            if self.driver_info and self.driver_info.formatted_name:
-                self.send_command(
-                    "CLIENT",
-                    "SETINFO",
-                    "LIB-NAME",
-                    self.driver_info.formatted_name,
-                    check_health=check_health,
-                )
-                self.read_response()
-        except ResponseError:
-            pass
-
-        try:
-            if self.driver_info and self.driver_info.lib_version:
-                self.send_command(
-                    "CLIENT",
-                    "SETINFO",
-                    "LIB-VER",
-                    self.driver_info.lib_version,
-                    check_health=check_health,
-                )
-                self.read_response()
-        except ResponseError:
-            pass
+        if self.driver_info and self.driver_info.lib_version:
+            self.send_command(
+                "CLIENT",
+                "SETINFO",
+                "LIB-VER",
+                self.driver_info.lib_version,
+                check_health=check_health,
+            )
+            deferred_reads.append(_read_setinfo_response)
 
         # if a database is specified, switch to it
         if self.db:
             self.send_command("SELECT", self.db, check_health=check_health)
-            if str_if_bytes(self.read_response()) != "OK":
-                raise ConnectionError("Invalid Database")
+
+            def _read_select_response():
+                if str_if_bytes(self.read_response()) != "OK":
+                    raise ConnectionError("Invalid Database")
+
+            deferred_reads.append(_read_select_response)
+
+        # Read the deferred replies in the order the commands were sent.
+        for read_and_validate_response in deferred_reads:
+            read_and_validate_response()
 
     def disconnect(self, *args, **kwargs):
         "Disconnects from the Redis server"
