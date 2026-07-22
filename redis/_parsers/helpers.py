@@ -1341,7 +1341,7 @@ def parse_acl_log_resp3_to_resp2_legacy(response, **options):
     data = []
     for log in response:
         if isinstance(log, dict):
-            log_data = {str_if_bytes(k): v for k, v in log.items()}
+            log_data = {str_if_bytes(k): str_if_bytes(v) for k, v in log.items()}
         else:
             log_data = pairs_to_dict(log, True, True)
         client_info = log_data.get("client-info", "")

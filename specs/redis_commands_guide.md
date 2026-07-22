@@ -98,6 +98,24 @@ def scan(
 In terms of required and optional arguments we follow the specification and trying to reflect it as close
 as possible.
 
+For argument type hints, prefer the most general abstract interface that expresses what the command actually needs
+over a concrete implementation type. When an argument is only iterated over, type it as `Iterable[...]` rather than
+`list[...]` so the API accepts any compatible input (lists, tuples, sets, generators, etc.) instead of just one
+concrete type. Only pin a concrete type (e.g. `list[...]`) when the implementation explicitly requires that type's
+capabilities, such as indexing, slicing, ordering guarantees, or in-place mutation. This keeps the public API
+permissive on input while the command internally normalizes the value to whatever Redis-friendly format it needs.
+
+```python
+# Preferred: accepts any iterable of strings.
+def querylabels(self, label: str | None = None, filters: Iterable[str] | None = None): ...
+
+# Avoid unless a list is explicitly required (indexing, ordering, mutation):
+def querylabels(self, label: str | None = None, filters: list[str] | None = None): ...
+```
+
+Note that this applies to input arguments. Return type hints should reflect the concrete type the command actually
+produces (see "Protocols compatibility" above).
+
 ### Testing
 
 Command tests are located in `tests/test_*command_type*.py` and `tests/test_asyncio/test_*command_type*.py` for async
