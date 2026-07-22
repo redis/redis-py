@@ -3742,6 +3742,19 @@ class ClusterPubSub(PubSub):
                 return None
         return message
 
+    def _eligible_subscription_nodes(self, slot: int) -> Dict[str, "ClusterNode"]:
+        """
+        Nodes a shard subscription may live on for ``slot``, keyed by node
+        name. Mirrors regular pubsub node selection: replicas are eligible
+        only when replica reads are enabled.
+        """
+        nodes = self.cluster.nodes_manager.slots_cache.get(slot) or []
+        if not (
+            self.cluster.read_from_replicas or self.cluster.load_balancing_strategy
+        ):
+            nodes = nodes[:1]
+        return {node.name: node for node in nodes}
+
     async def ssubscribe(
         self, *args: ChannelT | Subscription, **kwargs: PubSubHandler
     ) -> None:
@@ -3759,25 +3772,38 @@ class ClusterPubSub(PubSub):
         # re-acquire this lock (asyncio.Lock is non-reentrant).
         async with self._shard_state_lock:
             for s_channel, handler in s_channels.items():
-                node = self.cluster.get_node_from_key(s_channel)
+                slot = self.cluster.keyslot(s_channel)
+                node = self.cluster.nodes_manager.get_node_from_slot(
+                    slot,
+                    self.cluster.read_from_replicas,
+                    self.cluster.load_balancing_strategy,
+                )
                 if not node:
                     continue
                 # Lazy re-route: if this channel is already tracked against a
-                # different node (e.g. after a slot migration), migrate it now
-                # so the caller's intent is applied on the current owner.
+                # different node, migrate it now so the caller's intent is
+                # applied on the current owner — unless the tracked node
+                # still serves the slot, in which case leave it alone.
                 normalized_key = next(iter(self._normalize_keys({s_channel: None})))
                 old_name = self._shard_channel_to_node.get(normalized_key)
                 if old_name and old_name != node.name:
-                    # Match PubSub.ssubscribe() dict.update() semantics: the
-                    # caller's newly supplied handler (including None) always
-                    # overrides any previously registered handler.
-                    await self._migrate_shard_channel(
-                        normalized_key,
-                        handler,
-                        old_name,
-                        node,
-                    )
-                    continue
+                    tracked_node = self._eligible_subscription_nodes(slot).get(old_name)
+                    if tracked_node is not None:
+                        # The tracked node still serves the channel's slot
+                        # (the balancer merely picked a sibling); keep the
+                        # subscription where it is to avoid churn.
+                        node = tracked_node
+                    else:
+                        # Match PubSub.ssubscribe() dict.update() semantics: the
+                        # caller's newly supplied handler (including None) always
+                        # overrides any previously registered handler.
+                        await self._migrate_shard_channel(
+                            normalized_key,
+                            handler,
+                            old_name,
+                            node,
+                        )
+                        continue
                 pubsub = self._get_node_pubsub(node)
                 if handler:
                     await pubsub.ssubscribe(Subscription(s_channel, handler))
@@ -3813,10 +3839,21 @@ class ClusterPubSub(PubSub):
                 if name and name in self.node_pubsub_mapping:
                     pubsub = self.node_pubsub_mapping[name]
                 else:
-                    node = self.cluster.get_node_from_key(s_channel)
-                    if not node or node.name not in self.node_pubsub_mapping:
+                    # No reverse-index entry: check every node that may hold
+                    # the subscription for this slot (with replica reads
+                    # enabled that is not necessarily the primary).
+                    slot = self.cluster.keyslot(s_channel)
+                    eligible = self._eligible_subscription_nodes(slot)
+                    if not eligible:
+                        raise SlotNotCoveredError(
+                            f'Slot "{slot}" is not covered by the cluster.'
+                        )
+                    name = next(
+                        (n for n in eligible if n in self.node_pubsub_mapping), None
+                    )
+                    if name is None:
                         continue
-                    pubsub = self.node_pubsub_mapping[node.name]
+                    pubsub = self.node_pubsub_mapping[name]
                 await pubsub.sunsubscribe(s_channel)
                 self.pending_unsubscribe_shard_channels.update(
                     pubsub.pending_unsubscribe_shard_channels
@@ -3825,18 +3862,28 @@ class ClusterPubSub(PubSub):
     async def reinitialize_shard_subscriptions(self) -> None:
         """
         Reconcile per-node shard subscriptions against the cluster's current
-        slot ownership map. For each tracked shard channel whose owning node
-        has changed (e.g. after CLUSTER SETSLOT / failover), sunsubscribe on
-        the old node's pubsub and ssubscribe on the new owner's pubsub,
-        preserving any registered handler.
+        slot ownership map. For each tracked shard channel whose node no
+        longer serves the channel's slot (e.g. after CLUSTER SETSLOT /
+        failover), sunsubscribe on the old node's pubsub and ssubscribe on a
+        node currently serving the slot, preserving any registered handler.
         """
         uncovered: list = []
         made_progress = False
         first_migrate_error: Optional[BaseException] = None
         async with self._shard_state_lock:
             for channel, handler in list(self.shard_channels.items()):
+                slot = self.cluster.keyslot(channel)
+                old_name = self._shard_channel_to_node.get(channel)
+                if old_name and old_name in self._eligible_subscription_nodes(slot):
+                    # The tracked node still serves the channel's slot under
+                    # the current routing configuration; nothing to do.
+                    continue
                 try:
-                    new_node = self.cluster.get_node_from_key(channel)
+                    new_node = self.cluster.nodes_manager.get_node_from_slot(
+                        slot,
+                        self.cluster.read_from_replicas,
+                        self.cluster.load_balancing_strategy,
+                    )
                 except SlotNotCoveredError:
                     # Slot is transiently uncovered (mid-migration / partial
                     # topology refresh). Defer this channel so coverable
@@ -3845,9 +3892,6 @@ class ClusterPubSub(PubSub):
                     # channel was reconciled. Retry happens on the next
                     # slots-cache change notification.
                     uncovered.append(channel)
-                    continue
-                old_name = self._shard_channel_to_node.get(channel)
-                if old_name == new_node.name:
                     continue
                 try:
                     await self._migrate_shard_channel(
