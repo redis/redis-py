@@ -112,4 +112,13 @@ The following commands are not supported:
 - ``EVAL_RO``
 - ``EVALSHA_RO``
 
-Using scripting within pipelines in cluster mode is **not supported**.
+``EVALSHA`` can be used inside a ``ClusterPipeline``. Keys must still map to
+the same hash slot (or ``numkeys`` may be ``0``, in which case the command is
+routed to a random primary). In a transactional pipeline
+(``pipeline(transaction=True)``), zero-key ``EVALSHA`` reuses the
+transaction's existing slot when one is already chosen so multiple zero-key
+scripts (or a mix with keyed commands) stay single-slot. The script must
+already be loaded on the target node, for example via ``SCRIPT LOAD`` on the
+cluster client, which loads the script on all primaries. Other scripting
+helpers such as ``EVAL``, ``load_scripts``, and ``script_load_for_pipeline``
+remain unsupported on cluster pipelines.

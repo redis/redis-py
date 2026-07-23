@@ -21,6 +21,7 @@ from redis.backoff import (
 )
 from redis.cluster import (
     PRIMARY,
+    PIPELINE_BLOCKED_COMMANDS,
     REDIS_CLUSTER_HASH_SLOTS,
     REPLICA,
     ClusterNode,
@@ -3835,6 +3836,95 @@ class TestClusterPubSubObject:
         mock_node_conn.disconnect.assert_called_once()
 
 
+def test_evalsha_not_in_pipeline_blocked_commands():
+    """EVALSHA must be usable in ClusterPipeline (see #2914)."""
+    assert "EVALSHA" not in PIPELINE_BLOCKED_COMMANDS
+
+
+def test_evalsha_can_be_queued_on_cluster_pipeline():
+    """
+    Queuing EVALSHA on a ClusterPipeline must not raise the historical
+    'blocked when running redis in cluster mode' error. Slot selection for
+    EVALSHA is already handled by RedisCluster.determine_slot().
+    """
+    r = get_mocked_redis_client(host=default_host, port=default_port)
+    try:
+        pipe = r.pipeline()
+        sha = "a" * 40
+        returned = pipe.evalsha(sha, 1, "foo", "bar")
+        assert returned is pipe
+
+        queue = pipe._execution_strategy.command_queue
+        assert len(queue) == 1
+        assert queue[0].args == ("EVALSHA", sha, 1, "foo", "bar")
+
+        assert r.determine_slot("EVALSHA", sha, 1, "foo", "bar") == key_slot(b"foo")
+    finally:
+        r.close()
+
+
+def test_evalsha_zero_keys_pipeline_execute_skips_get_command_keys():
+    """
+    Sync ClusterPipeline must route EVALSHA via determine_slot, not
+    COMMAND GETKEYS. Redis <7 fails on GETKEYS for EVALSHA with numkeys=0.
+    """
+    r = get_mocked_redis_client(host=default_host, port=default_port)
+    try:
+        mock_all_nodes_resp(r, 42)
+        sha = "a" * 40
+        with r.pipeline() as pipe:
+            pipe.evalsha(sha, 0)
+            with patch.object(
+                pipe,
+                "_get_command_keys",
+                side_effect=AssertionError(
+                    "COMMAND GETKEYS must not be used for EVALSHA"
+                ),
+            ):
+                assert pipe.execute() == [42]
+    finally:
+        r.close()
+
+
+def test_evalsha_zero_keys_reuses_slot_in_transaction():
+    """
+    Zero-key EVALSHA in a transactional pipeline must reuse one slot so
+    execute() does not raise CrossSlotTransactionError.
+    """
+    r = get_mocked_redis_client(host=default_host, port=default_port)
+    try:
+        sha = "a" * 40
+        with r.pipeline(transaction=True) as pipe:
+            pipe.evalsha(sha, 0)
+            pipe.evalsha(sha, 0)
+            slots = pipe._execution_strategy._pipeline_slots
+            assert len(slots) == 1
+
+            # Keyed follow-up must retarget without needing a live COMMAND map.
+            keyed_slot = key_slot(b"foo")
+            with patch.object(pipe, "determine_slot", return_value=keyed_slot):
+                pipe.set("foo", "bar")
+            assert pipe._execution_strategy._pipeline_slots == {keyed_slot}
+            assert pipe._execution_strategy._transaction_has_keyed_slot is True
+    finally:
+        r.close()
+
+
+def test_evalsha_zero_keys_follows_keyed_slot_in_transaction():
+    """Zero-key EVALSHA after a keyed slot is fixed reuses that slot."""
+    r = get_mocked_redis_client(host=default_host, port=default_port)
+    try:
+        sha = "a" * 40
+        with r.pipeline(transaction=True) as pipe:
+            strategy = pipe._execution_strategy
+            strategy._pipeline_slots = {key_slot(b"foo")}
+            strategy._transaction_has_keyed_slot = True
+            pipe.evalsha(sha, 0)
+            assert strategy._pipeline_slots == {key_slot(b"foo")}
+    finally:
+        r.close()
+
+
 @pytest.mark.onlycluster
 class TestClusterPipeline:
     """
@@ -3869,6 +3959,40 @@ class TestClusterPipeline:
         assert (
             str(ex.value).startswith("shard_hint is deprecated in cluster mode") is True
         )
+
+    def test_evalsha_in_pipeline(self, r):
+        """
+        EVALSHA is allowed in ClusterPipeline when keys map to one slot
+        and the script is already loaded on cluster primaries (#2914).
+        """
+        multiply = "return redis.call('GET', KEYS[1]) * ARGV[1]"
+        sha = r.script_load(multiply)
+        # hash tag keeps the key on a known slot for the pipeline
+        r.set("{user}a", 2)
+        with r.pipeline() as pipe:
+            pipe.evalsha(sha, 1, "{user}a", 3)
+            assert pipe.execute() == [6]
+
+    def test_evalsha_zero_keys_in_pipeline(self, r):
+        """
+        EVALSHA with numkeys=0 must execute in ClusterPipeline without
+        calling COMMAND GETKEYS (broken on Redis <7 for this case).
+        """
+        sha = r.script_load("return 42")
+        with r.pipeline() as pipe:
+            pipe.evalsha(sha, 0)
+            assert pipe.execute() == [42]
+
+    def test_evalsha_zero_keys_in_transaction_pipeline(self, r):
+        """
+        Multiple zero-key EVALSHA calls in a transactional pipeline share
+        one slot and execute successfully.
+        """
+        sha = r.script_load("return 42")
+        with r.pipeline(transaction=True) as pipe:
+            pipe.evalsha(sha, 0)
+            pipe.evalsha(sha, 0)
+            assert pipe.execute() == [42, 42]
 
     def test_redis_cluster_pipeline(self, r):
         """
