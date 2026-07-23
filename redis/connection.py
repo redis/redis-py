@@ -55,7 +55,7 @@ from .exceptions import (
     ResponseError,
     TimeoutError,
 )
-from .himport import HImportConfig
+from .himport import HImportRegistry
 from .maint_notifications import (
     MaintenanceState,
     MaintNotificationsConfig,
@@ -842,7 +842,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         oss_cluster_maint_notifications_handler: Optional[
             OSSMaintNotificationsHandler
         ] = None,
-        himport_config: HImportConfig | None = None,
+        himport_registry: HImportRegistry | None = None,
     ):
         """
         Initialize a new Connection.
@@ -941,9 +941,9 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         self._command_packer = self._construct_command_packer(command_packer)
         self._should_reconnect = False
 
-        # HIMPORT client-side state. `himport_config` is the shared client-level
+        # HIMPORT client-side state. `himport_registry` is the shared client-level
         # registry (empty if unconfigured) and persists across reconnects.
-        self.himport_config = himport_config
+        self.himport_registry = himport_registry
         self._reset_himport_state()
 
         # Set up maintenance notifications
@@ -1113,7 +1113,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         # A fresh server session has no prepared HIMPORT fieldsets, so the next
         # himport_set must re-prepare on this connection. ``_himport_prepared`` maps
         # fieldset name -> the version prepared on the server; ``_himport_reconciled
-        # _revision`` is the config revision this connection last reconciled discards
+        # _revision`` is the registry revision this connection last reconciled discards
         # against. Both are reset on connect/disconnect since the session is gone.
         self._himport_prepared: dict[str, int] = {}
         self._himport_reconciled_revision: int = 0
@@ -1881,8 +1881,8 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     # delegate so callers treat the proxy like a plain connection and never need
     # to know a proxy is in play.
     @property
-    def himport_config(self):
-        return self._conn.himport_config
+    def himport_registry(self):
+        return self._conn.himport_registry
 
     @property
     def _himport_prepared(self):
@@ -3024,20 +3024,20 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         connection_kwargs.pop("cache", None)
         connection_kwargs.pop("cache_config", None)
 
-        # Resolve the HIMPORT config. A pre-built ``himport_config`` (shared, e.g.
+        # Resolve the HIMPORT config. A pre-built ``himport_registry`` (shared, e.g.
         # from the cluster client) takes precedence; otherwise build one from the
-        # ``himport_schemas`` dict (empty if none). A config always exists so runtime
+        # ``himport_schemas`` dict (empty if none). A registry always exists so runtime
         # ``himport_prepare`` mutates a single object every connection already shares.
         # The object stays in ``connection_kwargs`` so it reaches every connection,
         # while ``himport_schemas`` is consumed here. It is injected unconditionally
         # (like other auto-added pool kwargs), so a custom ``connection_class`` must
-        # accept ``**kwargs`` (or a ``himport_config`` parameter), as built-ins do.
-        himport_config = connection_kwargs.get("himport_config")
+        # accept ``**kwargs`` (or a ``himport_registry`` parameter), as built-ins do.
+        himport_registry = connection_kwargs.get("himport_registry")
         himport_schemas = connection_kwargs.pop("himport_schemas", None)
-        if himport_config is None:
-            himport_config = HImportConfig(himport_schemas)
-            connection_kwargs["himport_config"] = himport_config
-        self.himport_config = himport_config
+        if himport_registry is None:
+            himport_registry = HImportRegistry(himport_schemas)
+            connection_kwargs["himport_registry"] = himport_registry
+        self.himport_registry = himport_registry
 
         # a lock to protect the critical section in _checkpid().
         # this lock is acquired when the process id changes, such as
@@ -3075,7 +3075,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
     )
 
     # Internal plumbing kwargs omitted from __repr__ (not user-facing config).
-    OMIT_REPR_KEYS = frozenset({"himport_config"})
+    OMIT_REPR_KEYS = frozenset({"himport_registry"})
 
     def __repr__(self) -> str:
         conn_kwargs = ",".join(

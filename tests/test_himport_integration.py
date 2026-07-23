@@ -165,7 +165,7 @@ def test_discard_on_disconnected_single_connection(request):
             assert client.himport_discard("tmp") == 1
             discard_wire.assert_not_called()
         assert conn.is_connected is False
-        assert "tmp" not in client.himport_config
+        assert "tmp" not in client.himport_registry
         # A later himport_set still works: the prepare (while still disconnected)
         # sends nothing, and the set reconnects and bundles PREPARE lazily.
         with track_himport_wire(conn) as events:

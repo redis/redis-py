@@ -10834,7 +10834,7 @@ class HashCommands(CommandsProtocol):
         """
         # A bare str/bytes-like value is iterable element-by-element; splatting it
         # would send single chars/bytes as separate positional values instead of one
-        # value. Reject it as a caller mistake, mirroring HImportConfig's field-list
+        # value. Reject it as a caller mistake, mirroring HImportRegistry's field-list
         # guard.
         if isinstance(values, (str, bytes, bytearray, memoryview)):
             raise DataError(

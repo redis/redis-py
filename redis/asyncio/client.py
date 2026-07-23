@@ -86,7 +86,7 @@ from redis.himport import (
     HIMPORT_DISCARD,
     HIMPORT_PREPARE,
     HIMPORT_SET,
-    HImportConfig,
+    HImportRegistry,
     himport_discard_command,
     himport_prepare_command,
     himport_set_command,
@@ -372,7 +372,7 @@ class Redis(
         himport_schemas:
             optional mapping of `fieldset_name -> ordered field names` to register
             as HIMPORT fieldsets at construction time - see `redis.himport` for
-            details. The pool owns the resulting `HImportConfig`, so this argument
+            details. The pool owns the resulting `HImportRegistry`, so this argument
             is ignored when connection_pool is provided: to preconfigure schemas
             with a caller-supplied pool, pass `himport_schemas` to the pool itself
             (e.g. `ConnectionPool(..., himport_schemas=...)`).
@@ -489,7 +489,7 @@ class Redis(
                         "maint_notifications_config": maint_notifications_config,
                     }
                 )
-            # The pool builds the HImportConfig from the schemas (see
+            # The pool builds the HImportRegistry from the schemas (see
             # ConnectionPool.__init__) and owns it; the client never holds a mutable
             # reference, so the registry is mutated only via the HIMPORT command methods.
             if himport_schemas is not None:
@@ -569,12 +569,12 @@ class Redis(
         return self.connection_pool.connection_kwargs
 
     @property
-    def himport_config(self) -> HImportConfig:
+    def himport_registry(self) -> HImportRegistry:
         """The client's HIMPORT fieldset registry (empty if none was declared).
 
         Read-only: the registry is mutated only through the HIMPORT command methods.
         """
-        return self.connection_pool.himport_config
+        return self.connection_pool.himport_registry
 
     def get_retry(self) -> Optional[Retry]:
         return self.get_connection_kwargs().get("retry")
@@ -889,13 +889,22 @@ class Redis(
     async def _himport_reconcile_discards(self, conn):
         """DISCARD, on ``conn``, any prepared fieldset removed from the registry.
 
-        Runs at most once per registry mutation: the connection records the config
+        Runs at most once per registry mutation: the connection records the registry
         ``revision`` it last reconciled against, so unchanged registries are a no-op.
         """
-        cfg = conn.himport_config
-        if cfg is None or conn._himport_reconciled_revision == cfg.revision:
+        registry = conn.himport_registry
+        if registry is None or conn._himport_reconciled_revision == registry.revision:
             return
-        stale = cfg.names_to_discard(list(conn._himport_prepared))
+        # Snapshot the revision *before* computing ``stale`` so the value stamped at
+        # the end is never newer than the registry state ``stale`` reflects. A
+        # concurrent ``himport_discard`` (thread-shared sync client, or another task
+        # while this awaits the DISCARD replies) that lands after this point only
+        # leaves the connection marked behind the live revision, so the next
+        # reconcile re-runs and catches it. Re-reading ``registry.revision`` at the
+        # end instead would stamp a discard this connection never sent, leaving the
+        # server session carrying a supposedly-discarded fieldset.
+        reconciled_to = registry.revision
+        stale = registry.names_to_discard(list(conn._himport_prepared))
         if stale:
             await conn.send_packed_command(
                 conn.pack_commands([himport_discard_command(n) for n in stale])
@@ -913,7 +922,7 @@ class Redis(
                 conn._himport_prepared.pop(n, None)
             if first_error is not None:
                 raise first_error
-        conn._himport_reconciled_revision = cfg.revision
+        conn._himport_reconciled_revision = reconciled_to
 
     async def _himport_prepare_and_set(
         self, conn, key, fieldset_name, values, fieldset
@@ -960,8 +969,8 @@ class Redis(
         """
         await self._himport_reconcile_discards(conn)
 
-        cfg = conn.himport_config
-        fieldset = cfg.get(fieldset_name) if cfg is not None else None
+        registry = conn.himport_registry
+        fieldset = registry.get(fieldset_name) if registry is not None else None
         # Lazy PREPARE bundled with SET on first use of this fieldset.
         if (
             fieldset is not None
@@ -1119,7 +1128,7 @@ class Redis(
     ) -> bool:
         """Declare an HIMPORT fieldset for use by :meth:`himport_set`."""
         await self.initialize()
-        fieldset = self.himport_config.prepare(fieldset_name, fields)
+        fieldset = self.himport_registry.prepare(fieldset_name, fields)
         conn = self.connection
         if self.single_connection_client and conn is not None and conn.is_connected:
             await self.himport_prepare_internal(fieldset_name, fieldset.fields)
@@ -1129,25 +1138,25 @@ class Redis(
     async def himport_discard(self, fieldset_name: str) -> int:
         """Remove a runtime fieldset. Raises ``DataError`` for init-declared ones."""
         await self.initialize()
-        removed = self.himport_config.discard(fieldset_name)
+        removed = self.himport_registry.discard(fieldset_name)
         conn = self.connection
         if self.single_connection_client and conn is not None and conn.is_connected:
             if removed:
                 await self.himport_discard_internal(fieldset_name)
             conn._himport_prepared.pop(fieldset_name, None)
-            conn._himport_reconciled_revision = self.himport_config.revision
+            conn._himport_reconciled_revision = self.himport_registry.revision
         return 1 if removed else 0
 
     async def himport_discard_all(self) -> int:
         """Remove all runtime fieldsets. Raises ``DataError`` if any init one exists."""
         await self.initialize()
-        count = self.himport_config.discard_all()
+        count = self.himport_registry.discard_all()
         conn = self.connection
         if self.single_connection_client and conn is not None and conn.is_connected:
             if count:
                 await self.himport_discard_all_internal()
             conn._himport_prepared.clear()
-            conn._himport_reconciled_revision = self.himport_config.revision
+            conn._himport_reconciled_revision = self.himport_registry.revision
         return count
 
 
@@ -2129,8 +2138,8 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         """
         # A pipeline may run on a connection type that never carries real HIMPORT
         # state (e.g. mocked test doubles); only proceed for a real config.
-        cfg = getattr(conn, "himport_config", None)
-        if not isinstance(cfg, HImportConfig):
+        registry = getattr(conn, "himport_registry", None)
+        if not isinstance(registry, HImportRegistry):
             return
         await self._himport_reconcile_discards(conn)
         to_prepare = []
@@ -2142,7 +2151,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             if fieldset_name in seen:
                 continue
             seen.add(fieldset_name)
-            fieldset = cfg.get(fieldset_name)
+            fieldset = registry.get(fieldset_name)
             if (
                 fieldset is not None
                 and conn._himport_prepared.get(fieldset_name) != fieldset.version

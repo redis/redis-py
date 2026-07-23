@@ -85,7 +85,7 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
-from redis.himport import HImportConfig
+from redis.himport import HImportRegistry
 from redis.maint_notifications import (
     MaintenanceState,
     MaintNotificationsConfig,
@@ -622,7 +622,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         oss_cluster_maint_notifications_handler: (
             AsyncOSSMaintNotificationsHandler | None
         ) = None,
-        himport_config: HImportConfig | None = None,
+        himport_registry: HImportRegistry | None = None,
     ):
         """
         Initialize a new async Connection.
@@ -712,9 +712,9 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                 parser_class = _AsyncRESP2Parser
         self.set_parser(parser_class)
 
-        # HIMPORT client-side state. `himport_config` is the shared client-level
+        # HIMPORT client-side state. `himport_registry` is the shared client-level
         # registry (empty if unconfigured) and persists across reconnects.
-        self.himport_config = himport_config
+        self.himport_registry = himport_registry
         self._reset_himport_state()
 
         AsyncMaintNotificationsAbstractConnection.__init__(
@@ -930,7 +930,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         # A fresh server session has no prepared HIMPORT fieldsets, so the next
         # himport_set must re-prepare on this connection. ``_himport_prepared`` maps
         # fieldset name -> the version prepared on the server; ``_himport_reconciled
-        # _revision`` is the config revision this connection last reconciled discards
+        # _revision`` is the registry revision this connection last reconciled discards
         # against. Both are reset on connect/disconnect since the session is gone.
         self._himport_prepared: dict[str, int] = {}
         self._himport_reconciled_revision: int = 0
@@ -2626,20 +2626,20 @@ class ConnectionPool(
         self._connection_kwargs = connection_kwargs
         self.max_connections = max_connections
 
-        # Resolve the HIMPORT config. A pre-built ``himport_config`` (shared, e.g.
+        # Resolve the HIMPORT config. A pre-built ``himport_registry`` (shared, e.g.
         # from the cluster client) takes precedence; otherwise build one from the
-        # ``himport_schemas`` dict (empty if none). A config always exists so runtime
+        # ``himport_schemas`` dict (empty if none). A registry always exists so runtime
         # ``himport_prepare`` mutates a single object every connection already shares.
         # The object stays in ``connection_kwargs`` so it reaches every connection,
         # while ``himport_schemas`` is consumed here. It is injected unconditionally
         # (like other auto-added pool kwargs), so a custom ``connection_class`` must
-        # accept ``**kwargs`` (or a ``himport_config`` parameter), as built-ins do.
-        himport_config = connection_kwargs.get("himport_config")
+        # accept ``**kwargs`` (or a ``himport_registry`` parameter), as built-ins do.
+        himport_registry = connection_kwargs.get("himport_registry")
         himport_schemas = connection_kwargs.pop("himport_schemas", None)
-        if himport_config is None:
-            himport_config = HImportConfig(himport_schemas)
-            connection_kwargs["himport_config"] = himport_config
-        self.himport_config = himport_config
+        if himport_registry is None:
+            himport_registry = HImportRegistry(himport_schemas)
+            connection_kwargs["himport_registry"] = himport_registry
+        self.himport_registry = himport_registry
 
         self._available_connections: List[AbstractConnection] = []
         self._in_use_connections: Set[AbstractConnection] = set()
@@ -2666,7 +2666,7 @@ class ConnectionPool(
     )
 
     # Internal plumbing kwargs omitted from __repr__ (not user-facing config).
-    OMIT_REPR_KEYS = frozenset({"himport_config"})
+    OMIT_REPR_KEYS = frozenset({"himport_registry"})
 
     def __repr__(self):
         conn_kwargs = ",".join(

@@ -118,7 +118,7 @@ from redis.himport import (
     HIMPORT_DISCARD,
     HIMPORT_PREPARE,
     HIMPORT_SET,
-    HImportConfig,
+    HImportRegistry,
     himport_discard_command,
     himport_prepare_command,
     himport_set_command,
@@ -376,7 +376,7 @@ class RedisCluster(
         "_lock",
         "maint_notifications_config",
         "_oss_cluster_maint_notifications_handler",
-        "_himport_config",
+        "_himport_registry",
         "retry",
         "command_flags",
         "commands_parser",
@@ -558,14 +558,14 @@ class RedisCluster(
         else:
             kwargs["response_callbacks"]["CLUSTER SHARDS"] = parse_cluster_shards
 
-        # Build the client-level HIMPORT config once (empty if no schemas) and share
+        # Build the client-level HIMPORT registry once (empty if no schemas) and share
         # the same object with every node connection. It rides in connection_kwargs ->
         # ClusterNode -> each node's Connection, so the registry is shared cluster-wide
         # and runtime himport_prepare mutates one object. (Async has no per-node Redis
         # client, so the object flows via connection_kwargs directly to the Connection,
         # which is internal plumbing, not a public param.)
-        self._himport_config = HImportConfig(himport_schemas)
-        kwargs["himport_config"] = self._himport_config
+        self._himport_registry = HImportRegistry(himport_schemas)
+        kwargs["himport_registry"] = self._himport_registry
 
         self.connection_kwargs = kwargs
 
@@ -908,35 +908,35 @@ class RedisCluster(
         return key_slot(self.encoder.encode(key))
 
     # HIMPORT orchestration (async mirror of redis.cluster.RedisCluster). The one
-    # shared HImportConfig is mutated once by PREPARE/DISCARD/DISCARDALL and applied
+    # shared HImportRegistry is mutated once by PREPARE/DISCARD/DISCARDALL and applied
     # lazily per node; SET routes by key slot to the owning primary's ClusterNode.
     # See ``.agents/himport_client_support_spec.md``.
 
     @property
-    def himport_config(self) -> HImportConfig:
+    def himport_registry(self) -> HImportRegistry:
         """The cluster-wide HIMPORT fieldset registry (empty if none was declared).
 
         Read-only: the registry is mutated only through the HIMPORT command methods.
         """
-        return self._himport_config
+        return self._himport_registry
 
     async def himport_prepare(
         self, fieldset_name: str, fields: Iterable[FieldT]
     ) -> bool:
         """Declare an HIMPORT fieldset cluster-wide (shared registry, applied lazily)."""
         await self.initialize()
-        self._himport_config.prepare(fieldset_name, fields)
+        self._himport_registry.prepare(fieldset_name, fields)
         return True
 
     async def himport_discard(self, fieldset_name: str) -> int:
         """Remove a runtime fieldset cluster-wide. Raises ``DataError`` for init ones."""
         await self.initialize()
-        return 1 if self._himport_config.discard(fieldset_name) else 0
+        return 1 if self._himport_registry.discard(fieldset_name) else 0
 
     async def himport_discard_all(self) -> int:
         """Remove all runtime fieldsets cluster-wide. Raises ``DataError`` on init ones."""
         await self.initialize()
-        return self._himport_config.discard_all()
+        return self._himport_registry.discard_all()
 
     def get_encoder(self) -> Encoder:
         """Get the encoder object of the client."""
@@ -1887,10 +1887,19 @@ class ClusterNode:
 
     async def _himport_reconcile_discards(self, conn: "Connection") -> None:
         """DISCARD, on ``conn``, any prepared fieldset removed from the registry."""
-        cfg = conn.himport_config
-        if cfg is None or conn._himport_reconciled_revision == cfg.revision:
+        registry = conn.himport_registry
+        if registry is None or conn._himport_reconciled_revision == registry.revision:
             return
-        stale = cfg.names_to_discard(list(conn._himport_prepared))
+        # Snapshot the revision *before* computing ``stale`` so the value stamped at
+        # the end is never newer than the registry state ``stale`` reflects. A
+        # concurrent ``himport_discard`` (thread-shared sync client, or another task
+        # while this awaits the DISCARD replies) that lands after this point only
+        # leaves the connection marked behind the live revision, so the next
+        # reconcile re-runs and catches it. Re-reading ``registry.revision`` at the
+        # end instead would stamp a discard this connection never sent, leaving the
+        # server session carrying a supposedly-discarded fieldset.
+        reconciled_to = registry.revision
+        stale = registry.names_to_discard(list(conn._himport_prepared))
         if stale:
             await conn.send_packed_command(
                 conn.pack_commands([himport_discard_command(n) for n in stale])
@@ -1908,7 +1917,7 @@ class ClusterNode:
                 conn._himport_prepared.pop(n, None)
             if first_error is not None:
                 raise first_error
-        conn._himport_reconciled_revision = cfg.revision
+        conn._himport_reconciled_revision = reconciled_to
 
     async def _himport_prepare_and_set(
         self,
@@ -1984,8 +1993,8 @@ class ClusterNode:
         """
         await self._himport_reconcile_discards(conn)
 
-        cfg = conn.himport_config
-        fieldset = cfg.get(fieldset_name) if cfg is not None else None
+        registry = conn.himport_registry
+        fieldset = registry.get(fieldset_name) if registry is not None else None
         # Lazy PREPARE bundled with SET on first use of this fieldset.
         if (
             fieldset is not None
@@ -2017,7 +2026,7 @@ class ClusterNode:
                 raise
             conn._himport_prepared.pop(fieldset_name, None)
             return await self._himport_prepare_and_set(
-                conn, key, fieldset_name, values, fieldset
+                conn, key, fieldset_name, values, fieldset, asking=asking
             )
 
     async def _himport_prepare_pipeline(
@@ -2031,8 +2040,8 @@ class ClusterNode:
         """
         # A pipeline may run on a connection type that never carries real HIMPORT
         # state (e.g. mocked test doubles); only proceed for a real config.
-        cfg = getattr(conn, "himport_config", None)
-        if not isinstance(cfg, HImportConfig):
+        registry = getattr(conn, "himport_registry", None)
+        if not isinstance(registry, HImportRegistry):
             return
         await self._himport_reconcile_discards(conn)
         to_prepare = []
@@ -2045,7 +2054,7 @@ class ClusterNode:
             if fieldset_name in seen:
                 continue
             seen.add(fieldset_name)
-            fieldset = cfg.get(fieldset_name)
+            fieldset = registry.get(fieldset_name)
             if (
                 fieldset is not None
                 and conn._himport_prepared.get(fieldset_name) != fieldset.version

@@ -1,4 +1,4 @@
-"""HIMPORT client-side configuration for redis-py.
+"""HIMPORT client-side fieldset registry for redis-py.
 
 `HIMPORT` lets a client register an ordered list of hash field names once per
 connection (a *fieldset*) and then create many hashes by sending only values.
@@ -13,11 +13,11 @@ clients.
 
 Example::
 
-    >>> from redis.himport import HImportConfig, FieldsetOrigin
-    >>> cfg = HImportConfig({"account_data": ["name", "email", "age"]})
-    >>> cfg.get("account_data").fields
+    >>> from redis.himport import HImportRegistry, FieldsetOrigin
+    >>> registry = HImportRegistry({"account_data": ["name", "email", "age"]})
+    >>> registry.get("account_data").fields
     ('name', 'email', 'age')
-    >>> cfg.get("account_data").origin is FieldsetOrigin.INIT
+    >>> registry.get("account_data").origin is FieldsetOrigin.INIT
     True
 """
 
@@ -70,7 +70,7 @@ def himport_discard_command(fieldset_name: str) -> tuple:
 
 
 class FieldsetOrigin(Enum):
-    """How a fieldset entered the HIMPORT config.
+    """How a fieldset entered the HIMPORT registry.
 
     ``INIT`` fieldsets are declared in the client constructor and are treated as
     permanent for the client's lifetime — they cannot be discarded. ``RUNTIME``
@@ -94,8 +94,8 @@ class HImportFieldset:
         origin: Whether the fieldset was declared at client init or at runtime.
         version: Monotonic stamp bumped each time the fieldset is (re)declared.
             Connections compare the version they last prepared against this value
-            to detect a stale prepared state; the stamp is drawn from the config's
-            mutation clock (:attr:`HImportConfig.revision`), which never repeats,
+            to detect a stale prepared state; the stamp is drawn from the registry's
+            mutation clock (:attr:`HImportRegistry.revision`), which never repeats,
             so discarding and re-declaring the same name yields a fresh version
             rather than a colliding one. This is the prepare-side signal; the
             discard-side counterpart is the clock advancing on removal, since a
@@ -108,15 +108,19 @@ class HImportFieldset:
     version: int
 
 
-class HImportConfig:
+class HImportRegistry:
     """Client-level registry of HIMPORT fieldsets.
 
     Pure in-memory state, shared by the sync and async clients. It is mutated only
     through the client's ``himport_prepare`` / ``himport_discard`` /
     ``himport_discard_all`` methods and exposed read-only through the client's
-    ``himport_config`` property. Mutations are serialized under a lock so the
+    ``himport_registry`` property. Mutations are serialized under a lock so the
     revision bump and dict change stay consistent when a sync ``Redis`` instance is
-    shared across threads; the async client runs single-threaded and never contends.
+    shared across threads. Reads that iterate or snapshot the registry take the same
+    lock, so a concurrent mutation cannot make them observe a torn view or raise
+    ``dictionary changed size during iteration``; single-key/scalar reads (``get``,
+    ``__contains__``, ``__len__``, :attr:`revision`) are atomic and stay lock-free.
+    The async client runs single-threaded and never contends.
 
     Args:
         schemas: Optional mapping of ``fieldset_name -> ordered field names`` to
@@ -128,8 +132,10 @@ class HImportConfig:
         self._fieldsets: dict[str, HImportFieldset] = {}
         # Serializes mutations (prepare/discard/discard_all) so the revision bump and
         # the dict change are applied atomically under concurrent access from a
-        # thread-shared sync client. Held only across the synchronous mutation body,
-        # never across I/O, so it is harmless for the single-threaded async client.
+        # thread-shared sync client, and guards the reads that iterate/snapshot the
+        # dict so they never see a torn view or a mid-iteration resize. Held only
+        # across synchronous, non-blocking bodies, never across I/O, so it is harmless
+        # for the single-threaded async client.
         self._lock = threading.Lock()
         # Monotonic mutation clock. It advances on every registry change (prepare
         # and discard). prepare stamps the new entry with the advanced value as its
@@ -155,12 +161,15 @@ class HImportConfig:
     def _set(
         self, name: str, fields: Iterable[FieldT], origin: FieldsetOrigin
     ) -> HImportFieldset:
-        # A bare str/bytes is iterable character-by-character; that is almost
-        # certainly a caller mistake and would silently register single-character
-        # "fields", so reject it as invalid local API usage.
-        if isinstance(fields, (str, bytes)):
+        # A bare single field name (str/bytes/bytearray/memoryview) is itself
+        # iterable element-by-element; that is almost certainly a caller mistake and
+        # would silently register single-character/single-byte "fields" (e.g.
+        # memoryview(b"id") -> field names 105, 100), so reject it as invalid local
+        # API usage. int/float are not iterable, so tuple() below rejects them.
+        if isinstance(fields, (str, bytes, bytearray, memoryview)):
             raise DataError(
-                "HIMPORT fields must be a collection of field names, not a string"
+                "HIMPORT fields must be a collection of field names, "
+                "not a single string or binary value"
             )
         field_tuple = tuple(fields)
         if not field_tuple:
@@ -236,6 +245,10 @@ class HImportConfig:
             return count
 
     # -- read-only access -------------------------------------------------
+    # Reads that iterate or build a snapshot of the dict take ``_lock`` so a
+    # concurrent mutation cannot resize it mid-iteration or expose a torn view;
+    # single-key/scalar reads below (get/__contains__/__len__/revision) are atomic
+    # and deliberately stay lock-free.
 
     @property
     def revision(self) -> int:
@@ -257,7 +270,11 @@ class HImportConfig:
         the set that must be sent ``HIMPORT DISCARD`` (typically when the
         connection is released), because they have been removed from the registry.
         """
-        return [name for name in prepared_names if name not in self._fieldsets]
+        # Hold the lock across the comprehension so every membership test sees one
+        # consistent snapshot; ``prepared_names`` is an external iterable of plain
+        # strings and never calls back into the registry.
+        with self._lock:
+            return [name for name in prepared_names if name not in self._fieldsets]
 
     def get(self, name: str) -> HImportFieldset | None:
         """Return the fieldset registered under ``name``, or ``None``."""
@@ -265,11 +282,13 @@ class HImportConfig:
 
     def names(self) -> list[str]:
         """Return the registered fieldset names."""
-        return list(self._fieldsets)
+        with self._lock:
+            return list(self._fieldsets)
 
     def items(self) -> list[tuple[str, HImportFieldset]]:
         """Return a snapshot of ``(name, fieldset)`` pairs."""
-        return list(self._fieldsets.items())
+        with self._lock:
+            return list(self._fieldsets.items())
 
     def __contains__(self, name: object) -> bool:
         return name in self._fieldsets
@@ -278,11 +297,17 @@ class HImportConfig:
         return len(self._fieldsets)
 
     def __iter__(self) -> Iterator[str]:
-        return iter(self._fieldsets)
+        # Snapshot under the lock and iterate the copy, so the lock is never held
+        # across caller consumption and a concurrent mutation cannot resize the
+        # underlying dict mid-iteration.
+        with self._lock:
+            return iter(list(self._fieldsets))
 
     def __repr__(self) -> str:
-        entries = ", ".join(
+        with self._lock:
+            entries = list(self._fieldsets.items())
+        body = ", ".join(
             f"{name}={fieldset.origin.value}:{list(fieldset.fields)}"
-            for name, fieldset in self._fieldsets.items()
+            for name, fieldset in entries
         )
-        return f"{self.__class__.__name__}({entries})"
+        return f"{self.__class__.__name__}({body})"
