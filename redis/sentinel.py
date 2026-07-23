@@ -22,6 +22,9 @@ class SlaveNotFoundError(ConnectionError):
     pass
 
 
+ReplicaNotFoundError = SlaveNotFoundError
+
+
 class SentinelManagedConnection(Connection):
     def __init__(self, **kwargs):
         self.connection_pool = kwargs.pop("connection_pool")
@@ -140,6 +143,14 @@ class SentinelConnectionPoolProxy:
             pass
         raise SlaveNotFoundError(f"No slave found for {self.service_name!r}")
 
+    def rotate_replicas(self):
+        """Round-robin replica balancer.
+
+        This is an alias for :py:meth:`rotate_slaves`,
+        using the preferred Redis 5.0+ terminology.
+        """
+        return self.rotate_slaves()
+
 
 class SentinelConnectionPool(ConnectionPool):
     """
@@ -200,6 +211,14 @@ class SentinelConnectionPool(ConnectionPool):
     def rotate_slaves(self):
         "Round-robin slave balancer"
         return self.proxy.rotate_slaves()
+
+    def rotate_replicas(self):
+        """Round-robin replica balancer.
+
+        This is an alias for :py:meth:`rotate_slaves`,
+        using the preferred Redis 5.0+ terminology.
+        """
+        return self.rotate_slaves()
 
 
 class Sentinel(SentinelCommands):
@@ -294,6 +313,33 @@ class Sentinel(SentinelCommands):
             f"(sentinels=[{','.join(sentinel_addresses)}])>"
         )
 
+    def close(self) -> None:
+        """
+        Close all sentinel clients created by this Sentinel and their
+        connection pools.
+
+        Each client is closed independently: if one raises, the remaining
+        clients are still closed and the first error is re-raised afterwards.
+
+        Clients returned by ``master_for``/``slave_for`` are owned by the
+        caller and are not closed here.
+        """
+        exc = None
+        for sentinel in self.sentinels:
+            try:
+                sentinel.close()
+            except Exception as e:
+                if exc is None:
+                    exc = e
+        if exc:
+            raise exc
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
     def check_master_state(self, state, service_name):
         if not state["is_master"] or state["is_sdown"] or state["is_odown"]:
             return False
@@ -346,6 +392,14 @@ class Sentinel(SentinelCommands):
             slaves_alive.append((slave["ip"], slave["port"]))
         return slaves_alive
 
+    def filter_replicas(self, replicas):
+        """Remove replicas that are in an ODOWN or SDOWN state.
+
+        This is an alias for :py:meth:`filter_slaves`,
+        using the preferred Redis 5.0+ terminology.
+        """
+        return self.filter_slaves(replicas)
+
     def discover_slaves(self, service_name):
         "Returns a list of alive slaves for service ``service_name``"
         for sentinel in self.sentinels:
@@ -357,6 +411,14 @@ class Sentinel(SentinelCommands):
             if slaves:
                 return slaves
         return []
+
+    def discover_replicas(self, service_name):
+        """Returns a list of alive replicas for service ``service_name``.
+
+        This is an alias for :py:meth:`discover_slaves`,
+        using the preferred Redis 5.0+ terminology.
+        """
+        return self.discover_slaves(service_name)
 
     def master_for(
         self,
@@ -425,4 +487,24 @@ class Sentinel(SentinelCommands):
         connection_kwargs.update(kwargs)
         return redis_class.from_pool(
             connection_pool_class(service_name, self, **connection_kwargs)
+        )
+
+    def replica_for(
+        self,
+        service_name,
+        redis_class=Redis,
+        connection_pool_class=SentinelConnectionPool,
+        **kwargs,
+    ):
+        """
+        Returns redis client instance for the ``service_name`` replica(s).
+
+        This is an alias for :py:meth:`slave_for`,
+        using the preferred Redis 5.0+ terminology.
+        """
+        return self.slave_for(
+            service_name,
+            redis_class=redis_class,
+            connection_pool_class=connection_pool_class,
+            **kwargs,
         )

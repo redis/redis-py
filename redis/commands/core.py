@@ -756,7 +756,7 @@ class ManagementCommands(CommandsProtocol):
         Disconnects client(s) using a variety of filter options
         :param _id: Kills a client by its unique ID field
         :param _type: Kills a client by type where type is one of 'normal',
-        'master', 'slave' or 'pubsub'
+        'master', 'slave', 'replica' or 'pubsub'
         :param addr: Kills a client by its 'address:port'
         :param skipme: If True, then the client calling the command
         will not get killed even if it is identified by one of the filter
@@ -767,7 +767,7 @@ class ManagementCommands(CommandsProtocol):
         """
         args = []
         if _type is not None:
-            client_types = ("normal", "master", "slave", "pubsub")
+            client_types = ("normal", "master", "slave", "replica", "pubsub")
             if str(_type).lower() not in client_types:
                 raise DataError(f"CLIENT KILL type must be one of {client_types!r}")
             args.extend((b"TYPE", _type))
@@ -3606,6 +3606,142 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("BLMOVE", *params)
 
     @overload
+    def lmovem(
+        self: SyncClientProtocol,
+        first_list: str,
+        second_list: str,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> list[bytes | str] | None: ...
+
+    @overload
+    def lmovem(
+        self: AsyncClientProtocol,
+        first_list: str,
+        second_list: str,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> Awaitable[list[bytes | str] | None]: ...
+
+    def lmovem(
+        self,
+        first_list: str,
+        second_list: str,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> (list[bytes | str] | None) | Awaitable[list[bytes | str] | None]:
+        """
+        Atomically moves multiple elements from one end of the ``first_list``
+        to one end of the ``second_list``, returning the moved elements in
+        destination order.
+
+        ``src`` and ``dest`` are the ends to pop from / push to, either
+        ``LEFT`` (head) or ``RIGHT`` (tail).
+
+        When ``count`` is given, ``mode`` selects how many elements to move:
+        ``COUNT`` (the default) moves up to ``count`` elements, while
+        ``EXACTLY`` moves exactly ``count`` elements or nothing at all. When
+        ``count`` is not given a single element is moved.
+
+        ``ordering`` controls the order at the destination: ``OBO`` pushes each
+        element as it is popped (reversing block order, stack semantics) while
+        ``BULK`` preserves the original relative order (queue semantics). It is
+        required whenever ``count`` is given.
+
+        Returns the array of moved elements, or ``None`` if nothing was moved.
+
+        For more information, see https://redis.io/commands/lmovem
+        """
+        if count is None:
+            if mode is not None or ordering is not None:
+                raise DataError(
+                    "``count`` is required when ``mode`` or ``ordering`` is set"
+                )
+        elif ordering is None:
+            raise DataError(
+                "``ordering`` (OBO or BULK) is required when ``count`` is set"
+            )
+        pieces: list[EncodableT] = [first_list, second_list, src, dest]
+        if count is not None:
+            pieces.extend([mode or "COUNT", count, ordering])
+        return self.execute_command("LMOVEM", *pieces)
+
+    @overload
+    def blmovem(
+        self: SyncClientProtocol,
+        first_list: str,
+        second_list: str,
+        timeout: float,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> list[bytes | str] | None: ...
+
+    @overload
+    def blmovem(
+        self: AsyncClientProtocol,
+        first_list: str,
+        second_list: str,
+        timeout: float,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> Awaitable[list[bytes | str] | None]: ...
+
+    def blmovem(
+        self,
+        first_list: str,
+        second_list: str,
+        timeout: float,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> (list[bytes | str] | None) | Awaitable[list[bytes | str] | None]:
+        """
+        Blocking version of lmovem.
+
+        Blocks until elements are available to move or ``timeout`` (in seconds)
+        is reached; a ``timeout`` of ``0`` blocks indefinitely. With ``COUNT``
+        the command unblocks once at least one element is available and moves
+        ``min(count, available)``; with ``EXACTLY`` it blocks until the source
+        holds at least ``count`` elements, then moves exactly ``count``
+        atomically. On timeout ``None`` is returned and nothing is moved.
+
+        As with ``lmovem``, ``ordering`` (OBO or BULK) is required whenever
+        ``count`` is given.
+
+        For more information, see https://redis.io/commands/blmovem
+        """
+        if count is None:
+            if mode is not None or ordering is not None:
+                raise DataError(
+                    "``count`` is required when ``mode`` or ``ordering`` is set"
+                )
+        elif ordering is None:
+            raise DataError(
+                "``ordering`` (OBO or BULK) is required when ``count`` is set"
+            )
+        pieces: list[EncodableT] = [first_list, second_list, src, dest, timeout]
+        if count is not None:
+            pieces.extend([mode or "COUNT", count, ordering])
+        return self.execute_command("BLMOVEM", *pieces)
+
+    @overload
     def mget(
         self: SyncClientProtocol, keys: KeysT, *args: EncodableT
     ) -> list[bytes | str | None]: ...
@@ -6379,6 +6515,33 @@ class SetCommands(CommandsProtocol):
         return self.execute_command("SDIFF", *args, keys=args)
 
     @overload
+    def sdiffcard(
+        self: SyncClientProtocol, numkeys: int, keys: List[KeyT], limit: int = 0
+    ) -> int: ...
+
+    @overload
+    def sdiffcard(
+        self: AsyncClientProtocol, numkeys: int, keys: List[KeyT], limit: int = 0
+    ) -> Awaitable[int]: ...
+
+    def sdiffcard(
+        self, numkeys: int, keys: List[KeyT], limit: int = 0
+    ) -> int | Awaitable[int]:
+        """
+        Return the cardinality of the difference between the first set and all
+        the successive sets specified by ``keys``, without returning the
+        difference itself.
+
+        When LIMIT is provided (defaults to 0 and means unlimited), the returned
+        cardinality is capped at ``limit`` and the server may stop the
+        computation once the capped result is known.
+
+        For more information, see https://redis.io/commands/sdiffcard
+        """
+        args = [numkeys, *keys, "LIMIT", limit]
+        return self.execute_command("SDIFFCARD", *args, keys=keys)
+
+    @overload
     def sdiffstore(
         self: SyncClientProtocol, dest: str, keys: List, *args: List
     ) -> int: ...
@@ -6624,6 +6787,52 @@ class SetCommands(CommandsProtocol):
         """
         args = list_or_args(keys, args)
         return self.execute_command("SUNION", *args, keys=args)
+
+    @overload
+    def sunioncard(
+        self: SyncClientProtocol,
+        numkeys: int,
+        keys: List[KeyT],
+        limit: int = 0,
+        approx: bool = False,
+    ) -> int: ...
+
+    @overload
+    def sunioncard(
+        self: AsyncClientProtocol,
+        numkeys: int,
+        keys: List[KeyT],
+        limit: int = 0,
+        approx: bool = False,
+    ) -> Awaitable[int]: ...
+
+    def sunioncard(
+        self,
+        numkeys: int,
+        keys: List[KeyT],
+        limit: int = 0,
+        approx: bool = False,
+    ) -> int | Awaitable[int]:
+        """
+        Return the cardinality of the union of multiple sets specified by
+        ``keys``, without returning the union itself.
+
+        When ``approx`` is True, the ``APPROX`` option is sent and the server
+        returns an approximate cardinality computed using HyperLogLog.
+
+        When LIMIT is provided (defaults to 0 and means unlimited), the returned
+        cardinality is capped at ``limit``. In exact mode the result equals
+        ``limit`` when the real cardinality exceeds ``limit``; in approximate
+        mode the result will not exceed ``limit``. Options are emitted in the
+        canonical order ``APPROX`` before ``LIMIT``.
+
+        For more information, see https://redis.io/commands/sunioncard
+        """
+        pieces: list = [numkeys, *keys]
+        if approx:
+            pieces.append("APPROX")
+        pieces.extend(["LIMIT", limit])
+        return self.execute_command("SUNIONCARD", *pieces, keys=keys)
 
     @overload
     def sunionstore(
@@ -7639,6 +7848,8 @@ class StreamCommands(CommandsProtocol):
         streams: Dict[KeyT, StreamIdT],
         count: int | None = None,
         block: int | None = None,
+        max_count: int | None = None,
+        max_size: int | None = None,
     ) -> XReadResponse: ...
 
     @overload
@@ -7647,6 +7858,8 @@ class StreamCommands(CommandsProtocol):
         streams: Dict[KeyT, StreamIdT],
         count: int | None = None,
         block: int | None = None,
+        max_count: int | None = None,
+        max_size: int | None = None,
     ) -> Awaitable[XReadResponse]: ...
 
     def xread(
@@ -7654,6 +7867,8 @@ class StreamCommands(CommandsProtocol):
         streams: Dict[KeyT, StreamIdT],
         count: int | None = None,
         block: int | None = None,
+        max_count: int | None = None,
+        max_size: int | None = None,
     ) -> XReadResponse | Awaitable[XReadResponse]:
         """
         Block and monitor multiple streams for new data.
@@ -7661,10 +7876,23 @@ class StreamCommands(CommandsProtocol):
         streams: a dict of stream names to stream IDs, where
                    IDs indicate the last ID already seen.
 
-        count: if set, only return this many items, beginning with the
-               earliest available.
+        count: if set, only return this many items per stream, beginning with
+               the earliest available.
 
         block: number of milliseconds to wait, if nothing already present.
+
+        max_count: if set, cap the total number of entries returned across all
+                   streams combined. Unlike ``count`` (a per-stream limit),
+                   this is a cumulative cap over the whole reply. Must be a
+                   positive integer and, when ``count`` is also set, must be
+                   greater than or equal to ``count``. Requires Redis >= 8.10.0.
+
+        max_size: if set, a soft cap on the total server reply size in bytes
+                  across all streams combined. Measured server-side including
+                  protocol overhead, so it is not an exact application-payload
+                  size guarantee; a single available entry larger than the cap
+                  may still be returned. Must be a positive integer. Requires
+                  Redis >= 8.10.0.
 
         For more information, see https://redis.io/commands/xread
         """
@@ -7679,6 +7907,20 @@ class StreamCommands(CommandsProtocol):
                 raise DataError("XREAD count must be a positive integer")
             pieces.append(b"COUNT")
             pieces.append(str(count))
+        if max_count is not None:
+            if not isinstance(max_count, int) or max_count < 1:
+                raise DataError("XREAD max_count must be a positive integer")
+            if count is not None and max_count < count:
+                raise DataError(
+                    "XREAD max_count must be greater than or equal to count"
+                )
+            pieces.append(b"MAXCOUNT")
+            pieces.append(str(max_count))
+        if max_size is not None:
+            if not isinstance(max_size, int) or max_size < 1:
+                raise DataError("XREAD max_size must be a positive integer")
+            pieces.append(b"MAXSIZE")
+            pieces.append(str(max_size))
         if not isinstance(streams, dict) or len(streams) == 0:
             raise DataError("XREAD streams must be a non empty dict")
         pieces.append(b"STREAMS")
@@ -7711,6 +7953,8 @@ class StreamCommands(CommandsProtocol):
         block: int | None = None,
         noack: bool = False,
         claim_min_idle_time: int | None = None,
+        max_count: int | None = None,
+        max_size: int | None = None,
     ) -> XReadGroupResponse: ...
 
     @overload
@@ -7723,6 +7967,8 @@ class StreamCommands(CommandsProtocol):
         block: int | None = None,
         noack: bool = False,
         claim_min_idle_time: int | None = None,
+        max_count: int | None = None,
+        max_size: int | None = None,
     ) -> Awaitable[XReadGroupResponse]: ...
 
     def xreadgroup(
@@ -7734,6 +7980,8 @@ class StreamCommands(CommandsProtocol):
         block: int | None = None,
         noack: bool = False,
         claim_min_idle_time: int | None = None,
+        max_count: int | None = None,
+        max_size: int | None = None,
     ) -> XReadGroupResponse | Awaitable[XReadGroupResponse]:
         """
         Read from a stream via a consumer group.
@@ -7745,14 +7993,27 @@ class StreamCommands(CommandsProtocol):
         streams: a dict of stream names to stream IDs, where
                IDs indicate the last ID already seen.
 
-        count: if set, only return this many items, beginning with the
-               earliest available.
+        count: if set, only return this many items per stream, beginning with
+               the earliest available.
 
         block: number of milliseconds to wait, if nothing already present.
         noack: do not add messages to the PEL
 
         claim_min_idle_time: accepts an integer type and represents a
                              time interval in milliseconds
+
+        max_count: if set, cap the total number of entries returned across all
+                   streams combined. Unlike ``count`` (a per-stream limit),
+                   this is a cumulative cap over the whole reply. Must be a
+                   positive integer and, when ``count`` is also set, must be
+                   greater than or equal to ``count``. Requires Redis 8.10.0.
+
+        max_size: if set, a soft cap on the total server reply size in bytes
+                  across all streams combined. Measured server-side including
+                  protocol overhead, so it is not an exact application-payload
+                  size guarantee; a single available entry larger than the cap
+                  may still be returned. Must be a positive integer. Requires
+                  Redis 8.10.0.
 
         For more information, see https://redis.io/commands/xreadgroup
         """
@@ -7763,6 +8024,20 @@ class StreamCommands(CommandsProtocol):
                 raise DataError("XREADGROUP count must be a positive integer")
             pieces.append(b"COUNT")
             pieces.append(str(count))
+        if max_count is not None:
+            if not isinstance(max_count, int) or max_count < 1:
+                raise DataError("XREADGROUP max_count must be a positive integer")
+            if count is not None and max_count < count:
+                raise DataError(
+                    "XREADGROUP max_count must be greater than or equal to count"
+                )
+            pieces.append(b"MAXCOUNT")
+            pieces.append(str(max_count))
+        if max_size is not None:
+            if not isinstance(max_size, int) or max_size < 1:
+                raise DataError("XREADGROUP max_size must be a positive integer")
+            pieces.append(b"MAXSIZE")
+            pieces.append(str(max_size))
         if block is not None:
             if not isinstance(block, int) or block < 0:
                 raise DataError("XREADGROUP block must be a non-negative integer")

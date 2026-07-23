@@ -20,8 +20,12 @@ from .commands import (
     MGET_CMD,
     MRANGE_CMD,
     MREVRANGE_CMD,
+    NRANGE_CMD,
+    NREVRANGE_CMD,
     QUERYINDEX_CMD,
+    QUERYLABELS_CMD,
     RANGE_CMD,
+    READ_CMD,
     REVRANGE_CMD,
     TimeSeriesCommands,
 )
@@ -35,6 +39,8 @@ from .utils import (
     parse_m_range,
     parse_m_range_resp3_to_resp2_legacy,
     parse_m_range_unified,
+    parse_n_range,
+    parse_query_labels,
     parse_range,
     parse_range_unified,
 )
@@ -56,6 +62,10 @@ class _TimeSeriesBase(TimeSeriesCommands):
             CREATE_CMD: bool_ok,
             CREATERULE_CMD: bool_ok,
             DELETERULE_CMD: bool_ok,
+            READ_CMD: parse_range_unified,
+            NRANGE_CMD: parse_n_range,
+            NREVRANGE_CMD: parse_n_range,
+            QUERYLABELS_CMD: parse_query_labels,
         }
 
         _RESP2_MODULE_CALLBACKS = {
@@ -78,6 +88,7 @@ class _TimeSeriesBase(TimeSeriesCommands):
             MRANGE_CMD: parse_m_range_unified,
             MREVRANGE_CMD: parse_m_range_unified,
             RANGE_CMD: parse_range_unified,
+            READ_CMD: parse_range_unified,
             REVRANGE_CMD: parse_range_unified,
         }
         _RESP3_UNIFIED_MODULE_CALLBACKS = {

@@ -13,6 +13,7 @@ from tests.conftest import (
     skip_if_server_version_lt,
     skip_ifmodversion_lt,
 )
+from tests.test_timeseries import _assert_nrange_rows
 
 KEY1 = "key1"
 KEY2 = "key2"
@@ -364,6 +365,94 @@ async def test_rev_range(decoded_r: redis.Redis):
     )
 
 
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_read(decoded_r: redis.Redis):
+    await decoded_r.ts().create(1)
+    await decoded_r.ts().add(1, 100, 1.0)
+    await decoded_r.ts().add(1, 200, 2.0)
+    await decoded_r.ts().add(1, 300, 3.0)
+
+    # Read everything at or after the cursor. TS.READ always returns the same
+    # unified sample shape (list of [timestamp, value]) regardless of protocol.
+    assert await decoded_r.ts().read(1, 0) == [[100, 1.0], [200, 2.0], [300, 3.0]]
+
+    # The cursor is inclusive.
+    assert await decoded_r.ts().read(1, 200) == [[200, 2.0], [300, 3.0]]
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_read_max_count(decoded_r: redis.Redis):
+    await decoded_r.ts().create(1)
+    await decoded_r.ts().add(1, 100, 1.0)
+    await decoded_r.ts().add(1, 200, 2.0)
+    await decoded_r.ts().add(1, 300, 3.0)
+
+    # Bounded paging: read the oldest max_count, then page from last_ts + 1.
+    assert await decoded_r.ts().read(1, "-", max_count=2) == [[100, 1.0], [200, 2.0]]
+    assert await decoded_r.ts().read(1, 201, max_count=2) == [[300, 3.0]]
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_read_sentinels(decoded_r: redis.Redis):
+    await decoded_r.ts().create(1)
+    await decoded_r.ts().add(1, 100, 1.0)
+    await decoded_r.ts().add(1, 200, 2.0)
+    await decoded_r.ts().add(1, 300, 3.0)
+
+    # `+` resolves to the latest sample, inclusive; returned even without BLOCK.
+    assert await decoded_r.ts().read(1, "+") == [[300, 3.0]]
+
+    # `-` reads from the earliest sample.
+    assert len(await decoded_r.ts().read(1, "-")) == 3
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_read_empty(decoded_r: redis.Redis):
+    await decoded_r.ts().create(1)
+    await decoded_r.ts().add(1, 100, 1.0)
+
+    # A cursor past the newest sample yields an empty (successful) reply.
+    assert [] == await decoded_r.ts().read(1, 301)
+    # A missing key is also an empty reply, not an error.
+    assert [] == await decoded_r.ts().read("missing", 0)
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_read_block(decoded_r: redis.Redis):
+    await decoded_r.ts().create(1)
+    await decoded_r.ts().add(1, 100, 1.0)
+    await decoded_r.ts().add(1, 200, 2.0)
+    await decoded_r.ts().add(1, 300, 3.0)
+
+    # min_count is already met, so the blocking call returns immediately.
+    res = await decoded_r.ts().read(1, 0, block_milliseconds=1000, block_min_count=1)
+    assert len(res) == 3
+
+    # min_count cannot be reached; after the timeout the available samples flush.
+    res = await decoded_r.ts().read(1, 101, block_milliseconds=100, block_min_count=10)
+    assert res == [[200, 2.0], [300, 3.0]]
+
+    # A blocking timeout with nothing available is a successful empty reply.
+    assert [] == await decoded_r.ts().read(
+        1, 301, block_milliseconds=100, block_min_count=1
+    )
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_read_block_min_count_requires_milliseconds(decoded_r: redis.Redis):
+    # BLOCK is all-or-nothing: min_count without milliseconds is invalid usage.
+    with pytest.raises(
+        redis.DataError, match="block_min_count requires block_milliseconds"
+    ):
+        await decoded_r.ts().read(1, 0, block_min_count=5)
+
+
 @pytest.mark.onlynoncluster
 @pytest.mark.redismod
 async def test_multi_range(decoded_r: redis.Redis):
@@ -424,6 +513,130 @@ async def test_multi_range(decoded_r: redis.Redis):
         )
         assert res is not None
         assert {"Test": "This", "team": "ny"} == res[KEY1][0]
+
+
+def _mrange_returned_keys(decoded_r, res):
+    """Return the set of series key names in a TS.MRANGE/MREVRANGE reply,
+    normalizing the RESP2 (list of single-key dicts) and RESP3/unified
+    (dict keyed by name) shapes."""
+    if expects_resp2_shape(decoded_r):
+        return {next(iter(entry)) for entry in res}
+    return set(res.keys())
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_mrange_exclude_empty(decoded_r: redis.Redis):
+    await decoded_r.ts().create("s", labels={"sensor": "1", "type": "demo"})
+    await decoded_r.ts().create("t", labels={"sensor": "1", "type": "demo"})
+    await decoded_r.ts().create("u", labels={"sensor": "1", "type": "demo"})
+    await decoded_r.ts().madd(
+        [
+            ("s", 100, 100),
+            ("t", 100, 100),
+            ("s", 200, 200),
+            ("t", 300, 300),
+            ("s", 400, 400),
+            ("t", 400, 400),
+            ("u", 2000, 2000),
+        ]
+    )
+
+    # Without EXCLUDEEMPTY, "u" matches the filter but has no samples in range.
+    res = await decoded_r.ts().mrange("-", 500, filters=["sensor=1"])
+    assert {"s", "t", "u"} == _mrange_returned_keys(decoded_r, res)
+
+    # With EXCLUDEEMPTY, "u" is omitted from the top-level reply.
+    res = await decoded_r.ts().mrange(
+        "-", 500, filters=["sensor=1"], exclude_empty=True
+    )
+    assert {"s", "t"} == _mrange_returned_keys(decoded_r, res)
+
+    # Composing with WITHLABELS should not change the exclusion behavior.
+    res = await decoded_r.ts().mrange(
+        "-", 500, filters=["sensor=1"], with_labels=True, exclude_empty=True
+    )
+    assert {"s", "t"} == _mrange_returned_keys(decoded_r, res)
+
+    # Composing with AGGREGATION should still omit the empty series.
+    res = await decoded_r.ts().mrange(
+        "-",
+        500,
+        filters=["sensor=1"],
+        aggregation_type="min",
+        bucket_size_msec=100,
+        exclude_empty=True,
+    )
+    assert {"s", "t"} == _mrange_returned_keys(decoded_r, res)
+
+    # When every matching series is empty, no series is reported (an empty
+    # top-level reply; shape is [] in RESP2 and {} in RESP3).
+    res = await decoded_r.ts().mrange(1, 50, filters=["sensor=1"], exclude_empty=True)
+    assert 0 == len(res)
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_mrevrange_exclude_empty(decoded_r: redis.Redis):
+    await decoded_r.ts().create("s", labels={"sensor": "1", "type": "demo"})
+    await decoded_r.ts().create("t", labels={"sensor": "1", "type": "demo"})
+    await decoded_r.ts().create("u", labels={"sensor": "1", "type": "demo"})
+    await decoded_r.ts().madd(
+        [
+            ("s", 100, 100),
+            ("t", 100, 100),
+            ("s", 200, 200),
+            ("t", 300, 300),
+            ("s", 400, 400),
+            ("t", 400, 400),
+            ("u", 2000, 2000),
+        ]
+    )
+
+    res = await decoded_r.ts().mrevrange("-", 500, filters=["sensor=1"])
+    assert {"s", "t", "u"} == _mrange_returned_keys(decoded_r, res)
+
+    res = await decoded_r.ts().mrevrange(
+        "-", 500, filters=["sensor=1"], exclude_empty=True
+    )
+    assert {"s", "t"} == _mrange_returned_keys(decoded_r, res)
+
+    # All matching series empty -> empty top-level reply ([] in RESP2, {} in RESP3).
+    res = await decoded_r.ts().mrevrange(
+        1, 50, filters=["sensor=1"], exclude_empty=True
+    )
+    assert 0 == len(res)
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+async def test_mrange_exclude_empty_with_groupby_raises(decoded_r: redis.Redis):
+    # EXCLUDEEMPTY is mutually exclusive with GROUPBY. This is validated
+    # client-side, so it does not require server support.
+    with pytest.raises(
+        redis.DataError, match="EXCLUDEEMPTY is not allowed with GROUPBY"
+    ):
+        await decoded_r.ts().mrange(
+            "-",
+            500,
+            filters=["sensor=1"],
+            groupby="type",
+            reduce="max",
+            exclude_empty=True,
+        )
+    with pytest.raises(
+        redis.DataError, match="EXCLUDEEMPTY is not allowed with GROUPBY"
+    ):
+        await decoded_r.ts().mrevrange(
+            "-",
+            500,
+            filters=["sensor=1"],
+            groupby="type",
+            reduce="max",
+            exclude_empty=True,
+        )
 
 
 @pytest.mark.onlynoncluster
@@ -889,6 +1102,98 @@ async def test_query_index(decoded_r: redis.Redis):
         [KEY2],
         [KEY2],
     )
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_query_labels(decoded_r: redis.Redis):
+    await decoded_r.ts().create(
+        1, labels={"type": "sensor", "location": "LivingRoom", "sensortype": "temp"}
+    )
+    await decoded_r.ts().create(
+        2, labels={"type": "sensor", "location": "Kitchen", "sensortype": "temp"}
+    )
+    await decoded_r.ts().create(3, labels={"type": "gauge", "location": "BedRoom"})
+
+    # LABELS mode with a filter returns the union of label names across the
+    # matching series, including the label used in the filter itself.
+    labels = await decoded_r.ts().querylabels(filters=["type=sensor"])
+    assert isinstance(labels, set)
+    assert sorted(labels) == ["location", "sensortype", "type"]
+
+    # Omitting the filter queries all indexed series.
+    assert sorted(await decoded_r.ts().querylabels()) == [
+        "location",
+        "sensortype",
+        "type",
+    ]
+
+    # A filter that matches nothing is a normal empty reply, not an error.
+    assert await decoded_r.ts().querylabels(filters=["type=missing"]) == set()
+
+    # `filters` accepts any iterable, not just a list (a tuple and a single-pass
+    # generator both work).
+    assert sorted(await decoded_r.ts().querylabels(filters=("type=sensor",))) == [
+        "location",
+        "sensortype",
+        "type",
+    ]
+    assert sorted(
+        await decoded_r.ts().querylabels(filters=(f for f in ["type=sensor"]))
+    ) == ["location", "sensortype", "type"]
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_query_label_values(decoded_r: redis.Redis):
+    await decoded_r.ts().create(1, labels={"type": "sensor", "location": "LivingRoom"})
+    await decoded_r.ts().create(2, labels={"type": "sensor", "location": "Kitchen"})
+    await decoded_r.ts().create(3, labels={"type": "gauge", "location": "BedRoom"})
+
+    # VALUES mode returns the deduplicated union of a label's values.
+    values = await decoded_r.ts().querylabels("location", filters=["type=sensor"])
+    assert isinstance(values, set)
+    assert sorted(values) == ["Kitchen", "LivingRoom"]
+
+    # Omitting the filter collects values across all indexed series.
+    assert sorted(await decoded_r.ts().querylabels("location")) == [
+        "BedRoom",
+        "Kitchen",
+        "LivingRoom",
+    ]
+
+    # A label carried by no matching series yields an empty reply.
+    assert (
+        await decoded_r.ts().querylabels("nonexistent", filters=["type=sensor"])
+        == set()
+    )
+
+    # Values are byte-exact strings and are never coerced to numbers.
+    await decoded_r.ts().create(4, labels={"type": "sensor", "code": "123"})
+    assert await decoded_r.ts().querylabels("code", filters=["type=sensor"]) == {"123"}
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_query_labels_empty_filters_raises(decoded_r: redis.Redis):
+    # An explicitly empty filter collection is a local usage error; pass None
+    # (omit the argument) to query all indexed series instead.
+    with pytest.raises(redis.DataError):
+        await decoded_r.ts().querylabels(filters=[])
+    with pytest.raises(redis.DataError):
+        await decoded_r.ts().querylabels("location", filters=[])
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_query_labels_server_errors(decoded_r: redis.Redis):
+    # Server-side filter parsing errors surface unchanged as ResponseError.
+    with pytest.raises(redis.ResponseError):
+        await decoded_r.ts().querylabels("location", filters=["badexpr"])
 
 
 @pytest.mark.redismod
@@ -1415,3 +1720,152 @@ async def test_mrevrange_groupby_multiple_aggregators_raises(decoded_r: redis.Re
             groupby="type",
             reduce="max",
         )
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrange_raw_rows_and_missing_cells(decoded_r: redis.Redis):
+    nan = float("nan")
+    await decoded_r.ts().add("{s}:a", 10, 1.0)
+    await decoded_r.ts().add("{s}:a", 20, 2.0)
+    await decoded_r.ts().add("{s}:b", 20, 3.0)
+    await decoded_r.ts().add("{s}:b", 30, 4.0)
+
+    # Forward: one row per distinct timestamp, values follow key order,
+    # missing cells are NaN.
+    res = await decoded_r.ts().nrange(["{s}:a", "{s}:b"], from_time="-", to_time="+")
+    _assert_nrange_rows(res, [[10, [1.0, nan]], [20, [2.0, 3.0]], [30, [nan, 4.0]]])
+    assert all(len(row[1]) == 2 for row in res)
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrange_preserves_duplicate_keys(decoded_r: redis.Redis):
+    await decoded_r.ts().add("{s}:a", 10, 1.0)
+    await decoded_r.ts().add("{s}:a", 20, 2.0)
+
+    # Duplicate keys produce repeated value columns and are not deduplicated.
+    res = await decoded_r.ts().nrange(["{s}:a", "{s}:a"], from_time="-", to_time="+")
+    _assert_nrange_rows(res, [[10, [1.0, 1.0]], [20, [2.0, 2.0]]])
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrange_aggregation_one_per_key(decoded_r: redis.Redis):
+    for ts, val in [(0, 1.0), (1, 2.0), (10, 3.0), (11, 4.0)]:
+        await decoded_r.ts().add("{s}:a", ts, val)
+    for ts, val in [(0, 5.0), (1, 6.0), (10, 7.0), (11, 8.0)]:
+        await decoded_r.ts().add("{s}:b", ts, val)
+
+    # One aggregator per key: max for {s}:a, min for {s}:b.
+    res = await decoded_r.ts().nrange(
+        ["{s}:a", "{s}:b"],
+        from_time=0,
+        to_time=20,
+        aggregators=["max", "min"],
+        bucket_size_msec=10,
+    )
+    _assert_nrange_rows(res, [[0, [2.0, 5.0]], [10, [4.0, 7.0]]])
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrange_count_limits_rows(decoded_r: redis.Redis):
+    for ts in range(5):
+        await decoded_r.ts().add("{s}:a", ts, ts)
+    res = await decoded_r.ts().nrange(["{s}:a"], from_time="-", to_time="+", count=2)
+    assert len(res) == 2
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrange_empty_result(decoded_r: redis.Redis):
+    await decoded_r.ts().create("{s}:a")
+    assert await decoded_r.ts().nrange(["{s}:a"], from_time="-", to_time="+") == []
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrange_single_aggregator_applies_to_all_keys(decoded_r: redis.Redis):
+    for ts, val in [(0, 1.0), (1, 2.0), (10, 3.0), (11, 4.0)]:
+        await decoded_r.ts().add("{s}:a", ts, val)
+    for ts, val in [(0, 5.0), (1, 6.0), (10, 7.0), (11, 8.0)]:
+        await decoded_r.ts().add("{s}:b", ts, val)
+
+    # A single aggregator string is expanded to one token per key; here
+    # "max" is applied to both series.
+    res = await decoded_r.ts().nrange(
+        ["{s}:a", "{s}:b"],
+        from_time=0,
+        to_time=20,
+        aggregators="max",
+        bucket_size_msec=10,
+    )
+    _assert_nrange_rows(res, [[0, [2.0, 6.0]], [10, [4.0, 8.0]]])
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrange_aggregator_count_mismatch_raises(decoded_r: redis.Redis):
+    # An aggregator list whose length differs from the key count is invalid.
+    with pytest.raises(redis.DataError, match="one aggregator per key"):
+        await decoded_r.ts().nrange(
+            ["{s}:a", "{s}:b"],
+            from_time=0,
+            to_time=1,
+            aggregators=["min"],
+            bucket_size_msec=10,
+        )
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrange_empty_keys_raises(decoded_r: redis.Redis):
+    with pytest.raises(redis.DataError, match="At least one key"):
+        await decoded_r.ts().nrange([], from_time=0, to_time=1)
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrevrange_reverse_order(decoded_r: redis.Redis):
+    nan = float("nan")
+    await decoded_r.ts().add("{s}:a", 10, 1.0)
+    await decoded_r.ts().add("{s}:a", 20, 2.0)
+    await decoded_r.ts().add("{s}:b", 20, 3.0)
+    await decoded_r.ts().add("{s}:b", 30, 4.0)
+
+    # Reverse: rows in decreasing-timestamp order, same NaN cells.
+    res = await decoded_r.ts().nrevrange(["{s}:a", "{s}:b"], from_time="-", to_time="+")
+    _assert_nrange_rows(res, [[30, [nan, 4.0]], [20, [2.0, 3.0]], [10, [1.0, nan]]])
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrevrange_aggregation_one_per_key(decoded_r: redis.Redis):
+    for ts, val in [(0, 1.0), (1, 2.0), (10, 3.0), (11, 4.0)]:
+        await decoded_r.ts().add("{s}:a", ts, val)
+    for ts, val in [(0, 5.0), (1, 6.0), (10, 7.0), (11, 8.0)]:
+        await decoded_r.ts().add("{s}:b", ts, val)
+
+    # One aggregator per key, rows in decreasing-timestamp order.
+    res = await decoded_r.ts().nrevrange(
+        ["{s}:a", "{s}:b"],
+        from_time=0,
+        to_time=20,
+        aggregators=["max", "min"],
+        bucket_size_msec=10,
+    )
+    _assert_nrange_rows(res, [[10, [4.0, 7.0]], [0, [2.0, 5.0]]])
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+async def test_nrevrange_count_keeps_highest_timestamps(decoded_r: redis.Redis):
+    for ts in range(5):
+        await decoded_r.ts().add("{s}:a", ts, ts)
+    # COUNT is applied after the merge in decreasing-timestamp order, so the
+    # highest timestamps are kept (the opposite end from nrange).
+    res = await decoded_r.ts().nrange(["{s}:a"], from_time="-", to_time="+", count=2)
+    _assert_nrange_rows(res, [[0, [0.0]], [1, [1.0]]])
+    res = await decoded_r.ts().nrevrange(["{s}:a"], from_time="-", to_time="+", count=2)
+    _assert_nrange_rows(res, [[4, [4.0]], [3, [3.0]]])

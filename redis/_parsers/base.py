@@ -253,7 +253,7 @@ class MaintenanceNotificationsParser:
             host, port = None, None
         else:
             value = safe_str(response[3])
-            host, port = value.split(":")
+            host, port = value.rsplit(":", 1)
             port = int(port) if port is not None else None
 
         return NodeMovingNotification(id, host, port, ttl)

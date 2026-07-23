@@ -1,4 +1,4 @@
-from typing import Any, Awaitable, Dict, List, Tuple, overload
+from typing import Any, Awaitable, Dict, Iterable, List, Tuple, overload
 
 from redis.exceptions import DataError
 from redis.typing import (
@@ -8,6 +8,7 @@ from redis.typing import (
     Number,
     SyncClientProtocol,
     TimeSeriesMRangeResponse,
+    TimeSeriesNRangeResponse,
     TimeSeriesRangeResponse,
     TimeSeriesSample,
 )
@@ -28,8 +29,12 @@ MADD_CMD = "TS.MADD"
 MGET_CMD = "TS.MGET"
 MRANGE_CMD = "TS.MRANGE"
 MREVRANGE_CMD = "TS.MREVRANGE"
+NRANGE_CMD = "TS.NRANGE"
+NREVRANGE_CMD = "TS.NREVRANGE"
 QUERYINDEX_CMD = "TS.QUERYINDEX"
+QUERYLABELS_CMD = "TS.QUERYLABELS"
 RANGE_CMD = "TS.RANGE"
+READ_CMD = "TS.READ"
 REVRANGE_CMD = "TS.REVRANGE"
 
 
@@ -993,6 +998,382 @@ class TimeSeriesCommands:
         )
         return self.execute_command(REVRANGE_CMD, *params, keys=[key])
 
+    @overload
+    def read(
+        self: SyncClientProtocol,
+        key: KeyT,
+        timestamp: int | str,
+        block_milliseconds: int | None = None,
+        block_min_count: int | None = None,
+        max_count: int | None = None,
+    ) -> TimeSeriesRangeResponse: ...
+
+    @overload
+    def read(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        timestamp: int | str,
+        block_milliseconds: int | None = None,
+        block_min_count: int | None = None,
+        max_count: int | None = None,
+    ) -> Awaitable[TimeSeriesRangeResponse]: ...
+
+    def read(
+        self,
+        key: KeyT,
+        timestamp: int | str,
+        block_milliseconds: int | None = None,
+        block_min_count: int | None = None,
+        max_count: int | None = None,
+    ) -> TimeSeriesRangeResponse | Awaitable[TimeSeriesRangeResponse]:
+        """
+        Read a batch of samples with timestamps at or after `timestamp`, in
+        ascending timestamp order.
+
+        Without blocking, returns immediately with whatever qualifies (possibly an
+        empty list). With the `block_milliseconds` group, waits until at least
+        `block_min_count` qualifying samples exist or until the timeout elapses.
+        This allows consuming historical and newly-appended samples continuously,
+        in batches, without polling `TS.RANGE`.
+
+        For more information see https://redis.io/commands/ts.read/
+
+        Args:
+            key:
+                Key name for the time series (a regular series or a compaction
+                destination).
+            timestamp:
+                Inclusive cursor. Samples with `timestamp >= timestamp` qualify.
+                A non-negative integer (Unix milliseconds, `0` reads from the
+                beginning) or one of the sentinels `-` (earliest), `+` (latest
+                existing sample, inclusive) or `$` (only samples added after the
+                command is received). Sentinels are sent to the server as-is and
+                resolved server-side; `$` is only meaningful together with
+                `block_milliseconds`, since nothing can qualify at execution time
+                without blocking.
+            block_milliseconds:
+                Opt into blocking. Maximum time to wait, in whole milliseconds;
+                a non-negative integer where `0` means wait indefinitely. When
+                `None` (default) the command does not block.
+            block_min_count:
+                The unblock threshold: the call returns once this many samples
+                qualify. A positive integer, defaulting to `1` when blocking is
+                requested. Only used when `block_milliseconds` is set; the value is
+                always emitted on the wire inside the BLOCK group.
+            max_count:
+                Reply cap, a positive integer. When more samples qualify than
+                `max_count`, the oldest `max_count` are returned so callers can page
+                forward. `None` (default) means unlimited.
+
+        Returns:
+            A list of `[timestamp, value]` samples in ascending timestamp order.
+            An empty list is a successful reply (returned when nothing qualifies,
+            or when a blocking call times out with nothing available).
+
+        .. warning::
+            A blocking call keeps the connection parked for up to
+            `block_milliseconds`. The client's `socket_timeout` still applies: with
+            the default (5 seconds) a longer block raises `TimeoutError` before the
+            server replies. When using `block_milliseconds`, configure the client
+            with a `socket_timeout` larger than the block window (or `None`), as with
+            other blocking commands. This command must not be retried automatically
+            after an empty or partial reply.
+        """
+        params: list[EncodableT] = [key, timestamp]
+        self._append_block(params, block_milliseconds, block_min_count)
+        self._append_max_count(params, max_count)
+
+        return self.execute_command(READ_CMD, *params, keys=[key])
+
+    def __n_range_params(
+        self,
+        keys: List[KeyT],
+        from_time: int | str,
+        to_time: int | str,
+        count: int | None,
+        aggregators: str | list[str] | None,
+        bucket_size_msec: int | None,
+        filter_by_ts: List[int] | None,
+        filter_by_min_value: int | None,
+        filter_by_max_value: int | None,
+        align: int | str | None,
+        latest: bool | None,
+        bucket_timestamp: str | None,
+        empty: bool | None,
+    ):
+        """Create TS.NRANGE and TS.NREVRANGE arguments."""
+        if not keys:
+            raise DataError("At least one key must be provided.")
+        # numkeys is always derived from the key list and precedes the keys;
+        # key order and duplicates are preserved and map to output columns.
+        params: list[EncodableT] = [len(keys), *keys, from_time, to_time]
+        self._append_latest(params, latest)
+        self._append_filer_by_ts(params, filter_by_ts)
+        self._append_filer_by_value(params, filter_by_min_value, filter_by_max_value)
+        self._append_count(params, count)
+        self._append_align(params, align)
+        self._append_n_aggregation(params, aggregators, bucket_size_msec, len(keys))
+        self._append_bucket_timestamp(params, bucket_timestamp)
+        self._append_empty(params, empty)
+
+        return params
+
+    @overload
+    def nrange(
+        self: SyncClientProtocol,
+        keys: List[KeyT],
+        from_time: int | str,
+        to_time: int | str,
+        count: int | None = None,
+        aggregators: str | list[str] | None = None,
+        bucket_size_msec: int | None = 0,
+        filter_by_ts: List[int] | None = None,
+        filter_by_min_value: int | None = None,
+        filter_by_max_value: int | None = None,
+        align: int | str | None = None,
+        latest: bool | None = False,
+        bucket_timestamp: str | None = None,
+        empty: bool | None = False,
+    ) -> TimeSeriesNRangeResponse: ...
+
+    @overload
+    def nrange(
+        self: AsyncClientProtocol,
+        keys: List[KeyT],
+        from_time: int | str,
+        to_time: int | str,
+        count: int | None = None,
+        aggregators: str | list[str] | None = None,
+        bucket_size_msec: int | None = 0,
+        filter_by_ts: List[int] | None = None,
+        filter_by_min_value: int | None = None,
+        filter_by_max_value: int | None = None,
+        align: int | str | None = None,
+        latest: bool | None = False,
+        bucket_timestamp: str | None = None,
+        empty: bool | None = False,
+    ) -> Awaitable[TimeSeriesNRangeResponse]: ...
+
+    def nrange(
+        self,
+        keys: List[KeyT],
+        from_time: int | str,
+        to_time: int | str,
+        count: int | None = None,
+        aggregators: str | list[str] | None = None,
+        bucket_size_msec: int | None = 0,
+        filter_by_ts: List[int] | None = None,
+        filter_by_min_value: int | None = None,
+        filter_by_max_value: int | None = None,
+        align: int | str | None = None,
+        latest: bool | None = False,
+        bucket_timestamp: str | None = None,
+        empty: bool | None = False,
+    ) -> TimeSeriesNRangeResponse | Awaitable[TimeSeriesNRangeResponse]:
+        """
+        Query an explicit list of time-series over a range in forward direction
+        and return timestamp-major rows ordered by increasing timestamp.
+
+        Each returned row is ``[timestamp, [value_for_key_0, value_for_key_1,
+        ...]]`` where the value array preserves the input ``keys`` order. A key
+        with no sample (or no aggregation bucket) at a row's timestamp is
+        reported as ``NaN``, which is indistinguishable from a stored or
+        aggregated ``NaN``.
+
+        All keys must hash to the same slot when used against a cluster; this
+        command is routed as a single-shard, key command and is never split
+        across shards.
+
+        For more information see https://redis.io/commands/ts.nrange/
+
+        Args:
+            keys:
+                Explicit list of time-series keys. Order and duplicate keys are
+                significant: the output column order maps to the input key
+                order, and duplicate keys produce repeated value columns.
+            from_time:
+                Start timestamp for the range query. `-` can be used to express
+                the minimum possible timestamp (0).
+            to_time:
+                End timestamp for range query, `+` can be used to express the
+                maximum possible timestamp.
+            count:
+                Limits the number of returned rows, applied after the
+                merge in increasing-timestamp order.
+            aggregators:
+                Optional aggregation. Requires exactly one aggregator per key,
+                emitted as separate tokens. A single aggregator string is
+                expanded to one token per key as a convenience; passing a list
+                whose length differs from ``keys`` raises ``DataError``. Valid
+                values: [`avg`, `sum`, `min`, `max`, `range`, `count`, `first`,
+                `last`, `std.p`, `std.s`, `var.p`, `var.s`, `twa`, `countNaN`,
+                `countAll`].
+            bucket_size_msec:
+                Time bucket for aggregation in milliseconds. Shared by all keys.
+            filter_by_ts:
+                List of timestamps to keep before merging.
+            filter_by_min_value:
+                Keep only values greater than or equal to this value before
+                merging (must also set `filter_by_max_value`).
+            filter_by_max_value:
+                Keep only values less than or equal to this value before
+                merging (must also set `filter_by_min_value`).
+            align:
+                Timestamp for alignment control for aggregation.
+            latest:
+                Used when a time series is a compaction, reports the compacted
+                value of the latest possibly partial bucket.
+            bucket_timestamp:
+                Controls how bucket timestamps are reported. Can be one of
+                [`-`, `low`, `+`, `high`, `~`, `mid`].
+            empty:
+                Reports aggregations for empty buckets.
+        """
+        params = self.__n_range_params(
+            keys,
+            from_time,
+            to_time,
+            count,
+            aggregators,
+            bucket_size_msec,
+            filter_by_ts,
+            filter_by_min_value,
+            filter_by_max_value,
+            align,
+            latest,
+            bucket_timestamp,
+            empty,
+        )
+        return self.execute_command(NRANGE_CMD, *params, keys=list(keys))
+
+    @overload
+    def nrevrange(
+        self: SyncClientProtocol,
+        keys: List[KeyT],
+        from_time: int | str,
+        to_time: int | str,
+        count: int | None = None,
+        aggregators: str | list[str] | None = None,
+        bucket_size_msec: int | None = 0,
+        filter_by_ts: List[int] | None = None,
+        filter_by_min_value: int | None = None,
+        filter_by_max_value: int | None = None,
+        align: int | str | None = None,
+        latest: bool | None = False,
+        bucket_timestamp: str | None = None,
+        empty: bool | None = False,
+    ) -> TimeSeriesNRangeResponse: ...
+
+    @overload
+    def nrevrange(
+        self: AsyncClientProtocol,
+        keys: List[KeyT],
+        from_time: int | str,
+        to_time: int | str,
+        count: int | None = None,
+        aggregators: str | list[str] | None = None,
+        bucket_size_msec: int | None = 0,
+        filter_by_ts: List[int] | None = None,
+        filter_by_min_value: int | None = None,
+        filter_by_max_value: int | None = None,
+        align: int | str | None = None,
+        latest: bool | None = False,
+        bucket_timestamp: str | None = None,
+        empty: bool | None = False,
+    ) -> Awaitable[TimeSeriesNRangeResponse]: ...
+
+    def nrevrange(
+        self,
+        keys: List[KeyT],
+        from_time: int | str,
+        to_time: int | str,
+        count: int | None = None,
+        aggregators: str | list[str] | None = None,
+        bucket_size_msec: int | None = 0,
+        filter_by_ts: List[int] | None = None,
+        filter_by_min_value: int | None = None,
+        filter_by_max_value: int | None = None,
+        align: int | str | None = None,
+        latest: bool | None = False,
+        bucket_timestamp: str | None = None,
+        empty: bool | None = False,
+    ) -> TimeSeriesNRangeResponse | Awaitable[TimeSeriesNRangeResponse]:
+        """
+        Query an explicit list of time-series over a range in reverse direction
+        and return timestamp-major rows ordered by decreasing timestamp.
+
+        Each returned row is ``[timestamp, [value_for_key_0, value_for_key_1,
+        ...]]`` where the value array preserves the input ``keys`` order. A key
+        with no sample (or no aggregation bucket) at a row's timestamp is
+        reported as ``NaN``, which is indistinguishable from a stored or
+        aggregated ``NaN``.
+
+        All keys must hash to the same slot when used against a cluster; this
+        command is routed as a single-shard, key command and is never split
+        across shards.
+
+        For more information see https://redis.io/commands/ts.nrevrange/
+
+        Args:
+            keys:
+                Explicit list of time-series keys. Order and duplicate keys are
+                significant: the output column order maps to the input key
+                order, and duplicate keys produce repeated value columns.
+            from_time:
+                Start timestamp for the range query. `-` can be used to express
+                the minimum possible timestamp (0).
+            to_time:
+                End timestamp for range query, `+` can be used to express the
+                maximum possible timestamp.
+            count:
+                Limits the number of returned rows, applied after the
+                merge in decreasing-timestamp order.
+            aggregators:
+                Optional aggregation. Requires exactly one aggregator per key,
+                emitted as separate tokens. A single aggregator string is
+                expanded to one token per key as a convenience; passing a list
+                whose length differs from ``keys`` raises ``DataError``. Valid
+                values: [`avg`, `sum`, `min`, `max`, `range`, `count`, `first`,
+                `last`, `std.p`, `std.s`, `var.p`, `var.s`, `twa`, `countNaN`,
+                `countAll`].
+            bucket_size_msec:
+                Time bucket for aggregation in milliseconds. Shared by all keys.
+            filter_by_ts:
+                List of timestamps to keep before merging.
+            filter_by_min_value:
+                Keep only values greater than or equal to this value before
+                merging (must also set `filter_by_max_value`).
+            filter_by_max_value:
+                Keep only values less than or equal to this value before
+                merging (must also set `filter_by_min_value`).
+            align:
+                Timestamp for alignment control for aggregation.
+            latest:
+                Used when a time series is a compaction, reports the compacted
+                value of the latest possibly partial bucket.
+            bucket_timestamp:
+                Controls how bucket timestamps are reported. Can be one of
+                [`-`, `low`, `+`, `high`, `~`, `mid`].
+            empty:
+                Reports aggregations for empty buckets.
+        """
+        params = self.__n_range_params(
+            keys,
+            from_time,
+            to_time,
+            count,
+            aggregators,
+            bucket_size_msec,
+            filter_by_ts,
+            filter_by_min_value,
+            filter_by_max_value,
+            align,
+            latest,
+            bucket_timestamp,
+            empty,
+        )
+        return self.execute_command(NREVRANGE_CMD, *params, keys=list(keys))
+
     def __mrange_params(
         self,
         aggregation_type: str | list[str] | None,
@@ -1012,6 +1393,7 @@ class TimeSeriesCommands:
         latest: bool | None,
         bucket_timestamp: str | None,
         empty: bool | None,
+        exclude_empty: bool | None,
     ):
         """Create TS.MRANGE and TS.MREVRANGE arguments."""
         if (
@@ -1022,6 +1404,8 @@ class TimeSeriesCommands:
             raise DataError(
                 "GROUPBY is not allowed when multiple aggregators are specified"
             )
+        if exclude_empty and groupby is not None:
+            raise DataError("EXCLUDEEMPTY is not allowed with GROUPBY")
         params: list[EncodableT] = [from_time, to_time]
         self._append_latest(params, latest)
         self._append_filer_by_ts(params, filter_by_ts)
@@ -1032,6 +1416,7 @@ class TimeSeriesCommands:
         self._append_aggregation(params, aggregation_type, bucket_size_msec)
         self._append_bucket_timestamp(params, bucket_timestamp)
         self._append_empty(params, empty)
+        self._append_exclude_empty(params, exclude_empty)
         params.extend(["FILTER"])
         params += filters
         self._append_groupby_reduce(params, groupby, reduce)
@@ -1057,6 +1442,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> TimeSeriesMRangeResponse: ...
 
     @overload
@@ -1079,6 +1465,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> Awaitable[TimeSeriesMRangeResponse]: ...
 
     def mrange(
@@ -1100,6 +1487,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> TimeSeriesMRangeResponse | Awaitable[TimeSeriesMRangeResponse]:
         """
         Query a range across multiple time-series by filters in forward direction.
@@ -1156,6 +1544,9 @@ class TimeSeriesCommands:
                 `+`, `high`, `~`, `mid`].
             empty:
                 Reports aggregations for empty buckets.
+            exclude_empty:
+                Omit matching series whose reported samples array is empty for the
+                queried range and options. Must not be combined with `groupby`.
         """
         params = self.__mrange_params(
             aggregation_type,
@@ -1175,6 +1566,7 @@ class TimeSeriesCommands:
             latest,
             bucket_timestamp,
             empty,
+            exclude_empty,
         )
 
         return self.execute_command(
@@ -1201,6 +1593,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> TimeSeriesMRangeResponse: ...
 
     @overload
@@ -1223,6 +1616,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> Awaitable[TimeSeriesMRangeResponse]: ...
 
     def mrevrange(
@@ -1244,6 +1638,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> TimeSeriesMRangeResponse | Awaitable[TimeSeriesMRangeResponse]:
         """
         Query a range across multiple time-series by filters in reverse direction.
@@ -1300,6 +1695,9 @@ class TimeSeriesCommands:
                 `+`, `high`, `~`, `mid`].
             empty:
                 Reports aggregations for empty buckets.
+            exclude_empty:
+                Omit matching series whose reported samples array is empty for the
+                queried range and options. Must not be combined with `groupby`.
         """
         params = self.__mrange_params(
             aggregation_type,
@@ -1319,6 +1717,7 @@ class TimeSeriesCommands:
             latest,
             bucket_timestamp,
             empty,
+            exclude_empty,
         )
 
         return self.execute_command(
@@ -1442,6 +1841,79 @@ class TimeSeriesCommands:
         """
         return self.execute_command(QUERYINDEX_CMD, *filters)
 
+    @overload
+    def querylabels(
+        self: SyncClientProtocol,
+        label: str | None = None,
+        filters: Iterable[str] | None = None,
+    ) -> set[bytes | str]: ...
+
+    @overload
+    def querylabels(
+        self: AsyncClientProtocol,
+        label: str | None = None,
+        filters: Iterable[str] | None = None,
+    ) -> Awaitable[set[bytes | str]]: ...
+
+    def querylabels(
+        self, label: str | None = None, filters: Iterable[str] | None = None
+    ) -> set[bytes | str] | Awaitable[set[bytes | str]]:
+        """
+        Get label metadata for the time series matching `filters`.
+
+        The single `TS.QUERYLABELS` request is built from the supplied
+        arguments:
+
+        - When `label` is omitted (``None``), the ``LABELS`` form is issued and
+          the reply is the set of all label names present on the matching (and
+          readable) series, including the label names used in the filter
+          itself.
+        - When `label` is given, the ``VALUES`` form is issued and the reply is
+          the set of all values assigned to `label` across the matching series.
+          `label` is matched byte-exactly and is passed to the server without
+          any normalization; a series that does not carry `label`, and a
+          `label` that matches no series, contribute nothing (an empty reply,
+          not an error).
+
+        The reply is unordered and already deduplicated by the server, so it is
+        returned as a Python ``set``. When `filters` is omitted (``None``), all
+        indexed series are queried; filter expressions use the same language as
+        `TS.QUERYINDEX` and are passed verbatim, while an explicitly empty
+        collection raises a `DataError`.
+
+        For more information see https://redis.io/commands/ts.querylabels/
+        """
+        if label is None:
+            params: list[EncodableT] = ["LABELS"]
+        else:
+            params = ["VALUES", label]
+        self._append_filter_expressions(params, filters)
+        return self.execute_command(QUERYLABELS_CMD, *params)
+
+    @staticmethod
+    def _append_filter_expressions(
+        params: list[EncodableT], filters: Iterable[str] | None
+    ):
+        """Append the optional FILTER clause for TS.QUERYLABELS.
+
+        ``None`` omits ``FILTER`` entirely (the documented all-series query);
+        an explicitly empty collection is a local usage error, since silently
+        widening to all series would be surprising. Any iterable is accepted and
+        materialized once so single-pass iterators are handled correctly.
+        Expressions are passed through verbatim, without parsing, reordering, or
+        normalizing.
+        """
+        if filters is None:
+            return
+        filters = list(filters)
+        if not filters:
+            raise DataError(
+                "filters cannot be an empty collection; pass None to query "
+                "all indexed series."
+            )
+        params.append("FILTER")
+        params.extend(filters)
+
     @staticmethod
     def _append_uncompressed(params: list[EncodableT], uncompressed: bool | None):
         """Append UNCOMPRESSED tag to params."""
@@ -1494,6 +1966,35 @@ class TimeSeriesCommands:
             params.extend(["COUNT", count])
 
     @staticmethod
+    def _append_block(
+        params: list[EncodableT],
+        block_milliseconds: int | None,
+        block_min_count: int | None,
+    ):
+        """Append the BLOCK group to params.
+
+        The BLOCK group is all-or-nothing: when blocking is requested
+        (`block_milliseconds` is set), both `milliseconds` and `min_count` are
+        always emitted, with `min_count` defaulting to 1. There is no standalone
+        MIN_COUNT keyword in this command.
+        """
+        if block_milliseconds is None:
+            if block_min_count is not None:
+                raise DataError(
+                    "block_min_count requires block_milliseconds to be set; the "
+                    "BLOCK group is all-or-nothing."
+                )
+            return
+        min_count = 1 if block_min_count is None else block_min_count
+        params.extend(["BLOCK", block_milliseconds, min_count])
+
+    @staticmethod
+    def _append_max_count(params: list[EncodableT], max_count: int | None):
+        """Append MAX_COUNT property to params."""
+        if max_count is not None:
+            params.extend(["MAX_COUNT", max_count])
+
+    @staticmethod
     def _append_timestamp(params: list[EncodableT], timestamp: int | None):
         """Append TIMESTAMP property to params."""
         if timestamp is not None:
@@ -1519,6 +2020,33 @@ class TimeSeriesCommands:
                 )
             else:
                 params.extend(["AGGREGATION", aggregation_type, bucket_size_msec])
+
+    @staticmethod
+    def _append_n_aggregation(
+        params: list[EncodableT],
+        aggregators: str | list[str] | None,
+        bucket_size_msec: int | None,
+        numkeys: int,
+    ):
+        """Append AGGREGATION property for TS.NRANGE / TS.NREVRANGE.
+
+        Unlike TS.RANGE, these commands require exactly one aggregator per
+        queried key, emitted as separate tokens (never a single comma-joined
+        token and never a single aggregator broadcast across keys). A single
+        aggregator string is expanded to one token per key as a convenience.
+        """
+        if aggregators is None:
+            return
+        if isinstance(aggregators, str):
+            aggregators = [aggregators] * numkeys
+        else:
+            aggregators = list(aggregators)
+        if len(aggregators) != numkeys:
+            raise DataError(
+                "AGGREGATION requires exactly one aggregator per key "
+                f"(expected {numkeys}, got {len(aggregators)})."
+            )
+        params.extend(["AGGREGATION", *aggregators, bucket_size_msec])
 
     @staticmethod
     def _append_chunk_size(params: list[EncodableT], chunk_size: int | None):
@@ -1573,6 +2101,12 @@ class TimeSeriesCommands:
         """Append EMPTY property to params."""
         if empty:
             params.append("EMPTY")
+
+    @staticmethod
+    def _append_exclude_empty(params: list[EncodableT], exclude_empty: bool | None):
+        """Append EXCLUDEEMPTY property to params."""
+        if exclude_empty:
+            params.append("EXCLUDEEMPTY")
 
     @staticmethod
     def _append_insertion_filters(

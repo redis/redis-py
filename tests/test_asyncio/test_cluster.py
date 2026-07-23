@@ -1846,6 +1846,36 @@ class TestClusterRedisCommands:
         assert await r.blmove("{foo}a", "{foo}b", 5)
         assert await r.blmove("{foo}a", "{foo}b", 1, "RIGHT", "LEFT")
 
+    @skip_if_server_version_lt("8.9.0")
+    async def test_cluster_lmovem(self, r: RedisCluster) -> None:
+        # source and destination collocated on the same slot via a hash tag
+        await r.rpush("{foo}a", "1", "2", "3", "4", "5")
+        assert await r.lmovem("{foo}a", "{foo}b") == [b"1"]
+        assert await r.lmovem(
+            "{foo}a", "{foo}b", "LEFT", "LEFT", count=3, ordering="BULK"
+        ) == [b"2", b"3", b"4"]
+
+    @skip_if_server_version_lt("8.9.0")
+    async def test_cluster_lmovem_crossslot(self, r: RedisCluster) -> None:
+        # source and destination on different slots -> cannot be dispatched
+        with pytest.raises(RedisClusterException) as ex:
+            await r.lmovem("a", "b", "LEFT", "RIGHT", count=2, ordering="BULK")
+        assert "all keys must map to the same key slot" in str(ex.value)
+
+    @skip_if_server_version_lt("8.9.0")
+    async def test_cluster_blmovem(self, r: RedisCluster) -> None:
+        await r.rpush("{foo}a", "1", "2", "3", "4", "5")
+        assert await r.blmovem("{foo}a", "{foo}b", 1) == [b"1"]
+        assert await r.blmovem(
+            "{foo}a", "{foo}b", 1, "LEFT", "LEFT", count=3, ordering="BULK"
+        ) == [b"2", b"3", b"4"]
+
+    @skip_if_server_version_lt("8.9.0")
+    async def test_cluster_blmovem_crossslot(self, r: RedisCluster) -> None:
+        with pytest.raises(RedisClusterException) as ex:
+            await r.blmovem("a", "b", 1, "LEFT", "RIGHT", count=2, ordering="BULK")
+        assert "all keys must map to the same key slot" in str(ex.value)
+
     async def test_cluster_msetnx(self, r: RedisCluster) -> None:
         d = {"{foo}a": b"1", "{foo}b": b"2", "{foo}c": b"3"}
         assert await r.msetnx(d)

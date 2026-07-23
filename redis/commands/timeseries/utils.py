@@ -22,6 +22,21 @@ def _nativestr_dict(d):
     }
 
 
+def parse_query_labels(response, **kwargs):
+    """Normalize the TS.QUERYLABELS reply to a ``set`` of unique strings.
+
+    The reply is a flat array under RESP2 and a set under RESP3; both are
+    surfaced as a Python ``set`` so the collection type is identical across
+    protocols and reflects that the server returns a unique, unordered
+    collection. Elements are kept byte-exact (never coerced or normalized) and
+    the server already deduplicates them. A missing reply maps to an empty
+    ``set`` so an empty result is a normal success rather than an error.
+    """
+    if response is None:
+        return set()
+    return set(response)
+
+
 def parse_range(response, **kwargs):
     """Parse range response. Used by TS.RANGE and TS.REVRANGE (legacy shape)."""
     if not response:
@@ -43,6 +58,20 @@ def parse_range_unified(response, **kwargs):
     if len(response[0]) > 2:
         return [[r[0]] + [float(v) for v in r[1:]] for r in response]
     return [[r[0], float(r[1])] for r in response]
+
+
+def parse_n_range(response, **kwargs):
+    """Parse the TS.NRANGE / TS.NREVRANGE response.
+
+    The wire shape is ``[[timestamp, [value_0, value_1, ...]], ...]`` where the
+    value array preserves input key order and ``values`` length equals the
+    number of queried keys. Rows are returned in server order (never re-sorted
+    or reversed), and a missing raw sample or missing aggregation bucket is kept
+    as ``float('nan')`` rather than converted to ``None``.
+    """
+    if not response:
+        return []
+    return [[int(row[0]), [float(v) for v in row[1]]] for row in response]
 
 
 def parse_get(response):

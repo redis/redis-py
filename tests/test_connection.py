@@ -6,6 +6,7 @@ import selectors
 import socket
 import ssl
 import threading
+import time
 import types
 from errno import ECONNREFUSED, EWOULDBLOCK
 from typing import Any
@@ -16,7 +17,7 @@ import pytest
 import redis
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
-from redis._parsers.hiredis import NOT_ENOUGH_DATA, _socket_can_read
+from redis._parsers.hiredis import NOT_ENOUGH_DATA, _socket_can_read, _socket_is_closed
 from redis._parsers.socket import SocketBuffer
 from redis.backoff import NoBackoff
 from redis.cache import (
@@ -50,7 +51,7 @@ from redis.observability.attributes import (
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE, SENTINEL
 
-from .conftest import skip_if_server_version_lt
+from .conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 from .mocks import MockSocket
 
 
@@ -105,13 +106,81 @@ def test_hiredis_can_read_detects_reader_data():
     assert parser.read_response() == b"OK"
 
 
-def test_hiredis_can_read_checks_socket_readiness_without_reading():
+def test_hiredis_can_read_returns_true_for_readable_open_socket():
+    # socket readable, reader empty, and not closed -> pending data/push, so
+    # can_read() reports readable without consuming anything.
     parser = make_hiredis_parser(has_data=False)
 
-    with patch("redis._parsers.hiredis._socket_can_read", return_value=True) as ready:
+    with (
+        patch("redis._parsers.hiredis._socket_can_read", return_value=True) as ready,
+        patch("redis._parsers.hiredis._socket_is_closed", return_value=False) as closed,
+    ):
         assert parser.can_read(timeout=0) is True
 
     ready.assert_called_once_with(parser._sock, 0)
+    closed.assert_called_once_with(parser._sock)
+
+
+def test_hiredis_can_read_raises_on_peer_closed_socket():
+    # regression for #4128: a peer-closed socket reads as ready but the reader
+    # has no buffered data. can_read() must raise ConnectionError so the pool
+    # recycles it, matching the pure-Python and async parsers.
+    parser = make_hiredis_parser(has_data=False)
+
+    with (
+        patch("redis._parsers.hiredis._socket_can_read", return_value=True),
+        patch("redis._parsers.hiredis._socket_is_closed", return_value=True),
+    ):
+        with pytest.raises(redis.ConnectionError):
+            parser.can_read(timeout=0)
+
+
+@pytest.mark.skipif(not HIREDIS_AVAILABLE, reason="hiredis is not installed")
+@pytest.mark.skipif(
+    not hasattr(select, "poll"), reason="select.poll not available on this platform"
+)
+def test_hiredis_can_read_consumes_pending_push_before_reporting_closed():
+    # a peer that sends push data and then closes reports the closed poll flags
+    # while the data is still buffered. can_read() must keep reporting readable
+    # so pending messages (e.g. cache invalidations) get processed, and only
+    # raise once the buffer is drained, matching the pure-Python parser which
+    # consumes buffered data before raising.
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    client = socket.create_connection(listener.getsockname())
+    server, _ = listener.accept()
+
+    parser = _HiredisParser(socket_read_size=65536)
+    connection = mock.Mock()
+    connection._sock = client
+    connection.socket_timeout = None
+    connection.encoder.encoding_errors = "strict"
+    connection.encoder.decode_responses = False
+    parser.on_connect(connection)
+    try:
+        server.sendall(b">3\r\n$7\r\nmessage\r\n$2\r\nch\r\n$5\r\nhello\r\n")
+        server.close()  # graceful FIN with the push message still buffered
+        time.sleep(0.1)
+
+        assert parser.can_read(timeout=0) is True
+        assert parser.read_response(push_request=True) == [b"message", b"ch", b"hello"]
+        with pytest.raises(redis.ConnectionError):
+            parser.can_read(timeout=0)
+    finally:
+        parser.on_disconnect()
+        client.close()
+        listener.close()
+
+
+def test_socket_is_closed_reports_not_closed_with_pending_ssl_data():
+    # SSL sockets buffer decrypted bytes above the OS socket layer; those must
+    # be processed before the connection can be treated as closed, like
+    # kernel-level pending data.
+    sock = Mock(spec=["pending", "fileno"])
+    sock.pending.return_value = 10
+
+    assert _socket_is_closed(sock) is False
 
 
 @pytest.mark.fixed_client
@@ -221,6 +290,90 @@ def test_hiredis_socket_can_read_under_fd_exhaustion():
         peer.close()
 
 
+@pytest.mark.skipif(
+    not hasattr(select, "poll"), reason="select.poll not available on this platform"
+)
+def test_socket_is_closed_detects_peer_close():
+    # a peer-closed socket reads as ready (it yields EOF), so readiness alone
+    # cannot tell it apart from a socket holding pending data; _socket_is_closed()
+    # distinguishes them via POLLHUP without consuming data.
+    alive, peer = socket.socketpair()
+    closed, closing_peer = socket.socketpair()
+    try:
+        peer.sendall(b"pending push data")
+        closing_peer.close()
+
+        assert _socket_is_closed(alive) is False
+        assert _socket_is_closed(closed) is True
+    finally:
+        alive.close()
+        peer.close()
+        closed.close()
+
+
+@pytest.mark.skipif(
+    not hasattr(select, "poll"), reason="select.poll not available on this platform"
+)
+def test_socket_is_closed_detects_tcp_peer_half_close():
+    # on Linux a graceful peer close (FIN) reports POLLIN|POLLRDHUP and never
+    # POLLHUP, so a POLLHUP-only flags check misses it. a real TCP socket pair
+    # is required: the kernel (not a mock) produces the event, and AF_UNIX
+    # socketpairs set POLLHUP on close and would hide the gap.
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    client = socket.create_connection(listener.getsockname())
+    server, _ = listener.accept()
+    try:
+        assert _socket_is_closed(client) is False
+        server.close()  # graceful FIN
+        time.sleep(0.1)
+        assert _socket_is_closed(client) is True
+    finally:
+        client.close()
+        listener.close()
+
+
+@pytest.mark.skipif(
+    not hasattr(select, "poll"), reason="select.poll not available on this platform"
+)
+def test_socket_is_closed_defers_close_until_pending_data_is_read():
+    # a peer that sends data and then closes reports the closed poll flags
+    # while unread bytes remain (POLLIN|POLLHUP on macOS, POLLIN|POLLRDHUP on
+    # Linux). that data may carry cache invalidations that must be processed
+    # before the connection is dropped, so _socket_is_closed() must report
+    # not-closed until the buffer is drained, without consuming anything.
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    client = socket.create_connection(listener.getsockname())
+    server, _ = listener.accept()
+    try:
+        server.sendall(b"pending invalidation")
+        server.close()  # graceful FIN with data still buffered
+        time.sleep(0.1)
+
+        assert _socket_is_closed(client) is False
+        # the MSG_PEEK confirmation must not consume the pending data
+        assert client.recv(65536) == b"pending invalidation"
+        assert _socket_is_closed(client) is True
+    finally:
+        client.close()
+        listener.close()
+
+
+def test_socket_is_closed_without_poll_reports_not_closed(monkeypatch):
+    # without select.poll (e.g. Windows) closed and has-data states are
+    # indistinguishable here, so we conservatively report not-closed.
+    monkeypatch.setattr("redis._parsers.hiredis._HAS_POLL", False)
+    closed, closing_peer = socket.socketpair()
+    try:
+        closing_peer.close()
+        assert _socket_is_closed(closed) is False
+    finally:
+        closed.close()
+
+
 def test_hiredis_can_read_does_not_decide_disable_decoding():
     raw = b"\xe2\x98\x83"
     parser = make_hiredis_parser(
@@ -292,6 +445,38 @@ def test_hiredis_read_response_timeout_zero_maps_would_block_to_timeout():
 
     with pytest.raises(TimeoutError):
         parser.read_response(timeout=0)
+
+
+@pytest.mark.parametrize("cleared_attr", ["_reader", "_sock"])
+def test_hiredis_read_from_socket_raises_connection_error_when_disconnected(
+    cleared_attr,
+):
+    # regression for #4003: another thread may disconnect the connection while
+    # we are reading (e.g. a shared client closed via `with redis:`), which sets
+    # _sock and _reader to None. read_from_socket() must raise a descriptive,
+    # retryable ConnectionError rather than an AttributeError.
+    parser = make_hiredis_parser()
+    parser._sock.recv_into.return_value = 10
+    setattr(parser, cleared_attr, None)
+
+    with pytest.raises(ConnectionError, match="Connection closed by server"):
+        parser.read_from_socket()
+
+
+def test_hiredis_read_response_uses_local_reader_if_disconnected_mid_read():
+    # regression for #4003: if _reader is cleared by a concurrent disconnect
+    # after read_from_socket() returns, the in-flight read must still complete
+    # via the locally bound reader instead of raising AttributeError on .gets().
+    parser = make_hiredis_parser()
+    parser._reader.responses = [NOT_ENOUGH_DATA, b"OK"]
+
+    def fake_read_from_socket(*args, **kwargs):
+        parser._reader = None  # simulate on_disconnect() from another thread
+        return True
+
+    parser.read_from_socket = fake_read_from_socket
+
+    assert parser.read_response() == b"OK"
 
 
 def test_socket_buffer_timeout_zero_maps_would_block_to_timeout():
@@ -415,6 +600,9 @@ class TestConnection:
     def clear(self, conn):
         conn.retry_on_error.clear()
 
+    # Client-internal test: builds a default localhost Connection, so it cannot
+    # target a remote managed Redis Enterprise endpoint.
+    @skip_if_redis_enterprise()
     def test_retry_connect_on_timeout_error(self):
         """Test that the _connect function is retried in case of a timeout"""
         conn = Connection(retry_on_timeout=True, retry=Retry(NoBackoff(), 3))
@@ -443,6 +631,10 @@ class TestConnection:
             assert _connect.call_count == 1
             self.clear(conn)
 
+    # Client-internal test: builds a default localhost Connection and mocks the
+    # socket to count handshake retries, so it needs a co-located server rather
+    # than a remote managed Redis Enterprise endpoint.
+    @skip_if_redis_enterprise()
     def test_connect_with_retries(self):
         """
         Validate that retries occur for the entire connect+handshake flow when OSError
@@ -549,6 +741,8 @@ def test_pack_command(Class):
 
 
 @pytest.mark.fixed_client
+# Hardcodes a localhost URL, so it cannot target a remote managed Redis Enterprise endpoint.
+@skip_if_redis_enterprise()
 def test_create_single_connection_client_from_url():
     client = redis.Redis.from_url(
         "redis://localhost:6379/0?", single_connection_client=True

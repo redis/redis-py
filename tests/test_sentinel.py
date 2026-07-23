@@ -1,3 +1,4 @@
+import os
 import socket
 from unittest import mock
 
@@ -8,6 +9,7 @@ import redis.sentinel
 from redis import exceptions
 from redis.sentinel import (
     MasterNotFoundError,
+    ReplicaNotFoundError,
     Sentinel,
     SentinelConnectionPool,
     SlaveNotFoundError,
@@ -216,6 +218,19 @@ def test_discover_slaves(cluster, sentinel):
 
 
 @pytest.mark.onlynoncluster
+def test_discover_replicas(cluster, sentinel):
+    assert sentinel.discover_replicas("mymaster") == []
+
+    cluster.slaves = [
+        {"ip": "slave0", "port": 1234, "is_odown": False, "is_sdown": False},
+        {"ip": "slave1", "port": 1234, "is_odown": True, "is_sdown": False},
+    ]
+
+    assert sentinel.filter_replicas(cluster.slaves) == [("slave0", 1234)]
+    assert sentinel.discover_replicas("mymaster") == [("slave0", 1234)]
+
+
+@pytest.mark.onlynoncluster
 def test_master_for(sentinel, master_ip):
     master = sentinel.master_for("mymaster", db=9)
     assert master.ping()
@@ -236,11 +251,30 @@ def test_slave_for(cluster, sentinel):
 
 
 @pytest.mark.onlynoncluster
+def test_replica_for(cluster, sentinel):
+    cluster.slaves = [
+        {"ip": "127.0.0.1", "port": 6379, "is_odown": False, "is_sdown": False}
+    ]
+    replica = sentinel.replica_for("mymaster", db=9)
+    assert replica.ping()
+
+
+@pytest.mark.onlynoncluster
 def test_slave_for_slave_not_found_error(cluster, sentinel):
     cluster.master["is_odown"] = True
     slave = sentinel.slave_for("mymaster", db=9)
     with pytest.raises(SlaveNotFoundError):
         slave.ping()
+
+
+@pytest.mark.onlynoncluster
+def test_replica_not_found_alias(cluster, sentinel):
+    assert ReplicaNotFoundError is SlaveNotFoundError
+
+    cluster.master["is_odown"] = True
+    replica = sentinel.replica_for("mymaster", db=9)
+    with pytest.raises(ReplicaNotFoundError):
+        replica.ping()
 
 
 @pytest.mark.onlynoncluster
@@ -256,6 +290,63 @@ def test_slave_round_robin(cluster, sentinel, master_ip):
     # Fallback to master
     assert next(rotator) == (master_ip, 6379)
     with pytest.raises(SlaveNotFoundError):
+        next(rotator)
+
+
+@pytest.mark.fixed_client
+@pytest.mark.onlynoncluster
+def test_master_failover_reclaims_discarded_connection_slot():
+    master_a = ("master-a", 6379)
+    master_b = ("master-b", 6379)
+
+    class FakeConnection:
+        def __init__(self, **kwargs):
+            self.host, self.port = master_a
+            self.pid = os.getpid()
+
+        def connect(self):
+            pass
+
+        def disconnect(self):
+            pass
+
+        def can_read(self, timeout=0):
+            return False
+
+        def should_reconnect(self):
+            return False
+
+    pool = SentinelConnectionPool(
+        "mymaster",
+        mock.MagicMock(),
+        connection_class=FakeConnection,
+        max_connections=2,
+    )
+    pool.proxy.master_address = master_a
+
+    for _ in range(pool.max_connections):
+        connection = pool.get_connection()
+        pool.proxy.master_address = master_b
+        pool.release(connection)
+        pool.proxy.master_address = master_a
+
+    assert pool._created_connections == 0
+    pool.get_connection()
+
+
+@pytest.mark.onlynoncluster
+def test_replica_round_robin(cluster, sentinel, master_ip):
+    cluster.slaves = [
+        {"ip": "slave0", "port": 6379, "is_odown": False, "is_sdown": False},
+        {"ip": "slave1", "port": 6379, "is_odown": False, "is_sdown": False},
+    ]
+    pool = SentinelConnectionPool("mymaster", sentinel)
+    rotator = pool.rotate_replicas()
+    assert next(rotator) in (("slave0", 6379), ("slave1", 6379))
+    assert next(rotator) in (("slave0", 6379), ("slave1", 6379))
+    # Fallback to master
+    assert next(rotator) == (master_ip, 6379)
+    with pytest.raises(ReplicaNotFoundError):
         next(rotator)
 
 
@@ -279,7 +370,7 @@ def test_reset(cluster, sentinel):
 
 
 @pytest.mark.onlynoncluster
-@pytest.mark.parametrize("method_name", ["master_for", "slave_for"])
+@pytest.mark.parametrize("method_name", ["master_for", "slave_for", "replica_for"])
 def test_auto_close_pool(cluster, sentinel, method_name):
     """
     Check that the connection pool created by the sentinel client is
@@ -301,6 +392,42 @@ def test_auto_close_pool(cluster, sentinel, method_name):
 
     assert calls == 1
     pool.disconnect()
+
+
+@pytest.mark.onlynoncluster
+def test_close(cluster, sentinel):
+    sentinel.sentinels = [mock.Mock() for _ in range(2)]
+
+    with sentinel as entered:
+        assert entered is sentinel
+
+    # exiting the context closes every sentinel client and its pool
+    for s in sentinel.sentinels:
+        s.close.assert_called_once()
+
+
+@pytest.mark.onlynoncluster
+def test_close_error_still_closes_remaining_clients(cluster, sentinel):
+    sentinel.sentinels = [mock.Mock() for _ in range(3)]
+    sentinel.sentinels[0].close.side_effect = Exception("sentinel down")
+
+    with pytest.raises(Exception, match="sentinel down"):
+        sentinel.close()
+
+    # the failing client must not prevent closing the others
+    for s in sentinel.sentinels:
+        s.close.assert_called_once()
+
+
+@pytest.mark.onlynoncluster
+def test_close_idempotent(cluster, sentinel):
+    sentinel.sentinels = [mock.Mock() for _ in range(2)]
+
+    sentinel.close()
+    sentinel.close()
+
+    for s in sentinel.sentinels:
+        assert s.close.call_count == 2
 
 
 # Tests against real sentinel instances
