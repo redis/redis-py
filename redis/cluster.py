@@ -3623,6 +3623,20 @@ def block_pipeline_command(name: str) -> Callable[..., Any]:
     return inner
 
 
+def is_zero_key_eval_command(*args) -> bool:
+    """
+    True for EVAL/EVALSHA with numkeys=0 (may run on any primary).
+    """
+    if len(args) < 3:
+        return False
+    if str(args[0]).upper() not in ("EVAL", "EVALSHA"):
+        return False
+    try:
+        return int(args[2]) == 0
+    except (TypeError, ValueError):
+        return False
+
+
 # Blocked pipeline commands
 PIPELINE_BLOCKED_COMMANDS = (
     "BGREWRITEAOF",
@@ -4112,20 +4126,26 @@ class PipelineStrategy(AbstractStrategy):
                         command_flag = self.command_flags.get(command)
                         if not command_flag:
                             # Fallback to default policy.
-                            # Use determine_slot (not _get_command_keys) so EVAL /
-                            # EVALSHA with numkeys=0 work on Redis <7, matching
-                            # the async ClusterPipeline path.
-                            if not self._pipe.get_default_node():
-                                slot = None
-                            else:
-                                slot = self._pipe.determine_slot(*c.args)
-                            if slot is None:
-                                command_policies = CommandPolicies()
-                            else:
+                            # EVAL/EVALSHA must not use _get_command_keys(): Redis
+                            # <7 breaks on COMMAND GETKEYS when numkeys is 0.
+                            # Other unflagged commands keep the keyless fallback.
+                            if command in ("EVAL", "EVALSHA"):
                                 command_policies = CommandPolicies(
                                     request_policy=RequestPolicy.DEFAULT_KEYED,
                                     response_policy=ResponsePolicy.DEFAULT_KEYED,
                                 )
+                            else:
+                                if not self._pipe.get_default_node():
+                                    keys = None
+                                else:
+                                    keys = self._pipe._get_command_keys(*c.args)
+                                if not keys or len(keys) == 0:
+                                    command_policies = CommandPolicies()
+                                else:
+                                    command_policies = CommandPolicies(
+                                        request_policy=RequestPolicy.DEFAULT_KEYED,
+                                        response_policy=ResponsePolicy.DEFAULT_KEYED,
+                                    )
                         else:
                             if command_flag in self._pipe._command_flags_mapping:
                                 command_policies = CommandPolicies(
@@ -4419,12 +4439,42 @@ class TransactionStrategy(AbstractStrategy):
         self._explicit_transaction = False
         self._watching = False
         self._pipeline_slots: Set[int] = set()
+        # True once a keyed (non-slot-agnostic) command has fixed the slot
+        self._transaction_has_keyed_slot = False
         self._transaction_connection: Optional[Connection] = None
         self._executing = False
         self._retry = copy(self._pipe.retry)
         self._retry.update_supported_errors(
             RedisCluster.ERRORS_ALLOW_RETRY + self.SLOT_REDIRECT_ERRORS
         )
+
+    def _resolve_transaction_slot(self, *args) -> Optional[int]:
+        """
+        Pick a slot for a transactional pipeline command.
+
+        Zero-key EVAL/EVALSHA can run on any primary. Reuse an existing
+        transaction slot when present so multiple zero-key scripts (or a
+        mix with keyed commands) stay single-slot.
+        """
+        if args[0] in ClusterPipeline.NO_SLOTS_COMMANDS:
+            return None
+
+        if is_zero_key_eval_command(*args):
+            if self._pipeline_slots:
+                return next(iter(self._pipeline_slots))
+            return self._pipe.determine_slot(*args)
+
+        slot_number = self._pipe.determine_slot(*args)
+        if (
+            slot_number is not None
+            and self._pipeline_slots
+            and slot_number not in self._pipeline_slots
+            and not self._transaction_has_keyed_slot
+        ):
+            # Prior slots came only from zero-key EVAL/EVALSHA; retarget.
+            self._pipeline_slots.clear()
+        self._transaction_has_keyed_slot = True
+        return slot_number
 
     def _get_client_and_connection_for_transaction(self) -> Tuple[Redis, Connection]:
         """
@@ -4462,7 +4512,7 @@ class TransactionStrategy(AbstractStrategy):
     def execute_command(self, *args, **kwargs):
         slot_number: Optional[int] = None
         if args[0] not in ClusterPipeline.NO_SLOTS_COMMANDS:
-            slot_number = self._pipe.determine_slot(*args)
+            slot_number = self._resolve_transaction_slot(*args)
 
         if (
             self._watching or args[0] in self.IMMEDIATE_EXECUTE_COMMANDS
@@ -4787,6 +4837,7 @@ class TransactionStrategy(AbstractStrategy):
         self._watching = False
         self._explicit_transaction = False
         self._pipeline_slots = set()
+        self._transaction_has_keyed_slot = False
         self._executing = False
 
     def send_cluster_commands(

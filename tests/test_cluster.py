@@ -3886,6 +3886,45 @@ def test_evalsha_zero_keys_pipeline_execute_skips_get_command_keys():
         r.close()
 
 
+def test_evalsha_zero_keys_reuses_slot_in_transaction():
+    """
+    Zero-key EVALSHA in a transactional pipeline must reuse one slot so
+    execute() does not raise CrossSlotTransactionError.
+    """
+    r = get_mocked_redis_client(host=default_host, port=default_port)
+    try:
+        sha = "a" * 40
+        with r.pipeline(transaction=True) as pipe:
+            pipe.evalsha(sha, 0)
+            pipe.evalsha(sha, 0)
+            slots = pipe._execution_strategy._pipeline_slots
+            assert len(slots) == 1
+
+            # Keyed follow-up must retarget without needing a live COMMAND map.
+            keyed_slot = key_slot(b"foo")
+            with patch.object(pipe, "determine_slot", return_value=keyed_slot):
+                pipe.set("foo", "bar")
+            assert pipe._execution_strategy._pipeline_slots == {keyed_slot}
+            assert pipe._execution_strategy._transaction_has_keyed_slot is True
+    finally:
+        r.close()
+
+
+def test_evalsha_zero_keys_follows_keyed_slot_in_transaction():
+    """Zero-key EVALSHA after a keyed slot is fixed reuses that slot."""
+    r = get_mocked_redis_client(host=default_host, port=default_port)
+    try:
+        sha = "a" * 40
+        with r.pipeline(transaction=True) as pipe:
+            strategy = pipe._execution_strategy
+            strategy._pipeline_slots = {key_slot(b"foo")}
+            strategy._transaction_has_keyed_slot = True
+            pipe.evalsha(sha, 0)
+            assert strategy._pipeline_slots == {key_slot(b"foo")}
+    finally:
+        r.close()
+
+
 @pytest.mark.onlycluster
 class TestClusterPipeline:
     """
@@ -3943,6 +3982,17 @@ class TestClusterPipeline:
         with r.pipeline() as pipe:
             pipe.evalsha(sha, 0)
             assert pipe.execute() == [42]
+
+    def test_evalsha_zero_keys_in_transaction_pipeline(self, r):
+        """
+        Multiple zero-key EVALSHA calls in a transactional pipeline share
+        one slot and execute successfully.
+        """
+        sha = r.script_load("return 42")
+        with r.pipeline(transaction=True) as pipe:
+            pipe.evalsha(sha, 0)
+            pipe.evalsha(sha, 0)
+            assert pipe.execute() == [42, 42]
 
     def test_redis_cluster_pipeline(self, r):
         """
