@@ -4111,12 +4111,15 @@ class PipelineStrategy(AbstractStrategy):
                         # in a list of pre-defined request policies
                         command_flag = self.command_flags.get(command)
                         if not command_flag:
-                            # Fallback to default policy
+                            # Fallback to default policy.
+                            # Use determine_slot (not _get_command_keys) so EVAL /
+                            # EVALSHA with numkeys=0 work on Redis <7, matching
+                            # the async ClusterPipeline path.
                             if not self._pipe.get_default_node():
-                                keys = None
+                                slot = None
                             else:
-                                keys = self._pipe._get_command_keys(*c.args)
-                            if not keys or len(keys) == 0:
+                                slot = self._pipe.determine_slot(*c.args)
+                            if slot is None:
                                 command_policies = CommandPolicies()
                             else:
                                 command_policies = CommandPolicies(

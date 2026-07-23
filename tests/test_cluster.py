@@ -3859,8 +3859,29 @@ def test_evalsha_can_be_queued_on_cluster_pipeline():
         assert queue[0].args == ("EVALSHA", sha, 1, "foo", "bar")
 
         assert r.determine_slot("EVALSHA", sha, 1, "foo", "bar") == key_slot(b"foo")
-        zero_key_slot = r.determine_slot("EVALSHA", sha, 0)
-        assert 0 <= zero_key_slot < REDIS_CLUSTER_HASH_SLOTS
+    finally:
+        r.close()
+
+
+def test_evalsha_zero_keys_pipeline_execute_skips_get_command_keys():
+    """
+    Sync ClusterPipeline must route EVALSHA via determine_slot, not
+    COMMAND GETKEYS. Redis <7 fails on GETKEYS for EVALSHA with numkeys=0.
+    """
+    r = get_mocked_redis_client(host=default_host, port=default_port)
+    try:
+        mock_all_nodes_resp(r, 42)
+        sha = "a" * 40
+        with r.pipeline() as pipe:
+            pipe.evalsha(sha, 0)
+            with patch.object(
+                pipe,
+                "_get_command_keys",
+                side_effect=AssertionError(
+                    "COMMAND GETKEYS must not be used for EVALSHA"
+                ),
+            ):
+                assert pipe.execute() == [42]
     finally:
         r.close()
 
@@ -3912,6 +3933,16 @@ class TestClusterPipeline:
         with r.pipeline() as pipe:
             pipe.evalsha(sha, 1, "{user}a", 3)
             assert pipe.execute() == [6]
+
+    def test_evalsha_zero_keys_in_pipeline(self, r):
+        """
+        EVALSHA with numkeys=0 must execute in ClusterPipeline without
+        calling COMMAND GETKEYS (broken on Redis <7 for this case).
+        """
+        sha = r.script_load("return 42")
+        with r.pipeline() as pipe:
+            pipe.evalsha(sha, 0)
+            assert pipe.execute() == [42]
 
     def test_redis_cluster_pipeline(self, r):
         """
