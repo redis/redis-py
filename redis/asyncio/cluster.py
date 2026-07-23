@@ -3839,8 +3839,8 @@ class ClusterPubSub(PubSub):
                 if name and name in self.node_pubsub_mapping:
                     pubsub = self.node_pubsub_mapping[name]
                 else:
-                    # No reverse-index entry: check every node that may hold
-                    # the subscription for this slot (with replica reads
+                    # No reverse-index entry: find the node whose pubsub
+                    # actually holds the subscription (with replica reads
                     # enabled that is not necessarily the primary).
                     slot = self.cluster.keyslot(s_channel)
                     eligible = self._eligible_subscription_nodes(slot)
@@ -3848,12 +3848,17 @@ class ClusterPubSub(PubSub):
                         raise SlotNotCoveredError(
                             f'Slot "{slot}" is not covered by the cluster.'
                         )
-                    name = next(
-                        (n for n in eligible if n in self.node_pubsub_mapping), None
-                    )
-                    if name is None:
+                    pubsub = None
+                    for name in eligible:
+                        candidate = self.node_pubsub_mapping.get(name)
+                        if (
+                            candidate is not None
+                            and normalized_key in candidate.shard_channels
+                        ):
+                            pubsub = candidate
+                            break
+                    if pubsub is None:
                         continue
-                    pubsub = self.node_pubsub_mapping[name]
                 await pubsub.sunsubscribe(s_channel)
                 self.pending_unsubscribe_shard_channels.update(
                     pubsub.pending_unsubscribe_shard_channels

@@ -2864,15 +2864,20 @@ class TestClusterPubSubSlotMigration:
 
     def test_sunsubscribe_fallback_considers_all_slot_nodes(self):
         """
-        When the reverse index has no entry, the fallback must consider
-        every node serving the slot (the subscription may live on a replica
-        when replica routing is enabled), not only the primary.
+        When the reverse index has no entry, the fallback must route to the
+        node whose pubsub actually holds the subscription (which may be a
+        replica when replica routing is enabled), not simply the first
+        slot-serving node that has a per-node pubsub.
         """
         pubsub = self._make_cluster_pubsub()
         pubsub.cluster.read_from_replicas = True
         primary = self._make_node("127.0.0.1:7000")
         replica = self._make_node("127.0.0.1:7001")
+        # The primary also has a per-node pubsub (for other channels), but
+        # only the replica's pubsub holds the target subscription.
+        primary_ps = self._make_node_pubsub({b"other": None})
         replica_ps = self._make_node_pubsub({b"foo": None})
+        pubsub.node_pubsub_mapping[primary.name] = primary_ps
         pubsub.node_pubsub_mapping[replica.name] = replica_ps
         pubsub.shard_channels = {b"foo": None}
         pubsub.cluster.keyslot.return_value = 42
@@ -2881,6 +2886,7 @@ class TestClusterPubSubSlotMigration:
         pubsub.sunsubscribe(b"foo")
 
         replica_ps.sunsubscribe.assert_called_once_with(b"foo")
+        primary_ps.sunsubscribe.assert_not_called()
 
     def test_migration_driven_sunsubscribe_drops_empty_pubsub(self):
         """
