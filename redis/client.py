@@ -518,12 +518,12 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "oss_cluster_maint_notifications_handler": oss_cluster_maint_notifications_handler,
                         }
                     )
-                # The pool builds the HImportConfig from the schemas (see
-                # ConnectionPool.__init__) and owns it; the client never holds a
-                # mutable reference, so the registry is mutated only via the HIMPORT
-                # command methods.
-                if himport_schemas is not None:
-                    kwargs.update({"himport_schemas": himport_schemas})
+            # The pool builds the HImportConfig from the schemas (see
+            # ConnectionPool.__init__) and owns it; the client never holds a
+            # mutable reference, so the registry is mutated only via the HIMPORT
+            # command methods.
+            if himport_schemas is not None:
+                kwargs.update({"himport_schemas": himport_schemas})
             connection_pool = ConnectionPool(**kwargs)
             self._event_dispatcher.dispatch(
                 AfterPooledConnectionsInstantiationEvent(
@@ -1072,7 +1072,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         fieldset = self.himport_config.prepare(fieldset_name, fields)
         conn = self.connection
         if self._single_connection_client and conn is not None and conn.is_connected:
-            self.himport_prepare_internal(fieldset_name, fields)
+            self.himport_prepare_internal(fieldset_name, fieldset.fields)
             conn._himport_prepared[fieldset_name] = fieldset.version
         return True
 

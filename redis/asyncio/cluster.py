@@ -1260,10 +1260,18 @@ class RedisCluster(
 
         while ttl > 0:
             ttl -= 1
+            ask_himport = False
             try:
                 if asking:
                     target_node = self.get_node(node_name=redirect_addr)
-                    await target_node.execute_command("ASKING")
+                    if command == HIMPORT_SET:
+                        # ASKING must sit on the same connection as the SET,
+                        # immediately before it. HIMPORT SET's own executor folds
+                        # ASKING into the SET's packed write after the session setup,
+                        # so don't send it here as a separately pooled command.
+                        ask_himport = True
+                    else:
+                        await target_node.execute_command("ASKING")
                     asking = False
                 elif moved:
                     # MOVED occurred and the slots cache was updated,
@@ -1278,7 +1286,9 @@ class RedisCluster(
                     )
                     moved = False
 
-                response = await target_node.execute_command(*args, **kwargs)
+                response = await target_node.execute_command(
+                    *args, asking=ask_himport, **kwargs
+                )
                 await self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
@@ -1834,7 +1844,9 @@ class ClusterNode:
 
         return response
 
-    async def execute_command(self, *args: Any, **kwargs: Any) -> Any:
+    async def execute_command(
+        self, *args: Any, asking: bool = False, **kwargs: Any
+    ) -> Any:
         # Acquire connection
         connection = self.acquire_connection()
         try:
@@ -1852,10 +1864,13 @@ class ClusterNode:
             # connection is known, and connection-scoped session setup can only happen
             # once that connection is chosen. The overhead is one comparison per
             # command.
+            # On an ASK redirect ``asking`` is passed here rather than sent as a
+            # separate ASKING command so the allowance sits on this same connection,
+            # folded into the SET's own write immediately before the SET.
             if args[0] == HIMPORT_SET:
                 # args == (HIMPORT_SET, key, fieldset_name, *values)
                 return await self._himport_execute_set(
-                    connection, args[1], args[2], list(args[3:])
+                    connection, args[1], args[2], list(args[3:]), asking=asking
                 )
 
             # Execute command
@@ -1896,23 +1911,39 @@ class ClusterNode:
         conn._himport_reconciled_revision = cfg.revision
 
     async def _himport_prepare_and_set(
-        self, conn: "Connection", key: KeyT, fieldset_name: str, values: List, fieldset
+        self,
+        conn: "Connection",
+        key: KeyT,
+        fieldset_name: str,
+        values: List,
+        fieldset,
+        asking: bool = False,
     ) -> Any:
-        """PREPARE ``fieldset`` bundled with the SET on ``conn`` (one packed write)."""
-        await conn.send_packed_command(
-            conn.pack_commands(
-                [
-                    himport_prepare_command(fieldset_name, fieldset.fields),
-                    himport_set_command(key, fieldset_name, values),
-                ]
-            )
-        )
-        prep_error = set_error = None
+        """PREPARE ``fieldset`` bundled with the SET on ``conn`` (one packed write).
+
+        When ``asking`` is set (an ASK-redirected cluster SET) the batch becomes
+        ``[PREPARE, ASKING, SET]`` so the per-command ASKING allowance falls
+        immediately before the SET — the only slot-scoped command. PREPARE is a
+        connection-session command that the ASKING flag does not gate, so placing
+        it before ASKING is safe. Every reply is drained even on a per-command
+        error so the packed replies never desync the pooled socket.
+        """
+        commands = [himport_prepare_command(fieldset_name, fieldset.fields)]
+        if asking:
+            commands.append(("ASKING",))
+        commands.append(himport_set_command(key, fieldset_name, values))
+        await conn.send_packed_command(conn.pack_commands(commands))
+        prep_error = ask_error = set_error = None
         set_resp = None
         try:
             await self.parse_response(conn, HIMPORT_PREPARE)
         except ResponseError as e:
             prep_error = e
+        if asking:
+            try:
+                await self.parse_response(conn, "ASKING")
+            except ResponseError as e:
+                ask_error = e
         try:
             set_resp = await self.parse_response(conn, HIMPORT_SET)
         except ResponseError as e:
@@ -1923,12 +1954,19 @@ class ClusterNode:
         else:
             conn._himport_prepared[fieldset_name] = fieldset.version
 
+        if ask_error:
+            raise ask_error
         if set_error:
             raise set_error
         return set_resp
 
     async def _himport_execute_set(
-        self, conn: "Connection", key: KeyT, fieldset_name: str, values: List
+        self,
+        conn: "Connection",
+        key: KeyT,
+        fieldset_name: str,
+        values: List,
+        asking: bool = False,
     ) -> Any:
         """Execute an ``HIMPORT SET`` on ``conn`` with the required session setup.
 
@@ -1937,6 +1975,12 @@ class ClusterNode:
         reconciled must be dropped. Both are applied here, on the acquired
         connection, so the caller's full retry / MOVED-ASK / disconnect-on-error
         handling covers the whole exchange.
+
+        When ``asking`` is set (an ASK-redirected cluster SET) the ASKING allowance
+        is folded into the SET's own packed write so it immediately precedes the
+        SET. The session setup (deferred DISCARDs, lazy PREPARE) still runs first,
+        before ASKING, since those are connection-session commands the flag does
+        not gate; only the SET is slot-scoped and must carry the allowance.
         """
         await self._himport_reconcile_discards(conn)
 
@@ -1948,11 +1992,20 @@ class ClusterNode:
             and conn._himport_prepared.get(fieldset_name) != fieldset.version
         ):
             return await self._himport_prepare_and_set(
-                conn, key, fieldset_name, values, fieldset
+                conn, key, fieldset_name, values, fieldset, asking=asking
             )
 
-        # Believed already prepared (or an unregistered fieldset): bare SET.
-        await conn.send_command(*himport_set_command(key, fieldset_name, values))
+        # Believed already prepared (or an unregistered fieldset): bare SET, with
+        # ASKING packed immediately before it when this is an ASK redirect.
+        if asking:
+            await conn.send_packed_command(
+                conn.pack_commands(
+                    [("ASKING",), himport_set_command(key, fieldset_name, values)]
+                )
+            )
+            await self.parse_response(conn, "ASKING")
+        else:
+            await conn.send_command(*himport_set_command(key, fieldset_name, values))
         try:
             return await self.parse_response(conn, HIMPORT_SET)
         except NoSuchFieldsetError:

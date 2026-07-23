@@ -2631,7 +2631,9 @@ class ConnectionPool(
         # ``himport_schemas`` dict (empty if none). A config always exists so runtime
         # ``himport_prepare`` mutates a single object every connection already shares.
         # The object stays in ``connection_kwargs`` so it reaches every connection,
-        # while ``himport_schemas`` is consumed here.
+        # while ``himport_schemas`` is consumed here. It is injected unconditionally
+        # (like other auto-added pool kwargs), so a custom ``connection_class`` must
+        # accept ``**kwargs`` (or a ``himport_config`` parameter), as built-ins do.
         himport_config = connection_kwargs.get("himport_config")
         himport_schemas = connection_kwargs.pop("himport_schemas", None)
         if himport_config is None:

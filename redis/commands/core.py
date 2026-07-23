@@ -10832,6 +10832,14 @@ class HashCommands(CommandsProtocol):
             the SET fails and surfaces as an error in the batch results. Callers who
             need the automatic recovery should issue those sets outside a pipeline.
         """
+        # A bare str/bytes-like value is iterable element-by-element; splatting it
+        # would send single chars/bytes as separate positional values instead of one
+        # value. Reject it as a caller mistake, mirroring HImportConfig's field-list
+        # guard.
+        if isinstance(values, (str, bytes, bytearray, memoryview)):
+            raise DataError(
+                "HIMPORT values must be a collection of values, not a string"
+            )
         return self.execute_command(
             HIMPORT_SET, key, fieldset_name, *values, keys=[key]
         )

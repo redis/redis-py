@@ -1122,7 +1122,7 @@ class Redis(
         fieldset = self.himport_config.prepare(fieldset_name, fields)
         conn = self.connection
         if self.single_connection_client and conn is not None and conn.is_connected:
-            await self.himport_prepare_internal(fieldset_name, fields)
+            await self.himport_prepare_internal(fieldset_name, fieldset.fields)
             conn._himport_prepared[fieldset_name] = fieldset.version
         return True
 

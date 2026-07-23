@@ -1677,6 +1677,31 @@ class RedisCluster(
                         )
                     raise e
 
+    def _himport_prepare_for_asking(self, redis_node, connection, fieldset_name):
+        """Apply the connection-session setup an ASK-redirected HIMPORT SET needs.
+
+        Reconciles deferred DISCARDs and PREPAREs the fieldset on ``connection`` if
+        this connection has not already, so the subsequent bare SET (issued by the
+        node executor) is the only command after ASKING and keeps its allowance. A
+        no-op when the fieldset is unregistered or already prepared. Uses the same
+        reconcile/prepare idioms as the pipeline pre-flight
+        (:meth:`AbstractStrategy._himport_prepare_pipeline`).
+        """
+        cfg = getattr(connection, "himport_config", None)
+        if not isinstance(cfg, HImportConfig):
+            return
+        redis_node._himport_reconcile_discards(connection)
+        fieldset = cfg.get(fieldset_name)
+        if (
+            fieldset is not None
+            and connection._himport_prepared.get(fieldset_name) != fieldset.version
+        ):
+            connection.send_command(
+                *himport_prepare_command(fieldset_name, fieldset.fields)
+            )
+            redis_node.parse_response(connection, HIMPORT_PREPARE)
+            connection._himport_prepared[fieldset_name] = fieldset.version
+
     def _execute_command(self, target_node, *args, **kwargs):
         """
         Send a command to a node in the cluster
@@ -1712,7 +1737,7 @@ class RedisCluster(
 
                 redis_node = self.get_redis_connection(target_node)
                 connection = get_connection(redis_node)
-                if asking:
+                if asking and command != HIMPORT_SET:
                     connection.send_command("ASKING")
                     redis_node.parse_response(connection, "ASKING", **kwargs)
                     asking = False
@@ -1726,6 +1751,20 @@ class RedisCluster(
                     # and has no cleaner alternative: this is the only seam where the
                     # concrete routed connection is known, and connection-scoped
                     # session setup can only happen once that connection is chosen.
+                    if asking:
+                        # ASK redirect: the SET must carry the per-command ASKING
+                        # allowance, which Redis clears after the very next command.
+                        # Run the connection-session setup here first — deferred
+                        # DISCARD reconcile and lazy PREPARE, neither of which needs
+                        # nor may consume the allowance — then send ASKING so it lands
+                        # immediately before the SET. The executor below then finds the
+                        # session already reconciled and prepared and issues a bare SET.
+                        self._himport_prepare_for_asking(
+                            redis_node, connection, args[2]
+                        )
+                        connection.send_command("ASKING")
+                        redis_node.parse_response(connection, "ASKING", **kwargs)
+                        asking = False
                     response = redis_node._himport_execute_set(
                         connection, args[1], args[2], list(args[3:])
                     )
