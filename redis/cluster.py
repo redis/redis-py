@@ -3641,7 +3641,6 @@ PIPELINE_BLOCKED_COMMANDS = (
     "CONFIG",
     "DBSIZE",
     "ECHO",
-    "EVALSHA",
     "FLUSHALL",
     "FLUSHDB",
     "INFO",
