@@ -842,7 +842,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         oss_cluster_maint_notifications_handler: Optional[
             OSSMaintNotificationsHandler
         ] = None,
-        himport_config: Optional[HImportConfig] = None,
+        himport_config: HImportConfig | None = None,
     ):
         """
         Initialize a new Connection.
@@ -942,13 +942,9 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         self._should_reconnect = False
 
         # HIMPORT client-side state. `himport_config` is the shared client-level
-        # registry (or None). `_himport_prepared` maps fieldset name -> the version
-        # this connection last prepared on the server; `_himport_reconciled_revision`
-        # is the config revision this connection last reconciled discards against.
-        # These are populated here for propagation only and are not used yet.
+        # registry (empty if unconfigured) and persists across reconnects.
         self.himport_config = himport_config
-        self._himport_prepared: dict[str, int] = {}
-        self._himport_reconciled_revision: int = 0
+        self._reset_himport_state()
 
         # Set up maintenance notifications
         MaintNotificationsAbstractConnection.__init__(
@@ -1113,11 +1109,22 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
     def _error_message(self, exception):
         return format_error_message(self._host_error(), exception)
 
+    def _reset_himport_state(self):
+        # A fresh server session has no prepared HIMPORT fieldsets, so the next
+        # himport_set must re-prepare on this connection. ``_himport_prepared`` maps
+        # fieldset name -> the version prepared on the server; ``_himport_reconciled
+        # _revision`` is the config revision this connection last reconciled discards
+        # against. Both are reset on connect/disconnect since the session is gone.
+        self._himport_prepared: dict[str, int] = {}
+        self._himport_reconciled_revision: int = 0
+
     def on_connect(self):
         self.on_connect_check_health(check_health=True)
 
     def on_connect_check_health(self, check_health: bool = True):
         "Initialize the connection, authenticate and select a database"
+        # A fresh socket is a new server session: no prepared HIMPORT fieldsets.
+        self._reset_himport_state()
         self._parser.on_connect(self)
         parser = self._parser
 
@@ -1234,6 +1241,9 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
 
     def disconnect(self, *args, **kwargs):
         "Disconnects from the Redis server"
+        # The server session is gone, so any HIMPORT fieldsets prepared on this
+        # socket no longer exist; reset the tracking.
+        self._reset_himport_state()
         self._parser.on_disconnect()
 
         conn_sock = self._sock
@@ -1732,6 +1742,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def send_packed_command(self, command, check_health=True):
         # TODO: Investigate if it's possible to unpack command
         #  or extract keys from packed command
+        # Pre-packed commands are not individually cacheable, so make sure the
+        # next read_response does not try to cache their reply under a stale key.
+        self._current_command_cache_key = None
         self._conn.send_packed_command(command)
 
     def send_command(self, *args, **kwargs):
@@ -1863,6 +1876,25 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
     def pack_commands(self, commands):
         return self._conn.pack_commands(commands)
+
+    # HIMPORT state lives on the wrapped connection (HIMPORT is never cacheable);
+    # delegate so callers treat the proxy like a plain connection and never need
+    # to know a proxy is in play.
+    @property
+    def himport_config(self):
+        return self._conn.himport_config
+
+    @property
+    def _himport_prepared(self):
+        return self._conn._himport_prepared
+
+    @property
+    def _himport_reconciled_revision(self):
+        return self._conn._himport_reconciled_revision
+
+    @_himport_reconciled_revision.setter
+    def _himport_reconciled_revision(self, value):
+        self._conn._himport_reconciled_revision = value
 
     @property
     def handshake_metadata(self) -> Union[Dict[bytes, bytes], Dict[str, str]]:
@@ -2993,12 +3025,14 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         connection_kwargs.pop("cache_config", None)
 
         # Resolve the HIMPORT config. A pre-built ``himport_config`` (shared, e.g.
-        # from the cluster client) takes precedence; otherwise build one from a
-        # ``himport_schemas`` dict. The resolved config stays in ``connection_kwargs``
-        # so it reaches every connection, while ``himport_schemas`` is consumed here.
+        # from the cluster client) takes precedence; otherwise build one from the
+        # ``himport_schemas`` dict (empty if none). A config always exists so runtime
+        # ``himport_prepare`` mutates a single object every connection already shares.
+        # The object stays in ``connection_kwargs`` so it reaches every connection,
+        # while ``himport_schemas`` is consumed here.
         himport_config = connection_kwargs.get("himport_config")
         himport_schemas = connection_kwargs.pop("himport_schemas", None)
-        if himport_config is None and himport_schemas is not None:
+        if himport_config is None:
             himport_config = HImportConfig(himport_schemas)
             connection_kwargs["himport_config"] = himport_config
         self.himport_config = himport_config
@@ -3038,11 +3072,15 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         }
     )
 
+    # Internal plumbing kwargs omitted from __repr__ (not user-facing config).
+    OMIT_REPR_KEYS = frozenset({"himport_config"})
+
     def __repr__(self) -> str:
         conn_kwargs = ",".join(
             [
                 f"{k}={'<REDACTED>' if k in self.SENSITIVE_REPR_KEYS else v}"
                 for k, v in self.connection_kwargs.items()
+                if k not in self.OMIT_REPR_KEYS
             ]
         )
         return (

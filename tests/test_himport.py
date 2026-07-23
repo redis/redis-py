@@ -1,5 +1,7 @@
 import asyncio
 import inspect
+import threading
+from unittest import mock
 
 import pytest
 
@@ -9,8 +11,9 @@ from redis import Redis
 from redis.asyncio import Redis as AsyncRedis
 from redis.asyncio.connection import ConnectionPool as AsyncConnectionPool
 from redis.connection import BlockingConnectionPool, ConnectionPool
-from redis.exceptions import DataError
-from redis.himport import FieldsetOrigin, HImportConfig, HImportFieldset
+from redis._parsers.base import BaseParser
+from redis.exceptions import DataError, NoSuchFieldsetError, ResponseError
+from redis.himport import HIMPORT_SET, FieldsetOrigin, HImportConfig, HImportFieldset
 from redis.sentinel import Sentinel, SentinelConnectionPool
 
 
@@ -270,6 +273,133 @@ class TestHImportConfig:
         assert "fs" in text
         assert "INIT" in text
 
+    def test_concurrent_prepares_do_not_lose_revision_bumps(self):
+        # A sync Redis instance (and its shared HImportConfig) is routinely used
+        # across threads. Each prepare of a distinct name must advance the revision
+        # exactly once; the mutation lock keeps the read-modify-write from racing and
+        # collapsing bumps, which would let a connection skip a reconcile.
+        cfg = HImportConfig()
+        count = 200
+        barrier = threading.Barrier(count)
+
+        def worker(i):
+            barrier.wait()  # maximize contention on the mutation path
+            cfg.prepare(f"fs{i}", ["a"])
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(count)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(cfg) == count
+        assert cfg.revision == count  # no bump lost to a race
+
+
+class _RecordingConn:
+    """Minimal stand-in for a connection carrying HIMPORT state.
+
+    ``pack_commands`` / ``send_packed_command`` are no-ops (the client's
+    ``parse_response`` is mocked to supply the replies), so the batched
+    DISCARD/PREPARE read loops can be exercised without a real socket.
+    """
+
+    def __init__(self, cfg, prepared=None):
+        self.himport_config = cfg
+        self._himport_prepared = dict(prepared or {})
+        self._himport_reconciled_revision = 0
+
+    def pack_commands(self, commands):
+        return list(commands)
+
+    def send_packed_command(self, packed, **kwargs):
+        pass
+
+
+class _AsyncRecordingConn(_RecordingConn):
+    async def send_packed_command(self, packed, **kwargs):
+        pass
+
+
+@pytest.mark.fixed_client
+class TestHImportBatchedReadDrain:
+    """A per-command ResponseError inside a packed DISCARD/PREPARE batch must not
+    leave replies unread — that would desync the pooled connection. Each loop drains
+    every reply, marks only the ones that succeeded, then surfaces the first error.
+    """
+
+    def test_reconcile_discards_drains_all_replies_on_error(self):
+        # prepare+discard advances the revision so the connection reconciles; it has
+        # three stale prepared fieldsets, so three DISCARD replies must be read even
+        # though the second one errors.
+        cfg = HImportConfig()
+        cfg.prepare("a", ["f"])
+        cfg.discard("a")
+        conn = _RecordingConn(cfg, {"a": 1, "b": 1, "c": 1})
+        client = Redis()
+        replies = [True, ResponseError("boom"), True]
+        with mock.patch.object(client, "parse_response", side_effect=replies) as pr:
+            with pytest.raises(ResponseError, match="boom"):
+                client._himport_reconcile_discards(conn)
+        assert pr.call_count == 3  # every packed DISCARD reply drained
+        assert conn._himport_prepared == {}  # every stale name dropped regardless
+
+    def test_prepare_pipeline_drains_all_replies_on_error(self):
+        cfg = HImportConfig({"a": ["f"], "b": ["f"]})
+        conn = _RecordingConn(cfg)
+        conn._himport_reconciled_revision = cfg.revision  # no discard to reconcile
+        commands = [
+            (("HIMPORT SET", "k1", "a", "v"), {}),
+            (("HIMPORT SET", "k2", "b", "v"), {}),
+        ]
+        assert commands[0][0][0] == HIMPORT_SET  # guards the wire-token assumption
+        pipe = Redis().pipeline()
+        replies = [True, ResponseError("boom")]
+        with mock.patch.object(pipe, "parse_response", side_effect=replies) as pr:
+            with pytest.raises(ResponseError, match="boom"):
+                pipe._himport_prepare_pipeline(conn, commands)
+        assert pr.call_count == 2  # both PREPARE replies drained
+        assert "a" in conn._himport_prepared  # first PREPARE succeeded, marked
+        assert "b" not in conn._himport_prepared  # second errored, not marked
+
+    def test_async_reconcile_discards_drains_all_replies_on_error(self):
+        async def run():
+            cfg = HImportConfig()
+            cfg.prepare("a", ["f"])
+            cfg.discard("a")
+            conn = _AsyncRecordingConn(cfg, {"a": 1, "b": 1, "c": 1})
+            client = AsyncRedis()
+            client.parse_response = mock.AsyncMock(
+                side_effect=[True, ResponseError("boom"), True]
+            )
+            with pytest.raises(ResponseError, match="boom"):
+                await client._himport_reconcile_discards(conn)
+            assert client.parse_response.call_count == 3
+            assert conn._himport_prepared == {}
+
+        asyncio.run(run())
+
+    def test_async_prepare_pipeline_drains_all_replies_on_error(self):
+        async def run():
+            cfg = HImportConfig({"a": ["f"], "b": ["f"]})
+            conn = _AsyncRecordingConn(cfg)
+            conn._himport_reconciled_revision = cfg.revision
+            commands = [
+                (("HIMPORT SET", "k1", "a", "v"), {}),
+                (("HIMPORT SET", "k2", "b", "v"), {}),
+            ]
+            pipe = AsyncRedis().pipeline()
+            pipe.parse_response = mock.AsyncMock(
+                side_effect=[True, ResponseError("boom")]
+            )
+            with pytest.raises(ResponseError, match="boom"):
+                await pipe._himport_prepare_pipeline(conn, commands)
+            assert pipe.parse_response.call_count == 2
+            assert "a" in conn._himport_prepared
+            assert "b" not in conn._himport_prepared
+
+        asyncio.run(run())
+
 
 @pytest.mark.fixed_client
 class TestHImportPropagationSync:
@@ -293,10 +423,13 @@ class TestHImportPropagationSync:
         assert pool.himport_config is cfg
         assert pool.make_connection().himport_config is cfg
 
-    def test_pool_none_when_unconfigured(self):
+    def test_pool_empty_config_when_unconfigured(self):
+        # A config always exists (empty) so runtime himport_prepare has a single
+        # shared object to mutate; the same object reaches connections.
         pool = ConnectionPool()
-        assert pool.himport_config is None
-        assert pool.make_connection().himport_config is None
+        assert isinstance(pool.himport_config, HImportConfig)
+        assert len(pool.himport_config) == 0
+        assert pool.make_connection().himport_config is pool.himport_config
 
     def test_blocking_pool_resolves(self):
         pool = BlockingConnectionPool(himport_schemas={"s": ["a"]})
@@ -308,8 +441,10 @@ class TestHImportPropagationSync:
         assert r.himport_config is r.connection_pool.himport_config
         assert r.himport_config.get("shared").fields == ("name", "email")
 
-    def test_redis_unconfigured_is_none(self):
-        assert Redis().himport_config is None
+    def test_redis_unconfigured_is_empty(self):
+        cfg = Redis().himport_config
+        assert isinstance(cfg, HImportConfig)
+        assert len(cfg) == 0
 
     def test_redis_has_no_public_himport_config_param(self):
         # himport_config (the object) is internal-only; the sole public knob is the
@@ -342,7 +477,7 @@ class TestHImportPropagationAsync:
             assert r.himport_config is r.connection_pool.himport_config
             assert r.himport_config.get("s").fields == ("a",)
 
-            assert AsyncRedis().himport_config is None
+            assert len(AsyncRedis().himport_config) == 0
 
         asyncio.run(run())
 
@@ -369,4 +504,40 @@ class TestHImportClusterWiring:
         assert "himport_config" not in params
 
     def test_async_cluster_has_himport_slot(self):
-        assert "himport_config" in async_cluster_mod.RedisCluster.__slots__
+        # Private backing attribute lives in __slots__; the public name is a property.
+        assert "_himport_config" in async_cluster_mod.RedisCluster.__slots__
+
+    def test_himport_config_is_read_only_property(self):
+        # All client classes expose himport_config as a read-only property (no setter),
+        # so it cannot be rebound to desync the shared registry.
+        from redis import Redis, RedisCluster
+        from redis.asyncio import Redis as AsyncRedis
+        from redis.asyncio import RedisCluster as AsyncRedisCluster
+
+        for cls in (Redis, RedisCluster, AsyncRedis, AsyncRedisCluster):
+            attr = inspect.getattr_static(cls, "himport_config")
+            assert isinstance(attr, property), cls
+            assert attr.fset is None, cls  # read-only: no setter
+
+
+@pytest.mark.fixed_client
+class TestNoSuchFieldsetErrorMapping:
+    """The parser maps the server's "no such fieldset" reply to the dedicated
+    NoSuchFieldsetError so the HIMPORT SET recovery path can catch it by type.
+
+    The server reply is a fixed message with no fieldset name appended (verified
+    against the server: always exactly ``ERR no such fieldset``), so the mapping is
+    an exact match in ``EXCEPTION_CLASSES``, like the other ERR-message entries.
+    """
+
+    def test_maps_no_such_fieldset_reply(self):
+        # Exact wire reply the server sends for an unprepared fieldset.
+        exc = BaseParser.parse_error("ERR no such fieldset")
+        assert isinstance(exc, NoSuchFieldsetError)
+        assert isinstance(exc, ResponseError)  # remains a ResponseError subtype
+        assert exc.status_code == "ERR"
+
+    def test_unrelated_err_stays_generic(self):
+        exc = BaseParser.parse_error("ERR something else went wrong")
+        assert type(exc) is ResponseError
+        assert not isinstance(exc, NoSuchFieldsetError)

@@ -21,11 +21,52 @@ Example::
     True
 """
 
+import threading
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
 
 from redis.exceptions import DataError
+from redis.typing import EncodableT, FieldT, KeyT
+
+# ---------------------------------------------------------------------------
+# Wire command tokens
+# ---------------------------------------------------------------------------
+# Centralised so the sync/async clients, the cluster clients and the
+# CoreCommands mixin never repeat the literal HIMPORT strings. ``HIMPORT_*`` are
+# the full command names passed to ``execute_command`` and registered as
+# response callbacks (the request packer splits the space). The
+# ``himport_*_command`` builders return the positional wire args used when a
+# connection packs commands directly (lazy PREPARE bundled with SET, deferred
+# DISCARD reconcile, etc.).
+
+_HIMPORT = "HIMPORT"
+_PREPARE = "PREPARE"
+_SET = "SET"
+_DISCARD = "DISCARD"
+_DISCARDALL = "DISCARDALL"
+
+HIMPORT_PREPARE = f"{_HIMPORT} {_PREPARE}"
+HIMPORT_SET = f"{_HIMPORT} {_SET}"
+HIMPORT_DISCARD = f"{_HIMPORT} {_DISCARD}"
+HIMPORT_DISCARDALL = f"{_HIMPORT} {_DISCARDALL}"
+
+
+def himport_prepare_command(fieldset_name: str, fields: Iterable[FieldT]) -> tuple:
+    """Positional wire args for ``HIMPORT PREPARE fieldset_name field [field ...]``."""
+    return (_HIMPORT, _PREPARE, fieldset_name, *fields)
+
+
+def himport_set_command(
+    key: KeyT, fieldset_name: str, values: Iterable[EncodableT]
+) -> tuple:
+    """Positional wire args for ``HIMPORT SET key fieldset_name value [value ...]``."""
+    return (_HIMPORT, _SET, key, fieldset_name, *values)
+
+
+def himport_discard_command(fieldset_name: str) -> tuple:
+    """Positional wire args for ``HIMPORT DISCARD fieldset_name``."""
+    return (_HIMPORT, _DISCARD, fieldset_name)
 
 
 class FieldsetOrigin(Enum):
@@ -62,7 +103,7 @@ class HImportFieldset:
     """
 
     name: str
-    fields: tuple[str, ...]
+    fields: tuple[FieldT, ...]
     origin: FieldsetOrigin
     version: int
 
@@ -73,7 +114,9 @@ class HImportConfig:
     Pure in-memory state, shared by the sync and async clients. It is mutated only
     through the client's ``himport_prepare`` / ``himport_discard`` /
     ``himport_discard_all`` methods and exposed read-only through the client's
-    ``himport_config`` property.
+    ``himport_config`` property. Mutations are serialized under a lock so the
+    revision bump and dict change stay consistent when a sync ``Redis`` instance is
+    shared across threads; the async client runs single-threaded and never contends.
 
     Args:
         schemas: Optional mapping of ``fieldset_name -> ordered field names`` to
@@ -83,6 +126,11 @@ class HImportConfig:
 
     def __init__(self, schemas: Mapping[str, Iterable[str]] | None = None) -> None:
         self._fieldsets: dict[str, HImportFieldset] = {}
+        # Serializes mutations (prepare/discard/discard_all) so the revision bump and
+        # the dict change are applied atomically under concurrent access from a
+        # thread-shared sync client. Held only across the synchronous mutation body,
+        # never across I/O, so it is harmless for the single-threaded async client.
+        self._lock = threading.Lock()
         # Monotonic mutation clock. It advances on every registry change (prepare
         # and discard). prepare stamps the new entry with the advanced value as its
         # per-fieldset version; discard has no surviving entry to stamp, so the
@@ -96,13 +144,16 @@ class HImportConfig:
                 self._set(name, fields, FieldsetOrigin.INIT)
 
     # -- internal helpers -------------------------------------------------
+    # ``_advance`` and ``_set`` assume ``_lock`` is already held (they run under the
+    # public mutation methods) or that no other thread can observe the instance yet
+    # (during ``__init__``); they never acquire the lock themselves.
 
     def _advance(self) -> int:
         self._revision += 1
         return self._revision
 
     def _set(
-        self, name: str, fields: Iterable[str], origin: FieldsetOrigin
+        self, name: str, fields: Iterable[FieldT], origin: FieldsetOrigin
     ) -> HImportFieldset:
         # A bare str/bytes is iterable character-by-character; that is almost
         # certainly a caller mistake and would silently register single-character
@@ -125,7 +176,7 @@ class HImportConfig:
 
     # -- mutation ---------------------------------------------------------
 
-    def prepare(self, name: str, fields: Iterable[str]) -> HImportFieldset:
+    def prepare(self, name: str, fields: Iterable[FieldT]) -> HImportFieldset:
         """Add or replace a fieldset, bumping its version, and return the entry.
 
         A new name is registered as :attr:`FieldsetOrigin.RUNTIME`. Re-declaring
@@ -134,9 +185,10 @@ class HImportConfig:
         re-prepared, so discard protection cannot be bypassed by re-preparing.
         Field order is preserved verbatim; nothing is reordered or deduplicated.
         """
-        existing = self._fieldsets.get(name)
-        origin = existing.origin if existing is not None else FieldsetOrigin.RUNTIME
-        return self._set(name, fields, origin)
+        with self._lock:
+            existing = self._fieldsets.get(name)
+            origin = existing.origin if existing is not None else FieldsetOrigin.RUNTIME
+            return self._set(name, fields, origin)
 
     def discard(self, name: str) -> bool:
         """Remove a runtime fieldset from the registry.
@@ -146,16 +198,17 @@ class HImportConfig:
         fieldset was declared at client init (:attr:`FieldsetOrigin.INIT`).
         Advances :attr:`revision` when a fieldset is actually removed.
         """
-        existing = self._fieldsets.get(name)
-        if existing is None:
-            return False
-        if existing.origin is FieldsetOrigin.INIT:
-            raise DataError(
-                f"cannot discard HIMPORT fieldset {name!r} declared at client init"
-            )
-        del self._fieldsets[name]
-        self._advance()
-        return True
+        with self._lock:
+            existing = self._fieldsets.get(name)
+            if existing is None:
+                return False
+            if existing.origin is FieldsetOrigin.INIT:
+                raise DataError(
+                    f"cannot discard HIMPORT fieldset {name!r} declared at client init"
+                )
+            del self._fieldsets[name]
+            self._advance()
+            return True
 
     def discard_all(self) -> int:
         """Remove all runtime fieldsets and return the number removed.
@@ -165,21 +218,22 @@ class HImportConfig:
         discarded, so ``discard_all`` is rejected whenever one is present.
         Advances :attr:`revision` when at least one fieldset is removed.
         """
-        init_names = [
-            name
-            for name, fieldset in self._fieldsets.items()
-            if fieldset.origin is FieldsetOrigin.INIT
-        ]
-        if init_names:
-            raise DataError(
-                "cannot discard all HIMPORT fieldsets while init-declared "
-                "fieldsets exist: " + ", ".join(repr(n) for n in init_names)
-            )
-        count = len(self._fieldsets)
-        if count:
-            self._fieldsets.clear()
-            self._advance()
-        return count
+        with self._lock:
+            init_names = [
+                name
+                for name, fieldset in self._fieldsets.items()
+                if fieldset.origin is FieldsetOrigin.INIT
+            ]
+            if init_names:
+                raise DataError(
+                    "cannot discard all HIMPORT fieldsets while init-declared "
+                    "fieldsets exist: " + ", ".join(repr(n) for n in init_names)
+                )
+            count = len(self._fieldsets)
+            if count:
+                self._fieldsets.clear()
+                self._advance()
+            return count
 
     # -- read-only access -------------------------------------------------
 

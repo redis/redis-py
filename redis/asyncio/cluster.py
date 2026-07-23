@@ -105,6 +105,7 @@ from redis.exceptions import (
     InvalidPipelineStack,
     MaxConnectionsError,
     MovedError,
+    NoSuchFieldsetError,
     RedisClusterException,
     RedisError,
     ResponseError,
@@ -113,12 +114,21 @@ from redis.exceptions import (
     TryAgainError,
     WatchError,
 )
-from redis.himport import HImportConfig
+from redis.himport import (
+    HIMPORT_DISCARD,
+    HIMPORT_PREPARE,
+    HIMPORT_SET,
+    HImportConfig,
+    himport_discard_command,
+    himport_prepare_command,
+    himport_set_command,
+)
 from redis.maint_notifications import MaintNotificationsConfig
 from redis.typing import (
     AnyKeyT,
     ChannelT,
     EncodableT,
+    FieldT,
     KeyT,
     PubSubHandler,
     Subscription,
@@ -366,7 +376,7 @@ class RedisCluster(
         "_lock",
         "maint_notifications_config",
         "_oss_cluster_maint_notifications_handler",
-        "himport_config",
+        "_himport_config",
         "retry",
         "command_flags",
         "commands_parser",
@@ -548,16 +558,14 @@ class RedisCluster(
         else:
             kwargs["response_callbacks"]["CLUSTER SHARDS"] = parse_cluster_shards
 
-        # Build the client-level HIMPORT config once and share the same object with
-        # every node connection. It rides in connection_kwargs -> ClusterNode ->
-        # each node's Connection, so the fieldset registry is shared cluster-wide.
-        # (Async has no per-node Redis client, so the object flows via connection_kwargs
-        # directly to the Connection, which is internal plumbing, not a public param.)
-        self.himport_config = (
-            HImportConfig(himport_schemas) if himport_schemas is not None else None
-        )
-        if self.himport_config is not None:
-            kwargs["himport_config"] = self.himport_config
+        # Build the client-level HIMPORT config once (empty if no schemas) and share
+        # the same object with every node connection. It rides in connection_kwargs ->
+        # ClusterNode -> each node's Connection, so the registry is shared cluster-wide
+        # and runtime himport_prepare mutates one object. (Async has no per-node Redis
+        # client, so the object flows via connection_kwargs directly to the Connection,
+        # which is internal plumbing, not a public param.)
+        self._himport_config = HImportConfig(himport_schemas)
+        kwargs["himport_config"] = self._himport_config
 
         self.connection_kwargs = kwargs
 
@@ -898,6 +906,37 @@ class RedisCluster(
         See: https://redis.io/docs/manual/scaling/#redis-cluster-data-sharding
         """
         return key_slot(self.encoder.encode(key))
+
+    # HIMPORT orchestration (async mirror of redis.cluster.RedisCluster). The one
+    # shared HImportConfig is mutated once by PREPARE/DISCARD/DISCARDALL and applied
+    # lazily per node; SET routes by key slot to the owning primary's ClusterNode.
+    # See ``.agents/himport_client_support_spec.md``.
+
+    @property
+    def himport_config(self) -> HImportConfig:
+        """The cluster-wide HIMPORT fieldset registry (empty if none was declared).
+
+        Read-only: the registry is mutated only through the HIMPORT command methods.
+        """
+        return self._himport_config
+
+    async def himport_prepare(
+        self, fieldset_name: str, fields: Iterable[FieldT]
+    ) -> bool:
+        """Declare an HIMPORT fieldset cluster-wide (shared registry, applied lazily)."""
+        await self.initialize()
+        self._himport_config.prepare(fieldset_name, fields)
+        return True
+
+    async def himport_discard(self, fieldset_name: str) -> int:
+        """Remove a runtime fieldset cluster-wide. Raises ``DataError`` for init ones."""
+        await self.initialize()
+        return 1 if self._himport_config.discard(fieldset_name) else 0
+
+    async def himport_discard_all(self) -> int:
+        """Remove all runtime fieldsets cluster-wide. Raises ``DataError`` on init ones."""
+        await self.initialize()
+        return self._himport_config.discard_all()
 
     def get_encoder(self) -> Encoder:
         """Get the encoder object of the client."""
@@ -1802,6 +1841,23 @@ class ClusterNode:
             # Handle lazy disconnect for connections marked for reconnect
             await self.disconnect_if_needed(connection)
 
+            # HIMPORT SET is the one command whose wire form depends on
+            # per-connection state: the fieldset must be PREPAREd on this
+            # connection first, and any fieldset discarded since this connection
+            # last reconciled must be dropped. Doing it here (rather than in
+            # RedisCluster.himport_set) reuses the caller's full retry, MOVED/ASK
+            # and disconnect-on-error handling for HIMPORT SET too.
+            # This per-command branch in the hot dispatch path is deliberate and has
+            # no cleaner alternative: this is the only seam where the concrete routed
+            # connection is known, and connection-scoped session setup can only happen
+            # once that connection is chosen. The overhead is one comparison per
+            # command.
+            if args[0] == HIMPORT_SET:
+                # args == (HIMPORT_SET, key, fieldset_name, *values)
+                return await self._himport_execute_set(
+                    connection, args[1], args[2], list(args[3:])
+                )
+
             # Execute command
             await connection.send_packed_command(connection.pack_command(*args))
 
@@ -1814,12 +1870,166 @@ class ClusterNode:
                 # Release connection
                 self.release(connection)
 
+    async def _himport_reconcile_discards(self, conn: "Connection") -> None:
+        """DISCARD, on ``conn``, any prepared fieldset removed from the registry."""
+        cfg = conn.himport_config
+        if cfg is None or conn._himport_reconciled_revision == cfg.revision:
+            return
+        stale = cfg.names_to_discard(list(conn._himport_prepared))
+        if stale:
+            await conn.send_packed_command(
+                conn.pack_commands([himport_discard_command(n) for n in stale])
+            )
+            # One reply per packed DISCARD must be read regardless of a per-command
+            # ResponseError, otherwise the unread replies desync the pooled socket.
+            # Drain every reply, then surface the first error (ConnectionError is not
+            # caught: it tears the socket down, so no desync is possible).
+            first_error = None
+            for n in stale:
+                try:
+                    await self.parse_response(conn, HIMPORT_DISCARD)
+                except ResponseError as e:
+                    first_error = first_error or e
+                conn._himport_prepared.pop(n, None)
+            if first_error is not None:
+                raise first_error
+        conn._himport_reconciled_revision = cfg.revision
+
+    async def _himport_prepare_and_set(
+        self, conn: "Connection", key: KeyT, fieldset_name: str, values: List, fieldset
+    ) -> Any:
+        """PREPARE ``fieldset`` bundled with the SET on ``conn`` (one packed write)."""
+        await conn.send_packed_command(
+            conn.pack_commands(
+                [
+                    himport_prepare_command(fieldset_name, fieldset.fields),
+                    himport_set_command(key, fieldset_name, values),
+                ]
+            )
+        )
+        prep_error = set_error = None
+        set_resp = None
+        try:
+            await self.parse_response(conn, HIMPORT_PREPARE)
+        except ResponseError as e:
+            prep_error = e
+        try:
+            set_resp = await self.parse_response(conn, HIMPORT_SET)
+        except ResponseError as e:
+            set_error = e
+
+        if prep_error:
+            raise prep_error  # PREPARE failure is the root cause
+        else:
+            conn._himport_prepared[fieldset_name] = fieldset.version
+
+        if set_error:
+            raise set_error
+        return set_resp
+
+    async def _himport_execute_set(
+        self, conn: "Connection", key: KeyT, fieldset_name: str, values: List
+    ) -> Any:
+        """Execute an ``HIMPORT SET`` on ``conn`` with the required session setup.
+
+        ``HIMPORT SET`` needs the fieldset PREPAREd on this connection first, and
+        any fieldset discarded from the shared registry since this connection last
+        reconciled must be dropped. Both are applied here, on the acquired
+        connection, so the caller's full retry / MOVED-ASK / disconnect-on-error
+        handling covers the whole exchange.
+        """
+        await self._himport_reconcile_discards(conn)
+
+        cfg = conn.himport_config
+        fieldset = cfg.get(fieldset_name) if cfg is not None else None
+        # Lazy PREPARE bundled with SET on first use of this fieldset.
+        if (
+            fieldset is not None
+            and conn._himport_prepared.get(fieldset_name) != fieldset.version
+        ):
+            return await self._himport_prepare_and_set(
+                conn, key, fieldset_name, values, fieldset
+            )
+
+        # Believed already prepared (or an unregistered fieldset): bare SET.
+        await conn.send_command(*himport_set_command(key, fieldset_name, values))
+        try:
+            return await self.parse_response(conn, HIMPORT_SET)
+        except NoSuchFieldsetError:
+            # Server dropped the fieldset mid-connection without dropping the socket
+            # (e.g. RESET / maxmemory-clients eviction): re-PREPARE on this healthy
+            # connection and retry the SET once rather than reconnecting. Only for
+            # registry-backed fieldsets; manual/unregistered usage propagates.
+            if fieldset is None:
+                raise
+            conn._himport_prepared.pop(fieldset_name, None)
+            return await self._himport_prepare_and_set(
+                conn, key, fieldset_name, values, fieldset
+            )
+
+    async def _himport_prepare_pipeline(
+        self, conn: "Connection", commands: List["PipelineCommand"]
+    ) -> None:
+        """Pre-flight ``conn`` for a pipeline batch containing ``HIMPORT SET``s.
+
+        The packed pipeline write bypasses the per-command lazy PREPARE, so PREPARE
+        every distinct registered fieldset the batch references (and reconcile
+        deferred discards) on ``conn`` first, in one packed write.
+        """
+        # A pipeline may run on a connection type that never carries real HIMPORT
+        # state (e.g. mocked test doubles); only proceed for a real config.
+        cfg = getattr(conn, "himport_config", None)
+        if not isinstance(cfg, HImportConfig):
+            return
+        await self._himport_reconcile_discards(conn)
+        to_prepare = []
+        seen = set()
+        for cmd in commands:
+            args = cmd.args
+            if not args or args[0] != HIMPORT_SET or len(args) < 3:
+                continue
+            fieldset_name = args[2]
+            if fieldset_name in seen:
+                continue
+            seen.add(fieldset_name)
+            fieldset = cfg.get(fieldset_name)
+            if (
+                fieldset is not None
+                and conn._himport_prepared.get(fieldset_name) != fieldset.version
+            ):
+                to_prepare.append(fieldset)
+        if not to_prepare:
+            return
+        await conn.send_packed_command(
+            conn.pack_commands(
+                [himport_prepare_command(fs.name, fs.fields) for fs in to_prepare]
+            )
+        )
+        # One reply per packed PREPARE must be read regardless of a per-command
+        # ResponseError, otherwise the unread replies desync the socket before the
+        # buffered batch is even sent. Drain every reply (marking only the ones that
+        # succeeded), then surface the first error as the root cause.
+        first_error = None
+        for fs in to_prepare:
+            try:
+                await self.parse_response(conn, HIMPORT_PREPARE)
+            except ResponseError as e:
+                first_error = first_error or e
+                continue
+            conn._himport_prepared[fs.name] = fs.version
+        if first_error is not None:
+            raise first_error
+
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:
         # Acquire connection
         connection = self.acquire_connection()
         try:
             # Handle lazy disconnect for connections marked for reconnect
             await self.disconnect_if_needed(connection)
+
+            # PREPARE fieldsets referenced by buffered HIMPORT SETs before the
+            # batched write (it bypasses the per-command lazy prepare path).
+            await self._himport_prepare_pipeline(connection, commands)
 
             # Execute command
             await connection.send_packed_command(
@@ -3192,6 +3402,11 @@ class TransactionStrategy(AbstractStrategy):
         # Only disconnect if not watching - disconnecting would lose WATCH state
         if not self._watching:
             await redis_node.disconnect_if_needed(connection)
+
+        # Ensure fieldsets referenced by buffered HIMPORT SETs are prepared on this
+        # node's connection before the MULTI/EXEC block (session state, not
+        # transactional). All keys share one slot here, so it is a single node.
+        await redis_node._himport_prepare_pipeline(connection, stack)
 
         stack = chain(
             [PipelineCommand(0, "MULTI")],

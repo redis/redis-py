@@ -713,13 +713,9 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         self.set_parser(parser_class)
 
         # HIMPORT client-side state. `himport_config` is the shared client-level
-        # registry (or None). `_himport_prepared` maps fieldset name -> the version
-        # this connection last prepared on the server; `_himport_reconciled_revision`
-        # is the config revision this connection last reconciled discards against.
-        # These are populated here for propagation only and are not used yet.
+        # registry (empty if unconfigured) and persists across reconnects.
         self.himport_config = himport_config
-        self._himport_prepared: dict[str, int] = {}
-        self._himport_reconciled_revision: int = 0
+        self._reset_himport_state()
 
         AsyncMaintNotificationsAbstractConnection.__init__(
             self,
@@ -930,11 +926,22 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
     def get_protocol(self):
         return self.protocol
 
+    def _reset_himport_state(self) -> None:
+        # A fresh server session has no prepared HIMPORT fieldsets, so the next
+        # himport_set must re-prepare on this connection. ``_himport_prepared`` maps
+        # fieldset name -> the version prepared on the server; ``_himport_reconciled
+        # _revision`` is the config revision this connection last reconciled discards
+        # against. Both are reset on connect/disconnect since the session is gone.
+        self._himport_prepared: dict[str, int] = {}
+        self._himport_reconciled_revision: int = 0
+
     async def on_connect(self) -> None:
         """Initialize the connection, authenticate and select a database"""
         await self.on_connect_check_health(check_health=True)
 
     async def on_connect_check_health(self, check_health: bool = True) -> None:
+        # A fresh socket is a new server session: no prepared HIMPORT fieldsets.
+        self._reset_himport_state()
         self._parser.on_connect(self)
         parser = self._parser
 
@@ -1064,6 +1071,9 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         health_check_failed: bool = False,
     ) -> None:
         """Disconnects from the Redis server"""
+        # The server session is gone, so any HIMPORT fieldsets prepared on this
+        # socket no longer exist; reset the tracking.
+        self._reset_himport_state()
         # On Python 3.13+, asyncio.timeout() raises RuntimeError when called
         # outside a running Task (e.g. during GC finalization or event-loop
         # callbacks).  In that context we fall back to a synchronous close.
@@ -2617,12 +2627,14 @@ class ConnectionPool(
         self.max_connections = max_connections
 
         # Resolve the HIMPORT config. A pre-built ``himport_config`` (shared, e.g.
-        # from the cluster client) takes precedence; otherwise build one from a
-        # ``himport_schemas`` dict. The resolved config stays in ``connection_kwargs``
-        # so it reaches every connection, while ``himport_schemas`` is consumed here.
+        # from the cluster client) takes precedence; otherwise build one from the
+        # ``himport_schemas`` dict (empty if none). A config always exists so runtime
+        # ``himport_prepare`` mutates a single object every connection already shares.
+        # The object stays in ``connection_kwargs`` so it reaches every connection,
+        # while ``himport_schemas`` is consumed here.
         himport_config = connection_kwargs.get("himport_config")
         himport_schemas = connection_kwargs.pop("himport_schemas", None)
-        if himport_config is None and himport_schemas is not None:
+        if himport_config is None:
             himport_config = HImportConfig(himport_schemas)
             connection_kwargs["himport_config"] = himport_config
         self.himport_config = himport_config
@@ -2651,11 +2663,15 @@ class ConnectionPool(
         }
     )
 
+    # Internal plumbing kwargs omitted from __repr__ (not user-facing config).
+    OMIT_REPR_KEYS = frozenset({"himport_config"})
+
     def __repr__(self):
         conn_kwargs = ",".join(
             [
                 f"{k}={'<REDACTED>' if k in self.SENSITIVE_REPR_KEYS else v}"
                 for k, v in self.connection_kwargs.items()
+                if k not in self.OMIT_REPR_KEYS
             ]
         )
         return (

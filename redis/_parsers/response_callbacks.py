@@ -26,6 +26,12 @@ protocol-specific overlay. Callers wrap the returned dict in
 
 from typing import Any, Callable, Optional
 
+from redis.himport import (
+    HIMPORT_DISCARD,
+    HIMPORT_DISCARDALL,
+    HIMPORT_PREPARE,
+    HIMPORT_SET,
+)
 from redis.utils import str_if_bytes
 
 from .helpers import (
@@ -182,6 +188,10 @@ _RedisCallbacks = {
     "FUNCTION FLUSH": bool_ok,
     "FUNCTION RESTORE": bool_ok,
     "GEODIST": float_or_none,
+    HIMPORT_PREPARE: bool_ok,
+    HIMPORT_SET: bool_ok,
+    HIMPORT_DISCARD: int,
+    HIMPORT_DISCARDALL: int,
     "HSCAN": parse_hscan,
     "INFO": parse_info,
     "LASTSAVE": timestamp_to_datetime,
