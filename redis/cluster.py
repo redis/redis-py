@@ -1868,15 +1868,20 @@ class RedisCluster(
                     # On an ASK redirect ``asking`` is folded into the SET's own packed
                     # write (see the guard above that suppresses the standalone ASKING
                     # for HIMPORT SET) so the allowance sits immediately before the SET.
+                    # Clear ``asking`` first and carry the allowance in a dedicated
+                    # local: ``_himport_execute_set`` can raise a retriable MOVED/TRYAGAIN
+                    # mid-exchange, and a stale ``asking`` would shadow the moved-retry
+                    # branch on the next loop iteration (mirrors the async client).
+                    ask_himport = asking
+                    asking = False
                     response = self._himport_execute_set(
                         redis_node,
                         connection,
                         args[1],
                         args[2],
                         list(args[3:]),
-                        asking=asking,
+                        asking=ask_himport,
                     )
-                    asking = False
                     kwargs.pop("keys", None)
                 else:
                     connection.send_command(*args, **kwargs)
