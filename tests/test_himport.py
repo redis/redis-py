@@ -1114,6 +1114,48 @@ class TestHImportClusterWiring:
             assert isinstance(attr, property), cls
             assert attr.fset is None, cls  # read-only: no setter
 
+    def test_sync_cluster_pipeline_shares_parent_registry(self):
+        # The pipeline inherits himport_prepare/discard/discard_all from RedisCluster;
+        # they mutate the one registry threaded through the NodesManager (and referenced
+        # by every node pool), so a fieldset declared on the pipeline is visible to the
+        # batched himport_set pre-flight exactly as on the parent client.
+        registry = HImportRegistry()
+        nodes_manager = mock.Mock()
+        nodes_manager.himport_registry = registry
+        pipe = cluster_mod.ClusterPipeline(
+            nodes_manager=nodes_manager, commands_parser=mock.Mock()
+        )
+
+        assert pipe.himport_registry is registry
+        assert pipe.himport_prepare("fs", ["a", "b"]) is True
+        assert registry.get("fs") is not None  # mutated the shared object
+        assert pipe.himport_discard("fs") == 1
+        assert registry.get("fs") is None
+        assert pipe.himport_discard_all() == 0
+
+    def test_async_cluster_pipeline_delegates_to_parent_registry(self):
+        # The async pipeline holds only a client reference, so its HIMPORT lifecycle
+        # methods delegate to the parent client, mutating the one shared registry.
+        registry = HImportRegistry()
+        client = mock.Mock()
+        client.himport_registry = registry
+        client.himport_prepare = mock.AsyncMock(return_value=True)
+        client.himport_discard = mock.AsyncMock(return_value=1)
+        client.himport_discard_all = mock.AsyncMock(return_value=0)
+        pipe = async_cluster_mod.ClusterPipeline(client)
+
+        assert pipe.himport_registry is registry
+
+        async def run():
+            assert await pipe.himport_prepare("fs", ["a", "b"]) is True
+            assert await pipe.himport_discard("fs") == 1
+            assert await pipe.himport_discard_all() == 0
+
+        asyncio.run(run())
+        client.himport_prepare.assert_awaited_once_with("fs", ["a", "b"])
+        client.himport_discard.assert_awaited_once_with("fs")
+        client.himport_discard_all.assert_awaited_once_with()
+
 
 @pytest.mark.fixed_client
 class TestNoSuchFieldsetErrorMapping:

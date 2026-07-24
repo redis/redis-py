@@ -3648,6 +3648,11 @@ class ClusterPipeline(RedisCluster):
         """ """
         self.command_stack = []
         self.nodes_manager = nodes_manager
+        # Share the parent cluster's HIMPORT registry (held on the NodesManager and
+        # referenced by every node pool). The inherited himport_prepare/discard/
+        # discard_all mutate this one object, so a fieldset declared on the pipeline is
+        # visible to the batched himport_set pre-flight exactly as on the parent client.
+        self._himport_registry = nodes_manager.himport_registry
         self.commands_parser = commands_parser
         self.refresh_table_asap = False
         self.result_callbacks = (

@@ -516,16 +516,16 @@ class Pipeline(AsyncRedisModuleCommands, AsyncCoreCommands):
     # pipeline inherits ``himport_set`` from ``AsyncCoreCommands`` and would otherwise
     # queue an unprepared ``HIMPORT SET`` that fails with a confusing server-side
     # error, bypassing the client-level guard. Block all HIMPORT methods here too.
-    async def himport_prepare(self, *args: Any, **kwargs: Any) -> Any:
+    def himport_prepare(self, *args: Any, **kwargs: Any) -> Any:
         raise DataError(MultiDBClient._HIMPORT_UNSUPPORTED)
 
-    async def himport_set(self, *args: Any, **kwargs: Any) -> Any:
+    def himport_set(self, *args: Any, **kwargs: Any) -> Any:
         raise DataError(MultiDBClient._HIMPORT_UNSUPPORTED)
 
-    async def himport_discard(self, *args: Any, **kwargs: Any) -> Any:
+    def himport_discard(self, *args: Any, **kwargs: Any) -> Any:
         raise DataError(MultiDBClient._HIMPORT_UNSUPPORTED)
 
-    async def himport_discard_all(self, *args: Any, **kwargs: Any) -> Any:
+    def himport_discard_all(self, *args: Any, **kwargs: Any) -> Any:
         raise DataError(MultiDBClient._HIMPORT_UNSUPPORTED)
 
     async def execute(self) -> List[Any]:

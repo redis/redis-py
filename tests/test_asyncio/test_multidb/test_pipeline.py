@@ -524,12 +524,15 @@ class TestPipelineHImportUnsupported:
     blocked there too. The overrides raise before touching the client, so no config
     or server is needed."""
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "method",
         ["himport_prepare", "himport_set", "himport_discard", "himport_discard_all"],
     )
-    async def test_pipeline_himport_methods_raise(self, method):
+    def test_pipeline_himport_methods_raise(self, method):
+        # Pipeline commands are staged synchronously (``pipe.set(...)`` returns the
+        # pipe, not a coroutine), so the guard must raise at call time without an
+        # ``await``; an ``async def`` override would only return an un-awaited
+        # coroutine and skip the command silently.
         pipe = MultiDBPipeline(Mock(spec=MultiDBClient))
         with pytest.raises(DataError, match="not supported on the multi-database"):
-            await getattr(pipe, method)("users", ["a"])
+            getattr(pipe, method)("users", ["a"])

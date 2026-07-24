@@ -2677,6 +2677,33 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         """Get the nodes manager from the cluster client."""
         return self.cluster_client.nodes_manager
 
+    # HIMPORT lifecycle on a cluster pipeline delegates to the parent client, mutating
+    # the one shared registry that every node pool references. A fieldset declared here
+    # is therefore visible to the batched himport_set pre-flight, mirroring the sync
+    # ClusterPipeline (which inherits these from RedisCluster over the shared registry).
+
+    @property
+    def himport_registry(self) -> HImportRegistry:
+        """The cluster-wide HIMPORT fieldset registry (empty if none was declared).
+
+        Read-only: the registry is mutated only through the HIMPORT command methods.
+        """
+        return self.cluster_client.himport_registry
+
+    async def himport_prepare(
+        self, fieldset_name: str, fields: Iterable[FieldT]
+    ) -> bool:
+        """Declare an HIMPORT fieldset cluster-wide (shared registry, applied lazily)."""
+        return await self.cluster_client.himport_prepare(fieldset_name, fields)
+
+    async def himport_discard(self, fieldset_name: str) -> int:
+        """Remove an HIMPORT fieldset cluster-wide (shared registry, applied lazily)."""
+        return await self.cluster_client.himport_discard(fieldset_name)
+
+    async def himport_discard_all(self) -> int:
+        """Remove all HIMPORT fieldsets cluster-wide (shared registry, applied lazily)."""
+        return await self.cluster_client.himport_discard_all()
+
     def set_response_callback(self, command: str, callback: ResponseCallbackT) -> None:
         """Set a custom response callback on the cluster client."""
         self.cluster_client.set_response_callback(command, callback)
