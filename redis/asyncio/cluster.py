@@ -3398,8 +3398,25 @@ class TransactionStrategy(AbstractStrategy):
         Send a command and parse the response
         """
 
-        await connection.send_command(*args)
-        output = await redis_node.parse_response(connection, command_name, **options)
+        # HIMPORT SET's wire form depends on per-connection state: the fieldset
+        # must be PREPAREd on this connection first, and any fieldset discarded
+        # since this connection last reconciled must be dropped. The
+        # immediate/watched path (commands issued after WATCH, before MULTI)
+        # would otherwise send a bare HIMPORT SET and fail with "no such
+        # fieldset". Route it through the node's HIMPORT executor, the same way
+        # the normal cluster path, the batched MULTI/EXEC path, and standalone
+        # watched pipelines all do.
+        if command_name == HIMPORT_SET and len(args) >= 3:
+            # args == (HIMPORT_SET, key, fieldset_name, *values). Too few args
+            # fall through to the bare send so the server returns its arity error.
+            output = await redis_node._himport_execute_set(
+                connection, args[1], args[2], list(args[3:])
+            )
+        else:
+            await connection.send_command(*args)
+            output = await redis_node.parse_response(
+                connection, command_name, **options
+            )
 
         if command_name in self.UNWATCH_COMMANDS:
             self._watching = False

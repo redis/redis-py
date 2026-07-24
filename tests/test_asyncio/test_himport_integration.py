@@ -268,6 +268,20 @@ async def test_pipeline_runtime_prepared_fieldset(hr):
     assert await hr.hget("h:{u}:pl1", "y") == b"2"
 
 
+async def test_pipeline_watch_immediate_himport_set(hr):
+    # An HIMPORT SET issued after WATCH (before MULTI) runs on the immediate
+    # execution path, not the batched one. That path must lazily PREPARE the
+    # fieldset on the watched connection like the normal and batched paths do;
+    # otherwise the bare HIMPORT SET fails with "no such fieldset".
+    key = "h:{u}:w1"
+    async with hr.pipeline(transaction=True) as pipe:
+        await pipe.watch(key)
+        # Executed immediately on the watched connection.
+        await pipe.himport_set(key, "shared", ["alice", "alice@x", "25"])
+    assert await hr.hget(key, "name") == b"alice"
+    assert await hr.hget(key, "age") == b"25"
+
+
 @pytest.mark.onlynoncluster
 async def test_himport_set_recovers_when_fieldset_lost_midconnection(create_redis):
     """If the server drops a prepared fieldset mid-connection (e.g. RESET or

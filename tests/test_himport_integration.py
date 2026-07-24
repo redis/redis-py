@@ -349,6 +349,22 @@ class TestHImportIntegration:
         assert not any(isinstance(r, Exception) for r in result)
         assert hr.hget("h:{u}:pl1", "y") == b"2"
 
+    def test_pipeline_watch_immediate_himport_set(self, hr):
+        # An HIMPORT SET issued after WATCH (before MULTI) runs on the immediate
+        # execution path, not the batched one. That path must lazily PREPARE the
+        # fieldset on the watched connection like the normal and batched paths
+        # do; otherwise the bare HIMPORT SET fails with "no such fieldset".
+        key = "h:{u}:w1"
+        pipe = hr.pipeline(transaction=True)
+        try:
+            pipe.watch(key)
+            # Executed immediately on the watched connection.
+            pipe.himport_set(key, "shared", ["alice", "alice@x", "25"])
+        finally:
+            pipe.reset()
+        assert hr.hget(key, "name") == b"alice"
+        assert hr.hget(key, "age") == b"25"
+
     @pytest.mark.onlycluster
     def test_cluster_multi_slot(self, hr):
         # Distinct hash tags spread keys across slots/nodes; each node prepares lazily.
