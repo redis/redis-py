@@ -20,7 +20,6 @@ from typing import (
     Iterable,
     List,
     Literal,
-    Mapping,
     Optional,
     Set,
     Tuple,
@@ -727,7 +726,6 @@ class RedisCluster(
         event_dispatcher: Optional[EventDispatcher] = None,
         policy_resolver: PolicyResolver = StaticPolicyResolver(),
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
-        himport_schemas: Mapping[str, Iterable[str]] | None = None,
         **kwargs,
     ):
         """
@@ -903,13 +901,13 @@ class RedisCluster(
         if check_protocol_version(protocol, 3) and maint_notifications_config is None:
             maint_notifications_config = MaintNotificationsConfig()
 
-        # Build the client-level HIMPORT registry once (empty if no schemas) and share
-        # the same object with every node pool, so the fieldset registry is shared
-        # cluster-wide and runtime himport_prepare mutates one object. It is handed to
-        # the NodesManager and injected onto each node's pool in create_redis_node;
-        # it is deliberately NOT forwarded through connection_kwargs, so nodes reuse the
-        # one shared object rather than each rebuilding its own from the schemas.
-        self._himport_registry = HImportRegistry(himport_schemas)
+        # Build the client-level HIMPORT registry once (always empty at construction)
+        # and share the same object with every node pool, so the fieldset registry is
+        # shared cluster-wide and runtime himport_prepare mutates one object. It is
+        # handed to the NodesManager and injected onto each node's pool in
+        # create_redis_node; it is deliberately NOT forwarded through connection_kwargs,
+        # so nodes reuse the one shared object rather than each rebuilding their own.
+        self._himport_registry = HImportRegistry()
 
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.node_flags = self.__class__.NODE_FLAGS.copy()
@@ -1780,7 +1778,18 @@ class RedisCluster(
                     [("ASKING",), himport_set_command(key, fieldset_name, values)]
                 )
             )
-            redis_node.parse_response(connection, "ASKING")
+            try:
+                redis_node.parse_response(connection, "ASKING")
+            except ResponseError as ask_error:
+                # ASKING and SET were one packed write, so the SET reply is still
+                # queued. Drain it before surfacing the ASKING error, otherwise the
+                # connection returns to the pool with an unread reply and desyncs
+                # the next borrower.
+                try:
+                    redis_node.parse_response(connection, HIMPORT_SET)
+                except ResponseError:
+                    pass
+                raise ask_error
         else:
             connection.send_command(*himport_set_command(key, fieldset_name, values))
         try:

@@ -16,6 +16,7 @@ from redis.asyncio.retry import Retry
 from redis.background import BackgroundScheduler
 from redis.backoff import NoBackoff
 from redis.commands import AsyncCoreCommands, AsyncRedisModuleCommands
+from redis.exceptions import DataError
 from redis.multidb.circuit import CircuitBreaker
 from redis.multidb.circuit import State as CBState
 from redis.multidb.exception import (
@@ -290,6 +291,29 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             await self.initialize()
 
         return await self.command_executor.execute_command(*args, **options)
+
+    # HIMPORT is not supported on the multi-database client. A HIMPORT fieldset is
+    # per-connection server session state tracked by a single client's registry;
+    # there is no coherent way to keep that state consistent across independent
+    # database clients through failover. ``himport_set`` is inherited from
+    # ``AsyncCoreCommands`` (and the lifecycle methods would otherwise be missing
+    # entirely), so override them to fail early and clearly instead of surfacing a
+    # confusing ``no such fieldset`` at runtime.
+    _HIMPORT_UNSUPPORTED = (
+        "HIMPORT is not supported on the multi-database (Active-Active) client"
+    )
+
+    async def himport_prepare(self, *args: Any, **kwargs: Any) -> Any:
+        raise DataError(self._HIMPORT_UNSUPPORTED)
+
+    async def himport_set(self, *args: Any, **kwargs: Any) -> Any:
+        raise DataError(self._HIMPORT_UNSUPPORTED)
+
+    async def himport_discard(self, *args: Any, **kwargs: Any) -> Any:
+        raise DataError(self._HIMPORT_UNSUPPORTED)
+
+    async def himport_discard_all(self, *args: Any, **kwargs: Any) -> Any:
+        raise DataError(self._HIMPORT_UNSUPPORTED)
 
     def pipeline(self):
         """

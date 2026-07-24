@@ -325,7 +325,6 @@ class Redis(
         legacy_responses: bool = True,
         event_dispatcher: EventDispatcher | None = None,
         maint_notifications_config: MaintNotificationsConfig | None = None,
-        himport_schemas: Mapping[str, Iterable[str]] | None = None,
     ):
         """
         Initialize a new Redis client.
@@ -369,13 +368,6 @@ class Redis(
             will be enabled by default (logic is included in the connection pool
             initialization).
             Argument is ignored when connection_pool is provided.
-        himport_schemas:
-            optional mapping of `fieldset_name -> ordered field names` to register
-            as HIMPORT fieldsets at construction time - see `redis.himport` for
-            details. The pool owns the resulting `HImportRegistry`, so this argument
-            is ignored when connection_pool is provided: to preconfigure schemas
-            with a caller-supplied pool, pass `himport_schemas` to the pool itself
-            (e.g. `ConnectionPool(..., himport_schemas=...)`).
         """
         kwargs: Dict[str, Any]
         if event_dispatcher is None:
@@ -489,11 +481,6 @@ class Redis(
                         "maint_notifications_config": maint_notifications_config,
                     }
                 )
-            # The pool builds the HImportRegistry from the schemas (see
-            # ConnectionPool.__init__) and owns it; the client never holds a mutable
-            # reference, so the registry is mutated only via the HIMPORT command methods.
-            if himport_schemas is not None:
-                kwargs.update({"himport_schemas": himport_schemas})
             # This arg only used if no pool is passed in
             self.auto_close_connection_pool = auto_close_connection_pool
             connection_pool = ConnectionPool(**kwargs)
@@ -1136,7 +1123,7 @@ class Redis(
         return True
 
     async def himport_discard(self, fieldset_name: str) -> int:
-        """Remove a runtime fieldset. Raises ``DataError`` for init-declared ones."""
+        """Remove a fieldset from the registry."""
         await self.initialize()
         removed = self.himport_registry.discard(fieldset_name)
         conn = self.connection
@@ -1148,7 +1135,7 @@ class Redis(
         return 1 if removed else 0
 
     async def himport_discard_all(self) -> int:
-        """Remove all runtime fieldsets. Raises ``DataError`` if any init one exists."""
+        """Remove all fieldsets from the registry."""
         await self.initialize()
         count = self.himport_registry.discard_all()
         conn = self.connection

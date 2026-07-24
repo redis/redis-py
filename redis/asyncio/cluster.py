@@ -462,7 +462,6 @@ class RedisCluster(
         event_dispatcher: EventDispatcher | None = None,
         policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver(),
         maint_notifications_config: MaintNotificationsConfig | None = None,
-        himport_schemas: Mapping[str, Iterable[str]] | None = None,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -558,13 +557,13 @@ class RedisCluster(
         else:
             kwargs["response_callbacks"]["CLUSTER SHARDS"] = parse_cluster_shards
 
-        # Build the client-level HIMPORT registry once (empty if no schemas) and share
-        # the same object with every node connection. It rides in connection_kwargs ->
-        # ClusterNode -> each node's Connection, so the registry is shared cluster-wide
-        # and runtime himport_prepare mutates one object. (Async has no per-node Redis
-        # client, so the object flows via connection_kwargs directly to the Connection,
-        # which is internal plumbing, not a public param.)
-        self._himport_registry = HImportRegistry(himport_schemas)
+        # Build the client-level HIMPORT registry once (always empty at construction)
+        # and share the same object with every node connection. It rides in
+        # connection_kwargs -> ClusterNode -> each node's Connection, so the registry is
+        # shared cluster-wide and runtime himport_prepare mutates one object. (Async has
+        # no per-node Redis client, so the object flows via connection_kwargs directly to
+        # the Connection, which is internal plumbing, not a public param.)
+        self._himport_registry = HImportRegistry()
         kwargs["himport_registry"] = self._himport_registry
 
         self.connection_kwargs = kwargs
@@ -2012,7 +2011,18 @@ class ClusterNode:
                     [("ASKING",), himport_set_command(key, fieldset_name, values)]
                 )
             )
-            await self.parse_response(conn, "ASKING")
+            try:
+                await self.parse_response(conn, "ASKING")
+            except ResponseError as ask_error:
+                # ASKING and SET were one packed write, so the SET reply is still
+                # queued. Drain it before surfacing the ASKING error, otherwise the
+                # connection returns to the pool with an unread reply and desyncs
+                # the next borrower.
+                try:
+                    await self.parse_response(conn, HIMPORT_SET)
+                except ResponseError:
+                    pass
+                raise ask_error
         else:
             await conn.send_command(*himport_set_command(key, fieldset_name, values))
         try:

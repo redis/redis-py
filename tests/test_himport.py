@@ -13,8 +13,8 @@ from redis.asyncio.connection import ConnectionPool as AsyncConnectionPool
 from redis.connection import BlockingConnectionPool, ConnectionPool
 from redis._parsers.base import BaseParser
 from redis.exceptions import DataError, NoSuchFieldsetError, ResponseError
-from redis.himport import HIMPORT_SET, FieldsetOrigin, HImportRegistry, HImportFieldset
-from redis.sentinel import Sentinel, SentinelConnectionPool
+from redis.himport import HIMPORT_SET, HImportRegistry, HImportFieldset
+from redis.sentinel import Sentinel
 
 
 @pytest.mark.fixed_client
@@ -30,24 +30,16 @@ class TestHImportRegistry:
         assert registry.get("missing") is None
         assert "missing" not in registry
 
-    def test_none_schemas_is_empty(self):
-        assert len(HImportRegistry(None)) == 0
-
-    def test_constructor_entries_are_init(self):
-        registry = HImportRegistry({"shared": ["name", "email", "age"]})
+    def test_prepared_entry_exposes_name_fields_version(self):
+        registry = HImportRegistry()
+        registry.prepare("shared", ["name", "email", "age"])
         fs = registry.get("shared")
         assert isinstance(fs, HImportFieldset)
         assert fs.name == "shared"
         assert fs.fields == ("name", "email", "age")
-        assert fs.origin is FieldsetOrigin.INIT
+        assert isinstance(fs.version, int)
         assert "shared" in registry
         assert registry.names() == ["shared"]
-
-    def test_multiple_constructor_entries(self):
-        registry = HImportRegistry({"a": ["x"], "b": ["y", "z"]})
-        assert len(registry) == 2
-        assert {name for name, _ in registry.items()} == {"a", "b"}
-        assert all(fs.origin is FieldsetOrigin.INIT for _, fs in registry.items())
 
     # -- field-order fidelity --------------------------------------------
 
@@ -73,7 +65,8 @@ class TestHImportRegistry:
     def test_empty_string_names_and_fields_allowed(self):
         # Empty strings are valid fieldset names and field names per the HLD;
         # the client must not reject them locally.
-        registry = HImportRegistry({"": [""]})
+        registry = HImportRegistry()
+        registry.prepare("", [""])
         assert registry.get("").fields == ("",)
         registry.prepare("fs", ["", "x", ""])
         assert registry.get("fs").fields == ("", "x", "")
@@ -84,10 +77,6 @@ class TestHImportRegistry:
         registry = HImportRegistry()
         with pytest.raises(DataError):
             registry.prepare("fs", [])
-
-    def test_empty_field_list_rejected_in_constructor(self):
-        with pytest.raises(DataError):
-            HImportRegistry({"fs": []})
 
     @pytest.mark.parametrize(
         "bad", ["name", b"name", bytearray(b"name"), memoryview(b"name")]
@@ -161,13 +150,6 @@ class TestHImportRegistry:
         assert registry.discard_all() == 0
         assert registry.revision == before
 
-    def test_revision_unchanged_when_discard_init_raises(self):
-        registry = HImportRegistry({"fs": ["a"]})
-        before = registry.revision
-        with pytest.raises(DataError):
-            registry.discard("fs")
-        assert registry.revision == before
-
     # -- names_to_discard -------------------------------------------------
 
     def test_names_to_discard_returns_removed_names(self):
@@ -179,7 +161,9 @@ class TestHImportRegistry:
         assert registry.names_to_discard(["a", "b"]) == ["a"]
 
     def test_names_to_discard_empty_when_all_registered(self):
-        registry = HImportRegistry({"a": ["x"], "b": ["y"]})
+        registry = HImportRegistry()
+        registry.prepare("a", ["x"])
+        registry.prepare("b", ["y"])
         assert registry.names_to_discard(["a", "b"]) == []
 
     def test_names_to_discard_preserves_input_order(self):
@@ -195,29 +179,9 @@ class TestHImportRegistry:
         registry.prepare("fs", ["a", "b"])
         assert registry.names_to_discard(["fs"]) == []
 
-    # -- origin semantics -------------------------------------------------
-
-    def test_prepare_new_name_is_runtime(self):
-        registry = HImportRegistry()
-        assert registry.prepare("fs", ["a"]).origin is FieldsetOrigin.RUNTIME
-
-    def test_reprepare_preserves_init_origin(self):
-        # Re-preparing an init fieldset must keep it INIT so discard protection
-        # cannot be bypassed.
-        registry = HImportRegistry({"fs": ["a"]})
-        updated = registry.prepare("fs", ["a", "b"])
-        assert updated.origin is FieldsetOrigin.INIT
-        with pytest.raises(DataError):
-            registry.discard("fs")
-
-    def test_reprepare_preserves_runtime_origin(self):
-        registry = HImportRegistry()
-        registry.prepare("fs", ["a"])
-        assert registry.prepare("fs", ["a", "b"]).origin is FieldsetOrigin.RUNTIME
-
     # -- discard ----------------------------------------------------------
 
-    def test_discard_runtime_removes_and_returns_true(self):
+    def test_discard_removes_and_returns_true(self):
         registry = HImportRegistry()
         registry.prepare("fs", ["a"])
         assert registry.discard("fs") is True
@@ -228,15 +192,17 @@ class TestHImportRegistry:
         registry = HImportRegistry()
         assert registry.discard("missing") is False
 
-    def test_discard_init_raises_and_keeps_entry(self):
-        registry = HImportRegistry({"fs": ["a"]})
-        with pytest.raises(DataError):
-            registry.discard("fs")
-        assert "fs" in registry
+    def test_discard_never_raises_and_removes_any_fieldset(self):
+        # There is no init/protected concept anymore: any prepared fieldset is
+        # freely discardable and discard never raises.
+        registry = HImportRegistry()
+        registry.prepare("fs", ["a"])
+        assert registry.discard("fs") is True
+        assert "fs" not in registry
 
     # -- discard_all ------------------------------------------------------
 
-    def test_discard_all_removes_runtime_and_returns_count(self):
+    def test_discard_all_removes_all_and_returns_count(self):
         registry = HImportRegistry()
         registry.prepare("a", ["x"])
         registry.prepare("b", ["y"])
@@ -246,35 +212,38 @@ class TestHImportRegistry:
     def test_discard_all_on_empty_returns_zero(self):
         assert HImportRegistry().discard_all() == 0
 
-    def test_discard_all_rejected_when_init_present(self):
-        registry = HImportRegistry({"init": ["a"]})
-        registry.prepare("runtime", ["b"])
-        with pytest.raises(DataError):
-            registry.discard_all()
-        # Registry left untouched by the rejection.
-        assert len(registry) == 2
-        assert "init" in registry
-        assert "runtime" in registry
+    def test_discard_all_never_raises_and_clears_everything(self):
+        # discard_all removes every fieldset and returns the count with no
+        # DataError, even for fieldsets that would formerly have been "init".
+        registry = HImportRegistry()
+        registry.prepare("a", ["x"])
+        registry.prepare("b", ["y"])
+        assert registry.discard_all() == 2
+        assert len(registry) == 0
+        assert "a" not in registry
+        assert "b" not in registry
 
     # -- read-only access / immutability ----------------------------------
 
     def test_fieldset_is_immutable(self):
-        registry = HImportRegistry({"fs": ["a"]})
+        registry = HImportRegistry()
+        registry.prepare("fs", ["a"])
         fs = registry.get("fs")
         with pytest.raises(Exception):
             fs.fields = ("b",)
 
     def test_items_snapshot_does_not_mutate_registry(self):
-        registry = HImportRegistry({"fs": ["a"]})
+        registry = HImportRegistry()
+        registry.prepare("fs", ["a"])
         items = registry.items()
         items.clear()
         assert "fs" in registry
 
     def test_repr_lists_entries(self):
-        registry = HImportRegistry({"fs": ["a", "b"]})
+        registry = HImportRegistry()
+        registry.prepare("fs", ["a", "b"])
         text = repr(registry)
         assert "fs" in text
-        assert "INIT" in text
 
     def test_concurrent_prepares_do_not_lose_revision_bumps(self):
         # A sync Redis instance (and its shared HImportRegistry) is routinely used
@@ -425,7 +394,9 @@ class TestHImportBatchedReadDrain:
         assert conn._himport_prepared == {}  # every stale name dropped regardless
 
     def test_prepare_pipeline_drains_all_replies_on_error(self):
-        registry = HImportRegistry({"a": ["f"], "b": ["f"]})
+        registry = HImportRegistry()
+        registry.prepare("a", ["f"])
+        registry.prepare("b", ["f"])
         conn = _RecordingConn(registry)
         conn._himport_reconciled_revision = registry.revision  # no discard to reconcile
         commands = [
@@ -461,7 +432,9 @@ class TestHImportBatchedReadDrain:
 
     def test_async_prepare_pipeline_drains_all_replies_on_error(self):
         async def run():
-            registry = HImportRegistry({"a": ["f"], "b": ["f"]})
+            registry = HImportRegistry()
+            registry.prepare("a", ["f"])
+            registry.prepare("b", ["f"])
             conn = _AsyncRecordingConn(registry)
             conn._himport_reconciled_revision = registry.revision
             commands = [
@@ -618,7 +591,8 @@ class TestHImportAskRedirectSync:
         _himport_prepare_and_set = cluster_mod.RedisCluster._himport_prepare_and_set
 
     def test_prepare_and_set_packs_prepare_asking_set(self):
-        registry = HImportRegistry({"fs": ["a", "b"]})
+        registry = HImportRegistry()
+        registry.prepare("fs", ["a", "b"])
         conn = _CapturingConn(registry)
         fieldset = registry.get("fs")
         node = mock.Mock()
@@ -633,7 +607,8 @@ class TestHImportAskRedirectSync:
 
     def test_prepare_and_set_without_asking_keeps_bundle(self):
         # Regression guard: without an ASK redirect the batch stays [PREPARE, SET].
-        registry = HImportRegistry({"fs": ["a", "b"]})
+        registry = HImportRegistry()
+        registry.prepare("fs", ["a", "b"])
         conn = _CapturingConn(registry)
         fieldset = registry.get("fs")
         node = mock.Mock()
@@ -644,7 +619,8 @@ class TestHImportAskRedirectSync:
         assert conn.writes == [("packed", [PREPARE_FS_AB, SET_K_FS])]
 
     def test_bare_set_packs_asking_then_set(self):
-        registry = HImportRegistry({"fs": ["a"]})
+        registry = HImportRegistry()
+        registry.prepare("fs", ["a"])
         fieldset = registry.get("fs")
         conn = _CapturingConn(registry, prepared={"fs": fieldset.version})
         conn._himport_reconciled_revision = registry.revision
@@ -660,7 +636,8 @@ class TestHImportAskRedirectSync:
     def test_bare_set_recovers_with_asking_on_missing_fieldset(self):
         # The bare SET's ASKING allowance is consumed by the failed SET, so the
         # NoSuchFieldsetError recovery must re-arm ASKING: [PREPARE, ASKING, SET].
-        registry = HImportRegistry({"fs": ["a", "b"]})
+        registry = HImportRegistry()
+        registry.prepare("fs", ["a", "b"])
         fieldset = registry.get("fs")
         conn = _CapturingConn(registry, prepared={"fs": fieldset.version})
         conn._himport_reconciled_revision = registry.revision
@@ -688,7 +665,8 @@ class TestHImportAskRedirectSync:
 
     def test_bare_set_recovery_without_asking_keeps_bundle(self):
         # Regression: a non-ASK recovery still packs [PREPARE, SET] (no ASKING).
-        registry = HImportRegistry({"fs": ["a", "b"]})
+        registry = HImportRegistry()
+        registry.prepare("fs", ["a", "b"])
         fieldset = registry.get("fs")
         conn = _CapturingConn(registry, prepared={"fs": fieldset.version})
         conn._himport_reconciled_revision = registry.revision
@@ -704,6 +682,27 @@ class TestHImportAskRedirectSync:
             ("packed", [PREPARE_FS_AB, SET_K_FS]),
         ]
 
+    def test_bare_set_asking_error_drains_set_reply(self):
+        # ASKING and SET are one packed write (two queued replies). If the ASKING
+        # reply errors, the SET reply must still be drained before the error is
+        # surfaced, or the connection returns to the pool with an unread reply.
+        registry = HImportRegistry()
+        registry.prepare("fs", ["a"])
+        fieldset = registry.get("fs")
+        conn = _CapturingConn(registry, prepared={"fs": fieldset.version})
+        conn._himport_reconciled_revision = registry.revision
+        node = mock.Mock()
+        node._himport_reconcile_discards = mock.Mock()
+        node.parse_response = mock.Mock(
+            side_effect=[ResponseError("bad ASKING"), 1]  # ASKING errors, SET drained
+        )
+        with pytest.raises(ResponseError, match="bad ASKING"):
+            self._ClusterStub()._himport_execute_set(
+                node, conn, "k", "fs", ["v"], asking=True
+            )
+        assert node.parse_response.call_count == 2  # SET reply drained
+        assert conn.writes == [("packed", [ASKING, SET_K_FS])]  # no retry write
+
 
 @pytest.mark.fixed_client
 class TestHImportAskRedirectAsyncCluster:
@@ -716,7 +715,8 @@ class TestHImportAskRedirectAsyncCluster:
 
     def test_prepare_and_set_packs_prepare_asking_set(self):
         async def run():
-            registry = HImportRegistry({"fs": ["a", "b"]})
+            registry = HImportRegistry()
+            registry.prepare("fs", ["a", "b"])
             conn = _AsyncCapturingConn(registry)
             fieldset = registry.get("fs")
             node = mock.Mock()
@@ -734,7 +734,8 @@ class TestHImportAskRedirectAsyncCluster:
     def test_prepare_and_set_without_asking_keeps_bundle(self):
         # Regression guard: without an ASK redirect the batch stays [PREPARE, SET].
         async def run():
-            registry = HImportRegistry({"fs": ["a", "b"]})
+            registry = HImportRegistry()
+            registry.prepare("fs", ["a", "b"])
             conn = _AsyncCapturingConn(registry)
             fieldset = registry.get("fs")
             node = mock.Mock()
@@ -748,7 +749,8 @@ class TestHImportAskRedirectAsyncCluster:
 
     def test_bare_set_packs_asking_then_set(self):
         async def run():
-            registry = HImportRegistry({"fs": ["a"]})
+            registry = HImportRegistry()
+            registry.prepare("fs", ["a"])
             fieldset = registry.get("fs")
             conn = _AsyncCapturingConn(registry, prepared={"fs": fieldset.version})
             conn._himport_reconciled_revision = registry.revision
@@ -767,7 +769,8 @@ class TestHImportAskRedirectAsyncCluster:
         # The bare SET's ASKING allowance is consumed by the failed SET, so the
         # NoSuchFieldsetError recovery must re-arm ASKING: [PREPARE, ASKING, SET].
         async def run():
-            registry = HImportRegistry({"fs": ["a", "b"]})
+            registry = HImportRegistry()
+            registry.prepare("fs", ["a", "b"])
             fieldset = registry.get("fs")
             conn = _AsyncCapturingConn(registry, prepared={"fs": fieldset.version})
             conn._himport_reconciled_revision = registry.revision
@@ -801,7 +804,8 @@ class TestHImportAskRedirectAsyncCluster:
     def test_bare_set_recovery_without_asking_keeps_bundle(self):
         # Regression: a non-ASK recovery still packs [PREPARE, SET] (no ASKING).
         async def run():
-            registry = HImportRegistry({"fs": ["a", "b"]})
+            registry = HImportRegistry()
+            registry.prepare("fs", ["a", "b"])
             fieldset = registry.get("fs")
             conn = _AsyncCapturingConn(registry, prepared={"fs": fieldset.version})
             conn._himport_reconciled_revision = registry.revision
@@ -821,6 +825,30 @@ class TestHImportAskRedirectAsyncCluster:
                 ("cmd", SET_K_FS),
                 ("packed", [PREPARE_FS_AB, SET_K_FS]),
             ]
+
+        asyncio.run(run())
+
+    def test_bare_set_asking_error_drains_set_reply(self):
+        # ASKING and SET are one packed write (two queued replies). If the ASKING
+        # reply errors, the SET reply must still be drained before the error is
+        # surfaced, or the connection returns to the pool with an unread reply.
+        async def run():
+            registry = HImportRegistry()
+            registry.prepare("fs", ["a"])
+            fieldset = registry.get("fs")
+            conn = _AsyncCapturingConn(registry, prepared={"fs": fieldset.version})
+            conn._himport_reconciled_revision = registry.revision
+            node = mock.Mock()
+            node._himport_reconcile_discards = mock.AsyncMock()
+            node.parse_response = mock.AsyncMock(
+                side_effect=[ResponseError("bad ASKING"), 1]  # ASKING errs, SET drained
+            )
+            with pytest.raises(ResponseError, match="bad ASKING"):
+                await async_cluster_mod.ClusterNode._himport_execute_set(
+                    node, conn, "k", "fs", ["v"], asking=True
+                )
+            assert node.parse_response.call_count == 2  # SET reply drained
+            assert conn.writes == [("packed", [ASKING, SET_K_FS])]  # no retry write
 
         asyncio.run(run())
 
@@ -874,20 +902,25 @@ class TestHImportSingleConnectionPrepareMaterializesFields:
 class TestHImportPropagationSync:
     """Data propagation: client -> pool -> connection (standalone + sentinel)."""
 
-    def test_pool_builds_registry_from_schemas(self):
-        pool = ConnectionPool(himport_schemas={"shared": ["a", "b"]})
+    def test_pool_registry_reaches_connection_via_runtime_prepare(self):
+        # A shared registry always exists on the pool; a runtime prepare on it is
+        # visible through the same object reached by every connection.
+        pool = ConnectionPool()
+        pool.himport_registry.prepare("shared", ["a", "b"])
         assert isinstance(pool.himport_registry, HImportRegistry)
         assert pool.himport_registry.get("shared").fields == ("a", "b")
         conn = pool.make_connection()
         # Same shared object reaches the connection, plus empty per-conn state.
         assert conn.himport_registry is pool.himport_registry
+        assert conn.himport_registry.get("shared").fields == ("a", "b")
         assert conn._himport_prepared == {}
         assert conn._himport_reconciled_revision == 0
 
     def test_pool_accepts_prebuilt_registry_internally(self):
         # Internal channel (used by the cluster to share one object): a pre-built
         # himport_registry passed via connection_kwargs is used as-is, not rebuilt.
-        registry = HImportRegistry({"x": ["1"]})
+        registry = HImportRegistry()
+        registry.prepare("x", ["1"])
         pool = ConnectionPool(himport_registry=registry)
         assert pool.himport_registry is registry
         assert pool.make_connection().himport_registry is registry
@@ -901,22 +934,23 @@ class TestHImportPropagationSync:
         assert pool.make_connection().himport_registry is pool.himport_registry
 
     def test_blocking_pool_resolves(self):
-        pool = BlockingConnectionPool(himport_schemas={"s": ["a"]})
+        pool = BlockingConnectionPool()
+        pool.himport_registry.prepare("s", ["a"])
         assert pool.himport_registry.get("s").fields == ("a",)
         assert pool.make_connection().himport_registry is pool.himport_registry
 
     def test_redis_property_and_propagation(self):
-        r = Redis(himport_schemas={"shared": ["name", "email"]})
+        r = Redis()
+        r.himport_prepare("shared", ["name", "email"])
         assert r.himport_registry is r.connection_pool.himport_registry
         assert r.himport_registry.get("shared").fields == ("name", "email")
 
-    def test_redis_unix_socket_propagates_schemas(self):
-        # Regression: himport_schemas must propagate for Unix-socket clients, not
-        # just TCP. Construction does not connect, so no socket is needed.
-        r = Redis(
-            unix_socket_path="/tmp/does-not-connect.sock",
-            himport_schemas={"shared": ["name", "email"]},
-        )
+    def test_redis_unix_socket_propagates_runtime_prepare(self):
+        # Regression: runtime himport_prepare must reach the shared pool registry for
+        # Unix-socket clients, not just TCP. Construction does not connect, so no
+        # socket is needed.
+        r = Redis(unix_socket_path="/tmp/does-not-connect.sock")
+        r.himport_prepare("shared", ["name", "email"])
         assert r.himport_registry is r.connection_pool.himport_registry
         assert r.himport_registry.get("shared").fields == ("name", "email")
 
@@ -925,18 +959,22 @@ class TestHImportPropagationSync:
         assert isinstance(registry, HImportRegistry)
         assert len(registry) == 0
 
-    def test_redis_has_no_public_himport_registry_param(self):
-        # himport_registry (the object) is internal-only; the sole public knob is the
-        # schemas dict, so the client never holds a caller-supplied mutable registry.
-        assert "himport_registry" not in inspect.signature(Redis.__init__).parameters
+    def test_redis_has_no_public_himport_param(self):
+        # Under the runtime-only model there is no HIMPORT constructor argument at
+        # all: himport_registry is internal-only and himport_schemas was removed.
+        # Fieldsets are declared exclusively via the runtime himport_prepare method.
+        params = inspect.signature(Redis.__init__).parameters
+        assert not any("himport" in name for name in params)
 
-    def test_sentinel_pool_resolves_via_connection_kwargs(self):
-        # Sentinel needs no edits: himport_schemas rides in connection_kwargs and
-        # the base pool (via SentinelConnectionPool) resolves it.
-        s = Sentinel([("127.0.0.1", 26379)], himport_schemas={"s": ["a"]})
-        assert s.connection_kwargs.get("himport_schemas") == {"s": ["a"]}
-        pool = SentinelConnectionPool("mymaster", s, himport_schemas={"s": ["a"]})
-        assert pool.himport_registry.get("s").fields == ("a",)
+    def test_sentinel_master_client_runtime_prepare(self):
+        # Sentinel needs no HIMPORT-specific wiring: a client from master_for exposes
+        # the runtime himport API and mutates its own pool's shared registry. Pure
+        # unit test: construction and himport_prepare do not connect.
+        s = Sentinel([("127.0.0.1", 26379)])
+        master = s.master_for("mymaster")
+        master.himport_prepare("s", ["a"])
+        assert master.himport_registry is master.connection_pool.himport_registry
+        assert master.himport_registry.get("s").fields == ("a",)
 
 
 @pytest.mark.fixed_client
@@ -945,14 +983,17 @@ class TestHImportPropagationAsync:
 
     def test_async_pool_and_client(self):
         async def run():
-            pool = AsyncConnectionPool(himport_schemas={"s": ["a", "b"]})
+            pool = AsyncConnectionPool()
+            pool.himport_registry.prepare("s", ["a", "b"])
             assert pool.himport_registry.get("s").fields == ("a", "b")
             conn = pool.make_connection()
             assert conn.himport_registry is pool.himport_registry
+            assert conn.himport_registry.get("s").fields == ("a", "b")
             assert conn._himport_prepared == {}
             assert conn._himport_reconciled_revision == 0
 
-            r = AsyncRedis(himport_schemas={"s": ["a"]})
+            r = AsyncRedis()
+            await r.himport_prepare("s", ["a"])
             assert r.himport_registry is r.connection_pool.himport_registry
             assert r.himport_registry.get("s").fields == ("a",)
 
@@ -993,15 +1034,15 @@ class TestHImportClusterWiring:
         params = inspect.signature(cluster_mod.NodesManager.__init__).parameters
         assert "himport_registry" in params
 
-    def test_sync_cluster_single_public_param(self):
+    def test_sync_cluster_has_no_public_himport_param(self):
         params = inspect.signature(cluster_mod.RedisCluster.__init__).parameters
-        assert "himport_schemas" in params
-        assert "himport_registry" not in params
+        # Runtime-only model: no HIMPORT constructor knob is public (the shared
+        # registry is threaded internally, and the old schemas dict was removed).
+        assert not any("himport" in name for name in params)
 
-    def test_async_cluster_single_public_param(self):
+    def test_async_cluster_has_no_public_himport_param(self):
         params = inspect.signature(async_cluster_mod.RedisCluster.__init__).parameters
-        assert "himport_schemas" in params
-        assert "himport_registry" not in params
+        assert not any("himport" in name for name in params)
 
     def test_async_cluster_has_himport_slot(self):
         # Private backing attribute lives in __slots__; the public name is a property.

@@ -497,3 +497,67 @@ def test_sentinel_commands_with_strict_redis_client(request):
     assert isinstance(client.sentinel_ckquorum("redis-py-test"), bool)
 
     client.close()
+
+
+# ---------------------------------------------------------------------------
+# HIMPORT on Sentinel
+# ---------------------------------------------------------------------------
+# HIMPORT needs no Sentinel-specific code: the client returned by ``master_for``
+# is a normal ``Redis`` whose ``SentinelConnectionPool`` inherits the shared
+# ``HImportRegistry`` from ``ConnectionPool``. Fieldsets are declared at runtime
+# with ``himport_prepare`` and survive failover because the registry lives on the
+# long-lived pool while the per-connection PREPARE is reset on reconnect and
+# re-applied lazily on the next ``himport_set``.
+
+
+@pytest.mark.onlynoncluster
+def test_himport_master_for_exposes_runtime_prepare(sentinel):
+    """``master_for`` returns a client exposing the HIMPORT family; runtime
+    ``himport_prepare`` populates the client's registry with no init argument, and
+    discard is never forbidden."""
+    master = sentinel.master_for("mymaster", db=9)
+    assert master.himport_prepare("users", ["name", "email", "age"]) is True
+    fs = master.himport_registry.get("users")
+    assert fs is not None
+    assert fs.fields == ("name", "email", "age")
+    # Discard is always allowed under the runtime-only model.
+    assert master.himport_discard("users") == 1
+    assert master.himport_registry.get("users") is None
+
+
+@pytest.mark.onlynoncluster
+def test_himport_registry_shared_with_pool_connections(sentinel):
+    """The runtime-prepared fieldset lives on the pool-level registry object that is
+    injected into every connection via ``connection_kwargs``, so a connection created
+    after a Sentinel failover (pool re-point) still sees it."""
+    master = sentinel.master_for("mymaster", db=9)
+    master.himport_prepare("shared", ["a", "b"])
+    pool = master.connection_pool
+    # The same registry object reaches every connection the pool creates.
+    assert pool.connection_kwargs["himport_registry"] is pool.himport_registry
+    assert "shared" in pool.himport_registry
+
+
+@pytest.mark.onlynoncluster
+def test_himport_prepare_set_survives_reconnect(deployed_sentinel):
+    """Runtime ``himport_prepare`` on a reused ``master_for`` client survives a
+    connection drop (the Sentinel-failover analog): the per-connection PREPARE is
+    reset on reconnect and re-applied lazily on the next ``himport_set`` against the
+    re-pointed pool. Requires a deployed Sentinel and Redis >= 8.9.0."""
+    master = deployed_sentinel.master_for("redis-py-test", db=0)
+    try:
+        master.himport_prepare("users", ["name", "email"])
+        master.delete("himport:sentinel:1")
+        master.himport_set("himport:sentinel:1", "users", ["alice", "a@x.com"])
+    except exceptions.ResponseError as exc:
+        if "unknown command" in str(exc).lower() or "no such fieldset" in str(exc):
+            pytest.skip("server does not support HIMPORT")
+        raise
+    assert master.hget("himport:sentinel:1", "name") == "alice"
+    # Drop the pooled connection to simulate the failover reconnect, then reuse the
+    # same client: the fieldset is re-prepared lazily on the next himport_set.
+    for conn in list(master.connection_pool._available_connections):
+        conn.disconnect()
+    master.delete("himport:sentinel:2")
+    master.himport_set("himport:sentinel:2", "users", ["bob", "b@x.com"])
+    assert master.hget("himport:sentinel:2", "email") == "b@x.com"

@@ -221,6 +221,61 @@ This is useful when:
 
 For the complete failover configuration options and examples, see the [Multi-database client docs](https://redis.readthedocs.io/en/latest/multi_database.html).
 
+### Bulk hash ingestion (HIMPORT)
+
+Redis 8.10 adds the `HIMPORT` command family for loading many hashes that share
+the same set of field names: register the field names once with `himport_prepare`,
+then create each hash by sending only its values. Keys written this way are regular
+hashes — every hash command works on them.
+
+``` python
+r.himport_prepare("users", ["name", "email", "age"])
+r.himport_set("user:1", "users", ["alice", "alice@example.com", "25"])
+r.himport_set("user:2", "users", ["bob", "bob@example.com", "30"])
+r.himport_discard("users")  # => 1
+```
+
+Values pair positionally with the prepared fields. Hash enumeration order
+(`HGETALL`, `HKEYS`) is not guaranteed to match the prepare order.
+
+**Fieldsets are connection state.** A prepared fieldset lives in the server-side
+session of the physical connection that prepared it: it is invisible to other
+connections and destroyed by a disconnect or `RESET`. redis-py handles this for you —
+`himport_prepare` records the fieldset in a client-level registry, and the `PREPARE`
+is applied lazily on whatever pooled connection serves each `himport_set` (and
+re-applied automatically after a reconnect, `RESET`, or Sentinel/cluster failover).
+You declare each fieldset once per client with `himport_prepare`; there is no
+constructor argument for it.
+
+For the highest ingestion throughput, send the `PREPARE` and its `SET`s in one
+pipeline — a single batch always executes on one connection:
+
+``` python
+with r.pipeline(transaction=False) as pipe:
+    pipe.himport_prepare("users", ["name", "email", "age"])
+    for uid, row in rows:
+        pipe.himport_set(f"user:{uid}", "users", row)
+    pipe.execute()
+```
+
+The automatic re-prepare applies to direct calls only, not to commands inside
+`pipeline`/`transaction` blocks: a batched `himport_set` relies on the single
+pre-flight `PREPARE` in that batch.
+
+With `RedisCluster`, `himport_prepare` / `himport_discard` / `himport_discard_all`
+fan out to every master node and return a single aggregated reply, matching the
+standalone API; `himport_set` routes by the key's hash slot. With Sentinel, call
+`himport_prepare` on the long-lived client returned by `master_for(...)`; the fieldset
+survives failover automatically. HIMPORT is not supported on the multi-database
+(Active-Active) client.
+
+The async client mirrors this exactly:
+
+``` python
+await r.himport_prepare("users", ["name", "email", "age"])
+await r.himport_set("user:1", "users", ["alice", "alice@example.com", "25"])
+```
+
 ---------------------------------------------
 
 ### Author

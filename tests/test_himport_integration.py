@@ -83,8 +83,10 @@ def hr(request):
         redis.Redis,
         request,
         single_connection_client=False,
-        himport_schemas=dict(SCHEMAS),
     ) as client:
+        # Populate the registry directly (mirrors what init schemas did) without an
+        # eager PREPARE, so lazy-bundling wire assertions in the tests still hold.
+        client.himport_registry.prepare("shared", SCHEMAS["shared"])
         yield client
 
 
@@ -96,8 +98,8 @@ def test_dedicated_connection_prepare_immediate(request):
         redis.Redis,
         request,
         single_connection_client=True,
-        himport_schemas=dict(SCHEMAS),
     ) as client:
+        client.himport_registry.prepare("shared", SCHEMAS["shared"])
         conn = client.connection
         client.himport_set("himport:{probe}", "shared", ["p", "p@x", "1"])
         client.delete("himport:{probe}", "d:{u}:1")
@@ -111,7 +113,7 @@ def test_dedicated_connection_prepare_immediate(request):
 
 
 def test_runtime_prepare_without_init_schemas(request):
-    """A client built with no himport_schemas can still declare + use fieldsets."""
+    """A client that declares nothing up front can still declare + use fieldsets."""
     with _get_client(redis.Redis, request, single_connection_client=False) as client:
         client.himport_prepare("ronly", ["a", "b"])
         client.delete("r:{u}:1")
@@ -127,8 +129,8 @@ def test_disconnect_clears_prepared_state(request):
         redis.Redis,
         request,
         single_connection_client=True,
-        himport_schemas=dict(SCHEMAS),
     ) as client:
+        client.himport_registry.prepare("shared", SCHEMAS["shared"])
         conn = client.connection
         with track_himport_wire(conn) as events:
             # First use of the fieldset bundles PREPARE with SET; the second reuses
@@ -184,9 +186,9 @@ def test_himport_set_retries_and_reprepares(request):
         redis.Redis,
         request,
         single_connection_client=True,
-        himport_schemas=dict(SCHEMAS),
         retry=Retry(NoBackoff(), 1),
     ) as client:
+        client.himport_registry.prepare("shared", SCHEMAS["shared"])
         # Warm the pinned connection so "shared" is already prepared on it.
         client.himport_set("h:{u}:warm", "shared", ["w", "w@x", "0"])
         conn = client.connection
@@ -217,8 +219,8 @@ def test_himport_set_recovers_when_fieldset_lost_midconnection(request):
         redis.Redis,
         request,
         single_connection_client=True,
-        himport_schemas=dict(SCHEMAS),
     ) as client:
+        client.himport_registry.prepare("shared", SCHEMAS["shared"])
         client.himport_set("rst:{u}:1", "shared", ["a", "a@x", "1"])
         conn = client.connection
         assert "shared" in conn._himport_prepared
@@ -247,8 +249,8 @@ def test_himport_with_client_side_caching(request):
         single_connection_client=False,
         protocol=3,
         cache_config=CacheConfig(),
-        himport_schemas=dict(SCHEMAS),
     ) as client:
+        client.himport_registry.prepare("shared", SCHEMAS["shared"])
         client.himport_set("csc:{u}:1", "shared", ["a", "a@x", "1"])
         assert client.hget("csc:{u}:1", "name") == b"a"
         # create-or-replace still works through the proxy-wrapped connection

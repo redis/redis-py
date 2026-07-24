@@ -2626,18 +2626,16 @@ class ConnectionPool(
         self._connection_kwargs = connection_kwargs
         self.max_connections = max_connections
 
-        # Resolve the HIMPORT config. A pre-built ``himport_registry`` (shared, e.g.
-        # from the cluster client) takes precedence; otherwise build one from the
-        # ``himport_schemas`` dict (empty if none). A registry always exists so runtime
-        # ``himport_prepare`` mutates a single object every connection already shares.
-        # The object stays in ``connection_kwargs`` so it reaches every connection,
-        # while ``himport_schemas`` is consumed here. It is injected unconditionally
-        # (like other auto-added pool kwargs), so a custom ``connection_class`` must
-        # accept ``**kwargs`` (or a ``himport_registry`` parameter), as built-ins do.
+        # Resolve the HIMPORT registry. A pre-built ``himport_registry`` (shared, e.g.
+        # from the cluster client) takes precedence; otherwise build a fresh empty one.
+        # A registry always exists so runtime ``himport_prepare`` mutates a single object
+        # every connection already shares. The object stays in ``connection_kwargs`` so
+        # it reaches every connection. It is injected unconditionally (like other
+        # auto-added pool kwargs), so a custom ``connection_class`` must accept
+        # ``**kwargs`` (or a ``himport_registry`` parameter), as built-ins do.
         himport_registry = connection_kwargs.get("himport_registry")
-        himport_schemas = connection_kwargs.pop("himport_schemas", None)
         if himport_registry is None:
-            himport_registry = HImportRegistry(himport_schemas)
+            himport_registry = HImportRegistry()
             connection_kwargs["himport_registry"] = himport_registry
         self.himport_registry = himport_registry
 

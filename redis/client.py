@@ -331,7 +331,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         maint_notifications_config: MaintNotificationsConfig | None = None,
         oss_cluster_maint_notifications_handler: OSSMaintNotificationsHandler
         | None = None,
-        himport_schemas: Mapping[str, Iterable[str]] | None = None,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -396,13 +395,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             `redis.maint_notifications.OSSMaintNotificationsHandler` for details.
             Only supported with RESP3
             Argument is ignored when connection_pool is provided.
-        himport_schemas:
-            optional mapping of `fieldset_name -> ordered field names` to register
-            as HIMPORT fieldsets at construction time - see `redis.himport` for
-            details. The pool owns the resulting `HImportRegistry`, so this argument
-            is ignored when connection_pool is provided: to preconfigure schemas
-            with a caller-supplied pool, pass `himport_schemas` to the pool itself
-            (e.g. `ConnectionPool(..., himport_schemas=...)`).
         """
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -518,12 +510,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "oss_cluster_maint_notifications_handler": oss_cluster_maint_notifications_handler,
                         }
                     )
-            # The pool builds the HImportRegistry from the schemas (see
-            # ConnectionPool.__init__) and owns it; the client never holds a
-            # mutable reference, so the registry is mutated only via the HIMPORT
-            # command methods.
-            if himport_schemas is not None:
-                kwargs.update({"himport_schemas": himport_schemas})
             connection_pool = ConnectionPool(**kwargs)
             self._event_dispatcher.dispatch(
                 AfterPooledConnectionsInstantiationEvent(
@@ -1086,7 +1072,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         return True
 
     def himport_discard(self, fieldset_name: str) -> int:
-        """Remove a runtime fieldset. Raises ``DataError`` for init-declared ones.
+        """Remove a fieldset from the registry.
 
         Returns ``1`` if it was registered, ``0`` otherwise. On a pooled client the
         server-side ``DISCARD`` is reconciled lazily when each connection is next
@@ -1105,7 +1091,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         return 1 if removed else 0
 
     def himport_discard_all(self) -> int:
-        """Remove all runtime fieldsets. Raises ``DataError`` if any init one exists.
+        """Remove all fieldsets from the registry.
 
         Returns the number removed from the registry. Server-side removal follows the
         same live/lazy rule as :meth:`himport_discard`.

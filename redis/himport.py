@@ -13,18 +13,16 @@ clients.
 
 Example::
 
-    >>> from redis.himport import HImportRegistry, FieldsetOrigin
-    >>> registry = HImportRegistry({"account_data": ["name", "email", "age"]})
+    >>> from redis.himport import HImportRegistry
+    >>> registry = HImportRegistry()
+    >>> registry.prepare("account_data", ["name", "email", "age"])
     >>> registry.get("account_data").fields
     ('name', 'email', 'age')
-    >>> registry.get("account_data").origin is FieldsetOrigin.INIT
-    True
 """
 
 import threading
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
-from enum import Enum
 
 from redis.exceptions import DataError
 from redis.typing import EncodableT, FieldT, KeyT
@@ -69,18 +67,6 @@ def himport_discard_command(fieldset_name: str) -> tuple:
     return (_HIMPORT, _DISCARD, fieldset_name)
 
 
-class FieldsetOrigin(Enum):
-    """How a fieldset entered the HIMPORT registry.
-
-    ``INIT`` fieldsets are declared in the client constructor and are treated as
-    permanent for the client's lifetime — they cannot be discarded. ``RUNTIME``
-    fieldsets are added later via ``himport_prepare`` and may be discarded.
-    """
-
-    INIT = "INIT"
-    RUNTIME = "RUNTIME"
-
-
 @dataclass(frozen=True)
 class HImportFieldset:
     """An immutable HIMPORT fieldset entry.
@@ -91,7 +77,6 @@ class HImportFieldset:
             never reordered or deduplicated (HLD R.2): the server canonicalizes
             field order internally and rejects duplicate field names, so the
             client only preserves the caller's positional order.
-        origin: Whether the fieldset was declared at client init or at runtime.
         version: Monotonic stamp bumped each time the fieldset is (re)declared.
             Connections compare the version they last prepared against this value
             to detect a stale prepared state; the stamp is drawn from the registry's
@@ -104,7 +89,6 @@ class HImportFieldset:
 
     name: str
     fields: tuple[FieldT, ...]
-    origin: FieldsetOrigin
     version: int
 
 
@@ -122,13 +106,11 @@ class HImportRegistry:
     ``__contains__``, ``__len__``, :attr:`revision`) are atomic and stay lock-free.
     The async client runs single-threaded and never contends.
 
-    Args:
-        schemas: Optional mapping of ``fieldset_name -> ordered field names`` to
-            register at construction time. These entries are given
-            :attr:`FieldsetOrigin.INIT` and cannot later be discarded.
+    The registry always starts empty; fieldsets are declared at runtime through the
+    client's ``himport_prepare`` method.
     """
 
-    def __init__(self, schemas: Mapping[str, Iterable[str]] | None = None) -> None:
+    def __init__(self) -> None:
         self._fieldsets: dict[str, HImportFieldset] = {}
         # Serializes mutations (prepare/discard/discard_all) so the revision bump and
         # the dict change are applied atomically under concurrent access from a
@@ -145,22 +127,16 @@ class HImportRegistry:
         # comparing per-fieldset versions still avoids forcing unrelated fieldsets
         # to re-prepare.
         self._revision: int = 0
-        if schemas:
-            for name, fields in schemas.items():
-                self._set(name, fields, FieldsetOrigin.INIT)
 
     # -- internal helpers -------------------------------------------------
     # ``_advance`` and ``_set`` assume ``_lock`` is already held (they run under the
-    # public mutation methods) or that no other thread can observe the instance yet
-    # (during ``__init__``); they never acquire the lock themselves.
+    # public mutation methods); they never acquire the lock themselves.
 
     def _advance(self) -> int:
         self._revision += 1
         return self._revision
 
-    def _set(
-        self, name: str, fields: Iterable[FieldT], origin: FieldsetOrigin
-    ) -> HImportFieldset:
+    def _set(self, name: str, fields: Iterable[FieldT]) -> HImportFieldset:
         # A bare single field name (str/bytes/bytearray/memoryview) is itself
         # iterable element-by-element; that is almost certainly a caller mistake and
         # would silently register single-character/single-byte "fields" (e.g.
@@ -177,7 +153,6 @@ class HImportRegistry:
         fieldset = HImportFieldset(
             name=name,
             fields=field_tuple,
-            origin=origin,
             version=self._advance(),
         )
         self._fieldsets[name] = fieldset
@@ -188,56 +163,31 @@ class HImportRegistry:
     def prepare(self, name: str, fields: Iterable[FieldT]) -> HImportFieldset:
         """Add or replace a fieldset, bumping its version, and return the entry.
 
-        A new name is registered as :attr:`FieldsetOrigin.RUNTIME`. Re-declaring
-        an existing name preserves its current origin — in particular an
-        ``INIT`` fieldset stays ``INIT`` (and therefore undiscardable) when
-        re-prepared, so discard protection cannot be bypassed by re-preparing.
+        Re-declaring an existing name replaces its fields and bumps its version.
         Field order is preserved verbatim; nothing is reordered or deduplicated.
         """
         with self._lock:
-            existing = self._fieldsets.get(name)
-            origin = existing.origin if existing is not None else FieldsetOrigin.RUNTIME
-            return self._set(name, fields, origin)
+            return self._set(name, fields)
 
     def discard(self, name: str) -> bool:
-        """Remove a runtime fieldset from the registry.
+        """Remove a fieldset from the registry.
 
         Returns ``True`` if a fieldset was removed, ``False`` if ``name`` was not
-        registered. Raises :class:`~redis.exceptions.DataError` if the named
-        fieldset was declared at client init (:attr:`FieldsetOrigin.INIT`).
-        Advances :attr:`revision` when a fieldset is actually removed.
+        registered. Advances :attr:`revision` when a fieldset is actually removed.
         """
         with self._lock:
-            existing = self._fieldsets.get(name)
-            if existing is None:
+            if name not in self._fieldsets:
                 return False
-            if existing.origin is FieldsetOrigin.INIT:
-                raise DataError(
-                    f"cannot discard HIMPORT fieldset {name!r} declared at client init"
-                )
             del self._fieldsets[name]
             self._advance()
             return True
 
     def discard_all(self) -> int:
-        """Remove all runtime fieldsets and return the number removed.
+        """Remove all fieldsets and return the number removed.
 
-        Raises :class:`~redis.exceptions.DataError` if any init-declared fieldset
-        exists, leaving the registry unchanged: init fieldsets cannot be
-        discarded, so ``discard_all`` is rejected whenever one is present.
         Advances :attr:`revision` when at least one fieldset is removed.
         """
         with self._lock:
-            init_names = [
-                name
-                for name, fieldset in self._fieldsets.items()
-                if fieldset.origin is FieldsetOrigin.INIT
-            ]
-            if init_names:
-                raise DataError(
-                    "cannot discard all HIMPORT fieldsets while init-declared "
-                    "fieldsets exist: " + ", ".join(repr(n) for n in init_names)
-                )
             count = len(self._fieldsets)
             if count:
                 self._fieldsets.clear()
@@ -307,7 +257,6 @@ class HImportRegistry:
         with self._lock:
             entries = list(self._fieldsets.items())
         body = ", ".join(
-            f"{name}={fieldset.origin.value}:{list(fieldset.fields)}"
-            for name, fieldset in entries
+            f"{name}={list(fieldset.fields)}" for name, fieldset in entries
         )
         return f"{self.__class__.__name__}({body})"

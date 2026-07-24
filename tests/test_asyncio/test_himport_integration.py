@@ -77,11 +77,15 @@ async def track_himport_wire(conn):
 @pytest_asyncio.fixture()
 async def hr(create_redis):
     """A client (single/pooled standalone, or cluster) with a declared HIMPORT schema."""
-    return await create_redis(himport_schemas=dict(SCHEMAS))
+    client = await create_redis()
+    # Populate the registry directly (mirrors what init schemas did) without an eager
+    # PREPARE, so lazy-bundling wire assertions in the tests still hold.
+    client.himport_registry.prepare("shared", SCHEMAS["shared"])
+    return client
 
 
 async def test_runtime_prepare_without_init_schemas(create_redis):
-    """A client built with no himport_schemas can still declare + use fieldsets."""
+    """A client that declares nothing up front can still declare + use fieldsets."""
     client = await create_redis()
     await client.himport_prepare("ronly", ["a", "b"])
     await client.delete("r:{u}:1")
@@ -93,9 +97,8 @@ async def test_runtime_prepare_without_init_schemas(create_redis):
 async def test_disconnect_clears_prepared_state(create_redis):
     """A disconnect drops the server session; prepared state is cleared and the
     next himport_set transparently re-prepares."""
-    client = await create_redis(
-        single_connection_client=True, himport_schemas=dict(SCHEMAS)
-    )
+    client = await create_redis(single_connection_client=True)
+    client.himport_registry.prepare("shared", SCHEMAS["shared"])
     conn = client.connection
     async with track_himport_wire(conn) as events:
         # First use of the fieldset bundles PREPARE with SET; the second reuses
@@ -149,9 +152,9 @@ async def test_himport_set_retries_and_reprepares(create_redis):
     the retry re-prepares the fieldset before the SET."""
     client = await create_redis(
         single_connection_client=True,
-        himport_schemas=dict(SCHEMAS),
         retry=Retry(NoBackoff(), 1),
     )
+    client.himport_registry.prepare("shared", SCHEMAS["shared"])
     # Warm the pinned connection so "shared" is already prepared on it.
     await client.himport_set("h:{u}:warm", "shared", ["w", "w@x", "0"])
     conn = client.connection
@@ -280,9 +283,8 @@ async def test_himport_set_recovers_when_fieldset_lost_midconnection(create_redi
     """If the server drops a prepared fieldset mid-connection (e.g. RESET or
     maxmemory-clients eviction) without dropping the socket, the next himport_set
     re-prepares on the same connection and retries the SET once — no reconnect."""
-    client = await create_redis(
-        single_connection_client=True, himport_schemas=dict(SCHEMAS)
-    )
+    client = await create_redis(single_connection_client=True)
+    client.himport_registry.prepare("shared", SCHEMAS["shared"])
     await client.himport_set("rst:{u}:1", "shared", ["a", "a@x", "1"])
     conn = client.connection
     assert "shared" in conn._himport_prepared

@@ -418,6 +418,18 @@ class Sentinel(AsyncSentinelCommands):
         All other keyword arguments are merged with any connection_kwargs
         passed to this class and passed to the connection pool as keyword
         arguments to be used to initialize Redis connections.
+
+        HIMPORT note: the returned client exposes the HIMPORT command family
+        (``himport_prepare``, ``himport_set``, ``himport_discard``,
+        ``himport_discard_all``). Fieldsets are declared at runtime with
+        ``himport_prepare`` on the client and live on that client's shared registry,
+        so they survive Sentinel failover automatically: the pool re-points to the
+        new master and the fieldset is re-prepared lazily on the next
+        ``himport_set``. Each call to current command returns a *new* client with its *own* empty
+        registry, so call ``himport_prepare`` on the long-lived client you reuse
+        rather than creating a fresh one per operation; otherwise ``himport_set``
+        fails with ``no such fieldset``. (``himport_set`` is a write and is served by
+        the master.)
         """
         kwargs["is_master"] = True
         connection_kwargs = dict(self.connection_kwargs)
@@ -450,6 +462,18 @@ class Sentinel(AsyncSentinelCommands):
         All other keyword arguments are merged with any connection_kwargs
         passed to this class and passed to the connection pool as keyword
         arguments to be used to initialize Redis connections.
+
+        HIMPORT note: the returned client exposes the HIMPORT command family
+        (``himport_prepare``, ``himport_set``, ``himport_discard``,
+        ``himport_discard_all``). Fieldsets are declared at runtime with
+        ``himport_prepare`` on the client and live on that client's shared registry,
+        so they survive Sentinel failover automatically: the pool re-points to the
+        new master and the fieldset is re-prepared lazily on the next
+        ``himport_set``. Each call to current command returns a *new* client with its *own* empty
+        registry, so call ``himport_prepare`` on the long-lived client you reuse
+        rather than creating a fresh one per operation; otherwise ``himport_set``
+        fails with ``no such fieldset``. (``himport_set`` is a write and is served by
+        the master.)
         """
         kwargs["is_master"] = False
         connection_kwargs = dict(self.connection_kwargs)
