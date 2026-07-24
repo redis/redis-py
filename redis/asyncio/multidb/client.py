@@ -16,6 +16,7 @@ from redis.asyncio.retry import Retry
 from redis.background import BackgroundScheduler
 from redis.backoff import NoBackoff
 from redis.commands import AsyncCoreCommands, AsyncRedisModuleCommands
+from redis.exceptions import DataError
 from redis.multidb.circuit import CircuitBreaker
 from redis.multidb.circuit import State as CBState
 from redis.multidb.exception import (
@@ -291,6 +292,29 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
 
         return await self.command_executor.execute_command(*args, **options)
 
+    # HIMPORT is not supported on the multi-database client. A HIMPORT fieldset is
+    # per-connection server session state tracked by a single client's registry;
+    # there is no coherent way to keep that state consistent across independent
+    # database clients through failover. ``himport_set`` is inherited from
+    # ``AsyncCoreCommands`` (and the lifecycle methods would otherwise be missing
+    # entirely), so override them to fail early and clearly instead of surfacing a
+    # confusing ``no such fieldset`` at runtime.
+    _HIMPORT_UNSUPPORTED = (
+        "HIMPORT is not supported on the multi-database (Active-Active) client"
+    )
+
+    async def himport_prepare(self, *args: Any, **kwargs: Any) -> Any:
+        raise DataError(self._HIMPORT_UNSUPPORTED)
+
+    async def himport_set(self, *args: Any, **kwargs: Any) -> Any:
+        raise DataError(self._HIMPORT_UNSUPPORTED)
+
+    async def himport_discard(self, *args: Any, **kwargs: Any) -> Any:
+        raise DataError(self._HIMPORT_UNSUPPORTED)
+
+    async def himport_discard_all(self, *args: Any, **kwargs: Any) -> Any:
+        raise DataError(self._HIMPORT_UNSUPPORTED)
+
     def pipeline(self):
         """
         Enters into pipeline mode of the client.
@@ -487,6 +511,22 @@ class Pipeline(AsyncRedisModuleCommands, AsyncCoreCommands):
     def execute_command(self, *args, **kwargs):
         """Adds a command to the stack"""
         return self.pipeline_execute_command(*args, **kwargs)
+
+    # HIMPORT is unsupported on the multi-database client (see MultiDBClient). A
+    # pipeline inherits ``himport_set`` from ``AsyncCoreCommands`` and would otherwise
+    # queue an unprepared ``HIMPORT SET`` that fails with a confusing server-side
+    # error, bypassing the client-level guard. Block all HIMPORT methods here too.
+    def himport_prepare(self, *args: Any, **kwargs: Any) -> Any:
+        raise DataError(MultiDBClient._HIMPORT_UNSUPPORTED)
+
+    def himport_set(self, *args: Any, **kwargs: Any) -> Any:
+        raise DataError(MultiDBClient._HIMPORT_UNSUPPORTED)
+
+    def himport_discard(self, *args: Any, **kwargs: Any) -> Any:
+        raise DataError(MultiDBClient._HIMPORT_UNSUPPORTED)
+
+    def himport_discard_all(self, *args: Any, **kwargs: Any) -> Any:
+        raise DataError(MultiDBClient._HIMPORT_UNSUPPORTED)
 
     async def execute(self) -> List[Any]:
         """Execute all the commands in the current pipeline"""

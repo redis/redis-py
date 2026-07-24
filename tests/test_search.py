@@ -4726,7 +4726,11 @@ class TestSearchWithVamana(SearchTestsBase):
 
 class TestHybridSearch(SearchTestsBase):
     _HYBRID_TIMEOUT_DIM = 8192
-    _HYBRID_TIMEOUT_DOCS = 1500
+    # The 1ms timeout only fires once the query runs long enough to hit a
+    # server timeout checkpoint; smaller data sets slip through and return no
+    # warnings. 6000 docs keeps the query comfortably above the 1ms limit so
+    # the timeout reliably triggers across hardware.
+    _HYBRID_TIMEOUT_DOCS = 6000
 
     def _create_hybrid_search_index(self, client, dim=4):
         client.ft().create_index(

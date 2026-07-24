@@ -478,3 +478,63 @@ async def test_sentinel_commands_with_strict_redis_client(request):
     assert isinstance(await client.sentinel_ckquorum("redis-py-test"), bool)
 
     await client.close()
+
+
+# ---------------------------------------------------------------------------
+# HIMPORT on Sentinel (async)
+# ---------------------------------------------------------------------------
+# Mirrors tests/test_sentinel.py: the client from ``master_for`` inherits the shared
+# ``HImportRegistry`` from ``ConnectionPool`` and declares fieldsets at runtime; the
+# registry lives on the long-lived pool so it survives failover.
+
+
+@pytest.mark.onlynoncluster
+async def test_himport_master_for_exposes_runtime_prepare(sentinel):
+    """``master_for`` returns a client exposing the HIMPORT family; runtime
+    ``himport_prepare`` populates the client's registry with no init argument, and
+    discard is never forbidden."""
+    async with sentinel.master_for("mymaster", db=9) as master:
+        assert await master.himport_prepare("users", ["name", "email", "age"]) is True
+        fs = master.himport_registry.get("users")
+        assert fs is not None
+        assert fs.fields == ("name", "email", "age")
+        assert await master.himport_discard("users") == 1
+        assert master.himport_registry.get("users") is None
+
+
+@pytest.mark.onlynoncluster
+async def test_himport_registry_shared_with_pool_connections(sentinel):
+    """The runtime-prepared fieldset lives on the pool-level registry object injected
+    into every connection via ``connection_kwargs``, so a connection created after a
+    Sentinel failover (pool re-point) still sees it."""
+    async with sentinel.master_for("mymaster", db=9) as master:
+        await master.himport_prepare("shared", ["a", "b"])
+        pool = master.connection_pool
+        assert pool.connection_kwargs["himport_registry"] is pool.himport_registry
+        assert "shared" in pool.himport_registry
+
+
+@pytest.mark.onlynoncluster
+async def test_himport_prepare_set_survives_reconnect(deployed_sentinel):
+    """Async mirror of the sync reconnect test: runtime ``himport_prepare`` on a
+    reused ``master_for`` client survives a connection drop (the Sentinel-failover
+    analog); the fieldset is re-prepared lazily on the next ``himport_set`` against
+    the re-pointed pool. Requires a deployed Sentinel and Redis >= 8.9.0."""
+    master = await deployed_sentinel.master_for("redis-py-test", db=0)
+    try:
+        await master.himport_prepare("users", ["name", "email"])
+        await master.delete("himport:sentinel:async:1")
+        await master.himport_set(
+            "himport:sentinel:async:1", "users", ["alice", "a@x.com"]
+        )
+    except exceptions.ResponseError as exc:
+        if "unknown command" in str(exc).lower() or "no such fieldset" in str(exc):
+            pytest.skip("server does not support HIMPORT")
+        raise
+    assert await master.hget("himport:sentinel:async:1", "name") == "alice"
+    # Drop pooled connections to simulate the failover reconnect, then reuse the same
+    # client: the fieldset is re-prepared lazily on the next himport_set.
+    await master.connection_pool.disconnect()
+    await master.delete("himport:sentinel:async:2")
+    await master.himport_set("himport:sentinel:async:2", "users", ["bob", "b@x.com"])
+    assert await master.hget("himport:sentinel:async:2", "email") == "b@x.com"

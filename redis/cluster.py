@@ -17,6 +17,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    Iterable,
     List,
     Literal,
     Optional,
@@ -65,6 +66,7 @@ from redis.exceptions import (
     InvalidPipelineStack,
     MaxConnectionsError,
     MovedError,
+    NoSuchFieldsetError,
     RedisClusterException,
     RedisError,
     ResponseError,
@@ -72,6 +74,13 @@ from redis.exceptions import (
     TimeoutError,
     TryAgainError,
     WatchError,
+)
+from redis.himport import (
+    HIMPORT_PREPARE,
+    HIMPORT_SET,
+    HImportRegistry,
+    himport_prepare_command,
+    himport_set_command,
 )
 from redis.lock import Lock
 from redis.maint_notifications import (
@@ -83,7 +92,12 @@ from redis.observability.recorder import (
     record_operation_duration,
 )
 from redis.retry import Retry
-from redis.typing import ChannelT, PubSubHandler, Subscription
+from redis.typing import (
+    ChannelT,
+    FieldT,
+    PubSubHandler,
+    Subscription,
+)
 from redis.utils import (
     check_protocol_version,
     deprecated_args,
@@ -887,6 +901,14 @@ class RedisCluster(
         if check_protocol_version(protocol, 3) and maint_notifications_config is None:
             maint_notifications_config = MaintNotificationsConfig()
 
+        # Build the client-level HIMPORT registry once (always empty at construction)
+        # and share the same object with every node pool, so the fieldset registry is
+        # shared cluster-wide and runtime himport_prepare mutates one object. It is
+        # handed to the NodesManager and injected onto each node's pool in
+        # create_redis_node; it is deliberately NOT forwarded through connection_kwargs,
+        # so nodes reuse the one shared object rather than each rebuilding their own.
+        self._himport_registry = HImportRegistry()
+
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.node_flags = self.__class__.NODE_FLAGS.copy()
         self.read_from_replicas = read_from_replicas
@@ -909,6 +931,7 @@ class RedisCluster(
             cache_config=cache_config,
             event_dispatcher=self._event_dispatcher,
             maint_notifications_config=maint_notifications_config,
+            himport_registry=self._himport_registry,
             **kwargs,
         )
 
@@ -1370,6 +1393,33 @@ class RedisCluster(
         k = self.encoder.encode(key)
         return key_slot(k)
 
+    # HIMPORT orchestration. PREPARE/DISCARD/DISCARDALL mutate the one shared
+    # HImportRegistry exactly once (every node pool references the same object, so the
+    # change is visible cluster-wide and applied lazily per node). SET routes by key
+    # slot to the owning primary and reuses that node's standalone himport_set (lazy
+    # PREPARE bundled with SET). See ``.agents/himport_client_support_spec.md``.
+
+    @property
+    def himport_registry(self) -> HImportRegistry:
+        """The cluster-wide HIMPORT fieldset registry (empty if none was declared).
+
+        Read-only: the registry is mutated only through the HIMPORT command methods.
+        """
+        return self._himport_registry
+
+    def himport_prepare(self, fieldset_name: str, fields: Iterable[FieldT]) -> bool:
+        """Declare an HIMPORT fieldset cluster-wide (shared registry, applied lazily)."""
+        self._himport_registry.prepare(fieldset_name, fields)
+        return True
+
+    def himport_discard(self, fieldset_name: str) -> int:
+        """Remove an HIMPORT fieldset cluster-wide (shared registry, applied lazily)."""
+        return 1 if self._himport_registry.discard(fieldset_name) else 0
+
+    def himport_discard_all(self) -> int:
+        """Remove all HIMPORT fieldsets cluster-wide (shared registry, applied lazily)."""
+        return self._himport_registry.discard_all()
+
     def _get_command_keys(self, *args):
         """
         Get the keys in the command. If the command has no keys in in, None is
@@ -1627,6 +1677,141 @@ class RedisCluster(
                         )
                     raise e
 
+    def _himport_prepare_and_set(
+        self,
+        redis_node,
+        connection,
+        key,
+        fieldset_name,
+        values,
+        fieldset,
+        asking: bool = False,
+    ):
+        """PREPARE ``fieldset`` bundled with the SET on ``connection`` (one packed write).
+
+        When ``asking`` is set (an ASK-redirected cluster SET) the batch becomes
+        ``[PREPARE, ASKING, SET]`` so the per-command ASKING allowance falls
+        immediately before the SET -- the only slot-scoped command. PREPARE is a
+        connection-session command that the ASKING flag does not gate, so placing
+        it before ASKING is safe. Every reply is drained even on a per-command
+        error so the packed replies never desync the pooled socket.
+        """
+        commands = [himport_prepare_command(fieldset_name, fieldset.fields)]
+        if asking:
+            commands.append(("ASKING",))
+        commands.append(himport_set_command(key, fieldset_name, values))
+        connection.send_packed_command(connection.pack_commands(commands))
+        prep_error = ask_error = set_error = None
+        set_resp = None
+        try:
+            redis_node.parse_response(connection, HIMPORT_PREPARE)
+        except ResponseError as e:
+            prep_error = e
+        if asking:
+            try:
+                redis_node.parse_response(connection, "ASKING")
+            except ResponseError as e:
+                ask_error = e
+        try:
+            set_resp = redis_node.parse_response(connection, HIMPORT_SET)
+        except ResponseError as e:
+            set_error = e
+
+        if prep_error:
+            raise prep_error  # PREPARE failure is the root cause
+        else:
+            connection._himport_prepared[fieldset_name] = fieldset.version
+
+        if ask_error:
+            raise ask_error
+        if set_error:
+            raise set_error
+        return set_resp
+
+    def _himport_execute_set(
+        self,
+        redis_node,
+        connection,
+        key,
+        fieldset_name,
+        values,
+        asking: bool = False,
+    ):
+        """Execute an ``HIMPORT SET`` on ``connection`` with the required session setup.
+
+        ``HIMPORT SET`` needs the fieldset PREPAREd on this connection first, and
+        any fieldset discarded from the shared registry since this connection last
+        reconciled must be dropped. Both are applied here, on the acquired
+        connection, so the caller's full retry / MOVED-ASK / disconnect-on-error
+        handling covers the whole exchange.
+
+        When ``asking`` is set (an ASK-redirected cluster SET) the ASKING allowance
+        is folded into the SET's own packed write so it immediately precedes the
+        SET. The session setup (deferred DISCARDs, lazy PREPARE) still runs first,
+        before ASKING, since those are connection-session commands the flag does
+        not gate; only the SET is slot-scoped and must carry the allowance.
+        """
+        redis_node._himport_reconcile_discards(connection)
+
+        registry = connection.himport_registry
+        fieldset = registry.get(fieldset_name) if registry is not None else None
+        # Lazy PREPARE bundled with SET on first use of this fieldset.
+        if (
+            fieldset is not None
+            and connection._himport_prepared.get(fieldset_name) != fieldset.version
+        ):
+            return self._himport_prepare_and_set(
+                redis_node,
+                connection,
+                key,
+                fieldset_name,
+                values,
+                fieldset,
+                asking=asking,
+            )
+
+        # Believed already prepared (or an unregistered fieldset): bare SET, with
+        # ASKING packed immediately before it when this is an ASK redirect.
+        if asking:
+            connection.send_packed_command(
+                connection.pack_commands(
+                    [("ASKING",), himport_set_command(key, fieldset_name, values)]
+                )
+            )
+            try:
+                redis_node.parse_response(connection, "ASKING")
+            except ResponseError as ask_error:
+                # ASKING and SET were one packed write, so the SET reply is still
+                # queued. Drain it before surfacing the ASKING error, otherwise the
+                # connection returns to the pool with an unread reply and desyncs
+                # the next borrower.
+                try:
+                    redis_node.parse_response(connection, HIMPORT_SET)
+                except ResponseError:
+                    pass
+                raise ask_error
+        else:
+            connection.send_command(*himport_set_command(key, fieldset_name, values))
+        try:
+            return redis_node.parse_response(connection, HIMPORT_SET)
+        except NoSuchFieldsetError:
+            # Server dropped the fieldset mid-connection without dropping the socket
+            # (e.g. RESET / maxmemory-clients eviction): re-PREPARE on this healthy
+            # connection and retry the SET once rather than reconnecting. Only for
+            # registry-backed fieldsets; manual/unregistered usage propagates.
+            if fieldset is None:
+                raise
+            connection._himport_prepared.pop(fieldset_name, None)
+            return self._himport_prepare_and_set(
+                redis_node,
+                connection,
+                key,
+                fieldset_name,
+                values,
+                fieldset,
+                asking=asking,
+            )
+
     def _execute_command(self, target_node, *args, **kwargs):
         """
         Send a command to a node in the cluster
@@ -1662,20 +1847,53 @@ class RedisCluster(
 
                 redis_node = self.get_redis_connection(target_node)
                 connection = get_connection(redis_node)
-                if asking:
+                if asking and command != HIMPORT_SET:
                     connection.send_command("ASKING")
                     redis_node.parse_response(connection, "ASKING", **kwargs)
                     asking = False
-                connection.send_command(*args, **kwargs)
-                response = redis_node.parse_response(connection, command, **kwargs)
-
-                # Remove keys entry, it needs only for cache.
-                kwargs.pop("keys", None)
-
-                if command in self.cluster_response_callbacks:
-                    response = self.cluster_response_callbacks[command](
-                        response, **kwargs
+                if command == HIMPORT_SET and len(args) >= 3:
+                    # args == (HIMPORT_SET, key, fieldset_name, *values). A raw
+                    # ``execute_command`` with too few args falls through to the
+                    # normal send path below so the server returns its arity error
+                    # instead of a client-side IndexError.
+                    # The cluster
+                    # executor lazily PREPAREs the fieldset on this connection and
+                    # reconciles deferred DISCARDs, then SETs; it already applies the
+                    # HIMPORT SET response callback, so it bypasses the cluster callback
+                    # block below.
+                    # This per-command branch in the hot dispatch path is deliberate
+                    # and has no cleaner alternative: this is the only seam where the
+                    # concrete routed connection is known, and connection-scoped
+                    # session setup can only happen once that connection is chosen.
+                    # On an ASK redirect ``asking`` is folded into the SET's own packed
+                    # write (see the guard above that suppresses the standalone ASKING
+                    # for HIMPORT SET) so the allowance sits immediately before the SET.
+                    # Clear ``asking`` first and carry the allowance in a dedicated
+                    # local: ``_himport_execute_set`` can raise a retriable MOVED/TRYAGAIN
+                    # mid-exchange, and a stale ``asking`` would shadow the moved-retry
+                    # branch on the next loop iteration (mirrors the async client).
+                    ask_himport = asking
+                    asking = False
+                    response = self._himport_execute_set(
+                        redis_node,
+                        connection,
+                        args[1],
+                        args[2],
+                        list(args[3:]),
+                        asking=ask_himport,
                     )
+                    kwargs.pop("keys", None)
+                else:
+                    connection.send_command(*args, **kwargs)
+                    response = redis_node.parse_response(connection, command, **kwargs)
+
+                    # Remove keys entry, it needs only for cache.
+                    kwargs.pop("keys", None)
+
+                    if command in self.cluster_response_callbacks:
+                        response = self.cluster_response_callbacks[command](
+                            response, **kwargs
+                        )
 
                 self._record_command_metric(
                     command_name=command,
@@ -2121,8 +2339,13 @@ class NodesManager:
         cache_factory: Optional[CacheFactoryInterface] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+        himport_registry: HImportRegistry | None = None,
         **kwargs,
     ):
+        # Shared, cluster-wide HIMPORT registry object, injected onto every node's pool
+        # in create_redis_node (not forwarded through connection_kwargs, so all nodes
+        # reuse the one object rather than rebuilding it per node).
+        self.himport_registry = himport_registry
         self.nodes_cache: dict[str, ClusterNode] = {}
         self.slots_cache: dict[int, list[ClusterNode]] = {}
         self.startup_nodes: dict[str, ClusterNode] = {n.name: n for n in startup_nodes}
@@ -2402,6 +2625,14 @@ class NodesManager:
                 cache=self._cache,
                 retry=node_retry_config,
                 **kwargs,
+            )
+        # Share the one cluster-wide HIMPORT registry with this node's pool. Injected
+        # here (rather than forwarded via connection_kwargs) so every node reuses the
+        # same object; the node has no connections yet, so this is safe.
+        if self.himport_registry is not None:
+            r.connection_pool.himport_registry = self.himport_registry
+            r.connection_pool.connection_kwargs["himport_registry"] = (
+                self.himport_registry
             )
         return r
 
@@ -3422,6 +3653,11 @@ class ClusterPipeline(RedisCluster):
         """ """
         self.command_stack = []
         self.nodes_manager = nodes_manager
+        # Share the parent cluster's HIMPORT registry (held on the NodesManager and
+        # referenced by every node pool). The inherited himport_prepare/discard/
+        # discard_all mutate this one object, so a fieldset declared on the pipeline is
+        # visible to the batched himport_set pre-flight exactly as on the parent client.
+        self._himport_registry = nodes_manager.himport_registry
         self.commands_parser = commands_parser
         self.refresh_table_asap = False
         self.result_callbacks = (
@@ -3938,6 +4174,60 @@ class AbstractStrategy(ExecutionStrategy):
         )
         return self._pipe
 
+    def _himport_prepare_pipeline(self, redis_node, conn, commands):
+        """Pre-flight ``conn`` for a node's pipeline batch containing ``HIMPORT SET``s.
+
+        The cluster pipeline packs each node's commands and writes them bypassing the
+        per-command lazy-PREPARE path, so the fieldsets referenced by the buffered
+        SETs must be PREPAREd on ``conn`` first. Reconciles deferred discards, then
+        PREPAREs every distinct registered fieldset the batch references that this
+        connection has not already prepared, in one packed write. No-op when the
+        batch has no registry-backed ``HIMPORT SET``. Uses ``redis_node`` (the owning
+        node's client) for reconcile and response parsing on ``conn``.
+        """
+        # A node may run on a connection type that never carries real HIMPORT state
+        # (e.g. mocked test doubles); only proceed for a real config.
+        registry = getattr(conn, "himport_registry", None)
+        if not isinstance(registry, HImportRegistry):
+            return
+        redis_node._himport_reconcile_discards(conn)
+        to_prepare = []
+        seen = set()
+        for args, _ in commands:
+            if not args or args[0] != HIMPORT_SET or len(args) < 3:
+                continue
+            fieldset_name = args[2]
+            if fieldset_name in seen:
+                continue
+            seen.add(fieldset_name)
+            fieldset = registry.get(fieldset_name)
+            if (
+                fieldset is not None
+                and conn._himport_prepared.get(fieldset_name) != fieldset.version
+            ):
+                to_prepare.append(fieldset)
+        if not to_prepare:
+            return
+        conn.send_packed_command(
+            conn.pack_commands(
+                [himport_prepare_command(fs.name, fs.fields) for fs in to_prepare]
+            )
+        )
+        # One reply per packed PREPARE must be read regardless of a per-command
+        # ResponseError, otherwise the unread replies desync the node connection
+        # before the buffered batch is even sent. Drain every reply (marking only the
+        # ones that succeeded), then surface the first error as the root cause.
+        first_error = None
+        for fs in to_prepare:
+            try:
+                redis_node.parse_response(conn, HIMPORT_PREPARE)
+            except ResponseError as e:
+                first_error = first_error or e
+                continue
+            conn._himport_prepared[fs.name] = fs.version
+        if first_error is not None:
+            raise first_error
+
     @abstractmethod
     def execute(self, raise_on_error: bool = True) -> List[Any]:
         pass
@@ -4077,6 +4367,9 @@ class PipelineStrategy(AbstractStrategy):
         is_default_node = False
         # build a list of node objects based on node names we need to
         nodes: dict[str, NodeCommands] = {}
+        # node objects keyed by name, so each node's connection can be pre-flighted
+        # for HIMPORT SET (PREPARE) before the batched write.
+        node_objs: dict = {}
         nodes_written = 0
         nodes_read = 0
 
@@ -4177,6 +4470,7 @@ class PipelineStrategy(AbstractStrategy):
                         redis_node.connection_pool,
                         connection,
                     )
+                    node_objs[node_name] = node
                 nodes[node_name].append(c)
 
             # send the commands in sequence.
@@ -4187,6 +4481,15 @@ class PipelineStrategy(AbstractStrategy):
             # so that we can read them from different sockets as they come back.
             # we don't multiplex on the sockets as they come available,
             # but that shouldn't make too much difference.
+
+            # HIMPORT SETs in the batch need their fieldsets prepared on each
+            # node's connection first; the packed write bypasses the per-command
+            # lazy prepare, so pre-flight the PREPARE (once per node) here.
+            for node_name, n in nodes.items():
+                redis_node = self._pipe.get_redis_connection(node_objs[node_name])
+                self._himport_prepare_pipeline(
+                    redis_node, n.connection, [(c.args, c.options) for c in n.commands]
+                )
 
             # Start timing for observability
             start_time = time.monotonic()
@@ -4542,8 +4845,23 @@ class TransactionStrategy(AbstractStrategy):
         Send a command and parse the response
         """
 
-        conn.send_command(*args)
-        output = redis_node.parse_response(conn, command_name, **options)
+        # HIMPORT SET's wire form depends on per-connection state: the fieldset
+        # must be PREPAREd on this connection first, and any fieldset discarded
+        # since this connection last reconciled must be dropped. The
+        # immediate/watched path (commands issued after WATCH, before MULTI)
+        # would otherwise send a bare HIMPORT SET and fail with "no such
+        # fieldset". Route it through the node's HIMPORT executor, the same way
+        # the normal cluster path, the batched MULTI/EXEC path, and standalone
+        # watched pipelines all do.
+        if command_name == HIMPORT_SET and len(args) >= 3:
+            # args == (HIMPORT_SET, key, fieldset_name, *values). Too few args
+            # fall through to the bare send so the server returns its arity error.
+            output = redis_node._himport_execute_set(
+                conn, args[1], args[2], list(args[3:])
+            )
+        else:
+            conn.send_command(*args)
+            output = redis_node.parse_response(conn, command_name, **options)
 
         if command_name in self.UNWATCH_COMMANDS:
             self._watching = False
@@ -4644,6 +4962,13 @@ class TransactionStrategy(AbstractStrategy):
         self._executing = True
 
         redis_node, connection = self._get_client_and_connection_for_transaction()
+
+        # Ensure fieldsets referenced by buffered HIMPORT SETs are prepared on this
+        # node's connection before the MULTI/EXEC block (session state, not
+        # transactional). All keys share one slot here, so it is a single node.
+        self._himport_prepare_pipeline(
+            redis_node, connection, [(c.args, c.options) for c in stack]
+        )
 
         stack = chain(
             [PipelineCommand(("MULTI",))],
