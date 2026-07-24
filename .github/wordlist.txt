@@ -122,11 +122,14 @@ docstrings
 eg
 enums
 exc
+fieldset
+fieldsets
 firsttimersonly
 fo
 formatter
 genindex
 gmail
+himport
 hiredis
 http
 idx
@@ -162,6 +165,7 @@ parsers
 performant
 pmessage
 png
+positionally
 pre
 psubscribe
 pubsub
