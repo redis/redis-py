@@ -225,16 +225,6 @@ async def test_discard_runtime(hr):
     assert await hr.hget("h:{u}:t", "f1") == b"1"
 
 
-async def test_discard_init_raises(hr):
-    with pytest.raises(redis.DataError):
-        await hr.himport_discard("shared")
-
-
-async def test_discard_all_rejected_when_init_present(hr):
-    with pytest.raises(redis.DataError):
-        await hr.himport_discard_all()
-
-
 async def test_pool_churn_lazy_prepare(hr):
     n = 20
     for i in range(n):

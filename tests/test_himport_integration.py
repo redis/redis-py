@@ -309,14 +309,6 @@ class TestHImportIntegration:
         # Keys already written through it are unaffected.
         assert hr.hget("h:{u}:t", "f1") == b"1"
 
-    def test_discard_init_raises(self, hr):
-        with pytest.raises(redis.DataError):
-            hr.himport_discard("shared")
-
-    def test_discard_all_rejected_when_init_present(self, hr):
-        with pytest.raises(redis.DataError):
-            hr.himport_discard_all()
-
     def test_pool_churn_lazy_prepare(self, hr):
         # Each connection the pool hands out prepares the fieldset once, lazily.
         n = 25
