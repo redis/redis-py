@@ -1024,6 +1024,60 @@ class TestHImportSetValueValidation:
 
 
 @pytest.mark.fixed_client
+class TestHImportSetRawArityFallThrough:
+    """A raw ``execute_command`` for HIMPORT SET with too few args must fall through
+    to the normal send path so the server returns its arity error, instead of the
+    client raising IndexError while slicing key/fieldset_name out of ``args``.
+    ``himport_set`` itself always supplies key + fieldset_name (len(args) >= 3), so
+    the real command path is unaffected."""
+
+    def test_sync_too_few_args_falls_through_to_send(self):
+        conn = _CapturingConn(HImportRegistry())
+        r = Redis()
+        r._himport_execute_set = mock.Mock(
+            side_effect=AssertionError("must not take the HIMPORT executor path")
+        )
+        r.parse_response = mock.Mock(return_value="server-arity-error")
+        # (HIMPORT_SET, key) — no fieldset_name; must not raise IndexError.
+        r._send_command_parse_response(conn, HIMPORT_SET, HIMPORT_SET, "k")
+        assert conn.writes == [("cmd", (HIMPORT_SET, "k"))]
+
+    def test_sync_well_formed_uses_himport_executor(self):
+        conn = _CapturingConn(HImportRegistry())
+        r = Redis()
+        r._himport_execute_set = mock.Mock(return_value="OK")
+        r._send_command_parse_response(conn, HIMPORT_SET, HIMPORT_SET, "k", "fs", "v")
+        r._himport_execute_set.assert_called_once_with(conn, "k", "fs", ["v"])
+        assert conn.writes == []  # did not fall through to a plain send
+
+    def test_async_too_few_args_falls_through_to_send(self):
+        async def run():
+            conn = _AsyncCapturingConn(HImportRegistry())
+            r = AsyncRedis()
+            r._himport_execute_set = mock.AsyncMock(
+                side_effect=AssertionError("must not take the HIMPORT executor path")
+            )
+            r.parse_response = mock.AsyncMock(return_value="server-arity-error")
+            await r._send_command_parse_response(conn, HIMPORT_SET, HIMPORT_SET, "k")
+            assert conn.writes == [("cmd", (HIMPORT_SET, "k"))]
+
+        asyncio.run(run())
+
+    def test_async_well_formed_uses_himport_executor(self):
+        async def run():
+            conn = _AsyncCapturingConn(HImportRegistry())
+            r = AsyncRedis()
+            r._himport_execute_set = mock.AsyncMock(return_value="OK")
+            await r._send_command_parse_response(
+                conn, HIMPORT_SET, HIMPORT_SET, "k", "fs", "v"
+            )
+            r._himport_execute_set.assert_awaited_once_with(conn, "k", "fs", ["v"])
+            assert conn.writes == []
+
+        asyncio.run(run())
+
+
+@pytest.mark.fixed_client
 class TestHImportClusterWiring:
     """Cluster wiring guards (offline). Full topology behavior is covered by the
     cluster suite; here we assert the plumbing that makes propagation possible."""

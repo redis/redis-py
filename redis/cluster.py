@@ -1413,11 +1413,11 @@ class RedisCluster(
         return True
 
     def himport_discard(self, fieldset_name: str) -> int:
-        """Remove a runtime fieldset cluster-wide. Raises ``DataError`` for init ones."""
+        """Remove an HIMPORT fieldset cluster-wide (shared registry, applied lazily)."""
         return 1 if self._himport_registry.discard(fieldset_name) else 0
 
     def himport_discard_all(self) -> int:
-        """Remove all runtime fieldsets cluster-wide. Raises ``DataError`` on init ones."""
+        """Remove all HIMPORT fieldsets cluster-wide (shared registry, applied lazily)."""
         return self._himport_registry.discard_all()
 
     def _get_command_keys(self, *args):
@@ -1851,8 +1851,12 @@ class RedisCluster(
                     connection.send_command("ASKING")
                     redis_node.parse_response(connection, "ASKING", **kwargs)
                     asking = False
-                if command == HIMPORT_SET:
-                    # args == (HIMPORT_SET, key, fieldset_name, *values). The cluster
+                if command == HIMPORT_SET and len(args) >= 3:
+                    # args == (HIMPORT_SET, key, fieldset_name, *values). A raw
+                    # ``execute_command`` with too few args falls through to the
+                    # normal send path below so the server returns its arity error
+                    # instead of a client-side IndexError.
+                    # The cluster
                     # executor lazily PREPAREs the fieldset on this connection and
                     # reconciles deferred DISCARDs, then SETs; it already applies the
                     # HIMPORT SET response callback, so it bypasses the cluster callback

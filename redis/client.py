@@ -813,8 +813,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         # connection is known, and connection-scoped session setup can only happen
         # once that connection is chosen. The overhead is one string compare per
         # command.
-        if command_name == HIMPORT_SET:
-            # args == (HIMPORT_SET, key, fieldset_name, *values)
+        if command_name == HIMPORT_SET and len(args) >= 3:
+            # args == (HIMPORT_SET, key, fieldset_name, *values). A raw
+            # ``execute_command`` with too few args falls through to the normal send
+            # path so the server returns its arity error, preserving execute_command
+            # error semantics instead of raising a client-side IndexError here.
             return self._himport_execute_set(conn, args[1], args[2], list(args[3:]))
         conn.send_command(*args, **options)
         return self.parse_response(conn, command_name, **options)

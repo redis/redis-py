@@ -515,6 +515,22 @@ class Pipeline(RedisModuleCommands, CoreCommands):
         """Adds a command to the stack"""
         return self.pipeline_execute_command(*args, **kwargs)
 
+    # HIMPORT is unsupported on the multi-database client (see MultiDBClient). A
+    # pipeline inherits ``himport_set`` from ``CoreCommands`` and would otherwise
+    # queue an unprepared ``HIMPORT SET`` that fails with a confusing server-side
+    # error, bypassing the client-level guard. Block all HIMPORT methods here too.
+    def himport_prepare(self, *args: Any, **kwargs: Any) -> Any:
+        raise DataError(MultiDBClient._HIMPORT_UNSUPPORTED)
+
+    def himport_set(self, *args: Any, **kwargs: Any) -> Any:
+        raise DataError(MultiDBClient._HIMPORT_UNSUPPORTED)
+
+    def himport_discard(self, *args: Any, **kwargs: Any) -> Any:
+        raise DataError(MultiDBClient._HIMPORT_UNSUPPORTED)
+
+    def himport_discard_all(self, *args: Any, **kwargs: Any) -> Any:
+        raise DataError(MultiDBClient._HIMPORT_UNSUPPORTED)
+
     def execute(self) -> List[Any]:
         """Execute all the commands in the current pipeline"""
         if not self._client.initialized:

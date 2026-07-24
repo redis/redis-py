@@ -263,8 +263,13 @@ The automatic re-prepare applies to direct calls only, not to commands inside
 pre-flight `PREPARE` in that batch.
 
 With `RedisCluster`, `himport_prepare` / `himport_discard` / `himport_discard_all`
-fan out to every master node and return a single aggregated reply, matching the
-standalone API; `himport_set` routes by the key's hash slot. With Sentinel, call
+update the client's shared, cluster-wide registry and return immediately — like the
+standalone API, they perform no server I/O of their own. The server-side `PREPARE`
+(and, after a discard, `DISCARD`) is applied lazily on each node's connection the
+next time it serves an `himport_set`, and re-applied after reconnects or failover;
+`himport_set` itself routes by the key's hash slot. A discard is therefore not
+removed from every server session at once: each connection drops the fieldset on its
+next `himport_set` (or on disconnect). With Sentinel, call
 `himport_prepare` on the long-lived client returned by `master_for(...)`; the fieldset
 survives failover automatically. HIMPORT is not supported on the multi-database
 (Active-Active) client.

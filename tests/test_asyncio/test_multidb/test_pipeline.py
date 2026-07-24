@@ -5,7 +5,8 @@ import pybreaker
 import pytest
 
 from redis.asyncio.client import Pipeline
-from redis.asyncio.multidb.client import MultiDBClient
+from redis.asyncio.multidb.client import MultiDBClient, Pipeline as MultiDBPipeline
+from redis.exceptions import DataError
 from redis.asyncio.multidb.config import InitialHealthCheck
 from redis.asyncio.multidb.failover import WeightBasedFailoverStrategy
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
@@ -513,3 +514,22 @@ class TestTransaction:
                 )
 
                 assert await client.transaction(callback) == ["OK1", "value"]
+
+
+@pytest.mark.onlynoncluster
+class TestPipelineHImportUnsupported:
+    """HIMPORT is unsupported on the multi-database client. The lifecycle methods
+    are blocked on ``MultiDBClient``; the pipeline inherits ``himport_set`` from
+    ``AsyncCoreCommands`` and would otherwise queue it silently, so it must be
+    blocked there too. The overrides raise before touching the client, so no config
+    or server is needed."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "method",
+        ["himport_prepare", "himport_set", "himport_discard", "himport_discard_all"],
+    )
+    async def test_pipeline_himport_methods_raise(self, method):
+        pipe = MultiDBPipeline(Mock(spec=MultiDBClient))
+        with pytest.raises(DataError, match="not supported on the multi-database"):
+            await getattr(pipe, method)("users", ["a"])

@@ -928,12 +928,12 @@ class RedisCluster(
         return True
 
     async def himport_discard(self, fieldset_name: str) -> int:
-        """Remove a runtime fieldset cluster-wide. Raises ``DataError`` for init ones."""
+        """Remove an HIMPORT fieldset cluster-wide (shared registry, applied lazily)."""
         await self.initialize()
         return 1 if self._himport_registry.discard(fieldset_name) else 0
 
     async def himport_discard_all(self) -> int:
-        """Remove all runtime fieldsets cluster-wide. Raises ``DataError`` on init ones."""
+        """Remove all HIMPORT fieldsets cluster-wide (shared registry, applied lazily)."""
         await self.initialize()
         return self._himport_registry.discard_all()
 
@@ -1866,8 +1866,11 @@ class ClusterNode:
             # On an ASK redirect ``asking`` is passed here rather than sent as a
             # separate ASKING command so the allowance sits on this same connection,
             # folded into the SET's own write immediately before the SET.
-            if args[0] == HIMPORT_SET:
-                # args == (HIMPORT_SET, key, fieldset_name, *values)
+            if args[0] == HIMPORT_SET and len(args) >= 3:
+                # args == (HIMPORT_SET, key, fieldset_name, *values). A raw
+                # ``execute_command`` with too few args falls through to the normal
+                # send path below so the server returns its arity error instead of a
+                # client-side IndexError.
                 return await self._himport_execute_set(
                     connection, args[1], args[2], list(args[3:]), asking=asking
                 )
