@@ -1930,16 +1930,11 @@ class NodesManager:
             for name in list(old.keys()):
                 if name not in new:
                     # Node is removed from cache before disconnect starts,
-                    # so it won't be found in lookups during disconnect
-                    # Mark active connections so in-flight commands can
-                    # finish, then disconnect them when their current
-                    # operation completes. Free connections can be
-                    # disconnected immediately.
+                    # so it won't be found in lookups during disconnect.
+                    # We fully disconnect the node so that all its connections
+                    # (in-use and free) are closed immediately, preventing leaks.
                     removed_node = old.pop(name)
-                    removed_node.update_active_connections_for_reconnect()
-                    task = asyncio.create_task(
-                        removed_node.disconnect_free_connections()
-                    )
+                    task = asyncio.create_task(removed_node.disconnect())
                     self._background_tasks.add(task)
                     task.add_done_callback(self._background_tasks.discard)
 

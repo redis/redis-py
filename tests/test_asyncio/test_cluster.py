@@ -3140,11 +3140,12 @@ class TestNodesManager:
         assert nodes_cache_names == [node2.name, node1.name, node3.name]
 
     @pytest.mark.fixed_client
-    async def test_set_nodes_disconnects_removed_node_connections_after_use(
+    async def test_set_nodes_disconnects_removed_node_connections_immediately(
         self,
+        default_host: str,
     ) -> None:
         """
-        Test removed nodes let in-flight commands finish, then disconnect.
+        Test removed nodes are fully disconnected immediately, including in-use connections.
         """
 
         class FakeConnection:
@@ -3201,18 +3202,15 @@ class TestNodesManager:
         assert nodes_manager.nodes_cache == {}
         assert free_conn.disconnect_called is True
         assert free_conn.is_connected is False
-        assert active_conn.reconnect is True
-        assert active_conn.disconnect_called is False
-        assert active_conn.is_connected is True
-
-        active_conn.response_ready.set()
-        assert await command == b"OK"
-
         assert active_conn.disconnect_called is True
         assert active_conn.is_connected is False
-        assert active_conn in node._free
-        assert free_conn.reconnect is False
-        assert active_conn.reconnect is False
+
+        # Cancel the hanging command task since FakeConnection.disconnect doesn't interrupt read_response
+        command.cancel()
+        try:
+            await command
+        except asyncio.CancelledError:
+            pass
 
     @pytest.mark.fixed_client
     async def test_move_node_to_end_of_cached_nodes_nonexistent(self) -> None:
