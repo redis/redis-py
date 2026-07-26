@@ -3342,6 +3342,44 @@ class TestNodesManager:
 class TestClusterNodeConnectionHandling:
     """Tests for ClusterNode connection handling methods."""
 
+    async def test_execute_command_waits_for_pending_reconnect_cleanup(self) -> None:
+        node = ClusterNode(default_host, 7000, max_connections=1)
+        connection = mock.AsyncMock(spec=Connection)
+        connection.reconnect = True
+        connection.should_reconnect.side_effect = lambda: connection.reconnect
+        connection.pack_command.return_value = b"packed"
+        connection.read_response.return_value = b"OK"
+
+        disconnect_started = asyncio.Event()
+        allow_disconnect = asyncio.Event()
+
+        async def disconnect() -> None:
+            disconnect_started.set()
+            await allow_disconnect.wait()
+            connection.reconnect = False
+            connection.is_connected = False
+
+        connection.disconnect.side_effect = disconnect
+        node._connections.append(connection)
+        node.release(connection)
+
+        await disconnect_started.wait()
+        command = asyncio.create_task(node.execute_command("GET", "key"))
+        await asyncio.sleep(0)
+        assert not command.done()
+
+        allow_disconnect.set()
+        assert await command == b"OK"
+
+    async def test_acquire_connection_async_preserves_pool_exhaustion(self) -> None:
+        node = ClusterNode(default_host, 7000, max_connections=1)
+        connection = mock.AsyncMock(spec=Connection)
+        connection.is_connected = False
+        node._connections.append(connection)
+
+        with pytest.raises(MaxConnectionsError):
+            await node.acquire_connection_async()
+
     class WriteFailingConnection:
         def __init__(self, **kwargs: Any) -> None:
             self.host = kwargs["host"]

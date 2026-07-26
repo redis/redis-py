@@ -1679,6 +1679,17 @@ class ClusterNode:
 
             raise MaxConnectionsError()
 
+    async def acquire_connection_async(self) -> Connection:
+        """Acquire a connection after pending reconnect cleanup completes."""
+        while True:
+            try:
+                return self.acquire_connection()
+            except MaxConnectionsError:
+                pending_cleanup = tuple(self._background_tasks)
+                if not pending_cleanup:
+                    raise
+                await asyncio.gather(*pending_cleanup)
+
     async def disconnect_if_needed(self, connection: Connection) -> None:
         """
         Disconnect a connection if it's marked for reconnect.
@@ -1781,7 +1792,7 @@ class ClusterNode:
 
     async def execute_command(self, *args: Any, **kwargs: Any) -> Any:
         # Acquire connection
-        connection = self.acquire_connection()
+        connection = await self.acquire_connection_async()
         try:
             # Handle lazy disconnect for connections marked for reconnect
             await self.disconnect_if_needed(connection)
@@ -1800,7 +1811,7 @@ class ClusterNode:
 
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:
         # Acquire connection
-        connection = self.acquire_connection()
+        connection = await self.acquire_connection_async()
         try:
             # Handle lazy disconnect for connections marked for reconnect
             await self.disconnect_if_needed(connection)
@@ -2925,7 +2936,7 @@ class TransactionStrategy(AbstractStrategy):
             RedisCluster.ERRORS_ALLOW_RETRY + self.SLOT_REDIRECT_ERRORS
         )
 
-    def _get_client_and_connection_for_transaction(
+    async def _get_client_and_connection_for_transaction(
         self,
     ) -> Tuple[ClusterNode, Connection]:
         """
@@ -2947,7 +2958,9 @@ class TransactionStrategy(AbstractStrategy):
         self._transaction_node = node
 
         if not self._transaction_connection:
-            connection: Connection = self._transaction_node.acquire_connection()
+            connection: Connection = (
+                await self._transaction_node.acquire_connection_async()
+            )
             self._transaction_connection = connection
 
         return self._transaction_node, self._transaction_connection
@@ -3024,7 +3037,7 @@ class TransactionStrategy(AbstractStrategy):
         )
 
     async def _get_connection_and_send_command(self, *args, **options):
-        redis_node, connection = self._get_client_and_connection_for_transaction()
+        redis_node, connection = await self._get_client_and_connection_for_transaction()
         # Only disconnect if not watching - disconnecting would lose WATCH state
         if not self._watching:
             await redis_node.disconnect_if_needed(connection)
@@ -3172,7 +3185,7 @@ class TransactionStrategy(AbstractStrategy):
 
         self._executing = True
 
-        redis_node, connection = self._get_client_and_connection_for_transaction()
+        redis_node, connection = await self._get_client_and_connection_for_transaction()
         # Only disconnect if not watching - disconnecting would lose WATCH state
         if not self._watching:
             await redis_node.disconnect_if_needed(connection)
@@ -3388,7 +3401,7 @@ class _ClusterNodePoolAdapter(ConnectionPoolInterface):
     async def get_connection(
         self, command_name: Optional[str] = None, *keys: Any, **options: Any
     ) -> AbstractConnection:
-        connection = self._node.acquire_connection()
+        connection = await self._node.acquire_connection_async()
         try:
             await connection.connect()
         except BaseException:
