@@ -223,6 +223,20 @@ the primary and its replications in a Round-Robin manner.
 With load_balancing_strategy you can define a custom strategy for
 assigning read commands to the replicas and primary nodes.
 
+``LoadBalancingStrategy.LATENCY_BASED`` uses power-of-two choices and a
+peak-sensitive latency estimate to prefer the less busy of two sampled
+nodes.  The strategy is opt-in; existing round-robin and random strategies
+are unchanged.  Latency measurements are collected separately for each
+cluster node and are shared by regular commands and pipelines.
+
+.. code:: python
+
+   >>> from redis.cluster import LoadBalancingStrategy, RedisCluster
+   >>> rc = RedisCluster(
+   ...     startup_nodes=startup_nodes,
+   ...     load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+   ... )
+
 READONLY mode can be set at runtime by calling the readonly() method
 with target_nodes=‘replicas’, and read-write access can be restored by
 calling the readwrite() method.

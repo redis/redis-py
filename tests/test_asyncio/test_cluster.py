@@ -14,6 +14,7 @@ from _pytest.fixtures import FixtureRequest
 from redis._parsers import AsyncCommandsParser
 from redis.asyncio.cluster import (
     ClusterNode,
+    LoadBalancer,
     NodesManager,
     PipelineCommand,
     RedisCluster,
@@ -75,6 +76,71 @@ default_cluster_slots = [
     [0, 8191, ["127.0.0.1", 7000, "node_0"], ["127.0.0.1", 7003, "node_3"]],
     [8192, 16383, ["127.0.0.1", 7001, "node_1"], ["127.0.0.1", 7002, "node_2"]],
 ]
+
+
+def test_nodes_manager_provides_nodes_to_latency_based_selection():
+    nodes = [
+        ClusterNode("node-a", 7000),
+        ClusterNode("node-b", 7001),
+    ]
+    manager = object.__new__(NodesManager)
+    manager.slots_cache = {0: nodes}
+    manager.read_load_balancer = LoadBalancer()
+
+    manager.read_load_balancer.start_request(nodes[0].name)
+    manager.read_load_balancer.record_latency(nodes[0].name, 0.1)
+    manager.read_load_balancer.start_request(nodes[1].name)
+    manager.read_load_balancer.record_latency(nodes[1].name, 0.01)
+
+    with mock.patch("redis.cluster.random.sample", return_value=[0, 1]):
+        assert (
+            manager.get_node_from_slot(
+                0,
+                read_from_replicas=True,
+                load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+            )
+            is nodes[1]
+        )
+
+
+@pytest.mark.asyncio
+async def test_async_cluster_command_records_latency_when_read_fails():
+    node = ClusterNode("node-a", 7000)
+    execute_command = mock.AsyncMock(side_effect=ValueError("response failure"))
+    load_balancer = mock.Mock()
+    client = object.__new__(RedisCluster)
+    client.RedisClusterRequestTTL = 1
+    client.load_balancing_strategy = LoadBalancingStrategy.LATENCY_BASED
+    client.nodes_manager = mock.Mock(read_load_balancer=load_balancer)
+    client._record_command_metric = mock.AsyncMock()
+
+    with mock.patch.object(ClusterNode, "execute_command", execute_command):
+        with pytest.raises(ValueError, match="response failure"):
+            await client._execute_command(node, "GET", "key")
+
+    load_balancer.start_request.assert_called_once_with(node.name)
+    load_balancer.record_latency.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_async_cluster_pipeline_records_one_latency_sample_per_read_node():
+    client = await get_mocked_redis_client(
+        host=default_host,
+        port=default_port,
+        load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+    )
+
+    async def execute_pipeline(node, commands):
+        for command in commands:
+            command.result = b"value"
+        return False
+
+    pipeline = client.pipeline()
+    pipeline.get("foo")
+    with mock.patch.object(ClusterNode, "execute_pipeline", execute_pipeline):
+        assert await pipeline.execute() == [b"value"]
+
+    assert len(client.nodes_manager.read_load_balancer._latency_state) == 1
 
 
 class NodeProxy:
