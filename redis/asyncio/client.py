@@ -872,6 +872,7 @@ class Redis(
         await self.initialize()
         pool = self.connection_pool
         command_name = args[0]
+        no_retry = options.pop("_no_retry", False)
         conn = self.connection or await pool.get_connection()
 
         # Start timing for observability
@@ -889,13 +890,26 @@ class Redis(
         if self.single_connection_client:
             await self._single_conn_lock.acquire()
         try:
-            result = await conn.retry.call_with_retry(
-                lambda: self._send_command_parse_response(
-                    conn, command_name, *args, **options
-                ),
-                failure_callback,
-                with_failure_count=True,
-            )
+            if no_retry:
+                # SHUTDOWN closes the server-side connection, so retrying the
+                # resulting connection error only delays the expected outcome.
+                try:
+                    result = await self._send_command_parse_response(
+                        conn, command_name, *args, **options
+                    )
+                except (ConnectionError, TimeoutError) as error:
+                    await self._close_connection(
+                        conn, error, 0, start_time, command_name
+                    )
+                    raise
+            else:
+                result = await conn.retry.call_with_retry(
+                    lambda: self._send_command_parse_response(
+                        conn, command_name, *args, **options
+                    ),
+                    failure_callback,
+                    with_failure_count=True,
+                )
 
             await record_operation_duration(
                 command_name=command_name,

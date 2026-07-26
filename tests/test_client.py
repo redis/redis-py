@@ -3,12 +3,14 @@ from unittest import mock
 import pytest
 
 import redis
+from redis.backoff import NoBackoff
 from redis.event import (
     EventDispatcher,
 )
 from redis.observability import recorder
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
+from redis.retry import Retry
 
 
 class TestRedisClientMetricsRecording:
@@ -470,6 +472,7 @@ class TestRedisClientMetricsRecording:
         mock_connection_pool.get_connection.return_value = mock_connection
 
         recorder.reset_collector()
+
         # Enable both COMMAND and RESILIENCY metric groups
         config = OTelConfig(metric_groups=[MetricGroup.COMMAND, MetricGroup.RESILIENCY])
 
@@ -513,3 +516,16 @@ class TestRedisClientMetricsRecording:
             assert "error.type" in error_attrs
 
         recorder.reset_collector()
+
+    def test_no_retry_option_executes_command_once(self, mock_connection_pool):
+        mock_connection = mock_connection_pool.get_connection.return_value
+        mock_connection.retry = Retry(NoBackoff(), retries=3)
+        client = redis.Redis(connection_pool=mock_connection_pool)
+        send_command = mock.MagicMock(side_effect=redis.ConnectionError("shutdown"))
+        client._send_command_parse_response = send_command
+
+        with pytest.raises(redis.ConnectionError, match="shutdown"):
+            client.execute_command("SHUTDOWN", _no_retry=True)
+
+        assert send_command.call_count == 1
+        assert send_command.call_args.kwargs == {}

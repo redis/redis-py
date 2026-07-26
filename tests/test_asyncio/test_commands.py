@@ -791,6 +791,16 @@ class TestRedisCommands:
     async def test_ping(self, r: redis.Redis):
         assert await r.ping()
 
+    async def test_shutdown_disables_command_retries(self):
+        client = redis.Redis()
+        client.execute_command = AsyncMock(side_effect=redis.ConnectionError)
+
+        await client.shutdown(nosave=True)
+
+        client.execute_command.assert_awaited_once_with(
+            "SHUTDOWN", "NOSAVE", _no_retry=True
+        )
+
     @pytest.mark.onlynoncluster
     async def test_slowlog_get(self, r: redis.Redis, slowlog):
         assert await r.slowlog_reset()

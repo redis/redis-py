@@ -10,6 +10,8 @@ import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 
 import redis.asyncio as redis
+from redis.asyncio.retry import Retry
+from redis.backoff import NoBackoff
 from redis.asyncio.observability import recorder as async_recorder
 from redis.observability.attributes import (
     SERVER_ADDRESS,
@@ -361,6 +363,22 @@ class TestAsyncRedisClientErrorMetricsRecording:
             assert attrs["error.type"] == "ConnectionError"
 
         async_recorder.reset_collector()
+
+    async def test_no_retry_option_executes_command_once(
+        self, mock_async_connection_pool
+    ):
+        mock_async_connection = mock_async_connection_pool.get_connection.return_value
+        mock_async_connection.retry = Retry(NoBackoff(), retries=3)
+        mock_async_connection.disconnect = AsyncMock()
+        client = redis.Redis(connection_pool=mock_async_connection_pool)
+        send_command = AsyncMock(side_effect=redis.ConnectionError("shutdown"))
+        client._send_command_parse_response = send_command
+
+        with pytest.raises(redis.ConnectionError, match="shutdown"):
+            await client.execute_command("SHUTDOWN", _no_retry=True)
+
+        assert send_command.call_count == 1
+        assert send_command.call_args.kwargs == {}
 
     async def test_timeout_error_records_error_count(
         self, mock_async_connection_pool, mock_async_connection, mock_error_meter

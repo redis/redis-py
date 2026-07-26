@@ -818,6 +818,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         """Execute a command and return a parsed response"""
         pool = self.connection_pool
         command_name = args[0]
+        no_retry = options.pop("_no_retry", False)
         conn = self.connection or pool.get_connection()
 
         # Start timing for observability
@@ -834,13 +835,24 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         if self._single_connection_client:
             self.single_connection_lock.acquire()
         try:
-            result = conn.retry.call_with_retry(
-                lambda: self._send_command_parse_response(
-                    conn, command_name, *args, **options
-                ),
-                failure_callback,
-                with_failure_count=True,
-            )
+            if no_retry:
+                # SHUTDOWN closes the server-side connection, so retrying the
+                # resulting connection error only delays the expected outcome.
+                try:
+                    result = self._send_command_parse_response(
+                        conn, command_name, *args, **options
+                    )
+                except (ConnectionError, TimeoutError) as error:
+                    self._close_connection(conn, error, 0, start_time, command_name)
+                    raise
+            else:
+                result = conn.retry.call_with_retry(
+                    lambda: self._send_command_parse_response(
+                        conn, command_name, *args, **options
+                    ),
+                    failure_callback,
+                    with_failure_count=True,
+                )
 
             record_operation_duration(
                 command_name=command_name,

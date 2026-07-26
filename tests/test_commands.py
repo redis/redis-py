@@ -8442,17 +8442,27 @@ class TestRedisCommands:
         assert r.replicaof("NO", "ONE")
 
     def test_shutdown(self, r: redis.Redis):
-        r.execute_command = mock.MagicMock()
-        r.execute_command("SHUTDOWN", "NOSAVE")
-        r.execute_command.assert_called_once_with("SHUTDOWN", "NOSAVE")
+        def execute_command(command, *args, **kwargs):
+            if command == "SHUTDOWN":
+                raise redis.ConnectionError
+
+        r.execute_command = mock.MagicMock(side_effect=execute_command)
+        r.shutdown(nosave=True)
+        r.execute_command.assert_called_once_with("SHUTDOWN", "NOSAVE", _no_retry=True)
 
     @skip_if_server_version_lt("7.0.0")
     def test_shutdown_with_params(self, r: redis.Redis):
-        r.execute_command = mock.MagicMock()
-        r.execute_command("SHUTDOWN", "SAVE", "NOW", "FORCE")
-        r.execute_command.assert_called_once_with("SHUTDOWN", "SAVE", "NOW", "FORCE")
-        r.execute_command("SHUTDOWN", "ABORT")
-        r.execute_command.assert_called_with("SHUTDOWN", "ABORT")
+        def execute_command(command, *args, **kwargs):
+            if command == "SHUTDOWN":
+                raise redis.ConnectionError
+
+        r.execute_command = mock.MagicMock(side_effect=execute_command)
+        r.shutdown(save=True, now=True, force=True)
+        r.execute_command.assert_called_once_with(
+            "SHUTDOWN", "SAVE", "NOW", "FORCE", _no_retry=True
+        )
+        r.shutdown(abort=True)
+        r.execute_command.assert_called_with("SHUTDOWN", "ABORT", _no_retry=True)
 
     @pytest.mark.replica
     @pytest.mark.xfail(strict=False)

@@ -2116,6 +2116,7 @@ class ManagementCommands(CommandsProtocol):
         if abort:
             args.append("ABORT")
         try:
+            kwargs["_no_retry"] = True
             self.execute_command(*args, **kwargs)
         except ConnectionError:
             # a ConnectionError here is expected
@@ -2471,6 +2472,7 @@ class AsyncManagementCommands(ManagementCommands):
         if abort:
             args.append("ABORT")
         try:
+            kwargs["_no_retry"] = True
             await self.execute_command(*args, **kwargs)
         except ConnectionError:
             # a ConnectionError here is expected
