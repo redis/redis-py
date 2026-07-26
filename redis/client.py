@@ -315,6 +315,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         maint_notifications_config: MaintNotificationsConfig | None = None,
         oss_cluster_maint_notifications_handler: OSSMaintNotificationsHandler
         | None = None,
+        encoder_class: Type[Encoder] = Encoder,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -355,6 +356,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             instance use is not thread safe.
         decode_responses:
             if `True`, the response will be decoded to utf-8.
+            Argument is ignored when connection_pool is provided.
+        encoder_class:
+            The encoder class used to create an encoder for each connection.
+            Custom encoder classes must accept the same arguments as `Encoder`.
             Argument is ignored when connection_pool is provided.
         driver_info:
             Optional DriverInfo object to identify upstream libraries.
@@ -412,6 +417,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "credential_provider": credential_provider,
                 "protocol": protocol,
                 "legacy_responses": legacy_responses,
+                "encoder_class": encoder_class,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:

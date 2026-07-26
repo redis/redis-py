@@ -36,6 +36,7 @@ from redis._defaults import (
     DEFAULT_SOCKET_READ_SIZE,
     DEFAULT_SOCKET_TIMEOUT,
 )
+from redis._parsers.encoders import Encoder
 from redis._parsers.helpers import bool_ok, get_response_callbacks
 from redis.asyncio.connection import (
     Connection,
@@ -308,6 +309,7 @@ class Redis(
         legacy_responses: bool = True,
         event_dispatcher: EventDispatcher | None = None,
         maint_notifications_config: MaintNotificationsConfig | None = None,
+        encoder_class: Type[Encoder] = Encoder,
     ):
         """
         Initialize a new Redis client.
@@ -350,6 +352,10 @@ class Redis(
             If not provided and protocol is RESP3, the maintenance notifications
             will be enabled by default (logic is included in the connection pool
             initialization).
+            Argument is ignored when connection_pool is provided.
+        encoder_class:
+            The encoder class used to create an encoder for each connection.
+            Custom encoder classes must accept the same arguments as `Encoder`.
             Argument is ignored when connection_pool is provided.
         """
         kwargs: Dict[str, Any]
@@ -401,6 +407,7 @@ class Redis(
                 "redis_connect_func": redis_connect_func,
                 "protocol": protocol,
                 "legacy_responses": legacy_responses,
+                "encoder_class": encoder_class,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:

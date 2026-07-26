@@ -23,6 +23,32 @@ a separate connection pool) for each database.
 
 It is not safe to pass PubSub or Pipeline objects between threads.
 
+Custom encoders
+---------------
+
+Redis clients use an ``Encoder`` to serialize command arguments
+and deserialize responses. Applications that need to support additional
+Python value types can provide an ``encoder_class``. The class is
+instantiated separately for each connection, so it must accept the same
+``encoding``, ``encoding_errors``, and ``decode_responses`` arguments as the
+default encoder:
+
+.. code:: python
+
+   from redis import Encoder, Redis
+
+   class ApplicationEncoder(Encoder):
+       def encode(self, value):
+           if isinstance(value, ApplicationValue):
+               return value.to_bytes()
+           return super().encode(value)
+
+   client = Redis(encoder_class=ApplicationEncoder)
+
+The same option is available on ``redis.asyncio.Redis`` and both standalone
+connection-pool classes. Passing an encoder class, rather than a shared
+encoder instance, keeps connection-specific encoder state isolated.
+
 Pipelines
 ---------
 

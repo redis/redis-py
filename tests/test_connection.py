@@ -15,7 +15,7 @@ from unittest.mock import call, patch, MagicMock, Mock
 
 import pytest
 import redis
-from redis import ConnectionPool, Redis
+from redis import ConnectionPool, Encoder, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
 from redis._parsers.hiredis import NOT_ENOUGH_DATA, _socket_can_read, _socket_is_closed
 from redis._parsers.socket import SocketBuffer
@@ -75,6 +75,18 @@ class DummyHiredisReader:
 
 class DummyPushNotification(list):
     pass
+
+
+class CustomEncoder(Encoder):
+    def encode(self, value):
+        if value == "custom":
+            return b"encoded-custom"
+        return super().encode(value)
+
+    def decode(self, value, force=False):
+        if value == b"encoded-custom":
+            return "decoded-custom"
+        return super().decode(value, force=force)
 
 
 def make_hiredis_parser(
@@ -902,6 +914,33 @@ def test_unix_socket_connection_failure():
 
 @pytest.mark.fixed_client
 class TestUnitConnectionPool:
+    def test_uses_custom_encoder_for_connections_and_pool_helpers(self):
+        connection_pool = ConnectionPool(encoder_class=CustomEncoder)
+
+        connection = connection_pool.make_connection()
+        try:
+            assert isinstance(connection.encoder, CustomEncoder)
+            assert connection.encoder.encode("custom") == b"encoded-custom"
+            assert connection.encoder.decode(b"encoded-custom") == "decoded-custom"
+            pool_encoder = connection_pool.get_encoder()
+            assert isinstance(pool_encoder, CustomEncoder)
+            assert pool_encoder is not connection.encoder
+        finally:
+            connection.disconnect()
+            connection_pool.disconnect()
+
+    def test_redis_client_passes_custom_encoder_to_pool(self):
+        client = Redis(encoder_class=CustomEncoder)
+
+        try:
+            assert isinstance(client.get_encoder(), CustomEncoder)
+            assert (
+                client.connection_pool.connection_kwargs["encoder_class"]
+                is CustomEncoder
+            )
+        finally:
+            client.close()
+
     @pytest.mark.parametrize(
         "max_conn", (-1, "str"), ids=("non-positive", "wrong type")
     )

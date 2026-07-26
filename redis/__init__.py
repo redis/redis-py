@@ -2,6 +2,7 @@ from redis import asyncio  # noqa
 from redis.backoff import default_backoff
 from redis.client import Redis, StrictRedis
 from redis.driver_info import DriverInfo
+from redis._parsers import Encoder
 from redis.cluster import RedisCluster
 from redis.connection import (
     BlockingConnectionPool,
@@ -84,6 +85,7 @@ __all__ = [
     "CrossSlotTransactionError",
     "DataError",
     "DriverInfo",
+    "Encoder",
     "EventType",
     "from_url",
     "default_backoff",

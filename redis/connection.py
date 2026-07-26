@@ -830,6 +830,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         command_packer: Optional[Callable[[], None]] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+        encoder_class: Type[Encoder] = Encoder,
         maint_notifications_pool_handler: Optional[
             MaintNotificationsPoolHandler
         ] = None,
@@ -909,7 +910,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         self.health_check_interval = health_check_interval
         self.next_health_check = 0
         self.redis_connect_func = redis_connect_func
-        self.encoder = Encoder(encoding, encoding_errors, decode_responses)
+        self.encoder = encoder_class(encoding, encoding_errors, decode_responses)
         self.handshake_metadata = None
         self._sock = None
         self._socket_read_size = socket_read_size
@@ -3236,7 +3237,8 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
     def get_encoder(self) -> Encoder:
         "Return an encoder based on encoding settings"
         kwargs = self.connection_kwargs
-        return Encoder(
+        encoder_class = kwargs.get("encoder_class", Encoder)
+        return encoder_class(
             encoding=kwargs.get("encoding", "utf-8"),
             encoding_errors=kwargs.get("encoding_errors", "strict"),
             decode_responses=kwargs.get("decode_responses", False),

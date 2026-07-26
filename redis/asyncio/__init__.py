@@ -1,3 +1,4 @@
+from redis._parsers import Encoder
 from redis.asyncio.client import Redis, StrictRedis
 from redis.asyncio.cluster import RedisCluster
 from redis.asyncio.connection import (
@@ -51,6 +52,7 @@ __all__ = [
     "ConnectionError",
     "ConnectionPool",
     "DataError",
+    "Encoder",
     "from_url",
     "default_backoff",
     "InvalidResponse",

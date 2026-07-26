@@ -15,7 +15,7 @@ from redis._parsers import (
     _AsyncRESPBase,
 )
 from redis._parsers.hiredis import NOT_ENOUGH_DATA
-from redis.asyncio import ConnectionPool, Redis
+from redis.asyncio import ConnectionPool, Encoder, Redis
 from redis.asyncio.connection import (
     Connection,
     SSLConnection,
@@ -29,6 +29,18 @@ from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
 
 from .mocks import MockStream
+
+
+class CustomEncoder(Encoder):
+    def encode(self, value):
+        if value == "custom":
+            return b"encoded-custom"
+        return super().encode(value)
+
+    def decode(self, value, force=False):
+        if value == b"encoded-custom":
+            return "decoded-custom"
+        return super().decode(value, force=force)
 
 
 class DummyHiredisReader:
@@ -99,6 +111,34 @@ async def test_async_hiredis_can_read_uses_buffer_without_reading(
 
     assert await parser.can_read() is expected
     assert stream.read_called is False
+
+
+async def test_uses_custom_encoder_for_connections_and_pool_helpers():
+    connection_pool = ConnectionPool(encoder_class=CustomEncoder)
+
+    connection = connection_pool.make_connection()
+    try:
+        assert isinstance(connection.encoder, CustomEncoder)
+        assert connection.encoder.encode("custom") == b"encoded-custom"
+        assert connection.encoder.decode(b"encoded-custom") == "decoded-custom"
+        pool_encoder = connection_pool.get_encoder()
+        assert isinstance(pool_encoder, CustomEncoder)
+        assert pool_encoder is not connection.encoder
+    finally:
+        await connection.disconnect()
+        await connection_pool.disconnect()
+
+
+async def test_redis_client_passes_custom_encoder_to_pool():
+    client = Redis(encoder_class=CustomEncoder)
+
+    try:
+        assert isinstance(client.get_encoder(), CustomEncoder)
+        assert (
+            client.connection_pool.connection_kwargs["encoder_class"] is CustomEncoder
+        )
+    finally:
+        await client.aclose()
 
 
 async def test_async_hiredis_can_read_detects_reader_response():
