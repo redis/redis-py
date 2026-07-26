@@ -3142,7 +3142,6 @@ class TestNodesManager:
     @pytest.mark.fixed_client
     async def test_set_nodes_disconnects_removed_node_connections_immediately(
         self,
-        default_host: str,
     ) -> None:
         """
         Test removed nodes are fully disconnected immediately, including in-use connections.
