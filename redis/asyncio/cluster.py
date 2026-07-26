@@ -449,6 +449,8 @@ class RedisCluster(
         event_dispatcher: EventDispatcher | None = None,
         policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver(),
         maint_notifications_config: MaintNotificationsConfig | None = None,
+        # Read timeout used only for CLUSTER SLOTS topology discovery.
+        cluster_slots_timeout: float | None = None,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -586,6 +588,7 @@ class RedisCluster(
             dynamic_startup_nodes=dynamic_startup_nodes,
             address_remap=address_remap,
             event_dispatcher=self._event_dispatcher,
+            cluster_slots_timeout=cluster_slots_timeout,
         )
         AsyncMaintNotificationsAbstractRedisCluster.__init__(
             self,
@@ -1756,12 +1759,23 @@ class ClusterNode:
     async def parse_response(
         self, connection: Connection, command: str, **kwargs: Any
     ) -> Any:
+        # Used internally by RedisCluster for topology discovery reads.
+        read_timeout = kwargs.pop("_read_timeout", None)
         try:
             if NEVER_DECODE in kwargs:
-                response = await connection.read_response(disable_decoding=True)
+                read_options = {"disable_decoding": True}
                 kwargs.pop(NEVER_DECODE)
             else:
-                response = await connection.read_response()
+                read_options = {}
+            if read_timeout is not None:
+                original_socket_timeout = connection.socket_timeout
+                connection.socket_timeout = read_timeout
+                try:
+                    response = await connection.read_response(**read_options)
+                finally:
+                    connection.socket_timeout = original_socket_timeout
+            else:
+                response = await connection.read_response(**read_options)
         except ResponseError:
             if EMPTY_RESPONSE in kwargs:
                 return kwargs[EMPTY_RESPONSE]
@@ -1872,6 +1886,7 @@ class NodesManager:
         "slots_cache",
         "startup_nodes",
         "address_remap",
+        "cluster_slots_timeout",
     )
 
     def __init__(
@@ -1882,11 +1897,13 @@ class NodesManager:
         dynamic_startup_nodes: bool = True,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
+        cluster_slots_timeout: float | None = None,
     ) -> None:
         self.startup_nodes = {node.name: node for node in startup_nodes}
         self.require_full_coverage = require_full_coverage
         self.connection_kwargs = connection_kwargs
         self.address_remap = address_remap
+        self.cluster_slots_timeout = cluster_slots_timeout
 
         self.default_node: "ClusterNode" = None
         self.nodes_cache: Dict[str, "ClusterNode"] = {}
@@ -2130,6 +2147,9 @@ class NodesManager:
                             deferred_failed_nodes.append(node)
                         additional_startup_nodes.pop(index)
                         break
+            cluster_slots_options = {}
+            if self.cluster_slots_timeout is not None:
+                cluster_slots_options["_read_timeout"] = self.cluster_slots_timeout
             for startup_node in chain(
                 startup_nodes,
                 additional_startup_nodes,
@@ -2145,7 +2165,7 @@ class NodesManager:
                             )
                         )
                         cluster_slots = await startup_node.execute_command(
-                            "CLUSTER SLOTS"
+                            "CLUSTER SLOTS", **cluster_slots_options
                         )
                     except ResponseError:
                         raise RedisClusterException(

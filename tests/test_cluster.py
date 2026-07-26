@@ -2958,6 +2958,49 @@ class TestNodesManager:
         execute_command.assert_any_call("CLUSTER SLOTS")
 
     @pytest.mark.fixed_client
+    @pytest.mark.parametrize("cluster_slots_timeout", [None, 5.0])
+    def test_initialize_uses_cluster_slots_timeout(self, cluster_slots_timeout):
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_slots_timeout=cluster_slots_timeout,
+        )
+
+        with patch.object(Redis, "execute_command", autospec=True) as execute_command:
+
+            def execute_command_side_effect(_redis, command, *args, **kwargs):
+                if command == "CLUSTER SLOTS":
+                    return default_cluster_slots
+                raise AssertionError(f"Unexpected command: {command}")
+
+            execute_command.side_effect = execute_command_side_effect
+            rc.nodes_manager.initialize(disconnect_startup_nodes_pools=False)
+
+        cluster_slots_calls = [
+            call
+            for call in execute_command.call_args_list
+            if call.args[1] == "CLUSTER SLOTS"
+        ]
+        assert cluster_slots_calls
+        if cluster_slots_timeout is None:
+            assert "_read_timeout" not in cluster_slots_calls[-1].kwargs
+        else:
+            assert (
+                cluster_slots_calls[-1].kwargs["_read_timeout"] == cluster_slots_timeout
+            )
+
+    @pytest.mark.fixed_client
+    def test_parse_response_uses_internal_read_timeout(self):
+        redis_client = Redis()
+        connection = Mock()
+        connection.read_response.return_value = b"OK"
+
+        assert (
+            redis_client.parse_response(connection, "GET", _read_timeout=5.0) == b"OK"
+        )
+        connection.read_response.assert_called_once_with(timeout=5.0)
+
+    @pytest.mark.fixed_client
     def test_init_promote_server_type_for_node_in_cache(self):
         """
         When replica is promoted to master, nodes_cache must change the server type

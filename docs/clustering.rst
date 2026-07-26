@@ -61,6 +61,11 @@ commands cache contains all the server supported commands that were
 retrieved using the Redis ‘COMMAND’ output. See *RedisCluster specific
 options* below for more.
 
+The ``cluster_slots_timeout`` option can be used when topology discovery is
+expected to take longer than regular application commands. It overrides the
+read timeout only for ``CLUSTER SLOTS`` during initialization and topology
+refreshes; when omitted, ``socket_timeout`` continues to apply.
+
 RedisCluster instance can be directly used to execute Redis commands.
 When a command is being executed through the cluster instance, the
 target node(s) will be internally determined. When using a key-based

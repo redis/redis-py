@@ -712,6 +712,7 @@ class RedisCluster(
         event_dispatcher: Optional[EventDispatcher] = None,
         policy_resolver: PolicyResolver = StaticPolicyResolver(),
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+        cluster_slots_timeout: Optional[float] = None,
         **kwargs,
     ):
         """
@@ -751,6 +752,10 @@ class RedisCluster(
             listed in the CLUSTER SLOTS output.
             If you use dynamic DNS endpoints for startup nodes but CLUSTER SLOTS lists
             specific IP addresses, it is best to set it to false.
+        :param cluster_slots_timeout:
+            Optional read timeout, in seconds, used only for ``CLUSTER SLOTS``
+            topology discovery and refreshes. If not set, ``socket_timeout`` is
+            used as before.
         :param cluster_error_retry_attempts:
             @deprecated - Please configure the 'retry' object instead
             In case 'retry' object is set - this argument is ignored!
@@ -833,6 +838,9 @@ class RedisCluster(
                     "A ``db`` querystring option can only be 0 in cluster mode"
                 )
             kwargs.update(url_options)
+            cluster_slots_timeout = kwargs.pop(
+                "cluster_slots_timeout", cluster_slots_timeout
+            )
             host = kwargs.get("host")
             port = kwargs.get("port", port)
             startup_nodes.append(ClusterNode(host, port))
@@ -909,6 +917,7 @@ class RedisCluster(
             cache_config=cache_config,
             event_dispatcher=self._event_dispatcher,
             maint_notifications_config=maint_notifications_config,
+            cluster_slots_timeout=cluster_slots_timeout,
             **kwargs,
         )
 
@@ -2121,6 +2130,7 @@ class NodesManager:
         cache_factory: Optional[CacheFactoryInterface] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+        cluster_slots_timeout: Optional[float] = None,
         **kwargs,
     ):
         self.nodes_cache: dict[str, ClusterNode] = {}
@@ -2141,6 +2151,7 @@ class NodesManager:
         elif cache_config is not None:
             self._cache = CacheFactory(cache_config).get_cache()
         self.connection_kwargs = kwargs
+        self.cluster_slots_timeout = cluster_slots_timeout
         self.read_load_balancer = LoadBalancer()
 
         # nodes_cache / slots_cache / startup_nodes / default_node are protected by _lock
@@ -2469,6 +2480,9 @@ class NodesManager:
         startup_nodes_reachable = False
         fully_covered = False
         kwargs = self.connection_kwargs
+        cluster_slots_options = {}
+        if self.cluster_slots_timeout is not None:
+            cluster_slots_options["_read_timeout"] = self.cluster_slots_timeout
         exception = None
         epoch = self._get_epoch()
         if additional_startup_nodes_info is None:
@@ -2551,7 +2565,9 @@ class NodesManager:
                             startup_node.redis_connection = r
                     try:
                         # Make sure cluster mode is enabled on this node
-                        cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
+                        cluster_slots = str_if_bytes(
+                            r.execute_command("CLUSTER SLOTS", **cluster_slots_options)
+                        )
                         if disconnect_startup_nodes_pools:
                             with r.connection_pool._lock:
                                 # take care to clear connections before we move on

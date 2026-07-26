@@ -875,12 +875,17 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
     def parse_response(self, connection, command_name, **options):
         """Parses a response from the Redis server"""
+        # Used internally by RedisCluster for topology discovery reads.
+        read_timeout = options.pop("_read_timeout", None)
         try:
             if NEVER_DECODE in options:
-                response = connection.read_response(disable_decoding=True)
+                read_options = {"disable_decoding": True}
                 options.pop(NEVER_DECODE)
             else:
-                response = connection.read_response()
+                read_options = {}
+            if read_timeout is not None:
+                read_options["timeout"] = read_timeout
+            response = connection.read_response(**read_options)
         except ResponseError:
             if EMPTY_RESPONSE in options:
                 return options[EMPTY_RESPONSE]
