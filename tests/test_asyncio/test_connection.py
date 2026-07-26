@@ -83,6 +83,22 @@ def test_connection_default_parser_matches_default_protocol():
     assert conn.protocol == 3
 
 
+@pytest.mark.parametrize("socket_timeout", [None, 1])
+async def test_closed_writer_during_write_is_connection_error(socket_timeout):
+    conn = Connection(socket_timeout=socket_timeout)
+    conn._reader = mock.Mock()
+    conn._writer = mock.Mock()
+    conn._writer.writelines.side_effect = TypeError("'NoneType' object is not callable")
+    conn.disconnect = mock.AsyncMock()
+
+    with pytest.raises(ConnectionError, match="Connection closed while writing"):
+        await conn.send_packed_command([b"PING\r\n"], check_health=False)
+
+    conn.disconnect.assert_awaited_once_with(nowait=True)
+    conn._reader = None
+    conn._writer = None
+
+
 @pytest.mark.parametrize(
     ("buffer", "eof", "expected"),
     [
