@@ -501,6 +501,36 @@ class TestRedisClusterObj:
 
             assert r.execute_command("SET", "foo", "bar") == "MOCK_OK"
 
+    def test_ask_redirection_to_node_without_slots(self):
+        r = get_mocked_redis_client(host=default_host, port=default_port)
+        redirect_host = "127.0.0.1"
+        redirect_port = 7009
+
+        def get_redis_connection(node):
+            connection = Mock(host=node.host, port=node.port)
+            redis_node = Mock(connection=connection)
+
+            def parse_response(_connection, command, **_kwargs):
+                if command == "SET" and node.port != redirect_port:
+                    raise AskError(f"12182 {redirect_host}:{redirect_port}")
+                if command == "ASKING":
+                    assert node.port == redirect_port
+                    return "OK"
+                assert node.port == redirect_port
+                return "MOCK_OK"
+
+            redis_node.parse_response.side_effect = parse_response
+            return redis_node
+
+        with patch.object(r, "get_redis_connection", side_effect=get_redis_connection):
+            assert (
+                r.execute_command(
+                    "SET", "foo", "bar", target_nodes=r.get_primaries()[0]
+                )
+                == "MOCK_OK"
+            )
+        assert r.get_node(host=redirect_host, port=redirect_port) is None
+
     def test_handling_cluster_failover_to_a_replica(self, r):
         # Set the key we'll test for
         key = "key"

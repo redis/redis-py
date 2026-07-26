@@ -1198,7 +1198,7 @@ class RedisCluster(
         self, target_node: "ClusterNode", *args: Union[KeyT, EncodableT], **kwargs: Any
     ) -> Any:
         asking = moved = False
-        redirect_addr = None
+        redirected_node = None
         ttl = self.RedisClusterRequestTTL
         command = args[0]
         start_time = time.monotonic()
@@ -1207,7 +1207,7 @@ class RedisCluster(
             ttl -= 1
             try:
                 if asking:
-                    target_node = self.get_node(node_name=redirect_addr)
+                    target_node = redirected_node
                     await target_node.execute_command("ASKING")
                     asking = False
                 elif moved:
@@ -1327,7 +1327,11 @@ class RedisCluster(
                     connection=target_node,
                 )
             except AskError as e:
-                redirect_addr = get_node_name(host=e.host, port=e.port)
+                redirected_node = self.get_node(host=e.host, port=e.port)
+                if redirected_node is None:
+                    redirected_node = ClusterNode(
+                        e.host, e.port, PRIMARY, **self.nodes_manager.connection_kwargs
+                    )
                 asking = True
                 await self._record_command_metric(
                     command_name=command,
