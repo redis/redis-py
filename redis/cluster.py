@@ -1505,6 +1505,10 @@ class RedisCluster(
         target_nodes_specified = False
         is_default_node = False
         target_nodes = None
+        best_effort = (
+            kwargs.pop("_best_effort", False)
+            and not self.nodes_manager.require_full_coverage
+        )
         passed_targets = kwargs.pop("target_nodes", None)
         command_policies = self._policy_resolver.resolve(args[0].lower())
 
@@ -1580,7 +1584,11 @@ class RedisCluster(
                     ):
                         is_default_node = True
                 for node in target_nodes:
-                    res[node.name] = self._execute_command(node, *args, **kwargs)
+                    try:
+                        res[node.name] = self._execute_command(node, *args, **kwargs)
+                    except (ConnectionError, TimeoutError):
+                        if not best_effort:
+                            raise
 
                     if command_policies.response_policy == ResponsePolicy.ONE_SUCCEEDED:
                         break
@@ -2187,6 +2195,10 @@ class NodesManager:
                 return self.nodes_cache.get(node_name)
         else:
             return None
+
+    @property
+    def require_full_coverage(self) -> bool:
+        return self._require_full_coverage
 
     def move_slot(self, e: Union[AskError, MovedError]):
         """

@@ -4,6 +4,7 @@ import select
 import socket
 import socketserver
 import threading
+from types import SimpleNamespace
 from typing import List
 import warnings
 from queue import LifoQueue, Queue
@@ -73,6 +74,51 @@ default_cluster_slots = [
     [0, 8191, ["127.0.0.1", 7000, "node_0"], ["127.0.0.1", 7003, "node_3"]],
     [8192, 16383, ["127.0.0.1", 7001, "node_1"], ["127.0.0.1", 7002, "node_2"]],
 ]
+
+
+def test_cluster_scan_iter_skips_unavailable_node_without_full_coverage():
+    client = object.__new__(RedisCluster)
+    client.nodes_manager = SimpleNamespace(require_full_coverage=False)
+    client.get_node = Mock(side_effect=lambda node_name: node_name)
+    client.scan = Mock(
+        side_effect=[
+            ({"available": 1, "unavailable": 1}, [b"first"]),
+            ({"available": 0}, [b"second"]),
+            ConnectionError("node unavailable"),
+        ]
+    )
+
+    assert list(client.scan_iter(count=10)) == [b"first", b"second"]
+
+
+def test_cluster_scan_iter_preserves_fail_fast_with_full_coverage():
+    client = object.__new__(RedisCluster)
+    client.nodes_manager = SimpleNamespace(require_full_coverage=True)
+    client.get_node = Mock(side_effect=lambda node_name: node_name)
+    client.scan = Mock(
+        side_effect=[
+            ({"unavailable": 1}, []),
+            ConnectionError("node unavailable"),
+        ]
+    )
+
+    with pytest.raises(ConnectionError, match="node unavailable"):
+        list(client.scan_iter())
+
+
+def test_cluster_scan_iter_does_not_hide_redis_errors():
+    client = object.__new__(RedisCluster)
+    client.nodes_manager = SimpleNamespace(require_full_coverage=False)
+    client.get_node = Mock(side_effect=lambda node_name: node_name)
+    client.scan = Mock(
+        side_effect=[
+            ({"node": 1}, []),
+            ResponseError("invalid scan request"),
+        ]
+    )
+
+    with pytest.raises(ResponseError, match="invalid scan request"):
+        list(client.scan_iter())
 
 
 class ProxyRequestHandler(socketserver.BaseRequestHandler):

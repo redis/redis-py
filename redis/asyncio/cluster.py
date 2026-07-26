@@ -1069,6 +1069,10 @@ class RedisCluster(
         command = args[0]
         target_nodes = []
         target_nodes_specified = False
+        best_effort = (
+            kwargs.pop("_best_effort", False)
+            and not self.nodes_manager.require_full_coverage
+        )
         retry_attempts = self.retry.get_retries()
 
         passed_targets = kwargs.pop("target_nodes", None)
@@ -1137,7 +1141,18 @@ class RedisCluster(
 
                 if len(target_nodes) == 1:
                     # Return the processed result
-                    ret = await self._execute_command(target_nodes[0], *args, **kwargs)
+                    try:
+                        ret = await self._execute_command(
+                            target_nodes[0], *args, **kwargs
+                        )
+                    except (ConnectionError, TimeoutError):
+                        if not best_effort:
+                            raise
+                        if command in self.result_callbacks:
+                            return self.result_callbacks[command](command, {}, **kwargs)
+                        return self._policies_callback_mapping[
+                            command_policies.response_policy
+                        ]({})
                     if command in self.result_callbacks:
                         ret = self.result_callbacks[command](
                             command, {target_nodes[0].name: ret}, **kwargs
@@ -1153,15 +1168,27 @@ class RedisCluster(
                                 self._execute_command(node, *args, **kwargs)
                             )
                             for node in target_nodes
-                        )
+                        ),
+                        return_exceptions=best_effort,
                     )
+                    if best_effort:
+                        successful_values = {}
+                        for node, value in zip(target_nodes, values):
+                            if isinstance(value, (ConnectionError, TimeoutError)):
+                                continue
+                            if isinstance(value, Exception):
+                                raise value
+                            successful_values[node.name] = value
+                        values = successful_values
                     if command in self.result_callbacks:
                         return self.result_callbacks[command](
-                            command, dict(zip(keys, values)), **kwargs
+                            command,
+                            values if best_effort else dict(zip(keys, values)),
+                            **kwargs,
                         )
                     return self._policies_callback_mapping[
                         command_policies.response_policy
-                    ](dict(zip(keys, values)))
+                    ](values if best_effort else dict(zip(keys, values)))
             except Exception as e:
                 if retry_attempts > 0 and type(e) in self.__class__.ERRORS_ALLOW_RETRY:
                     # The nodes and slots cache were should be reinitialized.

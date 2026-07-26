@@ -18,7 +18,12 @@ from typing import (
 )
 
 from redis.crc import key_slot
-from redis.exceptions import RedisClusterException, RedisError
+from redis.exceptions import (
+    ConnectionError,
+    RedisClusterException,
+    RedisError,
+    TimeoutError,
+)
 from redis.typing import (
     AnyKeyT,
     AsyncClientProtocol,
@@ -1407,8 +1412,15 @@ class ClusterDataAccessCommands(DataAccessCommands):
         _type: str | None = None,
         **kwargs,
     ) -> Iterator:
+        best_effort = not self.nodes_manager.require_full_coverage
+        initial_kwargs = dict(kwargs)
+        if best_effort:
+            initial_kwargs["_best_effort"] = True
+
         # Do the first query with cursor=0 for all nodes
-        cursors, data = self.scan(match=match, count=count, _type=_type, **kwargs)
+        cursors, data = self.scan(
+            match=match, count=count, _type=_type, **initial_kwargs
+        )
         yield from data
 
         cursors = {name: cursor for name, cursor in cursors.items() if cursor != 0}
@@ -1419,15 +1431,21 @@ class ClusterDataAccessCommands(DataAccessCommands):
             # Iterate over each node till its cursor is 0
             kwargs.pop("target_nodes", None)
             while cursors:
-                for name, cursor in cursors.items():
-                    cur, data = self.scan(
-                        cursor=cursor,
-                        match=match,
-                        count=count,
-                        _type=_type,
-                        target_nodes=nodes[name],
-                        **kwargs,
-                    )
+                for name, cursor in list(cursors.items()):
+                    try:
+                        cur, data = self.scan(
+                            cursor=cursor,
+                            match=match,
+                            count=count,
+                            _type=_type,
+                            target_nodes=nodes[name],
+                            **kwargs,
+                        )
+                    except (ConnectionError, TimeoutError):
+                        if not best_effort:
+                            raise
+                        del cursors[name]
+                        continue
                     yield from data
                     cursors[name] = cur[name]
 
@@ -1453,8 +1471,15 @@ class AsyncClusterDataAccessCommands(
         _type: str | None = None,
         **kwargs,
     ) -> AsyncIterator:
+        best_effort = not self.nodes_manager.require_full_coverage
+        initial_kwargs = dict(kwargs)
+        if best_effort:
+            initial_kwargs["_best_effort"] = True
+
         # Do the first query with cursor=0 for all nodes
-        cursors, data = await self.scan(match=match, count=count, _type=_type, **kwargs)
+        cursors, data = await self.scan(
+            match=match, count=count, _type=_type, **initial_kwargs
+        )
         for value in data:
             yield value
 
@@ -1466,15 +1491,21 @@ class AsyncClusterDataAccessCommands(
             # Iterate over each node till its cursor is 0
             kwargs.pop("target_nodes", None)
             while cursors:
-                for name, cursor in cursors.items():
-                    cur, data = await self.scan(
-                        cursor=cursor,
-                        match=match,
-                        count=count,
-                        _type=_type,
-                        target_nodes=nodes[name],
-                        **kwargs,
-                    )
+                for name, cursor in list(cursors.items()):
+                    try:
+                        cur, data = await self.scan(
+                            cursor=cursor,
+                            match=match,
+                            count=count,
+                            _type=_type,
+                            target_nodes=nodes[name],
+                            **kwargs,
+                        )
+                    except (ConnectionError, TimeoutError):
+                        if not best_effort:
+                            raise
+                        del cursors[name]
+                        continue
                     for value in data:
                         yield value
                     cursors[name] = cur[name]

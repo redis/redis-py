@@ -77,6 +77,58 @@ default_cluster_slots = [
 ]
 
 
+@pytest.mark.asyncio
+async def test_async_cluster_scan_iter_skips_unavailable_node_without_full_coverage():
+    client = object.__new__(RedisCluster)
+    client.nodes_manager = mock.Mock(require_full_coverage=False)
+    client.get_node = mock.Mock(side_effect=lambda node_name: node_name)
+    client.scan = mock.AsyncMock(
+        side_effect=[
+            ({"available": 1, "unavailable": 1}, [b"first"]),
+            ({"available": 0}, [b"second"]),
+            ConnectionError("node unavailable"),
+        ]
+    )
+
+    values = [value async for value in client.scan_iter(count=10)]
+
+    assert values == [b"first", b"second"]
+
+
+@pytest.mark.asyncio
+async def test_async_cluster_scan_iter_preserves_fail_fast_with_full_coverage():
+    client = object.__new__(RedisCluster)
+    client.nodes_manager = mock.Mock(require_full_coverage=True)
+    client.get_node = mock.Mock(side_effect=lambda node_name: node_name)
+    client.scan = mock.AsyncMock(
+        side_effect=[
+            ({"unavailable": 1}, []),
+            ConnectionError("node unavailable"),
+        ]
+    )
+
+    with pytest.raises(ConnectionError, match="node unavailable"):
+        async for _ in client.scan_iter():
+            pass
+
+
+@pytest.mark.asyncio
+async def test_async_cluster_scan_iter_does_not_hide_redis_errors():
+    client = object.__new__(RedisCluster)
+    client.nodes_manager = mock.Mock(require_full_coverage=False)
+    client.get_node = mock.Mock(side_effect=lambda node_name: node_name)
+    client.scan = mock.AsyncMock(
+        side_effect=[
+            ({"node": 1}, []),
+            ResponseError("invalid scan request"),
+        ]
+    )
+
+    with pytest.raises(ResponseError, match="invalid scan request"):
+        async for _ in client.scan_iter():
+            pass
+
+
 class NodeProxy:
     """A class to proxy a node connection to a different port"""
 
