@@ -2035,6 +2035,7 @@ class SSLConnection(Connection):
         ssl_ocsp_expected_cert=None,
         ssl_min_version=None,
         ssl_ciphers=None,
+        ssl_context=None,
         **kwargs,
     ):
         """Constructor
@@ -2058,6 +2059,9 @@ class SSLConnection(Connection):
             ssl_ocsp_expected_cert: A PEM armoured string containing the expected certificate to be returned from the ocsp verification service.
             ssl_min_version: The lowest supported SSL version. It affects the supported SSL versions of the SSLContext. None leaves the default provided by ssl module.
             ssl_ciphers: A string listing the ciphers that are allowed to be used. Defaults to None, which means that the default ciphers are used. See https://docs.python.org/3/library/ssl.html#ssl.SSLContext.set_ciphers for more information.
+            ssl_context: A pre-configured ``ssl.SSLContext`` to use for the
+                connection. If provided, it takes precedence over the other
+                SSL configuration options.
 
         Raises:
             RedisError
@@ -2096,6 +2100,7 @@ class SSLConnection(Connection):
         self.ssl_ocsp_expected_cert = ssl_ocsp_expected_cert
         self.ssl_min_version = ssl_min_version
         self.ssl_ciphers = ssl_ciphers
+        self.ssl_context = ssl_context
         super().__init__(**kwargs)
 
     def _connect(self):
@@ -2119,33 +2124,36 @@ class SSLConnection(Connection):
         Returns:
             An SSL wrapped socket.
         """
-        context = ssl.create_default_context()
-        context.check_hostname = self.check_hostname
-        context.verify_mode = self.cert_reqs
-        if self.ssl_include_verify_flags:
-            for flag in self.ssl_include_verify_flags:
-                context.verify_flags |= flag
-        if self.ssl_exclude_verify_flags:
-            for flag in self.ssl_exclude_verify_flags:
-                context.verify_flags &= ~flag
-        if self.certfile or self.keyfile:
-            context.load_cert_chain(
-                certfile=self.certfile,
-                keyfile=self.keyfile,
-                password=self.certificate_password,
-            )
-        if (
-            self.ca_certs is not None
-            or self.ca_path is not None
-            or self.ca_data is not None
-        ):
-            context.load_verify_locations(
-                cafile=self.ca_certs, capath=self.ca_path, cadata=self.ca_data
-            )
-        if self.ssl_min_version is not None:
-            context.minimum_version = self.ssl_min_version
-        if self.ssl_ciphers:
-            context.set_ciphers(self.ssl_ciphers)
+        if self.ssl_context is None:
+            context = ssl.create_default_context()
+            context.check_hostname = self.check_hostname
+            context.verify_mode = self.cert_reqs
+            if self.ssl_include_verify_flags:
+                for flag in self.ssl_include_verify_flags:
+                    context.verify_flags |= flag
+            if self.ssl_exclude_verify_flags:
+                for flag in self.ssl_exclude_verify_flags:
+                    context.verify_flags &= ~flag
+            if self.certfile or self.keyfile:
+                context.load_cert_chain(
+                    certfile=self.certfile,
+                    keyfile=self.keyfile,
+                    password=self.certificate_password,
+                )
+            if (
+                self.ca_certs is not None
+                or self.ca_path is not None
+                or self.ca_data is not None
+            ):
+                context.load_verify_locations(
+                    cafile=self.ca_certs, capath=self.ca_path, cadata=self.ca_data
+                )
+            if self.ssl_min_version is not None:
+                context.minimum_version = self.ssl_min_version
+            if self.ssl_ciphers:
+                context.set_ciphers(self.ssl_ciphers)
+        else:
+            context = self.ssl_context
         if self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE is False:
             raise RedisError("cryptography is not installed.")
 

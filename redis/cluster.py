@@ -302,6 +302,7 @@ REDIS_ALLOWED_KEYS = (
     "ssl_exclude_verify_flags",
     "ssl_keyfile",
     "ssl_password",
+    "ssl_context",
     "ssl_check_hostname",
     "unix_socket_path",
     "username",

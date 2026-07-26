@@ -4,6 +4,7 @@ import socket
 import ssl
 
 import pytest
+import redis.asyncio as redis
 from redis.asyncio.connection import (
     Connection,
     SSLConnection,
@@ -51,6 +52,26 @@ async def test_uds_connect(uds_address):
         path=path, client_name=_CLIENT_NAME, socket_timeout=10
     )
     await _assert_connect(conn, path)
+
+
+@pytest.mark.ssl
+async def test_tcp_ssl_uses_custom_context(tcp_address):
+    context = ssl.create_default_context()
+    conn = SSLConnection(host="localhost", port=tcp_address[1], ssl_context=context)
+
+    assert conn.ssl_context.get() is context
+
+
+@pytest.mark.ssl
+async def test_redis_passes_custom_context_to_ssl_connection():
+    context = ssl.create_default_context()
+    client = redis.Redis(ssl=True, ssl_context=context)
+
+    try:
+        connection = client.connection_pool.make_connection()
+        assert connection.ssl_context.get() is context
+    finally:
+        await client.aclose()
 
 
 @pytest.mark.ssl

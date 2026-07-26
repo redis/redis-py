@@ -1507,6 +1507,7 @@ class SSLConnection(Connection):
         ssl_min_version: Optional[TLSVersion] = None,
         ssl_ciphers: Optional[str] = None,
         ssl_password: Optional[str] = None,
+        ssl_context: Optional[SSLContext] = None,
         **kwargs,
     ):
         if not SSL_AVAILABLE:
@@ -1525,6 +1526,7 @@ class SSLConnection(Connection):
             min_version=ssl_min_version,
             ciphers=ssl_ciphers,
             password=ssl_password,
+            context=ssl_context,
         )
         super().__init__(**kwargs)
 
@@ -1601,6 +1603,7 @@ class RedisSSLContext:
         min_version: Optional[TLSVersion] = None,
         ciphers: Optional[str] = None,
         password: Optional[str] = None,
+        context: Optional[SSLContext] = None,
     ):
         if not SSL_AVAILABLE:
             raise RedisError("Python wasn't built with SSL support")
@@ -1632,10 +1635,10 @@ class RedisSSLContext:
         self.min_version = min_version
         self.ciphers = ciphers
         self.password = password
-        self.context: Optional[SSLContext] = None
+        self.context: Optional[SSLContext] = context
 
     def get(self) -> SSLContext:
-        if not self.context:
+        if self.context is None:
             context = ssl.create_default_context()
             context.check_hostname = self.check_hostname
             context.verify_mode = self.cert_reqs

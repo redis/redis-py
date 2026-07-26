@@ -133,8 +133,9 @@ from redis.utils import (
 )
 
 if SSL_AVAILABLE:
-    from ssl import TLSVersion, VerifyFlags, VerifyMode
+    from ssl import SSLContext, TLSVersion, VerifyFlags, VerifyMode
 else:
+    SSLContext = None
     TLSVersion = None
     VerifyMode = None
     VerifyFlags = None
@@ -443,6 +444,7 @@ class RedisCluster(
         ssl_keyfile: str | None = None,
         ssl_min_version: "TLSVersion | None" = None,
         ssl_ciphers: str | None = None,
+        ssl_context: "SSLContext | None" = None,
         protocol: int | None = None,
         legacy_responses: bool = True,
         address_remap: Callable[[Tuple[str, int]], Tuple[str, int]] | None = None,
@@ -510,6 +512,7 @@ class RedisCluster(
                     "ssl_keyfile": ssl_keyfile,
                     "ssl_min_version": ssl_min_version,
                     "ssl_ciphers": ssl_ciphers,
+                    "ssl_context": ssl_context,
                 }
             )
 

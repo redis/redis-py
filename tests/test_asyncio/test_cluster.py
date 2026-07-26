@@ -77,6 +77,17 @@ default_cluster_slots = [
 ]
 
 
+def test_cluster_preserves_custom_ssl_context():
+    context = ssl.create_default_context()
+    cluster = RedisCluster(
+        startup_nodes=[ClusterNode("localhost", 6379)],
+        ssl=True,
+        ssl_context=context,
+    )
+
+    assert cluster.connection_kwargs["ssl_context"] is context
+
+
 class NodeProxy:
     """A class to proxy a node connection to a different port"""
 

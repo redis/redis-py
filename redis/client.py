@@ -315,6 +315,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         maint_notifications_config: MaintNotificationsConfig | None = None,
         oss_cluster_maint_notifications_handler: OSSMaintNotificationsHandler
         | None = None,
+        ssl_context: "ssl.SSLContext | None" = None,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -464,6 +465,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_ocsp_expected_cert": ssl_ocsp_expected_cert,
                             "ssl_min_version": ssl_min_version,
                             "ssl_ciphers": ssl_ciphers,
+                            "ssl_context": ssl_context,
                         }
                     )
                 if (cache_config or cache) and check_protocol_version(protocol, 3):

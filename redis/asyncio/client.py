@@ -97,8 +97,9 @@ from redis.utils import (
 )
 
 if TYPE_CHECKING and SSL_AVAILABLE:
-    from ssl import TLSVersion, VerifyFlags, VerifyMode
+    from ssl import SSLContext, TLSVersion, VerifyFlags, VerifyMode
 else:
+    SSLContext = None
     TLSVersion = None
     VerifyMode = None
     VerifyFlags = None
@@ -293,6 +294,7 @@ class Redis(
         ssl_min_version: "TLSVersion | None" = None,
         ssl_ciphers: str | None = None,
         ssl_password: str | None = None,
+        ssl_context: "SSLContext | None" = None,
         max_connections: int | None = None,
         single_connection_client: bool = False,
         health_check_interval: int = 0,
@@ -449,6 +451,7 @@ class Redis(
                             "ssl_min_version": ssl_min_version,
                             "ssl_ciphers": ssl_ciphers,
                             "ssl_password": ssl_password,
+                            "ssl_context": ssl_context,
                         }
                     )
             maint_notifications_enabled = (
