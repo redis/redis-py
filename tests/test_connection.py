@@ -543,6 +543,39 @@ def test_redis_client_default_driver_info():
 
 @pytest.mark.fixed_client
 class TestConnection:
+    @pytest.mark.parametrize("max_connection_lifetime", [0, -1])
+    def test_rejects_non_positive_connection_lifetime(self, max_connection_lifetime):
+        with pytest.raises(ValueError, match="max_connection_lifetime"):
+            Connection(max_connection_lifetime=max_connection_lifetime)
+
+    def test_reconnects_expired_connection(self):
+        conn = Connection(max_connection_lifetime=10)
+        conn._sock = mock.Mock()
+        conn._connection_created_at = 0
+        conn.disconnect = mock.Mock(side_effect=lambda: setattr(conn, "_sock", None))
+        conn._connect = mock.Mock(return_value=mock.Mock())
+        conn.on_connect_check_health = mock.Mock()
+
+        with patch("redis.connection.time.monotonic", return_value=11):
+            conn.connect_check_health()
+
+        conn.disconnect.assert_called_once_with()
+        conn._connect.assert_called_once_with()
+        assert conn._connection_created_at == 11
+
+    def test_reuses_connection_before_lifetime_expires(self):
+        conn = Connection(max_connection_lifetime=10)
+        conn._sock = mock.Mock()
+        conn._connection_created_at = 0
+        conn.disconnect = mock.Mock()
+        conn._connect = mock.Mock()
+
+        with patch("redis.connection.time.monotonic", return_value=9):
+            conn.connect_check_health()
+
+        conn.disconnect.assert_not_called()
+        conn._connect.assert_not_called()
+
     def test_disconnect(self):
         conn = Connection()
         mock_sock = mock.Mock()
@@ -661,6 +694,14 @@ class TestConnection:
             conn.connect()
         assert conn._connect.call_count == 1
         self.clear(conn)
+
+    def test_parse_url_connection_lifetime(self):
+        assert (
+            parse_url("redis://localhost?max_connection_lifetime=60")[
+                "max_connection_lifetime"
+            ]
+            == 60.0
+        )
 
 
 @pytest.mark.onlynoncluster

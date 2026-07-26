@@ -95,6 +95,11 @@ Connection
 .. autoclass:: redis.connection.Connection
     :members:
 
+For deployments that use rotating credentials, ``max_connection_lifetime``
+can be set in seconds. A connection that reaches this age is refreshed the
+next time it is checked out from the pool, allowing the configured credential
+provider to obtain fresh credentials without interrupting an active command.
+
 Connection (Async)
 ==================
 .. autoclass:: redis.asyncio.connection.Connection

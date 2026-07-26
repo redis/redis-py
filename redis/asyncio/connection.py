@@ -561,6 +561,8 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         "retry_on_timeout",
         "retry_on_error",
         "health_check_interval",
+        "max_connection_lifetime",
+        "_connection_created_at",
         "next_health_check",
         "last_active_at",
         "encoder",
@@ -597,6 +599,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         parser_class: Type[BaseParser] = DefaultParser,
         socket_read_size: int = DEFAULT_SOCKET_READ_SIZE,
         health_check_interval: float = 0,
+        max_connection_lifetime: float | None = None,
         client_name: str | None = None,
         lib_name: str | object | None = SENTINEL,
         lib_version: str | object | None = SENTINEL,
@@ -627,6 +630,11 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
 
         Parameters
         ----------
+        max_connection_lifetime : float, optional
+            Maximum time in seconds to reuse a connected socket. When the limit
+            is reached, the next connection attempt reconnects the socket so
+            credential providers can refresh their credentials. ``None``
+            disables the limit.
         driver_info : DriverInfo, optional
             Driver metadata for CLIENT SETINFO. If provided, lib_name and lib_version
             are ignored. If not provided, a DriverInfo will be created from lib_name
@@ -679,6 +687,10 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         else:
             self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval
+        if max_connection_lifetime is not None and max_connection_lifetime <= 0:
+            raise ValueError("max_connection_lifetime must be positive")
+        self.max_connection_lifetime = max_connection_lifetime
+        self._connection_created_at: float | None = None
         self.next_health_check: float = -1
         self.encoder = encoder_class(encoding, encoding_errors, decode_responses)
         self.redis_connect_func = redis_connect_func
@@ -818,11 +830,21 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             with_failure_count=True,
         )
 
+    def is_connection_expired(self) -> bool:
+        return (
+            self.max_connection_lifetime is not None
+            and self._connection_created_at is not None
+            and time.monotonic() - self._connection_created_at
+            >= self.max_connection_lifetime
+        )
+
     async def connect_check_health(
         self, check_health: bool = True, retry_socket_connect: bool = True
     ):
         if self.is_connected:
-            return
+            if not self.is_connection_expired():
+                return
+            await self.disconnect()
         # Track actual retry attempts for error reporting
         actual_retry_attempts = 0
 
@@ -894,6 +916,9 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             task = callback(self)
             if task and inspect.isawaitable(task):
                 await task
+
+        if self.max_connection_lifetime is not None:
+            self._connection_created_at = time.monotonic()
 
     def mark_for_reconnect(self):
         self._should_reconnect = True
@@ -1052,6 +1077,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         health_check_failed: bool = False,
     ) -> None:
         """Disconnects from the Redis server"""
+        self._connection_created_at = None
         # On Python 3.13+, asyncio.timeout() raises RuntimeError when called
         # outside a running Task (e.g. during GC finalization or event-loop
         # callbacks).  In that context we fall back to a synchronous close.
@@ -1717,6 +1743,7 @@ URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyTy
         "db": int,
         "socket_timeout": float,
         "socket_connect_timeout": float,
+        "max_connection_lifetime": float,
         "socket_read_size": int,
         "socket_keepalive": to_bool,
         "retry_on_timeout": to_bool,
@@ -1740,6 +1767,7 @@ class ConnectKwargs(TypedDict, total=False):
     host: str
     port: int
     db: int
+    max_connection_lifetime: float
     path: str
 
 

@@ -325,6 +325,63 @@ async def test_single_connection():
     await r.aclose()
 
 
+@pytest.mark.asyncio
+async def test_reconnects_expired_connection():
+    conn = Connection(max_connection_lifetime=10)
+    conn._reader = mock.Mock()
+    conn._writer = mock.Mock()
+    conn._connection_created_at = 0
+
+    async def disconnect():
+        conn._reader = None
+        conn._writer = None
+
+    async def connect():
+        conn._reader = mock.Mock()
+        conn._writer = mock.Mock()
+
+    conn.disconnect = mock.AsyncMock(side_effect=disconnect)
+    conn._connect = mock.AsyncMock(side_effect=connect)
+    conn.on_connect_check_health = mock.AsyncMock()
+
+    with patch("redis.asyncio.connection.time.monotonic", return_value=11):
+        await conn.connect_check_health()
+
+    conn.disconnect.assert_awaited_once_with()
+    conn._connect.assert_awaited_once_with()
+    assert conn._connection_created_at == 11
+    conn._reader = None
+    conn._writer = None
+
+
+@pytest.mark.asyncio
+async def test_reuses_connection_before_lifetime_expires():
+    conn = Connection(max_connection_lifetime=10)
+    conn._reader = mock.Mock()
+    conn._writer = mock.Mock()
+    conn._connection_created_at = 0
+    conn.disconnect = mock.AsyncMock()
+    conn._connect = mock.AsyncMock()
+
+    with patch("redis.asyncio.connection.time.monotonic", return_value=9):
+        await conn.connect_check_health()
+
+    conn.disconnect.assert_not_awaited()
+    conn._connect.assert_not_awaited()
+    conn._reader = None
+    conn._writer = None
+
+
+@pytest.mark.asyncio
+async def test_parse_url_connection_lifetime():
+    assert (
+        parse_url("redis://localhost?max_connection_lifetime=60")[
+            "max_connection_lifetime"
+        ]
+        == 60.0
+    )
+
+
 @skip_if_server_version_lt("4.0.0")
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
