@@ -17,6 +17,7 @@ from redis._parsers import (
 from redis._parsers.hiredis import NOT_ENOUGH_DATA
 from redis.asyncio import ConnectionPool, Redis
 from redis.asyncio.connection import (
+    AsyncCacheProxyConnection,
     Connection,
     SSLConnection,
     UnixDomainSocketConnection,
@@ -24,7 +25,8 @@ from redis.asyncio.connection import (
 )
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
+from redis.cache import CacheConfig, CacheFactory
+from redis.exceptions import ConnectionError, InvalidResponse, RedisError, TimeoutError
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
 
@@ -81,6 +83,88 @@ def test_connection_default_parser_matches_default_protocol():
     )
     assert isinstance(conn._parser, expected_parser_class)
     assert conn.protocol == 3
+
+
+async def test_async_redis_accepts_client_side_cache_configuration():
+    client = Redis(cache_config=CacheConfig(max_size=10), protocol=3)
+
+    try:
+        assert client.connection_pool.cache is not None
+    finally:
+        await client.aclose()
+
+
+async def test_async_redis_rejects_client_side_cache_with_resp2():
+    with pytest.raises(
+        RedisError, match="Client caching is only supported with RESP version 3"
+    ):
+        Redis(cache_config=CacheConfig(), protocol=2)
+
+
+def test_async_connection_pool_rejects_client_side_cache_with_resp2():
+    with pytest.raises(
+        RedisError, match="Client caching is only supported with RESP version 3"
+    ):
+        ConnectionPool(protocol=2, cache_config=CacheConfig())
+
+
+async def test_async_connection_pool_creates_cache_proxy_connection():
+    pool = ConnectionPool(protocol=3, cache_config=CacheConfig())
+
+    try:
+        assert isinstance(pool.make_connection(), AsyncCacheProxyConnection)
+    finally:
+        await pool.aclose()
+
+
+async def test_async_cache_proxy_rejects_unsupported_redis_version():
+    connection = mock.Mock()
+    connection.connect = mock.AsyncMock()
+    connection.handshake_metadata = {
+        b"server": b"redis",
+        b"version": b"7.2.4",
+    }
+    cache = CacheFactory(CacheConfig()).get_cache()
+    proxy = AsyncCacheProxyConnection(connection, cache, asyncio.Lock())
+
+    with pytest.raises(ConnectionError, match="supported by Redis 7.4 or later"):
+        await proxy.connect()
+
+
+async def test_async_cache_proxy_returns_cached_response_and_handles_invalidation():
+    connection = mock.Mock()
+    connection.can_read = mock.AsyncMock(return_value=False)
+    connection.send_command = mock.AsyncMock()
+    connection.read_response = mock.AsyncMock(side_effect=[b"first", b"second"])
+    cache = CacheFactory(CacheConfig()).get_cache()
+    proxy = AsyncCacheProxyConnection(connection, cache, asyncio.Lock())
+
+    await proxy.send_command("GET", "key", keys=("key",))
+    assert await proxy.read_response() == b"first"
+
+    await proxy.send_command("GET", "key", keys=("key",))
+    assert await proxy.read_response() == b"first"
+    assert connection.send_command.await_count == 1
+    assert connection.read_response.await_count == 1
+
+    await proxy._on_invalidation_callback([b"invalidate", [b"key"]])
+    await proxy.send_command("GET", "key", keys=("key",))
+    assert await proxy.read_response() == b"second"
+    assert connection.send_command.await_count == 2
+    assert connection.read_response.await_count == 2
+
+
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("7.4.0")
+async def test_async_client_side_cache_round_trip(create_redis):
+    client = await create_redis(cache_config=CacheConfig(max_size=10))
+
+    await client.set("async-cache-key", "first")
+    assert await client.get("async-cache-key") == b"first"
+    assert client.get_cache().size == 1
+
+    await client.set("async-cache-key", "second")
+    assert await client.get("async-cache-key") == b"second"
 
 
 @pytest.mark.parametrize(

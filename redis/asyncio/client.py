@@ -52,6 +52,7 @@ from redis.asyncio.observability.recorder import (
 )
 from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialWithJitterBackoff
+from redis.cache import CacheConfig, CacheInterface
 from redis.client import (
     EMPTY_RESPONSE,
     NEVER_DECODE,
@@ -316,6 +317,8 @@ class Redis(
         credential_provider: CredentialProvider | None = None,
         protocol: int | None = None,
         legacy_responses: bool = True,
+        cache: CacheInterface | None = None,
+        cache_config: CacheConfig | None = None,
         event_dispatcher: EventDispatcher | None = None,
         maint_notifications_config: MaintNotificationsConfig | None = None,
     ):
@@ -461,6 +464,13 @@ class Redis(
                             "ssl_password": ssl_password,
                         }
                     )
+                if (cache_config or cache) and check_protocol_version(protocol, 3):
+                    kwargs.update(
+                        {
+                            "cache": cache,
+                            "cache_config": cache_config,
+                        }
+                    )
             maint_notifications_enabled = (
                 maint_notifications_config and maint_notifications_config.enabled
             )
@@ -492,6 +502,12 @@ class Redis(
             )
 
         self.connection_pool = connection_pool
+
+        if (cache_config or cache) and not check_protocol_version(
+            self.connection_pool.get_protocol(), 3
+        ):
+            raise RedisError("Client caching is only supported with RESP version 3")
+
         self.single_connection_client = single_connection_client
         self.connection: Optional[Connection] = None
 
@@ -543,6 +559,10 @@ class Redis(
     def get_encoder(self):
         """Get the connection pool's encoder"""
         return self.connection_pool.get_encoder()
+
+    def get_cache(self) -> Optional[CacheInterface]:
+        """Return the client-side cache configured for this connection pool."""
+        return self.connection_pool.cache
 
     def get_connection_kwargs(self):
         """Get the connection's key-word arguments"""

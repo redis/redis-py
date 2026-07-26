@@ -35,6 +35,7 @@ from ..observability.attributes import (
     DB_CLIENT_CONNECTION_STATE,
     AttributeBuilder,
     ConnectionState,
+    CSCResult,
     get_pool_name,
 )
 from ..utils import SSL_AVAILABLE, deprecated_function
@@ -51,7 +52,7 @@ else:
 from ..auth.token import TokenInterface
 from ..driver_info import DriverInfo, resolve_driver_info
 from ..event import AsyncAfterConnectionReleasedEvent, EventDispatcher
-from ..utils import deprecated_args, format_error_message
+from ..utils import deprecated_args, ensure_string, format_error_message
 
 # the functionality is available in 3.11.x but has a major issue before
 # 3.11.3. See https://github.com/redis/redis-py/issues/2633
@@ -74,6 +75,15 @@ from redis.asyncio.observability.recorder import (
 )
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
+from redis.cache import (
+    CacheEntry,
+    CacheEntryStatus,
+    CacheFactory,
+    CacheFactoryInterface,
+    CacheInterface,
+    CacheKey,
+    CacheProxy,
+)
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import (
     AuthenticationError,
@@ -94,12 +104,19 @@ from redis.maint_notifications import (
     _build_moving_connection_kwargs,
 )
 from redis.observability.metrics import CloseReason
+from redis.observability.recorder import (
+    init_csc_items,
+    record_csc_network_saved,
+    record_csc_request,
+    register_csc_items_callback,
+)
 from redis.typing import EncodableT
 from redis.utils import (
     DEFAULT_RESP_VERSION,
     HIREDIS_AVAILABLE,
     SENTINEL,
     check_protocol_version,
+    compare_versions,
     str_if_bytes,
 )
 
@@ -684,6 +701,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         self.next_health_check: float = -1
         self.encoder = encoder_class(encoding, encoding_errors, decode_responses)
         self.redis_connect_func = redis_connect_func
+        self.handshake_metadata = None
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
         self._socket_read_size = socket_read_size
@@ -970,6 +988,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                 "HELLO", self.protocol, "AUTH", *auth_args, check_health=False
             )
             response = await self.read_response()
+            self.handshake_metadata = response
             if response.get(b"proto") != int(self.protocol) and response.get(
                 "proto"
             ) != int(self.protocol):
@@ -1001,6 +1020,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                 self._parser.on_connect(self)
             await self.send_command("HELLO", self.protocol, check_health=check_health)
             response = await self.read_response()
+            self.handshake_metadata = response
             # if response.get(b"proto") != self.protocol and response.get(
             #     "proto"
             # ) != self.protocol:
@@ -1824,6 +1844,212 @@ def parse_url(url: str) -> ConnectKwargs:
 _CP = TypeVar("_CP", bound="ConnectionPool")
 
 
+class AsyncCacheProxyConnection:
+    """Add Redis client-side caching to an asynchronous connection."""
+
+    DUMMY_CACHE_VALUE = b"foo"
+    MIN_ALLOWED_VERSION = "7.4.0"
+    DEFAULT_SERVER_NAME = "redis"
+
+    def __init__(
+        self,
+        connection: AbstractConnection,
+        cache: CacheInterface,
+        pool_lock: asyncio.Lock,
+    ) -> None:
+        self._conn = connection
+        self._cache = cache
+        self._pool_lock = pool_lock
+        self._cache_lock = asyncio.Lock()
+        self._current_command_cache_key: CacheKey | None = None
+        self.register_connect_callback(self._enable_tracking_callback)
+
+    def __getattr__(self, name: str):
+        return getattr(self._conn, name)
+
+    def __setattr__(self, name: str, value) -> None:
+        if name.startswith("_") or "_conn" not in self.__dict__:
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._conn, name, value)
+
+    @property
+    def retry(self):
+        return self._conn.retry
+
+    @retry.setter
+    def retry(self, value) -> None:
+        self._conn.retry = value
+
+    @property
+    def is_connected(self) -> bool:
+        return self._conn.is_connected
+
+    def __repr__(self) -> str:
+        return repr(self._conn)
+
+    async def connect(self) -> None:
+        await self._conn.connect()
+
+        server_name = self._conn.handshake_metadata.get(b"server")
+        if server_name is None:
+            server_name = self._conn.handshake_metadata.get("server")
+        server_version = self._conn.handshake_metadata.get(b"version")
+        if server_version is None:
+            server_version = self._conn.handshake_metadata.get("version")
+        if server_version is None or server_name is None:
+            raise ConnectionError("Cannot retrieve information about server version")
+
+        if (
+            ensure_string(server_name) != self.DEFAULT_SERVER_NAME
+            or compare_versions(ensure_string(server_version), self.MIN_ALLOWED_VERSION)
+            == 1
+        ):
+            raise ConnectionError(
+                "To maximize compatibility with all Redis products, client-side "
+                "caching is supported by Redis 7.4 or later"
+            )
+
+    async def disconnect(self, *args, **kwargs) -> None:
+        async with self._cache_lock:
+            self._cache.flush()
+        await self._conn.disconnect(*args, **kwargs)
+
+    async def send_packed_command(self, command, check_health: bool = True) -> None:
+        await self._conn.send_packed_command(command, check_health=check_health)
+
+    async def send_command(self, *args, **kwargs) -> None:
+        await self._process_pending_invalidations()
+
+        cache_key = CacheKey(command=args[0], redis_keys=(), redis_args=())
+        async with self._cache_lock:
+            if not self._cache.is_cachable(cache_key):
+                self._current_command_cache_key = None
+                is_cacheable = False
+            else:
+                is_cacheable = True
+
+            if is_cacheable and kwargs.get("keys") is None:
+                raise ValueError("Cannot create cache key.")
+
+            if is_cacheable:
+                self._current_command_cache_key = CacheKey(
+                    command=args[0],
+                    redis_keys=tuple(kwargs["keys"]),
+                    redis_args=args,
+                )
+                cached_entry = self._cache.get(self._current_command_cache_key)
+
+        if not is_cacheable:
+            await self._conn.send_command(*args, **kwargs)
+            return
+
+        if cached_entry is not None:
+            async with self._pool_lock:
+                while await cached_entry.connection_ref.can_read():
+                    try:
+                        await cached_entry.connection_ref.read_response(
+                            push_request=True,
+                            timeout=0,
+                            disconnect_on_error=False,
+                        )
+                    except TimeoutError:
+                        break
+
+            async with self._cache_lock:
+                if self._cache.get(self._current_command_cache_key) is not None:
+                    return
+
+        async with self._cache_lock:
+            self._cache.set(
+                CacheEntry(
+                    cache_key=self._current_command_cache_key,
+                    cache_value=self.DUMMY_CACHE_VALUE,
+                    status=CacheEntryStatus.IN_PROGRESS,
+                    connection_ref=self._conn,
+                )
+            )
+
+        await self._conn.send_command(*args, **kwargs)
+
+    async def can_read(self, timeout: float = 0) -> bool:
+        return await self._conn.can_read()
+
+    async def read_response(
+        self,
+        disable_decoding: bool = False,
+        timeout: float | None = None,
+        *,
+        disconnect_on_error: bool = True,
+        push_request: bool | None = False,
+    ):
+        async with self._cache_lock:
+            cache_key = self._current_command_cache_key
+            if cache_key is not None:
+                cache_entry = self._cache.get(cache_key)
+                if (
+                    cache_entry is not None
+                    and cache_entry.status != CacheEntryStatus.IN_PROGRESS
+                ):
+                    response = copy.deepcopy(cache_entry.cache_value)
+                    self._current_command_cache_key = None
+                    record_csc_request(result=CSCResult.HIT)
+                    record_csc_network_saved(
+                        bytes_saved=len(response) if hasattr(response, "__len__") else 0
+                    )
+                    return response
+                record_csc_request(result=CSCResult.MISS)
+
+        response = await self._conn.read_response(
+            disable_decoding=disable_decoding,
+            timeout=timeout,
+            disconnect_on_error=disconnect_on_error,
+            push_request=push_request,
+        )
+
+        async with self._cache_lock:
+            cache_key = self._current_command_cache_key
+            if cache_key is None:
+                return response
+            if response is None:
+                self._cache.delete_by_cache_keys([cache_key])
+                self._current_command_cache_key = None
+                return response
+
+            cache_entry = self._cache.get(cache_key)
+            if cache_entry is not None:
+                cache_entry.status = CacheEntryStatus.VALID
+                cache_entry.cache_value = response
+                self._cache.set(cache_entry)
+
+            self._current_command_cache_key = None
+
+        return response
+
+    async def _enable_tracking_callback(self, connection: AbstractConnection) -> None:
+        await connection.send_command("CLIENT", "TRACKING", "ON")
+        await connection.read_response()
+        connection._parser.set_invalidation_push_handler(self._on_invalidation_callback)
+
+    async def _process_pending_invalidations(self) -> None:
+        while await self._conn.can_read():
+            try:
+                await self._conn.read_response(
+                    push_request=True,
+                    timeout=0,
+                    disconnect_on_error=False,
+                )
+            except TimeoutError:
+                break
+
+    async def _on_invalidation_callback(self, data) -> None:
+        async with self._cache_lock:
+            if data[1] is None:
+                self._cache.flush()
+            else:
+                self._cache.delete_by_redis_keys(data[1])
+
+
 class ConnectionPoolInterface(ABC):
     @abstractmethod
     def get_protocol(self):
@@ -2618,6 +2844,7 @@ class ConnectionPool(
         self,
         connection_class: Type[AbstractConnection] = Connection,
         max_connections: Optional[int] = None,
+        cache_factory: Optional[CacheFactoryInterface] = None,
         maint_notifications_config: MaintNotificationsConfig | None = None,
         **connection_kwargs,
     ):
@@ -2628,6 +2855,33 @@ class ConnectionPool(
         self.connection_class = connection_class
         self._connection_kwargs = connection_kwargs
         self.max_connections = max_connections
+        self.cache = None
+        self._cache_factory = cache_factory
+
+        if connection_kwargs.get("cache_config") or connection_kwargs.get("cache"):
+            if not check_protocol_version(connection_kwargs.get("protocol"), 3):
+                raise RedisError("Client caching is only supported with RESP version 3")
+
+            cache = connection_kwargs.get("cache")
+            if cache is not None:
+                if not isinstance(cache, CacheInterface):
+                    raise ValueError("Cache must implement CacheInterface")
+                self.cache = cache
+            elif self._cache_factory is not None:
+                self.cache = CacheProxy(self._cache_factory.get_cache())
+            else:
+                self.cache = CacheFactory(
+                    connection_kwargs.get("cache_config")
+                ).get_cache()
+
+            init_csc_items()
+            register_csc_items_callback(
+                callback=lambda: self.cache.size,
+                pool_name=get_pool_name(self),
+            )
+
+        connection_kwargs.pop("cache", None)
+        connection_kwargs.pop("cache_config", None)
 
         # Resolve the HIMPORT registry. A pre-built ``himport_registry`` (shared, e.g.
         # from the cluster client) takes precedence; otherwise build a fresh empty one.
@@ -2858,7 +3112,10 @@ class ConnectionPool(
         """Create a new connection.  Can be overridden by child classes."""
         # Note: We don't record IDLE here because async uses a sync make_connection
         # but async record_connection_count. The recording is handled in get_connection.
-        return self.connection_class(**self.connection_kwargs)
+        connection = self.connection_class(**self.connection_kwargs)
+        if self.cache is not None:
+            return AsyncCacheProxyConnection(connection, self.cache, self._lock)
+        return connection
 
     async def ensure_connection(self, connection: AbstractConnection):
         """Ensure that the connection object is connected and valid"""
