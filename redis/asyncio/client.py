@@ -1928,8 +1928,9 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         pre: CommandT = (("MULTI",), {})
         post: CommandT = (("EXEC",), {})
         cmds = (pre, *commands, post)
-        all_cmds = connection.pack_commands(
-            args for args, options in cmds if EMPTY_RESPONSE not in options
+        all_cmds = await self._pack_commands(
+            connection,
+            (args for args, options in cmds if EMPTY_RESPONSE not in options),
         )
         await connection.send_packed_command(all_cmds)
         errors = []
@@ -2004,7 +2005,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         self, connection: Connection, commands: CommandStackT, raise_on_error: bool
     ):
         # build up all commands into a single request to increase network perf
-        all_cmds = connection.pack_commands([args for args, _ in commands])
+        all_cmds = await self._pack_commands(connection, [args for args, _ in commands])
         await connection.send_packed_command(all_cmds)
 
         response = []
@@ -2019,6 +2020,12 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         if raise_on_error:
             self.raise_first_error(commands, response)
         return response
+
+    async def _pack_commands(
+        self, connection: Connection, commands: Iterable[Iterable[EncodableT]]
+    ) -> List[bytes]:
+        """Pack commands without blocking the event loop."""
+        return await asyncio.to_thread(connection.pack_commands, commands)
 
     def raise_first_error(self, commands: CommandStackT, response: Iterable[Any]):
         for i, r in enumerate(response):
