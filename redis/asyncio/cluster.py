@@ -114,7 +114,7 @@ from redis.exceptions import (
     TryAgainError,
     WatchError,
 )
-from redis.himport import HImportRegistry, is_himport_set_command
+from redis.himport import HImportRegistry, parse_himport_set_args
 from redis.maint_notifications import MaintNotificationsConfig
 from redis.typing import (
     AnyKeyT,
@@ -1255,7 +1255,7 @@ class RedisCluster(
             try:
                 if asking:
                     target_node = self.get_node(node_name=redirect_addr)
-                    if is_himport_set_command(command):
+                    if parse_himport_set_args(args) is not None:
                         # ASKING must sit on the same connection as the SET,
                         # immediately before it. HIMPORT SET's own executor folds
                         # ASKING into the SET's packed write after the session setup,
@@ -1858,13 +1858,16 @@ class ClusterNode:
             # On an ASK redirect ``asking`` is passed here rather than sent as a
             # separate ASKING command so the allowance sits on this same connection,
             # folded into the SET's own write immediately before the SET.
-            if is_himport_set_command(args[0]) and len(args) >= 3:
-                # args == (HIMPORT_SET, key, fieldset_name, *values). A raw
-                # ``execute_command`` with too few args falls through to the normal
-                # send path below so the server returns its arity error instead of a
-                # client-side IndexError.
+            himport_set = parse_himport_set_args(args)
+            if himport_set is not None:
+                # HIMPORT SET in the joined ("HIMPORT SET", key, ...) or split
+                # ("HIMPORT", "SET", key, ...) raw form; operands at the right
+                # offsets. Too few operands returns None and falls through to the
+                # normal send path below so the server returns its arity error
+                # instead of a client-side IndexError.
+                key, fieldset_name, values = himport_set
                 return await self._himport_execute_set(
-                    connection, args[1], args[2], list(args[3:]), asking=asking
+                    connection, key, fieldset_name, values, asking=asking
                 )
 
             # Execute command
@@ -3227,11 +3230,14 @@ class TransactionStrategy(AbstractStrategy):
         # fieldset". Route it through the node's HIMPORT executor, the same way
         # the normal cluster path, the batched MULTI/EXEC path, and standalone
         # watched pipelines all do.
-        if is_himport_set_command(command_name) and len(args) >= 3:
-            # args == (HIMPORT_SET, key, fieldset_name, *values). Too few args
-            # fall through to the bare send so the server returns its arity error.
+        himport_set = parse_himport_set_args(args)
+        if himport_set is not None:
+            # HIMPORT SET in the joined or split raw form; operands at the right
+            # offsets. Too few operands returns None and falls through to the bare
+            # send so the server returns its arity error.
+            key, fieldset_name, values = himport_set
             output = await redis_node._himport_execute_set(
-                connection, args[1], args[2], list(args[3:])
+                connection, key, fieldset_name, values
             )
         else:
             await connection.send_command(*args)

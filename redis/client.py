@@ -64,7 +64,7 @@ from redis.exceptions import (
     ResponseError,
     WatchError,
 )
-from redis.himport import HImportRegistry, is_himport_set_command
+from redis.himport import HImportRegistry, parse_himport_set_args
 from redis.lock import Lock
 from redis.maint_notifications import (
     MaintNotificationsConfig,
@@ -805,12 +805,15 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         # connection is known, and connection-scoped session setup can only happen
         # once that connection is chosen. The overhead is one string compare per
         # command.
-        if is_himport_set_command(command_name) and len(args) >= 3:
-            # args == (HIMPORT_SET, key, fieldset_name, *values). A raw
-            # ``execute_command`` with too few args falls through to the normal send
-            # path so the server returns its arity error, preserving execute_command
-            # error semantics instead of raising a client-side IndexError here.
-            return self._himport_execute_set(conn, args[1], args[2], list(args[3:]))
+        himport_set = parse_himport_set_args(args)
+        if himport_set is not None:
+            # ``args`` is an HIMPORT SET in either the joined ("HIMPORT SET", key,
+            # ...) or split ("HIMPORT", "SET", key, ...) raw form; the operands come
+            # back at the right offsets for the form. A command with too few operands
+            # returns None and falls through to the normal send path so the server
+            # returns its arity error instead of a client-side IndexError here.
+            key, fieldset_name, values = himport_set
+            return self._himport_execute_set(conn, key, fieldset_name, values)
         conn.send_command(*args, **options)
         return self.parse_response(conn, command_name, **options)
 

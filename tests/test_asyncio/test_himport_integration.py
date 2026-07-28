@@ -133,6 +133,15 @@ async def test_raw_case_insensitive_himport_set_is_intercepted(hr):
     # Mixed-case bytes name.
     assert await hr.execute_command(b"HImPoRt SeT", "raw:{u}:2", "rawcmd", "bob", "b@x")
     assert await hr.hget("raw:{u}:2", "email") == b"b@x"
+    # Split-token wire-equivalent form: ("HIMPORT", "SET", key, fieldset, *values).
+    assert await hr.execute_command(
+        "HIMPORT", "SET", "raw:{u}:3", "rawcmd", "cara", "c@x"
+    )
+    assert await hr.hget("raw:{u}:3", "name") == b"cara"
+    assert await hr.execute_command(
+        b"himport", b"set", "raw:{u}:4", "rawcmd", "dan", "d@x"
+    )
+    assert await hr.hget("raw:{u}:4", "email") == b"d@x"
 
 
 async def test_runtime_prepare_without_init_schemas(create_redis):
@@ -350,10 +359,13 @@ async def test_pipeline_raw_case_insensitive_himport_set_is_preflighted(hr):
     pipe = hr.pipeline(transaction=False)
     pipe.execute_command("himport set", "plraw:{u}:1", "plraw", "1", "2")
     pipe.execute_command(b"HImPoRt SeT", "plraw:{u}:2", "plraw", "3", "4")
+    # Split-token form must also be recognised by the pre-flight.
+    pipe.execute_command("HIMPORT", "SET", "plraw:{u}:3", "plraw", "5", "6")
     result = await pipe.execute()
     assert not any(isinstance(r, Exception) for r in result)
     assert await hr.hget("plraw:{u}:1", "x") == b"1"
     assert await hr.hget("plraw:{u}:2", "y") == b"4"
+    assert await hr.hget("plraw:{u}:3", "y") == b"6"
 
 
 async def test_pipeline_watch_immediate_himport_set(hr):

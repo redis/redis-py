@@ -18,6 +18,7 @@ from redis.himport import (
     HImportFieldset,
     HImportRegistry,
     is_himport_set_command,
+    parse_himport_set_args,
 )
 from redis.sentinel import Sentinel
 
@@ -614,6 +615,45 @@ class TestIsHImportSetCommand:
     )
     def test_rejects_other_commands_and_non_strings(self, name):
         assert is_himport_set_command(name) is False
+
+
+@pytest.mark.fixed_client
+class TestParseHImportSetArgs:
+    """``parse_himport_set_args`` recognises both wire-equivalent raw forms of
+    HIMPORT SET and returns the operands at the right offsets for either.
+    """
+
+    @pytest.mark.parametrize(
+        "args, expected",
+        [
+            # Joined form: args[0] == "HIMPORT SET".
+            (("HIMPORT SET", "k", "fs", "v1", "v2"), ("k", "fs", ["v1", "v2"])),
+            (("himport set", "k", "fs", "v1"), ("k", "fs", ["v1"])),
+            ((b"HIMPORT SET", "k", "fs"), ("k", "fs", [])),  # no values
+            # Split form: args[0] == "HIMPORT", args[1] == "SET".
+            (("HIMPORT", "SET", "k", "fs", "v1", "v2"), ("k", "fs", ["v1", "v2"])),
+            (("himport", "set", "k", "fs", "v1"), ("k", "fs", ["v1"])),
+            ((b"HImPoRt", b"SeT", "k", "fs", "v1"), ("k", "fs", ["v1"])),
+        ],
+    )
+    def test_parses_both_forms(self, args, expected):
+        assert parse_himport_set_args(args) == expected
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            (),  # empty
+            ("HIMPORT",),  # bare, no subcommand
+            ("HIMPORT SET",),  # joined, too few operands
+            ("HIMPORT", "SET", "k"),  # split, missing fieldset
+            ("HIMPORT", "PREPARE", "fs", "a"),  # different subcommand
+            ("HIMPORT", "DISCARD", "fs"),
+            ("GET", "k"),  # unrelated command
+            ("HSET", "k", "f", "v"),
+        ],
+    )
+    def test_returns_none_for_non_set_or_too_few(self, args):
+        assert parse_himport_set_args(args) is None
 
 
 class TestHImportAskRedirectSync:

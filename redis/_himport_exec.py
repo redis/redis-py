@@ -22,7 +22,7 @@ from redis.himport import (
     himport_discard_command,
     himport_prepare_command,
     himport_set_command,
-    is_himport_set_command,
+    parse_himport_set_args,
 )
 
 
@@ -188,9 +188,10 @@ def prepare_pipeline(node, conn, command_arg_lists):
     to_prepare = []
     seen = set()
     for args in command_arg_lists:
-        if not args or not is_himport_set_command(args[0]) or len(args) < 3:
+        parsed = parse_himport_set_args(args)
+        if parsed is None:
             continue
-        fieldset_name = args[2]
+        fieldset_name = parsed[1]
         if fieldset_name in seen:
             continue
         seen.add(fieldset_name)
@@ -243,9 +244,10 @@ def pipeline_prepares(node, conn, command_arg_lists):
     to_prepare = []
     seen = set()
     for args in command_arg_lists:
-        if not args or not is_himport_set_command(args[0]) or len(args) < 3:
+        parsed = parse_himport_set_args(args)
+        if parsed is None:
             continue
-        fieldset_name = args[2]
+        fieldset_name = parsed[1]
         if fieldset_name in seen:
             continue
         seen.add(fieldset_name)

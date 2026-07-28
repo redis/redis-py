@@ -96,6 +96,63 @@ def is_himport_set_command(command_name) -> bool:
     return False
 
 
+_HIMPORT_BYTES = _HIMPORT.encode()
+_SET_BYTES = _SET.encode()
+
+
+def _token_is(value, upper_token: str, upper_token_bytes: bytes) -> bool:
+    """Case-insensitive match of a single ``str``/``bytes`` command token.
+
+    ``upper_token`` / ``upper_token_bytes`` must already be upper-cased. The
+    length guard keeps the hot path to a single comparison for a differently
+    sized token (``upper()`` runs only on a size match).
+    """
+    n = len(upper_token)
+    if isinstance(value, str):
+        return len(value) == n and value.upper() == upper_token
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        raw = bytes(value)
+        return len(raw) == n and raw.upper() == upper_token_bytes
+    return False
+
+
+def parse_himport_set_args(args):
+    """Detect an ``HIMPORT SET`` command in ``args`` and return its operands.
+
+    ``HIMPORT SET`` reaches the raw ``execute_command`` API in two wire-equivalent
+    forms that the serializer both accept:
+
+    * the joined form ``("HIMPORT SET", key, fieldset, *values)`` (``args[0]`` is
+      the two-word command name the request packer splits on the space), and
+    * the split form ``("HIMPORT", "SET", key, fieldset, *values)``.
+
+    Both are case- and encoding-insensitive. The connection-state-aware executor
+    and the pipeline pre-flight need the operands at the right offsets for either
+    form, so this returns ``(key, fieldset_name, values_list)`` when ``args`` is an
+    ``HIMPORT SET`` with enough operands, or ``None`` otherwise (a non-``HIMPORT
+    SET`` command, or one with too few operands -- which falls through to the plain
+    send so the server returns its own arity error).
+    """
+    if not args:
+        return None
+    first = args[0]
+    # Joined form: args[0] == "HIMPORT SET".
+    if is_himport_set_command(first):
+        if len(args) < 3:
+            return None
+        return args[1], args[2], list(args[3:])
+    # Split form: args[0] == "HIMPORT", args[1] == "SET".
+    if (
+        len(args) >= 2
+        and _token_is(first, _HIMPORT, _HIMPORT_BYTES)
+        and _token_is(args[1], _SET, _SET_BYTES)
+    ):
+        if len(args) < 4:
+            return None
+        return args[2], args[3], list(args[4:])
+    return None
+
+
 @dataclass(frozen=True)
 class HImportFieldset:
     """An immutable HIMPORT fieldset entry.

@@ -137,6 +137,11 @@ def test_raw_case_insensitive_himport_set_is_intercepted(hr):
     # Mixed-case bytes name.
     assert hr.execute_command(b"HImPoRt SeT", "raw:{u}:2", "rawcmd", "bob", "b@x")
     assert hr.hget("raw:{u}:2", "email") == b"b@x"
+    # Split-token wire-equivalent form: ("HIMPORT", "SET", key, fieldset, *values).
+    assert hr.execute_command("HIMPORT", "SET", "raw:{u}:3", "rawcmd", "cara", "c@x")
+    assert hr.hget("raw:{u}:3", "name") == b"cara"
+    assert hr.execute_command(b"himport", b"set", "raw:{u}:4", "rawcmd", "dan", "d@x")
+    assert hr.hget("raw:{u}:4", "email") == b"d@x"
 
 
 @pytest.mark.onlynoncluster
@@ -428,10 +433,13 @@ class TestHImportIntegration:
         pipe = hr.pipeline(transaction=False)
         pipe.execute_command("himport set", "plraw:{u}:1", "plraw", "1", "2")
         pipe.execute_command(b"HImPoRt SeT", "plraw:{u}:2", "plraw", "3", "4")
+        # Split-token form must also be recognised by the pre-flight.
+        pipe.execute_command("HIMPORT", "SET", "plraw:{u}:3", "plraw", "5", "6")
         result = pipe.execute()
         assert not any(isinstance(r, Exception) for r in result)
         assert hr.hget("plraw:{u}:1", "x") == b"1"
         assert hr.hget("plraw:{u}:2", "y") == b"4"
+        assert hr.hget("plraw:{u}:3", "y") == b"6"
 
     def test_pipeline_watch_immediate_himport_set(self, hr):
         # An HIMPORT SET issued after WATCH (before MULTI) runs on the immediate

@@ -75,7 +75,7 @@ from redis.exceptions import (
     TryAgainError,
     WatchError,
 )
-from redis.himport import HImportRegistry, is_himport_set_command
+from redis.himport import HImportRegistry, parse_himport_set_args
 from redis.lock import Lock
 from redis.maint_notifications import (
     MaintNotificationsConfig,
@@ -1745,11 +1745,12 @@ class RedisCluster(
 
                 redis_node = self.get_redis_connection(target_node)
                 connection = get_connection(redis_node)
-                if asking and not is_himport_set_command(command):
+                himport_set = parse_himport_set_args(args)
+                if asking and himport_set is None:
                     connection.send_command("ASKING")
                     redis_node.parse_response(connection, "ASKING", **kwargs)
                     asking = False
-                if is_himport_set_command(command) and len(args) >= 3:
+                if himport_set is not None:
                     # args == (HIMPORT_SET, key, fieldset_name, *values). A raw
                     # ``execute_command`` with too few args falls through to the
                     # normal send path below so the server returns its arity error
@@ -1770,14 +1771,15 @@ class RedisCluster(
                     # local: ``_himport_execute_set`` can raise a retriable MOVED/TRYAGAIN
                     # mid-exchange, and a stale ``asking`` would shadow the moved-retry
                     # branch on the next loop iteration (mirrors the async client).
+                    key, fieldset_name, values = himport_set
                     ask_himport = asking
                     asking = False
                     response = self._himport_execute_set(
                         redis_node,
                         connection,
-                        args[1],
-                        args[2],
-                        list(args[3:]),
+                        key,
+                        fieldset_name,
+                        values,
                         asking=ask_himport,
                     )
                     kwargs.pop("keys", None)
@@ -4701,12 +4703,13 @@ class TransactionStrategy(AbstractStrategy):
         # fieldset". Route it through the node's HIMPORT executor, the same way
         # the normal cluster path, the batched MULTI/EXEC path, and standalone
         # watched pipelines all do.
-        if is_himport_set_command(command_name) and len(args) >= 3:
-            # args == (HIMPORT_SET, key, fieldset_name, *values). Too few args
-            # fall through to the bare send so the server returns its arity error.
-            output = redis_node._himport_execute_set(
-                conn, args[1], args[2], list(args[3:])
-            )
+        himport_set = parse_himport_set_args(args)
+        if himport_set is not None:
+            # HIMPORT SET in the joined or split raw form; operands at the right
+            # offsets. Too few operands returns None and falls through to the bare
+            # send so the server returns its arity error.
+            key, fieldset_name, values = himport_set
+            output = redis_node._himport_execute_set(conn, key, fieldset_name, values)
         else:
             conn.send_command(*args)
             output = redis_node.parse_response(conn, command_name, **options)
