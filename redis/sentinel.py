@@ -51,7 +51,9 @@ class SentinelManagedConnection(Connection):
 
     def _connect_retry(self):
         if self._sock:
-            return  # already connected
+            if not self.is_connection_expired():
+                return  # already connected
+            self.disconnect()
         if self.connection_pool.is_master:
             self.connect_to(self.connection_pool.get_master_address())
         else:

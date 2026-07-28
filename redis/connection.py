@@ -817,6 +817,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         parser_class=DefaultParser,
         socket_read_size: int = DEFAULT_SOCKET_READ_SIZE,
         health_check_interval: int = 0,
+        max_connection_lifetime: Optional[float] = None,
         client_name: Optional[str] = None,
         lib_name: Union[Optional[str], object] = SENTINEL,
         lib_version: Union[Optional[str], object] = SENTINEL,
@@ -849,6 +850,11 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         `retry_on_error` to a list of the error/s to retry on, then set
         `retry` to a valid `Retry` object.
         To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
+
+        `max_connection_lifetime` limits how long a connected socket can be
+        reused. When the limit is reached, the next connection attempt closes
+        the socket and reconnects, allowing credential providers to refresh
+        their credentials. `None` disables the limit.
 
         Parameters
         ----------
@@ -907,6 +913,10 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         else:
             self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval
+        if max_connection_lifetime is not None and max_connection_lifetime <= 0:
+            raise ValueError("max_connection_lifetime must be positive")
+        self.max_connection_lifetime = max_connection_lifetime
+        self._connection_created_at: Optional[float] = None
         self.next_health_check = 0
         self.redis_connect_func = redis_connect_func
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
@@ -1025,11 +1035,21 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             lambda error: self.disconnect(error),
         )
 
+    def is_connection_expired(self) -> bool:
+        return (
+            self.max_connection_lifetime is not None
+            and self._connection_created_at is not None
+            and time.monotonic() - self._connection_created_at
+            >= self.max_connection_lifetime
+        )
+
     def connect_check_health(
         self, check_health: bool = True, retry_socket_connect: bool = True
     ):
         if self._sock:
-            return
+            if not self.is_connection_expired():
+                return
+            self.disconnect()
         # Track actual retry attempts for error reporting
         actual_retry_attempts = [0]
 
@@ -1090,6 +1110,9 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             callback = ref()
             if callback:
                 callback(self)
+
+        if self.max_connection_lifetime is not None:
+            self._connection_created_at = time.monotonic()
 
     @abstractmethod
     def _connect(self):
@@ -1227,6 +1250,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
 
         conn_sock = self._sock
         self._sock = None
+        self._connection_created_at = None
         # reset the reconnect flag
         self.reset_should_reconnect()
 
@@ -2259,6 +2283,7 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "db": int,
     "socket_timeout": float,
     "socket_connect_timeout": float,
+    "max_connection_lifetime": float,
     "socket_read_size": int,
     "socket_keepalive": to_bool,
     "retry_on_timeout": to_bool,
