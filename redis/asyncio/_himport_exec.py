@@ -183,47 +183,19 @@ async def prepare_pipeline(node, conn, command_arg_lists):
     sequences (the caller extracts them from its own command representation).
     No-op when the batch has no registry-backed ``HIMPORT SET``.
     """
-    # A pipeline may run on a connection type that never carries real HIMPORT
-    # state (e.g. mocked test doubles); only proceed for a real config.
-    registry = getattr(conn, "himport_registry", None)
-    if not isinstance(registry, HImportRegistry):
-        return
-    await reconcile_discards(node, conn)
-    to_prepare = []
-    seen = set()
-    for args in command_arg_lists:
-        parsed = parse_himport_set_args(args)
-        if parsed is None:
-            continue
-        fieldset_name = parsed[1]
-        if fieldset_name in seen:
-            continue
-        seen.add(fieldset_name)
-        fieldset = registry.get(fieldset_name)
-        if (
-            fieldset is not None
-            and conn._himport_prepared.get(fieldset_name) != fieldset.version
-        ):
-            to_prepare.append(fieldset)
+    # Selection (registry check, deferred-discard reconcile, scan/dedup/version)
+    # is shared with pipeline_prepares. This path differs only in that it sends the
+    # PREPAREs as their own packed exchange -- rather than folding them into a
+    # queued write -- then drains their replies and raises the first error.
+    to_prepare = await pipeline_prepares(node, conn, command_arg_lists)
     if not to_prepare:
         return
     await conn.send_packed_command(
-        conn.pack_commands(
-            [himport_prepare_command(fs.name, fs.fields) for fs in to_prepare]
-        )
+        conn.pack_commands(prepare_wire_commands(to_prepare))
     )
-    # One reply per packed PREPARE must be read regardless of a per-command
-    # ResponseError, otherwise the unread replies desync the socket before the
-    # buffered batch is even sent. Drain every reply (marking only the ones that
-    # succeeded), then surface the first error as the root cause.
-    first_error = None
-    for fs in to_prepare:
-        try:
-            await node.parse_response(conn, HIMPORT_PREPARE)
-        except ResponseError as e:
-            first_error = first_error or e
-            continue
-        conn._himport_prepared[fs.name] = fs.version
+    # Every reply must be drained even on a per-command error, or the unread
+    # replies desync the socket before the buffered batch is sent; then raise.
+    first_error = await drain_pipeline_prepares(node, conn, to_prepare)
     if first_error is not None:
         raise first_error
 
