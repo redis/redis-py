@@ -2291,7 +2291,10 @@ def parse_url(url):
 
     for name, value in parse_qs(url.query).items():
         if value and len(value) > 0:
-            value = unquote(value[0])
+            # parse_qs() already percent-decodes query values, so use the value
+            # as-is; unquoting again here would double-decode (e.g. "%2520" ->
+            # "%20" -> " "). See issue #4208.
+            value = value[0]
             parser = URL_QUERY_ARGUMENT_PARSERS.get(name)
             if parser:
                 try:

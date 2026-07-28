@@ -1749,7 +1749,10 @@ def parse_url(url: str) -> ConnectKwargs:
 
     for name, value_list in parse_qs(parsed.query).items():
         if value_list and len(value_list) > 0:
-            value = unquote(value_list[0])
+            # parse_qs() already percent-decodes query values, so use the value
+            # as-is; unquoting again here would double-decode (e.g. "%2520" ->
+            # "%20" -> " "). See issue #4208.
+            value = value_list[0]
             parser = URL_QUERY_ARGUMENT_PARSERS.get(name)
             if parser:
                 try:
