@@ -340,6 +340,22 @@ async def test_pipeline_folds_prepare_into_single_write(hr):
     assert await hr.hget("pf:{u}:2", "y") == b"4"
 
 
+@pytest.mark.onlynoncluster
+async def test_pipeline_raw_case_insensitive_himport_set_is_preflighted(hr):
+    # A raw, case/encoding-insensitive HIMPORT SET buffered in a pipeline must be
+    # detected by the pre-flight so its fieldset is PREPAREd before the batch --
+    # matching the per-command path. Otherwise the batched SET fails "no such
+    # fieldset" (the fieldset is only in the client registry, not on the socket).
+    await hr.himport_prepare("plraw", ["x", "y"])
+    pipe = hr.pipeline(transaction=False)
+    pipe.execute_command("himport set", "plraw:{u}:1", "plraw", "1", "2")
+    pipe.execute_command(b"HImPoRt SeT", "plraw:{u}:2", "plraw", "3", "4")
+    result = await pipe.execute()
+    assert not any(isinstance(r, Exception) for r in result)
+    assert await hr.hget("plraw:{u}:1", "x") == b"1"
+    assert await hr.hget("plraw:{u}:2", "y") == b"4"
+
+
 async def test_pipeline_watch_immediate_himport_set(hr):
     # An HIMPORT SET issued after WATCH (before MULTI) runs on the immediate
     # execution path, not the batched one. That path must lazily PREPARE the
