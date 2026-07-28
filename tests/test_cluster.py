@@ -4,6 +4,7 @@ import select
 import socket
 import socketserver
 import threading
+from types import SimpleNamespace
 from typing import List
 import warnings
 from queue import LifoQueue, Queue
@@ -24,7 +25,9 @@ from redis.cluster import (
     REDIS_CLUSTER_HASH_SLOTS,
     REPLICA,
     ClusterNode,
+    LoadBalancer,
     LoadBalancingStrategy,
+    NodeCommands,
     NodesManager,
     RedisCluster,
     get_node_name,
@@ -73,6 +76,203 @@ default_cluster_slots = [
     [0, 8191, ["127.0.0.1", 7000, "node_0"], ["127.0.0.1", 7003, "node_3"]],
     [8192, 16383, ["127.0.0.1", 7001, "node_1"], ["127.0.0.1", 7002, "node_2"]],
 ]
+
+
+def test_latency_based_load_balancer_prefers_lower_score():
+    nodes = [
+        ClusterNode("node-a", 7000),
+        ClusterNode("node-b", 7001),
+    ]
+    load_balancer = LoadBalancer()
+
+    load_balancer.start_request(nodes[0].name)
+    load_balancer.record_latency(nodes[0].name, 0.1)
+    load_balancer.start_request(nodes[1].name)
+    load_balancer.record_latency(nodes[1].name, 0.01)
+
+    with patch("redis.cluster.random.sample", return_value=[0, 1]):
+        assert (
+            load_balancer.get_server_index(
+                "primary",
+                len(nodes),
+                LoadBalancingStrategy.LATENCY_BASED,
+                nodes,
+            )
+            == 1
+        )
+
+
+def test_latency_based_load_balancer_accounts_for_in_flight_requests():
+    nodes = [
+        ClusterNode("node-a", 7000),
+        ClusterNode("node-b", 7001),
+    ]
+    load_balancer = LoadBalancer()
+
+    for node in nodes:
+        load_balancer.start_request(node.name)
+        load_balancer.record_latency(node.name, 0.01)
+
+    load_balancer.start_request(nodes[0].name)
+    load_balancer.start_request(nodes[0].name)
+
+    with patch("redis.cluster.random.sample", return_value=[0, 1]):
+        assert (
+            load_balancer.get_server_index(
+                "primary",
+                len(nodes),
+                LoadBalancingStrategy.LATENCY_BASED,
+                nodes,
+            )
+            == 1
+        )
+
+    load_balancer.record_latency(nodes[0].name, 0.01)
+    load_balancer.record_latency(nodes[0].name, 0.01)
+
+
+def test_latency_based_load_balancer_penalizes_peak_latency():
+    nodes = [
+        ClusterNode("node-a", 7000),
+        ClusterNode("node-b", 7001),
+    ]
+    load_balancer = LoadBalancer()
+
+    for node in nodes:
+        load_balancer.start_request(node.name)
+        load_balancer.record_latency(node.name, 0.01)
+    load_balancer.start_request(nodes[1].name)
+    load_balancer.record_latency(nodes[1].name, 1.0)
+
+    with patch("redis.cluster.random.sample", return_value=[0, 1]):
+        assert (
+            load_balancer.get_server_index(
+                "primary",
+                len(nodes),
+                LoadBalancingStrategy.LATENCY_BASED,
+                nodes,
+            )
+            == 0
+        )
+
+
+def test_latency_based_load_balancer_decays_peak_latency():
+    node = ClusterNode("node-a", 7000)
+    load_balancer = LoadBalancer()
+
+    load_balancer.start_request(node.name)
+    load_balancer.record_latency(node.name, 1.0)
+    initial_peak = load_balancer._latency_state[node.name].peak_ewma
+
+    for _ in range(4):
+        load_balancer.start_request(node.name)
+        load_balancer.record_latency(node.name, 0.01)
+
+    assert load_balancer._latency_state[node.name].peak_ewma < initial_peak
+
+
+def test_nodes_manager_provides_nodes_to_latency_based_selection():
+    nodes = [
+        ClusterNode("node-a", 7000),
+        ClusterNode("node-b", 7001),
+    ]
+    manager = object.__new__(NodesManager)
+    manager._lock = threading.RLock()
+    manager._require_full_coverage = True
+    manager.slots_cache = {0: nodes}
+    manager.read_load_balancer = LoadBalancer()
+
+    manager.read_load_balancer.start_request(nodes[0].name)
+    manager.read_load_balancer.record_latency(nodes[0].name, 0.1)
+    manager.read_load_balancer.start_request(nodes[1].name)
+    manager.read_load_balancer.record_latency(nodes[1].name, 0.01)
+
+    with patch("redis.cluster.random.sample", return_value=[0, 1]):
+        assert (
+            manager.get_node_from_slot(
+                0,
+                read_from_replicas=True,
+                load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+            )
+            is nodes[1]
+        )
+
+
+@pytest.mark.parametrize("command,tracks_latency", [("GET", True), ("SET", False)])
+def test_cluster_command_tracks_latency_only_for_reads(command, tracks_latency):
+    node = ClusterNode("node-a", 7000)
+    redis_node = Mock()
+    redis_node.parse_response.return_value = b"value"
+    connection = Mock()
+    load_balancer = Mock()
+    client = object.__new__(RedisCluster)
+    client.RedisClusterRequestTTL = 1
+    client.load_balancing_strategy = LoadBalancingStrategy.LATENCY_BASED
+    client.nodes_manager = SimpleNamespace(read_load_balancer=load_balancer)
+    client.cluster_response_callbacks = {}
+    client.get_redis_connection = Mock(return_value=redis_node)
+    client._record_command_metric = Mock()
+
+    with patch("redis.cluster.get_connection", return_value=connection):
+        assert client._execute_command(node, command, "key") == b"value"
+
+    if tracks_latency:
+        load_balancer.start_request.assert_called_once_with(node.name)
+        load_balancer.record_latency.assert_called_once()
+        assert load_balancer.record_latency.call_args.args[0] == node.name
+    else:
+        load_balancer.start_request.assert_not_called()
+        load_balancer.record_latency.assert_not_called()
+
+
+def test_cluster_command_records_latency_when_read_fails():
+    node = ClusterNode("node-a", 7000)
+    redis_node = Mock()
+    redis_node.parse_response.side_effect = ValueError("response failure")
+    connection = Mock()
+    load_balancer = Mock()
+    client = object.__new__(RedisCluster)
+    client.RedisClusterRequestTTL = 1
+    client.load_balancing_strategy = LoadBalancingStrategy.LATENCY_BASED
+    client.nodes_manager = SimpleNamespace(read_load_balancer=load_balancer)
+    client.cluster_response_callbacks = {}
+    client.get_redis_connection = Mock(return_value=redis_node)
+    client._record_command_metric = Mock()
+
+    with patch("redis.cluster.get_connection", return_value=connection):
+        with pytest.raises(ValueError, match="response failure"):
+            client._execute_command(node, "GET", "key")
+
+    load_balancer.start_request.assert_called_once_with(node.name)
+    load_balancer.record_latency.assert_called_once()
+
+
+def test_cluster_pipeline_records_one_latency_sample_per_read_node():
+    client = get_mocked_redis_client(
+        host=default_host,
+        port=default_port,
+        load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+    )
+
+    def write_without_network(self):
+        for command in self.commands:
+            command.result = None
+
+    def read_response(self):
+        for command in self.commands:
+            command.result = b"value"
+
+    pipeline = client.pipeline()
+    pipeline.get("foo")
+    connection = Mock(host=default_host, port=default_port, db=0)
+    with (
+        patch.object(NodeCommands, "write", write_without_network),
+        patch.object(NodeCommands, "read", read_response),
+        patch("redis.cluster.get_connection", return_value=connection),
+    ):
+        assert pipeline.execute() == [b"value"]
+
+    assert len(client.nodes_manager.read_load_balancer._latency_state) == 1
 
 
 class ProxyRequestHandler(socketserver.BaseRequestHandler):

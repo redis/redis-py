@@ -123,3 +123,20 @@ Stop the example stack when finished:
 ```shell
 docker compose -f docs/examples/opentelemetry/docker-compose.yml down
 ```
+
+## Cluster Latency-Aware Read Balancing
+
+`cluster_latency_load_balancing.py` compares round-robin reads with
+`LoadBalancingStrategy.LATENCY_BASED` on one fixed key slot. It adds a
+configurable delay to one replica's async client command path, then reports
+that replica's selection share and the measured p99 latency:
+
+```shell
+python -m benchmarks.cluster_latency_load_balancing \
+  --host 127.0.0.1 --port 7000 --delay-ms 10 \
+  --requests 2000 --concurrency 32
+```
+
+The cluster must expose at least one replica for the selected key slot and
+must permit read-only connections. Pass `--delayed-node HOST:PORT` to choose a
+specific replica; otherwise the last replica in the slot's topology is used.

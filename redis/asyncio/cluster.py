@@ -1205,6 +1205,8 @@ class RedisCluster(
 
         while ttl > 0:
             ttl -= 1
+            tracked_node_name = None
+            attempt_start_time = None
             try:
                 if asking:
                     target_node = self.get_node(node_name=redirect_addr)
@@ -1223,6 +1225,15 @@ class RedisCluster(
                     )
                     moved = False
 
+                if (
+                    self.load_balancing_strategy == LoadBalancingStrategy.LATENCY_BASED
+                    and command in READ_COMMANDS
+                ):
+                    tracked_node_name = target_node.name
+                    attempt_start_time = time.monotonic()
+                    self.nodes_manager.read_load_balancer.start_request(
+                        tracked_node_name
+                    )
                 response = await target_node.execute_command(*args, **kwargs)
                 await self._record_command_metric(
                     command_name=command,
@@ -1370,6 +1381,11 @@ class RedisCluster(
                     error=e,
                 )
                 raise
+            finally:
+                if tracked_node_name is not None and attempt_start_time is not None:
+                    self.nodes_manager.read_load_balancer.record_latency(
+                        tracked_node_name, time.monotonic() - attempt_start_time
+                    )
 
         e = ClusterError("TTL exhausted.")
         e.connection = target_node
@@ -2066,7 +2082,10 @@ class NodesManager:
                 # get the server index using the strategy defined in load_balancing_strategy
                 primary_name = self.slots_cache[slot][0].name
                 node_idx = self.read_load_balancer.get_server_index(
-                    primary_name, len(self.slots_cache[slot]), load_balancing_strategy
+                    primary_name,
+                    len(self.slots_cache[slot]),
+                    load_balancing_strategy,
+                    nodes=self.slots_cache[slot],
                 )
                 return self.slots_cache[slot][node_idx]
             return self.slots_cache[slot][0]
@@ -2793,10 +2812,27 @@ class PipelineStrategy(AbstractStrategy):
         # Start timing for observability
         start_time = time.monotonic()
 
+        async def execute_node_pipeline(node, commands):
+            track_latency = (
+                client.load_balancing_strategy == LoadBalancingStrategy.LATENCY_BASED
+                and any(command.args[0] in READ_COMMANDS for command in commands)
+            )
+            if not track_latency:
+                return await node.execute_pipeline(commands)
+
+            client.nodes_manager.read_load_balancer.start_request(node.name)
+            start_time = time.monotonic()
+            try:
+                return await node.execute_pipeline(commands)
+            finally:
+                client.nodes_manager.read_load_balancer.record_latency(
+                    node.name, time.monotonic() - start_time
+                )
+
         errors = await asyncio.gather(
             *(
-                asyncio.create_task(node[0].execute_pipeline(node[1]))
-                for node in nodes.values()
+                asyncio.create_task(execute_node_pipeline(node, commands))
+                for node, commands in nodes.values()
             )
         )
 
