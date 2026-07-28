@@ -581,14 +581,19 @@ class TestHImportAskRedirectSync:
     executor on ``RedisCluster`` (mirroring the async ``ClusterNode``): the ASKING
     allowance is folded into the SET's own packed write so it lands immediately
     before the SET. ``_himport_prepare_and_set`` ignores ``self`` (call it unbound);
-    ``_himport_execute_set`` dispatches to it via ``self``, so a stub ``self``
-    carrying the real methods exercises the real code. ``parse_response`` /
-    ``_himport_reconcile_discards`` are taken from the ``redis_node`` argument.
+    ``_himport_execute_set`` dispatches to ``_himport_prepare_and_set`` and
+    ``_himport_reconcile_discards`` via ``self``, so a stub ``self`` carrying the
+    real ``RedisCluster`` methods exercises the real code. ``parse_response`` is
+    taken from the ``redis_node`` argument (the reconcile helper drains its own
+    replies through that same ``redis_node``).
     """
 
     class _ClusterStub:
         _himport_execute_set = cluster_mod.RedisCluster._himport_execute_set
         _himport_prepare_and_set = cluster_mod.RedisCluster._himport_prepare_and_set
+        _himport_reconcile_discards = (
+            cluster_mod.RedisCluster._himport_reconcile_discards
+        )
 
     def test_prepare_and_set_packs_prepare_asking_set(self):
         registry = HImportRegistry()
@@ -625,7 +630,6 @@ class TestHImportAskRedirectSync:
         conn = _CapturingConn(registry, prepared={"fs": fieldset.version})
         conn._himport_reconciled_revision = registry.revision
         node = mock.Mock()
-        node._himport_reconcile_discards = mock.Mock()
         node.parse_response = mock.Mock(side_effect=["OK", 1])
         resp = self._ClusterStub()._himport_execute_set(
             node, conn, "k", "fs", ["v"], asking=True
@@ -642,7 +646,6 @@ class TestHImportAskRedirectSync:
         conn = _CapturingConn(registry, prepared={"fs": fieldset.version})
         conn._himport_reconciled_revision = registry.revision
         node = mock.Mock()
-        node._himport_reconcile_discards = mock.Mock()
         node.parse_response = mock.Mock(
             side_effect=[
                 "OK",  # ASKING (bare)
@@ -671,7 +674,6 @@ class TestHImportAskRedirectSync:
         conn = _CapturingConn(registry, prepared={"fs": fieldset.version})
         conn._himport_reconciled_revision = registry.revision
         node = mock.Mock()
-        node._himport_reconcile_discards = mock.Mock()
         node.parse_response = mock.Mock(
             side_effect=[NoSuchFieldsetError("no such fieldset"), "OK", 1]
         )
@@ -692,7 +694,6 @@ class TestHImportAskRedirectSync:
         conn = _CapturingConn(registry, prepared={"fs": fieldset.version})
         conn._himport_reconciled_revision = registry.revision
         node = mock.Mock()
-        node._himport_reconcile_discards = mock.Mock()
         node.parse_response = mock.Mock(
             side_effect=[ResponseError("bad ASKING"), 1]  # ASKING errors, SET drained
         )

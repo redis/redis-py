@@ -48,6 +48,7 @@ from redis._defaults import (
 from redis._parsers import AsyncCommandsParser, Encoder
 from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
 from redis._parsers.helpers import get_response_callbacks
+from redis.asyncio import _himport_exec
 from redis.asyncio.client import PubSub, ResponseCallbackT
 from redis.asyncio.connection import (
     AbstractConnection,
@@ -105,7 +106,6 @@ from redis.exceptions import (
     InvalidPipelineStack,
     MaxConnectionsError,
     MovedError,
-    NoSuchFieldsetError,
     RedisClusterException,
     RedisError,
     ResponseError,
@@ -114,15 +114,7 @@ from redis.exceptions import (
     TryAgainError,
     WatchError,
 )
-from redis.himport import (
-    HIMPORT_DISCARD,
-    HIMPORT_PREPARE,
-    HIMPORT_SET,
-    HImportRegistry,
-    himport_discard_command,
-    himport_prepare_command,
-    himport_set_command,
-)
+from redis.himport import HIMPORT_SET, HImportRegistry
 from redis.maint_notifications import MaintNotificationsConfig
 from redis.typing import (
     AnyKeyT,
@@ -1888,38 +1880,8 @@ class ClusterNode:
                 self.release(connection)
 
     async def _himport_reconcile_discards(self, conn: "Connection") -> None:
-        """DISCARD, on ``conn``, any prepared fieldset removed from the registry."""
-        registry = conn.himport_registry
-        if registry is None or conn._himport_reconciled_revision == registry.revision:
-            return
-        # Snapshot the revision *before* computing ``stale`` so the value stamped at
-        # the end is never newer than the registry state ``stale`` reflects. A
-        # concurrent ``himport_discard`` (thread-shared sync client, or another task
-        # while this awaits the DISCARD replies) that lands after this point only
-        # leaves the connection marked behind the live revision, so the next
-        # reconcile re-runs and catches it. Re-reading ``registry.revision`` at the
-        # end instead would stamp a discard this connection never sent, leaving the
-        # server session carrying a supposedly-discarded fieldset.
-        reconciled_to = registry.revision
-        stale = registry.names_to_discard(list(conn._himport_prepared))
-        if stale:
-            await conn.send_packed_command(
-                conn.pack_commands([himport_discard_command(n) for n in stale])
-            )
-            # One reply per packed DISCARD must be read regardless of a per-command
-            # ResponseError, otherwise the unread replies desync the pooled socket.
-            # Drain every reply, then surface the first error (ConnectionError is not
-            # caught: it tears the socket down, so no desync is possible).
-            first_error = None
-            for n in stale:
-                try:
-                    await self.parse_response(conn, HIMPORT_DISCARD)
-                except ResponseError as e:
-                    first_error = first_error or e
-                conn._himport_prepared.pop(n, None)
-            if first_error is not None:
-                raise first_error
-        conn._himport_reconciled_revision = reconciled_to
+        """Delegate to the shared async HIMPORT executor."""
+        return await _himport_exec.reconcile_discards(self, conn)
 
     async def _himport_prepare_and_set(
         self,
@@ -1930,46 +1892,10 @@ class ClusterNode:
         fieldset,
         asking: bool = False,
     ) -> Any:
-        """PREPARE ``fieldset`` bundled with the SET on ``conn`` (one packed write).
-
-        When ``asking`` is set (an ASK-redirected cluster SET) the batch becomes
-        ``[PREPARE, ASKING, SET]`` so the per-command ASKING allowance falls
-        immediately before the SET — the only slot-scoped command. PREPARE is a
-        connection-session command that the ASKING flag does not gate, so placing
-        it before ASKING is safe. Every reply is drained even on a per-command
-        error so the packed replies never desync the pooled socket.
-        """
-        commands = [himport_prepare_command(fieldset_name, fieldset.fields)]
-        if asking:
-            commands.append(("ASKING",))
-        commands.append(himport_set_command(key, fieldset_name, values))
-        await conn.send_packed_command(conn.pack_commands(commands))
-        prep_error = ask_error = set_error = None
-        set_resp = None
-        try:
-            await self.parse_response(conn, HIMPORT_PREPARE)
-        except ResponseError as e:
-            prep_error = e
-        if asking:
-            try:
-                await self.parse_response(conn, "ASKING")
-            except ResponseError as e:
-                ask_error = e
-        try:
-            set_resp = await self.parse_response(conn, HIMPORT_SET)
-        except ResponseError as e:
-            set_error = e
-
-        if prep_error:
-            raise prep_error  # PREPARE failure is the root cause
-        else:
-            conn._himport_prepared[fieldset_name] = fieldset.version
-
-        if ask_error:
-            raise ask_error
-        if set_error:
-            raise set_error
-        return set_resp
+        """Delegate to the shared async HIMPORT executor."""
+        return await _himport_exec.prepare_and_set(
+            self, conn, key, fieldset_name, values, fieldset, asking=asking
+        )
 
     async def _himport_execute_set(
         self,
@@ -1979,121 +1905,16 @@ class ClusterNode:
         values: List,
         asking: bool = False,
     ) -> Any:
-        """Execute an ``HIMPORT SET`` on ``conn`` with the required session setup.
-
-        ``HIMPORT SET`` needs the fieldset PREPAREd on this connection first, and
-        any fieldset discarded from the shared registry since this connection last
-        reconciled must be dropped. Both are applied here, on the acquired
-        connection, so the caller's full retry / MOVED-ASK / disconnect-on-error
-        handling covers the whole exchange.
-
-        When ``asking`` is set (an ASK-redirected cluster SET) the ASKING allowance
-        is folded into the SET's own packed write so it immediately precedes the
-        SET. The session setup (deferred DISCARDs, lazy PREPARE) still runs first,
-        before ASKING, since those are connection-session commands the flag does
-        not gate; only the SET is slot-scoped and must carry the allowance.
-        """
-        await self._himport_reconcile_discards(conn)
-
-        registry = conn.himport_registry
-        fieldset = registry.get(fieldset_name) if registry is not None else None
-        # Lazy PREPARE bundled with SET on first use of this fieldset.
-        if (
-            fieldset is not None
-            and conn._himport_prepared.get(fieldset_name) != fieldset.version
-        ):
-            return await self._himport_prepare_and_set(
-                conn, key, fieldset_name, values, fieldset, asking=asking
-            )
-
-        # Believed already prepared (or an unregistered fieldset): bare SET, with
-        # ASKING packed immediately before it when this is an ASK redirect.
-        if asking:
-            await conn.send_packed_command(
-                conn.pack_commands(
-                    [("ASKING",), himport_set_command(key, fieldset_name, values)]
-                )
-            )
-            try:
-                await self.parse_response(conn, "ASKING")
-            except ResponseError as ask_error:
-                # ASKING and SET were one packed write, so the SET reply is still
-                # queued. Drain it before surfacing the ASKING error, otherwise the
-                # connection returns to the pool with an unread reply and desyncs
-                # the next borrower.
-                try:
-                    await self.parse_response(conn, HIMPORT_SET)
-                except ResponseError:
-                    pass
-                raise ask_error
-        else:
-            await conn.send_command(*himport_set_command(key, fieldset_name, values))
-        try:
-            return await self.parse_response(conn, HIMPORT_SET)
-        except NoSuchFieldsetError:
-            # Server dropped the fieldset mid-connection without dropping the socket
-            # (e.g. RESET / maxmemory-clients eviction): re-PREPARE on this healthy
-            # connection and retry the SET once rather than reconnecting. Only for
-            # registry-backed fieldsets; manual/unregistered usage propagates.
-            if fieldset is None:
-                raise
-            conn._himport_prepared.pop(fieldset_name, None)
-            return await self._himport_prepare_and_set(
-                conn, key, fieldset_name, values, fieldset, asking=asking
-            )
+        """Delegate to the shared async HIMPORT executor."""
+        return await _himport_exec.execute_set(
+            self, conn, key, fieldset_name, values, asking=asking
+        )
 
     async def _himport_prepare_pipeline(
         self, conn: "Connection", commands: List["PipelineCommand"]
     ) -> None:
-        """Pre-flight ``conn`` for a pipeline batch containing ``HIMPORT SET``s.
-
-        The packed pipeline write bypasses the per-command lazy PREPARE, so PREPARE
-        every distinct registered fieldset the batch references (and reconcile
-        deferred discards) on ``conn`` first, in one packed write.
-        """
-        # A pipeline may run on a connection type that never carries real HIMPORT
-        # state (e.g. mocked test doubles); only proceed for a real config.
-        registry = getattr(conn, "himport_registry", None)
-        if not isinstance(registry, HImportRegistry):
-            return
-        await self._himport_reconcile_discards(conn)
-        to_prepare = []
-        seen = set()
-        for cmd in commands:
-            args = cmd.args
-            if not args or args[0] != HIMPORT_SET or len(args) < 3:
-                continue
-            fieldset_name = args[2]
-            if fieldset_name in seen:
-                continue
-            seen.add(fieldset_name)
-            fieldset = registry.get(fieldset_name)
-            if (
-                fieldset is not None
-                and conn._himport_prepared.get(fieldset_name) != fieldset.version
-            ):
-                to_prepare.append(fieldset)
-        if not to_prepare:
-            return
-        await conn.send_packed_command(
-            conn.pack_commands(
-                [himport_prepare_command(fs.name, fs.fields) for fs in to_prepare]
-            )
-        )
-        # One reply per packed PREPARE must be read regardless of a per-command
-        # ResponseError, otherwise the unread replies desync the socket before the
-        # buffered batch is even sent. Drain every reply (marking only the ones that
-        # succeeded), then surface the first error as the root cause.
-        first_error = None
-        for fs in to_prepare:
-            try:
-                await self.parse_response(conn, HIMPORT_PREPARE)
-            except ResponseError as e:
-                first_error = first_error or e
-                continue
-            conn._himport_prepared[fs.name] = fs.version
-        if first_error is not None:
-            raise first_error
+        """Delegate to the shared async HIMPORT executor."""
+        await _himport_exec.prepare_pipeline(self, conn, [cmd.args for cmd in commands])
 
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:
         # Acquire connection
