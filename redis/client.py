@@ -88,6 +88,7 @@ from redis.utils import (
     _set_info_logger,
     check_protocol_version,
     deprecated_args,
+    experimental_method,
     safe_str,
     str_if_bytes,
     truncate_text,
@@ -957,6 +958,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     # CacheProxyConnection transparently delegates it to the wrapped connection, so
     # this code never needs to know which connection type it holds.
 
+    @experimental_method()
     def himport_prepare(self, fieldset_name: str, fields: Iterable[FieldT]) -> bool:
         """Declare an HIMPORT fieldset for use by :meth:`himport_set`.
 
@@ -974,6 +976,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             conn._himport_prepared[fieldset_name] = fieldset.version
         return True
 
+    @experimental_method()
     def himport_discard(self, fieldset_name: str) -> int:
         """Remove a fieldset from the registry.
 
@@ -993,6 +996,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             conn._himport_reconciled_revision = self.himport_registry.revision
         return 1 if removed else 0
 
+    @experimental_method()
     def himport_discard_all(self) -> int:
         """Remove all fieldsets from the registry.
 

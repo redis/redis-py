@@ -131,6 +131,7 @@ from redis.utils import (
     check_protocol_version,
     deprecated_args,
     deprecated_function,
+    experimental_method,
     safe_str,
     str_if_bytes,
     truncate_text,
@@ -911,6 +912,7 @@ class RedisCluster(
         """
         return self._himport_registry
 
+    @experimental_method()
     async def himport_prepare(
         self, fieldset_name: str, fields: Iterable[FieldT]
     ) -> bool:
@@ -919,11 +921,13 @@ class RedisCluster(
         self._himport_registry.prepare(fieldset_name, fields)
         return True
 
+    @experimental_method()
     async def himport_discard(self, fieldset_name: str) -> int:
         """Remove an HIMPORT fieldset cluster-wide (shared registry, applied lazily)."""
         await self.initialize()
         return 1 if self._himport_registry.discard(fieldset_name) else 0
 
+    @experimental_method()
     async def himport_discard_all(self) -> int:
         """Remove all HIMPORT fieldsets cluster-wide (shared registry, applied lazily)."""
         await self.initialize()

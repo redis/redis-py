@@ -97,6 +97,7 @@ from redis.utils import (
     deprecated_args,
     deprecated_function,
     dict_merge,
+    experimental_method,
     list_keys_to_dict,
     merge_result,
     safe_str,
@@ -1401,15 +1402,18 @@ class RedisCluster(
         """
         return self._himport_registry
 
+    @experimental_method()
     def himport_prepare(self, fieldset_name: str, fields: Iterable[FieldT]) -> bool:
         """Declare an HIMPORT fieldset cluster-wide (shared registry, applied lazily)."""
         self._himport_registry.prepare(fieldset_name, fields)
         return True
 
+    @experimental_method()
     def himport_discard(self, fieldset_name: str) -> int:
         """Remove an HIMPORT fieldset cluster-wide (shared registry, applied lazily)."""
         return 1 if self._himport_registry.discard(fieldset_name) else 0
 
+    @experimental_method()
     def himport_discard_all(self) -> int:
         """Remove all HIMPORT fieldsets cluster-wide (shared registry, applied lazily)."""
         return self._himport_registry.discard_all()

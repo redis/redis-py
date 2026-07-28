@@ -10808,6 +10808,7 @@ class HashCommands(CommandsProtocol):
         values: Iterable[EncodableT],
     ) -> Awaitable[bool]: ...
 
+    @experimental_method()
     def himport_set(
         self, key: KeyT, fieldset_name: str, values: Iterable[EncodableT]
     ) -> bool | Awaitable[bool]:

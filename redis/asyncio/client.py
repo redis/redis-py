@@ -100,6 +100,7 @@ from redis.utils import (
     check_protocol_version,
     deprecated_args,
     deprecated_function,
+    experimental_method,
     safe_str,
     str_if_bytes,
     truncate_text,
@@ -1011,6 +1012,7 @@ class Redis(
     # HIMPORT orchestration (async mirror of redis.client.Redis). See
     # ``.agents/himport_client_support_spec.md``.
 
+    @experimental_method()
     async def himport_prepare(
         self, fieldset_name: str, fields: Iterable[FieldT]
     ) -> bool:
@@ -1023,6 +1025,7 @@ class Redis(
             conn._himport_prepared[fieldset_name] = fieldset.version
         return True
 
+    @experimental_method()
     async def himport_discard(self, fieldset_name: str) -> int:
         """Remove a fieldset from the registry."""
         await self.initialize()
@@ -1035,6 +1038,7 @@ class Redis(
             conn._himport_reconciled_revision = self.himport_registry.revision
         return 1 if removed else 0
 
+    @experimental_method()
     async def himport_discard_all(self) -> int:
         """Remove all fieldsets from the registry."""
         await self.initialize()
