@@ -220,3 +220,62 @@ def prepare_pipeline(node, conn, command_arg_lists):
         conn._himport_prepared[fs.name] = fs.version
     if first_error is not None:
         raise first_error
+
+
+def pipeline_prepares(node, conn, command_arg_lists):
+    """Return the fieldsets that must be PREPAREd on ``conn`` for this batch.
+
+    Like :func:`prepare_pipeline`, but does **not** send the PREPAREs: the caller
+    folds them into the same packed write as the queued commands (see the pipeline
+    executors), so the first pipeline use of a fieldset on a fresh or reconnected
+    connection stays a single round trip instead of a separate PREPARE exchange
+    followed by the batch. Deferred-discard reconciliation is still performed here,
+    but it only touches the socket when discards are actually pending (rare); the
+    common warm-up cost -- the first-use PREPARE -- is what gets folded. Returns an
+    empty list when the batch references no not-yet-prepared registered fieldset,
+    or when ``conn`` carries no real HIMPORT registry.
+    """
+    registry = getattr(conn, "himport_registry", None)
+    if not isinstance(registry, HImportRegistry):
+        return []
+    reconcile_discards(node, conn)
+    to_prepare = []
+    seen = set()
+    for args in command_arg_lists:
+        if not args or args[0] != HIMPORT_SET or len(args) < 3:
+            continue
+        fieldset_name = args[2]
+        if fieldset_name in seen:
+            continue
+        seen.add(fieldset_name)
+        fieldset = registry.get(fieldset_name)
+        if (
+            fieldset is not None
+            and conn._himport_prepared.get(fieldset_name) != fieldset.version
+        ):
+            to_prepare.append(fieldset)
+    return to_prepare
+
+
+def prepare_wire_commands(fieldsets):
+    """The leading ``HIMPORT PREPARE`` wire commands the caller folds into a batch."""
+    return [himport_prepare_command(fs.name, fs.fields) for fs in fieldsets]
+
+
+def drain_pipeline_prepares(node, conn, fieldsets):
+    """Drain the ``len(fieldsets)`` leading PREPARE replies of a folded pipeline
+    write, marking each fieldset prepared on success.
+
+    Returns the first ``ResponseError`` (or ``None``). The caller must still drain
+    the queued command replies and only then surface this error: every reply on
+    the wire has to be read before raising, or the pooled socket desyncs.
+    """
+    first_error = None
+    for fs in fieldsets:
+        try:
+            node.parse_response(conn, HIMPORT_PREPARE)
+        except ResponseError as e:
+            first_error = first_error or e
+            continue
+        conn._himport_prepared[fs.name] = fs.version
+    return first_error

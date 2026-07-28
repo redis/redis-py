@@ -13,7 +13,12 @@ from redis.asyncio.connection import ConnectionPool as AsyncConnectionPool
 from redis.connection import BlockingConnectionPool, ConnectionPool
 from redis._parsers.base import BaseParser
 from redis.exceptions import DataError, NoSuchFieldsetError, ResponseError
-from redis.himport import HIMPORT_SET, HImportRegistry, HImportFieldset
+from redis.himport import (
+    HIMPORT_SET,
+    HImportFieldset,
+    HImportRegistry,
+    is_himport_set_command,
+)
 from redis.sentinel import Sentinel
 
 
@@ -570,6 +575,47 @@ SET_K_FS = ("HIMPORT", "SET", "k", "fs", "v")
 
 
 @pytest.mark.fixed_client
+@pytest.mark.fixed_client
+class TestIsHImportSetCommand:
+    """``is_himport_set_command`` selects the connection-state-aware HIMPORT SET
+    path for the raw ``execute_command`` API, where the caller controls the
+    command-name spelling and encoding. An exact comparison would miss
+    case/byte variants and send a bare SET that fails ``no such fieldset``.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "HIMPORT SET",
+            "himport set",
+            "Himport Set",
+            b"HIMPORT SET",
+            b"himport set",
+            bytearray(b"himport set"),
+            memoryview(b"HIMPORT SET"),
+        ],
+    )
+    def test_matches_case_and_encoding_variants(self, name):
+        assert is_himport_set_command(name) is True
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "HIMPORT PREPARE",
+            "HIMPORT DISCARD",
+            "SET",
+            "himport setx",  # length differs -> no upper() needed, still rejected
+            "himport se",
+            "",
+            b"GET",
+            None,
+            123,
+        ],
+    )
+    def test_rejects_other_commands_and_non_strings(self, name):
+        assert is_himport_set_command(name) is False
+
+
 class TestHImportAskRedirectSync:
     """An ASK-redirected ``HIMPORT SET`` must carry the ASKING allowance on the
     same connection, immediately before the SET.

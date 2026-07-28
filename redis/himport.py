@@ -67,6 +67,35 @@ def himport_discard_command(fieldset_name: str) -> tuple:
     return (_HIMPORT, _DISCARD, fieldset_name)
 
 
+_HIMPORT_SET_LEN = len(HIMPORT_SET)
+_HIMPORT_SET_BYTES = HIMPORT_SET.encode()
+
+
+def is_himport_set_command(command_name) -> bool:
+    """Return ``True`` if ``command_name`` names the ``HIMPORT SET`` command.
+
+    Redis command names are case-insensitive on the wire, and a caller using the
+    raw ``execute_command`` API may pass the name in any case and as either
+    ``str`` or ``bytes`` (e.g. ``execute_command("himport set", ...)`` or
+    ``b"HIMPORT SET"``). The connection-state-aware ``HIMPORT SET`` path keys off
+    the command name, so it must recognise all of those spellings: an exact
+    comparison against :data:`HIMPORT_SET` would miss them and send a bare SET
+    that fails with ``no such fieldset`` for a fieldset registered in the client
+    but not yet PREPAREd on the borrowed connection. The length check keeps the
+    per-command cost on the hot path to a single comparison for the common case
+    of a differently-sized command name (``upper()`` runs only on a size match).
+    """
+    if isinstance(command_name, str):
+        return (
+            len(command_name) == _HIMPORT_SET_LEN
+            and command_name.upper() == HIMPORT_SET
+        )
+    if isinstance(command_name, (bytes, bytearray, memoryview)):
+        raw = bytes(command_name)
+        return len(raw) == _HIMPORT_SET_LEN and raw.upper() == _HIMPORT_SET_BYTES
+    return False
+
+
 @dataclass(frozen=True)
 class HImportFieldset:
     """An immutable HIMPORT fieldset entry.

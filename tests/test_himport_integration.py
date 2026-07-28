@@ -40,6 +40,40 @@ def _himport_verb(parts):
 
 
 @contextlib.contextmanager
+def capture_himport_packed_writes(pool):
+    """Yield a list of every HIMPORT-carrying packed write on connections the pool
+    hands out while the context is active. Used to prove the pipeline folds its
+    PREPARE into a single ``send_packed_command`` rather than a separate exchange.
+    """
+    blobs = []
+    real_get = pool.get_connection
+
+    def get_connection(*args, **kwargs):
+        conn = real_get(*args, **kwargs)
+        if not getattr(conn, "_himport_write_spy", False):
+            conn._himport_write_spy = True
+            real_send = conn.send_packed_command
+
+            def send_packed_command(*a, **k):
+                blob = a[0] if a else k.get("command", b"")
+                # pack_commands() returns a list of byte chunks; a single command
+                # is bytes. Normalise both to one bytestring for inspection.
+                if isinstance(blob, (list, tuple)):
+                    data = b"".join(bytes(x) for x in blob)
+                else:
+                    data = bytes(blob)
+                if b"HIMPORT" in data:
+                    blobs.append(data)
+                return real_send(*a, **k)
+
+            conn.send_packed_command = send_packed_command
+        return conn
+
+    with mock.patch.object(pool, "get_connection", side_effect=get_connection):
+        yield blobs
+
+
+@contextlib.contextmanager
 def track_himport_wire(conn):
     """Record how each HIMPORT write reached the socket, in order.
 
@@ -88,6 +122,21 @@ def hr(request):
         # eager PREPARE, so lazy-bundling wire assertions in the tests still hold.
         client.himport_registry.prepare("shared", SCHEMAS["shared"])
         yield client
+
+
+@pytest.mark.onlynoncluster
+def test_raw_case_insensitive_himport_set_is_intercepted(hr):
+    # A registered-but-not-yet-prepared fieldset used through the raw, case- and
+    # encoding-insensitive command name must still take the connection-state-aware
+    # path (lazy PREPARE), not send a bare SET that fails ``no such fieldset``.
+    hr.himport_prepare("rawcmd", ["name", "email"])
+    hr.delete("raw:{u}:1", "raw:{u}:2")
+    # Lowercase str name.
+    assert hr.execute_command("himport set", "raw:{u}:1", "rawcmd", "alice", "a@x")
+    assert hr.hget("raw:{u}:1", "name") == b"alice"
+    # Mixed-case bytes name.
+    assert hr.execute_command(b"HImPoRt SeT", "raw:{u}:2", "rawcmd", "bob", "b@x")
+    assert hr.hget("raw:{u}:2", "email") == b"b@x"
 
 
 @pytest.mark.onlynoncluster
@@ -348,6 +397,26 @@ class TestHImportIntegration:
         result = pipe.execute()
         assert not any(isinstance(r, Exception) for r in result)
         assert hr.hget("h:{u}:pl1", "y") == b"2"
+
+    @pytest.mark.onlynoncluster
+    def test_pipeline_folds_prepare_into_single_write(self, hr):
+        # First pipeline use of a registered-but-not-yet-prepared fieldset must fold
+        # the PREPARE into the single batched write, not do a separate PREPARE round
+        # trip first. Spy every connection the pool hands out and assert exactly one
+        # HIMPORT-carrying packed write, containing both the PREPARE and the SETs.
+        hr.himport_prepare("pfold", ["x", "y"])
+        pipe = hr.pipeline(transaction=False)
+        pipe.himport_set("pf:{u}:1", "pfold", ["1", "2"])
+        pipe.himport_set("pf:{u}:2", "pfold", ["3", "4"])
+        with capture_himport_packed_writes(hr.connection_pool) as blobs:
+            pipe.execute()
+        assert len(blobs) == 1, (
+            "PREPARE must be folded into the single pipeline write, "
+            f"got {len(blobs)} HIMPORT writes"
+        )
+        assert b"PREPARE" in blobs[0] and b"SET" in blobs[0]
+        assert hr.hget("pf:{u}:1", "x") == b"1"
+        assert hr.hget("pf:{u}:2", "y") == b"4"
 
     def test_pipeline_watch_immediate_himport_set(self, hr):
         # An HIMPORT SET issued after WATCH (before MULTI) runs on the immediate

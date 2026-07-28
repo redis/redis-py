@@ -82,7 +82,7 @@ from redis.exceptions import (
     ResponseError,
     WatchError,
 )
-from redis.himport import HIMPORT_SET, HImportRegistry
+from redis.himport import HImportRegistry, is_himport_set_command
 from redis.maint_notifications import MaintNotificationsConfig
 from redis.observability.attributes import PubSubDirection
 from redis.typing import (
@@ -857,7 +857,7 @@ class Redis(
         # connection is known, and connection-scoped session setup can only happen
         # once that connection is chosen. The overhead is one string compare per
         # command.
-        if command_name == HIMPORT_SET and len(args) >= 3:
+        if is_himport_set_command(command_name) and len(args) >= 3:
             # args == (HIMPORT_SET, key, fieldset_name, *values). A raw
             # ``execute_command`` with too few args falls through to the normal send
             # path so the server returns its arity error, preserving execute_command
@@ -2101,12 +2101,26 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
     async def _execute_pipeline(
         self, connection: Connection, commands: CommandStackT, raise_on_error: bool
     ):
-        # Ensure fieldsets referenced by buffered HIMPORT SETs are prepared on this
-        # connection before the batched write (the per-command lazy path is bypassed).
-        await self._himport_prepare_pipeline(connection, commands)
+        # Fold any first-use HIMPORT PREPAREs for referenced fieldsets into the same
+        # packed write as the queued commands, so a pipeline that lands on a fresh or
+        # reconnected connection stays a single round trip (the batched write bypasses
+        # the per-command lazy PREPARE path). Deferred-discard reconciliation happens
+        # inside pipeline_prepares and only touches the socket when discards are
+        # actually pending.
+        fieldsets = await _himport_exec.pipeline_prepares(
+            self, connection, [args for args, _ in commands]
+        )
+        preflight = _himport_exec.prepare_wire_commands(fieldsets)
         # build up all commands into a single request to increase network perf
-        all_cmds = connection.pack_commands([args for args, _ in commands])
+        all_cmds = connection.pack_commands(preflight + [args for args, _ in commands])
         await connection.send_packed_command(all_cmds)
+
+        # Drain the leading PREPARE replies (bookkeeping + capture the first error)
+        # before the queued replies. Everything on the wire is read before raising so
+        # the pooled socket never desyncs.
+        prep_error = await _himport_exec.drain_pipeline_prepares(
+            self, connection, fieldsets
+        )
 
         response = []
         for args, options in commands:
@@ -2117,6 +2131,11 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             except ResponseError as e:
                 response.append(e)
 
+        # A PREPARE failure (rare: an invalid fieldset definition) is a hard error,
+        # raised regardless of raise_on_error as it was before folding -- only now
+        # every reply has already been drained.
+        if prep_error is not None:
+            raise prep_error
         if raise_on_error:
             self.raise_first_error(commands, response)
         return response

@@ -75,7 +75,7 @@ from redis.exceptions import (
     TryAgainError,
     WatchError,
 )
-from redis.himport import HIMPORT_SET, HImportRegistry
+from redis.himport import HImportRegistry, is_himport_set_command
 from redis.lock import Lock
 from redis.maint_notifications import (
     MaintNotificationsConfig,
@@ -1745,11 +1745,11 @@ class RedisCluster(
 
                 redis_node = self.get_redis_connection(target_node)
                 connection = get_connection(redis_node)
-                if asking and command != HIMPORT_SET:
+                if asking and not is_himport_set_command(command):
                     connection.send_command("ASKING")
                     redis_node.parse_response(connection, "ASKING", **kwargs)
                     asking = False
-                if command == HIMPORT_SET and len(args) >= 3:
+                if is_himport_set_command(command) and len(args) >= 3:
                     # args == (HIMPORT_SET, key, fieldset_name, *values). A raw
                     # ``execute_command`` with too few args falls through to the
                     # normal send path below so the server returns its arity error
@@ -4701,7 +4701,7 @@ class TransactionStrategy(AbstractStrategy):
         # fieldset". Route it through the node's HIMPORT executor, the same way
         # the normal cluster path, the batched MULTI/EXEC path, and standalone
         # watched pipelines all do.
-        if command_name == HIMPORT_SET and len(args) >= 3:
+        if is_himport_set_command(command_name) and len(args) >= 3:
             # args == (HIMPORT_SET, key, fieldset_name, *values). Too few args
             # fall through to the bare send so the server returns its arity error.
             output = redis_node._himport_execute_set(

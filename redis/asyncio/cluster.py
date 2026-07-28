@@ -114,7 +114,7 @@ from redis.exceptions import (
     TryAgainError,
     WatchError,
 )
-from redis.himport import HIMPORT_SET, HImportRegistry
+from redis.himport import HImportRegistry, is_himport_set_command
 from redis.maint_notifications import MaintNotificationsConfig
 from redis.typing import (
     AnyKeyT,
@@ -1255,7 +1255,7 @@ class RedisCluster(
             try:
                 if asking:
                     target_node = self.get_node(node_name=redirect_addr)
-                    if command == HIMPORT_SET:
+                    if is_himport_set_command(command):
                         # ASKING must sit on the same connection as the SET,
                         # immediately before it. HIMPORT SET's own executor folds
                         # ASKING into the SET's packed write after the session setup,
@@ -1858,7 +1858,7 @@ class ClusterNode:
             # On an ASK redirect ``asking`` is passed here rather than sent as a
             # separate ASKING command so the allowance sits on this same connection,
             # folded into the SET's own write immediately before the SET.
-            if args[0] == HIMPORT_SET and len(args) >= 3:
+            if is_himport_set_command(args[0]) and len(args) >= 3:
                 # args == (HIMPORT_SET, key, fieldset_name, *values). A raw
                 # ``execute_command`` with too few args falls through to the normal
                 # send path below so the server returns its arity error instead of a
@@ -3227,7 +3227,7 @@ class TransactionStrategy(AbstractStrategy):
         # fieldset". Route it through the node's HIMPORT executor, the same way
         # the normal cluster path, the batched MULTI/EXEC path, and standalone
         # watched pipelines all do.
-        if command_name == HIMPORT_SET and len(args) >= 3:
+        if is_himport_set_command(command_name) and len(args) >= 3:
             # args == (HIMPORT_SET, key, fieldset_name, *values). Too few args
             # fall through to the bare send so the server returns its arity error.
             output = await redis_node._himport_execute_set(
