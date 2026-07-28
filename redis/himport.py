@@ -222,7 +222,17 @@ class HImportRegistry:
         self._revision += 1
         return self._revision
 
-    def _set(self, name: str, fields: Iterable[FieldT]) -> HImportFieldset:
+    @staticmethod
+    def _materialize_fields(fields: Iterable[FieldT]) -> tuple:
+        """Validate and materialize the caller's field iterable into a tuple.
+
+        Done *before* the mutation lock is taken: consuming an arbitrary iterable
+        can be slow, or -- for a generator that inspects this same registry -- can
+        re-enter a locked read (e.g. ``yield`` then ``registry.names()``). Running
+        it under the non-reentrant ``_lock`` would stall every registry user or
+        deadlock permanently. Field order is preserved; nothing is reordered or
+        deduplicated.
+        """
         # A bare single field name (str/bytes/bytearray/memoryview) is itself
         # iterable element-by-element; that is almost certainly a caller mistake and
         # would silently register single-character/single-byte "fields" (e.g.
@@ -236,6 +246,13 @@ class HImportRegistry:
         field_tuple = tuple(fields)
         if not field_tuple:
             raise DataError("HIMPORT fieldset must have at least one field")
+        return field_tuple
+
+    def _set(self, name: str, field_tuple: tuple) -> HImportFieldset:
+        # ``field_tuple`` is already validated/materialized by
+        # :meth:`_materialize_fields`; only the (cheap, non-blocking) revision bump
+        # and dict mutation run here, so ``_lock`` is never held across arbitrary
+        # caller code.
         fieldset = HImportFieldset(
             name=name,
             fields=field_tuple,
@@ -252,8 +269,12 @@ class HImportRegistry:
         Re-declaring an existing name replaces its fields and bumps its version.
         Field order is preserved verbatim; nothing is reordered or deduplicated.
         """
+        # Materialize/validate the iterable *outside* the lock so a slow or
+        # registry-re-entrant generator can never stall or deadlock other users;
+        # the lock then covers only the atomic revision-bump + dict mutation.
+        field_tuple = self._materialize_fields(fields)
         with self._lock:
-            return self._set(name, fields)
+            return self._set(name, field_tuple)
 
     def discard(self, name: str) -> bool:
         """Remove a fieldset from the registry.

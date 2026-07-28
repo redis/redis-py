@@ -68,6 +68,35 @@ class TestHImportRegistry:
         assert registry.get("tuple").fields == ("a", "b")
         assert registry.get("gen").fields == ("f0", "f1", "f2")
 
+    def test_prepare_with_registry_reentrant_generator_does_not_deadlock(self):
+        # The field iterable is materialized *before* the mutation lock, so a
+        # generator that consults the same registry mid-iteration (yield, then a
+        # locked read) must not deadlock on the non-reentrant lock. Run under a
+        # join timeout so a regression fails deterministically instead of hanging.
+        registry = HImportRegistry()
+        registry.prepare("existing", ["a"])
+        seen = []
+
+        def fields():
+            yield "f1"
+            seen.extend(registry.names())  # locked read while being consumed
+            yield "f2"
+
+        done = threading.Event()
+
+        def run():
+            registry.prepare("gen", fields())
+            done.set()
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        thread.join(timeout=5)
+        assert done.is_set(), (
+            "prepare() deadlocked materializing a registry-re-entrant generator"
+        )
+        assert registry.get("gen").fields == ("f1", "f2")
+        assert "existing" in seen
+
     def test_empty_string_names_and_fields_allowed(self):
         # Empty strings are valid fieldset names and field names per the HLD;
         # the client must not reject them locally.

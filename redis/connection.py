@@ -1888,6 +1888,15 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def _himport_prepared(self):
         return self._conn._himport_prepared
 
+    @_himport_prepared.setter
+    def _himport_prepared(self, value):
+        # Delegate reassignment to the wrapped connection, mirroring
+        # ``_himport_reconciled_revision``. Production code only mutates the dict
+        # in place, but ``_reset_himport_state`` (and any future caller) reassigns
+        # it, and a getter-only property here would raise ``AttributeError`` only
+        # when client-side caching is enabled -- a caching-specific latent trap.
+        self._conn._himport_prepared = value
+
     @property
     def _himport_reconciled_revision(self):
         return self._conn._himport_reconciled_revision
