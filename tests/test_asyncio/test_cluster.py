@@ -656,6 +656,35 @@ class TestRedisClusterObj:
 
             assert await r.execute_command("SET", "foo", "bar") == "MOCK_OK"
 
+    async def test_ask_redirection_to_node_without_slots(self) -> None:
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        redirect_host = "127.0.0.1"
+        redirect_port = 7009
+
+        async def ask_redirect_effect(node, *args, **_options):
+            if args[0] == "SET" and node.port != redirect_port:
+                raise AskError(f"12182 {redirect_host}:{redirect_port}")
+            if args[0] == "ASKING":
+                assert node.port == redirect_port
+                return "OK"
+            assert node.port == redirect_port
+            return "MOCK_OK"
+
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True
+        ) as execute_command:
+            execute_command.side_effect = ask_redirect_effect
+
+            assert (
+                await r.execute_command(
+                    "SET", "foo", "bar", target_nodes=r.get_primaries()[0]
+                )
+                == "MOCK_OK"
+            )
+        assert r.get_node(host=redirect_host, port=redirect_port) is None
+
+        await r.aclose()
+
     async def test_moved_redirection(
         self, create_redis: Callable[..., RedisCluster]
     ) -> None:

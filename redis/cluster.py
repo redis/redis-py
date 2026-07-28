@@ -1634,7 +1634,7 @@ class RedisCluster(
         command = args[0]
         redis_node = None
         connection = None
-        redirect_addr = None
+        redirected_node = None
         asking = False
         moved = False
         ttl = int(self.RedisClusterRequestTTL)
@@ -1646,7 +1646,7 @@ class RedisCluster(
             ttl -= 1
             try:
                 if asking:
-                    target_node = self.get_node(node_name=redirect_addr)
+                    target_node = redirected_node
                 elif moved:
                     # MOVED occurred and the slots cache was updated,
                     # refresh the target node
@@ -1818,7 +1818,9 @@ class RedisCluster(
                         f"ASK error received for command {args_log_str}, on node {target_node.name}, "
                         f"and connection: {connection} using local socket address: {socket_address}, error: {e}"
                     )
-                redirect_addr = get_node_name(host=e.host, port=e.port)
+                redirected_node = self.get_node(host=e.host, port=e.port)
+                if redirected_node is None:
+                    redirected_node = ClusterNode(e.host, e.port, PRIMARY)
                 asking = True
 
                 self._record_command_metric(
