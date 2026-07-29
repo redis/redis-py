@@ -103,6 +103,10 @@ STATIC_POLICIES: PolicyRecords = {
             request_policy=RequestPolicy.DEFAULT_KEYLESS,
             response_policy=ResponsePolicy.DEFAULT_KEYLESS,
         ),
+        "aliaslist": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
         "sugdel": CommandPolicies(
             request_policy=RequestPolicy.DEFAULT_KEYED,
             response_policy=ResponsePolicy.DEFAULT_KEYED,

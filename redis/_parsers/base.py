@@ -30,6 +30,7 @@ from ..exceptions import (
     MovedError,
     NoPermissionError,
     NoScriptError,
+    NoSuchFieldsetError,
     OutOfMemoryError,
     ReadOnlyError,
     ResponseError,
@@ -61,6 +62,13 @@ EXTERNAL_AUTH_PROVIDER_ERROR = {
     "problem with LDAP service": ExternalAuthProviderError,
 }
 
+# HIMPORT SET referencing a fieldset the connection has not prepared. The server
+# reply is a fixed message with no fieldset name appended (verified against the
+# server: always exactly ``ERR no such fieldset``), so an exact match is correct.
+NO_SUCH_FIELDSET_ERROR = {
+    "no such fieldset": NoSuchFieldsetError,
+}
+
 logger = logging.getLogger(__name__)
 
 
@@ -83,6 +91,7 @@ class BaseParser(ABC):
             MODULE_UNLOAD_NOT_POSSIBLE_ERROR: ModuleError,
             **NO_AUTH_SET_ERROR,
             **EXTERNAL_AUTH_PROVIDER_ERROR,
+            **NO_SUCH_FIELDSET_ERROR,
         },
         "OOM": OutOfMemoryError,
         "WRONGPASS": AuthenticationError,

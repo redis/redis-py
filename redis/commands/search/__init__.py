@@ -200,7 +200,7 @@ class Pipeline(SearchCommands, RedisPipeline):
             elif check_protocol_version(protocol, 3):
                 cmd_callbacks = self._RESP3_MODULE_CALLBACKS
             else:
-                cmd_callbacks = {}
+                cmd_callbacks = self._RESP2_LEGACY_PIPELINE_CALLBACKS
         else:
             if check_protocol_version(protocol, 3):
                 cmd_callbacks = self._RESP3_UNIFIED_MODULE_CALLBACKS

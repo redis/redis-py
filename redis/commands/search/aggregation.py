@@ -50,8 +50,8 @@ class Reducer:
             if not self._field:
                 raise ValueError("Cannot use FIELDNAME alias with no field")
             else:
-                # Chop off initial '@'
-                alias = self._field[1:]
+                # Chop off initial '@', which is optional in field names
+                alias = self._field.removeprefix("@")
         self._alias = alias
         return self
 
