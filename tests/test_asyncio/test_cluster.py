@@ -51,6 +51,7 @@ from redis.exceptions import (
     RedisError,
     ResponseError,
 )
+from redis.himport import HIMPORT_SET
 from redis.utils import str_if_bytes
 from tests.conftest import (
     assert_resp_response,
@@ -655,6 +656,60 @@ class TestRedisClusterObj:
             execute_command.side_effect = ask_redirect_effect
 
             assert await r.execute_command("SET", "foo", "bar") == "MOCK_OK"
+
+    async def test_himport_set_moved_after_ask_uses_moved_target(
+        self, r: RedisCluster
+    ) -> None:
+        """An HIMPORT SET that is ASK-redirected and then hits a MOVED
+        mid-exchange must retry against the MOVED target, not the stale ASK
+        target.
+
+        HIMPORT SET folds the ASK allowance into its own packed write, so the
+        retry loop must clear ``asking`` before the exchange runs; otherwise a
+        MOVED raised mid-exchange would leave ``asking`` set and shadow the
+        moved-retry branch on the next iteration.
+        """
+        key = "himport:key"
+        slot = r.keyslot(key)
+        primary = r.nodes_manager.get_node_from_slot(slot)
+        others = [n for n in r.get_primaries() if n.name != primary.name]
+        if len(others) < 2:
+            pytest.skip("requires at least 3 primaries")
+        ask_node, moved_node = others[0], others[1]
+
+        calls = []
+
+        def himport_effect(self, *args, **kwargs):
+            calls.append((self.host, self.port))
+            if len(calls) == 1:
+                raise AskError(f"{slot} {ask_node.host}:{ask_node.port}")
+            if len(calls) == 2:
+                raise MovedError(f"{slot} {moved_node.host}:{moved_node.port}")
+            return "MOCK_OK"
+
+        # ``_determine_slot`` parses HIMPORT SET keys via COMMAND INFO, which the
+        # test server may not know; pin it so the moved branch can recompute the
+        # target without a live HIMPORT-capable server.
+        with (
+            mock.patch.object(
+                RedisCluster, "_determine_slot", new=mock.AsyncMock(return_value=slot)
+            ),
+            mock.patch.object(
+                ClusterNode,
+                "execute_command",
+                autospec=True,
+                side_effect=himport_effect,
+            ),
+        ):
+            assert (
+                await r._execute_command(primary, HIMPORT_SET, key, "shared", "alice")
+                == "MOCK_OK"
+            )
+
+        assert calls[0] == (primary.host, primary.port)
+        assert calls[1] == (ask_node.host, ask_node.port)
+        # Third attempt must follow the MOVED redirect, not the stale ASK target.
+        assert calls[2] == (moved_node.host, moved_node.port)
 
     async def test_moved_redirection(
         self, create_redis: Callable[..., RedisCluster]
