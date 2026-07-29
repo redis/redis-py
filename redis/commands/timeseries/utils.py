@@ -64,10 +64,13 @@ def parse_n_range(response, **kwargs):
     """Parse the TS.NRANGE / TS.NREVRANGE response.
 
     The wire shape is ``[[timestamp, [value_0, value_1, ...]], ...]`` where the
-    value array preserves input key order and ``values`` length equals the
-    number of queried keys. Rows are returned in server order (never re-sorted
-    or reversed), and a missing raw sample or missing aggregation bucket is kept
-    as ``float('nan')`` rather than converted to ``None``.
+    value array preserves input key order. Its length equals the number of
+    queried keys, except when a per-key AGGREGATION spec lists multiple
+    aggregators: each such key then contributes one value per aggregator (in
+    spec order), concatenated in key order. Rows are returned in server order
+    (never re-sorted or reversed), and a missing raw sample or missing
+    aggregation bucket is kept as ``float('nan')`` rather than converted to
+    ``None``.
     """
     if not response:
         return []

@@ -1174,11 +1174,17 @@ class TimeSeriesCommands:
         Query an explicit list of time-series over a range in forward direction
         and return timestamp-major rows ordered by increasing timestamp.
 
-        Each returned row is ``[timestamp, [value_for_key_0, value_for_key_1,
-        ...]]`` where the value array preserves the input ``keys`` order. A key
-        with no sample (or no aggregation bucket) at a row's timestamp is
-        reported as ``NaN``, which is indistinguishable from a stored or
-        aggregated ``NaN``.
+        Each returned row is ``[timestamp, [value, ...]]``. With no aggregation
+        -- or a single-aggregator spec per key -- the value array holds exactly
+        one value per queried key, in the input ``keys`` order. When a per-key
+        AGGREGATION spec lists several aggregators (e.g. ``"avg,max"``), that key
+        contributes one value per aggregator in the order the aggregators were
+        listed, and the row's value array is those per-key blocks concatenated in
+        ``keys`` order. For example ``keys=[a, b]`` with
+        ``aggregators=["avg,max", "sum"]`` yields ``[a_avg, a_max, b_sum]`` for
+        every row. A key (or aggregator column) with no sample or aggregation
+        bucket at a row's timestamp is reported as ``NaN``, which is
+        indistinguishable from a stored or aggregated ``NaN``.
 
         All keys must hash to the same slot when used against a cluster; this
         command is routed as a single-shard, key command and is never split
@@ -1304,11 +1310,17 @@ class TimeSeriesCommands:
         Query an explicit list of time-series over a range in reverse direction
         and return timestamp-major rows ordered by decreasing timestamp.
 
-        Each returned row is ``[timestamp, [value_for_key_0, value_for_key_1,
-        ...]]`` where the value array preserves the input ``keys`` order. A key
-        with no sample (or no aggregation bucket) at a row's timestamp is
-        reported as ``NaN``, which is indistinguishable from a stored or
-        aggregated ``NaN``.
+        Each returned row is ``[timestamp, [value, ...]]``. With no aggregation
+        -- or a single-aggregator spec per key -- the value array holds exactly
+        one value per queried key, in the input ``keys`` order. When a per-key
+        AGGREGATION spec lists several aggregators (e.g. ``"avg,max"``), that key
+        contributes one value per aggregator in the order the aggregators were
+        listed, and the row's value array is those per-key blocks concatenated in
+        ``keys`` order. For example ``keys=[a, b]`` with
+        ``aggregators=["avg,max", "sum"]`` yields ``[a_avg, a_max, b_sum]`` for
+        every row. A key (or aggregator column) with no sample or aggregation
+        bucket at a row's timestamp is reported as ``NaN``, which is
+        indistinguishable from a stored or aggregated ``NaN``.
 
         All keys must hash to the same slot when used against a cluster; this
         command is routed as a single-shard, key command and is never split
