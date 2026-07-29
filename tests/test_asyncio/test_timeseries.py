@@ -1770,6 +1770,31 @@ async def test_nrange_aggregation_one_per_key(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @skip_if_server_version_lt("8.9.0")
+async def test_nrange_multiple_aggregators_per_key_layout(decoded_r: redis.Redis):
+    # A per-key spec may list several aggregators. That key then contributes one
+    # value per aggregator (in spec order), and each row's value array is the
+    # per-key blocks concatenated in key order: here [a_avg, a_max, b_sum].
+    # key a: bucket [0,10) avg=2 max=3; bucket [10,20) avg=15 max=20
+    for ts, val in [(0, 1.0), (5, 3.0), (10, 10.0), (15, 20.0)]:
+        await decoded_r.ts().add("{s}:a", ts, val)
+    # key b: bucket [0,10) sum=10; bucket [10,20) sum=7
+    for ts, val in [(0, 5.0), (5, 5.0), (10, 7.0)]:
+        await decoded_r.ts().add("{s}:b", ts, val)
+
+    res = await decoded_r.ts().nrange(
+        ["{s}:a", "{s}:b"],
+        from_time=0,
+        to_time=20,
+        aggregators=["avg,max", "sum"],
+        bucket_size_msec=10,
+    )
+    _assert_nrange_rows(res, [[0, [2.0, 3.0, 10.0]], [10, [15.0, 20.0, 7.0]]])
+    # 2 columns for key a (avg, max) + 1 for key b (sum).
+    assert all(len(row[1]) == 3 for row in res)
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
 async def test_nrange_count_limits_rows(decoded_r: redis.Redis):
     for ts in range(5):
         await decoded_r.ts().add("{s}:a", ts, ts)
@@ -1786,29 +1811,25 @@ async def test_nrange_empty_result(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @skip_if_server_version_lt("8.9.0")
-async def test_nrange_single_aggregator_applies_to_all_keys(decoded_r: redis.Redis):
-    for ts, val in [(0, 1.0), (1, 2.0), (10, 3.0), (11, 4.0)]:
-        await decoded_r.ts().add("{s}:a", ts, val)
-    for ts, val in [(0, 5.0), (1, 6.0), (10, 7.0), (11, 8.0)]:
-        await decoded_r.ts().add("{s}:b", ts, val)
-
-    # A single aggregator string is expanded to one token per key; here
-    # "max" is applied to both series.
-    res = await decoded_r.ts().nrange(
-        ["{s}:a", "{s}:b"],
-        from_time=0,
-        to_time=20,
-        aggregators="max",
-        bucket_size_msec=10,
-    )
-    _assert_nrange_rows(res, [[0, [2.0, 6.0]], [10, [4.0, 8.0]]])
+async def test_nrange_single_aggregator_multi_key_raises(decoded_r: redis.Redis):
+    # A single aggregator is NOT broadcast across keys (RedisTimeSeries PR
+    # #2079): with more than one key, each needs its own spec token. Raised
+    # client-side before any server round trip.
+    with pytest.raises(redis.DataError, match="one aggregation spec per key"):
+        await decoded_r.ts().nrange(
+            ["{s}:a", "{s}:b"],
+            from_time=0,
+            to_time=20,
+            aggregators="max",
+            bucket_size_msec=10,
+        )
 
 
 @pytest.mark.redismod
 @skip_if_server_version_lt("8.9.0")
 async def test_nrange_aggregator_count_mismatch_raises(decoded_r: redis.Redis):
-    # An aggregator list whose length differs from the key count is invalid.
-    with pytest.raises(redis.DataError, match="one aggregator per key"):
+    # A spec list whose length differs from the key count is invalid.
+    with pytest.raises(redis.DataError, match="one aggregation spec per key"):
         await decoded_r.ts().nrange(
             ["{s}:a", "{s}:b"],
             from_time=0,
