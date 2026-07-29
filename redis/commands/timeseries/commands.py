@@ -1174,11 +1174,17 @@ class TimeSeriesCommands:
         Query an explicit list of time-series over a range in forward direction
         and return timestamp-major rows ordered by increasing timestamp.
 
-        Each returned row is ``[timestamp, [value_for_key_0, value_for_key_1,
-        ...]]`` where the value array preserves the input ``keys`` order. A key
-        with no sample (or no aggregation bucket) at a row's timestamp is
-        reported as ``NaN``, which is indistinguishable from a stored or
-        aggregated ``NaN``.
+        Each returned row is ``[timestamp, [value, ...]]``. With no aggregation
+        -- or a single-aggregator spec per key -- the value array holds exactly
+        one value per queried key, in the input ``keys`` order. When a per-key
+        AGGREGATION spec lists several aggregators (e.g. ``"avg,max"``), that key
+        contributes one value per aggregator in the order the aggregators were
+        listed, and the row's value array is those per-key blocks concatenated in
+        ``keys`` order. For example ``keys=[a, b]`` with
+        ``aggregators=["avg,max", "sum"]`` yields ``[a_avg, a_max, b_sum]`` for
+        every row. A key (or aggregator column) with no sample or aggregation
+        bucket at a row's timestamp is reported as ``NaN``, which is
+        indistinguishable from a stored or aggregated ``NaN``.
 
         All keys must hash to the same slot when used against a cluster; this
         command is routed as a single-shard, key command and is never split
@@ -1201,13 +1207,15 @@ class TimeSeriesCommands:
                 Limits the number of returned rows, applied after the
                 merge in increasing-timestamp order.
             aggregators:
-                Optional aggregation. Requires exactly one aggregator per key,
-                emitted as separate tokens. A single aggregator string is
-                expanded to one token per key as a convenience; passing a list
-                whose length differs from ``keys`` raises ``DataError``. Valid
-                values: [`avg`, `sum`, `min`, `max`, `range`, `count`, `first`,
-                `last`, `std.p`, `std.s`, `var.p`, `var.s`, `twa`, `countNaN`,
-                `countAll`].
+                Optional aggregation, with exactly one spec token per key (a
+                single aggregator is never broadcast across keys). Each per-key
+                spec is a string and may list several comma-separated
+                aggregators, e.g. ``["avg,max", "sum"]`` builds
+                ``AGGREGATION avg,max sum`` for two keys. A bare string is the
+                spec for a single-key query; a number of specs that differs from
+                ``keys`` raises ``DataError``. Valid aggregators: [`avg`, `sum`,
+                `min`, `max`, `range`, `count`, `first`, `last`, `std.p`,
+                `std.s`, `var.p`, `var.s`, `twa`, `countNaN`, `countAll`].
             bucket_size_msec:
                 Time bucket for aggregation in milliseconds. Shared by all keys.
             filter_by_ts:
@@ -1302,11 +1310,17 @@ class TimeSeriesCommands:
         Query an explicit list of time-series over a range in reverse direction
         and return timestamp-major rows ordered by decreasing timestamp.
 
-        Each returned row is ``[timestamp, [value_for_key_0, value_for_key_1,
-        ...]]`` where the value array preserves the input ``keys`` order. A key
-        with no sample (or no aggregation bucket) at a row's timestamp is
-        reported as ``NaN``, which is indistinguishable from a stored or
-        aggregated ``NaN``.
+        Each returned row is ``[timestamp, [value, ...]]``. With no aggregation
+        -- or a single-aggregator spec per key -- the value array holds exactly
+        one value per queried key, in the input ``keys`` order. When a per-key
+        AGGREGATION spec lists several aggregators (e.g. ``"avg,max"``), that key
+        contributes one value per aggregator in the order the aggregators were
+        listed, and the row's value array is those per-key blocks concatenated in
+        ``keys`` order. For example ``keys=[a, b]`` with
+        ``aggregators=["avg,max", "sum"]`` yields ``[a_avg, a_max, b_sum]`` for
+        every row. A key (or aggregator column) with no sample or aggregation
+        bucket at a row's timestamp is reported as ``NaN``, which is
+        indistinguishable from a stored or aggregated ``NaN``.
 
         All keys must hash to the same slot when used against a cluster; this
         command is routed as a single-shard, key command and is never split
@@ -1329,13 +1343,15 @@ class TimeSeriesCommands:
                 Limits the number of returned rows, applied after the
                 merge in decreasing-timestamp order.
             aggregators:
-                Optional aggregation. Requires exactly one aggregator per key,
-                emitted as separate tokens. A single aggregator string is
-                expanded to one token per key as a convenience; passing a list
-                whose length differs from ``keys`` raises ``DataError``. Valid
-                values: [`avg`, `sum`, `min`, `max`, `range`, `count`, `first`,
-                `last`, `std.p`, `std.s`, `var.p`, `var.s`, `twa`, `countNaN`,
-                `countAll`].
+                Optional aggregation, with exactly one spec token per key (a
+                single aggregator is never broadcast across keys). Each per-key
+                spec is a string and may list several comma-separated
+                aggregators, e.g. ``["avg,max", "sum"]`` builds
+                ``AGGREGATION avg,max sum`` for two keys. A bare string is the
+                spec for a single-key query; a number of specs that differs from
+                ``keys`` raises ``DataError``. Valid aggregators: [`avg`, `sum`,
+                `min`, `max`, `range`, `count`, `first`, `last`, `std.p`,
+                `std.s`, `var.p`, `var.s`, `twa`, `countNaN`, `countAll`].
             bucket_size_msec:
                 Time bucket for aggregation in milliseconds. Shared by all keys.
             filter_by_ts:
@@ -2028,25 +2044,27 @@ class TimeSeriesCommands:
         bucket_size_msec: int | None,
         numkeys: int,
     ):
-        """Append AGGREGATION property for TS.NRANGE / TS.NREVRANGE.
+        """Append the AGGREGATION clause for TS.NRANGE / TS.NREVRANGE.
 
-        Unlike TS.RANGE, these commands require exactly one aggregator per
-        queried key, emitted as separate tokens (never a single comma-joined
-        token and never a single aggregator broadcast across keys). A single
-        aggregator string is expanded to one token per key as a convenience.
+        These commands take exactly one aggregation spec token per queried key;
+        a single aggregator is never broadcast across keys. A spec token may hold
+        several comma-separated aggregators, so the wire form is e.g.
+        ``AGGREGATION avg,max sum 1000`` for two keys -- key 0 aggregated by both
+        ``avg`` and ``max``, key 1 by ``sum``. Pass one spec string per key, each
+        optionally comma-joined (``["avg,max", "sum"]``); a bare string is the
+        spec for a single-key query. (Matches RedisTimeSeries PR #2079, which
+        replaced the earlier single comma-joined / broadcast token.)
         """
         if aggregators is None:
             return
-        if isinstance(aggregators, str):
-            aggregators = [aggregators] * numkeys
-        else:
-            aggregators = list(aggregators)
-        if len(aggregators) != numkeys:
+        specs = [aggregators] if isinstance(aggregators, str) else list(aggregators)
+        if len(specs) != numkeys:
             raise DataError(
-                "AGGREGATION requires exactly one aggregator per key "
-                f"(expected {numkeys}, got {len(aggregators)})."
+                "AGGREGATION requires exactly one aggregation spec per key "
+                f"(expected {numkeys}, got {len(specs)}); a spec may list "
+                "multiple comma-separated aggregators."
             )
-        params.extend(["AGGREGATION", *aggregators, bucket_size_msec])
+        params.extend(["AGGREGATION", *specs, bucket_size_msec])
 
     @staticmethod
     def _append_chunk_size(params: list[EncodableT], chunk_size: int | None):
