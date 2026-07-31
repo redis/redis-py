@@ -887,7 +887,7 @@ class Redis(
             # returns its arity error instead of a client-side IndexError here.
             key, fieldset_name, values = himport_set
             return await self._himport_execute_set(conn, key, fieldset_name, values)
-        await conn.send_command(*args)
+        await conn.send_command(*args, **options)
         return await self.parse_response(conn, command_name, **options)
 
     async def _himport_reconcile_discards(self, conn):

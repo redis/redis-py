@@ -35,6 +35,7 @@ from ..observability.attributes import (
     DB_CLIENT_CONNECTION_STATE,
     AttributeBuilder,
     ConnectionState,
+    CSCReason,
     CSCResult,
     get_pool_name,
 )
@@ -106,6 +107,7 @@ from redis.maint_notifications import (
 from redis.observability.metrics import CloseReason
 from redis.observability.recorder import (
     init_csc_items,
+    record_csc_eviction,
     record_csc_network_saved,
     record_csc_request,
     register_csc_items_callback,
@@ -1945,20 +1947,28 @@ class AsyncCacheProxyConnection:
             return
 
         if cached_entry is not None:
-            async with self._pool_lock:
-                while await cached_entry.connection_ref.can_read():
-                    try:
-                        await cached_entry.connection_ref.read_response(
-                            push_request=True,
-                            timeout=0,
-                            disconnect_on_error=False,
-                        )
-                    except TimeoutError:
-                        break
+            if cached_entry.status is CacheEntryStatus.IN_PROGRESS:
+                if cached_entry.completion_event is not None:
+                    await cached_entry.completion_event.wait()
 
-            async with self._cache_lock:
-                if self._cache.get(self._current_command_cache_key) is not None:
-                    return
+                async with self._cache_lock:
+                    if self._cache.get(self._current_command_cache_key) is not None:
+                        return
+            else:
+                async with self._pool_lock:
+                    while await cached_entry.connection_ref.can_read():
+                        try:
+                            await cached_entry.connection_ref.read_response(
+                                push_request=True,
+                                timeout=0,
+                                disconnect_on_error=False,
+                            )
+                        except TimeoutError:
+                            break
+
+                async with self._cache_lock:
+                    if self._cache.get(self._current_command_cache_key) is not None:
+                        return
 
         async with self._cache_lock:
             self._cache.set(
@@ -1967,6 +1977,7 @@ class AsyncCacheProxyConnection:
                     cache_value=self.DUMMY_CACHE_VALUE,
                     status=CacheEntryStatus.IN_PROGRESS,
                     connection_ref=self._conn,
+                    completion_event=asyncio.Event(),
                 )
             )
 
@@ -2000,19 +2011,34 @@ class AsyncCacheProxyConnection:
                     return response
                 record_csc_request(result=CSCResult.MISS)
 
-        response = await self._conn.read_response(
-            disable_decoding=disable_decoding,
-            timeout=timeout,
-            disconnect_on_error=disconnect_on_error,
-            push_request=push_request,
-        )
+        try:
+            response = await self._conn.read_response(
+                disable_decoding=disable_decoding,
+                timeout=timeout,
+                disconnect_on_error=disconnect_on_error,
+                push_request=push_request,
+            )
+        except BaseException:
+            async with self._cache_lock:
+                cache_entry = self._cache.get(cache_key)
+                if (
+                    cache_entry is not None
+                    and cache_entry.status is CacheEntryStatus.IN_PROGRESS
+                ):
+                    self._cache.delete_by_cache_keys([cache_key])
+                    self._signal_cache_entry(cache_entry)
+                self._current_command_cache_key = None
+            raise
 
         async with self._cache_lock:
             cache_key = self._current_command_cache_key
             if cache_key is None:
                 return response
             if response is None:
+                cache_entry = self._cache.get(cache_key)
                 self._cache.delete_by_cache_keys([cache_key])
+                if cache_entry is not None:
+                    self._signal_cache_entry(cache_entry)
                 self._current_command_cache_key = None
                 return response
 
@@ -2021,6 +2047,7 @@ class AsyncCacheProxyConnection:
                 cache_entry.status = CacheEntryStatus.VALID
                 cache_entry.cache_value = response
                 self._cache.set(cache_entry)
+                self._signal_cache_entry(cache_entry)
 
             self._current_command_cache_key = None
 
@@ -2045,9 +2072,45 @@ class AsyncCacheProxyConnection:
     async def _on_invalidation_callback(self, data) -> None:
         async with self._cache_lock:
             if data[1] is None:
+                entries = tuple(self._cache.collection.values())
                 self._cache.flush()
+                keys_deleted = 0
             else:
-                self._cache.delete_by_redis_keys(data[1])
+                entries = tuple(self._cache.collection.values())
+                keys_deleted = len(self._cache.delete_by_redis_keys(data[1]))
+
+            for entry in entries:
+                if entry.completion_event is not None and (
+                    data[1] is None or self._matches_redis_keys(entry, data[1])
+                ):
+                    entry.completion_event.set()
+
+            if keys_deleted:
+                record_csc_eviction(
+                    count=keys_deleted,
+                    reason=CSCReason.INVALIDATION,
+                )
+
+    @staticmethod
+    def _signal_cache_entry(entry: CacheEntry) -> None:
+        if entry.completion_event is not None:
+            entry.completion_event.set()
+
+    @staticmethod
+    def _matches_redis_keys(entry: CacheEntry, redis_keys) -> bool:
+        for redis_key in redis_keys:
+            candidates = [redis_key]
+            if isinstance(redis_key, str):
+                candidates.append(redis_key.encode("utf-8"))
+            elif isinstance(redis_key, bytes):
+                try:
+                    candidates.append(redis_key.decode("utf-8"))
+                except UnicodeDecodeError:
+                    pass
+
+            if any(candidate in entry.cache_key.redis_keys for candidate in candidates):
+                return True
+        return False
 
 
 class ConnectionPoolInterface(ABC):

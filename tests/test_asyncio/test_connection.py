@@ -26,6 +26,7 @@ from redis.asyncio.connection import (
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.cache import CacheConfig, CacheFactory
+from redis.observability.attributes import CSCReason
 from redis.exceptions import ConnectionError, InvalidResponse, RedisError, TimeoutError
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
@@ -152,6 +153,95 @@ async def test_async_cache_proxy_returns_cached_response_and_handles_invalidatio
     assert await proxy.read_response() == b"second"
     assert connection.send_command.await_count == 2
     assert connection.read_response.await_count == 2
+
+
+async def test_async_cache_proxy_waits_for_in_flight_cache_fill():
+    first_connection = mock.Mock()
+    first_connection.can_read = mock.AsyncMock(return_value=False)
+    first_connection.send_command = mock.AsyncMock()
+    first_connection.read_response = mock.AsyncMock(return_value=b"first")
+    second_connection = mock.Mock()
+    second_connection.can_read = mock.AsyncMock(return_value=False)
+    second_connection.send_command = mock.AsyncMock()
+    second_connection.read_response = mock.AsyncMock()
+    cache = CacheFactory(CacheConfig()).get_cache()
+    pool_lock = asyncio.Lock()
+    first_proxy = AsyncCacheProxyConnection(first_connection, cache, pool_lock)
+    second_proxy = AsyncCacheProxyConnection(second_connection, cache, pool_lock)
+
+    await first_proxy.send_command("GET", "key", keys=("key",))
+    waiting_send = asyncio.create_task(
+        second_proxy.send_command("GET", "key", keys=("key",))
+    )
+    await asyncio.sleep(0)
+
+    assert waiting_send.done() is False
+    assert second_connection.send_command.await_count == 0
+
+    assert await first_proxy.read_response() == b"first"
+    await waiting_send
+    assert await second_proxy.read_response() == b"first"
+    assert second_connection.read_response.await_count == 0
+
+
+async def test_async_cache_proxy_retries_after_in_flight_fill_fails():
+    first_connection = mock.Mock()
+    first_connection.can_read = mock.AsyncMock(return_value=False)
+    first_connection.send_command = mock.AsyncMock()
+    first_connection.read_response = mock.AsyncMock(
+        side_effect=ConnectionError("read failed")
+    )
+    second_connection = mock.Mock()
+    second_connection.can_read = mock.AsyncMock(return_value=False)
+    second_connection.send_command = mock.AsyncMock()
+    cache = CacheFactory(CacheConfig()).get_cache()
+    pool_lock = asyncio.Lock()
+    first_proxy = AsyncCacheProxyConnection(first_connection, cache, pool_lock)
+    second_proxy = AsyncCacheProxyConnection(second_connection, cache, pool_lock)
+
+    await first_proxy.send_command("GET", "key", keys=("key",))
+    waiting_send = asyncio.create_task(
+        second_proxy.send_command("GET", "key", keys=("key",))
+    )
+    await asyncio.sleep(0)
+
+    with pytest.raises(ConnectionError, match="read failed"):
+        await first_proxy.read_response()
+
+    await waiting_send
+    second_connection.send_command.assert_awaited_once_with("GET", "key", keys=("key",))
+
+
+async def test_async_cache_proxy_records_invalidation_evictions():
+    connection = mock.Mock()
+    connection.can_read = mock.AsyncMock(return_value=False)
+    connection.send_command = mock.AsyncMock()
+    connection.read_response = mock.AsyncMock(return_value=b"first")
+    cache = CacheFactory(CacheConfig()).get_cache()
+    proxy = AsyncCacheProxyConnection(connection, cache, asyncio.Lock())
+
+    await proxy.send_command("GET", "key", keys=("key",))
+    await proxy.read_response()
+
+    with mock.patch("redis.asyncio.connection.record_csc_eviction") as record:
+        await proxy._on_invalidation_callback([b"invalidate", [b"key"]])
+
+    record.assert_called_once_with(count=1, reason=CSCReason.INVALIDATION)
+
+
+async def test_async_client_forwards_command_options_to_connection():
+    client = object.__new__(Redis)
+    client.parse_response = mock.AsyncMock(return_value=b"value")
+    connection = mock.Mock()
+    connection.send_command = mock.AsyncMock()
+
+    assert (
+        await client._send_command_parse_response(
+            connection, "GET", "key", keys=("key",)
+        )
+        == b"value"
+    )
+    connection.send_command.assert_awaited_once_with("key", keys=("key",))
 
 
 @pytest.mark.onlynoncluster

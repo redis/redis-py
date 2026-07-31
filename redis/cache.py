@@ -43,11 +43,13 @@ class CacheEntry:
         cache_value: bytes,
         status: CacheEntryStatus,
         connection_ref,
+        completion_event=None,
     ):
         self.cache_key = cache_key
         self.cache_value = cache_value
         self.status = status
         self.connection_ref = connection_ref
+        self.completion_event = completion_event
 
     def __hash__(self):
         return hash(
