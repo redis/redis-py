@@ -631,10 +631,8 @@ class RedisCluster(
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.response_callbacks = kwargs["response_callbacks"]
         self.result_callbacks = self.__class__.RESULT_CALLBACKS.copy()
-        self.result_callbacks["CLUSTER SLOTS"] = (
-            lambda cmd, res, **kwargs: parse_cluster_slots(
-                list(res.values())[0], **kwargs
-            )
+        self.result_callbacks["CLUSTER SLOTS"] = lambda cmd, res, **kwargs: (
+            parse_cluster_slots(list(res.values())[0], **kwargs)
         )
 
         self._initialize = True
@@ -1688,7 +1686,9 @@ class ClusterNode:
                 pending_cleanup = tuple(self._background_tasks)
                 if not pending_cleanup:
                     raise
-                await asyncio.gather(*pending_cleanup)
+                await asyncio.gather(
+                    *(asyncio.shield(task) for task in pending_cleanup)
+                )
 
     async def disconnect_if_needed(self, connection: Connection) -> None:
         """

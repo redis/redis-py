@@ -3380,6 +3380,40 @@ class TestClusterNodeConnectionHandling:
         with pytest.raises(MaxConnectionsError):
             await node.acquire_connection_async()
 
+    async def test_acquire_connection_async_does_not_cancel_cleanup(self) -> None:
+        node = ClusterNode(default_host, 7000, max_connections=1)
+        connection = mock.AsyncMock(spec=Connection)
+        connection.is_connected = True
+        connection.reconnect = True
+        connection.should_reconnect.side_effect = lambda: connection.reconnect
+
+        disconnect_started = asyncio.Event()
+        allow_disconnect = asyncio.Event()
+
+        async def disconnect() -> None:
+            disconnect_started.set()
+            await allow_disconnect.wait()
+            connection.reconnect = False
+            connection.is_connected = False
+
+        connection.disconnect.side_effect = disconnect
+        node._connections.append(connection)
+        node.release(connection)
+        await disconnect_started.wait()
+
+        waiter = asyncio.create_task(node.acquire_connection_async())
+        await asyncio.sleep(0)
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+
+        cleanup_task = next(iter(node._background_tasks))
+        assert cleanup_task.cancelled() is False
+
+        allow_disconnect.set()
+        await cleanup_task
+        assert await node.acquire_connection_async() is connection
+
     class WriteFailingConnection:
         def __init__(self, **kwargs: Any) -> None:
             self.host = kwargs["host"]
