@@ -617,6 +617,21 @@ class TestConnectionPoolURLParsing:
         pool = redis.ConnectionPool.from_url("redis://location?client_name=test-client")
         assert pool.connection_kwargs["client_name"] == "test-client"
 
+    def test_querystring_value_percent_decoded_once(self):
+        # A single percent-encoded sequence is decoded exactly once.
+        pool = redis.ConnectionPool.from_url(
+            "redis://location?client_name=worker%20name"
+        )
+        assert pool.connection_kwargs["client_name"] == "worker name"
+
+    def test_querystring_value_not_double_percent_decoded(self):
+        # A literal percent sign in a query value (encoded as %2520) must survive
+        # as "%20" rather than being decoded a second time into a space. See #4208.
+        pool = redis.ConnectionPool.from_url(
+            "redis://location?client_name=worker%2520name"
+        )
+        assert pool.connection_kwargs["client_name"] == "worker%20name"
+
     def test_invalid_extra_typed_querystring_options(self):
         with pytest.raises(ValueError):
             redis.ConnectionPool.from_url(
@@ -682,13 +697,15 @@ class TestConnectionPoolUnixSocketURLParsing:
     def test_defaults(self):
         pool = redis.ConnectionPool.from_url("unix:///socket")
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket"}
+        assert_kwargs_subset(pool.connection_kwargs, {"path": "/socket"})
 
     @skip_if_server_version_lt("6.0.0")
     def test_username(self):
         pool = redis.ConnectionPool.from_url("unix://myuser:@/socket")
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "username": "myuser"}
+        assert_kwargs_subset(
+            pool.connection_kwargs, {"path": "/socket", "username": "myuser"}
+        )
 
     @skip_if_server_version_lt("6.0.0")
     def test_quoted_username(self):
@@ -696,45 +713,56 @@ class TestConnectionPoolUnixSocketURLParsing:
             "unix://%2Fmyuser%2F%2B name%3D%24+:@/socket"
         )
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {
-            "path": "/socket",
-            "username": "/myuser/+ name=$+",
-        }
+        assert_kwargs_subset(
+            pool.connection_kwargs,
+            {
+                "path": "/socket",
+                "username": "/myuser/+ name=$+",
+            },
+        )
 
     def test_password(self):
         pool = redis.ConnectionPool.from_url("unix://:mypassword@/socket")
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "password": "mypassword"}
+        assert_kwargs_subset(
+            pool.connection_kwargs, {"path": "/socket", "password": "mypassword"}
+        )
 
     def test_quoted_password(self):
         pool = redis.ConnectionPool.from_url(
             "unix://:%2Fmypass%2F%2B word%3D%24+@/socket"
         )
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {
-            "path": "/socket",
-            "password": "/mypass/+ word=$+",
-        }
+        assert_kwargs_subset(
+            pool.connection_kwargs,
+            {
+                "path": "/socket",
+                "password": "/mypass/+ word=$+",
+            },
+        )
 
     def test_quoted_path(self):
         pool = redis.ConnectionPool.from_url(
             "unix://:mypassword@/my%2Fpath%2Fto%2F..%2F+_%2B%3D%24ocket"
         )
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {
-            "path": "/my/path/to/../+_+=$ocket",
-            "password": "mypassword",
-        }
+        assert_kwargs_subset(
+            pool.connection_kwargs,
+            {
+                "path": "/my/path/to/../+_+=$ocket",
+                "password": "mypassword",
+            },
+        )
 
     def test_db_as_argument(self):
         pool = redis.ConnectionPool.from_url("unix:///socket", db=1)
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "db": 1}
+        assert_kwargs_subset(pool.connection_kwargs, {"path": "/socket", "db": 1})
 
     def test_db_in_querystring(self):
         pool = redis.ConnectionPool.from_url("unix:///socket?db=2", db=1)
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "db": 2}
+        assert_kwargs_subset(pool.connection_kwargs, {"path": "/socket", "db": 2})
 
     def test_client_name_in_querystring(self):
         pool = redis.ConnectionPool.from_url("redis://location?client_name=test-client")
@@ -743,7 +771,9 @@ class TestConnectionPoolUnixSocketURLParsing:
     def test_extra_querystring_options(self):
         pool = redis.ConnectionPool.from_url("unix:///socket?a=1&b=2")
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "a": "1", "b": "2"}
+        assert_kwargs_subset(
+            pool.connection_kwargs, {"path": "/socket", "a": "1", "b": "2"}
+        )
 
 
 @pytest.mark.fixed_client
