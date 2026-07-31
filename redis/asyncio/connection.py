@@ -1149,7 +1149,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         try:
             writer.writelines(command)
             await writer.drain()
-        except (AttributeError, TypeError) as error:
+        except AttributeError as error:
             raise ConnectionError("Connection closed while writing") from error
 
     async def send_packed_command(

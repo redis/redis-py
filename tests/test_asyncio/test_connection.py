@@ -88,10 +88,27 @@ async def test_closed_writer_during_write_is_connection_error(socket_timeout):
     conn = Connection(socket_timeout=socket_timeout)
     conn._reader = mock.Mock()
     conn._writer = mock.Mock()
-    conn._writer.writelines.side_effect = TypeError("'NoneType' object is not callable")
+    conn._writer.writelines.side_effect = AttributeError(
+        "'NoneType' object has no attribute 'writelines'"
+    )
     conn.disconnect = mock.AsyncMock()
 
     with pytest.raises(ConnectionError, match="Connection closed while writing"):
+        await conn.send_packed_command([b"PING\r\n"], check_health=False)
+
+    conn.disconnect.assert_awaited_once_with(nowait=True)
+    conn._reader = None
+    conn._writer = None
+
+
+async def test_invalid_packed_command_type_error_is_not_connection_error():
+    conn = Connection()
+    conn._reader = mock.Mock()
+    conn._writer = mock.Mock()
+    conn._writer.writelines.side_effect = TypeError("invalid packed command")
+    conn.disconnect = mock.AsyncMock()
+
+    with pytest.raises(TypeError, match="invalid packed command"):
         await conn.send_packed_command([b"PING\r\n"], check_health=False)
 
     conn.disconnect.assert_awaited_once_with(nowait=True)
