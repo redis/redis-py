@@ -12,6 +12,11 @@ from .base import (
 )
 from .socket import SERVER_CLOSED_CONNECTION_ERROR
 
+# Resolved once at import time rather than per message: the pub/sub push handler
+# is on the hot path (called for every message) and ``getLogger`` is a locked
+# dict lookup.
+_pubsub_push_logger = getLogger("push_response")
+
 
 class _RESP3Parser(_RESPBase, PushNotificationsParser):
     """RESP3 protocol implementation"""
@@ -25,8 +30,9 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
         self.invalidation_push_handler_func = None
 
     def handle_pubsub_push_response(self, response):
-        logger = getLogger("push_response")
-        logger.debug("Push response: " + str(response))
+        # Lazy ``%s`` formatting: ``str(response)`` is only paid when DEBUG is
+        # actually enabled, not on every message.
+        _pubsub_push_logger.debug("Push response: %s", response)
         return response
 
     def read_response(
@@ -170,8 +176,9 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
         self.invalidation_push_handler_func = None
 
     async def handle_pubsub_push_response(self, response):
-        logger = getLogger("push_response")
-        logger.debug("Push response: " + str(response))
+        # Lazy ``%s`` formatting: ``str(response)`` is only paid when DEBUG is
+        # actually enabled, not on every message.
+        _pubsub_push_logger.debug("Push response: %s", response)
         return response
 
     async def read_response(

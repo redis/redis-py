@@ -19,6 +19,11 @@ from .socket import (
     SERVER_CLOSED_CONNECTION_ERROR,
 )
 
+# Resolved once at import time rather than per message: the pub/sub push handler
+# is on the hot path (called for every message) and ``getLogger`` is a locked
+# dict lookup.
+_pubsub_push_logger = getLogger("push_response")
+
 # Used to signal that hiredis-py does not have enough data to parse.
 # Using `False` or `None` is not reliable, given that the parser can
 # return `False` or `None` for legitimate reasons from RESP payloads.
@@ -126,8 +131,9 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
             pass
 
     def handle_pubsub_push_response(self, response):
-        logger = getLogger("push_response")
-        logger.debug("Push response: " + str(response))
+        # Lazy ``%s`` formatting: ``str(response)`` is only paid when DEBUG is
+        # actually enabled, not on every message.
+        _pubsub_push_logger.debug("Push response: %s", response)
         return response
 
     def on_connect(self, connection, **kwargs):
@@ -281,8 +287,9 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         self._hiredis_PushNotificationType = None
 
     async def handle_pubsub_push_response(self, response):
-        logger = getLogger("push_response")
-        logger.debug("Push response: " + str(response))
+        # Lazy ``%s`` formatting: ``str(response)`` is only paid when DEBUG is
+        # actually enabled, not on every message.
+        _pubsub_push_logger.debug("Push response: %s", response)
         return response
 
     def on_connect(self, connection):
