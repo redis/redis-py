@@ -164,6 +164,27 @@ def test_normalize_function_lib_code_bytes_non_utf8():
     assert b"\\n" not in shebang
     assert b"\xff" in body
 
+
+@pytest.mark.fixed_client
+def test_normalize_function_lib_code_handles_non_contiguous_memoryview():
+    source = b"#!lua name=mylib\\nreturn 1"
+    interleaved = bytearray(len(source) * 2)
+    interleaved[::2] = source
+    code = memoryview(interleaved)[::2]
+
+    assert not code.c_contiguous
+    assert normalize_function_lib_code(code) == b"#!lua name=mylib\nreturn 1"
+
+
+@pytest.mark.fixed_client
+def test_normalize_function_lib_code_normalizes_lfcr_as_one_newline():
+    text = "#!lua name=mylib\nreturn [[a\n\rb]]"
+    expected = "#!lua name=mylib\nreturn [[a\nb]]"
+
+    assert normalize_function_lib_code(text) == expected
+    assert normalize_function_lib_code(text.encode()) == expected.encode()
+
+
 @pytest.mark.fixed_client
 def test_normalize_function_lib_code_preserves_trailing_whitespace():
     text = "#!lua name=mylib\nreturn 1\n \t"
