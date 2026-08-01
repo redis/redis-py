@@ -261,10 +261,6 @@ def _normalize_function_lib_code_binary(
     else:
         view = searchable = code
 
-    if isinstance(code, memoryview):
-        # Set only by the full-view branch above.
-        searchable = backing
-
     start = 0
     whitespace = b" \t\n\r\v\f"
     while start < len(view) and view[start] in whitespace:
