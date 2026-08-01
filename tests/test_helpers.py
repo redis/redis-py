@@ -66,8 +66,7 @@ redis.register_function('myfunc', function(keys, args) return args[1] end)
 @pytest.mark.fixed_client
 def test_normalize_function_lib_code_expands_redis_cli_escapes():
     # redis-cli unescapes "\n" inside double quotes; raw / double-escaped
-    # Python strings do not, so expand the shebang terminator when no real
-    # newline is present.
+    # Python strings do not, so expand the shebang terminator escape.
     code = r"#!lua name=mylib \n redis.register_function('myfunc', function(keys, args) return args[1] end)"
     normalized = normalize_function_lib_code(code)
     assert "\n" in normalized
@@ -88,8 +87,8 @@ def test_normalize_function_lib_code_normalizes_crlf():
 
 @pytest.mark.fixed_client
 def test_normalize_function_lib_code_preserves_multiline_backslash_n():
-    # When real newlines already exist, do not rewrite literal \n sequences
-    # that may appear in Lua source.
+    # When a real newline already ends the shebang line, do not rewrite
+    # literal \n sequences that may appear in Lua source.
     code = "#!lua name=mylib\nreturn 'a\\nb'"
     assert normalize_function_lib_code(code) == code
 
@@ -120,8 +119,47 @@ def test_normalize_function_lib_code_expands_first_crlf_escape():
 
 
 @pytest.mark.fixed_client
+def test_normalize_function_lib_code_escapes_shebang_with_later_real_newlines():
+    # Escaped shebang terminator must expand even when the Lua body already
+    # has physical newlines (e.g. a multiline long string).
+    code = (
+        "#!lua name=mylib \\n redis.register_function('f', function()\n"
+        "  return [[a\nb]]\nend)"
+    )
+    normalized = normalize_function_lib_code(code)
+    shebang_line, rest = normalized.split("\n", 1)
+    assert shebang_line.startswith("#!lua name=mylib")
+    assert "\\n" not in shebang_line
+    assert "[[a\nb]]" in rest
+
+
+@pytest.mark.fixed_client
+def test_normalize_function_lib_code_terminator_by_position_not_presence():
+    # Prefer the earliest escape by position: shebang uses \n, body has \r\n.
+    code = r"#!lua name=mylib \n return 'a\r\nb'"
+    normalized = normalize_function_lib_code(code)
+    assert normalized.count("\n") == 1
+    body = normalized.split("\n", 1)[1]
+    assert "\\r\\n" in body
+    assert "return 'a\\r\\nb'" in normalized
+
+
+@pytest.mark.fixed_client
 def test_normalize_function_lib_code_bytes_roundtrip():
     code = b"\n#!lua name=mylib\nreturn 1\n"
     normalized = normalize_function_lib_code(code)
     assert isinstance(normalized, bytes)
     assert normalized.startswith(b"#!lua name=mylib\n")
+
+
+@pytest.mark.fixed_client
+def test_normalize_function_lib_code_bytes_non_utf8():
+    # Non-UTF-8 body bytes must still get leading-whitespace / escape fixes.
+    code = b"\n#!lua name=mylib \\n return '\xff'"
+    normalized = normalize_function_lib_code(code)
+    assert isinstance(normalized, bytes)
+    assert not normalized.startswith(b"\n")
+    shebang, body = normalized.split(b"\n", 1)
+    assert shebang.startswith(b"#!lua name=mylib")
+    assert b"\\n" not in shebang
+    assert b"\xff" in body

@@ -218,21 +218,19 @@ def normalize_function_lib_code(code: Any) -> Any:
       ``Invalid library metadata``).
     - Windows CRLF (``\\r\\n``) line endings.
 
-    Only the first shebang-line terminator escape is expanded when the payload
-    has no real newline. Later ``\\n`` sequences (e.g. Lua string escapes) are
-    left unchanged so function source is not rewritten.
+    Expands only the first shebang-line terminator escape, chosen by earliest
+    position among a real newline and redis-cli-style ``\\r\\n`` / ``\\n``.
+    Later escapes (e.g. Lua string ``\\n``) are left unchanged. Binary payloads
+    are normalized via latin-1 so non-UTF-8 body bytes still get framing fixes.
 
     Returns the same type as ``code`` for ``str`` / ``bytes`` / ``bytearray``;
     other types are returned unchanged so the encoder can raise as usual.
     """
     if isinstance(code, (bytes, bytearray, memoryview)):
+        # latin-1 is a 1:1 byte mapping; do not require UTF-8 for framing.
         raw = bytes(code)
-        try:
-            text = raw.decode("utf-8")
-        except UnicodeDecodeError:
-            return code
-        normalized = _normalize_function_lib_code_text(text)
-        return normalized.encode("utf-8")
+        normalized = _normalize_function_lib_code_text(raw.decode("latin-1"))
+        return normalized.encode("latin-1")
 
     if isinstance(code, str):
         return _normalize_function_lib_code_text(code)
@@ -245,13 +243,25 @@ def _normalize_function_lib_code_text(text: str) -> str:
     text = text.strip()
     # Normalize common line-ending variants to LF (what Redis's parser scans for).
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    # When the payload is still a single physical line, expand only the first
-    # redis-cli-style newline escape so Redis can parse library metadata.
-    # Expanding every "\\n" would rewrite intentional Lua escapes such as
-    # return 'a\\nb' in single-line payloads (Codex review on #4233).
-    if "\n" not in text:
-        if "\\r\\n" in text:
-            text = text.replace("\\r\\n", "\n", 1)
-        elif "\\n" in text:
-            text = text.replace("\\n", "\n", 1)
-    return text
+    # End of the shebang line is the earliest of: a real newline, or a
+    # redis-cli-style "\r\n" / "\n" escape. Expand that escape when it wins
+    # (even if real newlines appear later in a multiline Lua body).
+    real_nl = text.find("\n")
+    esc_crlf = text.find("\\r\\n")
+    esc_lf = text.find("\\n")
+
+    candidates: List[tuple[int, str, int]] = []
+    if real_nl >= 0:
+        candidates.append((real_nl, "real", 1))
+    if esc_crlf >= 0:
+        candidates.append((esc_crlf, "esc_crlf", 4))
+    if esc_lf >= 0:
+        candidates.append((esc_lf, "esc_lf", 2))
+
+    if not candidates:
+        return text
+
+    pos, kind, length = min(candidates, key=lambda item: item[0])
+    if kind == "real":
+        return text
+    return text[:pos] + "\n" + text[pos + length :]
