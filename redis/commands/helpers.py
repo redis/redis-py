@@ -280,41 +280,35 @@ def _normalize_function_lib_code_binary(
         return code
 
     normalized = bytes(view[start:])
+    if escaped >= 0:
+        pos = escaped - start
+        length = 4 if escaped == esc_crlf else 2
+        normalized = normalized[:pos] + b"\n" + normalized[pos + length :]
+    # Expand the escaped terminator first so an adjacent CR forms one LFCR
+    # newline and is collapsed as a unit.
     normalized = re.sub(br"\r\n|\n\r|\r", b"\n", normalized)
-    normalized = _expand_first_shebang_escape_binary(normalized)
 
     if isinstance(code, bytearray):
         return bytearray(normalized)
     return normalized
 
 
-def _expand_first_shebang_escape_binary(data: bytes) -> bytes:
-    real_nl = data.find(b"\n")
-    header_end = real_nl if real_nl >= 0 else len(data)
-    esc_crlf = data.find(b"\\r\\n", 0, header_end)
-    esc_lf = data.find(b"\\n", 0, header_end)
-    escaped = min((pos for pos in (esc_crlf, esc_lf) if pos >= 0), default=-1)
-    if escaped < 0:
-        return data
-
-    length = 4 if escaped == esc_crlf else 2
-    return data[:escaped] + b"\n" + data[escaped + length :]
-
-
 def _normalize_function_lib_code_text(text: str) -> str:
     # Only leading whitespace prevents Redis from finding the shebang. Preserve
     # the right-hand side exactly for FUNCTION LIST WITHCODE round trips.
     text = text.lstrip()
-    # Lua treats CRLF and LFCR as one newline; normalize both as a unit.
-    text = re.sub(r"\r\n|\n\r|\r", "\n", text)
 
-    real_nl = text.find("\n")
+    real_lf = text.find("\n")
+    real_cr = text.find("\r")
+    real_nl = min((pos for pos in (real_lf, real_cr) if pos >= 0), default=-1)
     header_end = real_nl if real_nl >= 0 else len(text)
     esc_crlf = text.find("\\r\\n", 0, header_end)
     esc_lf = text.find("\\n", 0, header_end)
     escaped = min((pos for pos in (esc_crlf, esc_lf) if pos >= 0), default=-1)
-    if escaped < 0:
-        return text
+    if escaped >= 0:
+        length = 4 if escaped == esc_crlf else 2
+        text = text[:escaped] + "\n" + text[escaped + length :]
 
-    length = 4 if escaped == esc_crlf else 2
-    return text[:escaped] + "\n" + text[escaped + length :]
+    # Lua treats CRLF and LFCR as one newline. Expand first so an escaped
+    # terminator followed by CR is normalized as a single LFCR newline.
+    return re.sub(r"\r\n|\n\r|\r", "\n", text)
