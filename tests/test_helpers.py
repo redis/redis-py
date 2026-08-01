@@ -163,3 +163,25 @@ def test_normalize_function_lib_code_bytes_non_utf8():
     assert shebang.startswith(b"#!lua name=mylib")
     assert b"\\n" not in shebang
     assert b"\xff" in body
+
+@pytest.mark.fixed_client
+def test_normalize_function_lib_code_preserves_trailing_whitespace():
+    text = "#!lua name=mylib\nreturn 1\n \t"
+    binary = text.encode()
+
+    assert normalize_function_lib_code(text) == text
+    assert normalize_function_lib_code(binary) == binary
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize(
+    "code",
+    [
+        b"#!lua name=mylib\nreturn 1",
+        bytearray(b"#!lua name=mylib\nreturn 1"),
+        memoryview(b"#!lua name=mylib\nreturn 1"),
+    ],
+)
+def test_normalize_function_lib_code_binary_no_copy_when_unchanged(code):
+    assert normalize_function_lib_code(code) is code
+
