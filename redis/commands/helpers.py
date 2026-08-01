@@ -253,6 +253,21 @@ def _find_function_lib_bytes(
     return -1
 
 
+def _find_function_lib_binary_newline(
+    data: bytes | bytearray | memoryview, start: int
+) -> int:
+    """Return the first CR or LF without repeatedly scanning memoryviews."""
+    if isinstance(data, (bytes, bytearray)):
+        lf = data.find(b"\n", start)
+        cr = data.find(b"\r", start)
+        return min((pos for pos in (lf, cr) if pos >= 0), default=-1)
+
+    for pos in range(start, len(data)):
+        if data[pos] in (ord("\n"), ord("\r")):
+            return pos
+    return -1
+
+
 def _normalize_function_lib_code_binary(
     code: bytes | bytearray | memoryview,
 ) -> bytes | bytearray | memoryview:
@@ -272,15 +287,17 @@ def _normalize_function_lib_code_binary(
     while start < len(view) and view[start] in whitespace:
         start += 1
 
-    real_lf = _find_function_lib_bytes(view, b"\n", start)
-    real_cr = _find_function_lib_bytes(view, b"\r", start)
-    real_nl = min((pos for pos in (real_lf, real_cr) if pos >= 0), default=-1)
+    real_nl = _find_function_lib_binary_newline(view, start)
     header_end = real_nl if real_nl >= 0 else len(view)
     esc_crlf = _find_function_lib_bytes(view, b"\\r\\n", start, header_end)
     esc_lf = _find_function_lib_bytes(view, b"\\n", start, header_end)
     escaped = min((pos for pos in (esc_crlf, esc_lf) if pos >= 0), default=-1)
 
-    valid_lf = real_lf >= 0 and (real_cr < 0 or real_lf < real_cr)
+    valid_lf = (
+        real_nl >= 0
+        and view[real_nl] == ord("\n")
+        and (real_nl + 1 == len(view) or view[real_nl + 1] != ord("\r"))
+    )
     if start == 0 and escaped < 0 and (valid_lf or real_nl < 0):
         return code
 
@@ -288,7 +305,11 @@ def _normalize_function_lib_code_binary(
         prefix_end = escaped
         terminator_end = escaped + (4 if escaped == esc_crlf else 2)
         # An escaped LF followed by CR is one LFCR shebang terminator.
-        if (\n            escaped == esc_lf\n            and terminator_end < len(view)\n            and view[terminator_end] == ord("\r")\n        ):
+        if (
+            escaped == esc_lf
+            and terminator_end < len(view)
+            and view[terminator_end] == ord("\r")
+        ):
             terminator_end += 1
     elif real_nl >= 0:
         prefix_end = real_nl
@@ -325,15 +346,26 @@ def _normalize_function_lib_code_text(text: str) -> str:
 
     if escaped >= 0:
         terminator_end = escaped + (4 if escaped == esc_crlf else 2)
-        if (\n            escaped == esc_lf\n            and terminator_end < len(text)\n            and text[terminator_end] == "\r"\n        ):
+        if (
+            escaped == esc_lf
+            and terminator_end < len(text)
+            and text[terminator_end] == "\r"
+        ):
             terminator_end += 1
         return text[:escaped] + "\n" + text[terminator_end:]
 
-    valid_lf = real_lf >= 0 and (real_cr < 0 or real_lf < real_cr)
+    valid_lf = (
+        real_lf >= 0
+        and (real_cr < 0 or real_lf < real_cr)
+        and (real_lf + 1 == len(text) or text[real_lf + 1] != "\r")
+    )
     if real_nl < 0 or valid_lf:
         return text
 
     terminator_end = real_nl + 1
-    if terminator_end < len(text) and text[terminator_end] == "\n":
+    if terminator_end < len(text) and (
+        (text[real_nl] == "\r" and text[terminator_end] == "\n")
+        or (text[real_nl] == "\n" and text[terminator_end] == "\r")
+    ):
         terminator_end += 1
     return text[:real_nl] + "\n" + text[terminator_end:]

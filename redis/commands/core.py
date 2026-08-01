@@ -12287,12 +12287,11 @@ class FunctionCommands:
         :param code: the source code. It must include a shebang that provides
             metadata about the library (``#!lua name=<lib>``). Leading
             whitespace is stripped so multi-line strings work; trailing
-            whitespace is preserved for exact source round trips. If the code
-            is a single line that uses a redis-cli-style ``\\n`` escape
-            after the shebang instead of a real newline, that first terminator
-            escape is expanded so Redis can parse library metadata. Later
-            ``\\n`` sequences in the body (e.g. Lua string escapes) are left
-            unchanged.
+            whitespace is preserved for exact source round trips. If the
+            shebang terminator is a redis-cli-style ``\\n`` or ``\\r\\n``
+            escape instead of a real newline, that terminator is expanded even
+            when the body contains later physical newlines. Later escapes in
+            the body (e.g. Lua string escapes) are left unchanged.
         :param replace: changes the behavior to overwrite the existing library
             with the new contents.
         Return the library name that was loaded.

@@ -72,9 +72,7 @@ def test_normalize_function_lib_code_expands_redis_cli_escapes():
     assert "\n" in normalized
     assert "\\n" not in normalized
     assert normalized.startswith("#!lua name=mylib")
-    assert normalized.split("\n", 1)[1].lstrip().startswith(
-        "redis.register_function"
-    )
+    assert normalized.split("\n", 1)[1].lstrip().startswith("redis.register_function")
 
 
 @pytest.mark.fixed_client
@@ -196,8 +194,17 @@ def test_normalize_function_lib_code_expands_terminator_before_lfcr():
 
 @pytest.mark.fixed_client
 def test_normalize_function_lib_code_preserves_body_cr_after_escaped_crlf():
-    text = r"#!lua name=mylib \\r\\n" + "\rreturn 1"
+    text = r"#!lua name=mylib \r\n" + "\rreturn 1"
     expected = "#!lua name=mylib \n\rreturn 1"
+
+    assert normalize_function_lib_code(text) == expected
+    assert normalize_function_lib_code(text.encode()) == expected.encode()
+
+
+@pytest.mark.fixed_client
+def test_normalize_function_lib_code_normalizes_lfcr_after_leading_whitespace():
+    text = " #!lua name=mylib\n\rreturn 1"
+    expected = "#!lua name=mylib\nreturn 1"
 
     assert normalize_function_lib_code(text) == expected
     assert normalize_function_lib_code(text.encode()) == expected.encode()
@@ -231,4 +238,3 @@ def test_normalize_function_lib_code_sliced_memoryview_no_copy_when_unchanged():
 )
 def test_normalize_function_lib_code_binary_no_copy_when_unchanged(code):
     assert normalize_function_lib_code(code) is code
-
