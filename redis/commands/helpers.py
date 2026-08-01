@@ -288,7 +288,7 @@ def _normalize_function_lib_code_binary(
         prefix_end = escaped
         terminator_end = escaped + (4 if escaped == esc_crlf else 2)
         # An escaped LF followed by CR is one LFCR shebang terminator.
-        if terminator_end < len(view) and view[terminator_end] == ord("\r"):
+        if (\n            escaped == esc_lf\n            and terminator_end < len(view)\n            and view[terminator_end] == ord("\r")\n        ):
             terminator_end += 1
     elif real_nl >= 0:
         prefix_end = real_nl
@@ -325,7 +325,7 @@ def _normalize_function_lib_code_text(text: str) -> str:
 
     if escaped >= 0:
         terminator_end = escaped + (4 if escaped == esc_crlf else 2)
-        if terminator_end < len(text) and text[terminator_end] == "\r":
+        if (\n            escaped == esc_lf\n            and terminator_end < len(text)\n            and text[terminator_end] == "\r"\n        ):
             terminator_end += 1
         return text[:escaped] + "\n" + text[terminator_end:]
 
