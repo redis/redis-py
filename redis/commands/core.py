@@ -12285,9 +12285,10 @@ class FunctionCommands:
         Load a library to Redis.
 
         :param code: the source code. It must include a shebang that provides
-            metadata about the library (``#!lua name=<lib>``). Leading and
-            trailing whitespace is stripped so multi-line strings work. If the
-            code is a single line that uses a redis-cli-style ``\\n`` escape
+            metadata about the library (``#!lua name=<lib>``). Leading
+            whitespace is stripped so multi-line strings work; trailing
+            whitespace is preserved for exact source round trips. If the code
+            is a single line that uses a redis-cli-style ``\\n`` escape
             after the shebang instead of a real newline, that first terminator
             escape is expanded so Redis can parse library metadata. Later
             ``\\n`` sequences in the body (e.g. Lua string escapes) are left
