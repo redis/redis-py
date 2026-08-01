@@ -211,8 +211,8 @@ def normalize_function_lib_code(code: Any) -> Any:
     real newline after the shebang line. Callers often copy examples from
     redis-cli / the docs that differ from what the server accepts:
 
-    - Multi-line triple-quoted strings with a leading newline or indentation
-      before ``#!`` (server error: ``Missing library metadata``).
+    - Multi-line triple-quoted strings with leading whitespace before ``#!``
+      (server error: ``Missing library metadata``).
     - redis-cli double-quoted style where the shebang separator is a
       two-character ``\\n`` escape rather than a real newline (server error:
       ``Invalid library metadata``).
@@ -220,17 +220,15 @@ def normalize_function_lib_code(code: Any) -> Any:
 
     Expands only the first shebang-line terminator escape, chosen by earliest
     position among a real newline and redis-cli-style ``\\r\\n`` / ``\\n``.
-    Later escapes (e.g. Lua string ``\\n``) are left unchanged. Binary payloads
-    are normalized via latin-1 so non-UTF-8 body bytes still get framing fixes.
+    Later escapes (e.g. Lua string ``\\n``) and trailing source whitespace are
+    left unchanged.
 
-    Returns the same type as ``code`` for ``str`` / ``bytes`` / ``bytearray``;
-    other types are returned unchanged so the encoder can raise as usual.
+    Returns the same type as ``code`` for ``str`` / ``bytes`` /
+    ``bytearray``; other types are returned unchanged so the encoder can raise
+    as usual. Unchanged binary inputs are returned by identity.
     """
     if isinstance(code, (bytes, bytearray, memoryview)):
-        # latin-1 is a 1:1 byte mapping; do not require UTF-8 for framing.
-        raw = bytes(code)
-        normalized = _normalize_function_lib_code_text(raw.decode("latin-1"))
-        return normalized.encode("latin-1")
+        return _normalize_function_lib_code_binary(code)
 
     if isinstance(code, str):
         return _normalize_function_lib_code_text(code)
@@ -238,13 +236,81 @@ def normalize_function_lib_code(code: Any) -> Any:
     return code
 
 
+def _find_binary(data: bytes | bytearray | memoryview, needle: bytes, start: int) -> int:
+    if isinstance(data, (bytes, bytearray)):
+        return data.find(needle, start)
+
+    view = data.cast("B")
+    stop = len(view) - len(needle) + 1
+    for index in range(start, max(start, stop)):
+        if all(view[index + offset] == byte for offset, byte in enumerate(needle)):
+            return index
+    return -1
+
+
+def _normalize_function_lib_code_binary(
+    code: bytes | bytearray | memoryview,
+) -> bytes | bytearray | memoryview:
+    view = code if isinstance(code, (bytes, bytearray)) else code.cast("B")
+    start = 0
+    whitespace = b" \t\n\r\v\f"
+    while start < len(view) and view[start] in whitespace:
+        start += 1
+
+    real_nl = _find_binary(view, b"\n", start)
+    esc_crlf = _find_binary(view, b"\\r\\n", start)
+    esc_lf = _find_binary(view, b"\\n", start)
+    escaped = min((pos for pos in (esc_crlf, esc_lf) if pos >= 0), default=-1)
+    escape_wins = escaped >= 0 and (real_nl < 0 or escaped < real_nl)
+
+    # Preserve the original object when no framing change is needed. This keeps
+    # large bytes-like payloads on a no-copy path.
+    if (
+        start == 0
+        and _find_binary(view, b"\r", start) < 0
+        and not escape_wins
+    ):
+        return code
+
+    normalized = bytes(view[start:])
+    normalized = normalized.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    normalized = _expand_first_shebang_escape_binary(normalized)
+
+    if isinstance(code, bytearray):
+        return bytearray(normalized)
+    return normalized
+
+
+def _expand_first_shebang_escape_binary(data: bytes) -> bytes:
+    real_nl = data.find(b"\n")
+    esc_crlf = data.find(b"\\r\\n")
+    esc_lf = data.find(b"\\n")
+
+    candidates: List[tuple[int, int]] = []
+    if real_nl >= 0:
+        candidates.append((real_nl, 0))
+    if esc_crlf >= 0:
+        candidates.append((esc_crlf, 4))
+    if esc_lf >= 0:
+        candidates.append((esc_lf, 2))
+
+    if not candidates:
+        return data
+
+    pos, length = min(candidates, key=lambda item: item[0])
+    if length == 0:
+        return data
+    return data[:pos] + b"\n" + data[pos + length :]
+
+
 def _normalize_function_lib_code_text(text: str) -> str:
-    # Drop leading/trailing whitespace so the shebang is at offset 0.
-    text = text.strip()
+    # Only leading whitespace prevents Redis from finding the shebang. Preserve
+    # the right-hand side exactly for FUNCTION LIST WITHCODE round trips.
+    text = text.lstrip()
     # Normalize common line-ending variants to LF (what Redis's parser scans for).
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     # End of the shebang line is the earliest of: a real newline, or a
-    # redis-cli-style "\r\n" / "\n" escape. Expand that escape when it wins
+    # redis-cli-style "\\r\\n" / "\\n" escape. Expand that escape when it wins
     # (even if real newlines appear later in a multiline Lua body).
     real_nl = text.find("\n")
     esc_crlf = text.find("\\r\\n")
