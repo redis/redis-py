@@ -201,3 +201,48 @@ def at_most_one_value_set(iterable: Iterable[Any]):
     """
     values = (bool(x) for x in iterable)
     return sum(values) <= 1
+
+
+def normalize_function_lib_code(code: Any) -> Any:
+    """
+    Normalize Redis function library source for FUNCTION LOAD.
+
+    Redis requires the payload to start with a shebang (``#!``) and to contain a
+    real newline after the shebang line. Callers often copy examples from
+    redis-cli / the docs that differ from what the server accepts:
+
+    - Multi-line triple-quoted strings with a leading newline or indentation
+      before ``#!`` (server error: ``Missing library metadata``).
+    - redis-cli double-quoted style where ``\\n`` is a two-character escape
+      rather than a real newline (server error: ``Invalid library metadata``).
+    - Windows CRLF (``\\r\\n``) line endings.
+
+    Returns the same type as ``code`` for ``str`` / ``bytes`` / ``bytearray``;
+    other types are returned unchanged so the encoder can raise as usual.
+    """
+    if isinstance(code, (bytes, bytearray, memoryview)):
+        raw = bytes(code)
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return code
+        normalized = _normalize_function_lib_code_text(text)
+        return normalized.encode("utf-8")
+
+    if isinstance(code, str):
+        return _normalize_function_lib_code_text(code)
+
+    return code
+
+
+def _normalize_function_lib_code_text(text: str) -> str:
+    # Drop leading/trailing whitespace so the shebang is at offset 0.
+    text = text.strip()
+    # Normalize common line-ending variants to LF (what Redis's parser scans for).
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    # Expand redis-cli-style "\n" escapes only when no real newline is present,
+    # so multi-line Lua that intentionally contains a backslash-n sequence is
+    # left alone.
+    if "\n" not in text and "\\n" in text:
+        text = text.replace("\\n", "\n")
+    return text

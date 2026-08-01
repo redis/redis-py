@@ -32,6 +32,30 @@ class TestFunction:
         with pytest.raises(ResponseError):
             r.function_load(f"#!{engine} name={lib2} \n {function}")
 
+    @pytest.mark.onlynoncluster
+    def test_function_load_strips_leading_whitespace(self, r):
+        # https://github.com/redis/redis-py/issues/3307
+        code = f"""
+#!{engine} name={lib}
+{function}
+"""
+        assert b"mylib" == r.function_load(code)
+        assert r.fcall("myfunc", 0, "hello") == b"hello"
+
+    @pytest.mark.onlynoncluster
+    def test_function_load_redis_cli_style_escapes(self, r):
+        # Match redis-cli / docs: "#!lua name=mylib \\n <body>" with literal \\n
+        code = (
+            f"#!{engine} name={lib} \\n "
+            "redis.register_function('myfunc', function(keys, args) "
+            "return args[1] end)"
+        )
+        # Ensure we are testing the two-character escape form, not a real newline
+        assert "\n" not in code
+        assert "\\n" in code
+        assert b"mylib" == r.function_load(code)
+        assert r.fcall("myfunc", 0, "hello") == b"hello"
+
     def test_function_delete(self, r):
         r.function_load(f"#!{engine} name={lib} \n {set_function}")
         with pytest.raises(ResponseError):

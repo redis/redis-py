@@ -104,7 +104,7 @@ from ..observability.recorder import (
     record_pubsub_message,
     record_streaming_lag_from_response,
 )
-from .helpers import at_most_one_value_set, list_or_args
+from .helpers import at_most_one_value_set, list_or_args, normalize_function_lib_code
 
 if TYPE_CHECKING:
     import redis.asyncio.client
@@ -12283,16 +12283,21 @@ class FunctionCommands:
     ) | Awaitable[bytes | str]:
         """
         Load a library to Redis.
-        :param code: the source code (must start with
-        Shebang statement that provides a metadata about the library)
+
+        :param code: the source code. It must include a shebang that provides
+            metadata about the library (``#!lua name=<lib>``). Leading and
+            trailing whitespace is stripped so multi-line strings work. If the
+            code is a single line that uses redis-cli-style ``\\n`` escapes
+            instead of real newlines, those escapes are expanded so behavior
+            matches redis-cli / the FUNCTION LOAD docs examples.
         :param replace: changes the behavior to overwrite the existing library
-        with the new contents.
+            with the new contents.
         Return the library name that was loaded.
 
         For more information, see https://redis.io/commands/function-load
         """
         pieces = ["REPLACE"] if replace else []
-        pieces.append(code)
+        pieces.append(normalize_function_lib_code(code))
         return self.execute_command("FUNCTION LOAD", *pieces)
 
     @overload
