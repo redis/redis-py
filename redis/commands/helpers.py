@@ -1,5 +1,6 @@
 import copy
 import random
+import re
 import string
 from typing import (
     Any,
@@ -236,44 +237,54 @@ def normalize_function_lib_code(code: Any) -> Any:
     return code
 
 
-def _find_binary(data: bytes | bytearray | memoryview, needle: bytes, start: int) -> int:
-    if isinstance(data, (bytes, bytearray)):
-        return data.find(needle, start)
-
-    view = data.cast("B")
-    stop = len(view) - len(needle) + 1
-    for index in range(start, max(start, stop)):
-        if all(view[index + offset] == byte for offset, byte in enumerate(needle)):
-            return index
-    return -1
-
-
 def _normalize_function_lib_code_binary(
     code: bytes | bytearray | memoryview,
 ) -> bytes | bytearray | memoryview:
-    view = code if isinstance(code, (bytes, bytearray)) else code.cast("B")
+    if isinstance(code, memoryview):
+        try:
+            view = code.cast("B")
+        except TypeError:
+            # Strided/non-contiguous views cannot be cast. Match the command
+            # encoder's behavior and copy only this unsupported view shape.
+            code = bytes(code)
+            view = searchable = code
+        else:
+            # A full view over bytes/bytearray can use the backing object's
+            # C-level find without copying. Copy sliced/foreign views once.
+            backing = view.obj
+            if isinstance(backing, (bytes, bytearray)) and view.nbytes == len(backing):
+                searchable = backing
+            else:
+                code = bytes(view)
+                view = code
+                searchable = code
+    else:
+        view = searchable = code
+
+    if isinstance(code, memoryview):
+        # Set only by the full-view branch above.
+        searchable = backing
+
     start = 0
     whitespace = b" \t\n\r\v\f"
     while start < len(view) and view[start] in whitespace:
         start += 1
 
-    real_nl = _find_binary(view, b"\n", start)
-    esc_crlf = _find_binary(view, b"\\r\\n", start)
-    esc_lf = _find_binary(view, b"\\n", start)
+    real_lf = searchable.find(b"\n", start)
+    real_cr = searchable.find(b"\r", start)
+    real_nl = min((pos for pos in (real_lf, real_cr) if pos >= 0), default=-1)
+    header_end = real_nl if real_nl >= 0 else len(searchable)
+    esc_crlf = searchable.find(b"\\r\\n", start, header_end)
+    esc_lf = searchable.find(b"\\n", start, header_end)
     escaped = min((pos for pos in (esc_crlf, esc_lf) if pos >= 0), default=-1)
-    escape_wins = escaped >= 0 and (real_nl < 0 or escaped < real_nl)
 
-    # Preserve the original object when no framing change is needed. This keeps
-    # large bytes-like payloads on a no-copy path.
-    if (
-        start == 0
-        and _find_binary(view, b"\r", start) < 0
-        and not escape_wins
-    ):
+    # Preserve a full bytes-like input by identity when its framing is already
+    # normalized. Searches above use bytes/bytearray.find, including for views.
+    if start == 0 and real_cr < 0 and escaped < 0:
         return code
 
     normalized = bytes(view[start:])
-    normalized = normalized.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    normalized = re.sub(br"\r\n|\n\r|\r", b"\n", normalized)
     normalized = _expand_first_shebang_escape_binary(normalized)
 
     if isinstance(code, bytearray):
@@ -283,51 +294,31 @@ def _normalize_function_lib_code_binary(
 
 def _expand_first_shebang_escape_binary(data: bytes) -> bytes:
     real_nl = data.find(b"\n")
-    esc_crlf = data.find(b"\\r\\n")
-    esc_lf = data.find(b"\\n")
-
-    candidates: List[tuple[int, int]] = []
-    if real_nl >= 0:
-        candidates.append((real_nl, 0))
-    if esc_crlf >= 0:
-        candidates.append((esc_crlf, 4))
-    if esc_lf >= 0:
-        candidates.append((esc_lf, 2))
-
-    if not candidates:
+    header_end = real_nl if real_nl >= 0 else len(data)
+    esc_crlf = data.find(b"\\r\\n", 0, header_end)
+    esc_lf = data.find(b"\\n", 0, header_end)
+    escaped = min((pos for pos in (esc_crlf, esc_lf) if pos >= 0), default=-1)
+    if escaped < 0:
         return data
 
-    pos, length = min(candidates, key=lambda item: item[0])
-    if length == 0:
-        return data
-    return data[:pos] + b"\n" + data[pos + length :]
+    length = 4 if escaped == esc_crlf else 2
+    return data[:escaped] + b"\n" + data[escaped + length :]
 
 
 def _normalize_function_lib_code_text(text: str) -> str:
     # Only leading whitespace prevents Redis from finding the shebang. Preserve
     # the right-hand side exactly for FUNCTION LIST WITHCODE round trips.
     text = text.lstrip()
-    # Normalize common line-ending variants to LF (what Redis's parser scans for).
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    # End of the shebang line is the earliest of: a real newline, or a
-    # redis-cli-style "\\r\\n" / "\\n" escape. Expand that escape when it wins
-    # (even if real newlines appear later in a multiline Lua body).
+    # Lua treats CRLF and LFCR as one newline; normalize both as a unit.
+    text = re.sub(r"\r\n|\n\r|\r", "\n", text)
+
     real_nl = text.find("\n")
-    esc_crlf = text.find("\\r\\n")
-    esc_lf = text.find("\\n")
-
-    candidates: List[tuple[int, str, int]] = []
-    if real_nl >= 0:
-        candidates.append((real_nl, "real", 1))
-    if esc_crlf >= 0:
-        candidates.append((esc_crlf, "esc_crlf", 4))
-    if esc_lf >= 0:
-        candidates.append((esc_lf, "esc_lf", 2))
-
-    if not candidates:
+    header_end = real_nl if real_nl >= 0 else len(text)
+    esc_crlf = text.find("\\r\\n", 0, header_end)
+    esc_lf = text.find("\\n", 0, header_end)
+    escaped = min((pos for pos in (esc_crlf, esc_lf) if pos >= 0), default=-1)
+    if escaped < 0:
         return text
 
-    pos, kind, length = min(candidates, key=lambda item: item[0])
-    if kind == "real":
-        return text
-    return text[:pos] + "\n" + text[pos + length :]
+    length = 4 if escaped == esc_crlf else 2
+    return text[:escaped] + "\n" + text[escaped + length :]
