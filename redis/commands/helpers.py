@@ -213,9 +213,14 @@ def normalize_function_lib_code(code: Any) -> Any:
 
     - Multi-line triple-quoted strings with a leading newline or indentation
       before ``#!`` (server error: ``Missing library metadata``).
-    - redis-cli double-quoted style where ``\\n`` is a two-character escape
-      rather than a real newline (server error: ``Invalid library metadata``).
+    - redis-cli double-quoted style where the shebang separator is a
+      two-character ``\\n`` escape rather than a real newline (server error:
+      ``Invalid library metadata``).
     - Windows CRLF (``\\r\\n``) line endings.
+
+    Only the first shebang-line terminator escape is expanded when the payload
+    has no real newline. Later ``\\n`` sequences (e.g. Lua string escapes) are
+    left unchanged so function source is not rewritten.
 
     Returns the same type as ``code`` for ``str`` / ``bytes`` / ``bytearray``;
     other types are returned unchanged so the encoder can raise as usual.
@@ -240,9 +245,13 @@ def _normalize_function_lib_code_text(text: str) -> str:
     text = text.strip()
     # Normalize common line-ending variants to LF (what Redis's parser scans for).
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    # Expand redis-cli-style "\n" escapes only when no real newline is present,
-    # so multi-line Lua that intentionally contains a backslash-n sequence is
-    # left alone.
-    if "\n" not in text and "\\n" in text:
-        text = text.replace("\\n", "\n")
+    # When the payload is still a single physical line, expand only the first
+    # redis-cli-style newline escape so Redis can parse library metadata.
+    # Expanding every "\\n" would rewrite intentional Lua escapes such as
+    # return 'a\\nb' in single-line payloads (Codex review on #4233).
+    if "\n" not in text:
+        if "\\r\\n" in text:
+            text = text.replace("\\r\\n", "\n", 1)
+        elif "\\n" in text:
+            text = text.replace("\\n", "\n", 1)
     return text

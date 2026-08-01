@@ -66,12 +66,16 @@ redis.register_function('myfunc', function(keys, args) return args[1] end)
 @pytest.mark.fixed_client
 def test_normalize_function_lib_code_expands_redis_cli_escapes():
     # redis-cli unescapes "\n" inside double quotes; raw / double-escaped
-    # Python strings do not, so expand when no real newline is present.
+    # Python strings do not, so expand the shebang terminator when no real
+    # newline is present.
     code = r"#!lua name=mylib \n redis.register_function('myfunc', function(keys, args) return args[1] end)"
     normalized = normalize_function_lib_code(code)
     assert "\n" in normalized
     assert "\\n" not in normalized
     assert normalized.startswith("#!lua name=mylib")
+    assert normalized.split("\n", 1)[1].lstrip().startswith(
+        "redis.register_function"
+    )
 
 
 @pytest.mark.fixed_client
@@ -88,6 +92,31 @@ def test_normalize_function_lib_code_preserves_multiline_backslash_n():
     # that may appear in Lua source.
     code = "#!lua name=mylib\nreturn 'a\\nb'"
     assert normalize_function_lib_code(code) == code
+
+
+@pytest.mark.fixed_client
+def test_normalize_function_lib_code_expands_only_shebang_terminator():
+    # Single-line redis-cli-style payloads may also contain intentional
+    # backslash-n in Lua source; only the first escape (shebang separator)
+    # should become a real newline.
+    code = r"#!lua name=mylib \n redis.register_function('f', function() return 'a\nb' end)"
+    normalized = normalize_function_lib_code(code)
+    assert normalized.startswith("#!lua name=mylib\n") or normalized.startswith(
+        "#!lua name=mylib \n"
+    )
+    # Exactly one real newline (the shebang terminator).
+    assert normalized.count("\n") == 1
+    # Body Lua escape preserved as two characters.
+    assert "return 'a\\nb'" in normalized
+    assert "\\n" in normalized.split("\n", 1)[1]
+
+
+@pytest.mark.fixed_client
+def test_normalize_function_lib_code_expands_first_crlf_escape():
+    code = r"#!lua name=mylib \r\n return 'a\nb'"
+    normalized = normalize_function_lib_code(code)
+    assert normalized.count("\n") == 1
+    assert "return 'a\\nb'" in normalized
 
 
 @pytest.mark.fixed_client
