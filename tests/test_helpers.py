@@ -195,6 +195,15 @@ def test_normalize_function_lib_code_expands_terminator_before_lfcr():
 
 
 @pytest.mark.fixed_client
+def test_normalize_function_lib_code_preserves_body_cr_after_escaped_crlf():
+    text = r"#!lua name=mylib \\r\\n" + "\rreturn 1"
+    expected = "#!lua name=mylib \n\rreturn 1"
+
+    assert normalize_function_lib_code(text) == expected
+    assert normalize_function_lib_code(text.encode()) == expected.encode()
+
+
+@pytest.mark.fixed_client
 def test_normalize_function_lib_code_preserves_trailing_whitespace():
     text = "#!lua name=mylib\nreturn 1\n \t"
     binary = text.encode()
