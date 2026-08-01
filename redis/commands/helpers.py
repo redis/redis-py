@@ -1,6 +1,5 @@
 import copy
 import random
-import re
 import string
 from typing import (
     Any,
@@ -217,12 +216,12 @@ def normalize_function_lib_code(code: Any) -> Any:
     - redis-cli double-quoted style where the shebang separator is a
       two-character ``\\n`` escape rather than a real newline (server error:
       ``Invalid library metadata``).
-    - Windows CRLF (``\\r\\n``) line endings.
+    - A shebang terminator using CRLF, LFCR, or lone CR line endings.
 
     Expands only the first shebang-line terminator escape, chosen by earliest
     position among a real newline and redis-cli-style ``\\r\\n`` / ``\\n``.
-    Later escapes (e.g. Lua string ``\\n``) and trailing source whitespace are
-    left unchanged.
+    The Lua body, including its physical line endings and escapes, is left
+    unchanged for exact source round trips.
 
     Returns the same type as ``code`` for ``str`` / ``bytes`` /
     ``bytearray``; other types are returned unchanged so the encoder can raise
@@ -237,6 +236,23 @@ def normalize_function_lib_code(code: Any) -> Any:
     return code
 
 
+def _find_function_lib_bytes(
+    data: bytes | bytearray | memoryview,
+    pattern: bytes,
+    start: int = 0,
+    end: int | None = None,
+) -> int:
+    if isinstance(data, (bytes, bytearray)):
+        return data.find(pattern, start, len(data) if end is None else end)
+
+    stop = len(data) if end is None else end
+    last = stop - len(pattern)
+    for pos in range(start, last + 1):
+        if all(data[pos + offset] == value for offset, value in enumerate(pattern)):
+            return pos
+    return -1
+
+
 def _normalize_function_lib_code_binary(
     code: bytes | bytearray | memoryview,
 ) -> bytes | bytearray | memoryview:
@@ -247,47 +263,48 @@ def _normalize_function_lib_code_binary(
             # Strided/non-contiguous views cannot be cast. Match the command
             # encoder's behavior and copy only this unsupported view shape.
             code = bytes(code)
-            view = searchable = code
-        else:
-            # A full view over bytes/bytearray can use the backing object's
-            # C-level find without copying. Copy sliced/foreign views once.
-            backing = view.obj
-            if isinstance(backing, (bytes, bytearray)) and view.nbytes == len(backing):
-                searchable = backing
-            else:
-                code = bytes(view)
-                view = code
-                searchable = code
+            view = code
     else:
-        view = searchable = code
+        view = code
 
     start = 0
     whitespace = b" \t\n\r\v\f"
     while start < len(view) and view[start] in whitespace:
         start += 1
 
-    real_lf = searchable.find(b"\n", start)
-    real_cr = searchable.find(b"\r", start)
+    real_lf = _find_function_lib_bytes(view, b"\n", start)
+    real_cr = _find_function_lib_bytes(view, b"\r", start)
     real_nl = min((pos for pos in (real_lf, real_cr) if pos >= 0), default=-1)
-    header_end = real_nl if real_nl >= 0 else len(searchable)
-    esc_crlf = searchable.find(b"\\r\\n", start, header_end)
-    esc_lf = searchable.find(b"\\n", start, header_end)
+    header_end = real_nl if real_nl >= 0 else len(view)
+    esc_crlf = _find_function_lib_bytes(view, b"\\r\\n", start, header_end)
+    esc_lf = _find_function_lib_bytes(view, b"\\n", start, header_end)
     escaped = min((pos for pos in (esc_crlf, esc_lf) if pos >= 0), default=-1)
 
-    # Preserve a full bytes-like input by identity when its framing is already
-    # normalized. Searches above use bytes/bytearray.find, including for views.
-    if start == 0 and real_cr < 0 and escaped < 0:
+    valid_lf = real_lf >= 0 and (real_cr < 0 or real_lf < real_cr)
+    if start == 0 and escaped < 0 and (valid_lf or real_nl < 0):
         return code
 
-    normalized = bytes(view[start:])
     if escaped >= 0:
-        pos = escaped - start
-        length = 4 if escaped == esc_crlf else 2
-        normalized = normalized[:pos] + b"\n" + normalized[pos + length :]
-    # Expand the escaped terminator first so an adjacent CR forms one LFCR
-    # newline and is collapsed as a unit.
-    normalized = re.sub(br"\r\n|\n\r|\r", b"\n", normalized)
+        prefix_end = escaped
+        terminator_end = escaped + (4 if escaped == esc_crlf else 2)
+        # An escaped LF followed by CR is one LFCR shebang terminator.
+        if terminator_end < len(view) and view[terminator_end] == ord("\r"):
+            terminator_end += 1
+    elif real_nl >= 0:
+        prefix_end = real_nl
+        terminator_end = real_nl + 1
+        if terminator_end < len(view) and (
+            (view[real_nl] == ord("\r") and view[terminator_end] == ord("\n"))
+            or (view[real_nl] == ord("\n") and view[terminator_end] == ord("\r"))
+        ):
+            terminator_end += 1
+    else:
+        normalized = bytes(view[start:])
+        return bytearray(normalized) if isinstance(code, bytearray) else normalized
 
+    # Normalize only the shebang terminator. The Lua body is preserved byte-for-byte
+    # for FUNCTION LIST WITHCODE round trips, hashes, and audit comparisons.
+    normalized = bytes(view[start:prefix_end]) + b"\n" + bytes(view[terminator_end:])
     if isinstance(code, bytearray):
         return bytearray(normalized)
     return normalized
@@ -305,10 +322,18 @@ def _normalize_function_lib_code_text(text: str) -> str:
     esc_crlf = text.find("\\r\\n", 0, header_end)
     esc_lf = text.find("\\n", 0, header_end)
     escaped = min((pos for pos in (esc_crlf, esc_lf) if pos >= 0), default=-1)
-    if escaped >= 0:
-        length = 4 if escaped == esc_crlf else 2
-        text = text[:escaped] + "\n" + text[escaped + length :]
 
-    # Lua treats CRLF and LFCR as one newline. Expand first so an escaped
-    # terminator followed by CR is normalized as a single LFCR newline.
-    return re.sub(r"\r\n|\n\r|\r", "\n", text)
+    if escaped >= 0:
+        terminator_end = escaped + (4 if escaped == esc_crlf else 2)
+        if terminator_end < len(text) and text[terminator_end] == "\r":
+            terminator_end += 1
+        return text[:escaped] + "\n" + text[terminator_end:]
+
+    valid_lf = real_lf >= 0 and (real_cr < 0 or real_lf < real_cr)
+    if real_nl < 0 or valid_lf:
+        return text
+
+    terminator_end = real_nl + 1
+    if terminator_end < len(text) and text[terminator_end] == "\n":
+        terminator_end += 1
+    return text[:real_nl] + "\n" + text[terminator_end:]

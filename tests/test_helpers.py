@@ -177,9 +177,9 @@ def test_normalize_function_lib_code_handles_non_contiguous_memoryview():
 
 
 @pytest.mark.fixed_client
-def test_normalize_function_lib_code_normalizes_lfcr_as_one_newline():
-    text = "#!lua name=mylib\nreturn [[a\n\rb]]"
-    expected = "#!lua name=mylib\nreturn [[a\nb]]"
+def test_normalize_function_lib_code_preserves_body_line_endings():
+    text = "#!lua name=mylib\r\nreturn [[a\n\rb\r\nc]]"
+    expected = "#!lua name=mylib\nreturn [[a\n\rb\r\nc]]"
 
     assert normalize_function_lib_code(text) == expected
     assert normalize_function_lib_code(text.encode()) == expected.encode()
@@ -201,6 +201,14 @@ def test_normalize_function_lib_code_preserves_trailing_whitespace():
 
     assert normalize_function_lib_code(text) == text
     assert normalize_function_lib_code(binary) == binary
+
+
+@pytest.mark.fixed_client
+def test_normalize_function_lib_code_sliced_memoryview_no_copy_when_unchanged():
+    source = b"pad#!lua name=mylib\nreturn 1\r\ntail"
+    code = memoryview(source)[3:-4]
+
+    assert normalize_function_lib_code(code) is code
 
 
 @pytest.mark.fixed_client
