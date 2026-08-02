@@ -216,7 +216,7 @@ def normalize_function_lib_code(code: Any) -> Any:
     - redis-cli double-quoted style where the shebang separator is a
       two-character ``\\n`` escape rather than a real newline (server error:
       ``Invalid library metadata``).
-    - A shebang terminator using CRLF, LFCR, or lone CR line endings.
+    - A shebang terminator using CRLF or lone CR line endings.
 
     Expands only the first shebang-line terminator escape, chosen by earliest
     position among a real newline and redis-cli-style ``\\r\\n`` / ``\\n``.
@@ -293,11 +293,7 @@ def _normalize_function_lib_code_binary(
     esc_lf = _find_function_lib_bytes(view, b"\\n", start, header_end)
     escaped = min((pos for pos in (esc_crlf, esc_lf) if pos >= 0), default=-1)
 
-    valid_lf = (
-        real_nl >= 0
-        and view[real_nl] == ord("\n")
-        and (real_nl + 1 == len(view) or view[real_nl + 1] != ord("\r"))
-    )
+    valid_lf = real_nl >= 0 and view[real_nl] == ord("\n")
     if start == 0 and escaped < 0 and (valid_lf or real_nl < 0):
         return code
 
@@ -314,9 +310,10 @@ def _normalize_function_lib_code_binary(
     elif real_nl >= 0:
         prefix_end = real_nl
         terminator_end = real_nl + 1
-        if terminator_end < len(view) and (
-            (view[real_nl] == ord("\r") and view[terminator_end] == ord("\n"))
-            or (view[real_nl] == ord("\n") and view[terminator_end] == ord("\r"))
+        if (
+            view[real_nl] == ord("\r")
+            and terminator_end < len(view)
+            and view[terminator_end] == ord("\n")
         ):
             terminator_end += 1
     else:
@@ -354,18 +351,15 @@ def _normalize_function_lib_code_text(text: str) -> str:
             terminator_end += 1
         return text[:escaped] + "\n" + text[terminator_end:]
 
-    valid_lf = (
-        real_lf >= 0
-        and (real_cr < 0 or real_lf < real_cr)
-        and (real_lf + 1 == len(text) or text[real_lf + 1] != "\r")
-    )
+    valid_lf = real_nl >= 0 and text[real_nl] == "\n"
     if real_nl < 0 or valid_lf:
         return text
 
     terminator_end = real_nl + 1
-    if terminator_end < len(text) and (
-        (text[real_nl] == "\r" and text[terminator_end] == "\n")
-        or (text[real_nl] == "\n" and text[terminator_end] == "\r")
+    if (
+        text[real_nl] == "\r"
+        and terminator_end < len(text)
+        and text[terminator_end] == "\n"
     ):
         terminator_end += 1
     return text[:real_nl] + "\n" + text[terminator_end:]
