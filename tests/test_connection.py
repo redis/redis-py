@@ -24,6 +24,7 @@ from redis.cache import (
     CacheConfig,
     CacheEntry,
     CacheEntryStatus,
+    CacheFactory,
     CacheInterface,
     CacheKey,
     CacheProxy,
@@ -943,6 +944,22 @@ class TestUnitConnectionPool:
         # Cache is wrapped in CacheProxy for observability
         assert isinstance(connection_pool.cache, CacheProxy)
         assert connection_pool.cache._cache == mock_cache
+        connection_pool.disconnect()
+
+    def test_does_not_double_wrap_custom_cache_factory(self):
+        cache = CacheFactory(CacheConfig()).get_cache()
+        cache_factory = mock.Mock()
+        cache_factory.get_cache.return_value = cache
+
+        connection_pool = ConnectionPool(
+            protocol=3,
+            cache_config=CacheConfig(),
+            cache_factory=cache_factory,
+        )
+
+        assert connection_pool.cache is cache
+        assert isinstance(connection_pool.cache, CacheProxy)
+        assert not isinstance(connection_pool.cache._cache, CacheProxy)
         connection_pool.disconnect()
 
     def test_creates_cache_with_given_configuration(self, mock_cache):

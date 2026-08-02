@@ -31,6 +31,7 @@ from redis.cache import (
     CacheEntryStatus,
     CacheFactory,
     CacheKey,
+    CacheProxy,
 )
 from redis.observability.attributes import CSCReason
 from redis.exceptions import ConnectionError, InvalidResponse, RedisError, TimeoutError
@@ -256,7 +257,9 @@ async def test_async_cache_proxy_signals_evicted_in_progress_fill():
 
 
 async def test_blocking_pool_serializes_cache_owner_checks():
-    pool = BlockingConnectionPool(max_connections=1)
+    pool = BlockingConnectionPool(
+        max_connections=1, protocol=3, cache_config=CacheConfig()
+    )
     entered = asyncio.Event()
 
     async def acquire_pool_lock():
@@ -270,6 +273,41 @@ async def test_blocking_pool_serializes_cache_owner_checks():
 
     await task
     await pool.aclose()
+
+
+async def test_blocking_pool_skips_lock_without_cache():
+    pool = BlockingConnectionPool(max_connections=1)
+    entered = asyncio.Event()
+
+    async def acquire_pool_lock():
+        async with pool._maybe_pool_lock():
+            entered.set()
+
+    async with pool._lock:
+        task = asyncio.create_task(acquire_pool_lock())
+        await asyncio.sleep(0)
+        assert entered.is_set() is True
+
+    await task
+    await pool.aclose()
+
+
+async def test_async_connection_pool_does_not_double_wrap_custom_cache_factory():
+    cache = CacheFactory(CacheConfig()).get_cache()
+    cache_factory = mock.Mock()
+    cache_factory.get_cache.return_value = cache
+    pool = ConnectionPool(
+        protocol=3,
+        cache_config=CacheConfig(),
+        cache_factory=cache_factory,
+    )
+
+    try:
+        assert pool.cache is cache
+        assert isinstance(pool.cache, CacheProxy)
+        assert not isinstance(pool.cache._cache, CacheProxy)
+    finally:
+        await pool.aclose()
 
 
 async def test_async_cache_proxy_waits_for_replacement_in_progress_fill():

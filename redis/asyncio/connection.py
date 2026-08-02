@@ -2979,7 +2979,10 @@ class ConnectionPool(
                     raise ValueError("Cache must implement CacheInterface")
                 self.cache = cache
             elif self._cache_factory is not None:
-                self.cache = CacheProxy(self._cache_factory.get_cache())
+                cache = self._cache_factory.get_cache()
+                self.cache = (
+                    cache if isinstance(cache, CacheProxy) else CacheProxy(cache)
+                )
             else:
                 self.cache = CacheFactory(
                     connection_kwargs.get("cache_config")
@@ -3442,7 +3445,10 @@ class BlockingConnectionPool(ConnectionPool):
     @contextlib.asynccontextmanager
     async def _maybe_pool_lock(self) -> AsyncIterator[None]:
         """Serialize pool mutations with cache-owner availability checks."""
-        async with self._lock:
+        if self.cache is not None or self._in_maintenance:
+            async with self._lock:
+                yield
+        else:
             yield
 
     @deprecated_args(
