@@ -116,6 +116,25 @@ async def test_invalid_packed_command_type_error_is_not_connection_error():
     conn._writer = None
 
 
+async def test_invalid_packed_command_attribute_error_is_not_connection_error():
+    class InvalidCommand:
+        def __iter__(self):
+            raise AttributeError("invalid packed command")
+
+    conn = Connection()
+    conn._reader = mock.Mock()
+    conn._writer = mock.Mock()
+    conn._writer.writelines.side_effect = lambda command: list(command)
+    conn.disconnect = mock.AsyncMock()
+
+    with pytest.raises(AttributeError, match="invalid packed command"):
+        await conn.send_packed_command(InvalidCommand(), check_health=False)
+
+    conn.disconnect.assert_awaited_once_with(nowait=True)
+    conn._reader = None
+    conn._writer = None
+
+
 async def test_closed_writer_type_error_is_connection_error():
     conn = Connection()
     conn._reader = mock.Mock()

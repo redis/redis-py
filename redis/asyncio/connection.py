@@ -1150,6 +1150,8 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             writer.writelines(command)
             await writer.drain()
         except AttributeError as error:
+            if str(error) != "'NoneType' object has no attribute 'writelines'":
+                raise
             raise ConnectionError("Connection closed while writing") from error
         except TypeError as error:
             if str(error) != "'NoneType' object is not callable":
