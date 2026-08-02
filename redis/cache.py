@@ -280,6 +280,7 @@ class CacheProxy(CacheInterface):
         is_set = self._cache.set(entry)
 
         if self.config.is_exceeds_max_size(self.size):
+            evicted_entry = next(iter(self.collection.values()))
             # Lazy import to avoid circular dependency
             from redis.observability.recorder import record_csc_eviction
 
@@ -288,6 +289,8 @@ class CacheProxy(CacheInterface):
                 reason=CSCReason.FULL,
             )
             self.eviction_policy.evict_next()
+            if evicted_entry.completion_event is not None:
+                evicted_entry.completion_event.set()
 
         return is_set
 

@@ -1950,20 +1950,9 @@ class AsyncCacheProxyConnection:
             await self._conn.send_command(*args, **kwargs)
             return
 
-        if cached_entry is not None:
+        while cached_entry is not None:
             if cached_entry.status is CacheEntryStatus.IN_PROGRESS:
-                if cached_entry.completion_event is not None:
-                    await cached_entry.completion_event.wait()
-
-                async with self._cache_lock:
-                    if self._cache.get(self._current_command_cache_key) is not None:
-                        return
-            else:
-                if await self._refresh_cached_entry(cached_entry):
-                    async with self._cache_lock:
-                        if self._cache.get(self._current_command_cache_key) is not None:
-                            return
-                else:
+                if cached_entry.completion_event is None:
                     async with self._cache_lock:
                         if (
                             self._cache.get(self._current_command_cache_key)
@@ -1972,6 +1961,29 @@ class AsyncCacheProxyConnection:
                             self._cache.delete_by_cache_keys(
                                 [self._current_command_cache_key]
                             )
+                    break
+
+                await cached_entry.completion_event.wait()
+                async with self._cache_lock:
+                    cached_entry = self._cache.get(self._current_command_cache_key)
+                if (
+                    cached_entry is not None
+                    and cached_entry.status is CacheEntryStatus.VALID
+                ):
+                    return
+                continue
+
+            if await self._refresh_cached_entry(cached_entry):
+                async with self._cache_lock:
+                    if self._cache.get(self._current_command_cache_key) is not None:
+                        return
+            else:
+                async with self._cache_lock:
+                    if self._cache.get(self._current_command_cache_key) is cached_entry:
+                        self._cache.delete_by_cache_keys(
+                            [self._current_command_cache_key]
+                        )
+            break
 
         cache_key = self._current_command_cache_key
         cache_entry = CacheEntry(
@@ -3429,10 +3441,8 @@ class BlockingConnectionPool(ConnectionPool):
 
     @contextlib.asynccontextmanager
     async def _maybe_pool_lock(self) -> AsyncIterator[None]:
-        if self._in_maintenance:
-            async with self._lock:
-                yield
-        else:
+        """Serialize pool mutations with cache-owner availability checks."""
+        async with self._lock:
             yield
 
     @deprecated_args(

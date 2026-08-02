@@ -15,7 +15,7 @@ from redis._parsers import (
     _AsyncRESPBase,
 )
 from redis._parsers.hiredis import NOT_ENOUGH_DATA
-from redis.asyncio import ConnectionPool, Redis
+from redis.asyncio import BlockingConnectionPool, ConnectionPool, Redis
 from redis.asyncio.connection import (
     AsyncCacheProxyConnection,
     Connection,
@@ -25,7 +25,13 @@ from redis.asyncio.connection import (
 )
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from redis.cache import CacheConfig, CacheFactory
+from redis.cache import (
+    CacheConfig,
+    CacheEntry,
+    CacheEntryStatus,
+    CacheFactory,
+    CacheKey,
+)
 from redis.observability.attributes import CSCReason
 from redis.exceptions import ConnectionError, InvalidResponse, RedisError, TimeoutError
 from redis.utils import HIREDIS_AVAILABLE
@@ -223,6 +229,89 @@ async def test_async_cache_proxy_retries_after_in_flight_fill_fails():
 
     await waiting_send
     second_connection.send_command.assert_awaited_once_with("GET", "key", keys=("key",))
+
+
+async def test_async_cache_proxy_signals_evicted_in_progress_fill():
+    cache = CacheFactory(CacheConfig(max_size=1)).get_cache()
+    first_event = asyncio.Event()
+    first_entry = CacheEntry(
+        cache_key=CacheKey(command="GET", redis_keys=("first",), redis_args=()),
+        cache_value=b"foo",
+        status=CacheEntryStatus.IN_PROGRESS,
+        connection_ref=mock.Mock(),
+        completion_event=first_event,
+    )
+    second_entry = CacheEntry(
+        cache_key=CacheKey(command="GET", redis_keys=("second",), redis_args=()),
+        cache_value=b"foo",
+        status=CacheEntryStatus.IN_PROGRESS,
+        connection_ref=mock.Mock(),
+        completion_event=asyncio.Event(),
+    )
+
+    cache.set(first_entry)
+    cache.set(second_entry)
+
+    assert first_event.is_set()
+
+
+async def test_blocking_pool_serializes_cache_owner_checks():
+    pool = BlockingConnectionPool(max_connections=1)
+    entered = asyncio.Event()
+
+    async def acquire_pool_lock():
+        async with pool._maybe_pool_lock():
+            entered.set()
+
+    async with pool._lock:
+        task = asyncio.create_task(acquire_pool_lock())
+        await asyncio.sleep(0)
+        assert entered.is_set() is False
+
+    await task
+    await pool.aclose()
+
+
+async def test_async_cache_proxy_waits_for_replacement_in_progress_fill():
+    connection = mock.Mock()
+    connection.can_read = mock.AsyncMock(return_value=False)
+    connection.send_command = mock.AsyncMock()
+    cache = CacheFactory(CacheConfig()).get_cache()
+    proxy = AsyncCacheProxyConnection(connection, cache, asyncio.Lock())
+    replacement_event = asyncio.Event()
+    replacement_entry = CacheEntry(
+        cache_key=CacheKey(
+            command="GET", redis_keys=("key",), redis_args=("GET", "key")
+        ),
+        cache_value=b"replacement",
+        status=CacheEntryStatus.IN_PROGRESS,
+        connection_ref=connection,
+        completion_event=replacement_event,
+    )
+    initial_event = mock.Mock()
+
+    async def install_replacement():
+        cache.set(replacement_entry)
+
+    initial_event.wait = mock.AsyncMock(side_effect=install_replacement)
+    initial_entry = CacheEntry(
+        cache_key=replacement_entry.cache_key,
+        cache_value=b"foo",
+        status=CacheEntryStatus.IN_PROGRESS,
+        connection_ref=connection,
+        completion_event=initial_event,
+    )
+    cache.set(initial_entry)
+
+    waiting_send = asyncio.create_task(proxy.send_command("GET", "key", keys=("key",)))
+    await asyncio.sleep(0)
+
+    assert waiting_send.done() is False
+    replacement_entry.status = CacheEntryStatus.VALID
+    replacement_event.set()
+    await waiting_send
+    assert await proxy.read_response() == b"replacement"
+    connection.send_command.assert_not_awaited()
 
 
 async def test_async_cache_proxy_records_invalidation_evictions():
