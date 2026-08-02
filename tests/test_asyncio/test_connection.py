@@ -116,6 +116,21 @@ async def test_invalid_packed_command_type_error_is_not_connection_error():
     conn._writer = None
 
 
+async def test_closed_writer_type_error_is_connection_error():
+    conn = Connection()
+    conn._reader = mock.Mock()
+    conn._writer = mock.Mock()
+    conn._writer.writelines.side_effect = TypeError("'NoneType' object is not callable")
+    conn.disconnect = mock.AsyncMock()
+
+    with pytest.raises(ConnectionError, match="Connection closed while writing"):
+        await conn.send_packed_command([b"PING\r\n"], check_health=False)
+
+    conn.disconnect.assert_awaited_once_with(nowait=True)
+    conn._reader = None
+    conn._writer = None
+
+
 async def test_closed_reader_during_invalidation_processing_is_connection_error():
     conn = Connection()
     conn._reader = None

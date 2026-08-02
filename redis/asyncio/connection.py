@@ -1151,6 +1151,10 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             await writer.drain()
         except AttributeError as error:
             raise ConnectionError("Connection closed while writing") from error
+        except TypeError as error:
+            if str(error) != "'NoneType' object is not callable":
+                raise
+            raise ConnectionError("Connection closed while writing") from error
 
     async def send_packed_command(
         self, command: Union[bytes, str, Iterable[bytes]], check_health: bool = True
