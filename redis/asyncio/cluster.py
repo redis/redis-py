@@ -1698,6 +1698,10 @@ class ClusterNode:
                 await self._connection_available_event.wait()
                 self._connection_available_event.clear()
 
+    def _connection_cleanup_done(self, task: asyncio.Task) -> None:
+        self._background_tasks.discard(task)
+        self._connection_available_event.set()
+
     async def disconnect_if_needed(self, connection: Connection) -> None:
         """
         Disconnect a connection if it's marked for reconnect.
@@ -1716,7 +1720,7 @@ class ClusterNode:
         if connection.should_reconnect():
             task = asyncio.create_task(self._disconnect_and_release(connection))
             self._background_tasks.add(task)
-            task.add_done_callback(self._background_tasks.discard)
+            task.add_done_callback(self._connection_cleanup_done)
             return
         self._free.append(connection)
         self._connection_available_event.set()
@@ -1734,11 +1738,9 @@ class ClusterNode:
                 self._connections.remove(connection)
             except ValueError:
                 pass
-            self._connection_available_event.set()
             return
 
         self._free.append(connection)
-        self._connection_available_event.set()
 
     def get_encoder(self) -> Encoder:
         """Return an :class:`Encoder` derived from this node's connection kwargs."""
