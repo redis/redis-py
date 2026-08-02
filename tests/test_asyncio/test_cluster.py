@@ -3460,6 +3460,37 @@ class TestClusterNodeConnectionHandling:
         allow_second_disconnect.set()
         await asyncio.gather(*node._background_tasks)
 
+    async def test_acquire_connection_async_rechecks_completed_cleanup(self) -> None:
+        node = ClusterNode(default_host, 7000, max_connections=1)
+        connection = mock.AsyncMock(spec=Connection)
+        connection.is_connected = False
+        connection.reconnect = True
+        connection.should_reconnect.return_value = True
+        node._connections.append(connection)
+
+        disconnect_started = asyncio.Event()
+        allow_disconnect = asyncio.Event()
+
+        async def disconnect() -> None:
+            disconnect_started.set()
+            await allow_disconnect.wait()
+            connection.reconnect = False
+
+        connection.disconnect.side_effect = disconnect
+        node.release(connection)
+        await disconnect_started.wait()
+
+        first_waiter = asyncio.create_task(node.acquire_connection_async())
+        second_waiter = asyncio.create_task(node.acquire_connection_async())
+        await asyncio.sleep(0)
+
+        allow_disconnect.set()
+        assert await asyncio.wait_for(first_waiter, timeout=1) is connection
+        with pytest.raises(MaxConnectionsError):
+            await asyncio.wait_for(second_waiter, timeout=1)
+
+        await asyncio.gather(*node._background_tasks)
+
     async def test_acquire_connection_async_wakes_on_normal_release(self) -> None:
         node = ClusterNode(default_host, 7000, max_connections=2)
         reconnecting_connection = mock.AsyncMock(spec=Connection)

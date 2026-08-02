@@ -1687,8 +1687,13 @@ class ClusterNode:
                 self._connection_available_event.clear()
                 return connection
             except MaxConnectionsError:
-                pending_cleanup = tuple(self._background_tasks)
+                pending_cleanup = tuple(
+                    task for task in self._background_tasks if not task.done()
+                )
                 if not pending_cleanup:
+                    if self._background_tasks:
+                        self._background_tasks.clear()
+                        continue
                     raise
                 await self._connection_available_event.wait()
                 self._connection_available_event.clear()
