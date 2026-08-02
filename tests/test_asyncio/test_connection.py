@@ -256,6 +256,22 @@ async def test_client_setinfo_skipped_with_explicit_none(connection_kwargs):
     conn.read_response.assert_not_awaited()
 
 
+async def test_connect_check_health_timeout_is_connection_error():
+    conn = Connection(protocol=3, driver_info=None)
+    conn._connect = mock.AsyncMock()
+    conn._parser.on_connect = mock.Mock()
+    conn.send_command = mock.AsyncMock()
+    conn.read_response = mock.AsyncMock(
+        side_effect=TimeoutError("Timeout reading from localhost:6379")
+    )
+    conn.disconnect = mock.AsyncMock()
+
+    with pytest.raises(ConnectionError, match="connection health check"):
+        await conn.connect_check_health(retry_socket_connect=False)
+
+    conn.disconnect.assert_awaited_once_with()
+
+
 @pytest.mark.onlynoncluster
 async def test_invalid_response(create_redis):
     r = await create_redis(single_connection_client=True)

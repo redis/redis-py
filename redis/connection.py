@@ -1084,6 +1084,11 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             else:
                 # Use the passed function redis_connect_func
                 self.redis_connect_func(self)
+        except TimeoutError as error:
+            self.disconnect()
+            raise ConnectionError(
+                f"Timeout during connection health check to {self._host_error()}"
+            ) from error
         except RedisError:
             # clean up after any error in on_connect
             self.disconnect()

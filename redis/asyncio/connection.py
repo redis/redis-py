@@ -888,6 +888,11 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                     if asyncio.iscoroutinefunction(self.redis_connect_func)
                     else self.redis_connect_func(self)
                 )
+        except TimeoutError as error:
+            await self.disconnect()
+            raise ConnectionError(
+                f"Timeout during connection health check to {self._host_error()}"
+            ) from error
         except RedisError:
             # clean up after any error in on_connect
             await self.disconnect()

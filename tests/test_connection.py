@@ -631,6 +631,21 @@ class TestConnection:
             assert _connect.call_count == 1
             self.clear(conn)
 
+    def test_connect_check_health_timeout_is_connection_error(self):
+        conn = Connection(protocol=3, driver_info=None)
+        conn._connect = mock.Mock()
+        conn._parser.on_connect = mock.Mock()
+        conn.send_command = mock.Mock()
+        conn.read_response = mock.Mock(
+            side_effect=TimeoutError("Timeout reading from localhost:6379")
+        )
+        conn.disconnect = mock.Mock()
+
+        with pytest.raises(ConnectionError, match="connection health check"):
+            conn.connect_check_health(retry_socket_connect=False)
+
+        conn.disconnect.assert_called_once_with()
+
     # Client-internal test: builds a default localhost Connection and mocks the
     # socket to count handshake retries, so it needs a co-located server rather
     # than a remote managed Redis Enterprise endpoint.
