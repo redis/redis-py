@@ -1686,8 +1686,9 @@ class ClusterNode:
                 pending_cleanup = tuple(self._background_tasks)
                 if not pending_cleanup:
                     raise
-                await asyncio.gather(
-                    *(asyncio.shield(task) for task in pending_cleanup)
+                await asyncio.wait(
+                    [asyncio.shield(task) for task in pending_cleanup],
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
 
     async def disconnect_if_needed(self, connection: Connection) -> None:

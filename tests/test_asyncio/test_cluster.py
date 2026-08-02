@@ -3414,6 +3414,52 @@ class TestClusterNodeConnectionHandling:
         await cleanup_task
         assert await node.acquire_connection_async() is connection
 
+    async def test_acquire_connection_async_retries_after_any_cleanup(self) -> None:
+        node = ClusterNode(default_host, 7000, max_connections=2)
+        first_connection = mock.AsyncMock(spec=Connection)
+        second_connection = mock.AsyncMock(spec=Connection)
+        for connection in (first_connection, second_connection):
+            connection.is_connected = True
+            connection.reconnect = True
+            connection.should_reconnect.side_effect = (
+                lambda connection=connection: connection.reconnect
+            )
+            node._connections.append(connection)
+
+        first_disconnect_started = asyncio.Event()
+        second_disconnect_started = asyncio.Event()
+        allow_first_disconnect = asyncio.Event()
+        allow_second_disconnect = asyncio.Event()
+
+        async def disconnect_first() -> None:
+            first_disconnect_started.set()
+            await allow_first_disconnect.wait()
+            first_connection.reconnect = False
+            first_connection.is_connected = False
+
+        async def disconnect_second() -> None:
+            second_disconnect_started.set()
+            await allow_second_disconnect.wait()
+            second_connection.reconnect = False
+            second_connection.is_connected = False
+
+        first_connection.disconnect.side_effect = disconnect_first
+        second_connection.disconnect.side_effect = disconnect_second
+        node.release(first_connection)
+        node.release(second_connection)
+        await asyncio.gather(
+            first_disconnect_started.wait(), second_disconnect_started.wait()
+        )
+
+        waiter = asyncio.create_task(node.acquire_connection_async())
+        await asyncio.sleep(0)
+        allow_first_disconnect.set()
+
+        assert await asyncio.wait_for(waiter, timeout=1) is first_connection
+
+        allow_second_disconnect.set()
+        await asyncio.gather(*node._background_tasks)
+
     class WriteFailingConnection:
         def __init__(self, **kwargs: Any) -> None:
             self.host = kwargs["host"]
