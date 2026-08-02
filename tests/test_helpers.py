@@ -52,8 +52,6 @@ def test_random_string():
 
 @pytest.mark.fixed_client
 def test_normalize_function_lib_code_strips_leading_whitespace():
-    # Issue #3307: triple-quoted multi-line payloads often start with a newline
-    # before the shebang, which Redis rejects as "Missing library metadata".
     code = """
 #!lua name=mylib
 redis.register_function('myfunc', function(keys, args) return args[1] end)
@@ -65,8 +63,6 @@ redis.register_function('myfunc', function(keys, args) return args[1] end)
 
 @pytest.mark.fixed_client
 def test_normalize_function_lib_code_expands_redis_cli_escapes():
-    # redis-cli unescapes "\n" inside double quotes; raw / double-escaped
-    # Python strings do not, so expand the shebang terminator escape.
     code = r"#!lua name=mylib \n redis.register_function('myfunc', function(keys, args) return args[1] end)"
     normalized = normalize_function_lib_code(code)
     assert "\n" in normalized
@@ -85,25 +81,18 @@ def test_normalize_function_lib_code_normalizes_crlf():
 
 @pytest.mark.fixed_client
 def test_normalize_function_lib_code_preserves_multiline_backslash_n():
-    # When a real newline already ends the shebang line, do not rewrite
-    # literal \n sequences that may appear in Lua source.
     code = "#!lua name=mylib\nreturn 'a\\nb'"
     assert normalize_function_lib_code(code) == code
 
 
 @pytest.mark.fixed_client
 def test_normalize_function_lib_code_expands_only_shebang_terminator():
-    # Single-line redis-cli-style payloads may also contain intentional
-    # backslash-n in Lua source; only the first escape (shebang separator)
-    # should become a real newline.
     code = r"#!lua name=mylib \n redis.register_function('f', function() return 'a\nb' end)"
     normalized = normalize_function_lib_code(code)
     assert normalized.startswith("#!lua name=mylib\n") or normalized.startswith(
         "#!lua name=mylib \n"
     )
-    # Exactly one real newline (the shebang terminator).
     assert normalized.count("\n") == 1
-    # Body Lua escape preserved as two characters.
     assert "return 'a\\nb'" in normalized
     assert "\\n" in normalized.split("\n", 1)[1]
 
@@ -118,8 +107,6 @@ def test_normalize_function_lib_code_expands_first_crlf_escape():
 
 @pytest.mark.fixed_client
 def test_normalize_function_lib_code_escapes_shebang_with_later_real_newlines():
-    # Escaped shebang terminator must expand even when the Lua body already
-    # has physical newlines (e.g. a multiline long string).
     code = (
         "#!lua name=mylib \\n redis.register_function('f', function()\n"
         "  return [[a\nb]]\nend)"
@@ -133,7 +120,6 @@ def test_normalize_function_lib_code_escapes_shebang_with_later_real_newlines():
 
 @pytest.mark.fixed_client
 def test_normalize_function_lib_code_terminator_by_position_not_presence():
-    # Prefer the earliest escape by position: shebang uses \n, body has \r\n.
     code = r"#!lua name=mylib \n return 'a\r\nb'"
     normalized = normalize_function_lib_code(code)
     assert normalized.count("\n") == 1
@@ -152,7 +138,6 @@ def test_normalize_function_lib_code_bytes_roundtrip():
 
 @pytest.mark.fixed_client
 def test_normalize_function_lib_code_bytes_non_utf8():
-    # Non-UTF-8 body bytes must still get leading-whitespace / escape fixes.
     code = b"\n#!lua name=mylib \\n return '\xff'"
     normalized = normalize_function_lib_code(code)
     assert isinstance(normalized, bytes)
@@ -184,6 +169,14 @@ def test_normalize_function_lib_code_preserves_body_line_endings():
 
 
 @pytest.mark.fixed_client
+def test_normalize_function_lib_code_preserves_crlf_at_body_start():
+    text = "#!lua name=mylib\n\r\nreturn 1"
+
+    assert normalize_function_lib_code(text) == text
+    assert normalize_function_lib_code(text.encode()) == text.encode()
+
+
+@pytest.mark.fixed_client
 def test_normalize_function_lib_code_expands_terminator_before_lfcr():
     text = r"#!lua name=mylib \n" + "\rreturn 1"
     expected = "#!lua name=mylib \nreturn 1"
@@ -204,7 +197,7 @@ def test_normalize_function_lib_code_preserves_body_cr_after_escaped_crlf():
 @pytest.mark.fixed_client
 def test_normalize_function_lib_code_normalizes_lfcr_after_leading_whitespace():
     text = " #!lua name=mylib\n\rreturn 1"
-    expected = "#!lua name=mylib\nreturn 1"
+    expected = "#!lua name=mylib\n\rreturn 1"
 
     assert normalize_function_lib_code(text) == expected
     assert normalize_function_lib_code(text.encode()) == expected.encode()
