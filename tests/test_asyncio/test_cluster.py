@@ -3460,6 +3460,40 @@ class TestClusterNodeConnectionHandling:
         allow_second_disconnect.set()
         await asyncio.gather(*node._background_tasks)
 
+    async def test_acquire_connection_async_wakes_on_normal_release(self) -> None:
+        node = ClusterNode(default_host, 7000, max_connections=2)
+        reconnecting_connection = mock.AsyncMock(spec=Connection)
+        released_connection = mock.AsyncMock(spec=Connection)
+        reconnecting_connection.is_connected = False
+        released_connection.is_connected = False
+        reconnecting_connection.reconnect = True
+        reconnecting_connection.should_reconnect.return_value = True
+        released_connection.reconnect = False
+        released_connection.should_reconnect.return_value = False
+        node._connections.extend([reconnecting_connection, released_connection])
+
+        disconnect_started = asyncio.Event()
+        allow_disconnect = asyncio.Event()
+
+        async def disconnect() -> None:
+            disconnect_started.set()
+            await allow_disconnect.wait()
+            reconnecting_connection.reconnect = False
+
+        reconnecting_connection.disconnect.side_effect = disconnect
+        node.release(reconnecting_connection)
+        await disconnect_started.wait()
+
+        waiter = asyncio.create_task(node.acquire_connection_async())
+        await asyncio.sleep(0)
+        node.release(released_connection)
+
+        try:
+            assert await asyncio.wait_for(waiter, timeout=1) is released_connection
+        finally:
+            allow_disconnect.set()
+            await asyncio.gather(*node._background_tasks)
+
     class WriteFailingConnection:
         def __init__(self, **kwargs: Any) -> None:
             self.host = kwargs["host"]

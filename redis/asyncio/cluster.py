@@ -1563,6 +1563,7 @@ class ClusterNode:
     __slots__ = (
         "_background_tasks",
         "_connections",
+        "_connection_available_event",
         "_free",
         "_lock",
         "_event_dispatcher",
@@ -1602,6 +1603,7 @@ class ClusterNode:
         self.response_callbacks = connection_kwargs.pop("response_callbacks", {})
 
         self._connections: List[Connection] = []
+        self._connection_available_event = asyncio.Event()
         self._free: Deque[Connection] = collections.deque(maxlen=self.max_connections)
         self._background_tasks: Set[asyncio.Task] = set()
         self._event_dispatcher = self.connection_kwargs.get("event_dispatcher", None)
@@ -1678,18 +1680,18 @@ class ClusterNode:
             raise MaxConnectionsError()
 
     async def acquire_connection_async(self) -> Connection:
-        """Acquire a connection after pending reconnect cleanup completes."""
+        """Acquire a connection after a pending release makes one available."""
         while True:
             try:
-                return self.acquire_connection()
+                connection = self.acquire_connection()
+                self._connection_available_event.clear()
+                return connection
             except MaxConnectionsError:
                 pending_cleanup = tuple(self._background_tasks)
                 if not pending_cleanup:
                     raise
-                await asyncio.wait(
-                    [asyncio.shield(task) for task in pending_cleanup],
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
+                await self._connection_available_event.wait()
+                self._connection_available_event.clear()
 
     async def disconnect_if_needed(self, connection: Connection) -> None:
         """
@@ -1712,6 +1714,7 @@ class ClusterNode:
             task.add_done_callback(self._background_tasks.discard)
             return
         self._free.append(connection)
+        self._connection_available_event.set()
 
     async def _disconnect_and_release(self, connection: Connection) -> None:
         try:
@@ -1726,9 +1729,11 @@ class ClusterNode:
                 self._connections.remove(connection)
             except ValueError:
                 pass
+            self._connection_available_event.set()
             return
 
         self._free.append(connection)
+        self._connection_available_event.set()
 
     def get_encoder(self) -> Encoder:
         """Return an :class:`Encoder` derived from this node's connection kwargs."""
