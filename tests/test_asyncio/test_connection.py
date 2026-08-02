@@ -116,6 +116,14 @@ async def test_invalid_packed_command_type_error_is_not_connection_error():
     conn._writer = None
 
 
+async def test_closed_reader_during_invalidation_processing_is_connection_error():
+    conn = Connection()
+    conn._reader = None
+
+    with pytest.raises(ConnectionError, match="Connection closed while reading"):
+        await conn.process_invalidation_messages()
+
+
 @pytest.mark.parametrize(
     ("buffer", "eof", "expected"),
     [

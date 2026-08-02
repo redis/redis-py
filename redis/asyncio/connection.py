@@ -1398,7 +1398,13 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
 
     def _socket_is_empty(self):
         """Check if the socket is empty"""
-        return len(self._reader._buffer) == 0
+        reader = self._reader
+        if reader is None:
+            raise ConnectionError("Connection closed while reading")
+        try:
+            return len(reader._buffer) == 0
+        except AttributeError as error:
+            raise ConnectionError("Connection closed while reading") from error
 
     async def process_invalidation_messages(self):
         while not self._socket_is_empty():
