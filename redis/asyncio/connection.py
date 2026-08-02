@@ -1858,10 +1858,12 @@ class AsyncCacheProxyConnection:
         connection: AbstractConnection,
         cache: CacheInterface,
         pool_lock: asyncio.Lock,
+        pool: Optional["ConnectionPool"] = None,
     ) -> None:
         self._conn = connection
         self._cache = cache
         self._pool_lock = pool_lock
+        self._pool = pool
         self._cache_lock = asyncio.Lock()
         self._current_command_cache_key: CacheKey | None = None
         self.register_connect_callback(self._enable_tracking_callback)
@@ -1918,6 +1920,8 @@ class AsyncCacheProxyConnection:
         await self._conn.disconnect(*args, **kwargs)
 
     async def send_packed_command(self, command, check_health: bool = True) -> None:
+        async with self._cache_lock:
+            self._current_command_cache_key = None
         await self._conn.send_packed_command(command, check_health=check_health)
 
     async def send_command(self, *args, **kwargs) -> None:
@@ -1937,7 +1941,7 @@ class AsyncCacheProxyConnection:
             if is_cacheable:
                 self._current_command_cache_key = CacheKey(
                     command=args[0],
-                    redis_keys=tuple(kwargs["keys"]),
+                    redis_keys=self._normalize_cache_keys(kwargs["keys"]),
                     redis_args=args,
                 )
                 cached_entry = self._cache.get(self._current_command_cache_key)
@@ -1955,33 +1959,41 @@ class AsyncCacheProxyConnection:
                     if self._cache.get(self._current_command_cache_key) is not None:
                         return
             else:
-                async with self._pool_lock:
-                    while await cached_entry.connection_ref.can_read():
-                        try:
-                            await cached_entry.connection_ref.read_response(
-                                push_request=True,
-                                timeout=0,
-                                disconnect_on_error=False,
+                if await self._refresh_cached_entry(cached_entry):
+                    async with self._cache_lock:
+                        if self._cache.get(self._current_command_cache_key) is not None:
+                            return
+                else:
+                    async with self._cache_lock:
+                        if (
+                            self._cache.get(self._current_command_cache_key)
+                            is cached_entry
+                        ):
+                            self._cache.delete_by_cache_keys(
+                                [self._current_command_cache_key]
                             )
-                        except TimeoutError:
-                            break
 
-                async with self._cache_lock:
-                    if self._cache.get(self._current_command_cache_key) is not None:
-                        return
-
+        cache_key = self._current_command_cache_key
+        cache_entry = CacheEntry(
+            cache_key=cache_key,
+            cache_value=self.DUMMY_CACHE_VALUE,
+            status=CacheEntryStatus.IN_PROGRESS,
+            connection_ref=self._conn,
+            completion_event=asyncio.Event(),
+        )
         async with self._cache_lock:
-            self._cache.set(
-                CacheEntry(
-                    cache_key=self._current_command_cache_key,
-                    cache_value=self.DUMMY_CACHE_VALUE,
-                    status=CacheEntryStatus.IN_PROGRESS,
-                    connection_ref=self._conn,
-                    completion_event=asyncio.Event(),
-                )
-            )
+            self._cache.set(cache_entry)
 
-        await self._conn.send_command(*args, **kwargs)
+        try:
+            await self._conn.send_command(*args, **kwargs)
+        except BaseException:
+            async with self._cache_lock:
+                if cache_key is not None and self._cache.get(cache_key) is cache_entry:
+                    self._cache.delete_by_cache_keys([cache_key])
+                    self._signal_cache_entry(cache_entry)
+                if self._current_command_cache_key == cache_key:
+                    self._current_command_cache_key = None
+            raise
 
     async def can_read(self, timeout: float = 0) -> bool:
         return await self._conn.can_read()
@@ -2059,15 +2071,39 @@ class AsyncCacheProxyConnection:
         connection._parser.set_invalidation_push_handler(self._on_invalidation_callback)
 
     async def _process_pending_invalidations(self) -> None:
-        while await self._conn.can_read():
+        await self._drain_pending_invalidations(self._conn)
+
+    async def _drain_pending_invalidations(self, connection) -> bool:
+        while await connection.can_read():
             try:
-                await self._conn.read_response(
+                response = await connection.read_response(
                     push_request=True,
                     timeout=0,
                     disconnect_on_error=False,
                 )
             except TimeoutError:
-                break
+                return False
+            if response is None:
+                return False
+        return True
+
+    async def _refresh_cached_entry(self, cached_entry: CacheEntry) -> bool:
+        async with self._pool_lock:
+            is_current_connection = cached_entry.connection_ref is self._conn
+            is_available_connection = (
+                self._pool is None
+                or is_current_connection
+                or self._pool._is_connection_available(cached_entry.connection_ref)
+            )
+            if not is_available_connection:
+                return False
+            return await self._drain_pending_invalidations(cached_entry.connection_ref)
+
+    @staticmethod
+    def _normalize_cache_keys(redis_keys) -> tuple:
+        if isinstance(redis_keys, (str, bytes)):
+            return (redis_keys,)
+        return tuple(redis_keys)
 
     async def _on_invalidation_callback(self, data) -> None:
         async with self._cache_lock:
@@ -3177,8 +3213,17 @@ class ConnectionPool(
         # but async record_connection_count. The recording is handled in get_connection.
         connection = self.connection_class(**self.connection_kwargs)
         if self.cache is not None:
-            return AsyncCacheProxyConnection(connection, self.cache, self._lock)
+            return AsyncCacheProxyConnection(
+                connection, self.cache, self._lock, pool=self
+            )
         return connection
+
+    def _is_connection_available(self, connection: AbstractConnection) -> bool:
+        """Return whether a cached connection is idle in this pool."""
+        return any(
+            candidate is connection or getattr(candidate, "_conn", None) is connection
+            for candidate in self._available_connections
+        )
 
     async def ensure_connection(self, connection: AbstractConnection):
         """Ensure that the connection object is connected and valid"""

@@ -464,13 +464,13 @@ class Redis(
                             "ssl_password": ssl_password,
                         }
                     )
-                if (cache_config or cache) and check_protocol_version(protocol, 3):
-                    kwargs.update(
-                        {
-                            "cache": cache,
-                            "cache_config": cache_config,
-                        }
-                    )
+            if (cache_config or cache) and check_protocol_version(protocol, 3):
+                kwargs.update(
+                    {
+                        "cache": cache,
+                        "cache_config": cache_config,
+                    }
+                )
             maint_notifications_enabled = (
                 maint_notifications_config and maint_notifications_config.enabled
             )

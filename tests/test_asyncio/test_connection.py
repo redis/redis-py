@@ -95,6 +95,19 @@ async def test_async_redis_accepts_client_side_cache_configuration():
         await client.aclose()
 
 
+async def test_async_unix_socket_accepts_client_side_cache_configuration():
+    client = Redis(
+        unix_socket_path="unix:///tmp/redis.sock",
+        cache_config=CacheConfig(max_size=10),
+        protocol=3,
+    )
+
+    try:
+        assert client.connection_pool.cache is not None
+    finally:
+        await client.aclose()
+
+
 async def test_async_redis_rejects_client_side_cache_with_resp2():
     with pytest.raises(
         RedisError, match="Client caching is only supported with RESP version 3"
@@ -227,6 +240,91 @@ async def test_async_cache_proxy_records_invalidation_evictions():
         await proxy._on_invalidation_callback([b"invalidate", [b"key"]])
 
     record.assert_called_once_with(count=1, reason=CSCReason.INVALIDATION)
+
+
+async def test_async_cache_proxy_clears_cache_key_before_packed_command():
+    connection = mock.Mock()
+    connection.send_packed_command = mock.AsyncMock()
+    proxy = AsyncCacheProxyConnection(
+        connection, CacheFactory(CacheConfig()).get_cache(), asyncio.Lock()
+    )
+    proxy._current_command_cache_key = object()
+
+    await proxy.send_packed_command([b"PING\r\n"])
+
+    assert proxy._current_command_cache_key is None
+
+
+async def test_async_cache_proxy_does_not_drain_busy_cached_connection():
+    first_connection = mock.Mock()
+    first_connection.can_read = mock.AsyncMock(return_value=False)
+    first_connection.send_command = mock.AsyncMock()
+    first_connection.read_response = mock.AsyncMock(return_value=b"first")
+    second_connection = mock.Mock()
+    second_connection.can_read = mock.AsyncMock(return_value=False)
+    second_connection.send_command = mock.AsyncMock()
+    cache = CacheFactory(CacheConfig()).get_cache()
+    pool = mock.Mock()
+    pool._is_connection_available.return_value = False
+    first_proxy = AsyncCacheProxyConnection(
+        first_connection, cache, asyncio.Lock(), pool=pool
+    )
+    second_proxy = AsyncCacheProxyConnection(
+        second_connection, cache, asyncio.Lock(), pool=pool
+    )
+
+    await first_proxy.send_command("GET", "key", keys=("key",))
+    await first_proxy.read_response()
+    first_connection.read_response.reset_mock()
+
+    await second_proxy.send_command("GET", "key", keys=("key",))
+
+    first_connection.read_response.assert_not_awaited()
+    second_connection.send_command.assert_awaited_once_with("GET", "key", keys=("key",))
+
+
+async def test_async_cache_proxy_clears_in_progress_entry_when_send_is_cancelled():
+    connection = mock.Mock()
+    connection.can_read = mock.AsyncMock(return_value=False)
+    connection.send_command = mock.AsyncMock(
+        side_effect=[asyncio.CancelledError(), None]
+    )
+    cache = CacheFactory(CacheConfig()).get_cache()
+    proxy = AsyncCacheProxyConnection(connection, cache, asyncio.Lock())
+
+    with pytest.raises(asyncio.CancelledError):
+        await proxy.send_command("GET", "key", keys=("key",))
+
+    assert cache.size == 0
+    assert proxy._current_command_cache_key is None
+
+    await proxy.send_command("GET", "key", keys=("key",))
+    assert connection.send_command.await_count == 2
+
+
+async def test_async_cache_proxy_normalizes_scalar_cache_keys():
+    connection = mock.Mock()
+    connection.can_read = mock.AsyncMock(return_value=False)
+    connection.send_command = mock.AsyncMock()
+    cache = CacheFactory(CacheConfig()).get_cache()
+    proxy = AsyncCacheProxyConnection(connection, cache, asyncio.Lock())
+
+    await proxy.send_command("ZREVRANGE", "myzset", 0, -1, keys="myzset")
+
+    assert next(iter(cache.collection)).redis_keys == ("myzset",)
+
+
+async def test_async_cache_proxy_stops_when_invalidation_read_times_out():
+    connection = mock.Mock()
+    connection.can_read = mock.AsyncMock(return_value=True)
+    connection.read_response = mock.AsyncMock(return_value=None)
+    proxy = AsyncCacheProxyConnection(
+        connection, CacheFactory(CacheConfig()).get_cache(), asyncio.Lock()
+    )
+
+    await asyncio.wait_for(proxy._process_pending_invalidations(), timeout=1)
+
+    connection.read_response.assert_awaited_once()
 
 
 async def test_async_client_forwards_command_options_to_connection():
