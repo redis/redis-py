@@ -340,9 +340,10 @@ class RedisCluster(
         - `rediss://` creates a SSL wrapped TCP socket connection. See more at:
           <https://www.iana.org/assignments/uri-schemes/prov/rediss>
 
-        The username, password, hostname, path and all querystring values are passed
-        through ``urllib.parse.unquote`` in order to replace any percent-encoded values
-        with their corresponding characters.
+        The username, password, hostname and path are passed through
+        ``urllib.parse.unquote`` in order to replace any percent-encoded values with
+        their corresponding characters. Querystring values are decoded by
+        ``urllib.parse.parse_qs`` and are not unquoted again.
 
         All querystring options are cast to their appropriate Python types. Boolean
         arguments can be specified with string values "True"/"False" or "Yes"/"No".

@@ -656,9 +656,10 @@ class RedisCluster(
           <https://www.iana.org/assignments/uri-schemes/prov/rediss>
         - ``unix://``: creates a Unix Domain Socket connection.
 
-        The username, password, hostname, path and all querystring values
-        are passed through urllib.parse.unquote in order to replace any
-        percent-encoded values with their corresponding characters.
+        The username, password, hostname and path are passed through
+        urllib.parse.unquote in order to replace any percent-encoded values
+        with their corresponding characters. Querystring values are decoded
+        by urllib.parse.parse_qs and are not unquoted again.
 
         There are several ways to specify a database number. The first value
         found will be used:
