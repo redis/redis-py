@@ -1,5 +1,6 @@
 import copy
 import random
+import re
 import string
 from typing import (
     Any,
@@ -328,38 +329,25 @@ def _normalize_function_lib_code_binary(
     )
 
 
+_FUNCTION_LIB_TEXT_TERMINATOR_RE = re.compile(
+    r"\A(?P<leading>[ \t\n\r\v\f]*)(?P<header>.*?)"
+    r"(?P<terminator>\\r\\n|\\n\r?|\r\n|\n|\r)",
+    re.DOTALL,
+)
+
+
 def _normalize_function_lib_code_text(text: str) -> str:
-    # Only leading whitespace prevents Redis from finding the shebang. Preserve
-    # the right-hand side exactly for FUNCTION LIST WITHCODE round trips.
-    text = text.lstrip()
+    """Normalize text framing without materializing a payload-sized suffix."""
+    match = _FUNCTION_LIB_TEXT_TERMINATOR_RE.match(text)
+    if match is None:
+        return text.lstrip()
 
-    real_lf = text.find("\n")
-    real_cr = text.find("\r")
-    real_nl = min((pos for pos in (real_lf, real_cr) if pos >= 0), default=-1)
-    header_end = real_nl if real_nl >= 0 else len(text)
-    esc_crlf = text.find("\\r\\n", 0, header_end)
-    esc_lf = text.find("\\n", 0, header_end)
-    escaped = min((pos for pos in (esc_crlf, esc_lf) if pos >= 0), default=-1)
-
-    if escaped >= 0:
-        terminator_end = escaped + (4 if escaped == esc_crlf else 2)
-        if (
-            escaped == esc_lf
-            and terminator_end < len(text)
-            and text[terminator_end] == "\r"
-        ):
-            terminator_end += 1
-        return text[:escaped] + "\n" + text[terminator_end:]
-
-    valid_lf = real_nl >= 0 and text[real_nl] == "\n"
-    if real_nl < 0 or valid_lf:
+    terminator = match.group("terminator")
+    if not match.group("leading") and terminator == "\n":
         return text
 
-    terminator_end = real_nl + 1
-    if (
-        text[real_nl] == "\r"
-        and terminator_end < len(text)
-        and text[terminator_end] == "\n"
-    ):
-        terminator_end += 1
-    return text[:real_nl] + "\n" + text[terminator_end:]
+    # The regex engine copies the unmatched body into the result directly,
+    # avoiding explicit lstrip and suffix-slice copies for large payloads.
+    return _FUNCTION_LIB_TEXT_TERMINATOR_RE.sub(
+        rf"{match.group('header')}\n", text, count=1
+    )
