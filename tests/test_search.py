@@ -1473,6 +1473,32 @@ class TestBaseSearchFunctionality(SearchTestsBase):
             "The text field is not decoded correctly"
         )
 
+    def test_return_field_encoding_is_keyed_by_alias(self):
+        # The server returns an aliased field under its alias, so that is the
+        # name the response is looked up under when decoding.
+        query = Query("*").return_field(
+            "$.vector_emb", as_field="vector_emb", decode_field=False
+        )
+        assert query._return_fields_decode_as == {"vector_emb": None}
+        assert query.get_args()[:4] == ["*", "RETURN", 3, "$.vector_emb"]
+
+        raw = b"\x00\x01\x82\xff"
+        res = Result(
+            [1, "doc:1", ["vector_emb", raw]],
+            True,
+            field_encodings=query._return_fields_decode_as,
+        )
+        assert res.docs[0].vector_emb == raw
+
+        res = Result.from_resp3(
+            {
+                "total_results": 1,
+                "results": [{"id": "doc:1", "extra_attributes": {"vector_emb": raw}}],
+            },
+            field_encodings=query._return_fields_decode_as,
+        )
+        assert res.docs[0].vector_emb == raw
+
     @pytest.mark.redismod
     def test_synupdate(self, client):
         definition = IndexDefinition(index_type=IndexType.HASH)
