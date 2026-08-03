@@ -995,6 +995,26 @@ class TestUnitCacheProxyConnection:
 
         assert len(cache.collection) == 0
 
+    def test_himport_prepared_is_reassignable_through_proxy(self):
+        # Regression: `_himport_prepared` must have a setter that delegates to the
+        # wrapped connection, mirroring `_himport_reconciled_revision`. A getter-only
+        # property would make `conn._himport_prepared = {}` (as `_reset_himport_state`
+        # does) raise AttributeError -- but only when client-side caching is enabled.
+        # Exercise the property descriptors directly, no full construction needed.
+        proxy = object.__new__(CacheProxyConnection)
+
+        class _Wrapped:
+            _himport_prepared = {"fs": 1}
+            _himport_reconciled_revision = 3
+
+        proxy._conn = _Wrapped()
+        assert proxy._himport_prepared == {"fs": 1}  # getter delegates
+        proxy._himport_prepared = {}  # setter delegates (was AttributeError)
+        assert proxy._conn._himport_prepared == {}
+        # symmetry with the existing reconciled-revision setter
+        proxy._himport_reconciled_revision = 7
+        assert proxy._conn._himport_reconciled_revision == 7
+
     @pytest.mark.skipif(
         platform.python_implementation() == "PyPy",
         reason="Pypy doesn't support side_effect",
