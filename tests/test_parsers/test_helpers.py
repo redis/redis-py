@@ -1,6 +1,8 @@
 import pytest
 
 from redis._parsers.helpers import (
+    parse_acl_log,
+    parse_acl_log_resp3_to_resp2_legacy,
     parse_client_list,
     parse_command,
     parse_info,
@@ -143,3 +145,56 @@ def test_parse_sentinel_masters_resp3_returns_master_dict():
     assert masters["redis-py-test"]["flags"] == {"master"}
     assert masters["redis-py-test"]["is_master"] is True
     assert masters["redis-py-test"]["is_sdown"] is False
+
+
+@pytest.mark.fixed_client
+def test_parse_acl_log_resp3_legacy_decodes_string_values():
+    # On a RESP3 connection with the default legacy_responses=True, each ACL
+    # LOG entry arrives as a map. The scalar string fields (reason, context,
+    # object, username) are bulk strings and must be decoded to ``str`` so the
+    # result matches what parse_acl_log() produces from a RESP2 connection.
+    client_info = b"id=3 addr=127.0.0.1:52654 name= age=0 user=someuser"
+    resp3_entry = {
+        b"count": 1,
+        b"reason": b"auth",
+        b"context": b"toplevel",
+        b"object": b"AUTH",
+        b"username": b"someuser",
+        b"age-seconds": b"8.038",
+        b"client-info": client_info,
+        b"entry-id": 0,
+        b"timestamp-created": 1700000000000,
+        b"timestamp-last-updated": 1700000000000,
+    }
+
+    parsed = parse_acl_log_resp3_to_resp2_legacy([resp3_entry])[0]
+
+    assert parsed["reason"] == "auth"
+    assert parsed["context"] == "toplevel"
+    assert parsed["object"] == "AUTH"
+    assert parsed["username"] == "someuser"
+
+    # Must match the RESP2-wire legacy shape exactly (the default-config promise).
+    resp2_entry = [
+        b"count",
+        1,
+        b"reason",
+        b"auth",
+        b"context",
+        b"toplevel",
+        b"object",
+        b"AUTH",
+        b"username",
+        b"someuser",
+        b"age-seconds",
+        b"8.038",
+        b"client-info",
+        client_info,
+        b"entry-id",
+        0,
+        b"timestamp-created",
+        1700000000000,
+        b"timestamp-last-updated",
+        1700000000000,
+    ]
+    assert parse_acl_log([resp2_entry]) == [parsed]
