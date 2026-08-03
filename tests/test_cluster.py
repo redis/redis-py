@@ -3925,6 +3925,28 @@ def test_evalsha_zero_keys_follows_keyed_slot_in_transaction():
         r.close()
 
 
+def test_slotless_command_does_not_lock_keyed_slot_flag():
+    """Slotless commands must not block later keyed retargeting."""
+    r = get_mocked_redis_client(host=default_host, port=default_port)
+    try:
+        sha = "a" * 40
+        with r.pipeline(transaction=True) as pipe:
+            pipe.evalsha(sha, 0)
+            assert pipe._execution_strategy._transaction_has_keyed_slot is False
+
+            with patch.object(pipe, "determine_slot", return_value=None):
+                pipe.execute_command("CLIENT TRACKING", "ON")
+            assert pipe._execution_strategy._transaction_has_keyed_slot is False
+
+            keyed_slot = key_slot(b"foo")
+            with patch.object(pipe, "determine_slot", return_value=keyed_slot):
+                pipe.set("foo", "bar")
+            assert pipe._execution_strategy._pipeline_slots == {keyed_slot}
+            assert pipe._execution_strategy._transaction_has_keyed_slot is True
+    finally:
+        r.close()
+
+
 @pytest.mark.onlycluster
 class TestClusterPipeline:
     """

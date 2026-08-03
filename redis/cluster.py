@@ -4473,7 +4473,8 @@ class TransactionStrategy(AbstractStrategy):
         ):
             # Prior slots came only from zero-key EVAL/EVALSHA; retarget.
             self._pipeline_slots.clear()
-        self._transaction_has_keyed_slot = True
+        if slot_number is not None:
+            self._transaction_has_keyed_slot = True
         return slot_number
 
     def _get_client_and_connection_for_transaction(self) -> Tuple[Redis, Connection]:

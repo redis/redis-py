@@ -3931,6 +3931,42 @@ class TestClusterPipeline:
         finally:
             await r.aclose()
 
+    async def test_slotless_command_does_not_lock_keyed_slot_flag(self) -> None:
+        """Slotless commands must not block later keyed retargeting."""
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            sha = "a" * 40
+            async with r.pipeline(transaction=True) as pipe:
+                pipe.evalsha(sha, 0)
+                assert pipe._execution_strategy._transaction_has_keyed_slot is False
+
+                async def _no_slot(*_args, **_kwargs):
+                    return None
+
+                with mock.patch.object(
+                    pipe.cluster_client,
+                    "_determine_slot",
+                    side_effect=_no_slot,
+                ):
+                    pipe.execute_command("CLIENT TRACKING", "ON")
+                assert pipe._execution_strategy._transaction_has_keyed_slot is False
+
+                keyed_slot = key_slot(b"foo")
+
+                async def _fake_determine_slot(*_args, **_kwargs):
+                    return keyed_slot
+
+                with mock.patch.object(
+                    pipe.cluster_client,
+                    "_determine_slot",
+                    side_effect=_fake_determine_slot,
+                ):
+                    pipe.set("foo", "bar")
+                assert pipe._execution_strategy._pipeline_slots == {keyed_slot}
+                assert pipe._execution_strategy._transaction_has_keyed_slot is True
+        finally:
+            await r.aclose()
+
     async def test_empty_stack(self, r: RedisCluster) -> None:
         """If a pipeline is executed with no commands it should return a empty list."""
         p = r.pipeline()
