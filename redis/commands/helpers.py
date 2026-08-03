@@ -236,96 +236,96 @@ def normalize_function_lib_code(code: Any) -> Any:
     return code
 
 
-def _find_function_lib_bytes(
-    data: bytes | bytearray | memoryview,
-    pattern: bytes,
-    start: int = 0,
-    end: int | None = None,
-) -> int:
-    if isinstance(data, (bytes, bytearray)):
-        return data.find(pattern, start, len(data) if end is None else end)
+def _find_function_lib_binary_terminator(
+    data: memoryview, start: int
+) -> tuple[int, int, bool]:
+    """Find the first real or escaped shebang terminator in one pass.
 
-    stop = len(data) if end is None else end
-    last = stop - len(pattern)
-    for pos in range(start, last + 1):
-        if all(data[pos + offset] == value for offset, value in enumerate(pattern)):
-            return pos
-    return -1
+    Returns ``(prefix_end, terminator_end, needs_normalization)``. A plain LF is
+    already valid; CR, CRLF, LFCR, and redis-cli-style escapes need rewriting.
+    """
+    size = len(data)
+    pos = start
+    while pos < size:
+        value = data[pos]
+        if value == ord("\n"):
+            return pos, pos + 1, False
+        if value == ord("\r"):
+            end = pos + 1
+            if end < size and data[end] == ord("\n"):
+                end += 1
+            return pos, end, True
+        if value == ord("\\"):
+            if (
+                pos + 3 < size
+                and data[pos + 1] == ord("r")
+                and data[pos + 2] == ord("\\")
+                and data[pos + 3] == ord("n")
+            ):
+                return pos, pos + 4, True
+            if pos + 1 < size and data[pos + 1] == ord("n"):
+                end = pos + 2
+                if end < size and data[end] == ord("\r"):
+                    end += 1
+                return pos, end, True
+        pos += 1
+    return -1, -1, False
 
 
-def _find_function_lib_binary_newline(
-    data: bytes | bytearray | memoryview, start: int
-) -> int:
-    """Return the first CR or LF without repeatedly scanning memoryviews."""
-    if isinstance(data, (bytes, bytearray)):
-        lf = data.find(b"\n", start)
-        cr = data.find(b"\r", start)
-        return min((pos for pos in (lf, cr) if pos >= 0), default=-1)
+def _copy_function_lib_binary(
+    view: memoryview,
+    start: int,
+    prefix_end: int,
+    terminator_end: int,
+    as_bytearray: bool,
+) -> bytes | bytearray:
+    """Build a changed binary payload without materializing its suffix."""
+    prefix = view[start:prefix_end]
+    suffix = view[terminator_end:]
+    if not as_bytearray:
+        # bytes.join accepts memoryviews and allocates only the final bytes object.
+        return b"".join((prefix, b"\n", suffix))
 
-    for pos in range(start, len(data)):
-        if data[pos] in (ord("\n"), ord("\r")):
-            return pos
-    return -1
+    result = bytearray(len(prefix) + 1 + len(suffix))
+    result[: len(prefix)] = prefix
+    result[len(prefix)] = ord("\n")
+    result[len(prefix) + 1 :] = suffix
+    return result
 
 
 def _normalize_function_lib_code_binary(
     code: bytes | bytearray | memoryview,
 ) -> bytes | bytearray | memoryview:
-    if isinstance(code, memoryview):
-        try:
-            view = code.cast("B")
-        except TypeError:
-            # Strided/non-contiguous views cannot be cast. Match the command
-            # encoder's behavior and copy only this unsupported view shape.
-            code = bytes(code)
-            view = code
-    else:
-        view = code
+    try:
+        view = memoryview(code).cast("B")
+    except TypeError:
+        # Strided/non-contiguous views cannot be cast. Match the command
+        # encoder's behavior and copy only this unsupported view shape.
+        code = bytes(code)
+        view = memoryview(code)
 
     start = 0
     whitespace = b" \t\n\r\v\f"
     while start < len(view) and view[start] in whitespace:
         start += 1
 
-    real_nl = _find_function_lib_binary_newline(view, start)
-    header_end = real_nl if real_nl >= 0 else len(view)
-    esc_crlf = _find_function_lib_bytes(view, b"\\r\\n", start, header_end)
-    esc_lf = _find_function_lib_bytes(view, b"\\n", start, header_end)
-    escaped = min((pos for pos in (esc_crlf, esc_lf) if pos >= 0), default=-1)
+    prefix_end, terminator_end, needs_normalization = (
+        _find_function_lib_binary_terminator(view, start)
+    )
 
-    valid_lf = real_nl >= 0 and view[real_nl] == ord("\n")
-    if start == 0 and escaped < 0 and (valid_lf or real_nl < 0):
+    if start == 0 and not needs_normalization:
         return code
 
-    if escaped >= 0:
-        prefix_end = escaped
-        terminator_end = escaped + (4 if escaped == esc_crlf else 2)
-        # An escaped LF followed by CR is one LFCR shebang terminator.
-        if (
-            escaped == esc_lf
-            and terminator_end < len(view)
-            and view[terminator_end] == ord("\r")
-        ):
-            terminator_end += 1
-    elif real_nl >= 0:
-        prefix_end = real_nl
-        terminator_end = real_nl + 1
-        if (
-            view[real_nl] == ord("\r")
-            and terminator_end < len(view)
-            and view[terminator_end] == ord("\n")
-        ):
-            terminator_end += 1
-    else:
-        normalized = bytes(view[start:])
-        return bytearray(normalized) if isinstance(code, bytearray) else normalized
+    as_bytearray = isinstance(code, bytearray)
+    if prefix_end < 0 or not needs_normalization:
+        stripped = view[start:]
+        return bytearray(stripped) if as_bytearray else bytes(stripped)
 
     # Normalize only the shebang terminator. The Lua body is preserved byte-for-byte
     # for FUNCTION LIST WITHCODE round trips, hashes, and audit comparisons.
-    normalized = bytes(view[start:prefix_end]) + b"\n" + bytes(view[terminator_end:])
-    if isinstance(code, bytearray):
-        return bytearray(normalized)
-    return normalized
+    return _copy_function_lib_binary(
+        view, start, prefix_end, terminator_end, as_bytearray
+    )
 
 
 def _normalize_function_lib_code_text(text: str) -> str:
