@@ -348,6 +348,7 @@ def _normalize_function_lib_code_text(text: str) -> str:
 
     # The regex engine copies the unmatched body into the result directly,
     # avoiding explicit lstrip and suffix-slice copies for large payloads.
+    header = match.group("header")
     return _FUNCTION_LIB_TEXT_TERMINATOR_RE.sub(
-        rf"{match.group('header')}\n", text, count=1
+        lambda _match: header + "\n", text, count=1
     )
