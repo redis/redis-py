@@ -315,7 +315,7 @@ runs:
       with:
         name: pytest-results-redis_${{inputs.redis-version}}-python_${{inputs.python-version}}-parser_${{env.PARSER_BACKEND}}-el_${{inputs.event-loop}}-config_${{inputs.test-config}}
         path: |
-          *-results.xml
+          junit-results/*-results.xml
           prof/**
           profile_output*
         if-no-files-found: error
