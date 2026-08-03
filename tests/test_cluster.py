@@ -3947,6 +3947,25 @@ def test_slotless_command_does_not_lock_keyed_slot_flag():
         r.close()
 
 
+def test_zero_key_fcall_allows_keyed_retarget():
+    """Zero-key FCALL must not lock the slot so a later keyed command can retarget."""
+    r = get_mocked_redis_client(host=default_host, port=default_port)
+    try:
+        with r.pipeline(transaction=True) as pipe:
+            with patch.object(pipe, "determine_slot", return_value=111):
+                pipe.execute_command("FCALL", "myfunc", 0)
+            assert pipe._execution_strategy._pipeline_slots == {111}
+            assert pipe._execution_strategy._transaction_has_keyed_slot is False
+
+            keyed_slot = key_slot(b"foo")
+            with patch.object(pipe, "determine_slot", return_value=keyed_slot):
+                pipe.set("foo", "bar")
+            assert pipe._execution_strategy._pipeline_slots == {keyed_slot}
+            assert pipe._execution_strategy._transaction_has_keyed_slot is True
+    finally:
+        r.close()
+
+
 @pytest.mark.onlycluster
 class TestClusterPipeline:
     """

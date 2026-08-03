@@ -2932,9 +2932,9 @@ class TransactionStrategy(AbstractStrategy):
         """
         Pick a slot for a transactional pipeline command.
 
-        Zero-key EVAL/EVALSHA can run on any primary. Reuse an existing
-        transaction slot when present so multiple zero-key scripts (or a
-        mix with keyed commands) stay single-slot.
+        Zero-key EVAL/EVALSHA/FCALL/FCALL_RO can run on any primary. Reuse
+        an existing transaction slot when present so multiple zero-key
+        scripts/functions (or a mix with keyed commands) stay single-slot.
         """
         if args[0] in self.NO_SLOTS_COMMANDS:
             return None
@@ -2951,7 +2951,7 @@ class TransactionStrategy(AbstractStrategy):
             and slot_number not in self._pipeline_slots
             and not self._transaction_has_keyed_slot
         ):
-            # Prior slots came only from zero-key EVAL/EVALSHA; retarget.
+            # Prior slots came only from zero-key scripts/functions; retarget.
             self._pipeline_slots.clear()
         if slot_number is not None:
             self._transaction_has_keyed_slot = True

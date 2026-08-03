@@ -3967,6 +3967,54 @@ class TestClusterPipeline:
         finally:
             await r.aclose()
 
+    async def test_zero_key_fcall_allows_keyed_retarget(self) -> None:
+        """Zero-key FCALL must not lock the slot so a later keyed command can retarget."""
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            async with r.pipeline(transaction=True) as pipe:
+
+                async def _fcall_slot(*_args, **_kwargs):
+                    return 111
+
+                with mock.patch.object(
+                    pipe.cluster_client,
+                    "_determine_slot",
+                    side_effect=_fcall_slot,
+                ):
+                    pipe.execute_command("FCALL", "myfunc", 0)
+                assert pipe._execution_strategy._pipeline_slots == {111}
+                assert pipe._execution_strategy._transaction_has_keyed_slot is False
+
+                keyed_slot = key_slot(b"foo")
+
+                async def _fake_determine_slot(*_args, **_kwargs):
+                    return keyed_slot
+
+                with mock.patch.object(
+                    pipe.cluster_client,
+                    "_determine_slot",
+                    side_effect=_fake_determine_slot,
+                ):
+                    pipe.set("foo", "bar")
+                assert pipe._execution_strategy._pipeline_slots == {keyed_slot}
+                assert pipe._execution_strategy._transaction_has_keyed_slot is True
+        finally:
+            await r.aclose()
+
+    async def test_async_script_queues_evalsha_on_cluster_pipeline(self) -> None:
+        """AsyncScript must queue EVALSHA on ClusterPipeline without dropping it."""
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            script = r.register_script("return 1")
+            async with r.pipeline() as pipe:
+                await script(client=pipe)
+                queue = pipe._execution_strategy._command_queue
+                assert len(queue) == 1
+                assert queue[0].args[0] == "EVALSHA"
+                assert queue[0].args[1] == script.sha
+        finally:
+            await r.aclose()
+
     async def test_empty_stack(self, r: RedisCluster) -> None:
         """If a pipeline is executed with no commands it should return a empty list."""
         p = r.pipeline()

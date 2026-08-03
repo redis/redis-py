@@ -10862,10 +10862,15 @@ class AsyncScript:
         args = tuple(keys) + tuple(args)
         # make sure the Redis server knows about the script
         from redis.asyncio.client import Pipeline
+        from redis.asyncio.cluster import ClusterPipeline
 
         if isinstance(client, Pipeline):
             # Make sure the pipeline can register the script before executing.
             client.scripts.add(self)
+        if isinstance(client, ClusterPipeline):
+            # ClusterPipeline.evalsha queues synchronously. Awaiting the
+            # pipeline would call initialize() and drop the queued command.
+            return client.evalsha(self.sha, len(keys), *args)
         try:
             return await client.evalsha(self.sha, len(keys), *args)
         except NoScriptError:
