@@ -22,11 +22,11 @@ jobs:
     permissions:
       issues: write          # required by actions/stale to label/close issues
       pull-requests: write   # required by actions/stale to label/close PRs
-      actions: write         # required by actions/stale@v10 for its cache state
+      actions: write         # required by actions/stale@v11 for its cache state
     steps:
       # First step: Handle regular issues (excluding needs-information)
       - name: Mark regular issues as stale
-        uses: actions/stale@v10
+        uses: actions/stale@v11
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -70,7 +70,7 @@ jobs:
 
       # Second step: Handle needs-information issues with accelerated timeline
       - name: Mark needs-information issues as stale
-        uses: actions/stale@v10
+        uses: actions/stale@v11
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
