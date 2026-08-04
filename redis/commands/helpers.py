@@ -256,18 +256,27 @@ def _find_function_lib_binary_terminator(
                 end += 1
             return pos, end, True
         if value == ord("\\"):
-            if (
-                pos + 3 < size
-                and data[pos + 1] == ord("r")
-                and data[pos + 2] == ord("\\")
-                and data[pos + 3] == ord("n")
-            ):
-                return pos, pos + 4, True
-            if pos + 1 < size and data[pos + 1] == ord("n"):
-                end = pos + 2
-                if end < size and data[end] == ord("\r"):
-                    end += 1
-                return pos, end, True
+            run_end = pos
+            while run_end < size and data[run_end] == ord("\\"):
+                run_end += 1
+            if (run_end - pos) % 2 == 1:
+                # Odd run: the last backslash starts a real escape; an even run
+                # is all literal backslashes, so any following `n` is content.
+                esc = run_end - 1
+                if (
+                    esc + 3 < size
+                    and data[esc + 1] == ord("r")
+                    and data[esc + 2] == ord("\\")
+                    and data[esc + 3] == ord("n")
+                ):
+                    return esc, esc + 4, True
+                if esc + 1 < size and data[esc + 1] == ord("n"):
+                    end = esc + 2
+                    if end < size and data[end] == ord("\r"):
+                        end += 1
+                    return esc, end, True
+            pos = run_end
+            continue
         pos += 1
     return -1, -1, False
 
@@ -344,13 +353,22 @@ def _find_function_lib_text_terminator(
                 end += 1
             return pos, end, True
         if value == "\\":
-            if text.startswith(r"\r\n", pos):
-                return pos, pos + 4, True
-            if text.startswith(r"\n", pos):
-                end = pos + 2
-                if end < size and text[end] == "\r":
-                    end += 1
-                return pos, end, True
+            run_end = pos
+            while run_end < size and text[run_end] == "\\":
+                run_end += 1
+            if (run_end - pos) % 2 == 1:
+                # Odd run: the last backslash starts a real escape; an even run
+                # is all literal backslashes, so any following `n` is content.
+                esc = run_end - 1
+                if text.startswith(r"\r\n", esc):
+                    return esc, esc + 4, True
+                if text.startswith(r"\n", esc):
+                    end = esc + 2
+                    if end < size and text[end] == "\r":
+                        end += 1
+                    return esc, end, True
+            pos = run_end
+            continue
         pos += 1
     return -1, -1, False
 

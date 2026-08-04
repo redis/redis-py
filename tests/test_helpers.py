@@ -204,6 +204,37 @@ def test_normalize_function_lib_code_normalizes_lfcr_after_leading_whitespace():
 
 
 @pytest.mark.fixed_client
+def test_normalize_function_lib_code_skips_escaped_backslash_before_n():
+    # `\\n` is a literal backslash + `n`, not a terminator; the real LF rules.
+    code = "#!lua name=mylib " + "\\\\n" + "\nreturn 1"
+    assert normalize_function_lib_code(code) == code
+
+
+@pytest.mark.fixed_client
+def test_normalize_function_lib_code_skips_escaped_backslash_before_n_bytes():
+    code = b"#!lua name=mylib " + b"\\\\n" + b"\nreturn 1"
+    normalized = normalize_function_lib_code(code)
+    assert isinstance(normalized, bytes)
+    assert normalized == code
+
+
+@pytest.mark.fixed_client
+def test_normalize_function_lib_code_odd_backslash_run_still_terminates():
+    # Three backslashes: the first two are literal, the third starts `\n`.
+    code = "#!lua name=mylib " + "\\\\\\n" + " body"
+    normalized = normalize_function_lib_code(code)
+    assert normalized == "#!lua name=mylib " + "\\\\" + "\n body"
+
+
+@pytest.mark.fixed_client
+def test_normalize_function_lib_code_even_run_before_r_keeps_real_escape():
+    # `\\r\n`: literal backslash + `r`, then a genuine `\n` escape.
+    code = "#!lua name=mylib " + "\\\\r\\n" + " body"
+    normalized = normalize_function_lib_code(code)
+    assert normalized == "#!lua name=mylib " + "\\\\r" + "\n body"
+
+
+@pytest.mark.fixed_client
 def test_normalize_function_lib_code_preserves_trailing_whitespace():
     text = "#!lua name=mylib\nreturn 1\n \t"
     binary = text.encode()
