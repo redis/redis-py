@@ -1500,6 +1500,55 @@ class TestBaseSearchFunctionality(SearchTestsBase):
         assert res.docs[0].vector_emb == raw
 
     @pytest.mark.redismod
+    def test_binary_field_survives_alias_with_decode_field_false(self, client):
+        # Regression test: return_field() used to key the decode-encoding map
+        # by the field identifier instead of the AS alias, so an aliased
+        # binary field was decoded (and silently truncated) instead of being
+        # kept raw. Covered against a real server across the protocol /
+        # legacy_responses matrix that CI runs this suite under.
+        fake_vec = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
+
+        index_name = "aliased_binary_index"
+        client.hset(f"{index_name}:1", mapping={"vector_emb": fake_vec.tobytes()})
+
+        client.ft(index_name).create_index(
+            fields=(
+                VectorField(
+                    "vector_emb",
+                    algorithm="HNSW",
+                    attributes={
+                        "TYPE": "FLOAT32",
+                        "DIM": 4,
+                        "DISTANCE_METRIC": "COSINE",
+                    },
+                ),
+            ),
+            definition=IndexDefinition(
+                prefix=[f"{index_name}:"], index_type=IndexType.HASH
+            ),
+        )
+        self.waitForIndex(client, index_name)
+
+        query = Query("*").return_field(
+            "vector_emb", as_field="emb", decode_field=False
+        )
+        result = client.ft(index_name).search(query=query, query_params={})
+
+        if expects_resp3_shape(client):
+            results = result["results"]
+            assert len(results) > 0, f"Returned search results are empty: {result}"
+            attributes = results[0]["extra_attributes"]
+        else:
+            docs = result.docs
+            assert len(docs) > 0, f"Returned search results are empty: {result}"
+            attributes = docs[0]
+
+        decoded_vec = np.frombuffer(attributes["emb"], dtype=np.float32)
+        assert np.array_equal(decoded_vec, fake_vec), (
+            "The aliased binary field was not preserved intact"
+        )
+
+    @pytest.mark.redismod
     def test_synupdate(self, client):
         definition = IndexDefinition(index_type=IndexType.HASH)
         client.ft().create_index(
