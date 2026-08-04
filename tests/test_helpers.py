@@ -231,3 +231,14 @@ def test_normalize_function_lib_code_sliced_memoryview_no_copy_when_unchanged():
 )
 def test_normalize_function_lib_code_binary_no_copy_when_unchanged(code):
     assert normalize_function_lib_code(code) is code
+
+
+@pytest.mark.fixed_client
+def test_normalize_function_lib_code_strips_unicode_whitespace():
+    code = "\u00a0#!lua name=mylib\nreturn 1"
+    assert normalize_function_lib_code(code) == "#!lua name=mylib\nreturn 1"
+
+
+@pytest.mark.fixed_client
+def test_normalize_function_lib_code_terminator_free_whitespace():
+    assert normalize_function_lib_code(" " * 50_000) == ""
