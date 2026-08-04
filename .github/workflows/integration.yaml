@@ -115,7 +115,6 @@ jobs:
             # runners are added. Run them once, on the current Redis version's
             # cluster cell.
             run-multidb-integration: ${{ (matrix.redis-version == needs.redis_version.outputs.CURRENT && matrix.test-config == 'default-unified_responses-cluster') && 'true' || 'false' }}
-            otlp-auth-token: ${{ secrets.SELF_CHECK_OTEL_AUTHORIZATION_TOKEN }}
 
   python-compatibility-tests:
     runs-on: ubuntu-latest
@@ -155,7 +154,6 @@ jobs:
           parser-backend: ${{ matrix.parser-backend }}
           redis-version: ${{ matrix.redis-version }}
           test-config: ${{ matrix.test-config }}
-          otlp-auth-token: ${{ secrets.SELF_CHECK_OTEL_AUTHORIZATION_TOKEN }}
 
   pypy-compatibility-tests:
     runs-on: ubuntu-latest
@@ -198,7 +196,6 @@ jobs:
           parser-backend: ${{ matrix.parser-backend }}
           redis-version: ${{ matrix.redis-version }}
           test-config: ${{ matrix.test-config }}
-          otlp-auth-token: ${{ secrets.SELF_CHECK_OTEL_AUTHORIZATION_TOKEN }}
 
   hiredis-tests:
     runs-on: ubuntu-latest
@@ -240,7 +237,6 @@ jobs:
           redis-version: ${{ matrix.redis-version }}
           hiredis-version: ${{ matrix.hiredis-version }}
           test-config: ${{ matrix.test-config }}
-          otlp-auth-token: ${{ secrets.SELF_CHECK_OTEL_AUTHORIZATION_TOKEN }}
 
   uvloop-tests:
     runs-on: ubuntu-latest
@@ -281,7 +277,6 @@ jobs:
           redis-version: ${{ matrix.redis-version }}
           event-loop: ${{ matrix.event-loop }}
           test-config: ${{ matrix.test-config }}
-          otlp-auth-token: ${{ secrets.SELF_CHECK_OTEL_AUTHORIZATION_TOKEN }}
 
   build-and-test-package:
     name: Validate building and installing the package
