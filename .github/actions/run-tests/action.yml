@@ -57,7 +57,7 @@ runs:
         repository: ${{ inputs.repository }}
         ref: ${{ inputs.ref }}
 
-    - uses: actions/setup-python@v6
+    - uses: actions/setup-python@v7
       with:
         python-version: ${{ inputs.python-version }}
         cache: 'pip'
