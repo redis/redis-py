@@ -1,6 +1,5 @@
 import copy
 import random
-import re
 import string
 from typing import (
     Any,
@@ -329,26 +328,47 @@ def _normalize_function_lib_code_binary(
     )
 
 
-_FUNCTION_LIB_TEXT_TERMINATOR_RE = re.compile(
-    r"\A(?P<leading>[ \t\n\r\v\f]*)(?P<header>.*?)"
-    r"(?P<terminator>\\r\\n|\\n\r?|\r\n|\n|\r)",
-    re.DOTALL,
-)
+def _find_function_lib_text_terminator(
+    text: str, start: int
+) -> tuple[int, int, bool]:
+    """Find the first real or escaped text shebang terminator in one pass."""
+    size = len(text)
+    pos = start
+    while pos < size:
+        value = text[pos]
+        if value == "\n":
+            return pos, pos + 1, False
+        if value == "\r":
+            end = pos + 1
+            if end < size and text[end] == "\n":
+                end += 1
+            return pos, end, True
+        if value == "\\":
+            if text.startswith(r"\r\n", pos):
+                return pos, pos + 4, True
+            if text.startswith(r"\n", pos):
+                end = pos + 2
+                if end < size and text[end] == "\r":
+                    end += 1
+                return pos, end, True
+        pos += 1
+    return -1, -1, False
 
 
 def _normalize_function_lib_code_text(text: str) -> str:
-    """Normalize text framing without materializing a payload-sized suffix."""
-    match = _FUNCTION_LIB_TEXT_TERMINATOR_RE.match(text)
-    if match is None:
-        return text.lstrip()
+    """Normalize text framing with linear Unicode-aware scanning."""
+    start = 0
+    while start < len(text) and text[start].isspace():
+        start += 1
 
-    terminator = match.group("terminator")
-    if not match.group("leading") and terminator == "\n":
-        return text
-
-    # The regex engine copies the unmatched body into the result directly,
-    # avoiding explicit lstrip and suffix-slice copies for large payloads.
-    header = match.group("header")
-    return _FUNCTION_LIB_TEXT_TERMINATOR_RE.sub(
-        lambda _match: header + "\n", text, count=1
+    prefix_end, terminator_end, needs_normalization = (
+        _find_function_lib_text_terminator(text, start)
     )
+
+    if start == 0 and not needs_normalization:
+        return text
+    if prefix_end < 0 or not needs_normalization:
+        return text[start:]
+
+    # Normalize only the shebang terminator and preserve the body verbatim.
+    return "".join((text[start:prefix_end], "\n", text[terminator_end:]))
