@@ -221,9 +221,12 @@ def test_normalize_function_lib_code_skips_escaped_backslash_before_n_bytes():
 @pytest.mark.fixed_client
 def test_normalize_function_lib_code_odd_backslash_run_still_terminates():
     # Three backslashes: the first two are literal, the third starts `\n`.
-    code = "#!lua name=mylib " + "\\\\\\n" + " body"
-    normalized = normalize_function_lib_code(code)
-    assert normalized == "#!lua name=mylib " + "\\\\" + "\n body"
+    escaped_terminator = "\\" * 3 + "n"
+    code = "#!lua name=mylib " + escaped_terminator + " body"
+    expected = "#!lua name=mylib " + "\\" * 2 + "\n body"
+
+    assert code != expected
+    assert normalize_function_lib_code(code) == expected
 
 
 @pytest.mark.fixed_client
