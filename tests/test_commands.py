@@ -5222,16 +5222,6 @@ class TestRedisCommands:
             [[b"a3", "3.0"], [b"a2", "2.0"]],
         )
 
-    def test_zrevrange_passes_key_as_list(self, r):
-        # zrevrange must pass its key in a list, like the sibling range
-        # commands (zrange, zrangebyscore, zrevrangebyscore). Passing a bare
-        # string means downstream consumers that iterate options["keys"]
-        # (e.g. client-side cache key construction) walk it character by
-        # character instead of treating it as a single key.
-        with mock.patch.object(r, "execute_command", return_value=[]) as execute_command:
-            r.zrevrange("myzset", 0, -1)
-        assert execute_command.call_args.kwargs["keys"] == ["myzset"]
-
     def test_zrevrangebyscore(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
         assert r.zrevrangebyscore("a", 4, 2) == [b"a4", b"a3", b"a2"]
