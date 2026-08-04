@@ -119,8 +119,9 @@ transactional pipeline (``pipeline(transaction=True)``), zero-key ``EVALSHA``
 reuses the transaction's existing slot when one is already chosen, so multiple
 zero-key scripts (or a mix with keyed commands) stay single-slot.
 
-``EVAL``, ``load_scripts``, and ``script_load_for_pipeline`` remain
-**not supported** on cluster pipelines.
+``load_scripts`` and ``script_load_for_pipeline`` remain **not supported**
+on cluster pipelines. On the sync client, ``ClusterPipeline.eval()`` is also
+blocked; the async cluster pipeline has no ``eval`` override.
 
 Important caveats when using ``EVALSHA`` in a cluster pipeline:
 

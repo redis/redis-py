@@ -43,6 +43,7 @@ from redis.exceptions import (
     AskError,
     ClusterDownError,
     ConnectionError,
+    CrossSlotTransactionError,
     DataError,
     MaxConnectionsError,
     MovedError,
@@ -3967,37 +3968,40 @@ class TestClusterPipeline:
         finally:
             await r.aclose()
 
-    async def test_zero_key_fcall_allows_keyed_retarget(self) -> None:
-        """Zero-key FCALL must not lock the slot so a later keyed command can retarget."""
+    async def test_evalsha_zero_keys_then_cross_slot_raises_at_execute(self) -> None:
+        """
+        Zero-key EVALSHA retarget must not swallow a later true cross-slot
+        conflict: two keyed commands on different slots still raise at execute().
+        """
         r = await get_mocked_redis_client(host=default_host, port=default_port)
         try:
+            sha = "a" * 40
+            slot_a = key_slot(b"{foo}a")
+            slot_b = key_slot(b"{bar}b")
+            assert slot_a != slot_b
             async with r.pipeline(transaction=True) as pipe:
-
-                async def _fcall_slot(*_args, **_kwargs):
-                    return 111
-
-                with mock.patch.object(
-                    pipe.cluster_client,
-                    "_determine_slot",
-                    side_effect=_fcall_slot,
-                ):
-                    pipe.execute_command("FCALL", "myfunc", 0)
-                assert pipe._execution_strategy._pipeline_slots == {111}
-                assert pipe._execution_strategy._transaction_has_keyed_slot is False
-
-                keyed_slot = key_slot(b"foo")
+                slots = iter([111, slot_a, slot_b])
 
                 async def _fake_determine_slot(*_args, **_kwargs):
-                    return keyed_slot
+                    return next(slots)
 
                 with mock.patch.object(
                     pipe.cluster_client,
                     "_determine_slot",
                     side_effect=_fake_determine_slot,
                 ):
-                    pipe.set("foo", "bar")
-                assert pipe._execution_strategy._pipeline_slots == {keyed_slot}
-                assert pipe._execution_strategy._transaction_has_keyed_slot is True
+                    pipe.evalsha(sha, 0)
+                    pipe.set("{foo}a", "1")
+                    pipe.set("{bar}b", "2")
+                assert pipe._execution_strategy._pipeline_slots == {slot_a, slot_b}
+                with pytest.raises(
+                    CrossSlotTransactionError,
+                    match=(
+                        "All keys involved in a cluster transaction "
+                        "must map to the same slot"
+                    ),
+                ):
+                    await pipe.execute()
         finally:
             await r.aclose()
 
@@ -4014,6 +4018,41 @@ class TestClusterPipeline:
                 assert queue[0].args[1] == script.sha
         finally:
             await r.aclose()
+
+    async def test_evalsha_in_pipeline(self, r: RedisCluster) -> None:
+        """
+        EVALSHA is allowed in ClusterPipeline when keys map to one slot
+        and the script is already loaded on cluster primaries (#2914).
+        """
+        multiply = "return redis.call('GET', KEYS[1]) * ARGV[1]"
+        sha = await r.script_load(multiply)
+        await r.set("{user}a", 2)
+        async with r.pipeline() as pipe:
+            pipe.evalsha(sha, 1, "{user}a", 3)
+            assert await pipe.execute() == [6]
+
+    async def test_evalsha_zero_keys_in_pipeline(self, r: RedisCluster) -> None:
+        """
+        EVALSHA with numkeys=0 must execute in ClusterPipeline without
+        calling COMMAND GETKEYS (broken on Redis <7 for this case).
+        """
+        sha = await r.script_load("return 42")
+        async with r.pipeline() as pipe:
+            pipe.evalsha(sha, 0)
+            assert await pipe.execute() == [42]
+
+    async def test_evalsha_zero_keys_in_transaction_pipeline(
+        self, r: RedisCluster
+    ) -> None:
+        """
+        Multiple zero-key EVALSHA calls in a transactional pipeline share
+        one slot and execute successfully.
+        """
+        sha = await r.script_load("return 42")
+        async with r.pipeline(transaction=True) as pipe:
+            pipe.evalsha(sha, 0)
+            pipe.evalsha(sha, 0)
+            assert await pipe.execute() == [42, 42]
 
     async def test_empty_stack(self, r: RedisCluster) -> None:
         """If a pipeline is executed with no commands it should return a empty list."""

@@ -42,6 +42,7 @@ from redis.exceptions import (
     AskError,
     ClusterDownError,
     ConnectionError,
+    CrossSlotTransactionError,
     DataError,
     MovedError,
     NoPermissionError,
@@ -3836,11 +3837,13 @@ class TestClusterPubSubObject:
         mock_node_conn.disconnect.assert_called_once()
 
 
+@pytest.mark.onlycluster
 def test_evalsha_not_in_pipeline_blocked_commands():
     """EVALSHA must be usable in ClusterPipeline (see #2914)."""
     assert "EVALSHA" not in PIPELINE_BLOCKED_COMMANDS
 
 
+@pytest.mark.onlycluster
 def test_evalsha_can_be_queued_on_cluster_pipeline():
     """
     Queuing EVALSHA on a ClusterPipeline must not raise the historical
@@ -3863,6 +3866,7 @@ def test_evalsha_can_be_queued_on_cluster_pipeline():
         r.close()
 
 
+@pytest.mark.onlycluster
 def test_evalsha_zero_keys_pipeline_execute_skips_get_command_keys():
     """
     Sync ClusterPipeline must route EVALSHA via determine_slot, not
@@ -3886,6 +3890,7 @@ def test_evalsha_zero_keys_pipeline_execute_skips_get_command_keys():
         r.close()
 
 
+@pytest.mark.onlycluster
 def test_evalsha_zero_keys_reuses_slot_in_transaction():
     """
     Zero-key EVALSHA in a transactional pipeline must reuse one slot so
@@ -3910,6 +3915,7 @@ def test_evalsha_zero_keys_reuses_slot_in_transaction():
         r.close()
 
 
+@pytest.mark.onlycluster
 def test_evalsha_zero_keys_follows_keyed_slot_in_transaction():
     """Zero-key EVALSHA after a keyed slot is fixed reuses that slot."""
     r = get_mocked_redis_client(host=default_host, port=default_port)
@@ -3925,6 +3931,7 @@ def test_evalsha_zero_keys_follows_keyed_slot_in_transaction():
         r.close()
 
 
+@pytest.mark.onlycluster
 def test_slotless_command_does_not_lock_keyed_slot_flag():
     """Slotless commands must not block later keyed retargeting."""
     r = get_mocked_redis_client(host=default_host, port=default_port)
@@ -3947,21 +3954,34 @@ def test_slotless_command_does_not_lock_keyed_slot_flag():
         r.close()
 
 
-def test_zero_key_fcall_allows_keyed_retarget():
-    """Zero-key FCALL must not lock the slot so a later keyed command can retarget."""
+@pytest.mark.onlycluster
+def test_evalsha_zero_keys_then_cross_slot_raises_at_execute():
+    """
+    Zero-key EVALSHA retarget must not swallow a later true cross-slot
+    conflict: two keyed commands on different slots still raise at execute().
+    """
     r = get_mocked_redis_client(host=default_host, port=default_port)
     try:
+        sha = "a" * 40
+        slot_a = key_slot(b"{foo}a")
+        slot_b = key_slot(b"{bar}b")
+        assert slot_a != slot_b
         with r.pipeline(transaction=True) as pipe:
-            with patch.object(pipe, "determine_slot", return_value=111):
-                pipe.execute_command("FCALL", "myfunc", 0)
-            assert pipe._execution_strategy._pipeline_slots == {111}
-            assert pipe._execution_strategy._transaction_has_keyed_slot is False
-
-            keyed_slot = key_slot(b"foo")
-            with patch.object(pipe, "determine_slot", return_value=keyed_slot):
-                pipe.set("foo", "bar")
-            assert pipe._execution_strategy._pipeline_slots == {keyed_slot}
-            assert pipe._execution_strategy._transaction_has_keyed_slot is True
+            with patch.object(
+                pipe, "determine_slot", side_effect=[111, slot_a, slot_b]
+            ):
+                pipe.evalsha(sha, 0)
+                pipe.set("{foo}a", "1")
+                pipe.set("{bar}b", "2")
+            assert pipe._execution_strategy._pipeline_slots == {slot_a, slot_b}
+            with pytest.raises(
+                CrossSlotTransactionError,
+                match=(
+                    "All keys involved in a cluster transaction "
+                    "must map to the same slot"
+                ),
+            ):
+                pipe.execute()
     finally:
         r.close()
 
