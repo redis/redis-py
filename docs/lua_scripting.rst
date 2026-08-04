@@ -134,8 +134,12 @@ Important caveats when using ``EVALSHA`` in a cluster pipeline:
   fails with ``NOSCRIPT`` (``redis.exceptions.NoScriptError``).
 - Unlike the non-pipelined ``Script`` object, **a cluster pipeline performs no
   automatic reload or retry** on ``NOSCRIPT``. Recovery is the caller's
-  responsibility: catch ``NoScriptError``, re-run ``SCRIPT LOAD``, and
-  re-execute the pipeline. Because zero-key ``EVALSHA`` is routed to a random
+  responsibility: catch ``NoScriptError``, re-run ``SCRIPT LOAD``, then retry
+  only when replay is safe (for example an idempotent or single-command
+  pipeline). Blindly re-executing a multi-command pipeline can duplicate
+  side effects: Redis still runs the rest of a non-transactional batch when
+  one ``EVALSHA`` returns ``NOSCRIPT``, and the client raises only after
+  reading every response. Because zero-key ``EVALSHA`` is routed to a random
   primary, the script must be present on **all** primaries.
 - In a **transactional** pipeline, a ``NOSCRIPT`` from ``EVALSHA`` is raised at
   ``EXEC`` time and does **not** roll back the other commands (this follows
@@ -149,9 +153,9 @@ Important caveats when using ``EVALSHA`` in a cluster pipeline:
    ...     with rc.pipeline() as pipe:
    ...         pipe.evalsha(sha, 1, "{user}:1")
    ...         return pipe.execute()
-   >>> try:
-   ...     result = run()
-   ... except NoScriptError:
-   ...     # a node was missing the script (e.g. after failover/upgrade)
-   ...     sha = rc.script_load(lua)  # reload on current primaries
-   ...     result = run()
+>>> try:
+...     result = run()
+... except NoScriptError:
+...     # single-command pipeline: safe to reload and retry
+...     sha = rc.script_load(lua)  # reload on current primaries
+...     result = run()
