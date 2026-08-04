@@ -12290,8 +12290,10 @@ class FunctionCommands:
             whitespace is preserved for exact source round trips. If the
             shebang terminator is a redis-cli-style ``\\n`` or ``\\r\\n``
             escape instead of a real newline, that terminator is expanded even
-            when the body contains later physical newlines. Later escapes in
-            the body (e.g. Lua string escapes) are left unchanged.
+            when the body contains later physical newlines. A physical CRLF or
+            lone-CR shebang terminator is normalized to LF, while the body's
+            own physical line endings are preserved. Later escapes in the body
+            (e.g. Lua string escapes) are left unchanged.
         :param replace: changes the behavior to overwrite the existing library
             with the new contents.
         Return the library name that was loaded.
