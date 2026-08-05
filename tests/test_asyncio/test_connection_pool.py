@@ -676,6 +676,14 @@ class TestConnectionPoolURLParsing:
         assert pool.connection_class == redis.Connection
         assert_kwargs_subset(pool.connection_kwargs, {"host": "my.host"})
 
+        ssl_pool = redis.ConnectionPool.from_url("REDISS://my.host")
+        assert ssl_pool.connection_class == redis.SSLConnection
+        assert_kwargs_subset(ssl_pool.connection_kwargs, {"host": "my.host"})
+
+        unix_pool = redis.ConnectionPool.from_url("UNIX:///tmp/redis.sock")
+        assert unix_pool.connection_class == redis.UnixDomainSocketConnection
+        assert_kwargs_subset(unix_pool.connection_kwargs, {"path": "/tmp/redis.sock"})
+
 
 @pytest.mark.fixed_client
 class TestBlockingConnectionPoolURLParsing:
