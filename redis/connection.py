@@ -1152,7 +1152,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             self.send_command(
                 "HELLO", self.protocol, "AUTH", *auth_args, check_health=False
             )
-            self.handshake_metadata = self.read_response()
+            self.handshake_metadata = self._read_response_with_health_check()
             # if response.get(b"proto") != self.protocol and response.get(
             #     "proto"
             # ) != self.protocol:
@@ -1163,14 +1163,14 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             self.send_command("AUTH", *auth_args, check_health=False)
 
             try:
-                auth_response = self.read_response()
+                auth_response = self._read_response_with_health_check()
             except AuthenticationWrongNumberOfArgsError:
                 # a username and password were specified but the Redis
                 # server seems to be < 6.0.0 which expects a single password
                 # arg. retry auth with just the password.
                 # https://github.com/andymccurdy/redis-py/issues/1274
                 self.send_command("AUTH", auth_args[-1], check_health=False)
-                auth_response = self.read_response()
+                auth_response = self._read_response_with_health_check()
 
             if str_if_bytes(auth_response) != "OK":
                 raise AuthenticationError("Invalid Username or Password")
@@ -1183,7 +1183,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 self._parser.EXCEPTION_CLASSES = parser.EXCEPTION_CLASSES
                 self._parser.on_connect(self)
             self.send_command("HELLO", self.protocol, check_health=check_health)
-            self.handshake_metadata = self.read_response()
+            self.handshake_metadata = self._read_response_with_health_check()
             if (
                 self.handshake_metadata.get(b"proto") != self.protocol
                 and self.handshake_metadata.get("proto") != self.protocol
@@ -1203,7 +1203,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 self.client_name,
                 check_health=check_health,
             )
-            if str_if_bytes(self.read_response()) != "OK":
+            if str_if_bytes(self._read_response_with_health_check()) != "OK":
                 raise ConnectionError("Error setting client name")
 
         # Set the library name and version from driver_info
@@ -1216,7 +1216,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                     self.driver_info.formatted_name,
                     check_health=check_health,
                 )
-                self.read_response()
+                self._read_response_with_health_check()
         except ResponseError:
             pass
 
@@ -1229,14 +1229,14 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                     self.driver_info.lib_version,
                     check_health=check_health,
                 )
-                self.read_response()
+                self._read_response_with_health_check()
         except ResponseError:
             pass
 
         # if a database is specified, switch to it
         if self.db:
             self.send_command("SELECT", self.db, check_health=check_health)
-            if str_if_bytes(self.read_response()) != "OK":
+            if str_if_bytes(self._read_response_with_health_check()) != "OK":
                 raise ConnectionError("Invalid Database")
 
     def disconnect(self, *args, **kwargs):
@@ -1317,8 +1317,17 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
     def _send_ping(self):
         """Send PING, expect PONG in return"""
         self.send_command("PING", check_health=False)
-        if str_if_bytes(self.read_response()) != "PONG":
+        if str_if_bytes(self._read_response_with_health_check()) != "PONG":
             raise ConnectionError("Bad response from PING health check")
+
+    def _read_response_with_health_check(self):
+        """Read a response while establishing or checking a connection."""
+        try:
+            return self.read_response()
+        except TimeoutError as error:
+            raise ConnectionError(
+                f"Timeout during connection health check to {self._host_error()}"
+            ) from error
 
     def _ping_failed(self, error, failure_count):
         """Function to call when PING fails"""

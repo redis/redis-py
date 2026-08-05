@@ -969,7 +969,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             await self.send_command(
                 "HELLO", self.protocol, "AUTH", *auth_args, check_health=False
             )
-            response = await self.read_response()
+            response = await self._read_response_with_health_check()
             if response.get(b"proto") != int(self.protocol) and response.get(
                 "proto"
             ) != int(self.protocol):
@@ -980,14 +980,14 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             await self.send_command("AUTH", *auth_args, check_health=False)
 
             try:
-                auth_response = await self.read_response()
+                auth_response = await self._read_response_with_health_check()
             except AuthenticationWrongNumberOfArgsError:
                 # a username and password were specified but the Redis
                 # server seems to be < 6.0.0 which expects a single password
                 # arg. retry auth with just the password.
                 # https://github.com/andymccurdy/redis-py/issues/1274
                 await self.send_command("AUTH", auth_args[-1], check_health=False)
-                auth_response = await self.read_response()
+                auth_response = await self._read_response_with_health_check()
 
             if str_if_bytes(auth_response) != "OK":
                 raise AuthenticationError("Invalid Username or Password")
@@ -1000,7 +1000,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                 self._parser.EXCEPTION_CLASSES = parser.EXCEPTION_CLASSES
                 self._parser.on_connect(self)
             await self.send_command("HELLO", self.protocol, check_health=check_health)
-            response = await self.read_response()
+            response = await self._read_response_with_health_check()
             # if response.get(b"proto") != self.protocol and response.get(
             #     "proto"
             # ) != self.protocol:
@@ -1021,7 +1021,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                 self.client_name,
                 check_health=check_health,
             )
-            if str_if_bytes(await self.read_response()) != "OK":
+            if str_if_bytes(await self._read_response_with_health_check()) != "OK":
                 raise ConnectionError("Error setting client name")
 
         # Set the library name and version from driver_info, pipeline for lower startup latency
@@ -1055,12 +1055,12 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         # read responses from pipeline
         for _ in range(sum([lib_name_sent, lib_version_sent])):
             try:
-                await self.read_response()
+                await self._read_response_with_health_check()
             except ResponseError:
                 pass
 
         if self.db:
-            if str_if_bytes(await self.read_response()) != "OK":
+            if str_if_bytes(await self._read_response_with_health_check()) != "OK":
                 raise ConnectionError("Invalid Database")
 
     async def disconnect(
@@ -1145,8 +1145,17 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
     async def _send_ping(self):
         """Send PING, expect PONG in return"""
         await self.send_command("PING", check_health=False)
-        if str_if_bytes(await self.read_response()) != "PONG":
+        if str_if_bytes(await self._read_response_with_health_check()) != "PONG":
             raise ConnectionError("Bad response from PING health check")
+
+    async def _read_response_with_health_check(self):
+        """Read a response while establishing or checking a connection."""
+        try:
+            return await self.read_response()
+        except TimeoutError as error:
+            raise ConnectionError(
+                f"Timeout during connection health check to {self._host_error()}"
+            ) from error
 
     async def _ping_failed(self, error, failure_count):
         """Function to call when PING fails"""

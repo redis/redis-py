@@ -543,6 +543,17 @@ def test_redis_client_default_driver_info():
 
 @pytest.mark.fixed_client
 class TestConnection:
+    def test_connection_health_check_timeout_is_connection_error(self):
+        conn = Connection()
+        conn.read_response = mock.Mock(side_effect=TimeoutError("read timeout"))
+
+        with pytest.raises(
+            ConnectionError, match="Timeout during connection health check"
+        ) as raised:
+            conn._read_response_with_health_check()
+
+        assert isinstance(raised.value.__cause__, TimeoutError)
+
     def test_disconnect(self):
         conn = Connection()
         mock_sock = mock.Mock()

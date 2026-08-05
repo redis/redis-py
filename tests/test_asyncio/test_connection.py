@@ -414,6 +414,19 @@ async def test_connect_with_retries():
 
 
 @pytest.mark.fixed_client
+async def test_connection_health_check_timeout_is_connection_error():
+    conn = Connection()
+    conn.read_response = mock.AsyncMock(side_effect=TimeoutError("read timeout"))
+
+    with pytest.raises(
+        ConnectionError, match="Timeout during connection health check"
+    ) as raised:
+        await conn._read_response_with_health_check()
+
+    assert isinstance(raised.value.__cause__, TimeoutError)
+
+
+@pytest.mark.fixed_client
 async def test_connect_timeout_error_without_retry():
     """Test that the _connect function is not being retried if retry_on_timeout is
     set to False"""
