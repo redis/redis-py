@@ -3022,7 +3022,10 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 self.cache = cache
             else:
                 if self._cache_factory is not None:
-                    self.cache = CacheProxy(self._cache_factory.get_cache())
+                    cache = self._cache_factory.get_cache()
+                    self.cache = (
+                        cache if isinstance(cache, CacheProxy) else CacheProxy(cache)
+                    )
                 else:
                     self.cache = CacheFactory(
                         self._connection_kwargs.get("cache_config")

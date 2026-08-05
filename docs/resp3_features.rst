@@ -86,10 +86,11 @@ Client-side caching
 Client-side caching is a technique used to create high performance services.
 It utilizes the memory on application servers, typically separate from the database nodes, to cache a subset of the data directly on the application side.
 For more information please check the `Redis client-side caching documentation <https://redis.io/docs/latest/develop/use/client-side-caching/>`_.
-Please notice that this feature is available only with RESP3 protocol enabled
-in sync clients. redis-py 8.0 and later use RESP3 on the wire by default, and
-the examples below pass ``protocol=3`` explicitly to make the requirement clear.
-Supported in standalone, Cluster, and Sentinel clients.
+Please notice that this feature is available only with RESP3 protocol enabled.
+redis-py 8.0 and later use RESP3 on the wire by default, and the examples below
+pass ``protocol=3`` explicitly to make the requirement clear. It is supported
+by standalone sync and async clients, as well as the sync Cluster and Sentinel
+clients.
 
 Basic usage:
 
@@ -101,7 +102,15 @@ Enable caching with default configuration:
     >>> from redis.cache import CacheConfig
     >>> r = redis.Redis(host='localhost', port=6379, protocol=3, cache_config=CacheConfig())
 
-The same interface applies to Redis Cluster and Sentinel.
+The async client uses the same configuration:
+
+.. code:: python
+
+    >>> import redis.asyncio as redis
+    >>> from redis.cache import CacheConfig
+    >>> r = redis.Redis(host='localhost', port=6379, protocol=3, cache_config=CacheConfig())
+
+The same interface applies to the sync Redis Cluster and Sentinel clients.
 
 Enable caching with custom cache implementation:
 

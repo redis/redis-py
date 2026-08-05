@@ -15,8 +15,9 @@ from redis._parsers import (
     _AsyncRESPBase,
 )
 from redis._parsers.hiredis import NOT_ENOUGH_DATA
-from redis.asyncio import ConnectionPool, Redis
+from redis.asyncio import BlockingConnectionPool, ConnectionPool, Redis
 from redis.asyncio.connection import (
+    AsyncCacheProxyConnection,
     Connection,
     SSLConnection,
     UnixDomainSocketConnection,
@@ -24,7 +25,16 @@ from redis.asyncio.connection import (
 )
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
+from redis.cache import (
+    CacheConfig,
+    CacheEntry,
+    CacheEntryStatus,
+    CacheFactory,
+    CacheKey,
+    CacheProxy,
+)
+from redis.observability.attributes import CSCReason
+from redis.exceptions import ConnectionError, InvalidResponse, RedisError, TimeoutError
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
 
@@ -81,6 +91,395 @@ def test_connection_default_parser_matches_default_protocol():
     )
     assert isinstance(conn._parser, expected_parser_class)
     assert conn.protocol == 3
+
+
+async def test_async_redis_accepts_client_side_cache_configuration():
+    client = Redis(cache_config=CacheConfig(max_size=10), protocol=3)
+
+    try:
+        assert client.connection_pool.cache is not None
+    finally:
+        await client.aclose()
+
+
+async def test_async_unix_socket_accepts_client_side_cache_configuration():
+    client = Redis(
+        unix_socket_path="unix:///tmp/redis.sock",
+        cache_config=CacheConfig(max_size=10),
+        protocol=3,
+    )
+
+    try:
+        assert client.connection_pool.cache is not None
+    finally:
+        await client.aclose()
+
+
+async def test_async_redis_rejects_client_side_cache_with_resp2():
+    with pytest.raises(
+        RedisError, match="Client caching is only supported with RESP version 3"
+    ):
+        Redis(cache_config=CacheConfig(), protocol=2)
+
+
+def test_async_connection_pool_rejects_client_side_cache_with_resp2():
+    with pytest.raises(
+        RedisError, match="Client caching is only supported with RESP version 3"
+    ):
+        ConnectionPool(protocol=2, cache_config=CacheConfig())
+
+
+async def test_async_connection_pool_creates_cache_proxy_connection():
+    pool = ConnectionPool(protocol=3, cache_config=CacheConfig())
+
+    try:
+        assert isinstance(pool.make_connection(), AsyncCacheProxyConnection)
+    finally:
+        await pool.aclose()
+
+
+async def test_async_cache_proxy_rejects_unsupported_redis_version():
+    connection = mock.Mock()
+    connection.connect = mock.AsyncMock()
+    connection.handshake_metadata = {
+        b"server": b"redis",
+        b"version": b"7.2.4",
+    }
+    cache = CacheFactory(CacheConfig()).get_cache()
+    proxy = AsyncCacheProxyConnection(connection, cache, asyncio.Lock())
+
+    with pytest.raises(ConnectionError, match="supported by Redis 7.4 or later"):
+        await proxy.connect()
+
+
+async def test_async_cache_proxy_returns_cached_response_and_handles_invalidation():
+    connection = mock.Mock()
+    connection.can_read = mock.AsyncMock(return_value=False)
+    connection.send_command = mock.AsyncMock()
+    connection.read_response = mock.AsyncMock(side_effect=[b"first", b"second"])
+    cache = CacheFactory(CacheConfig()).get_cache()
+    proxy = AsyncCacheProxyConnection(connection, cache, asyncio.Lock())
+
+    await proxy.send_command("GET", "key", keys=("key",))
+    assert await proxy.read_response() == b"first"
+
+    await proxy.send_command("GET", "key", keys=("key",))
+    assert await proxy.read_response() == b"first"
+    assert connection.send_command.await_count == 1
+    assert connection.read_response.await_count == 1
+
+    await proxy._on_invalidation_callback([b"invalidate", [b"key"]])
+    await proxy.send_command("GET", "key", keys=("key",))
+    assert await proxy.read_response() == b"second"
+    assert connection.send_command.await_count == 2
+    assert connection.read_response.await_count == 2
+
+
+async def test_async_cache_proxy_waits_for_in_flight_cache_fill():
+    first_connection = mock.Mock()
+    first_connection.can_read = mock.AsyncMock(return_value=False)
+    first_connection.send_command = mock.AsyncMock()
+    first_connection.read_response = mock.AsyncMock(return_value=b"first")
+    second_connection = mock.Mock()
+    second_connection.can_read = mock.AsyncMock(return_value=False)
+    second_connection.send_command = mock.AsyncMock()
+    second_connection.read_response = mock.AsyncMock()
+    cache = CacheFactory(CacheConfig()).get_cache()
+    pool_lock = asyncio.Lock()
+    first_proxy = AsyncCacheProxyConnection(first_connection, cache, pool_lock)
+    second_proxy = AsyncCacheProxyConnection(second_connection, cache, pool_lock)
+
+    await first_proxy.send_command("GET", "key", keys=("key",))
+    waiting_send = asyncio.create_task(
+        second_proxy.send_command("GET", "key", keys=("key",))
+    )
+    await asyncio.sleep(0)
+
+    assert waiting_send.done() is False
+    assert second_connection.send_command.await_count == 0
+
+    assert await first_proxy.read_response() == b"first"
+    await waiting_send
+    assert await second_proxy.read_response() == b"first"
+    assert second_connection.read_response.await_count == 0
+
+
+async def test_async_cache_proxy_retries_after_in_flight_fill_fails():
+    first_connection = mock.Mock()
+    first_connection.can_read = mock.AsyncMock(return_value=False)
+    first_connection.send_command = mock.AsyncMock()
+    first_connection.read_response = mock.AsyncMock(
+        side_effect=ConnectionError("read failed")
+    )
+    second_connection = mock.Mock()
+    second_connection.can_read = mock.AsyncMock(return_value=False)
+    second_connection.send_command = mock.AsyncMock()
+    cache = CacheFactory(CacheConfig()).get_cache()
+    pool_lock = asyncio.Lock()
+    first_proxy = AsyncCacheProxyConnection(first_connection, cache, pool_lock)
+    second_proxy = AsyncCacheProxyConnection(second_connection, cache, pool_lock)
+
+    await first_proxy.send_command("GET", "key", keys=("key",))
+    waiting_send = asyncio.create_task(
+        second_proxy.send_command("GET", "key", keys=("key",))
+    )
+    await asyncio.sleep(0)
+
+    with pytest.raises(ConnectionError, match="read failed"):
+        await first_proxy.read_response()
+
+    await waiting_send
+    second_connection.send_command.assert_awaited_once_with("GET", "key", keys=("key",))
+
+
+async def test_async_cache_proxy_signals_evicted_in_progress_fill():
+    cache = CacheFactory(CacheConfig(max_size=1)).get_cache()
+    first_event = asyncio.Event()
+    first_entry = CacheEntry(
+        cache_key=CacheKey(command="GET", redis_keys=("first",), redis_args=()),
+        cache_value=b"foo",
+        status=CacheEntryStatus.IN_PROGRESS,
+        connection_ref=mock.Mock(),
+        completion_event=first_event,
+    )
+    second_entry = CacheEntry(
+        cache_key=CacheKey(command="GET", redis_keys=("second",), redis_args=()),
+        cache_value=b"foo",
+        status=CacheEntryStatus.IN_PROGRESS,
+        connection_ref=mock.Mock(),
+        completion_event=asyncio.Event(),
+    )
+
+    cache.set(first_entry)
+    cache.set(second_entry)
+
+    assert first_event.is_set()
+
+
+async def test_blocking_pool_serializes_cache_owner_checks():
+    pool = BlockingConnectionPool(
+        max_connections=1, protocol=3, cache_config=CacheConfig()
+    )
+    entered = asyncio.Event()
+
+    async def acquire_pool_lock():
+        async with pool._maybe_pool_lock():
+            entered.set()
+
+    async with pool._lock:
+        task = asyncio.create_task(acquire_pool_lock())
+        await asyncio.sleep(0)
+        assert entered.is_set() is False
+
+    await task
+    await pool.aclose()
+
+
+async def test_blocking_pool_skips_lock_without_cache():
+    pool = BlockingConnectionPool(max_connections=1)
+    entered = asyncio.Event()
+
+    async def acquire_pool_lock():
+        async with pool._maybe_pool_lock():
+            entered.set()
+
+    async with pool._lock:
+        task = asyncio.create_task(acquire_pool_lock())
+        await asyncio.sleep(0)
+        assert entered.is_set() is True
+
+    await task
+    await pool.aclose()
+
+
+async def test_async_connection_pool_does_not_double_wrap_custom_cache_factory():
+    cache = CacheFactory(CacheConfig()).get_cache()
+    cache_factory = mock.Mock()
+    cache_factory.get_cache.return_value = cache
+    pool = ConnectionPool(
+        protocol=3,
+        cache_config=CacheConfig(),
+        cache_factory=cache_factory,
+    )
+
+    try:
+        assert pool.cache is cache
+        assert isinstance(pool.cache, CacheProxy)
+        assert not isinstance(pool.cache._cache, CacheProxy)
+    finally:
+        await pool.aclose()
+
+
+async def test_async_cache_proxy_waits_for_replacement_in_progress_fill():
+    connection = mock.Mock()
+    connection.can_read = mock.AsyncMock(return_value=False)
+    connection.send_command = mock.AsyncMock()
+    cache = CacheFactory(CacheConfig()).get_cache()
+    proxy = AsyncCacheProxyConnection(connection, cache, asyncio.Lock())
+    replacement_event = asyncio.Event()
+    replacement_entry = CacheEntry(
+        cache_key=CacheKey(
+            command="GET", redis_keys=("key",), redis_args=("GET", "key")
+        ),
+        cache_value=b"replacement",
+        status=CacheEntryStatus.IN_PROGRESS,
+        connection_ref=connection,
+        completion_event=replacement_event,
+    )
+    initial_event = mock.Mock()
+
+    async def install_replacement():
+        cache.set(replacement_entry)
+
+    initial_event.wait = mock.AsyncMock(side_effect=install_replacement)
+    initial_entry = CacheEntry(
+        cache_key=replacement_entry.cache_key,
+        cache_value=b"foo",
+        status=CacheEntryStatus.IN_PROGRESS,
+        connection_ref=connection,
+        completion_event=initial_event,
+    )
+    cache.set(initial_entry)
+
+    waiting_send = asyncio.create_task(proxy.send_command("GET", "key", keys=("key",)))
+    await asyncio.sleep(0)
+
+    assert waiting_send.done() is False
+    replacement_entry.status = CacheEntryStatus.VALID
+    replacement_event.set()
+    await waiting_send
+    assert await proxy.read_response() == b"replacement"
+    connection.send_command.assert_not_awaited()
+
+
+async def test_async_cache_proxy_records_invalidation_evictions():
+    connection = mock.Mock()
+    connection.can_read = mock.AsyncMock(return_value=False)
+    connection.send_command = mock.AsyncMock()
+    connection.read_response = mock.AsyncMock(return_value=b"first")
+    cache = CacheFactory(CacheConfig()).get_cache()
+    proxy = AsyncCacheProxyConnection(connection, cache, asyncio.Lock())
+
+    await proxy.send_command("GET", "key", keys=("key",))
+    await proxy.read_response()
+
+    with mock.patch("redis.asyncio.connection.record_csc_eviction") as record:
+        await proxy._on_invalidation_callback([b"invalidate", [b"key"]])
+
+    record.assert_called_once_with(count=1, reason=CSCReason.INVALIDATION)
+
+
+async def test_async_cache_proxy_clears_cache_key_before_packed_command():
+    connection = mock.Mock()
+    connection.send_packed_command = mock.AsyncMock()
+    proxy = AsyncCacheProxyConnection(
+        connection, CacheFactory(CacheConfig()).get_cache(), asyncio.Lock()
+    )
+    proxy._current_command_cache_key = object()
+
+    await proxy.send_packed_command([b"PING\r\n"])
+
+    assert proxy._current_command_cache_key is None
+
+
+async def test_async_cache_proxy_does_not_drain_busy_cached_connection():
+    first_connection = mock.Mock()
+    first_connection.can_read = mock.AsyncMock(return_value=False)
+    first_connection.send_command = mock.AsyncMock()
+    first_connection.read_response = mock.AsyncMock(return_value=b"first")
+    second_connection = mock.Mock()
+    second_connection.can_read = mock.AsyncMock(return_value=False)
+    second_connection.send_command = mock.AsyncMock()
+    cache = CacheFactory(CacheConfig()).get_cache()
+    pool = mock.Mock()
+    pool._is_connection_available.return_value = False
+    first_proxy = AsyncCacheProxyConnection(
+        first_connection, cache, asyncio.Lock(), pool=pool
+    )
+    second_proxy = AsyncCacheProxyConnection(
+        second_connection, cache, asyncio.Lock(), pool=pool
+    )
+
+    await first_proxy.send_command("GET", "key", keys=("key",))
+    await first_proxy.read_response()
+    first_connection.read_response.reset_mock()
+
+    await second_proxy.send_command("GET", "key", keys=("key",))
+
+    first_connection.read_response.assert_not_awaited()
+    second_connection.send_command.assert_awaited_once_with("GET", "key", keys=("key",))
+
+
+async def test_async_cache_proxy_clears_in_progress_entry_when_send_is_cancelled():
+    connection = mock.Mock()
+    connection.can_read = mock.AsyncMock(return_value=False)
+    connection.send_command = mock.AsyncMock(
+        side_effect=[asyncio.CancelledError(), None]
+    )
+    cache = CacheFactory(CacheConfig()).get_cache()
+    proxy = AsyncCacheProxyConnection(connection, cache, asyncio.Lock())
+
+    with pytest.raises(asyncio.CancelledError):
+        await proxy.send_command("GET", "key", keys=("key",))
+
+    assert cache.size == 0
+    assert proxy._current_command_cache_key is None
+
+    await proxy.send_command("GET", "key", keys=("key",))
+    assert connection.send_command.await_count == 2
+
+
+async def test_async_cache_proxy_normalizes_scalar_cache_keys():
+    connection = mock.Mock()
+    connection.can_read = mock.AsyncMock(return_value=False)
+    connection.send_command = mock.AsyncMock()
+    cache = CacheFactory(CacheConfig()).get_cache()
+    proxy = AsyncCacheProxyConnection(connection, cache, asyncio.Lock())
+
+    await proxy.send_command("ZREVRANGE", "myzset", 0, -1, keys="myzset")
+
+    assert next(iter(cache.collection)).redis_keys == ("myzset",)
+
+
+async def test_async_cache_proxy_stops_when_invalidation_read_times_out():
+    connection = mock.Mock()
+    connection.can_read = mock.AsyncMock(return_value=True)
+    connection.read_response = mock.AsyncMock(return_value=None)
+    proxy = AsyncCacheProxyConnection(
+        connection, CacheFactory(CacheConfig()).get_cache(), asyncio.Lock()
+    )
+
+    await asyncio.wait_for(proxy._process_pending_invalidations(), timeout=1)
+
+    connection.read_response.assert_awaited_once()
+
+
+async def test_async_client_forwards_command_options_to_connection():
+    client = object.__new__(Redis)
+    client.parse_response = mock.AsyncMock(return_value=b"value")
+    connection = mock.Mock()
+    connection.send_command = mock.AsyncMock()
+
+    assert (
+        await client._send_command_parse_response(
+            connection, "GET", "key", keys=("key",)
+        )
+        == b"value"
+    )
+    connection.send_command.assert_awaited_once_with("key", keys=("key",))
+
+
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("7.4.0")
+async def test_async_client_side_cache_round_trip(create_redis):
+    client = await create_redis(cache_config=CacheConfig(max_size=10))
+
+    await client.set("async-cache-key", "first")
+    assert await client.get("async-cache-key") == b"first"
+    assert client.get_cache().size == 1
+
+    await client.set("async-cache-key", "second")
+    assert await client.get("async-cache-key") == b"second"
 
 
 @pytest.mark.parametrize(
