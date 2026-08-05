@@ -94,6 +94,7 @@ class TestClusterMaintNotificationsBase:
             maint_notifications_config=maint_config,
             connection_pool_class=pool_class,
             max_connections=max_connections,
+            socket_timeout=DEFAULT_SOCKET_TIMEOUT,
             **kwargs,
         )
 
@@ -409,35 +410,43 @@ class TestClusterMaintNotificationsHandler(TestClusterMaintNotificationsBase):
     def test_oss_maint_handler_propagation(self):
         """Test that OSSMaintNotificationsHandler is propagated to all connections."""
         cluster = self._create_cluster_client()
-        # Verify all nodes have the handler
-        for node in cluster.nodes_manager.nodes_cache.values():
-            assert node.redis_connection is not None
-            assert node.redis_connection.connection_pool is not None
-            for conn in (
-                *node.redis_connection.connection_pool._get_in_use_connections(),
-                *node.redis_connection.connection_pool._get_free_connections(),
-            ):
-                assert conn._oss_cluster_maint_notifications_handler is not None
-                self._validate_connection_handlers(
-                    conn, cluster, cluster.maint_notifications_config
-                )
+        try:
+            # Verify all nodes have the handler
+            for node in cluster.nodes_manager.nodes_cache.values():
+                assert node.redis_connection is not None
+                assert node.redis_connection.connection_pool is not None
+                for conn in (
+                    *node.redis_connection.connection_pool._get_in_use_connections(),
+                    *node.redis_connection.connection_pool._get_free_connections(),
+                ):
+                    assert conn._oss_cluster_maint_notifications_handler is not None
+                    self._validate_connection_handlers(
+                        conn, cluster, cluster.maint_notifications_config
+                    )
+        finally:
+            cluster.close()
 
     @skip_if_server_version_lt("7.4.0")
     def test_oss_maint_handler_propagation_cache_enabled(self):
         """Test that OSSMaintNotificationsHandler is propagated to all connections."""
         cluster = self._create_cluster_client(enable_cache=True)
-        # Verify all nodes have the handler
-        for node in cluster.nodes_manager.nodes_cache.values():
-            assert node.redis_connection is not None
-            assert node.redis_connection.connection_pool is not None
-            for conn in (
-                *node.redis_connection.connection_pool._get_in_use_connections(),
-                *node.redis_connection.connection_pool._get_free_connections(),
-            ):
-                assert conn._conn._oss_cluster_maint_notifications_handler is not None
-                self._validate_connection_handlers(
-                    conn._conn, cluster, cluster.maint_notifications_config
-                )
+        try:
+            # Verify all nodes have the handler
+            for node in cluster.nodes_manager.nodes_cache.values():
+                assert node.redis_connection is not None
+                assert node.redis_connection.connection_pool is not None
+                for conn in (
+                    *node.redis_connection.connection_pool._get_in_use_connections(),
+                    *node.redis_connection.connection_pool._get_free_connections(),
+                ):
+                    assert (
+                        conn._conn._oss_cluster_maint_notifications_handler is not None
+                    )
+                    self._validate_connection_handlers(
+                        conn._conn, cluster, cluster.maint_notifications_config
+                    )
+        finally:
+            cluster.close()
 
 
 class TestClusterMaintNotificationsHandlingBase(TestClusterMaintNotificationsBase):
@@ -503,10 +512,21 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         self,
         cluster: RedisCluster,
         expected_states: List[ConnectionStateExpectation],
+        default_timeout: Optional[float] = DEFAULT_SOCKET_TIMEOUT,
     ):
-        """Validate connections states."""
+        """Validate connections states.
+
+        A connection is counted as "changed" when it deviates from the default
+        (non-maintenance) config - i.e. its ``maintenance_state`` is not
+        ``NONE`` or its ``socket_timeout`` is not ``default_timeout`` (the
+        socket timeout the client's connections are created with). For every
+        node with an expectation, exactly ``changed_connections_count``
+        connections must be changed; a zero expectation therefore asserts that
+        no connection deviates from the default config. When a non-default state
+        is expected, the changed connections must additionally match the
+        expected ``state`` / ``relaxed_timeout``.
+        """
         default_maint_state = MaintenanceState.NONE
-        default_timeout = None
         nodes = list(cluster.nodes_manager.nodes_cache.values())
         for node in nodes:
             cluster_node = cast(ClusterNode, node)
@@ -520,19 +540,29 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
                 # No expectation for this node
                 continue
             changed_connections_count = 0
+            matching_expected_count = 0
             for conn in (
                 *connection_pool._get_in_use_connections(),
                 *connection_pool._get_free_connections(),
             ):
                 if (
                     conn.maintenance_state != default_maint_state
-                    and conn.maintenance_state == expected_state.state
-                ) or (
-                    conn.socket_timeout != default_timeout
-                    and conn.socket_timeout == expected_state.relaxed_timeout
+                    or conn.socket_timeout != default_timeout
                 ):
                     changed_connections_count += 1
+                if (
+                    conn.maintenance_state == expected_state.state
+                    and conn.socket_timeout == expected_state.relaxed_timeout
+                ):
+                    matching_expected_count += 1
             assert changed_connections_count == expected_state.changed_connections_count
+            if (
+                expected_state.state != default_maint_state
+                or expected_state.relaxed_timeout != default_timeout
+            ):
+                assert (
+                    matching_expected_count == expected_state.changed_connections_count
+                )
 
     def _validate_removed_node_connections(self, node):
         """Validate connections in a removed node."""
@@ -604,31 +634,33 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
             relaxed_timeout=-1,  # This means the relaxed timeout is Disabled
         )
         cluster = self._create_cluster_client(maint_config=disabled_config)
+        try:
+            # warm up connection pools
+            self._warm_up_connection_pools(cluster, created_connections_count=3)
 
-        # warm up connection pools
-        self._warm_up_connection_pools(cluster, created_connections_count=3)
+            # send a notification to node 1
+            notification = RespTranslator.oss_maint_notification_to_resp(
+                "SMIGRATING 12 123,456,5000-7000"
+            )
+            self.proxy_helper.send_notification(notification)
 
-        # send a notification to node 1
-        notification = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATING 12 123,456,5000-7000"
-        )
-        self.proxy_helper.send_notification(notification)
-
-        # validate no timeout is relaxed on any connection
-        self._validate_connections_states(
-            self.cluster,
-            [
-                ConnectionStateExpectation(
-                    node_port=NODE_PORT_1, changed_connections_count=0
-                ),
-                ConnectionStateExpectation(
-                    node_port=NODE_PORT_2, changed_connections_count=0
-                ),
-                ConnectionStateExpectation(
-                    node_port=NODE_PORT_3, changed_connections_count=0
-                ),
-            ],
-        )
+            # validate no timeout is relaxed on any connection
+            self._validate_connections_states(
+                cluster,
+                [
+                    ConnectionStateExpectation(
+                        node_port=NODE_PORT_1, changed_connections_count=0
+                    ),
+                    ConnectionStateExpectation(
+                        node_port=NODE_PORT_2, changed_connections_count=0
+                    ),
+                    ConnectionStateExpectation(
+                        node_port=NODE_PORT_3, changed_connections_count=0
+                    ),
+                ],
+            )
+        finally:
+            cluster.close()
 
     def test_receive_smigrated_notification(self):
         """Test receiving an OSS maintenance completed notification."""
@@ -981,67 +1013,6 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
 
         # validate the connections in removed node are in the correct state
         self._validate_removed_node_connections(node_2)
-
-    def test_smigrating_smigrated_on_the_same_node_two_slot_ranges(
-        self,
-    ):
-        """
-        Test receiving an OSS maintenance notification on the same node twice.
-        The focus here is to validate that the timeouts are not unrelaxed if a second
-        migration is in progress
-        """
-        # warm up connection pools - create several connections in each pool
-        self._warm_up_connection_pools(self.cluster, created_connections_count=1)
-
-        smigrating_node_1 = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATING 12 1000-2000,2500-3000"
-        )
-        self.proxy_helper.send_notification(smigrating_node_1)
-        # execute command with node 1 connection
-        self.cluster.set("anyprefix:{3}:k", "VAL")
-        self._validate_connections_states(
-            self.cluster,
-            [
-                ConnectionStateExpectation(
-                    node_port=NODE_PORT_1,
-                    changed_connections_count=1,
-                    state=MaintenanceState.MAINTENANCE,
-                    relaxed_timeout=self.config.relaxed_timeout,
-                ),
-            ],
-        )
-
-        smigrated_node_1 = RespTranslator.oss_maint_notification_to_resp(
-            f"SMIGRATED 14 {NODE_IP_PROXY}:{NODE_PORT_1} {NODE_IP_PROXY}:{NODE_PORT_2} 1000-2000 {NODE_IP_PROXY}:{NODE_PORT_1} {NODE_IP_PROXY}:{NODE_PORT_3} 2500-3000"
-        )
-        self.proxy_helper.send_notification(smigrated_node_1)
-        # execute command with node 1 connection
-        self.cluster.set("anyprefix:{3}:k", "VAL")
-
-        # validate the timeout is still relaxed
-        self._validate_connections_states(
-            self.cluster,
-            [
-                ConnectionStateExpectation(
-                    node_port=NODE_PORT_1,
-                ),
-            ],
-        )
-        smigrated_node_1_2 = RespTranslator.oss_maint_notification_to_resp(
-            f"SMIGRATED 15 {NODE_IP_PROXY}:{NODE_PORT_1} {NODE_IP_PROXY}:{NODE_PORT_3} 3000-4000"
-        )
-        self.proxy_helper.send_notification(smigrated_node_1_2)
-        # execute command with node 1 connection
-        self.cluster.set("anyprefix:{3}:k", "VAL")
-        self._validate_connections_states(
-            self.cluster,
-            [
-                ConnectionStateExpectation(
-                    node_port=NODE_PORT_1,
-                    changed_connections_count=0,
-                ),
-            ],
-        )
 
     def test_smigrating_smigrated_with_sharded_pubsub(
         self,

@@ -1,4 +1,4 @@
-from typing import Any, Awaitable, Dict, List, Tuple, overload
+from typing import Any, Awaitable, Dict, Iterable, List, Tuple, overload
 
 from redis.exceptions import DataError
 from redis.typing import (
@@ -32,6 +32,7 @@ MREVRANGE_CMD = "TS.MREVRANGE"
 NRANGE_CMD = "TS.NRANGE"
 NREVRANGE_CMD = "TS.NREVRANGE"
 QUERYINDEX_CMD = "TS.QUERYINDEX"
+QUERYLABELS_CMD = "TS.QUERYLABELS"
 RANGE_CMD = "TS.RANGE"
 READ_CMD = "TS.READ"
 REVRANGE_CMD = "TS.REVRANGE"
@@ -1173,11 +1174,17 @@ class TimeSeriesCommands:
         Query an explicit list of time-series over a range in forward direction
         and return timestamp-major rows ordered by increasing timestamp.
 
-        Each returned row is ``[timestamp, [value_for_key_0, value_for_key_1,
-        ...]]`` where the value array preserves the input ``keys`` order. A key
-        with no sample (or no aggregation bucket) at a row's timestamp is
-        reported as ``NaN``, which is indistinguishable from a stored or
-        aggregated ``NaN``.
+        Each returned row is ``[timestamp, [value, ...]]``. With no aggregation
+        -- or a single-aggregator spec per key -- the value array holds exactly
+        one value per queried key, in the input ``keys`` order. When a per-key
+        AGGREGATION spec lists several aggregators (e.g. ``"avg,max"``), that key
+        contributes one value per aggregator in the order the aggregators were
+        listed, and the row's value array is those per-key blocks concatenated in
+        ``keys`` order. For example ``keys=[a, b]`` with
+        ``aggregators=["avg,max", "sum"]`` yields ``[a_avg, a_max, b_sum]`` for
+        every row. A key (or aggregator column) with no sample or aggregation
+        bucket at a row's timestamp is reported as ``NaN``, which is
+        indistinguishable from a stored or aggregated ``NaN``.
 
         All keys must hash to the same slot when used against a cluster; this
         command is routed as a single-shard, key command and is never split
@@ -1200,13 +1207,15 @@ class TimeSeriesCommands:
                 Limits the number of returned rows, applied after the
                 merge in increasing-timestamp order.
             aggregators:
-                Optional aggregation. Requires exactly one aggregator per key,
-                emitted as separate tokens. A single aggregator string is
-                expanded to one token per key as a convenience; passing a list
-                whose length differs from ``keys`` raises ``DataError``. Valid
-                values: [`avg`, `sum`, `min`, `max`, `range`, `count`, `first`,
-                `last`, `std.p`, `std.s`, `var.p`, `var.s`, `twa`, `countNaN`,
-                `countAll`].
+                Optional aggregation, with exactly one spec token per key (a
+                single aggregator is never broadcast across keys). Each per-key
+                spec is a string and may list several comma-separated
+                aggregators, e.g. ``["avg,max", "sum"]`` builds
+                ``AGGREGATION avg,max sum`` for two keys. A bare string is the
+                spec for a single-key query; a number of specs that differs from
+                ``keys`` raises ``DataError``. Valid aggregators: [`avg`, `sum`,
+                `min`, `max`, `range`, `count`, `first`, `last`, `std.p`,
+                `std.s`, `var.p`, `var.s`, `twa`, `countNaN`, `countAll`].
             bucket_size_msec:
                 Time bucket for aggregation in milliseconds. Shared by all keys.
             filter_by_ts:
@@ -1301,11 +1310,17 @@ class TimeSeriesCommands:
         Query an explicit list of time-series over a range in reverse direction
         and return timestamp-major rows ordered by decreasing timestamp.
 
-        Each returned row is ``[timestamp, [value_for_key_0, value_for_key_1,
-        ...]]`` where the value array preserves the input ``keys`` order. A key
-        with no sample (or no aggregation bucket) at a row's timestamp is
-        reported as ``NaN``, which is indistinguishable from a stored or
-        aggregated ``NaN``.
+        Each returned row is ``[timestamp, [value, ...]]``. With no aggregation
+        -- or a single-aggregator spec per key -- the value array holds exactly
+        one value per queried key, in the input ``keys`` order. When a per-key
+        AGGREGATION spec lists several aggregators (e.g. ``"avg,max"``), that key
+        contributes one value per aggregator in the order the aggregators were
+        listed, and the row's value array is those per-key blocks concatenated in
+        ``keys`` order. For example ``keys=[a, b]`` with
+        ``aggregators=["avg,max", "sum"]`` yields ``[a_avg, a_max, b_sum]`` for
+        every row. A key (or aggregator column) with no sample or aggregation
+        bucket at a row's timestamp is reported as ``NaN``, which is
+        indistinguishable from a stored or aggregated ``NaN``.
 
         All keys must hash to the same slot when used against a cluster; this
         command is routed as a single-shard, key command and is never split
@@ -1328,13 +1343,15 @@ class TimeSeriesCommands:
                 Limits the number of returned rows, applied after the
                 merge in decreasing-timestamp order.
             aggregators:
-                Optional aggregation. Requires exactly one aggregator per key,
-                emitted as separate tokens. A single aggregator string is
-                expanded to one token per key as a convenience; passing a list
-                whose length differs from ``keys`` raises ``DataError``. Valid
-                values: [`avg`, `sum`, `min`, `max`, `range`, `count`, `first`,
-                `last`, `std.p`, `std.s`, `var.p`, `var.s`, `twa`, `countNaN`,
-                `countAll`].
+                Optional aggregation, with exactly one spec token per key (a
+                single aggregator is never broadcast across keys). Each per-key
+                spec is a string and may list several comma-separated
+                aggregators, e.g. ``["avg,max", "sum"]`` builds
+                ``AGGREGATION avg,max sum`` for two keys. A bare string is the
+                spec for a single-key query; a number of specs that differs from
+                ``keys`` raises ``DataError``. Valid aggregators: [`avg`, `sum`,
+                `min`, `max`, `range`, `count`, `first`, `last`, `std.p`,
+                `std.s`, `var.p`, `var.s`, `twa`, `countNaN`, `countAll`].
             bucket_size_msec:
                 Time bucket for aggregation in milliseconds. Shared by all keys.
             filter_by_ts:
@@ -1392,6 +1409,7 @@ class TimeSeriesCommands:
         latest: bool | None,
         bucket_timestamp: str | None,
         empty: bool | None,
+        exclude_empty: bool | None,
     ):
         """Create TS.MRANGE and TS.MREVRANGE arguments."""
         if (
@@ -1402,6 +1420,8 @@ class TimeSeriesCommands:
             raise DataError(
                 "GROUPBY is not allowed when multiple aggregators are specified"
             )
+        if exclude_empty and groupby is not None:
+            raise DataError("EXCLUDEEMPTY is not allowed with GROUPBY")
         params: list[EncodableT] = [from_time, to_time]
         self._append_latest(params, latest)
         self._append_filer_by_ts(params, filter_by_ts)
@@ -1412,6 +1432,7 @@ class TimeSeriesCommands:
         self._append_aggregation(params, aggregation_type, bucket_size_msec)
         self._append_bucket_timestamp(params, bucket_timestamp)
         self._append_empty(params, empty)
+        self._append_exclude_empty(params, exclude_empty)
         params.extend(["FILTER"])
         params += filters
         self._append_groupby_reduce(params, groupby, reduce)
@@ -1437,6 +1458,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> TimeSeriesMRangeResponse: ...
 
     @overload
@@ -1459,6 +1481,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> Awaitable[TimeSeriesMRangeResponse]: ...
 
     def mrange(
@@ -1480,6 +1503,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> TimeSeriesMRangeResponse | Awaitable[TimeSeriesMRangeResponse]:
         """
         Query a range across multiple time-series by filters in forward direction.
@@ -1536,6 +1560,9 @@ class TimeSeriesCommands:
                 `+`, `high`, `~`, `mid`].
             empty:
                 Reports aggregations for empty buckets.
+            exclude_empty:
+                Omit matching series whose reported samples array is empty for the
+                queried range and options. Must not be combined with `groupby`.
         """
         params = self.__mrange_params(
             aggregation_type,
@@ -1555,6 +1582,7 @@ class TimeSeriesCommands:
             latest,
             bucket_timestamp,
             empty,
+            exclude_empty,
         )
 
         return self.execute_command(
@@ -1581,6 +1609,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> TimeSeriesMRangeResponse: ...
 
     @overload
@@ -1603,6 +1632,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> Awaitable[TimeSeriesMRangeResponse]: ...
 
     def mrevrange(
@@ -1624,6 +1654,7 @@ class TimeSeriesCommands:
         latest: bool | None = False,
         bucket_timestamp: str | None = None,
         empty: bool | None = False,
+        exclude_empty: bool | None = False,
     ) -> TimeSeriesMRangeResponse | Awaitable[TimeSeriesMRangeResponse]:
         """
         Query a range across multiple time-series by filters in reverse direction.
@@ -1680,6 +1711,9 @@ class TimeSeriesCommands:
                 `+`, `high`, `~`, `mid`].
             empty:
                 Reports aggregations for empty buckets.
+            exclude_empty:
+                Omit matching series whose reported samples array is empty for the
+                queried range and options. Must not be combined with `groupby`.
         """
         params = self.__mrange_params(
             aggregation_type,
@@ -1699,6 +1733,7 @@ class TimeSeriesCommands:
             latest,
             bucket_timestamp,
             empty,
+            exclude_empty,
         )
 
         return self.execute_command(
@@ -1822,6 +1857,79 @@ class TimeSeriesCommands:
         """
         return self.execute_command(QUERYINDEX_CMD, *filters)
 
+    @overload
+    def querylabels(
+        self: SyncClientProtocol,
+        label: str | None = None,
+        filters: Iterable[str] | None = None,
+    ) -> set[bytes | str]: ...
+
+    @overload
+    def querylabels(
+        self: AsyncClientProtocol,
+        label: str | None = None,
+        filters: Iterable[str] | None = None,
+    ) -> Awaitable[set[bytes | str]]: ...
+
+    def querylabels(
+        self, label: str | None = None, filters: Iterable[str] | None = None
+    ) -> set[bytes | str] | Awaitable[set[bytes | str]]:
+        """
+        Get label metadata for the time series matching `filters`.
+
+        The single `TS.QUERYLABELS` request is built from the supplied
+        arguments:
+
+        - When `label` is omitted (``None``), the ``LABELS`` form is issued and
+          the reply is the set of all label names present on the matching (and
+          readable) series, including the label names used in the filter
+          itself.
+        - When `label` is given, the ``VALUES`` form is issued and the reply is
+          the set of all values assigned to `label` across the matching series.
+          `label` is matched byte-exactly and is passed to the server without
+          any normalization; a series that does not carry `label`, and a
+          `label` that matches no series, contribute nothing (an empty reply,
+          not an error).
+
+        The reply is unordered and already deduplicated by the server, so it is
+        returned as a Python ``set``. When `filters` is omitted (``None``), all
+        indexed series are queried; filter expressions use the same language as
+        `TS.QUERYINDEX` and are passed verbatim, while an explicitly empty
+        collection raises a `DataError`.
+
+        For more information see https://redis.io/commands/ts.querylabels/
+        """
+        if label is None:
+            params: list[EncodableT] = ["LABELS"]
+        else:
+            params = ["VALUES", label]
+        self._append_filter_expressions(params, filters)
+        return self.execute_command(QUERYLABELS_CMD, *params)
+
+    @staticmethod
+    def _append_filter_expressions(
+        params: list[EncodableT], filters: Iterable[str] | None
+    ):
+        """Append the optional FILTER clause for TS.QUERYLABELS.
+
+        ``None`` omits ``FILTER`` entirely (the documented all-series query);
+        an explicitly empty collection is a local usage error, since silently
+        widening to all series would be surprising. Any iterable is accepted and
+        materialized once so single-pass iterators are handled correctly.
+        Expressions are passed through verbatim, without parsing, reordering, or
+        normalizing.
+        """
+        if filters is None:
+            return
+        filters = list(filters)
+        if not filters:
+            raise DataError(
+                "filters cannot be an empty collection; pass None to query "
+                "all indexed series."
+            )
+        params.append("FILTER")
+        params.extend(filters)
+
     @staticmethod
     def _append_uncompressed(params: list[EncodableT], uncompressed: bool | None):
         """Append UNCOMPRESSED tag to params."""
@@ -1936,25 +2044,27 @@ class TimeSeriesCommands:
         bucket_size_msec: int | None,
         numkeys: int,
     ):
-        """Append AGGREGATION property for TS.NRANGE / TS.NREVRANGE.
+        """Append the AGGREGATION clause for TS.NRANGE / TS.NREVRANGE.
 
-        Unlike TS.RANGE, these commands require exactly one aggregator per
-        queried key, emitted as separate tokens (never a single comma-joined
-        token and never a single aggregator broadcast across keys). A single
-        aggregator string is expanded to one token per key as a convenience.
+        These commands take exactly one aggregation spec token per queried key;
+        a single aggregator is never broadcast across keys. A spec token may hold
+        several comma-separated aggregators, so the wire form is e.g.
+        ``AGGREGATION avg,max sum 1000`` for two keys -- key 0 aggregated by both
+        ``avg`` and ``max``, key 1 by ``sum``. Pass one spec string per key, each
+        optionally comma-joined (``["avg,max", "sum"]``); a bare string is the
+        spec for a single-key query. (Matches RedisTimeSeries PR #2079, which
+        replaced the earlier single comma-joined / broadcast token.)
         """
         if aggregators is None:
             return
-        if isinstance(aggregators, str):
-            aggregators = [aggregators] * numkeys
-        else:
-            aggregators = list(aggregators)
-        if len(aggregators) != numkeys:
+        specs = [aggregators] if isinstance(aggregators, str) else list(aggregators)
+        if len(specs) != numkeys:
             raise DataError(
-                "AGGREGATION requires exactly one aggregator per key "
-                f"(expected {numkeys}, got {len(aggregators)})."
+                "AGGREGATION requires exactly one aggregation spec per key "
+                f"(expected {numkeys}, got {len(specs)}); a spec may list "
+                "multiple comma-separated aggregators."
             )
-        params.extend(["AGGREGATION", *aggregators, bucket_size_msec])
+        params.extend(["AGGREGATION", *specs, bucket_size_msec])
 
     @staticmethod
     def _append_chunk_size(params: list[EncodableT], chunk_size: int | None):
@@ -2009,6 +2119,12 @@ class TimeSeriesCommands:
         """Append EMPTY property to params."""
         if empty:
             params.append("EMPTY")
+
+    @staticmethod
+    def _append_exclude_empty(params: list[EncodableT], exclude_empty: bool | None):
+        """Append EXCLUDEEMPTY property to params."""
+        if exclude_empty:
+            params.append("EXCLUDEEMPTY")
 
     @staticmethod
     def _append_insertion_filters(

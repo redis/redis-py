@@ -37,6 +37,12 @@ from redis.asyncio.observability.recorder import (
     record_streaming_lag_from_response as async_record_streaming_lag,
 )
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
+from redis.himport import (
+    HIMPORT_DISCARD,
+    HIMPORT_DISCARDALL,
+    HIMPORT_PREPARE,
+    HIMPORT_SET,
+)
 from redis.typing import (
     AbsExpiryT,
     ACLGetUserData,
@@ -756,7 +762,7 @@ class ManagementCommands(CommandsProtocol):
         Disconnects client(s) using a variety of filter options
         :param _id: Kills a client by its unique ID field
         :param _type: Kills a client by type where type is one of 'normal',
-        'master', 'slave' or 'pubsub'
+        'master', 'slave', 'replica' or 'pubsub'
         :param addr: Kills a client by its 'address:port'
         :param skipme: If True, then the client calling the command
         will not get killed even if it is identified by one of the filter
@@ -767,7 +773,7 @@ class ManagementCommands(CommandsProtocol):
         """
         args = []
         if _type is not None:
-            client_types = ("normal", "master", "slave", "pubsub")
+            client_types = ("normal", "master", "slave", "replica", "pubsub")
             if str(_type).lower() not in client_types:
                 raise DataError(f"CLIENT KILL type must be one of {client_types!r}")
             args.extend((b"TYPE", _type))
@@ -3604,6 +3610,142 @@ class BasicKeyCommands(CommandsProtocol):
         """
         params = [first_list, second_list, src, dest, timeout]
         return self.execute_command("BLMOVE", *params)
+
+    @overload
+    def lmovem(
+        self: SyncClientProtocol,
+        first_list: str,
+        second_list: str,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> list[bytes | str] | None: ...
+
+    @overload
+    def lmovem(
+        self: AsyncClientProtocol,
+        first_list: str,
+        second_list: str,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> Awaitable[list[bytes | str] | None]: ...
+
+    def lmovem(
+        self,
+        first_list: str,
+        second_list: str,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> (list[bytes | str] | None) | Awaitable[list[bytes | str] | None]:
+        """
+        Atomically moves multiple elements from one end of the ``first_list``
+        to one end of the ``second_list``, returning the moved elements in
+        destination order.
+
+        ``src`` and ``dest`` are the ends to pop from / push to, either
+        ``LEFT`` (head) or ``RIGHT`` (tail).
+
+        When ``count`` is given, ``mode`` selects how many elements to move:
+        ``COUNT`` (the default) moves up to ``count`` elements, while
+        ``EXACTLY`` moves exactly ``count`` elements or nothing at all. When
+        ``count`` is not given a single element is moved.
+
+        ``ordering`` controls the order at the destination: ``OBO`` pushes each
+        element as it is popped (reversing block order, stack semantics) while
+        ``BULK`` preserves the original relative order (queue semantics). It is
+        required whenever ``count`` is given.
+
+        Returns the array of moved elements, or ``None`` if nothing was moved.
+
+        For more information, see https://redis.io/commands/lmovem
+        """
+        if count is None:
+            if mode is not None or ordering is not None:
+                raise DataError(
+                    "``count`` is required when ``mode`` or ``ordering`` is set"
+                )
+        elif ordering is None:
+            raise DataError(
+                "``ordering`` (OBO or BULK) is required when ``count`` is set"
+            )
+        pieces: list[EncodableT] = [first_list, second_list, src, dest]
+        if count is not None:
+            pieces.extend([mode or "COUNT", count, ordering])
+        return self.execute_command("LMOVEM", *pieces)
+
+    @overload
+    def blmovem(
+        self: SyncClientProtocol,
+        first_list: str,
+        second_list: str,
+        timeout: float,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> list[bytes | str] | None: ...
+
+    @overload
+    def blmovem(
+        self: AsyncClientProtocol,
+        first_list: str,
+        second_list: str,
+        timeout: float,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> Awaitable[list[bytes | str] | None]: ...
+
+    def blmovem(
+        self,
+        first_list: str,
+        second_list: str,
+        timeout: float,
+        src: str = "LEFT",
+        dest: str = "RIGHT",
+        count: int | None = None,
+        mode: Literal["COUNT", "EXACTLY"] | None = None,
+        ordering: Literal["OBO", "BULK"] | None = None,
+    ) -> (list[bytes | str] | None) | Awaitable[list[bytes | str] | None]:
+        """
+        Blocking version of lmovem.
+
+        Blocks until elements are available to move or ``timeout`` (in seconds)
+        is reached; a ``timeout`` of ``0`` blocks indefinitely. With ``COUNT``
+        the command unblocks once at least one element is available and moves
+        ``min(count, available)``; with ``EXACTLY`` it blocks until the source
+        holds at least ``count`` elements, then moves exactly ``count``
+        atomically. On timeout ``None`` is returned and nothing is moved.
+
+        As with ``lmovem``, ``ordering`` (OBO or BULK) is required whenever
+        ``count`` is given.
+
+        For more information, see https://redis.io/commands/blmovem
+        """
+        if count is None:
+            if mode is not None or ordering is not None:
+                raise DataError(
+                    "``count`` is required when ``mode`` or ``ordering`` is set"
+                )
+        elif ordering is None:
+            raise DataError(
+                "``ordering`` (OBO or BULK) is required when ``count`` is set"
+            )
+        pieces: list[EncodableT] = [first_list, second_list, src, dest, timeout]
+        if count is not None:
+            pieces.extend([mode or "COUNT", count, ordering])
+        return self.execute_command("BLMOVEM", *pieces)
 
     @overload
     def mget(
@@ -8160,7 +8302,7 @@ class SortedSetCommands(CommandsProtocol):
                 "ZADD option 'incr' only works when passing a single element/score pair"
             )
         if nx and (gt or lt):
-            raise DataError("Only one of 'nx', 'lt', or 'gr' may be defined.")
+            raise DataError("Only one of 'nx', 'gt', or 'lt' may be defined.")
 
         pieces: list[EncodableT] = []
         options = {}
@@ -8846,7 +8988,7 @@ class SortedSetCommands(CommandsProtocol):
         if withscores:
             pieces.append(b"WITHSCORES")
         options = {"withscores": withscores, "score_cast_func": score_cast_func}
-        options["keys"] = name
+        options["keys"] = [name]
         return self.execute_command(*pieces, **options)
 
     @overload
@@ -10611,6 +10753,141 @@ class HashCommands(CommandsProtocol):
         return self.execute_command(
             "HPTTL", key, "FIELDS", len(fields), *fields, keys=[key]
         )
+
+    # -- HIMPORT (Hinted Hash Templates) --------------------------------------
+    # himport_set is the full public command: the executor lazily PREPAREs the
+    # fieldset on the serving connection and reconciles deferred DISCARDs, so it
+    # needs no client-level wrapper. The *_internal methods are the pure PREPARE /
+    # DISCARD / DISCARDALL wire mappings; the client-side orchestration around them
+    # (the shared registry, and running them immediately on a single-connection
+    # client) lives on the client classes as himport_prepare / himport_discard /
+    # himport_discard_all.
+
+    @overload
+    def himport_prepare_internal(
+        self: SyncClientProtocol, fieldset_name: str, fields: Iterable[FieldT]
+    ) -> bool: ...
+
+    @overload
+    def himport_prepare_internal(
+        self: AsyncClientProtocol, fieldset_name: str, fields: Iterable[FieldT]
+    ) -> Awaitable[bool]: ...
+
+    def himport_prepare_internal(
+        self, fieldset_name: str, fields: Iterable[FieldT]
+    ) -> bool | Awaitable[bool]:
+        """Send ``HIMPORT PREPARE fieldset_name field [field ...]``.
+
+        Registers the ordered field list under ``fieldset_name`` in the executing
+        connection's session. Fields are sent in the caller's order, unmodified.
+
+        .. warning::
+            Internal wire mapping — not for direct use on a pooled client. It
+            PREPAREs on a single arbitrary borrowed connection and bypasses the
+            client's shared fieldset registry, so other connections stay unaware and
+            reintroduce the nondeterministic "no such fieldset" the HIMPORT design
+            prevents. Use the client's ``himport_prepare`` instead; call this only
+            on a pinned single-connection client where you manage session state
+            yourself.
+        """
+        return self.execute_command(HIMPORT_PREPARE, fieldset_name, *fields)
+
+    @overload
+    def himport_set(
+        self: SyncClientProtocol,
+        key: KeyT,
+        fieldset_name: str,
+        values: Iterable[EncodableT],
+    ) -> bool: ...
+
+    @overload
+    def himport_set(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        fieldset_name: str,
+        values: Iterable[EncodableT],
+    ) -> Awaitable[bool]: ...
+
+    @experimental_method()
+    def himport_set(
+        self, key: KeyT, fieldset_name: str, values: Iterable[EncodableT]
+    ) -> bool | Awaitable[bool]:
+        """Create/replace ``key`` as a hash using ``fieldset_name``'s field list.
+
+        Values are sent in the caller's order and map positionally to the prepared
+        fields. The fieldset is prepared on the serving connection on first use
+        (PREPARE bundled with SET in one write) and reused on subsequent calls;
+        runtime discards are reconciled on the next use of the connection. All of
+        this happens inside the normal command path, so retry, disconnect-on-error
+        and (for the cluster) routing / MOVED-ASK apply exactly as for any command.
+
+        .. note::
+            Recovery from a mid-connection fieldset loss (the server dropping the
+            prepared fieldset without dropping the socket, e.g. ``RESET`` or
+            ``maxmemory-clients`` eviction) applies only to a standalone
+            ``himport_set`` call: it catches the resulting ``no such fieldset`` and
+            re-prepares on the same socket, retrying the SET once. A ``himport_set``
+            buffered in a **pipeline or transaction** has no such per-command
+            recovery — its fieldset is PREPAREd once as a pre-flight before the
+            batch, and if the server loses it between that pre-flight and the batch
+            the SET fails and surfaces as an error in the batch results. Callers who
+            need the automatic recovery should issue those sets outside a pipeline.
+        """
+        # A bare str/bytes-like value is iterable element-by-element; splatting it
+        # would send single chars/bytes as separate positional values instead of one
+        # value. Reject it as a caller mistake, mirroring HImportRegistry's field-list
+        # guard.
+        if isinstance(values, (str, bytes, bytearray, memoryview)):
+            raise DataError(
+                "HIMPORT values must be a collection of values, not a string"
+            )
+        return self.execute_command(
+            HIMPORT_SET, key, fieldset_name, *values, keys=[key]
+        )
+
+    @overload
+    def himport_discard_internal(
+        self: SyncClientProtocol, fieldset_name: str
+    ) -> int: ...
+
+    @overload
+    def himport_discard_internal(
+        self: AsyncClientProtocol, fieldset_name: str
+    ) -> Awaitable[int]: ...
+
+    def himport_discard_internal(self, fieldset_name: str) -> int | Awaitable[int]:
+        """Send ``HIMPORT DISCARD fieldset_name`` (``1`` removed, ``0`` not found).
+
+        .. warning::
+            Internal wire mapping — not for direct use on a pooled client. It
+            DISCARDs on a single arbitrary borrowed connection and bypasses the
+            client's shared fieldset registry, leaving other connections and the
+            registry out of sync. Use the client's ``himport_discard`` instead; call
+            this only on a pinned single-connection client where you manage session
+            state yourself.
+        """
+        return self.execute_command(HIMPORT_DISCARD, fieldset_name)
+
+    @overload
+    def himport_discard_all_internal(self: SyncClientProtocol) -> int: ...
+
+    @overload
+    def himport_discard_all_internal(
+        self: AsyncClientProtocol,
+    ) -> Awaitable[int]: ...
+
+    def himport_discard_all_internal(self) -> int | Awaitable[int]:
+        """Send ``HIMPORT DISCARDALL`` (returns the number of fieldsets removed).
+
+        .. warning::
+            Internal wire mapping — not for direct use on a pooled client. It
+            DISCARDs on a single arbitrary borrowed connection and bypasses the
+            client's shared fieldset registry, leaving other connections and the
+            registry out of sync. Use the client's ``himport_discard_all`` instead;
+            call this only on a pinned single-connection client where you manage
+            session state yourself.
+        """
+        return self.execute_command(HIMPORT_DISCARDALL)
 
 
 AsyncHashCommands = HashCommands

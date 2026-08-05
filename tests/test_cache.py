@@ -110,6 +110,47 @@ class TestCache:
                 "cache": DefaultCache(CacheConfig(max_size=5)),
                 "single_connection_client": False,
             },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_zrevrange_cache_key_uses_whole_key(self, r, r2):
+        # Regression: zrevrange stored options["keys"] as a bare string, so the
+        # cache key was built from the key's individual characters
+        # (("m", "y", "z", ...)) instead of the whole key. Verify the result is
+        # cached under redis_keys=("myzset",) and invalidated when the set
+        # changes from another client.
+        cache = r.get_cache()
+        r.delete("myzset")
+        r.zadd("myzset", {"a": 1, "b": 2})
+        # populate the local cache
+        assert r.zrevrange("myzset", 0, -1) == [b"b", b"a"]
+        # the entry must be stored under the whole key, not per-character
+        cache_key = CacheKey(
+            command="ZREVRANGE",
+            redis_keys=("myzset",),
+            redis_args=("ZREVRANGE", "myzset", 0, -1),
+        )
+        assert cache.get(cache_key) is not None
+        # change the sorted set from a second client (causes invalidation)
+        r2.zadd("myzset", {"c": 3})
+        # Add a small delay to allow invalidation to be processed
+        time.sleep(0.1)
+        # a fresh value is fetched and re-cached
+        assert r.zrevrange("myzset", 0, -1) == [b"c", b"b", b"a"]
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": True,
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": False,
+            },
             {
                 "cache": DefaultCache(CacheConfig(max_size=5)),
                 "single_connection_client": False,

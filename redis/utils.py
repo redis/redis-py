@@ -284,9 +284,9 @@ DEFAULT_RESP_VERSION = 3
 
 
 def check_protocol_version(
-    protocol: Optional[Union[str, int]], expected_version: int = 3
+    protocol: str | int | object | None, expected_version: int = 3
 ) -> bool:
-    if protocol is None:
+    if protocol is None or protocol is SENTINEL:
         protocol = DEFAULT_RESP_VERSION
     if isinstance(protocol, str):
         try:

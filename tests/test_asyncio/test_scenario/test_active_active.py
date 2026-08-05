@@ -29,12 +29,14 @@ async def trigger_network_failure_action(
         parameters={"bdb_id": config["bdb_id"], "delay": 3, "cluster_index": 0},
     )
 
-    result = fault_injector_client.trigger_action(action_request)
-    status_result = fault_injector_client.get_action_status(result["action_id"])
+    result = await fault_injector_client.trigger_action(action_request)
+    status_result = await fault_injector_client.get_action_status(result["action_id"])
 
     while status_result["status"] != "success":
         await asyncio.sleep(0.1)
-        status_result = fault_injector_client.get_action_status(result["action_id"])
+        status_result = await fault_injector_client.get_action_status(
+            result["action_id"]
+        )
         logger.info(
             f"Waiting for action to complete. Status: {status_result['status']}"
         )

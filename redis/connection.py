@@ -38,7 +38,7 @@ from ._defaults import (
     DEFAULT_SOCKET_TIMEOUT,
     get_default_socket_keepalive_options,
 )
-from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
+from ._parsers import BaseParser, Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
@@ -55,6 +55,7 @@ from .exceptions import (
     ResponseError,
     TimeoutError,
 )
+from .himport import HImportRegistry
 from .maint_notifications import (
     MaintenanceState,
     MaintNotificationsConfig,
@@ -336,7 +337,7 @@ class MaintNotificationsAbstractConnection:
         oss_cluster_maint_notifications_handler: Optional[
             OSSMaintNotificationsHandler
         ] = None,
-        parser: Optional[Union[_HiredisParser, _RESP3Parser]] = None,
+        parser: Optional[BaseParser] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
     ):
         """
@@ -351,7 +352,7 @@ class MaintNotificationsAbstractConnection:
             orig_socket_timeout (Optional[float]): The original socket timeout of the connection.
             orig_socket_connect_timeout (Optional[float]): The original socket connect timeout of the connection.
             oss_cluster_maint_notifications_handler (Optional[OSSMaintNotificationsHandler]): The OSS cluster handler for maintenance notifications.
-            parser (Optional[Union[_HiredisParser, _RESP3Parser]]): The parser to use for maintenance notifications.
+            parser (Optional[BaseParser]): The parser to use for maintenance notifications.
                     If not provided, the parser from the connection is used.
                     This is useful when the parser is created after this object.
         """
@@ -376,8 +377,16 @@ class MaintNotificationsAbstractConnection:
         self._skipped_end_maint_notifications = set()
 
     @abstractmethod
-    def _get_parser(self) -> Union[_HiredisParser, _RESP3Parser]:
+    def _get_parser(self) -> BaseParser:
         pass
+
+    def _get_push_notifications_parser(self) -> Union[_HiredisParser, _RESP3Parser]:
+        parser = self._get_parser()
+        if not isinstance(parser, (_HiredisParser, _RESP3Parser)):
+            raise RedisError(
+                "Maintenance notifications are only supported with hiredis and RESP3 parsers!"
+            )
+        return parser
 
     @abstractmethod
     def _get_socket(self) -> Optional[socket.socket]:
@@ -441,6 +450,10 @@ class MaintNotificationsAbstractConnection:
     def disconnect(self, *args, **kwargs):
         pass
 
+    @abstractmethod
+    def mark_for_reconnect(self):
+        pass
+
     def _configure_maintenance_notifications(
         self,
         maint_notifications_pool_handler: Optional[
@@ -452,7 +465,7 @@ class MaintNotificationsAbstractConnection:
         oss_cluster_maint_notifications_handler: Optional[
             OSSMaintNotificationsHandler
         ] = None,
-        parser: Optional[Union[_HiredisParser, _RESP3Parser]] = None,
+        parser: Optional[BaseParser] = None,
     ):
         """
         Enable maintenance notifications by setting up
@@ -502,14 +515,12 @@ class MaintNotificationsAbstractConnection:
             self._oss_cluster_maint_notifications_handler = (
                 oss_cluster_maint_notifications_handler
             )
-        else:
-            self._oss_cluster_maint_notifications_handler = None
-
-        # Set up OSS cluster handler to parser if available
-        if self._oss_cluster_maint_notifications_handler:
+            # Set up OSS cluster handler to parser
             parser.set_oss_cluster_maint_push_handler(
                 self._oss_cluster_maint_notifications_handler.handle_notification
             )
+        else:
+            self._oss_cluster_maint_notifications_handler = None
 
         # Set up pool handler to parser if available
         if self._maint_notifications_pool_handler:
@@ -545,7 +556,8 @@ class MaintNotificationsAbstractConnection:
         )
 
         maint_notifications_pool_handler_copy.set_connection(self)
-        self._get_parser().set_node_moving_push_handler(
+        parser = self._get_push_notifications_parser()
+        parser.set_node_moving_push_handler(
             maint_notifications_pool_handler_copy.handle_notification
         )
 
@@ -558,7 +570,7 @@ class MaintNotificationsAbstractConnection:
                     self, maint_notifications_pool_handler.config
                 )
             )
-            self._get_parser().set_maintenance_push_handler(
+            parser.set_maintenance_push_handler(
                 self._maint_notifications_connection_handler.handle_notification
             )
         else:
@@ -569,9 +581,15 @@ class MaintNotificationsAbstractConnection:
     def set_maint_notifications_cluster_handler_for_connection(
         self, oss_cluster_maint_notifications_handler: OSSMaintNotificationsHandler
     ):
-        self._get_parser().set_oss_cluster_maint_push_handler(
+        parser = self._get_push_notifications_parser()
+        parser.set_oss_cluster_maint_push_handler(
             oss_cluster_maint_notifications_handler.handle_notification
         )
+        # OSS cluster mode and pool-handler mode are mutually exclusive. Clear
+        # any node-moving/pool handler a default (RESP3 "auto") pool wired in
+        # __init__ so this existing connection is not configured with both.
+        parser.set_node_moving_push_handler(None)
+        self._maint_notifications_pool_handler = None
 
         self._oss_cluster_maint_notifications_handler = (
             oss_cluster_maint_notifications_handler
@@ -584,7 +602,7 @@ class MaintNotificationsAbstractConnection:
                     self, oss_cluster_maint_notifications_handler.config
                 )
             )
-            self._get_parser().set_maintenance_push_handler(
+            parser.set_maintenance_push_handler(
                 self._maint_notifications_connection_handler.handle_notification
             )
         else:
@@ -601,7 +619,7 @@ class MaintNotificationsAbstractConnection:
         # When the mode is enabled=True, we raise an exception in case of failure
         host = getattr(self, "host", None)
         if (
-            self.get_protocol() not in [2, "2"]
+            check_protocol_version(self.get_protocol(), 3)
             and self.maint_notifications_config
             and self.maint_notifications_config.enabled
             and self._maint_notifications_connection_handler
@@ -755,10 +773,10 @@ class MaintNotificationsAbstractConnection:
     def set_tmp_settings(
         self,
         tmp_host_address: Optional[Union[str, object]] = SENTINEL,
-        tmp_relaxed_timeout: Optional[float] = None,
+        tmp_relaxed_timeout: Optional[float] = -1,
     ):
         """
-        The value of SENTINEL is used to indicate that the property should not be updated.
+        SENTINEL keeps the host unchanged. -1 keeps the relaxed timeout unchanged.
         """
         if tmp_host_address and tmp_host_address != SENTINEL:
             self.host = str(tmp_host_address)
@@ -824,6 +842,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         oss_cluster_maint_notifications_handler: Optional[
             OSSMaintNotificationsHandler
         ] = None,
+        himport_registry: HImportRegistry | None = None,
     ):
         """
         Initialize a new Connection.
@@ -921,6 +940,11 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
 
         self._command_packer = self._construct_command_packer(command_packer)
         self._should_reconnect = False
+
+        # HIMPORT client-side state. `himport_registry` is the shared client-level
+        # registry (empty if unconfigured) and persists across reconnects.
+        self.himport_registry = himport_registry
+        self._reset_himport_state()
 
         # Set up maintenance notifications
         MaintNotificationsAbstractConnection.__init__(
@@ -1085,11 +1109,22 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
     def _error_message(self, exception):
         return format_error_message(self._host_error(), exception)
 
+    def _reset_himport_state(self):
+        # A fresh server session has no prepared HIMPORT fieldsets, so the next
+        # himport_set must re-prepare on this connection. ``_himport_prepared`` maps
+        # fieldset name -> the version prepared on the server; ``_himport_reconciled
+        # _revision`` is the registry revision this connection last reconciled discards
+        # against. Both are reset on connect/disconnect since the session is gone.
+        self._himport_prepared: dict[str, int] = {}
+        self._himport_reconciled_revision: int = 0
+
     def on_connect(self):
         self.on_connect_check_health(check_health=True)
 
     def on_connect_check_health(self, check_health: bool = True):
         "Initialize the connection, authenticate and select a database"
+        # A fresh socket is a new server session: no prepared HIMPORT fieldsets.
+        self._reset_himport_state()
         self._parser.on_connect(self)
         parser = self._parser
 
@@ -1104,7 +1139,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
 
         # if resp version is specified and we have auth args,
         # we need to send them via HELLO
-        if auth_args and self.protocol not in [2, "2"]:
+        if auth_args and check_protocol_version(self.protocol, 3):
             if isinstance(self._parser, _RESP2Parser):
                 self.set_parser(_RESP3Parser)
                 # update cluster exception classes
@@ -1141,7 +1176,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 raise AuthenticationError("Invalid Username or Password")
 
         # if resp version is specified, switch to it
-        elif self.protocol not in [2, "2"]:
+        elif check_protocol_version(self.protocol, 3):
             if isinstance(self._parser, _RESP2Parser):
                 self.set_parser(_RESP3Parser)
                 # update cluster exception classes
@@ -1206,6 +1241,9 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
 
     def disconnect(self, *args, **kwargs):
         "Disconnects from the Redis server"
+        # The server session is gone, so any HIMPORT fieldsets prepared on this
+        # socket no longer exist; reset the tracking.
+        self._reset_himport_state()
         self._parser.on_disconnect()
 
         conn_sock = self._sock
@@ -1704,6 +1742,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def send_packed_command(self, command, check_health=True):
         # TODO: Investigate if it's possible to unpack command
         #  or extract keys from packed command
+        # Pre-packed commands are not individually cacheable, so make sure the
+        # next read_response does not try to cache their reply under a stale key.
+        self._current_command_cache_key = None
         self._conn.send_packed_command(command)
 
     def send_command(self, *args, **kwargs):
@@ -1836,6 +1877,34 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def pack_commands(self, commands):
         return self._conn.pack_commands(commands)
 
+    # HIMPORT state lives on the wrapped connection (HIMPORT is never cacheable);
+    # delegate so callers treat the proxy like a plain connection and never need
+    # to know a proxy is in play.
+    @property
+    def himport_registry(self):
+        return self._conn.himport_registry
+
+    @property
+    def _himport_prepared(self):
+        return self._conn._himport_prepared
+
+    @_himport_prepared.setter
+    def _himport_prepared(self, value):
+        # Delegate reassignment to the wrapped connection, mirroring
+        # ``_himport_reconciled_revision``. Production code only mutates the dict
+        # in place, but ``_reset_himport_state`` (and any future caller) reassigns
+        # it, and a getter-only property here would raise ``AttributeError`` only
+        # when client-side caching is enabled -- a caching-specific latent trap.
+        self._conn._himport_prepared = value
+
+    @property
+    def _himport_reconciled_revision(self):
+        return self._conn._himport_reconciled_revision
+
+    @_himport_reconciled_revision.setter
+    def _himport_reconciled_revision(self, value):
+        self._conn._himport_reconciled_revision = value
+
     @property
     def handshake_metadata(self) -> Union[Dict[bytes, bytes], Dict[str, str]]:
         return self._conn.handshake_metadata
@@ -1943,7 +2012,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def set_tmp_settings(
         self,
         tmp_host_address: Optional[str] = None,
-        tmp_relaxed_timeout: Optional[float] = None,
+        tmp_relaxed_timeout: Optional[float] = -1,
     ):
         con = self._get_maint_notifications_connection_instance(self._conn)
         con.set_tmp_settings(tmp_host_address, tmp_relaxed_timeout)
@@ -2274,7 +2343,10 @@ def parse_url(url):
 
     for name, value in parse_qs(url.query).items():
         if value and len(value) > 0:
-            value = unquote(value[0])
+            # parse_qs() already percent-decodes query values, so use the value
+            # as-is; unquoting again here would double-decode (e.g. "%2520" ->
+            # "%20" -> " "). See issue #4208.
+            value = value[0]
             parser = URL_QUERY_ARGUMENT_PARSERS.get(name)
             if parser:
                 try:
@@ -2498,9 +2570,22 @@ class MaintNotificationsAbstractConnectionPool:
             self._oss_cluster_maint_notifications_handler = (
                 oss_cluster_maint_notifications_handler
             )
+            # OSS cluster mode and pool-handler mode are mutually exclusive
+            # (see __init__). A pool created with the default RESP3 "auto"
+            # config wires a pool handler before this method runs; clear it so
+            # new and existing connections are not configured with both handlers.
+            self._maint_notifications_pool_handler = None
         else:
             # first update pool settings
-            if not self._maint_notifications_pool_handler:
+            if self._oss_cluster_maint_notifications_handler:
+                # Pool already in OSS cluster mode; update the OSS handler config
+                # instead of creating a mutually-exclusive pool handler (which
+                # would be silently ignored because the OSS handler wins priority
+                # in both update helpers below).
+                self._oss_cluster_maint_notifications_handler.config = (
+                    maint_notifications_config
+                )
+            elif not self._maint_notifications_pool_handler:
                 self._maint_notifications_pool_handler = MaintNotificationsPoolHandler(
                     self, maint_notifications_config
                 )
@@ -2547,6 +2632,10 @@ class MaintNotificationsAbstractConnectionPool:
                     "maint_notifications_config": oss_cluster_maint_notifications_handler.config,
                 }
             )
+            # OSS cluster mode and pool-handler mode are mutually exclusive.
+            # Drop any pool handler a default (RESP3 "auto") pool creation may
+            # have wired so future connections are not configured with both.
+            self.connection_kwargs.pop("maint_notifications_pool_handler", None)
 
         # Store original connection parameters for maintenance notifications.
         if self.connection_kwargs.get("orig_host_address", None) is None:
@@ -2598,11 +2687,18 @@ class MaintNotificationsAbstractConnectionPool:
                 conn.disconnect()
             for conn in self._get_in_use_connections():
                 if oss_cluster_maint_notifications_handler:
+                    # Use set_maint_notifications_cluster_handler_for_connection
+                    # (not _configure_maintenance_notifications) so the parser is
+                    # obtained from the connection itself. _configure_* requires a
+                    # parser argument and would raise here; it would also reset the
+                    # connection's orig_* settings, which is wrong for an in-use
+                    # (active) connection. This mirrors the idle-connection branch
+                    # above and the pool-handler branches.
+                    conn.set_maint_notifications_cluster_handler_for_connection(
+                        oss_cluster_maint_notifications_handler
+                    )
                     conn.maint_notifications_config = (
                         oss_cluster_maint_notifications_handler.config
-                    )
-                    conn._configure_maintenance_notifications(
-                        oss_cluster_maint_notifications_handler=oss_cluster_maint_notifications_handler
                     )
                 elif maint_notifications_pool_handler:
                     conn.set_maint_notifications_pool_handler_for_connection(
@@ -2637,7 +2733,7 @@ class MaintNotificationsAbstractConnectionPool:
                 return False
         elif matching_pattern == "notification_hash":
             if (
-                matching_notification_hash
+                matching_notification_hash is not None
                 and conn.maintenance_notification_hash != matching_notification_hash
             ):
                 return False
@@ -2838,9 +2934,10 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
           <https://www.iana.org/assignments/uri-schemes/prov/rediss>
         - ``unix://``: creates a Unix Domain Socket connection.
 
-        The username, password, hostname, path and all querystring values
-        are passed through urllib.parse.unquote in order to replace any
-        percent-encoded values with their corresponding characters.
+        The username, password, hostname and path are passed through
+        urllib.parse.unquote in order to replace any percent-encoded values
+        with their corresponding characters. Querystring values are decoded
+        by urllib.parse.parse_qs and are not unquoted again.
 
         There are several ways to specify a database number. The first value
         found will be used:
@@ -2940,6 +3037,19 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         connection_kwargs.pop("cache", None)
         connection_kwargs.pop("cache_config", None)
 
+        # Resolve the HIMPORT registry. A pre-built ``himport_registry`` (shared, e.g.
+        # from the cluster client) takes precedence; otherwise build a fresh empty one.
+        # A registry always exists so runtime ``himport_prepare`` mutates a single object
+        # every connection already shares. The object stays in ``connection_kwargs`` so
+        # it reaches every connection. It is injected unconditionally (like other
+        # auto-added pool kwargs), so a custom ``connection_class`` must accept
+        # ``**kwargs`` (or a ``himport_registry`` parameter), as built-ins do.
+        himport_registry = connection_kwargs.get("himport_registry")
+        if himport_registry is None:
+            himport_registry = HImportRegistry()
+            connection_kwargs["himport_registry"] = himport_registry
+        self.himport_registry = himport_registry
+
         # a lock to protect the critical section in _checkpid().
         # this lock is acquired when the process id changes, such as
         # after a fork. during this time, multiple threads in the child
@@ -2975,11 +3085,15 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         }
     )
 
+    # Internal plumbing kwargs omitted from __repr__ (not user-facing config).
+    OMIT_REPR_KEYS = frozenset({"himport_registry"})
+
     def __repr__(self) -> str:
         conn_kwargs = ",".join(
             [
                 f"{k}={'<REDACTED>' if k in self.SENSITIVE_REPR_KEYS else v}"
                 for k, v in self.connection_kwargs.items()
+                if k not in self.OMIT_REPR_KEYS
             ]
         )
         return (
@@ -3172,7 +3286,11 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             except (ConnectionError, TimeoutError, OSError):
                 connection.disconnect()
                 connection.connect()
-                if connection.can_read():
+                if (
+                    connection.can_read()
+                    and self.cache is None
+                    and not self.maint_notifications_enabled()
+                ):
                     raise ConnectionError("Connection not ready")
         except BaseException:
             # release the connection back to the pool so that we don't
@@ -3256,10 +3374,14 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             else:
                 # Pool doesn't own this connection, do not add it back
                 # to the pool.
-                # The created connections count should not be changed,
-                # because the connection was not created by the pool.
                 # Still need to decrement USED since it was counted in get_connection()
                 connection.disconnect()
+                # Subclasses such as SentinelConnectionPool can override
+                # owns_connection() with a comparison different from local PID
+                # ownership. When such a subclass rejects a connection, also require
+                # connection.pid == self.pid before reclaiming its slot.
+                if connection.pid == self.pid:
+                    self._created_connections -= 1
                 record_connection_count(
                     pool_name="unknown_pool",
                     connection_state=ConnectionState.USED,
@@ -3614,12 +3736,20 @@ class BlockingConnectionPool(ConnectionPool):
             # pool before all data has been read or the socket has been
             # closed. either way, reconnect and verify everything is good.
             try:
-                if connection.can_read():
+                if (
+                    connection.can_read()
+                    and self.cache is None
+                    and not self.maint_notifications_enabled()
+                ):
                     raise ConnectionError("Connection has data")
             except (ConnectionError, TimeoutError, OSError):
                 connection.disconnect()
                 connection.connect()
-                if connection.can_read():
+                if (
+                    connection.can_read()
+                    and self.cache is None
+                    and not self.maint_notifications_enabled()
+                ):
                     raise ConnectionError("Connection not ready")
         except BaseException:
             # release the connection back to the pool so that we don't leak it

@@ -2,6 +2,7 @@ import threading
 from unittest.mock import Mock, call, patch, MagicMock
 import pytest
 
+from redis._parsers.base import MaintenanceNotificationsParser
 from redis.connection import ConnectionInterface, MaintNotificationsAbstractConnection
 
 from redis.maint_notifications import (
@@ -16,6 +17,7 @@ from redis.maint_notifications import (
     MaintNotificationsConfig,
     MaintNotificationsPoolHandler,
     MaintNotificationsConnectionHandler,
+    OSSMaintNotificationsHandler,
     MaintenanceState,
     EndpointType,
 )
@@ -636,6 +638,86 @@ class TestOSSNodeMigratedNotification:
         assert (
             len(notification_set) == 2
         )  # notification1 and notification2 should be the same
+
+
+@pytest.mark.fixed_client
+class TestOSSMaintNotificationsHandler:
+    """Test address parsing in the OSS SMIGRATED handler."""
+
+    def _make_handler(self):
+        cluster_client = MagicMock()
+        # Keep the affected-nodes set and the node-reconnect loop empty so the
+        # test focuses purely on how src/dest addresses are parsed.
+        cluster_client.nodes_manager.get_node.return_value = None
+        cluster_client.nodes_manager.nodes_cache.values.return_value = []
+        config = MaintNotificationsConfig(enabled=True)
+        return OSSMaintNotificationsHandler(cluster_client, config), cluster_client
+
+    def test_handle_smigrated_parses_ipv4_addresses(self):
+        handler, cluster_client = self._make_handler()
+        notification = OSSNodeMigratedNotification(
+            id=1,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
+        )
+
+        handler.handle_oss_maintenance_completed_notification(notification)
+
+        cluster_client.nodes_manager.get_node.assert_called_once_with(
+            host="127.0.0.1", port=6379
+        )
+        cluster_client.nodes_manager.initialize.assert_called_once_with(
+            disconnect_startup_nodes_pools=False,
+            additional_startup_nodes_info=[("127.0.0.1", 6380)],
+        )
+
+    def test_handle_smigrated_parses_ipv6_addresses(self):
+        handler, cluster_client = self._make_handler()
+        # IPv6 literals contain multiple colons; a naive split(":") would raise
+        # ValueError on the host/port unpack.
+        notification = OSSNodeMigratedNotification(
+            id=1,
+            nodes_to_slots_mapping={
+                "2001:db8::1:6379": [{"2001:db8::2:6380": "1-100"}]
+            },
+        )
+
+        handler.handle_oss_maintenance_completed_notification(notification)
+
+        cluster_client.nodes_manager.get_node.assert_called_once_with(
+            host="2001:db8::1", port=6379
+        )
+        cluster_client.nodes_manager.initialize.assert_called_once_with(
+            disconnect_startup_nodes_pools=False,
+            additional_startup_nodes_info=[("2001:db8::2", 6380)],
+        )
+
+
+@pytest.mark.fixed_client
+class TestMaintenanceNotificationsParser:
+    """Test endpoint parsing in the shared MOVING push parser."""
+
+    def test_parse_moving_msg_ipv4_endpoint(self):
+        notification = MaintenanceNotificationsParser.parse_moving_msg(
+            ["MOVING", 1, 10, "1.2.3.4:6379"]
+        )
+        assert notification.new_node_host == "1.2.3.4"
+        assert notification.new_node_port == 6379
+
+    def test_parse_moving_msg_ipv6_endpoint(self):
+        # IPv6 literals contain multiple colons; a naive split(":") would raise
+        # ValueError on the host/port unpack.
+        notification = MaintenanceNotificationsParser.parse_moving_msg(
+            ["MOVING", 1, 10, "2001:db8::1:6379"]
+        )
+        assert notification.new_node_host == "2001:db8::1"
+        assert notification.new_node_port == 6379
+
+    def test_parse_moving_msg_none_endpoint(self):
+        notification = MaintenanceNotificationsParser.parse_moving_msg(
+            ["MOVING", 1, 10, None]
+        )
+        assert notification.new_node_host is None
+        assert notification.new_node_port is None
 
 
 @pytest.mark.fixed_client

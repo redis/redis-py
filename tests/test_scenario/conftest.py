@@ -55,6 +55,14 @@ _FAULT_INJECTOR_CLIENT_OSS_API = (
     else REFaultInjector(os.getenv("FAULT_INJECTION_API_URL", "http://127.0.0.1:20324"))
 )
 
+# Module-level singleton for fault injector client used in parametrize
+# This ensures we create only ONE instance that's shared between parametrize and fixture
+_FAULT_INJECTOR_STANDALONE_CLIENT = (
+    ProxyServerFaultInjector(oss_cluster=False)
+    if use_mock_proxy()
+    else REFaultInjector(os.getenv("FAULT_INJECTION_API_URL", "http://127.0.0.1:20324"))
+)
+
 
 @pytest.fixture()
 def endpoint_name(request):
@@ -259,11 +267,6 @@ def _prepare_ssl_certificates(cert_chain: bool) -> dict:
     }
 
 
-@pytest.fixture()
-def client_maint_notifications(endpoints_config):
-    return _get_client_maint_notifications(endpoints_config)
-
-
 def _get_client_maint_notifications(
     endpoints_config,
     protocol: int = 3,
@@ -272,6 +275,7 @@ def _get_client_maint_notifications(
     enable_relaxed_timeout: bool = True,
     enable_proactive_reconnect: bool = True,
     disable_retries: bool = False,
+    auth_ssl_client_certs: bool = False,
     socket_timeout: Optional[float] = None,
     host_config: Optional[str] = None,
 ):
@@ -313,6 +317,11 @@ def _get_client_maint_notifications(
     tls_enabled = True if parsed.scheme == "rediss" else False
     logging.info(f"TLS enabled: {tls_enabled}")
 
+    tls_kwargs = {"ssl": tls_enabled}
+    if tls_enabled:
+        ssl_config = _prepare_ssl_certificates(auth_ssl_client_certs)
+        tls_kwargs.update(ssl_config)
+
     # Create Redis client with maintenance notifications config
     # This will automatically create the MaintNotificationsPoolHandler
     client = Redis(
@@ -321,15 +330,87 @@ def _get_client_maint_notifications(
         socket_timeout=CLIENT_TIMEOUT if socket_timeout is None else socket_timeout,
         username=username,
         password=password,
-        ssl=tls_enabled,
-        ssl_cert_reqs="none",
-        ssl_check_hostname=False,
         protocol=protocol,  # RESP3 required for push notifications
         maint_notifications_config=maintenance_config,
         retry=retry,
+        **tls_kwargs,
     )
     logging.info("Redis client created with maintenance notifications enabled")
     logging.info(f"Client uses Protocol: {client.connection_pool.get_protocol()}")
+
+    return client
+
+
+def get_standalone_client_maint_notifications(
+    endpoints_config,
+    protocol: int = 3,
+    enable_maintenance_notifications: bool = True,
+    endpoint_type: Optional[EndpointType] = None,
+    enable_relaxed_timeout: bool = True,
+    enable_proactive_reconnect: bool = True,
+    disable_retries: bool = False,
+    auth_ssl_client_certs: bool = False,
+    socket_timeout: Optional[float] = None,
+):
+    """Create Redis stanalone client with maintenance notifications enabled."""
+    # Get credentials from the configuration
+    username = endpoints_config.get("username")
+    password = endpoints_config.get("password")
+
+    # Parse host and port from endpoints URL
+    endpoints = endpoints_config.get("endpoints", [])
+    if not endpoints:
+        raise ValueError("No endpoints found in configuration")
+
+    parsed = urlparse(endpoints[0])
+    host = parsed.hostname
+    port = parsed.port
+
+    if not host:
+        raise ValueError(f"Could not parse host from endpoint URL: {endpoints[0]}")
+
+    logging.info(f"Connecting to Redis Enterprise: {host}:{port} with user: {username}")
+
+    if disable_retries:
+        retry = Retry(NoBackoff(), 0)
+    else:
+        retry = Retry(
+            backoff=ExponentialWithJitterBackoff(base=0.01, cap=1), retries=10
+        )
+
+    tls_enabled = True if parsed.scheme == "rediss" else False
+    logging.info(f"TLS enabled: {tls_enabled}")
+
+    tls_kwargs = {"ssl": tls_enabled}
+
+    if tls_enabled:
+        # Prepare SSL certificate configuration
+        ssl_config = _prepare_ssl_certificates(auth_ssl_client_certs)
+        tls_kwargs.update(ssl_config)
+
+    # Configure maintenance notifications
+    maintenance_config = MaintNotificationsConfig(
+        enabled=enable_maintenance_notifications,
+        proactive_reconnect=enable_proactive_reconnect,
+        relaxed_timeout=RELAXED_TIMEOUT if enable_relaxed_timeout else -1,
+        endpoint_type=endpoint_type,
+    )
+
+    # Create Redis cluster client with maintenance notifications config
+    client = Redis(
+        host=host,
+        port=port,
+        socket_timeout=CLIENT_TIMEOUT if socket_timeout is None else socket_timeout,
+        username=username,
+        password=password,
+        protocol=protocol,  # RESP3 required for push notifications
+        maint_notifications_config=maintenance_config,
+        retry=retry,
+        **tls_kwargs,
+    )
+    logging.info(
+        "Redis standalone client created with maintenance notifications enabled"
+    )
 
     return client
 
@@ -344,6 +425,7 @@ def get_cluster_client_maint_notifications(
     disable_retries: bool = False,
     auth_ssl_client_certs: bool = False,
     socket_timeout: Optional[float] = None,
+    socket_connect_timeout: Optional[float] = None,
 ):
     """Create Redis cluster client with maintenance notifications enabled."""
     # Get credentials from the configuration
@@ -394,6 +476,9 @@ def get_cluster_client_maint_notifications(
         host=host,
         port=port,
         socket_timeout=CLIENT_TIMEOUT if socket_timeout is None else socket_timeout,
+        socket_connect_timeout=CLIENT_TIMEOUT
+        if socket_connect_timeout is None
+        else socket_connect_timeout,
         username=username,
         password=password,
         protocol=protocol,  # RESP3 required for push notifications
