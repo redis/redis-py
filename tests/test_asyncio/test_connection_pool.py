@@ -670,6 +670,12 @@ class TestConnectionPoolURLParsing:
             "(redis://, rediss://, unix://)"
         )
 
+    def test_uppercase_scheme_is_accepted(self):
+        # URL schemes are case-insensitive (RFC 3986)
+        pool = redis.ConnectionPool.from_url("REDIS://my.host")
+        assert pool.connection_class == redis.Connection
+        assert_kwargs_subset(pool.connection_kwargs, {"host": "my.host"})
+
 
 @pytest.mark.fixed_client
 class TestBlockingConnectionPoolURLParsing:

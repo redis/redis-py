@@ -1766,11 +1766,10 @@ class ConnectKwargs(TypedDict, total=False):
 
 
 def parse_url(url: str) -> ConnectKwargs:
-    if not (
-        url.startswith("redis://")
-        or url.startswith("rediss://")
-        or url.startswith("unix://")
-    ):
+    # Scheme names are case-insensitive (RFC 3986), so normalize before the
+    # prefix check; the "://" is required so a URL like "redis:foo" (which
+    # urlparse would still report as the "redis" scheme) is rejected.
+    if not url.lower().startswith(("redis://", "rediss://", "unix://")):
         raise ValueError(
             "Redis URL must specify one of the following schemes "
             "(redis://, rediss://, unix://)"
