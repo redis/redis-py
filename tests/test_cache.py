@@ -110,6 +110,60 @@ class TestCache:
                 "cache": DefaultCache(CacheConfig(max_size=5)),
                 "single_connection_client": False,
             },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_zrank_zrevrank_are_cacheable(self, r, r2):
+        # ZRANK and ZREVRANK are in the cache allow list but used to pass no
+        # `keys`, so client-side caching raised
+        # ValueError("Cannot create cache key."). They must be cacheable under
+        # the whole key and invalidated when the sorted set changes.
+        cache = r.get_cache()
+        r.delete("myzset")
+        r.zadd("myzset", {"a": 1, "b": 2, "c": 3})
+        # populate the local cache (no ValueError)
+        assert r.zrank("myzset", "b") == 1
+        assert r.zrevrank("myzset", "b") == 1
+        assert (
+            cache.get(
+                CacheKey(
+                    command="ZRANK",
+                    redis_keys=("myzset",),
+                    redis_args=("ZRANK", "myzset", "b"),
+                )
+            )
+            is not None
+        )
+        assert (
+            cache.get(
+                CacheKey(
+                    command="ZREVRANK",
+                    redis_keys=("myzset",),
+                    redis_args=("ZREVRANK", "myzset", "b"),
+                )
+            )
+            is not None
+        )
+        # change the sorted set from a second client (causes invalidation)
+        r2.zadd("myzset", {"aa": 0})
+        # Add a small delay to allow invalidation to be processed
+        time.sleep(0.1)
+        # rank of "b" shifts from 1 to 2 after inserting a lower-scored member
+        assert r.zrank("myzset", "b") == 2
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": True,
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": False,
+            },
             {
                 "cache": DefaultCache(CacheConfig(max_size=5)),
                 "single_connection_client": False,
