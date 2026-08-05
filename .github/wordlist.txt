@@ -132,6 +132,7 @@ gmail
 himport
 hiredis
 http
+idempotent
 idx
 iff
 ini
@@ -182,6 +183,7 @@ redismodules
 reinitialization
 replicaof
 repo
+resharding
 runtime
 sedrik
 serializers

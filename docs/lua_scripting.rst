@@ -153,9 +153,9 @@ Important caveats when using ``EVALSHA`` in a cluster pipeline:
    ...     with rc.pipeline() as pipe:
    ...         pipe.evalsha(sha, 1, "{user}:1")
    ...         return pipe.execute()
->>> try:
-...     result = run()
-... except NoScriptError:
-...     # single-command pipeline: safe to reload and retry
-...     sha = rc.script_load(lua)  # reload on current primaries
-...     result = run()
+   >>> try:
+   ...     result = run()
+   ... except NoScriptError:
+   ...     # single-command pipeline: safe to reload and retry
+   ...     sha = rc.script_load(lua)  # reload on current primaries
+   ...     result = run()
