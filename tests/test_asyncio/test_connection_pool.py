@@ -662,6 +662,14 @@ class TestConnectionPoolURLParsing:
             "(redis://, rediss://, unix://)"
         )
 
+    def test_invalid_scheme_raises_error_when_double_slash_missing(self):
+        with pytest.raises(ValueError) as cm:
+            redis.ConnectionPool.from_url("redis:foo.bar.com:12345")
+        assert str(cm.value) == (
+            "Redis URL must specify one of the following schemes "
+            "(redis://, rediss://, unix://)"
+        )
+
 
 @pytest.mark.fixed_client
 class TestBlockingConnectionPoolURLParsing:

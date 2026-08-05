@@ -1766,6 +1766,16 @@ class ConnectKwargs(TypedDict, total=False):
 
 
 def parse_url(url: str) -> ConnectKwargs:
+    if not (
+        url.startswith("redis://")
+        or url.startswith("rediss://")
+        or url.startswith("unix://")
+    ):
+        raise ValueError(
+            "Redis URL must specify one of the following schemes "
+            "(redis://, rediss://, unix://)"
+        )
+
     parsed: ParseResult = urlparse(url)
     kwargs: ConnectKwargs = {}
 
@@ -1795,7 +1805,7 @@ def parse_url(url: str) -> ConnectKwargs:
             kwargs["path"] = unquote(parsed.path)
         kwargs["connection_class"] = UnixDomainSocketConnection
 
-    elif parsed.scheme in ("redis", "rediss"):
+    else:  # implied:  parsed.scheme in ("redis", "rediss")
         if parsed.hostname:
             kwargs["host"] = unquote(parsed.hostname)
         if parsed.port:
@@ -1811,12 +1821,6 @@ def parse_url(url: str) -> ConnectKwargs:
 
         if parsed.scheme == "rediss":
             kwargs["connection_class"] = SSLConnection
-
-    else:
-        valid_schemes = "redis://, rediss://, unix://"
-        raise ValueError(
-            f"Redis URL must specify one of the following schemes ({valid_schemes})"
-        )
 
     return kwargs
 
