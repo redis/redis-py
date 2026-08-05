@@ -9315,6 +9315,7 @@ class SortedSetCommands(CommandsProtocol):
             pieces.append("WITHSCORE")
 
         options = {"withscore": withscore, "score_cast_func": score_cast_func}
+        options["keys"] = [name]
 
         return self.execute_command(*pieces, **options)
 
@@ -9439,6 +9440,7 @@ class SortedSetCommands(CommandsProtocol):
             pieces.append("WITHSCORE")
 
         options = {"withscore": withscore, "score_cast_func": score_cast_func}
+        options["keys"] = [name]
 
         return self.execute_command(*pieces, **options)
 
