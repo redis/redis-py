@@ -9,6 +9,8 @@ class StringJoiningConnection(Connection):
         if not self._sock:
             self.connect()
         try:
+            if isinstance(command, list):
+                command = SYM_EMPTY.join(command)
             self._sock.sendall(command)
         except OSError as e:
             self.disconnect()
