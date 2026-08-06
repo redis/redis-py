@@ -1165,8 +1165,20 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             )
 
     async def _send_packed_command(self, command: Iterable[bytes]) -> None:
-        self._writer.writelines(command)
-        await self._writer.drain()
+        writer = self._writer
+        if writer is None:
+            raise ConnectionError("Connection closed while writing")
+        try:
+            writer.writelines(command)
+            await writer.drain()
+        except AttributeError as error:
+            if str(error) != "'NoneType' object has no attribute 'writelines'":
+                raise
+            raise ConnectionError("Connection closed while writing") from error
+        except TypeError as error:
+            if str(error) != "'NoneType' object is not callable":
+                raise
+            raise ConnectionError("Connection closed while writing") from error
 
     async def send_packed_command(
         self, command: Union[bytes, str, Iterable[bytes]], check_health: bool = True
@@ -1186,8 +1198,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                     self._send_packed_command(command), self.socket_timeout
                 )
             else:
-                self._writer.writelines(command)
-                await self._writer.drain()
+                await self._send_packed_command(command)
         except asyncio.TimeoutError:
             await self.disconnect(nowait=True)
             raise TimeoutError("Timeout writing to socket") from None
@@ -1415,7 +1426,13 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
 
     def _socket_is_empty(self):
         """Check if the socket is empty"""
-        return len(self._reader._buffer) == 0
+        reader = self._reader
+        if reader is None:
+            raise ConnectionError("Connection closed while reading")
+        try:
+            return len(reader._buffer) == 0
+        except AttributeError as error:
+            raise ConnectionError("Connection closed while reading") from error
 
     async def process_invalidation_messages(self):
         while not self._socket_is_empty():
