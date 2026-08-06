@@ -8302,7 +8302,7 @@ class SortedSetCommands(CommandsProtocol):
                 "ZADD option 'incr' only works when passing a single element/score pair"
             )
         if nx and (gt or lt):
-            raise DataError("Only one of 'nx', 'lt', or 'gr' may be defined.")
+            raise DataError("Only one of 'nx', 'gt', or 'lt' may be defined.")
 
         pieces: list[EncodableT] = []
         options = {}
@@ -8988,7 +8988,7 @@ class SortedSetCommands(CommandsProtocol):
         if withscores:
             pieces.append(b"WITHSCORES")
         options = {"withscores": withscores, "score_cast_func": score_cast_func}
-        options["keys"] = name
+        options["keys"] = [name]
         return self.execute_command(*pieces, **options)
 
     @overload
