@@ -3918,6 +3918,22 @@ def test_evalsha_can_be_queued_on_cluster_pipeline():
 
 
 @pytest.mark.onlycluster
+def test_script_queues_evalsha_on_cluster_pipeline():
+    """Script must queue EVALSHA on ClusterPipeline without calling script_load."""
+    r = get_mocked_redis_client(host=default_host, port=default_port)
+    try:
+        script = r.register_script("return 1")
+        with r.pipeline() as pipe:
+            script(client=pipe)
+            queue = pipe._execution_strategy.command_queue
+            assert len(queue) == 1
+            assert queue[0].args[0] == "EVALSHA"
+            assert queue[0].args[1] == script.sha
+    finally:
+        r.close()
+
+
+@pytest.mark.onlycluster
 def test_evalsha_zero_keys_pipeline_execute_skips_get_command_keys():
     """
     Sync ClusterPipeline must route EVALSHA via determine_slot, not

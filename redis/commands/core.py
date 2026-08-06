@@ -10928,10 +10928,15 @@ class Script:
         args = tuple(keys) + tuple(args)
         # make sure the Redis server knows about the script
         from redis.client import Pipeline
+        from redis.cluster import ClusterPipeline
 
         if isinstance(client, Pipeline):
             # Make sure the pipeline can register the script before executing.
             client.scripts.add(self)
+        if isinstance(client, ClusterPipeline):
+            # ClusterPipeline does not support script_load. Queue EVALSHA and
+            # leave NOSCRIPT recovery to the caller (same as AsyncScript).
+            return client.evalsha(self.sha, len(keys), *args)
         try:
             return client.evalsha(self.sha, len(keys), *args)
         except NoScriptError:

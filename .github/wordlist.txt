@@ -164,6 +164,7 @@ opentelemetry
 oss
 parsers
 performant
+pipelined
 pmessage
 png
 positionally
