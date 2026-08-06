@@ -16,3 +16,5 @@ traceback  # unused variable (/data/repos/redis/redis-py/redis/asyncio/utils.py:
 AsyncConnectionPool  # unused import (//data/repos/redis/redis-py/redis/typing.py:9)
 AsyncRedis  # unused import (//data/repos/redis/redis-py/redis/commands/core.py:49)
 TargetNodesT  # unused import (//data/repos/redis/redis-py/redis/commands/cluster.py:46)
+PyJWK  # unused import (//data/repos/redis/redis-py/redis/auth/token.py:8)
+AllowedPublicKeys  # unused import (//data/repos/redis/redis-py/redis/auth/token.py:9)
