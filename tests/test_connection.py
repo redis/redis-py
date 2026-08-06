@@ -740,6 +740,15 @@ def test_pack_command(Class):
     assert actual == expected, f"actual = {actual}, expected = {expected}"
 
 
+@pytest.mark.parametrize("protocol", [2, 3])
+def test_pack_command_respects_connection_encoding(protocol):
+    connection = Connection(encoding="latin-1", protocol=protocol)
+
+    assert connection.pack_command("SET", "key", "café") == [
+        b"*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$4\r\ncaf\xe9\r\n"
+    ]
+
+
 @pytest.mark.fixed_client
 # Hardcodes a localhost URL, so it cannot target a remote managed Redis Enterprise endpoint.
 @skip_if_redis_enterprise()

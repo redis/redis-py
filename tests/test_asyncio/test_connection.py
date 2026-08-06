@@ -18,6 +18,7 @@ from redis._parsers.hiredis import NOT_ENOUGH_DATA
 from redis.asyncio import ConnectionPool, Redis
 from redis.asyncio.connection import (
     Connection,
+    HiredisRespSerializer,
     SSLConnection,
     UnixDomainSocketConnection,
     parse_url,
@@ -81,6 +82,39 @@ def test_connection_default_parser_matches_default_protocol():
     )
     assert isinstance(conn._parser, expected_parser_class)
     assert conn.protocol == 3
+
+
+@pytest.mark.skipif(not HIREDIS_AVAILABLE, reason="hiredis is not installed")
+def test_connection_uses_hiredis_command_packer(monkeypatch):
+    calls = []
+
+    def pack_command(args):
+        calls.append(args)
+        return b"packed"
+
+    monkeypatch.setattr("redis.connection.hiredis.pack_command", pack_command)
+    connection = Connection()
+
+    assert isinstance(connection._command_packer, HiredisRespSerializer)
+    assert connection.pack_command("SET", "key", "value") == [b"packed"]
+    assert calls == [(b"SET", b"key", b"value")]
+
+
+def test_connection_uses_python_command_packer_without_hiredis(monkeypatch):
+    monkeypatch.setattr("redis.asyncio.connection.HIREDIS_AVAILABLE", False)
+    connection = Connection()
+
+    assert connection._command_packer is None
+    assert connection.pack_command("PING") == [b"*1\r\n$4\r\nPING\r\n"]
+
+
+@pytest.mark.parametrize("protocol", [2, 3])
+def test_async_pack_command_respects_connection_encoding(protocol):
+    connection = Connection(encoding="latin-1", protocol=protocol)
+
+    assert connection.pack_command("SET", "key", "café") == [
+        b"*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$4\r\ncaf\xe9\r\n"
+    ]
 
 
 @pytest.mark.parametrize(
