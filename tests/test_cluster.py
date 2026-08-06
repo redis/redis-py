@@ -3,6 +3,7 @@ import datetime
 import select
 import socket
 import socketserver
+import ssl
 import threading
 from typing import List
 import warnings
@@ -74,6 +75,22 @@ default_cluster_slots = [
     [0, 8191, ["127.0.0.1", 7000, "node_0"], ["127.0.0.1", 7003, "node_3"]],
     [8192, 16383, ["127.0.0.1", 7001, "node_1"], ["127.0.0.1", 7002, "node_2"]],
 ]
+
+
+def test_cluster_preserves_custom_ssl_context():
+    context = ssl.create_default_context()
+
+    with (
+        patch.object(NodesManager, "initialize"),
+        patch.object(CommandsParser, "initialize"),
+    ):
+        cluster = RedisCluster(
+            startup_nodes=[ClusterNode("localhost", 6379)],
+            ssl=True,
+            ssl_context=context,
+        )
+
+    assert cluster.get_connection_kwargs()["ssl_context"] is context
 
 
 class ProxyRequestHandler(socketserver.BaseRequestHandler):
