@@ -1142,3 +1142,35 @@ async def test_toggle_dollar(decoded_r: redis.Redis):
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
         await decoded_r.json().toggle("non_existing_doc", "$..a")
+
+
+async def test_set_path_key_strips_only_extension(monkeypatch):
+    # Regression test: JSON.set_path must strip only the file extension when
+    # deriving the key, so a path containing dots in a directory (e.g. a
+    # versioned "v1.2" folder) is not truncated at the first dot. set_file is
+    # stubbed so this runs without a server.
+    import json
+    import os
+    import tempfile
+
+    root = tempfile.mkdtemp()
+    dotted_dir = os.path.join(root, "v1.2")
+    os.makedirs(dotted_dir)
+    json_file = os.path.join(dotted_dir, "data.json")
+    with open(json_file, "w") as fp:
+        fp.write(json.dumps({"hello": "world"}))
+
+    json_client = redis.Redis().json()
+    captured = []
+
+    async def fake_set_file(name, *args, **kwargs):
+        captured.append(name)
+        return True
+
+    monkeypatch.setattr(json_client, "set_file", fake_set_file)
+
+    result = await json_client.set_path(Path.root_path(), root)
+
+    expected_key = json_file[: -len(".json")]
+    assert captured == [expected_key]
+    assert result == {json_file: True}
