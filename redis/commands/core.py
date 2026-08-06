@@ -8988,7 +8988,7 @@ class SortedSetCommands(CommandsProtocol):
         if withscores:
             pieces.append(b"WITHSCORES")
         options = {"withscores": withscores, "score_cast_func": score_cast_func}
-        options["keys"] = name
+        options["keys"] = [name]
         return self.execute_command(*pieces, **options)
 
     @overload

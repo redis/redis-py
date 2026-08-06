@@ -1576,6 +1576,14 @@ class Connection(AbstractConnection):
         # we want to mimic what socket.create_connection does to support
         # ipv4/ipv6, but we want to set options prior to calling
         # socket.connect()
+
+        # Last caught connection error.
+        # Re-thrown if we are unable to connect to any of the options returned
+        # by getaddrinfo.
+        # Note that we must clear this variable before returning - otherwise,
+        # a caught err's traceback points to this frame, which points to err.
+        # Clearing this lets refcounting reclaim the exception immediately
+        # without deferring to the python garbage collector.
         err = None
 
         for res in socket.getaddrinfo(
@@ -1602,6 +1610,10 @@ class Connection(AbstractConnection):
 
                 # set the socket_timeout now that we're connected
                 sock.settimeout(self.socket_timeout)
+
+                # If a previous connection attempt failed, clear the error
+                err = None
+
                 return sock
 
             except OSError as _:
@@ -1614,7 +1626,11 @@ class Connection(AbstractConnection):
                     sock.close()
 
         if err is not None:
-            raise err
+            try:
+                raise err
+            finally:
+                # Ensure we clear local references to caught exceptions
+                err = None
         raise OSError("socket.getaddrinfo returned an empty list")
 
     def _host_error(self):
@@ -2328,11 +2344,10 @@ URL_QUERY_ARGUMENT_PARSERS = {
 
 
 def parse_url(url):
-    if not (
-        url.startswith("redis://")
-        or url.startswith("rediss://")
-        or url.startswith("unix://")
-    ):
+    # Scheme names are case-insensitive (RFC 3986), so normalize before the
+    # prefix check; the "://" is required so a URL like "redis:foo" (which
+    # urlparse would still report as the "redis" scheme) is rejected.
+    if not url.lower().startswith(("redis://", "rediss://", "unix://")):
         raise ValueError(
             "Redis URL must specify one of the following "
             "schemes (redis://, rediss://, unix://)"
