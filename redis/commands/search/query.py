@@ -76,7 +76,11 @@ class Query:
         - **encoding**: The encoding to use when decoding the field
         """
         self._return_fields.append(field)
-        self._return_fields_decode_as[field] = encoding if decode_field else None
+        # The server returns an aliased field under its alias, so the encoding
+        # has to be recorded under the name the response will carry.
+        self._return_fields_decode_as[field if as_field is None else as_field] = (
+            encoding if decode_field else None
+        )
         if as_field is not None:
             self._return_fields += ("AS", as_field)
         return self

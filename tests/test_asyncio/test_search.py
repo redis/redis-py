@@ -43,7 +43,6 @@ from tests.conftest import (
     expects_unified_shape,
     get_protocol_version,
     skip_if_redis_enterprise,
-    skip_if_resp_version,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_ifmodversion_lt,
@@ -937,6 +936,64 @@ class TestBaseSearchFunctionality(AsyncSearchTestsBase):
             _ = (await alias_client2.search("*")).docs[0]
 
     @pytest.mark.redismod
+    @skip_if_server_version_lt("8.9.0")
+    async def test_aliaslist(self, decoded_r: redis.Redis):
+        index = decoded_r.ft("aliaslistidx")
+        await index.create_index((TextField("txt"),))
+
+        # An existing index with no aliases returns an empty set, not an error.
+        assert await index.aliaslist() == set()
+
+        # Aliases are returned as an unordered collection.
+        await index.aliasadd("alias1")
+        await index.aliasadd("alias2")
+        aliases = await index.aliaslist()
+        assert isinstance(aliases, set)
+        assert aliases == {"alias1", "alias2"}
+
+        # FT.ALIASUPDATE moving an alias to another index removes it from the
+        # previous index's listing.
+        index2 = decoded_r.ft("aliaslistidx2")
+        await index2.create_index((TextField("txt"),))
+        await index2.aliasupdate("alias1")
+        assert await index.aliaslist() == {"alias2"}
+        assert await index2.aliaslist() == {"alias1"}
+
+        # FT.ALIASDEL removes the alias from the listing.
+        await index.aliasdel("alias2")
+        assert await index.aliaslist() == set()
+
+        # A missing index and an alias name supplied as the index both fail
+        # with the index-not-found error; the client must not resolve aliases.
+        with pytest.raises(redis.ResponseError):
+            await decoded_r.ft("nonexistent_aliaslist_index").aliaslist()
+        with pytest.raises(redis.ResponseError):
+            await decoded_r.ft("alias1").aliaslist()
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("8.9.0")
+    @skip_if_redis_enterprise()
+    async def test_aliaslist_decode_responses_false(self, create_redis, stack_url):
+        # ``decode_responses`` is not part of the CI protocol/legacy matrix,
+        # so pin only that here and let the harness supply the protocol x
+        # legacy combinations (as it does for ``test_aliaslist`` above).
+        client = await create_redis(decode_responses=False, url=stack_url)
+        index = client.ft("aliaslistbytesidx")
+        await index.create_index((TextField("txt"),))
+
+        # ``aliasadd`` accepts a ``KeyT`` (str | bytes | memoryview); mix a
+        # ``str`` and a ``bytes`` alias to exercise the widened input type.
+        await index.aliasadd("alias1")
+        await index.aliasadd(b"alias2")
+
+        # Alias names are user data, so with ``decode_responses=False`` they
+        # are returned as ``bytes`` (honoring the flag, like FT.TAGVALS /
+        # FT.DICTDUMP) rather than being force-decoded to ``str``.
+        aliases = await index.aliaslist()
+        assert isinstance(aliases, set)
+        assert aliases == {b"alias1", b"alias2"}
+
+    @pytest.mark.redismod
     async def test_tags(self, decoded_r: redis.Redis):
         await decoded_r.ft().create_index((TextField("txt"), TagField("tags")))
         tags = "foo,foo bar,hello;world"
@@ -1278,7 +1335,6 @@ class TestBaseSearchFunctionality(AsyncSearchTestsBase):
             await decoded_r.config_set("search-on-timeout", original)
 
     @pytest.mark.redismod
-    @skip_if_resp_version(3)
     async def test_binary_and_text_fields(self, decoded_r: redis.Redis):
         fake_vec = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
 
@@ -1313,23 +1369,27 @@ class TestBaseSearchFunctionality(AsyncSearchTestsBase):
             .return_field("first_name")
         )
         result = await decoded_r.ft(index_name).search(query=query, query_params={})
-        docs = result.docs
 
-        if len(docs) == 0:
-            hash_content = await decoded_r.hget(f"{index_name}:1", "first_name")
-        assert len(docs) > 0, (
-            f"Returned search results are empty. Result: {result}; Hash: {hash_content}"
-        )
+        if expects_resp3_shape(decoded_r):
+            # protocol=3 + legacy_responses=True returns the native RESP3 dict;
+            # text fields are decoded while the binary field is kept as bytes.
+            results = result["results"]
+            assert len(results) > 0, f"Returned search results are empty: {result}"
+            attributes = results[0]["extra_attributes"]
+        else:
+            docs = result.docs
+            assert len(docs) > 0, f"Returned search results are empty: {result}"
+            attributes = docs[0]
 
         decoded_vec_from_search_results = np.frombuffer(
-            docs[0]["vector_emb"], dtype=np.float32
+            attributes["vector_emb"], dtype=np.float32
         )
 
         assert np.array_equal(decoded_vec_from_search_results, fake_vec), (
             "The vectors are not equal"
         )
 
-        assert docs[0]["first_name"] == mixed_data["first_name"], (
+        assert attributes["first_name"] == mixed_data["first_name"], (
             "The text field is not decoded correctly"
         )
 
@@ -1645,7 +1705,80 @@ class TestConfig(AsyncSearchTestsBase):
         assert "100" == res["timeout"]
 
 
+# Documents shared by the COLLECT reducer tests. Some fruits deliberately omit
+# ``origin`` so the sparse-projection behavior can be exercised.
+COLLECT_FRUITS = {
+    "fruit:apple": {"color": "red", "name": "apple", "sweetness": 4, "origin": "usa"},
+    "fruit:strawberry": {"color": "red", "name": "strawberry", "sweetness": 3},
+    "fruit:cherry": {
+        "color": "red",
+        "name": "cherry",
+        "sweetness": 5,
+        "origin": "turkey",
+    },
+    "fruit:banana": {
+        "color": "yellow",
+        "name": "banana",
+        "sweetness": 4,
+        "origin": "ecuador",
+    },
+    "fruit:lemon": {"color": "yellow", "name": "lemon", "sweetness": 2},
+}
+
+
+def collect_entry_to_dict(entry):
+    """Normalize a single COLLECT entry to a dict.
+
+    RESP3 entries are maps already; RESP2 entries are flat
+    ``[key, value, key, value, ...]`` arrays.
+    """
+    if isinstance(entry, dict):
+        return entry
+    return {entry[i]: entry[i + 1] for i in range(0, len(entry), 2)}
+
+
+def collect_groups(client, res, alias, group_field="color"):
+    """Return ``{group_value: [entry_dict, ...]}`` from an FT.AGGREGATE COLLECT
+    result across all response shapes.
+
+    ``legacy_resp3`` returns a dict of results; the other shapes return an
+    ``AggregateResult`` whose rows are flat ``[key, value, ...]`` lists.
+    """
+    if expects_resp3_shape(client):
+        rows = [result["extra_attributes"] for result in res["results"]]
+    else:
+        rows = [{row[i]: row[i + 1] for i in range(0, len(row), 2)} for row in res.rows]
+    return {
+        attrs[group_field]: [collect_entry_to_dict(e) for e in attrs[alias]]
+        for attrs in rows
+    }
+
+
 class TestAggregations(AsyncSearchTestsBase):
+    @pytest_asyncio.fixture
+    async def collect_index(self, decoded_r):
+        """Enable the preview feature and index the shared fruit documents.
+
+        Restores ``search-enable-unstable-features`` to its original value on
+        teardown so the preview flag does not leak into other tests.
+        """
+        config = await decoded_r.config_get("search-enable-unstable-features")
+        original = config["search-enable-unstable-features"]
+        await decoded_r.config_set("search-enable-unstable-features", "yes")
+        await decoded_r.ft().create_index(
+            (
+                TextField("color"),
+                TextField("name"),
+                NumericField("sweetness"),
+                TextField("origin"),
+            )
+        )
+        for key, mapping in COLLECT_FRUITS.items():
+            await decoded_r.hset(key, mapping=mapping)
+        await self.waitForIndex(decoded_r, "idx")
+        yield
+        await decoded_r.config_set("search-enable-unstable-features", original)
+
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     async def test_aggregations_groupby(self, decoded_r: redis.Redis):
@@ -1960,6 +2093,287 @@ class TestAggregations(AsyncSearchTestsBase):
                 ]
 
     @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    async def test_aggregations_collect_sortby(
+        self, decoded_r: redis.Redis, collect_index
+    ):
+        # COLLECT projects the named fields per group, ordered by SORTBY.
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("*")
+            .group_by(
+                "@color",
+                reducers.collect(
+                    ["@name", "@sweetness"],
+                    sort_by=[aggregations.Desc("@sweetness")],
+                ).alias("fruits"),
+            )
+        )
+        groups = collect_groups(
+            decoded_r, await decoded_r.ft().aggregate(req), "fruits"
+        )
+
+        assert groups["red"] == [
+            {"name": "cherry", "sweetness": "5"},
+            {"name": "apple", "sweetness": "4"},
+            {"name": "strawberry", "sweetness": "3"},
+        ]
+        assert groups["yellow"] == [
+            {"name": "banana", "sweetness": "4"},
+            {"name": "lemon", "sweetness": "2"},
+        ]
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    async def test_aggregations_collect_sortby_ascending(
+        self, decoded_r: redis.Redis, collect_index
+    ):
+        # An ``Asc`` directive orders the collected entries in ascending order.
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("*")
+            .group_by(
+                "@color",
+                reducers.collect(
+                    ["@name"], sort_by=[aggregations.Asc("@sweetness")]
+                ).alias("fruits"),
+            )
+        )
+        groups = collect_groups(
+            decoded_r, await decoded_r.ft().aggregate(req), "fruits"
+        )
+
+        assert groups["red"] == [
+            {"name": "strawberry"},
+            {"name": "apple"},
+            {"name": "cherry"},
+        ]
+        assert groups["yellow"] == [{"name": "lemon"}, {"name": "banana"}]
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    async def test_aggregations_collect_limit_top_n(
+        self, decoded_r: redis.Redis, collect_index
+    ):
+        # SORTBY + LIMIT is a bounded top-N selection with an offset.
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("*")
+            .group_by(
+                "@color",
+                reducers.collect(
+                    ["@name"],
+                    sort_by=[aggregations.Desc("@sweetness")],
+                    limit=(1, 1),
+                ).alias("fruits"),
+            )
+        )
+        groups = collect_groups(
+            decoded_r, await decoded_r.ft().aggregate(req), "fruits"
+        )
+
+        # red desc: cherry, apple, strawberry -> skip 1, take 1 -> apple
+        assert groups["red"] == [{"name": "apple"}]
+        # yellow desc: banana, lemon -> skip 1, take 1 -> lemon
+        assert groups["yellow"] == [{"name": "lemon"}]
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    async def test_aggregations_collect_multiple_sort_keys(
+        self, decoded_r: redis.Redis, collect_index
+    ):
+        # Multiple sort keys are applied left to right.
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("*")
+            .group_by(
+                "@color",
+                reducers.collect(
+                    ["@name", "@sweetness"],
+                    sort_by=[
+                        aggregations.Desc("@sweetness"),
+                        aggregations.Asc("@name"),
+                    ],
+                ).alias("fruits"),
+            )
+        )
+        groups = collect_groups(
+            decoded_r, await decoded_r.ft().aggregate(req), "fruits"
+        )
+
+        assert groups["red"] == [
+            {"name": "cherry", "sweetness": "5"},
+            {"name": "apple", "sweetness": "4"},
+            {"name": "strawberry", "sweetness": "3"},
+        ]
+        assert groups["yellow"] == [
+            {"name": "banana", "sweetness": "4"},
+            {"name": "lemon", "sweetness": "2"},
+        ]
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    async def test_aggregations_collect_sparse_projection(
+        self, decoded_r: redis.Redis, collect_index
+    ):
+        # A field absent from a row is omitted from that entry (not NULL).
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("*")
+            .group_by(
+                "@color",
+                reducers.collect(
+                    ["@name", "@origin"],
+                    sort_by=[aggregations.Desc("@sweetness")],
+                ).alias("fruits"),
+            )
+        )
+        groups = collect_groups(
+            decoded_r, await decoded_r.ft().aggregate(req), "fruits"
+        )
+
+        # strawberry and lemon have no ``origin`` -> the key is omitted.
+        assert groups["red"] == [
+            {"name": "cherry", "origin": "turkey"},
+            {"name": "apple", "origin": "usa"},
+            {"name": "strawberry"},
+        ]
+        assert groups["yellow"] == [
+            {"name": "banana", "origin": "ecuador"},
+            {"name": "lemon"},
+        ]
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    async def test_aggregations_collect_key_field(
+        self, decoded_r: redis.Redis, collect_index
+    ):
+        # ``@__key`` can be projected when carried into the pipeline via LOAD.
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("@__key", "@name")
+            .group_by(
+                "@color",
+                reducers.collect(
+                    ["@name", "@__key"], sort_by=[aggregations.Asc("@name")]
+                ).alias("fruits"),
+            )
+        )
+        groups = collect_groups(
+            decoded_r, await decoded_r.ft().aggregate(req), "fruits"
+        )
+
+        assert groups["red"] == [
+            {"name": "apple", "__key": "fruit:apple"},
+            {"name": "cherry", "__key": "fruit:cherry"},
+            {"name": "strawberry", "__key": "fruit:strawberry"},
+        ]
+        assert groups["yellow"] == [
+            {"name": "banana", "__key": "fruit:banana"},
+            {"name": "lemon", "__key": "fruit:lemon"},
+        ]
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    async def test_aggregations_collect_fields_all(
+        self, decoded_r: redis.Redis, collect_index
+    ):
+        # FIELDS * is stage-local: after GROUPBY only the group key is present.
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("*")
+            .group_by("@color", reducers.collect("*").alias("fruits"))
+        )
+        groups = collect_groups(
+            decoded_r, await decoded_r.ft().aggregate(req), "fruits"
+        )
+
+        assert len(groups["red"]) == 3
+        assert len(groups["yellow"]) == 2
+        assert all(entry == {"color": "red"} for entry in groups["red"])
+        assert all(entry == {"color": "yellow"} for entry in groups["yellow"])
+
+    @pytest.mark.parametrize(
+        "bad_fields",
+        [[], (), "", "   ", ["   "], ["name", ""], ["name", "   "]],
+    )
+    def test_aggregations_collect_invalid_fields(self, bad_fields):
+        # Empty or blank field selectors are local API misuse and are rejected
+        # client-side with a ValueError before any command is sent. A blank
+        # entry anywhere in the list is rejected too, not just an empty list.
+        with pytest.raises(ValueError):
+            reducers.collect(bad_fields)
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    async def test_aggregations_collect_single_str_field(
+        self, decoded_r: redis.Redis, collect_index
+    ):
+        # A single field may be passed as a bare string; the client wraps it as
+        # a one-field projection.
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("*")
+            .group_by(
+                "@color",
+                reducers.collect(
+                    "@name", sort_by=[aggregations.Asc("@sweetness")]
+                ).alias("fruits"),
+            )
+        )
+        groups = collect_groups(
+            decoded_r, await decoded_r.ft().aggregate(req), "fruits"
+        )
+
+        assert groups["red"] == [
+            {"name": "strawberry"},
+            {"name": "apple"},
+            {"name": "cherry"},
+        ]
+        assert groups["yellow"] == [{"name": "lemon"}, {"name": "banana"}]
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.9.0")
+    async def test_aggregations_collect_field_names_without_prefix(
+        self, decoded_r: redis.Redis, collect_index
+    ):
+        # Field and sort names may be supplied without a leading "@"; the client
+        # normalizes them on the wire (the server requires the prefix).
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("*")
+            .group_by(
+                "@color",
+                reducers.collect(
+                    ["name", "sweetness"],
+                    sort_by=[aggregations.Desc("sweetness")],
+                ).alias("fruits"),
+            )
+        )
+        groups = collect_groups(
+            decoded_r, await decoded_r.ft().aggregate(req), "fruits"
+        )
+
+        assert groups["red"] == [
+            {"name": "cherry", "sweetness": "5"},
+            {"name": "apple", "sweetness": "4"},
+            {"name": "strawberry", "sweetness": "3"},
+        ]
+        assert groups["yellow"] == [
+            {"name": "banana", "sweetness": "4"},
+            {"name": "lemon", "sweetness": "2"},
+        ]
+
+    @pytest.mark.redismod
     async def test_aggregations_sort_by_and_limit(self, decoded_r: redis.Redis):
         await decoded_r.ft().create_index((TextField("t1"), TextField("t2")))
 
@@ -2191,6 +2605,30 @@ class TestPipeline(AsyncSearchTestsBase):
             )
 
     @pytest.mark.redismod
+    @skip_if_redis_enterprise()
+    @skip_if_server_version_lt("8.9.0")
+    async def test_aliaslist_in_pipeline(self, decoded_r: redis.Redis):
+        index = decoded_r.ft("aliaslistpipeidx")
+        await index.create_index((TextField("txt"),))
+
+        # An empty listing normalizes to ``set()`` through the pipeline, not
+        # the raw ``[]`` wire response.
+        p = index.pipeline()
+        await p.aliaslist()
+        res = await p.execute()
+        assert isinstance(res[0], set)
+        assert res[0] == set()
+
+        # Aliases are returned as an unordered set, matching the direct call.
+        await index.aliasadd("alias1")
+        await index.aliasadd("alias2")
+        p = index.pipeline()
+        await p.aliaslist()
+        res = await p.execute()
+        assert isinstance(res[0], set)
+        assert res[0] == {"alias1", "alias2"}
+
+    @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")
     async def test_hybrid_search_query_with_pipeline(self, decoded_r: redis.Redis):
         p = decoded_r.ft().pipeline()
@@ -2265,6 +2703,40 @@ class TestPipeline(AsyncSearchTestsBase):
 
 class TestSearchWithVamana(AsyncSearchTestsBase):
     # SVS-VAMANA Async Tests
+    @pytest.mark.fixed_client
+    def test_vector_field_rerank(self):
+        # Pure serialization check: VectorField builds the FT.CREATE args with
+        # no server round-trip, so this test needs no Redis and is not gated.
+        # RERANK is a boolean key-value attribute for HNSW vector fields on
+        # disk-backed (Flex / Auto-Tiering) deployments, where it is mandatory.
+        # It toggles the exact FP32 rerank pass over the approximate candidates
+        # returned by the on-disk graph traversal. It flows through the generic
+        # ``attributes`` dict as the string "TRUE"/"FALSE" (a bare flag is
+        # rejected by the server, and Python bools are rejected by the client
+        # encoder), and the attribute-count token accounts for the extra pair.
+        # Field construction has no I/O, so this mirrors the sync serialization
+        # test and is not an async test.
+        field = VectorField(
+            "v",
+            "HNSW",
+            {"TYPE": "FLOAT32", "DIM": 128, "DISTANCE_METRIC": "L2", "RERANK": "TRUE"},
+        )
+        assert field.args[0] == "VECTOR"
+        assert field.args[1] == "HNSW"
+        assert field.args[2] == 8  # 4 attribute pairs -> 8 tokens
+        assert "RERANK" in field.args
+        assert "TRUE" in field.args
+
+        # MS2 also accepts RERANK FALSE (opt out of the rerank pass).
+        field = VectorField(
+            "v",
+            "HNSW",
+            {"TYPE": "FLOAT32", "DIM": 128, "DISTANCE_METRIC": "L2", "RERANK": "FALSE"},
+        )
+        assert field.args[2] == 8
+        assert "RERANK" in field.args
+        assert "FALSE" in field.args
+
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.1.224")
     async def test_async_svs_vamana_basic_functionality(self, decoded_r: redis.Redis):
@@ -2453,7 +2925,11 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
 
 class TestHybridSearch(AsyncSearchTestsBase):
     _HYBRID_TIMEOUT_DIM = 8192
-    _HYBRID_TIMEOUT_DOCS = 1500
+    # The 1ms timeout only fires once the query runs long enough to hit a
+    # server timeout checkpoint; smaller data sets slip through and return no
+    # warnings. 6000 docs keeps the query comfortably above the 1ms limit so
+    # the timeout reliably triggers across hardware.
+    _HYBRID_TIMEOUT_DOCS = 6000
 
     async def _create_hybrid_search_index(self, decoded_r: redis.Redis, dim=4):
         await decoded_r.ft().create_index(
@@ -3576,7 +4052,9 @@ class TestHybridSearch(AsyncSearchTestsBase):
             warnings = res["warnings"]
             assert res["execution_time"] > 0
 
-        assert any(
+        assert warnings, f"Expected timeout warnings but none were returned: {warnings}"
+
+        all_match = all(
             safe_str(warning)
             in {
                 "Timeout limit was reached (VSIM)",
@@ -3584,6 +4062,8 @@ class TestHybridSearch(AsyncSearchTestsBase):
             }
             for warning in warnings
         )
+
+        assert all_match, f"Not all warnings are matching expected values: {warnings}"
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")

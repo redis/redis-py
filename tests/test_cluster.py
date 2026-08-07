@@ -49,6 +49,7 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
+from redis.himport import HIMPORT_SET
 from redis.observability import recorder
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
@@ -500,6 +501,56 @@ class TestRedisClusterObj:
             parse_response.side_effect = ask_redirect_effect
 
             assert r.execute_command("SET", "foo", "bar") == "MOCK_OK"
+
+    def test_himport_set_moved_after_ask_uses_moved_target(self, r):
+        """An HIMPORT SET that is ASK-redirected and then hits a MOVED
+        mid-exchange must retry against the MOVED target, not the stale ASK
+        target.
+
+        HIMPORT SET folds the ASK allowance into its own packed write, so the
+        retry loop keeps ``asking`` set until ``_himport_execute_set`` returns.
+        Regression guard: if that method raises a MOVED before returning,
+        ``asking`` must still be cleared so the next iteration takes the
+        moved-retry branch instead of re-sending to the old ASK node.
+        """
+        key = "himport:key"
+        slot = r.keyslot(key)
+        primary = r.nodes_manager.get_node_from_slot(slot)
+        others = [n for n in r.get_primaries() if n.name != primary.name]
+        if len(others) < 2:
+            pytest.skip("requires at least 3 primaries")
+        ask_node, moved_node = others[0], others[1]
+
+        calls = []
+
+        def himport_effect(redis_node, connection, *args, **kwargs):
+            calls.append((connection.host, connection.port))
+            if len(calls) == 1:
+                raise AskError(f"{slot} {ask_node.host}:{ask_node.port}")
+            if len(calls) == 2:
+                # MOVED raised from within the HIMPORT SET exchange, before the
+                # caller could clear ``asking``.
+                raise MovedError(f"{slot} {moved_node.host}:{moved_node.port}")
+            return "MOCK_OK"
+
+        # ``determine_slot`` parses HIMPORT SET keys via COMMAND INFO, which the
+        # test server may not know; pin it so the moved branch can recompute the
+        # target without a live HIMPORT-capable server.
+        with (
+            patch.object(RedisCluster, "determine_slot", return_value=slot),
+            patch.object(
+                RedisCluster, "_himport_execute_set", side_effect=himport_effect
+            ),
+        ):
+            assert (
+                r._execute_command(primary, HIMPORT_SET, key, "shared", "alice")
+                == "MOCK_OK"
+            )
+
+        assert calls[0] == (primary.host, primary.port)
+        assert calls[1] == (ask_node.host, ask_node.port)
+        # Third attempt must follow the MOVED redirect, not the stale ASK target.
+        assert calls[2] == (moved_node.host, moved_node.port)
 
     def test_handling_cluster_failover_to_a_replica(self, r):
         # Set the key we'll test for
@@ -1984,6 +2035,40 @@ class TestClusterRedisCommands:
         r.rpush("{foo}a", "one", "two", "three", "four")
         assert r.blmove("{foo}a", "{foo}b", 5)
         assert r.blmove("{foo}a", "{foo}b", 1, "RIGHT", "LEFT")
+
+    @skip_if_server_version_lt("8.9.0")
+    def test_cluster_lmovem(self, r):
+        # source and destination collocated on the same slot via a hash tag
+        r.rpush("{foo}a", "1", "2", "3", "4", "5")
+        assert r.lmovem("{foo}a", "{foo}b") == [b"1"]
+        assert r.lmovem(
+            "{foo}a", "{foo}b", "LEFT", "LEFT", count=3, ordering="BULK"
+        ) == [
+            b"2",
+            b"3",
+            b"4",
+        ]
+
+    @skip_if_server_version_lt("8.9.0")
+    def test_cluster_lmovem_crossslot(self, r):
+        # source and destination on different slots -> cannot be dispatched
+        with pytest.raises(RedisClusterException) as ex:
+            r.lmovem("a", "b", "LEFT", "RIGHT", count=2, ordering="BULK")
+        assert "all keys must map to the same key slot" in str(ex.value)
+
+    @skip_if_server_version_lt("8.9.0")
+    def test_cluster_blmovem(self, r):
+        r.rpush("{foo}a", "1", "2", "3", "4", "5")
+        assert r.blmovem("{foo}a", "{foo}b", 1) == [b"1"]
+        assert r.blmovem(
+            "{foo}a", "{foo}b", 1, "LEFT", "LEFT", count=3, ordering="BULK"
+        ) == [b"2", b"3", b"4"]
+
+    @skip_if_server_version_lt("8.9.0")
+    def test_cluster_blmovem_crossslot(self, r):
+        with pytest.raises(RedisClusterException) as ex:
+            r.blmovem("a", "b", 1, "LEFT", "RIGHT", count=2, ordering="BULK")
+        assert "all keys must map to the same key slot" in str(ex.value)
 
     def test_cluster_msetnx(self, r):
         d = {"{foo}a": b"1", "{foo}b": b"2", "{foo}c": b"3"}
