@@ -16,6 +16,8 @@ from .socket import SERVER_CLOSED_CONNECTION_ERROR
 class _RESP3Parser(_RESPBase, PushNotificationsParser):
     """RESP3 protocol implementation"""
 
+    MAX_NESTING_DEPTH = 100
+
     def __init__(self, socket_read_size):
         super().__init__(socket_read_size)
         self.pubsub_push_handler_func = self.handle_pubsub_push_response
@@ -61,6 +63,7 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
         disable_decoding=False,
         push_request=False,
         timeout: Union[float, object] = SENTINEL,
+        _depth=0,
     ):
         raw = self._buffer.readline(timeout=timeout)
         if not raw:
@@ -106,41 +109,69 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
             response = self._buffer.read(int(response), timeout=timeout)[4:]
         # array response
         elif byte == b"*":
+            if _depth >= self.MAX_NESTING_DEPTH:
+                raise InvalidResponse(
+                    f"Response nesting depth exceeded {self.MAX_NESTING_DEPTH}"
+                )
             response = [
-                self._read_response(disable_decoding=disable_decoding, timeout=timeout)
+                self._read_response(
+                    disable_decoding=disable_decoding,
+                    timeout=timeout,
+                    _depth=_depth + 1,
+                )
                 for _ in range(int(response))
             ]
         # set response
         elif byte == b"~":
+            if _depth >= self.MAX_NESTING_DEPTH:
+                raise InvalidResponse(
+                    f"Response nesting depth exceeded {self.MAX_NESTING_DEPTH}"
+                )
             # redis can return unhashable types (like dict) in a set,
             # so we return sets as list, all the time, for predictability
             response = [
-                self._read_response(disable_decoding=disable_decoding, timeout=timeout)
+                self._read_response(
+                    disable_decoding=disable_decoding,
+                    timeout=timeout,
+                    _depth=_depth + 1,
+                )
                 for _ in range(int(response))
             ]
         # map response
         elif byte == b"%":
+            if _depth >= self.MAX_NESTING_DEPTH:
+                raise InvalidResponse(
+                    f"Response nesting depth exceeded {self.MAX_NESTING_DEPTH}"
+                )
             # We cannot use a dict-comprehension to parse stream.
             # Evaluation order of key:val expression in dict comprehension only
             # became defined to be left-right in version 3.8
             resp_dict = {}
             for _ in range(int(response)):
                 key = self._read_response(
-                    disable_decoding=disable_decoding, timeout=timeout
+                    disable_decoding=disable_decoding,
+                    timeout=timeout,
+                    _depth=_depth + 1,
                 )
                 resp_dict[key] = self._read_response(
                     disable_decoding=disable_decoding,
                     push_request=push_request,
                     timeout=timeout,
+                    _depth=_depth + 1,
                 )
             response = resp_dict
         # push response
         elif byte == b">":
+            if _depth >= self.MAX_NESTING_DEPTH:
+                raise InvalidResponse(
+                    f"Response nesting depth exceeded {self.MAX_NESTING_DEPTH}"
+                )
             response = [
                 self._read_response(
                     disable_decoding=disable_decoding,
                     push_request=push_request,
                     timeout=timeout,
+                    _depth=_depth + 1,
                 )
                 for _ in range(int(response))
             ]
@@ -164,6 +195,8 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
 
 
 class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
+    MAX_NESTING_DEPTH = 100
+
     def __init__(self, socket_read_size):
         super().__init__(socket_read_size)
         self.pubsub_push_handler_func = self.handle_pubsub_push_response
@@ -190,7 +223,7 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
         return response
 
     async def _read_response(
-        self, disable_decoding: bool = False, push_request: bool = False
+        self, disable_decoding: bool = False, push_request: bool = False, _depth: int = 0
     ) -> Union[EncodableT, ResponseError, None]:
         if not self._stream or not self.encoder:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
@@ -240,36 +273,54 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
             response = (await self._read(int(response)))[4:]
         # array response
         elif byte == b"*":
+            if _depth >= self.MAX_NESTING_DEPTH:
+                raise InvalidResponse(
+                    f"Response nesting depth exceeded {self.MAX_NESTING_DEPTH}"
+                )
             response = [
-                (await self._read_response(disable_decoding=disable_decoding))
+                (await self._read_response(disable_decoding, _depth=_depth + 1))
                 for _ in range(int(response))
             ]
         # set response
         elif byte == b"~":
+            if _depth >= self.MAX_NESTING_DEPTH:
+                raise InvalidResponse(
+                    f"Response nesting depth exceeded {self.MAX_NESTING_DEPTH}"
+                )
             # redis can return unhashable types (like dict) in a set,
             # so we always convert to a list, to have predictable return types
             response = [
-                (await self._read_response(disable_decoding=disable_decoding))
+                (await self._read_response(disable_decoding, _depth=_depth + 1))
                 for _ in range(int(response))
             ]
         # map response
         elif byte == b"%":
+            if _depth >= self.MAX_NESTING_DEPTH:
+                raise InvalidResponse(
+                    f"Response nesting depth exceeded {self.MAX_NESTING_DEPTH}"
+                )
             # We cannot use a dict-comprehension to parse stream.
             # Evaluation order of key:val expression in dict comprehension only
             # became defined to be left-right in version 3.8
             resp_dict = {}
             for _ in range(int(response)):
-                key = await self._read_response(disable_decoding=disable_decoding)
+                key = await self._read_response(
+                    disable_decoding, _depth=_depth + 1
+                )
                 resp_dict[key] = await self._read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
+                    disable_decoding, push_request=push_request, _depth=_depth + 1
                 )
             response = resp_dict
         # push response
         elif byte == b">":
+            if _depth >= self.MAX_NESTING_DEPTH:
+                raise InvalidResponse(
+                    f"Response nesting depth exceeded {self.MAX_NESTING_DEPTH}"
+                )
             response = [
                 (
                     await self._read_response(
-                        disable_decoding=disable_decoding, push_request=push_request
+                        disable_decoding, push_request=push_request, _depth=_depth + 1
                     )
                 )
                 for _ in range(int(response))
