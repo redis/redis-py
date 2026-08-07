@@ -54,7 +54,6 @@ logging.getLogger("redis.cluster").setLevel(logging.DEBUG)
 
 
 STANDALONE_MAINT_TIMEOUT = 60
-SMIGRATING_TIMEOUT = 20
 # SMIGRATED / slot-shuffle waits sized for the FI's real reshard budget: the fault injector
 # blocks on the reshard up to 300s (slot-shuffle migrate_slots) / 600s (ASM scale). Sizing the
 # client below that turned slow-but-successful reshards into false failures. Raising a timeout
@@ -62,6 +61,13 @@ SMIGRATING_TIMEOUT = 20
 SMIGRATED_TIMEOUT = 120
 
 SLOT_SHUFFLE_TIMEOUT = 300
+
+# Wait budget for the FIRST SMIGRATING of a reshard. It has to cover the ASM decision engine's
+# planning time before the first slot actually moves - not just the move itself - so it is sized as
+# a fraction of the FI's own slot-shuffle budget rather than as a "notification should be instant"
+# value. Every reshard test uses this, including remove_add: that effect keeps its maintenance
+# window open the longest, but it is also the heaviest plan, so it is the slowest to open it.
+RESHARD_SMIGRATING_TIMEOUT = int(SLOT_SHUFFLE_TIMEOUT / 2)
 
 # The trigger thread must not give up before the FI finishes the reshard, otherwise it dies and
 # the command-execution workers are left running (their join then hangs to the pytest cap). Cover
@@ -1435,7 +1441,12 @@ class TestClusterClientPushNotificationsWithEffectTriggerBase(
         return self._client, cluster_endpoint_config
 
     def _wait_for_node_cache_delta(
-        self, client, connections, initial_count, expected_delta, timeout=SMIGRATED_TIMEOUT
+        self,
+        client,
+        connections,
+        initial_count,
+        expected_delta,
+        timeout=SMIGRATED_TIMEOUT,
     ):
         """Poll the client node cache until it reflects the expected +/- delta.
 
@@ -1497,7 +1508,9 @@ class TestClusterClientPushNotificationsWithEffectTriggerBase(
 class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
     TestClusterClientPushNotificationsWithEffectTriggerBase
 ):
-    @pytest.mark.timeout(RESHARD_TEST_TIMEOUT)  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
+    @pytest.mark.timeout(
+        RESHARD_TEST_TIMEOUT
+    )  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
     @pytest.mark.parametrize(
         "effect_name, trigger, db_config, db_name",
         generate_params(
@@ -1553,7 +1566,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
         for conn in in_use_connections.values():
             ClientValidations.wait_push_notification(
                 cluster_client_maint_notifications,
-                timeout=int(SLOT_SHUFFLE_TIMEOUT / 2),
+                timeout=RESHARD_SMIGRATING_TIMEOUT,
                 connection=conn,
             )
 
@@ -1610,7 +1623,9 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
         trigger_effect_thread.join()
         self.maintenance_ops_threads.remove(trigger_effect_thread)
 
-    @pytest.mark.timeout(RESHARD_TEST_TIMEOUT)  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
+    @pytest.mark.timeout(
+        RESHARD_TEST_TIMEOUT
+    )  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
     @pytest.mark.parametrize(
         "effect_name, trigger, db_config, db_name",
         generate_params(
@@ -1670,7 +1685,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
         for conn in in_use_connections.values():
             ClientValidations.wait_push_notification(
                 cluster_client_maint_notifications,
-                timeout=SMIGRATING_TIMEOUT,
+                timeout=RESHARD_SMIGRATING_TIMEOUT,
                 connection=conn,
             )
 
@@ -1732,7 +1747,9 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
         trigger_effect_thread.join()
         self.maintenance_ops_threads.remove(trigger_effect_thread)
 
-    @pytest.mark.timeout(RESHARD_TEST_TIMEOUT)  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
+    @pytest.mark.timeout(
+        RESHARD_TEST_TIMEOUT
+    )  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
     @pytest.mark.parametrize(
         "effect_name, trigger, db_config, db_name",
         generate_params(
@@ -1792,7 +1809,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
         for conn in in_use_connections.values():
             ClientValidations.wait_push_notification(
                 cluster_client_maint_notifications,
-                timeout=int(SLOT_SHUFFLE_TIMEOUT / 2),
+                timeout=RESHARD_SMIGRATING_TIMEOUT,
                 connection=conn,
             )
 
@@ -1867,7 +1884,9 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                 continue
             node.redis_connection.connection_pool.release(conn)
 
-    @pytest.mark.timeout(RESHARD_TEST_TIMEOUT)  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
+    @pytest.mark.timeout(
+        RESHARD_TEST_TIMEOUT
+    )  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
     @pytest.mark.parametrize(
         "effect_name, trigger, db_config, db_name",
         generate_params(
@@ -1925,7 +1944,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
         for conn in in_use_connections.values():
             ClientValidations.wait_push_notification(
                 cluster_client_maint_notifications,
-                timeout=int(SLOT_SHUFFLE_TIMEOUT / 2),
+                timeout=RESHARD_SMIGRATING_TIMEOUT,
                 connection=conn,
             )
 
@@ -1989,7 +2008,9 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                 continue
             node.redis_connection.connection_pool.release(conn)
 
-    @pytest.mark.timeout(RESHARD_TEST_TIMEOUT)  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
+    @pytest.mark.timeout(
+        RESHARD_TEST_TIMEOUT
+    )  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
     @pytest.mark.skipif(
         use_mock_proxy(),
         reason="Mock proxy doesn't support sending notifications to new connections.",
@@ -2004,9 +2025,21 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                 SlotMigrateEffects.REMOVE,
                 SlotMigrateEffects.ADD,
             ],
+            # Catching the in-flight SMIGRATING on a NEWLY opened connection needs a
+            # maintenance window that stays open long enough to open that fresh connection
+            # mid-flight. These combinations close too fast for the test to be reliable:
+            #   - slot_shuffle + failover: maintenance ends almost immediately;
+            #   - reshard + add/remove: a cascade of short SMIGRATING/SMIGRATED windows, so a
+            #     connection opened between windows sees no maintenance state;
+            #   - reshard + slot_shuffle: a single ASM migrate_slots that, for a small slot
+            #     range, closes (SMIGRATED) ~1s after SMIGRATING.
+            # remove_add keeps a long enough combined window and is still exercised here.
             skip_combinations=[
                 (SlotMigrateEffects.SLOT_SHUFFLE, "failover"),
-            ],  # maintenance ends too fast for the test to be reliable
+                (SlotMigrateEffects.SLOT_SHUFFLE, "reshard"),
+                (SlotMigrateEffects.REMOVE, "reshard"),
+                (SlotMigrateEffects.ADD, "reshard"),
+            ],
         ),
     )
     def test_new_connections_receive_last_smigrating_smigrated_notification(
@@ -2022,26 +2055,6 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
 
         """
         logging.info(f"DB name: {db_name}")
-
-        # Catching the in-flight SMIGRATING on a NEWLY opened connection needs a maintenance
-        # window that stays open long enough to open that fresh connection mid-flight. For the
-        # `reshard` (ASM) trigger this is not reliable:
-        #   - add/remove are a cascade of short SMIGRATING/SMIGRATED windows, so a connection
-        #     opened between windows sees no maintenance state;
-        #   - slot-shuffle is a single ASM migrate_slots that, for a small slot range, closes
-        #     (SMIGRATED) ~1s after SMIGRATING - the window shuts before a new connection can be
-        #     opened, the same "ends too fast" class as the slot_shuffle+failover skip below.
-        # remove_add keeps a long enough combined window and is still exercised here.
-        if trigger == "reshard" and effect_name in (
-            SlotMigrateEffects.ADD,
-            SlotMigrateEffects.REMOVE,
-            SlotMigrateEffects.SLOT_SHUFFLE,
-        ):
-            pytest.skip(
-                "new-connection-catches-window needs a window long enough to open a fresh "
-                "connection mid-flight; ASM reshard windows (add/remove cascade, ~1s "
-                "slot-shuffle) close too fast to be reliable"
-            )
 
         cluster_client_maint_notifications, cluster_endpoint_config = self.setup_env(
             fault_injector_client_oss_api, db_config
@@ -2078,7 +2091,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
             for conn in conns_per_node:
                 ClientValidations.wait_push_notification(
                     cluster_client_maint_notifications,
-                    timeout=int(SLOT_SHUFFLE_TIMEOUT / 2),
+                    timeout=RESHARD_SMIGRATING_TIMEOUT,
                     connection=conn,
                 )
                 logging.info(
@@ -2148,7 +2161,9 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
 class TestClusterClientCommandsExecutionWithPushNotificationsWithEffectTrigger(
     TestClusterClientPushNotificationsWithEffectTriggerBase
 ):
-    @pytest.mark.timeout(RESHARD_TEST_TIMEOUT)  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
+    @pytest.mark.timeout(
+        RESHARD_TEST_TIMEOUT
+    )  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
     @pytest.mark.parametrize(
         "effect_name, trigger, db_config, db_name",
         generate_params(
@@ -2157,7 +2172,6 @@ class TestClusterClientCommandsExecutionWithPushNotificationsWithEffectTrigger(
                 SlotMigrateEffects.SLOT_SHUFFLE,
                 SlotMigrateEffects.REMOVE,
                 SlotMigrateEffects.ADD,
-                SlotMigrateEffects.SLOT_SHUFFLE,
             ],
         ),
     )
