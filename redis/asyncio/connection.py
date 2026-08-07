@@ -85,6 +85,7 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
+from redis.himport import HImportRegistry
 from redis.maint_notifications import (
     MaintenanceState,
     MaintNotificationsConfig,
@@ -621,6 +622,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         oss_cluster_maint_notifications_handler: (
             AsyncOSSMaintNotificationsHandler | None
         ) = None,
+        himport_registry: HImportRegistry | None = None,
     ):
         """
         Initialize a new async Connection.
@@ -709,6 +711,12 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             elif self.protocol == 2 and parser_class == _AsyncRESP3Parser:
                 parser_class = _AsyncRESP2Parser
         self.set_parser(parser_class)
+
+        # HIMPORT client-side state. `himport_registry` is the shared client-level
+        # registry (empty if unconfigured) and persists across reconnects.
+        self.himport_registry = himport_registry
+        self._reset_himport_state()
+
         AsyncMaintNotificationsAbstractConnection.__init__(
             self,
             maint_notifications_config,
@@ -918,11 +926,22 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
     def get_protocol(self):
         return self.protocol
 
+    def _reset_himport_state(self) -> None:
+        # A fresh server session has no prepared HIMPORT fieldsets, so the next
+        # himport_set must re-prepare on this connection. ``_himport_prepared`` maps
+        # fieldset name -> the version prepared on the server; ``_himport_reconciled
+        # _revision`` is the registry revision this connection last reconciled discards
+        # against. Both are reset on connect/disconnect since the session is gone.
+        self._himport_prepared: dict[str, int] = {}
+        self._himport_reconciled_revision: int = 0
+
     async def on_connect(self) -> None:
         """Initialize the connection, authenticate and select a database"""
         await self.on_connect_check_health(check_health=True)
 
     async def on_connect_check_health(self, check_health: bool = True) -> None:
+        # A fresh socket is a new server session: no prepared HIMPORT fieldsets.
+        self._reset_himport_state()
         self._parser.on_connect(self)
         parser = self._parser
 
@@ -1052,6 +1071,9 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         health_check_failed: bool = False,
     ) -> None:
         """Disconnects from the Redis server"""
+        # The server session is gone, so any HIMPORT fieldsets prepared on this
+        # socket no longer exist; reset the tracking.
+        self._reset_himport_state()
         # On Python 3.13+, asyncio.timeout() raises RuntimeError when called
         # outside a running Task (e.g. during GC finalization or event-loop
         # callbacks).  In that context we fall back to a synchronous close.
@@ -1744,12 +1766,24 @@ class ConnectKwargs(TypedDict, total=False):
 
 
 def parse_url(url: str) -> ConnectKwargs:
+    # Scheme names are case-insensitive (RFC 3986), so normalize before the
+    # prefix check; the "://" is required so a URL like "redis:foo" (which
+    # urlparse would still report as the "redis" scheme) is rejected.
+    if not url.lower().startswith(("redis://", "rediss://", "unix://")):
+        raise ValueError(
+            "Redis URL must specify one of the following schemes "
+            "(redis://, rediss://, unix://)"
+        )
+
     parsed: ParseResult = urlparse(url)
     kwargs: ConnectKwargs = {}
 
     for name, value_list in parse_qs(parsed.query).items():
         if value_list and len(value_list) > 0:
-            value = unquote(value_list[0])
+            # parse_qs() already percent-decodes query values, so use the value
+            # as-is; unquoting again here would double-decode (e.g. "%2520" ->
+            # "%20" -> " "). See issue #4208.
+            value = value_list[0]
             parser = URL_QUERY_ARGUMENT_PARSERS.get(name)
             if parser:
                 try:
@@ -1770,7 +1804,7 @@ def parse_url(url: str) -> ConnectKwargs:
             kwargs["path"] = unquote(parsed.path)
         kwargs["connection_class"] = UnixDomainSocketConnection
 
-    elif parsed.scheme in ("redis", "rediss"):
+    else:  # implied:  parsed.scheme in ("redis", "rediss")
         if parsed.hostname:
             kwargs["host"] = unquote(parsed.hostname)
         if parsed.port:
@@ -1786,12 +1820,6 @@ def parse_url(url: str) -> ConnectKwargs:
 
         if parsed.scheme == "rediss":
             kwargs["connection_class"] = SSLConnection
-
-    else:
-        valid_schemes = "redis://, rediss://, unix://"
-        raise ValueError(
-            f"Redis URL must specify one of the following schemes ({valid_schemes})"
-        )
 
     return kwargs
 
@@ -2561,9 +2589,10 @@ class ConnectionPool(
           <https://www.iana.org/assignments/uri-schemes/prov/rediss>
         - ``unix://``: creates a Unix Domain Socket connection.
 
-        The username, password, hostname, path and all querystring values
-        are passed through urllib.parse.unquote in order to replace any
-        percent-encoded values with their corresponding characters.
+        The username, password, hostname and path are passed through
+        urllib.parse.unquote in order to replace any percent-encoded values
+        with their corresponding characters. Querystring values are decoded
+        by urllib.parse.parse_qs and are not unquoted again.
 
         There are several ways to specify a database number. The first value
         found will be used:
@@ -2604,6 +2633,19 @@ class ConnectionPool(
         self._connection_kwargs = connection_kwargs
         self.max_connections = max_connections
 
+        # Resolve the HIMPORT registry. A pre-built ``himport_registry`` (shared, e.g.
+        # from the cluster client) takes precedence; otherwise build a fresh empty one.
+        # A registry always exists so runtime ``himport_prepare`` mutates a single object
+        # every connection already shares. The object stays in ``connection_kwargs`` so
+        # it reaches every connection. It is injected unconditionally (like other
+        # auto-added pool kwargs), so a custom ``connection_class`` must accept
+        # ``**kwargs`` (or a ``himport_registry`` parameter), as built-ins do.
+        himport_registry = connection_kwargs.get("himport_registry")
+        if himport_registry is None:
+            himport_registry = HImportRegistry()
+            connection_kwargs["himport_registry"] = himport_registry
+        self.himport_registry = himport_registry
+
         self._available_connections: List[AbstractConnection] = []
         self._in_use_connections: Set[AbstractConnection] = set()
         self.encoder_class = self.connection_kwargs.get("encoder_class", Encoder)
@@ -2628,11 +2670,15 @@ class ConnectionPool(
         }
     )
 
+    # Internal plumbing kwargs omitted from __repr__ (not user-facing config).
+    OMIT_REPR_KEYS = frozenset({"himport_registry"})
+
     def __repr__(self):
         conn_kwargs = ",".join(
             [
                 f"{k}={'<REDACTED>' if k in self.SENSITIVE_REPR_KEYS else v}"
                 for k, v in self.connection_kwargs.items()
+                if k not in self.OMIT_REPR_KEYS
             ]
         )
         return (
