@@ -1620,10 +1620,15 @@ def test_set_file(client):
 @pytest.mark.redismod
 def test_set_path(client):
     import json
+    import os
     import tempfile
 
     root = tempfile.mkdtemp()
-    sub = tempfile.mkdtemp(dir=root)
+    # Place the file under a directory whose name contains a dot, to guard
+    # against the derived key being truncated at the first dot rather than at
+    # the file extension.
+    sub = os.path.join(root, "v1.2")
+    os.makedirs(sub)
     jsonfile = tempfile.mkstemp(suffix=".json", dir=sub)[1]
     nojsonfile = tempfile.mkstemp(dir=root)[1]
 
@@ -1635,4 +1640,36 @@ def test_set_path(client):
     result = {jsonfile: True, nojsonfile: False}
     assert client.json().set_path(Path.root_path(), root) == result
     res = {"hello": "world"}
-    assert client.json().get(jsonfile.rsplit(".")[0]) == res
+    assert client.json().get(jsonfile.rsplit(".", 1)[0]) == res
+
+
+def test_set_path_key_strips_only_extension(monkeypatch):
+    # Regression test: JSON.set_path must strip only the file extension when
+    # deriving the key, so a path containing dots in a directory (e.g. a
+    # versioned "v1.2" folder) is not truncated at the first dot. set_file is
+    # stubbed so this runs without a server.
+    import json
+    import os
+    import tempfile
+
+    root = tempfile.mkdtemp()
+    dotted_dir = os.path.join(root, "v1.2")
+    os.makedirs(dotted_dir)
+    json_file = os.path.join(dotted_dir, "data.json")
+    with open(json_file, "w") as fp:
+        fp.write(json.dumps({"hello": "world"}))
+
+    json_client = redis.Redis().json()
+    captured = []
+
+    def fake_set_file(name, *args, **kwargs):
+        captured.append(name)
+        return True
+
+    monkeypatch.setattr(json_client, "set_file", fake_set_file)
+
+    result = json_client.set_path(Path.root_path(), root)
+
+    expected_key = json_file[: -len(".json")]
+    assert captured == [expected_key]
+    assert result == {json_file: True}
