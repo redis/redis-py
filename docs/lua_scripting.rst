@@ -113,3 +113,59 @@ The following commands are not supported:
 - ``EVALSHA_RO``
 
 Using scripting within pipelines in cluster mode is **not supported**.
+
+Practical Example: Sliding Window Rate Limiter
+-----------------------------------------------
+
+The ``register_script`` API is well-suited for operations that must be
+atomic across multiple Redis commands. A sliding window rate limiter is
+a good example: checking the request count and conditionally inserting
+a new entry must happen in a single round trip to avoid race conditions
+when multiple clients share the same key.
+
+This script removes entries older than the window, counts the remaining
+entries, and either adds the new request or rejects it — all atomically.
+
+.. code:: python
+
+   >>> import time, uuid
+   >>> SLIDING_WINDOW = """
+   ... local key = KEYS[1]
+   ... local now = tonumber(ARGV[1])
+   ... local window = tonumber(ARGV[2])
+   ... local limit = tonumber(ARGV[3])
+   ... local member = ARGV[4]
+   ... redis.call('ZREMRANGEBYSCORE', key, '-inf', now - window)
+   ... local count = redis.call('ZCARD', key)
+   ... if count < limit then
+   ...     redis.call('ZADD', key, now, member)
+   ...     redis.call('EXPIRE', key, window * 2)
+   ...     return 1
+   ... end
+   ... return 0
+   ... """
+   >>> sliding_window = r.register_script(SLIDING_WINDOW)
+   >>> def is_allowed(client, key, limit, window_seconds):
+   ...     result = sliding_window(
+   ...         keys=[key],
+   ...         args=[time.time(), window_seconds, limit, str(uuid.uuid4())],
+   ...         client=client,
+   ...     )
+   ...     return bool(result)
+
+The ``client=client`` argument ensures the script executes on the
+provided connection rather than the one used during registration.
+This matters when working with multiple databases, test fixtures, or
+any client other than the one that called ``register_script``.
+
+.. code:: python
+
+   >>> r.delete('rate:demo')
+   0
+   >>> [is_allowed(r, 'rate:demo', limit=3, window_seconds=60) for _ in range(5)]
+   [True, True, True, False, False]
+
+The first three calls are allowed; the fourth and fifth are rejected
+because three entries already exist within the 60-second window. The
+key expires automatically after the window duration so no manual
+cleanup is needed.
