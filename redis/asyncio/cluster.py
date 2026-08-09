@@ -1756,10 +1756,12 @@ class ClusterNode:
         returning it to the free queue.
         """
         if connection.should_reconnect():
-            task = asyncio.create_task(self._disconnect_and_release(connection))
-            self._background_tasks.add(task)
-            task.add_done_callback(self._background_tasks.discard)
-            return
+            if connection.is_connected:
+                task = asyncio.create_task(self._disconnect_and_release(connection))
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
+                return
+            connection.reset_should_reconnect()
         self._free.append(connection)
 
     async def _disconnect_and_release(self, connection: Connection) -> None:
