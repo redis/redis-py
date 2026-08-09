@@ -3945,6 +3945,22 @@ class TestClusterPipeline:
             pipe.get("a")
             assert await pipe.execute() == [1, None]
 
+    async def test_awaiting_unlink_fails_loudly(self, r: RedisCluster) -> None:
+        """The removed `await pipe.unlink(key)` must raise, not drop the queue.
+
+        unlink() used to be a coroutine function, so awaiting it was correct usage. If it
+        returned the pipeline, that await would run ClusterPipeline.__await__ -> initialize(),
+        which clears _command_queue and silently discards every staged command.
+        """
+        await r.set("a", 1)
+        async with r.pipeline(transaction=False) as pipe:
+            pipe.get("a")
+            with pytest.raises(TypeError):
+                await pipe.unlink("a")
+            # Nothing was lost: the UNLINK staged before the await raised, and the
+            # earlier GET survived because nothing reset the queue.
+            assert await pipe.execute() == [b"1", 1]
+
     async def test_multi_unlink_unsupported(self, r: RedisCluster) -> None:
         """Unlinking several keys at once is not supported in a pipeline."""
         async with r.pipeline(transaction=False) as pipe:

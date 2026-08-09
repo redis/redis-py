@@ -2632,7 +2632,15 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         await self._execution_strategy.unwatch()
 
     def unlink(self, *names):
-        return self._execution_strategy.unlink(*names)
+        """Unlink a key, staging it like every other pipeline command.
+
+        Deliberately returns None rather than the pipeline. This was an ``async def`` in
+        released versions, so ``await pipe.unlink(key)`` was correct usage; returning the
+        pipeline would make that await run ``ClusterPipeline.__await__`` -> ``initialize()``,
+        which CLEARS the command queue and silently drops every staged command. Returning
+        None makes the removed API fail loudly at the call site instead.
+        """
+        self._execution_strategy.unlink(*names)
 
     def mset_nonatomic(
         self, mapping: Mapping[AnyKeyT, EncodableT]
