@@ -2631,8 +2631,8 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         """Unwatches all previously specified keys"""
         await self._execution_strategy.unwatch()
 
-    async def unlink(self, *names):
-        await self._execution_strategy.unlink(*names)
+    def unlink(self, *names):
+        return self._execution_strategy.unlink(*names)
 
     def mset_nonatomic(
         self, mapping: Mapping[AnyKeyT, EncodableT]
@@ -2747,7 +2747,7 @@ class ExecutionStrategy(ABC):
         pass
 
     @abstractmethod
-    async def unlink(self, *names):
+    def unlink(self, *names):
         """
         "Unlink a key specified by ``names``"
 
@@ -2823,7 +2823,7 @@ class AbstractStrategy(ExecutionStrategy):
         pass
 
     @abstractmethod
-    async def unlink(self, *names):
+    def unlink(self, *names):
         pass
 
     def __len__(self) -> int:
@@ -3048,7 +3048,7 @@ class PipelineStrategy(AbstractStrategy):
             "method discard() is not supported outside of transactional context"
         )
 
-    async def unlink(self, *names):
+    def unlink(self, *names):
         if len(names) != 1:
             raise RedisClusterException(
                 "unlinking multiple keys is not implemented in pipeline command"
@@ -3535,7 +3535,7 @@ class TransactionStrategy(AbstractStrategy):
     async def discard(self):
         await self.reset()
 
-    async def unlink(self, *names):
+    def unlink(self, *names):
         return self.execute_command("UNLINK", *names)
 
 

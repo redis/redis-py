@@ -3924,6 +3924,35 @@ class TestClusterPipeline:
         result = await p.execute()
         assert result == []
 
+    async def test_unlink_single(self, r: RedisCluster) -> None:
+        """
+        unlink() must stage like every other command, without being awaited.
+
+        It was a coroutine function, so `pipe.unlink(key)` written the way
+        `pipe.delete(key)` is written staged nothing and the key survived.
+        """
+        await r.set("a", 1)
+        async with r.pipeline(transaction=False) as pipe:
+            pipe.unlink("a")
+            assert await pipe.execute() == [1]
+        assert await r.exists("a") == 0
+
+    async def test_unlink_keeps_result_positions(self, r: RedisCluster) -> None:
+        """A dropped unlink also shifts every later result left."""
+        await r.set("a", 1)
+        async with r.pipeline(transaction=False) as pipe:
+            pipe.unlink("a")
+            pipe.get("a")
+            assert await pipe.execute() == [1, None]
+
+    async def test_multi_unlink_unsupported(self, r: RedisCluster) -> None:
+        """Unlinking several keys at once is not supported in a pipeline."""
+        async with r.pipeline(transaction=False) as pipe:
+            await r.set("a", 1)
+            await r.set("b", 2)
+            with pytest.raises(RedisClusterException):
+                pipe.unlink("a", "b")
+
     async def test_redis_cluster_pipeline(self, r: RedisCluster) -> None:
         """Test that we can use a pipeline with the RedisCluster class"""
         result = await (
