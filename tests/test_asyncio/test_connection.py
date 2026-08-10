@@ -109,6 +109,18 @@ async def test_async_hiredis_can_read_raises_on_eof():
     assert stream.read_called is False
 
 
+async def test_async_hiredis_can_read_prefers_buffered_data_over_eof():
+    # a reply or push notification the reader already buffered must stay
+    # readable even if the server has since closed the connection,
+    # matching the sync parser's has_data-first ordering
+    stream = DummyAsyncStream(eof=True)
+    parser = make_async_hiredis_parser(stream, response=b"OK", has_data=True)
+
+    assert await parser.can_read() is True
+    assert await parser.read_response() == b"OK"
+    assert stream.read_called is False
+
+
 async def test_async_hiredis_can_read_detects_reader_response():
     stream = DummyAsyncStream()
     parser = make_async_hiredis_parser(stream, response=b"OK", has_data=True)
@@ -186,6 +198,21 @@ async def test_async_resp_can_read_raises_on_eof(parser_class):
 
     with pytest.raises(ConnectionError):
         await parser.can_read()
+    assert stream.read_called is False
+
+
+@pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
+async def test_async_resp_can_read_prefers_buffered_data_over_eof(parser_class):
+    # data the parser already buffered must stay readable even if the server
+    # has since closed the connection, matching the sync SocketBuffer's
+    # buffer-first ordering
+    stream = DummyAsyncStream(eof=True)
+    parser = parser_class(socket_read_size=65536)
+    parser._connected = True
+    parser._stream = stream
+    parser._buffer = b"+OK\r\n"
+
+    assert await parser.can_read() is True
     assert stream.read_called is False
 
 
