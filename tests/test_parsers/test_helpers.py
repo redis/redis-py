@@ -3,6 +3,8 @@ import pytest
 from redis._parsers.helpers import (
     parse_client_list,
     parse_command,
+    parse_command_resp3,
+    parse_command_unified,
     parse_info,
     parse_sentinel_masters_resp3,
     zpop_score_pairs,
@@ -116,6 +118,31 @@ def test_parse_command_preserves_acl_categories():
 
     assert command["flags"] == ["readonly", "fast"]
     assert command["acl_categories"] == ["@read", "@string", "@fast"]
+
+
+@pytest.mark.fixed_client
+def test_parse_command_handles_pre_7_0_reply():
+    # Redis 6.0/6.2 return 6-element COMMAND entries: ``acl_categories``
+    # (index 6) was only added in Redis 7.0. RESP3 is available from Redis
+    # 6.0, so ``Redis(protocol=3).command()`` against those servers routes
+    # the reply through ``parse_command_resp3``, which must not raise on the
+    # missing element. All three parsers must handle it consistently.
+    response = [[b"get", 2, [b"readonly", b"fast"], 1, 1, 1]]
+
+    for parser in (parse_command, parse_command_unified, parse_command_resp3):
+        command = parser(response)["get"]
+        assert command["step_count"] == 1
+        assert "acl_categories" not in command
+
+
+@pytest.mark.fixed_client
+def test_parse_command_resp3_keeps_acl_categories_when_present():
+    # Redis 7.0+ includes acl_categories at index 6.
+    response = [[b"get", 2, [b"readonly", b"fast"], 1, 1, 1, [b"@read", b"@fast"]]]
+
+    command = parse_command_resp3(response)["get"]
+
+    assert command["acl_categories"] == [b"@read", b"@fast"]
 
 
 @pytest.mark.fixed_client
