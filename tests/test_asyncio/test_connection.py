@@ -84,20 +84,28 @@ def test_connection_default_parser_matches_default_protocol():
 
 
 @pytest.mark.parametrize(
-    ("buffer", "eof", "expected"),
+    ("buffer", "expected"),
     [
-        (b"", False, False),
-        (b"+OK\r\n", False, True),
-        (b"", True, True),
+        (b"", False),
+        (b"+OK\r\n", True),
     ],
 )
-async def test_async_hiredis_can_read_uses_buffer_without_reading(
-    buffer, eof, expected
-):
-    stream = DummyAsyncStream(buffer=buffer, eof=eof)
+async def test_async_hiredis_can_read_uses_buffer_without_reading(buffer, expected):
+    stream = DummyAsyncStream(buffer=buffer)
     parser = make_async_hiredis_parser(stream)
 
     assert await parser.can_read() is expected
+    assert stream.read_called is False
+
+
+async def test_async_hiredis_can_read_raises_on_eof():
+    # a server-closed connection must raise like the sync SocketBuffer does,
+    # not report readable data (#4252)
+    stream = DummyAsyncStream(eof=True)
+    parser = make_async_hiredis_parser(stream)
+
+    with pytest.raises(ConnectionError):
+        await parser.can_read()
     assert stream.read_called is False
 
 
@@ -164,6 +172,20 @@ async def test_async_resp_can_read_detects_stream_buffer(parser_class):
     parser._stream = stream
 
     assert await parser.can_read() is True
+    assert stream.read_called is False
+
+
+@pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
+async def test_async_resp_can_read_raises_on_eof(parser_class):
+    # a server-closed connection must raise like the sync SocketBuffer does,
+    # not report readable data (#4252)
+    stream = DummyAsyncStream(eof=True)
+    parser = parser_class(socket_read_size=65536)
+    parser._connected = True
+    parser._stream = stream
+
+    with pytest.raises(ConnectionError):
+        await parser.can_read()
     assert stream.read_called is False
 
 
