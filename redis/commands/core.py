@@ -5399,6 +5399,7 @@ class ListCommands(CommandsProtocol):
         alpha: bool = False,
         store: str | None = None,
         groups: bool | None = False,
+        _command: str = "SORT",
     ) -> SortResponse | Awaitable[SortResponse]:
         """
         Sort and return the list, set or sorted set at ``name``.
@@ -5459,7 +5460,7 @@ class ListCommands(CommandsProtocol):
 
         options = {"groups": len(get) if groups else None}
         options["keys"] = [name]
-        return self.execute_command("SORT", *pieces, **options)
+        return self.execute_command(_command, *pieces, **options)
 
     @overload
     def sort_ro(
@@ -5515,7 +5516,14 @@ class ListCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/sort_ro
         """
         return self.sort(
-            key, start=start, num=num, by=by, get=get, desc=desc, alpha=alpha
+            key,
+            start=start,
+            num=num,
+            by=by,
+            get=get,
+            desc=desc,
+            alpha=alpha,
+            _command="SORT_RO",
         )
 
 
@@ -7796,7 +7804,7 @@ class StreamCommands(CommandsProtocol):
         if consumername:
             pieces.append(consumername)
 
-        return self.execute_command("XPENDING", *pieces, parse_detail=True)
+        return self.execute_command("XPENDING", *pieces, parse_detail=True, keys=[name])
 
     @overload
     def xrange(
