@@ -43,6 +43,7 @@ from redis.exceptions import (
     AskError,
     ClusterDownError,
     ConnectionError,
+    CrossSlotTransactionError,
     DataError,
     MaxConnectionsError,
     MovedError,
@@ -3998,6 +3999,196 @@ class TestClusterPipeline:
                 f"ERROR: Calling pipelined function {command} is blocked "
                 "when running redis in cluster mode..."
             )
+
+    async def test_evalsha_not_blocked_on_cluster_pipeline(self) -> None:
+        """EVALSHA must be usable on async ClusterPipeline (see #2914)."""
+        assert "EVALSHA" not in PIPELINE_BLOCKED_COMMANDS
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            pipe = r.pipeline()
+            sha = "a" * 40
+            returned = pipe.evalsha(sha, 1, "foo", "bar")
+            assert returned is pipe
+            queue = pipe._execution_strategy._command_queue
+            assert len(queue) == 1
+            assert queue[0].args == ("EVALSHA", sha, 1, "foo", "bar")
+        finally:
+            await r.aclose()
+
+    async def test_evalsha_zero_keys_pipeline_execute(self) -> None:
+        """Async ClusterPipeline must execute EVALSHA with numkeys=0."""
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            mock_all_nodes_resp(r, 42)
+            sha = "a" * 40
+            async with r.pipeline() as pipe:
+                pipe.evalsha(sha, 0)
+                assert await pipe.execute() == [42]
+        finally:
+            await r.aclose()
+
+    async def test_evalsha_zero_keys_reuses_slot_in_transaction(self) -> None:
+        """Zero-key EVALSHA in a transactional async pipeline reuses one slot."""
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            sha = "a" * 40
+            async with r.pipeline(transaction=True) as pipe:
+                pipe.evalsha(sha, 0)
+                pipe.evalsha(sha, 0)
+                slots = pipe._execution_strategy._pipeline_slots
+                assert len(slots) == 1
+
+                keyed_slot = key_slot(b"foo")
+
+                async def _fake_determine_slot(*_args, **_kwargs):
+                    return keyed_slot
+
+                with mock.patch.object(
+                    pipe.cluster_client,
+                    "_determine_slot",
+                    side_effect=_fake_determine_slot,
+                ):
+                    pipe.set("foo", "bar")
+                assert pipe._execution_strategy._pipeline_slots == {keyed_slot}
+                assert pipe._execution_strategy._transaction_has_keyed_slot is True
+        finally:
+            await r.aclose()
+
+    async def test_evalsha_zero_keys_follows_keyed_slot_in_transaction(self) -> None:
+        """Zero-key EVALSHA after a keyed slot is fixed reuses that slot."""
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            sha = "a" * 40
+            async with r.pipeline(transaction=True) as pipe:
+                strategy = pipe._execution_strategy
+                strategy._pipeline_slots = {key_slot(b"foo")}
+                strategy._transaction_has_keyed_slot = True
+                pipe.evalsha(sha, 0)
+                assert strategy._pipeline_slots == {key_slot(b"foo")}
+        finally:
+            await r.aclose()
+
+    async def test_slotless_command_does_not_lock_keyed_slot_flag(self) -> None:
+        """Slotless commands must not block later keyed retargeting."""
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            sha = "a" * 40
+            async with r.pipeline(transaction=True) as pipe:
+                pipe.evalsha(sha, 0)
+                assert pipe._execution_strategy._transaction_has_keyed_slot is False
+
+                async def _no_slot(*_args, **_kwargs):
+                    return None
+
+                with mock.patch.object(
+                    pipe.cluster_client,
+                    "_determine_slot",
+                    side_effect=_no_slot,
+                ):
+                    pipe.execute_command("CLIENT TRACKING", "ON")
+                assert pipe._execution_strategy._transaction_has_keyed_slot is False
+
+                keyed_slot = key_slot(b"foo")
+
+                async def _fake_determine_slot(*_args, **_kwargs):
+                    return keyed_slot
+
+                with mock.patch.object(
+                    pipe.cluster_client,
+                    "_determine_slot",
+                    side_effect=_fake_determine_slot,
+                ):
+                    pipe.set("foo", "bar")
+                assert pipe._execution_strategy._pipeline_slots == {keyed_slot}
+                assert pipe._execution_strategy._transaction_has_keyed_slot is True
+        finally:
+            await r.aclose()
+
+    async def test_evalsha_zero_keys_then_cross_slot_raises_at_execute(self) -> None:
+        """
+        Zero-key EVALSHA retarget must not swallow a later true cross-slot
+        conflict: two keyed commands on different slots still raise at execute().
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            sha = "a" * 40
+            slot_a = key_slot(b"{foo}a")
+            slot_b = key_slot(b"{bar}b")
+            assert slot_a != slot_b
+            async with r.pipeline(transaction=True) as pipe:
+                slots = iter([111, slot_a, slot_b])
+
+                async def _fake_determine_slot(*_args, **_kwargs):
+                    return next(slots)
+
+                with mock.patch.object(
+                    pipe.cluster_client,
+                    "_determine_slot",
+                    side_effect=_fake_determine_slot,
+                ):
+                    pipe.evalsha(sha, 0)
+                    pipe.set("{foo}a", "1")
+                    pipe.set("{bar}b", "2")
+                assert pipe._execution_strategy._pipeline_slots == {slot_a, slot_b}
+                with pytest.raises(
+                    CrossSlotTransactionError,
+                    match=(
+                        "All keys involved in a cluster transaction "
+                        "must map to the same slot"
+                    ),
+                ):
+                    await pipe.execute()
+        finally:
+            await r.aclose()
+
+    async def test_async_script_queues_evalsha_on_cluster_pipeline(self) -> None:
+        """AsyncScript must queue EVALSHA on ClusterPipeline without dropping it."""
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            script = r.register_script("return 1")
+            async with r.pipeline() as pipe:
+                await script(client=pipe)
+                queue = pipe._execution_strategy._command_queue
+                assert len(queue) == 1
+                assert queue[0].args[0] == "EVALSHA"
+                assert queue[0].args[1] == script.sha
+        finally:
+            await r.aclose()
+
+    async def test_evalsha_in_pipeline(self, r: RedisCluster) -> None:
+        """
+        EVALSHA is allowed in ClusterPipeline when keys map to one slot
+        and the script is already loaded on cluster primaries (#2914).
+        """
+        multiply = "return redis.call('GET', KEYS[1]) * ARGV[1]"
+        sha = await r.script_load(multiply)
+        await r.set("{user}a", 2)
+        async with r.pipeline() as pipe:
+            pipe.evalsha(sha, 1, "{user}a", 3)
+            assert await pipe.execute() == [6]
+
+    async def test_evalsha_zero_keys_in_pipeline(self, r: RedisCluster) -> None:
+        """
+        EVALSHA with numkeys=0 must execute in ClusterPipeline without
+        calling COMMAND GETKEYS (broken on Redis <7 for this case).
+        """
+        sha = await r.script_load("return 42")
+        async with r.pipeline() as pipe:
+            pipe.evalsha(sha, 0)
+            assert await pipe.execute() == [42]
+
+    async def test_evalsha_zero_keys_in_transaction_pipeline(
+        self, r: RedisCluster
+    ) -> None:
+        """
+        Multiple zero-key EVALSHA calls in a transactional pipeline share
+        one slot and execute successfully.
+        """
+        sha = await r.script_load("return 42")
+        async with r.pipeline(transaction=True) as pipe:
+            pipe.evalsha(sha, 0)
+            pipe.evalsha(sha, 0)
+            assert await pipe.execute() == [42, 42]
 
     async def test_empty_stack(self, r: RedisCluster) -> None:
         """If a pipeline is executed with no commands it should return a empty list."""
