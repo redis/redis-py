@@ -132,6 +132,7 @@ gmail
 himport
 hiredis
 http
+idempotent
 idx
 iff
 ini
@@ -163,6 +164,7 @@ opentelemetry
 oss
 parsers
 performant
+pipelined
 pmessage
 png
 positionally
@@ -182,6 +184,7 @@ redismodules
 reinitialization
 replicaof
 repo
+resharding
 runtime
 sedrik
 serializers
