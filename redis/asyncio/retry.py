@@ -1,4 +1,5 @@
 from asyncio import sleep
+from copy import deepcopy
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -82,3 +83,17 @@ class Retry(AbstractRetry[RedisError]):
                 backoff = self._backoff.compute(failures)
                 if backoff > 0:
                     await sleep(backoff)
+
+
+def _to_async_retry(retry: AbstractRetry) -> Retry:
+    """Return an async retry policy equivalent to ``retry``."""
+    if isinstance(retry, Retry):
+        return retry
+    if not isinstance(retry, AbstractRetry):
+        raise TypeError("retry must be an instance of redis.asyncio.retry.Retry")
+
+    return Retry(
+        backoff=deepcopy(retry._backoff),
+        retries=retry._retries,
+        supported_errors=retry._supported_errors,
+    )

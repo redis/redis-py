@@ -1,9 +1,10 @@
 import pytest
-from redis.asyncio import Redis
+from redis.asyncio import Redis, RedisCluster
 from redis.asyncio.connection import Connection, UnixDomainSocketConnection
 from redis.asyncio.retry import Retry
 from redis.backoff import AbstractBackoff, ExponentialBackoff, NoBackoff
 from redis.exceptions import ConnectionError, TimeoutError
+from redis.retry import Retry as SyncRetry
 
 
 class BackoffMock(AbstractBackoff):
@@ -71,6 +72,56 @@ class TestConnectionConstructorWithRetry:
         assert isinstance(c.retry, Retry)
         assert c.retry._retries == retries
         assert set(c.retry._supported_errors) == set(retry_on_error)
+
+    @pytest.mark.parametrize("Class", [Connection, UnixDomainSocketConnection])
+    @pytest.mark.asyncio
+    async def test_sync_retry_is_converted(self, Class):
+        retry = SyncRetry(NoBackoff(), 2)
+        connection = Class(retry=retry)
+        attempts = 0
+        failures = 0
+
+        async def do():
+            nonlocal attempts
+            attempts += 1
+            raise ConnectionError
+
+        async def fail(_error):
+            nonlocal failures
+            failures += 1
+
+        assert isinstance(connection.retry, Retry)
+        with pytest.raises(ConnectionError):
+            await connection.retry.call_with_retry(do, fail)
+
+        assert attempts == 3
+        assert failures == 3
+
+    def test_pool_converts_sync_retry(self):
+        retry = SyncRetry(NoBackoff(), 2)
+        client = Redis(retry=retry)
+
+        assert isinstance(client.get_retry(), Retry)
+        assert client.get_retry().get_retries() == retry.get_retries()
+
+        new_retry = SyncRetry(ExponentialBackoff(), 3)
+        client.set_retry(new_retry)
+
+        assert isinstance(client.get_retry(), Retry)
+        assert client.get_retry().get_retries() == new_retry.get_retries()
+
+    def test_cluster_converts_sync_retry(self):
+        retry = SyncRetry(NoBackoff(), 2)
+        client = RedisCluster(host="127.0.0.1", port=6379, retry=retry)
+
+        assert isinstance(client.retry, Retry)
+        assert client.retry.get_retries() == retry.get_retries()
+
+        new_retry = SyncRetry(ExponentialBackoff(), 3)
+        client.set_retry(new_retry)
+
+        assert isinstance(client.retry, Retry)
+        assert client.retry.get_retries() == new_retry.get_retries()
 
 
 @pytest.mark.fixed_client

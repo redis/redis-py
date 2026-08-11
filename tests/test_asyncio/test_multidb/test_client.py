@@ -10,6 +10,8 @@ from redis.asyncio.multidb.database import AsyncDatabase
 from redis.asyncio.multidb.failover import WeightBasedFailoverStrategy
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector
 from redis.asyncio.multidb.healthcheck import HealthCheck
+from redis.asyncio.retry import Retry
+from redis.backoff import NoBackoff
 from redis.event import EventDispatcher, AsyncOnCommandsFailEvent
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
 from redis.multidb.config import DatabaseConfig
@@ -18,12 +20,24 @@ from redis.multidb.exception import (
     UnhealthyDatabaseException,
     InitialHealthCheckFailedError,
 )
+from redis.retry import Retry as SyncRetry
 from tests.test_asyncio.helpers import wait_for_condition
 from tests.test_asyncio.test_multidb.conftest import create_weighted_list
 
 
 @pytest.mark.fixed_client
 class TestMultiDbClient:
+    @pytest.mark.parametrize("mock_multi_db_config,mock_db", [({}, {})], indirect=True)
+    def test_sync_retry_is_converted(self, mock_multi_db_config, mock_db):
+        mock_multi_db_config.command_retry = SyncRetry(NoBackoff(), 2)
+        databases = create_weighted_list(mock_db)
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            client = MultiDBClient(mock_multi_db_config)
+
+        assert isinstance(client._command_retry, Retry)
+        assert client._command_retry.get_retries() == 2
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",

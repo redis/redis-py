@@ -72,7 +72,7 @@ from redis.asyncio.observability.recorder import (
     record_connection_wait_time,
     record_error_count,
 )
-from redis.asyncio.retry import Retry
+from redis.asyncio.retry import Retry, _to_async_retry
 from redis.backoff import NoBackoff
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import (
@@ -675,7 +675,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                 self.retry = Retry(NoBackoff(), 1)
             else:
                 # deep-copy the Retry object as it is mutable
-                self.retry = copy.deepcopy(retry)
+                self.retry = copy.deepcopy(_to_async_retry(retry))
             # Update the retry's supported errors with the specified errors
             self.retry.update_supported_errors(retry_on_error)
         else:
@@ -2629,6 +2629,10 @@ class ConnectionPool(
         if not isinstance(max_connections, int) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
 
+        retry = connection_kwargs.get("retry")
+        if retry is not None:
+            connection_kwargs["retry"] = _to_async_retry(retry)
+
         self.connection_class = connection_class
         self._connection_kwargs = connection_kwargs
         self.max_connections = max_connections
@@ -2952,6 +2956,8 @@ class ConnectionPool(
         await self.aclose()
 
     def set_retry(self, retry: "Retry") -> None:
+        retry = _to_async_retry(retry)
+        self.connection_kwargs["retry"] = retry
         for conn in self._available_connections:
             conn.retry = retry
         for conn in self._in_use_connections:

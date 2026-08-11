@@ -12,7 +12,7 @@ from redis.asyncio.multidb.config import (
 from redis.asyncio.multidb.database import AsyncDatabase, Database, Databases
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector
 from redis.asyncio.multidb.healthcheck import HealthCheck, HealthCheckPolicy
-from redis.asyncio.retry import Retry
+from redis.asyncio.retry import Retry, _to_async_retry
 from redis.background import BackgroundScheduler
 from redis.backoff import NoBackoff
 from redis.commands import AsyncCoreCommands, AsyncRedisModuleCommands
@@ -63,7 +63,7 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         self._failover_strategy.set_databases(self._databases)
         self._auto_fallback_interval = config.auto_fallback_interval
         self._event_dispatcher = config.event_dispatcher
-        self._command_retry = config.command_retry
+        self._command_retry = _to_async_retry(config.command_retry)
         self._command_retry.update_supported_errors([ConnectionRefusedError])
         self.command_executor = DefaultCommandExecutor(
             failure_detectors=self._failure_detectors,
