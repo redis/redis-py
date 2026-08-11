@@ -613,6 +613,41 @@ async def test_pool_auto_close(request, from_url):
     await r1.aclose()
 
 
+@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
+@skip_if_server_version_lt("5.0.0")
+async def test_pool_replaces_connection_killed_while_idle(request):
+    """
+    Regression test for #4252: a pooled connection the server closed while
+    it sat idle (CLIENT KILL, idle timeout, server-side reap) must be
+    replaced at pool checkout instead of failing the next command.
+    Retries are disabled so recovery can only come from the pool.
+    """
+    url: str = request.config.getoption("--redis-url")
+    r = Redis.from_url(url, retry=Retry(NoBackoff(), 0))
+    killer = Redis.from_url(url)
+    try:
+        cid = await r.client_id()
+        conn = r.connection_pool._available_connections[0]
+        assert await killer.client_kill_filter(_id=str(cid))
+
+        # wait until the client's event loop has seen the server-side close
+        deadline = asyncio.get_running_loop().time() + 3
+        while not conn._parser._stream.at_eof():
+            assert asyncio.get_running_loop().time() < deadline, (
+                "server-side kill never surfaced on the client socket"
+            )
+            await asyncio.sleep(0.01)
+
+        # the next command must be served by a healthy replacement connection
+        assert await r.ping()
+    finally:
+        await r.aclose()
+        await r.connection_pool.disconnect()
+        await killer.aclose()
+        await killer.connection_pool.disconnect()
+
+
 async def test_close_is_aclose(request):
     """Verify close() calls aclose()"""
     calls = 0

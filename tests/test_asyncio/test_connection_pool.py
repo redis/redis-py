@@ -6,7 +6,8 @@ from unittest.mock import patch
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
-from redis._parsers import _AsyncRESP3Parser
+from redis._parsers import _AsyncHiredisParser, _AsyncRESP3Parser
+from redis.utils import HIREDIS_AVAILABLE
 from redis.asyncio.connection import (
     BlockingConnectionPool,
     Connection,
@@ -334,9 +335,21 @@ class TestConnectionPool:
                 await pool.release(conn)
 
     @pytest.mark.fixed_client
+    @pytest.mark.parametrize(
+        "parser_class",
+        [
+            _AsyncRESP3Parser,
+            pytest.param(
+                _AsyncHiredisParser,
+                marks=pytest.mark.skipif(
+                    not HIREDIS_AVAILABLE, reason="hiredis is not installed"
+                ),
+            ),
+        ],
+    )
     @pytest.mark.parametrize("maint_notifications_enabled", [True, False])
     async def test_get_connection_replaces_closed_idle_connection(
-        self, maint_notifications_enabled
+        self, maint_notifications_enabled, parser_class
     ):
         """
         A pooled connection whose socket the server closed while it sat idle
@@ -346,7 +359,7 @@ class TestConnectionPool:
         """
         async with self.get_pool(connection_class=redis.Connection) as pool:
             conn = pool.make_connection()
-            conn.set_parser(_AsyncRESP3Parser)
+            conn.set_parser(parser_class)
 
             # simulate a connection that was healthy when released to the
             # pool but whose socket the server has since closed
@@ -354,6 +367,10 @@ class TestConnectionPool:
             eof_stream.feed_eof()
             conn._parser._connected = True
             conn._parser._stream = eof_stream
+            if parser_class is _AsyncHiredisParser:
+                # on_connect() normally creates the hiredis reader; the test
+                # never dials, so give it one with an empty buffer
+                conn._parser._reader = mock.Mock(has_data=mock.Mock(return_value=False))
             fake_writer = mock.Mock()
             fake_writer.wait_closed = AsyncMock(return_value=None)
             conn._reader = eof_stream
