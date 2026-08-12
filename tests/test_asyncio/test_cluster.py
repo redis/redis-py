@@ -3642,13 +3642,11 @@ class TestClusterNodeConnectionHandling:
             max_connections=1,
             connection_class=RaceConnection,
         )
+        connection = RaceConnection(host=default_host, port=7000)
+        node._connections = [connection]
+        node._free.append(connection)
 
         async def remark_during_disconnect() -> None:
-            while not node._connections:
-                await asyncio.sleep(0)
-
-            connection = node._connections[0]
-
             await connection.send_started.wait()
             node.update_active_connections_for_reconnect()
             connection.response_ready.set()
@@ -3661,8 +3659,6 @@ class TestClusterNodeConnectionHandling:
 
         assert await node.execute_command("GET", "key") == b"value"
         await remark_task
-
-        connection = node._connections[0]
 
         assert node.acquire_connection() is connection
         assert node._background_tasks == set()

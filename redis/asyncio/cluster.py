@@ -1753,8 +1753,9 @@ class ClusterNode:
     def release(self, connection: Connection) -> None:
         """
         Release connection back to free queue.
-        If the connection is marked for reconnect, disconnect it before
-        returning it to the free queue.
+        If a connected connection is marked for reconnect, disconnect it before
+        returning it to the free queue. An already-closed connection can be
+        returned immediately after clearing its reconnect flag.
         """
         if connection.should_reconnect():
             if connection.is_connected:
@@ -1762,6 +1763,7 @@ class ClusterNode:
                 self._background_tasks.add(task)
                 task.add_done_callback(self._background_tasks.discard)
                 return
+            # It may have been re-marked while its own disconnect was in progress.
             connection.reset_should_reconnect()
         self._free.append(connection)
 
