@@ -1,5 +1,4 @@
 from asyncio import sleep
-from copy import deepcopy
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -93,7 +92,7 @@ def _to_async_retry(retry: AbstractRetry) -> Retry:
         raise TypeError("retry must be an instance of redis.asyncio.retry.Retry")
 
     return Retry(
-        backoff=deepcopy(retry._backoff),
+        backoff=retry._backoff,
         retries=retry._retries,
         supported_errors=retry._supported_errors,
     )

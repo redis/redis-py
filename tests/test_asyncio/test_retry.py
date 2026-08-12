@@ -1,3 +1,5 @@
+from threading import Lock
+
 import pytest
 from redis.asyncio import Redis, RedisCluster
 from redis.asyncio.connection import Connection, UnixDomainSocketConnection
@@ -18,6 +20,15 @@ class BackoffMock(AbstractBackoff):
     def compute(self, failures):
         self.calls += 1
         return 0
+
+
+class UncopyableBackoff(AbstractBackoff):
+    def __init__(self):
+        self._lock = Lock()
+
+    def compute(self, failures):
+        with self._lock:
+            return 0
 
 
 @pytest.mark.fixed_client
@@ -122,6 +133,15 @@ class TestConnectionConstructorWithRetry:
 
         assert isinstance(client.retry, Retry)
         assert client.retry.get_retries() == new_retry.get_retries()
+
+    def test_cluster_preserves_uncopyable_sync_backoff(self):
+        backoff = UncopyableBackoff()
+        retry = SyncRetry(backoff, 2)
+
+        client = RedisCluster(host="127.0.0.1", port=6379, retry=retry)
+
+        assert isinstance(client.retry, Retry)
+        assert client.retry._backoff is backoff
 
 
 @pytest.mark.fixed_client
