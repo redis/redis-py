@@ -2468,6 +2468,28 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
     Note: For commands `DELETE`, `EXISTS`, `TOUCH`, `UNLINK`, `mset_nonatomic`, which
     are split across multiple nodes, you'll get multiple results for them in the array.
 
+    Which methods must be awaited:
+
+    Outside a transactional block, staging a command returns the pipeline itself, so
+    commands chain and are not awaited, as in the example above. These methods are
+    coroutines and must be awaited individually::
+
+        watch, unwatch, unlink, discard, reset, execute, initialize,
+        himport_prepare, himport_discard, himport_discard_all
+
+    They return ``None`` rather than the pipeline, so they do not chain even once
+    awaited. `unlink` is the surprising one, because `delete` sits beside it in the note
+    above and behaves the other way::
+
+        pipe = rc.pipeline()
+        pipe.delete("A")          # stages, chainable
+        await pipe.unlink("B")    # stages, must be awaited, returns None
+        await pipe.execute()
+
+    Inside a transactional block opened with :meth:`multi`, commands are sent as they
+    are issued and return a response instead of the pipeline, so they do not chain
+    there either.
+
     Retryable errors:
         - :class:`~.ClusterDownError`
         - :class:`~.ConnectionError`
@@ -2621,7 +2643,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         self._execution_strategy.multi()
 
     async def discard(self):
-        """ """
+        """Discards the transactional block. Must be awaited."""
         await self._execution_strategy.discard()
 
     async def watch(self, *names):
@@ -2633,6 +2655,15 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         await self._execution_strategy.unwatch()
 
     async def unlink(self, *names):
+        """
+        Stages an `UNLINK` for keys ``names``. Must be awaited, and returns ``None``
+        rather than the pipeline, so unlike `delete` it does not chain::
+
+            await pipe.unlink("A")
+
+        Outside a transactional block only one key is accepted; more raises
+        :class:`~.RedisClusterException`.
+        """
         await self._execution_strategy.unlink(*names)
 
     def mset_nonatomic(
