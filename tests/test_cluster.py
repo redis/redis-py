@@ -5329,14 +5329,13 @@ class TestClusterPipelineMetricsRecording:
             assert duration >= 0
 
     def test_register_read_command(self):
-        import redis.commands.cluster as cluster_cmds
+        import redis.asyncio.cluster as async_cluster_mod
+        import redis.cluster as sync_cluster_mod
         from redis.commands import READ_COMMANDS, register_read_command
 
         assert "GRAPH.RO_QUERY" in READ_COMMANDS
         assert "GRAPH.EXPLAIN" in READ_COMMANDS
-        assert "GRAPH.PROFILE" in READ_COMMANDS
-        assert "GRAPH.LIST" in READ_COMMANDS
-        assert "GRAPH.SLOWLOG" in READ_COMMANDS
 
         register_read_command("CUSTOM.READ_CMD")
-        assert "CUSTOM.READ_CMD" in cluster_cmds.READ_COMMANDS
+        assert "CUSTOM.READ_CMD" in sync_cluster_mod.READ_COMMANDS
+        assert "CUSTOM.READ_CMD" in async_cluster_mod.READ_COMMANDS

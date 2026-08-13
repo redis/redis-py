@@ -60,7 +60,7 @@ if TYPE_CHECKING:
 
 # Not complete, but covers the major ones
 # https://redis.io/commands
-READ_COMMANDS = frozenset(
+READ_COMMANDS = set(
     [
         # Bit Operations
         "BITCOUNT",
@@ -171,12 +171,8 @@ READ_COMMANDS = frozenset(
         "FT.PROFILE",
         "FT.SEARCH",
         # FalkorDB / RedisGraph Module
-        "GRAPH.CONFIG GET",
         "GRAPH.EXPLAIN",
-        "GRAPH.LIST",
-        "GRAPH.PROFILE",
         "GRAPH.RO_QUERY",
-        "GRAPH.SLOWLOG",
     ]
 )
 
@@ -186,8 +182,7 @@ def register_read_command(command_name: str) -> None:
     Register a custom or module command (e.g. GRAPH.RO_QUERY) as read-only
     for cluster replica routing.
     """
-    global READ_COMMANDS
-    READ_COMMANDS = READ_COMMANDS | {command_name.upper()}
+    READ_COMMANDS.add(command_name.upper())
 
 
 class ClusterMultiKeyCommands(ClusterCommandsProtocol):
