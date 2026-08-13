@@ -38,7 +38,11 @@ from redis._parsers.helpers import parse_scan
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.cache import CacheConfig, CacheFactory, CacheFactoryInterface, CacheInterface
 from redis.client import EMPTY_RESPONSE, CaseInsensitiveDict, PubSub, Redis
-from redis.commands import READ_COMMANDS, RedisClusterCommands
+from redis.commands import (
+    READ_COMMANDS,
+    RedisClusterCommands,
+    register_read_command,  # noqa: F401
+)
 from redis.commands.helpers import list_or_args, parse_pubsub_subscriptions
 from redis.commands.policies import PolicyResolver, StaticPolicyResolver
 from redis.connection import (

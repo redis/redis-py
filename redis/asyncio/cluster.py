@@ -83,7 +83,11 @@ from redis.cluster import (
     parse_cluster_shards_with_str_keys,
     parse_cluster_slots,
 )
-from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
+from redis.commands import (
+    READ_COMMANDS,
+    AsyncRedisClusterCommands,
+    register_read_command,  # noqa: F401
+)
 from redis.commands.helpers import list_or_args, parse_pubsub_subscriptions
 from redis.commands.policies import AsyncPolicyResolver, AsyncStaticPolicyResolver
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
