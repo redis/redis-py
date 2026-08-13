@@ -1,4 +1,3 @@
-import socket
 from asyncio import sleep
 from typing import (
     TYPE_CHECKING,
@@ -31,7 +30,6 @@ class Retry(AbstractRetry[Exception]):
         supported_errors: Tuple[Type[Exception], ...] = (
             ConnectionError,
             TimeoutError,
-            socket.timeout,
         ),
     ):
         super().__init__(backoff, retries, supported_errors)
