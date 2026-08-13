@@ -5336,6 +5336,8 @@ class TestClusterPipelineMetricsRecording:
         assert "GRAPH.RO_QUERY" in READ_COMMANDS
         assert "GRAPH.EXPLAIN" in READ_COMMANDS
 
-        register_read_command("CUSTOM.READ_CMD")
+        register_read_command("custom.read_cmd")
         assert "CUSTOM.READ_CMD" in sync_cluster_mod.READ_COMMANDS
+        assert "custom.read_cmd" in sync_cluster_mod.READ_COMMANDS
         assert "CUSTOM.READ_CMD" in async_cluster_mod.READ_COMMANDS
+        assert "custom.read_cmd" in async_cluster_mod.READ_COMMANDS

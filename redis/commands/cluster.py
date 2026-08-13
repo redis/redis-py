@@ -182,7 +182,10 @@ def register_read_command(command_name: str) -> None:
     Register a custom or module command (e.g. GRAPH.RO_QUERY) as read-only
     for cluster replica routing.
     """
-    READ_COMMANDS.add(command_name.upper())
+    cmd = command_name.strip()
+    if cmd:
+        READ_COMMANDS.add(cmd.upper())
+        READ_COMMANDS.add(cmd.lower())
 
 
 class ClusterMultiKeyCommands(ClusterCommandsProtocol):
