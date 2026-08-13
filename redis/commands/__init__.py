@@ -1,4 +1,9 @@
-from .cluster import READ_COMMANDS, AsyncRedisClusterCommands, RedisClusterCommands
+from .cluster import (
+    READ_COMMANDS,
+    AsyncRedisClusterCommands,
+    RedisClusterCommands,
+    register_read_command,
+)
 from .core import AsyncCoreCommands, CoreCommands
 from .helpers import list_or_args
 from .redismodules import AsyncRedisModuleCommands, RedisModuleCommands
@@ -15,4 +20,5 @@ __all__ = [
     "RedisModuleCommands",
     "SentinelCommands",
     "list_or_args",
+    "register_read_command",
 ]

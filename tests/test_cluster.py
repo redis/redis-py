@@ -5327,3 +5327,16 @@ class TestClusterPipelineMetricsRecording:
             duration = call_obj[0][0]
             assert isinstance(duration, float)
             assert duration >= 0
+
+    def test_register_read_command(self):
+        import redis.commands.cluster as cluster_cmds
+        from redis.commands import READ_COMMANDS, register_read_command
+
+        assert "GRAPH.RO_QUERY" in READ_COMMANDS
+        assert "GRAPH.EXPLAIN" in READ_COMMANDS
+        assert "GRAPH.PROFILE" in READ_COMMANDS
+        assert "GRAPH.LIST" in READ_COMMANDS
+        assert "GRAPH.SLOWLOG" in READ_COMMANDS
+
+        register_read_command("CUSTOM.READ_CMD")
+        assert "CUSTOM.READ_CMD" in cluster_cmds.READ_COMMANDS
