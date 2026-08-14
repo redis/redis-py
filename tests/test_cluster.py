@@ -32,6 +32,10 @@ from redis.cluster import (
     get_node_name,
 )
 from redis.cache import CacheConfig
+from redis.cluster_topology import (
+    ClusterShardsTopologyProvider,
+    ClusterSlotsTopologyProvider,
+)
 from redis.commands.core import HotkeysMetricsTypes
 from redis.commands.metadata import (
     DynamicMetadataResolver,
@@ -86,6 +90,75 @@ default_port = 7000
 default_cluster_slots = [
     [0, 8191, ["127.0.0.1", 7000, "node_0"], ["127.0.0.1", 7003, "node_3"]],
     [8192, 16383, ["127.0.0.1", 7001, "node_1"], ["127.0.0.1", 7002, "node_2"]],
+]
+
+# The same topology as ``default_cluster_slots``, in each of the shapes a
+# CLUSTER SHARDS reply can reach the client in.
+default_cluster_shards = [
+    {
+        "slots": [0, 8191],
+        "nodes": [
+            {
+                "id": "node_0",
+                "endpoint": "127.0.0.1",
+                "ip": "127.0.0.1",
+                "port": 7000,
+                "role": "master",
+                "health": "online",
+            },
+            {
+                "id": "node_3",
+                "endpoint": "127.0.0.1",
+                "ip": "127.0.0.1",
+                "port": 7003,
+                "role": "replica",
+                "health": "online",
+            },
+        ],
+    },
+    {
+        "slots": [8192, 16383],
+        "nodes": [
+            {
+                "id": "node_1",
+                "endpoint": "127.0.0.1",
+                "ip": "127.0.0.1",
+                "port": 7001,
+                "role": "master",
+                "health": "online",
+            },
+            {
+                "id": "node_2",
+                "endpoint": "127.0.0.1",
+                "ip": "127.0.0.1",
+                "port": 7002,
+                "role": "replica",
+                "health": "online",
+            },
+        ],
+    },
+]
+default_cluster_shards_bytes_keys = [
+    {
+        b"slots": shard["slots"],
+        b"nodes": [
+            {key.encode(): value for key, value in node.items()}
+            for node in shard["nodes"]
+        ],
+    }
+    for shard in default_cluster_shards
+]
+default_cluster_shards_resp2 = [
+    [
+        b"slots",
+        shard["slots"],
+        b"nodes",
+        [
+            [item for key, value in node.items() for item in (key.encode(), value)]
+            for node in shard["nodes"]
+        ],
+    ]
+    for shard in default_cluster_shards
 ]
 
 
@@ -194,6 +267,7 @@ def get_mocked_redis_client(
     on different installations and machines.
     """
     cluster_slots = kwargs.pop("cluster_slots", default_cluster_slots)
+    cluster_shards = kwargs.pop("cluster_shards", default_cluster_shards)
     coverage_res = kwargs.pop("coverage_result", "yes")
     cluster_enabled = kwargs.pop("cluster_enabled", True)
     with patch.object(Redis, "execute_command") as execute_command_mock:
@@ -205,6 +279,10 @@ def get_mocked_redis_client(
                 else:
                     mock_cluster_slots = cluster_slots
                     return mock_cluster_slots
+            elif _args[0] == "CLUSTER SHARDS":
+                if cluster_slots_raise_error:
+                    raise ResponseError()
+                return cluster_shards
             elif _args[0] == "COMMAND":
                 return {"get": [], "set": []}
             elif _args[0] == "INFO":
@@ -3171,6 +3249,28 @@ class TestNodesManager:
     """
 
     @pytest.mark.onlycluster
+    @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
+    def test_shards_provider_matches_slots_against_real_cluster(self, r, request):
+        shards_client = _get_client(
+            RedisCluster,
+            request,
+            flushdb=False,
+            topology_provider=ClusterShardsTopologyProvider(),
+        )
+
+        def slot_map(client):
+            return {
+                slot: sorted(node.name for node in nodes)
+                for slot, nodes in client.nodes_manager.slots_cache.items()
+            }
+
+        assert slot_map(shards_client) == slot_map(r)
+        assert sorted(shards_client.nodes_manager.nodes_cache) == sorted(
+            r.nodes_manager.nodes_cache
+        )
+
+    @pytest.mark.onlycluster
     def test_load_balancer(self, r):
         n_manager = r.nodes_manager
         lb = n_manager.read_load_balancer
@@ -4044,6 +4144,290 @@ class TestNodesManager:
             nodes_cache_names = list(nodes_manager.nodes_cache.keys())
             assert startup_node_names == [node1.name]
             assert nodes_cache_names == [node1.name]
+
+
+@pytest.mark.fixed_client
+class TestClusterTopologyProvider:
+    """
+    Unit tests for the topology providers' response parsing.
+    """
+
+    expected_topology = [
+        (0, 8191, ("127.0.0.1", 7000), [("127.0.0.1", 7003)]),
+        (8192, 16383, ("127.0.0.1", 7001), [("127.0.0.1", 7002)]),
+    ]
+
+    @pytest.mark.parametrize(
+        "response",
+        [
+            default_cluster_shards,
+            default_cluster_shards_bytes_keys,
+            default_cluster_shards_resp2,
+        ],
+        ids=["resp3-str-keys", "resp3-bytes-keys", "resp2"],
+    )
+    def test_shards_parsing_is_shape_agnostic(self, response):
+        assert ClusterShardsTopologyProvider().parse(response) == self.expected_topology
+
+    def test_shards_parsing_accepts_paired_slot_ranges(self):
+        response = [
+            {**shard, "slots": [tuple(shard["slots"])]}
+            for shard in default_cluster_shards
+        ]
+
+        assert ClusterShardsTopologyProvider().parse(response) == self.expected_topology
+
+    def test_shards_and_slots_agree(self):
+        assert ClusterShardsTopologyProvider().parse(
+            default_cluster_shards
+        ) == ClusterSlotsTopologyProvider().parse(default_cluster_slots)
+
+    def test_slots_parsing_decodes_bytes(self):
+        response = [[0, 16383, [b"127.0.0.1", b"7000", b"node_0"]]]
+
+        assert ClusterSlotsTopologyProvider().parse(response) == [
+            (0, 16383, ("127.0.0.1", 7000), [])
+        ]
+
+    def test_shard_with_multiple_slot_ranges(self):
+        response = [
+            {
+                "slots": [0, 10, 100, 110],
+                "nodes": [{"ip": "127.0.0.1", "port": 7000, "role": "master"}],
+            }
+        ]
+
+        assert ClusterShardsTopologyProvider().parse(response) == [
+            (0, 10, ("127.0.0.1", 7000), []),
+            (100, 110, ("127.0.0.1", 7000), []),
+        ]
+
+    def test_primary_is_selected_by_role_not_position(self):
+        response = [
+            {
+                "slots": [0, 1],
+                "nodes": [
+                    {"ip": "127.0.0.1", "port": 7003, "role": "replica"},
+                    {"ip": "127.0.0.1", "port": 7000, "role": "master"},
+                ],
+            }
+        ]
+
+        assert ClusterShardsTopologyProvider().parse(response) == [
+            (0, 1, ("127.0.0.1", 7000), [("127.0.0.1", 7003)])
+        ]
+
+    @pytest.mark.parametrize("health", ["failed", "loading"])
+    def test_unhealthy_replicas_are_excluded(self, health):
+        response = [
+            {
+                "slots": [0, 1],
+                "nodes": [
+                    {"ip": "127.0.0.1", "port": 7000, "role": "master"},
+                    {
+                        "ip": "127.0.0.1",
+                        "port": 7003,
+                        "role": "replica",
+                        "health": health,
+                    },
+                ],
+            }
+        ]
+
+        assert ClusterShardsTopologyProvider().parse(response) == [
+            (0, 1, ("127.0.0.1", 7000), [])
+        ]
+
+    @pytest.mark.parametrize("health", ["failed", "loading"])
+    def test_unhealthy_primary_is_retained(self, health):
+        response = [
+            {
+                "slots": [0, 1],
+                "nodes": [
+                    {
+                        "ip": "127.0.0.1",
+                        "port": 7000,
+                        "role": "master",
+                        "health": health,
+                    }
+                ],
+            }
+        ]
+
+        assert ClusterShardsTopologyProvider().parse(response) == [
+            (0, 1, ("127.0.0.1", 7000), [])
+        ]
+
+    def test_shard_without_master_is_skipped(self):
+        response = [
+            {
+                "slots": [0, 1],
+                "nodes": [{"ip": "127.0.0.1", "port": 7003, "role": "replica"}],
+            }
+        ]
+
+        assert ClusterShardsTopologyProvider().parse(response) == []
+
+    def test_shard_without_slots_is_skipped(self):
+        response = [
+            {
+                "slots": [],
+                "nodes": [{"ip": "127.0.0.1", "port": 7000, "role": "master"}],
+            }
+        ]
+
+        assert ClusterShardsTopologyProvider().parse(response) == []
+
+    @pytest.mark.parametrize(
+        "node,expected_host",
+        [
+            ({"endpoint": "", "ip": "127.0.0.1"}, "127.0.0.1"),
+            ({"ip": "127.0.0.1"}, "127.0.0.1"),
+            ({"endpoint": "node.example.com", "ip": "127.0.0.1"}, "node.example.com"),
+        ],
+        ids=["empty-endpoint", "absent-endpoint", "endpoint-preferred"],
+    )
+    def test_host_falls_back_to_ip(self, node, expected_host):
+        response = [
+            {"slots": [0, 1], "nodes": [{**node, "port": 7000, "role": "master"}]}
+        ]
+
+        assert ClusterShardsTopologyProvider().parse(response) == [
+            (0, 1, (expected_host, 7000), [])
+        ]
+
+    def test_prefer_tls_port(self):
+        response = [
+            {
+                "slots": [0, 1],
+                "nodes": [
+                    {
+                        "ip": "127.0.0.1",
+                        "port": 7000,
+                        "tls-port": 7100,
+                        "role": "master",
+                    }
+                ],
+            }
+        ]
+
+        assert ClusterShardsTopologyProvider(prefer_tls_port=True).parse(response) == [
+            (0, 1, ("127.0.0.1", 7100), [])
+        ]
+        assert ClusterShardsTopologyProvider().parse(response) == [
+            (0, 1, ("127.0.0.1", 7000), [])
+        ]
+
+    def test_port_falls_back_when_preferred_is_absent(self):
+        response = [
+            {
+                "slots": [0, 1],
+                "nodes": [
+                    {"ip": "127.0.0.1", "tls-port": 7100, "role": "master"},
+                ],
+            }
+        ]
+
+        assert ClusterShardsTopologyProvider().parse(response) == [
+            (0, 1, ("127.0.0.1", 7100), [])
+        ]
+
+
+@pytest.mark.fixed_client
+class TestNodesManagerTopologyProvider:
+    """
+    Unit tests for topology provider selection in NodesManager.
+    """
+
+    @staticmethod
+    def _issued_commands(**kwargs):
+        """Build a mocked client, returning it with the commands it issued."""
+        issued = []
+        original = NodesManager.initialize
+
+        def recording_initialize(self, *args, **init_kwargs):
+            issued.extend(self._topology_provider.command)
+            return original(self, *args, **init_kwargs)
+
+        with patch.object(NodesManager, "initialize", recording_initialize):
+            client = get_mocked_redis_client(url="redis://127.0.0.1:7000", **kwargs)
+        return client, issued
+
+    def test_default_provider_uses_cluster_slots(self):
+        rc, issued = self._issued_commands()
+
+        assert isinstance(
+            rc.nodes_manager._topology_provider, ClusterSlotsTopologyProvider
+        )
+        assert "CLUSTER SLOTS" in issued
+        assert "CLUSTER SHARDS" not in issued
+
+    def test_shards_provider_issues_cluster_shards(self):
+        rc, issued = self._issued_commands(
+            topology_provider=ClusterShardsTopologyProvider()
+        )
+
+        assert "CLUSTER SHARDS" in issued
+        assert "CLUSTER SLOTS" not in issued
+        assert len(rc.nodes_manager.slots_cache) == REDIS_CLUSTER_HASH_SLOTS
+
+    def test_shards_provider_builds_same_topology_as_slots(self):
+        slots_client = get_mocked_redis_client(url="redis://127.0.0.1:7000")
+        shards_client = get_mocked_redis_client(
+            url="redis://127.0.0.1:7000",
+            topology_provider=ClusterShardsTopologyProvider(),
+        )
+
+        def slot_map(client):
+            return {
+                slot: [node.name for node in nodes]
+                for slot, nodes in client.nodes_manager.slots_cache.items()
+            }
+
+        assert slot_map(shards_client) == slot_map(slots_client)
+        assert sorted(shards_client.nodes_manager.nodes_cache) == sorted(
+            slots_client.nodes_manager.nodes_cache
+        )
+
+    def test_provider_does_not_leak_into_connection_kwargs(self):
+        rc = get_mocked_redis_client(
+            url="redis://127.0.0.1:7000",
+            topology_provider=ClusterShardsTopologyProvider(),
+        )
+
+        assert "topology_provider" not in rc.nodes_manager.connection_kwargs
+
+    @pytest.mark.parametrize(
+        "provider", [None, ClusterShardsTopologyProvider()], ids=["slots", "shards"]
+    )
+    def test_address_remap_applies_to_both_providers(self, provider):
+        kwargs = {"topology_provider": provider} if provider else {}
+        rc = get_mocked_redis_client(
+            url="redis://127.0.0.1:7000",
+            address_remap=lambda address: (address[0], address[1] + 1000),
+            **kwargs,
+        )
+
+        assert {node.port for node in rc.nodes_manager.nodes_cache.values()} == {
+            8000,
+            8001,
+            8002,
+            8003,
+        }
+
+    def test_single_node_cluster_uses_startup_host(self):
+        rc = get_mocked_redis_client(
+            url="redis://127.0.0.1:7000",
+            cluster_shards=[
+                {
+                    "slots": [0, REDIS_CLUSTER_HASH_SLOTS - 1],
+                    "nodes": [{"endpoint": "", "port": 7000, "role": "master"}],
+                }
+            ],
+            topology_provider=ClusterShardsTopologyProvider(),
+        )
+
+        assert list(rc.nodes_manager.nodes_cache) == ["127.0.0.1:7000"]
 
 
 @pytest.mark.fixed_client

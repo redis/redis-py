@@ -32,6 +32,10 @@ from redis.cluster import (
     LoadBalancingStrategy,
     get_node_name,
 )
+from redis.cluster_topology import (
+    AsyncClusterShardsTopologyProvider,
+    AsyncClusterSlotsTopologyProvider,
+)
 from redis.commands.core import HotkeysMetricsTypes
 from redis.commands.metadata import RequestPolicy
 from redis.commands.policies import AsyncStaticPolicyResolver
@@ -75,6 +79,11 @@ from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
 
 from ..ssl_utils import get_tls_certificates
+from ..test_cluster import (
+    default_cluster_shards,
+    default_cluster_shards_bytes_keys,
+    default_cluster_shards_resp2,
+)
 from .compat import aclosing
 
 default_host = "127.0.0.1"
@@ -175,6 +184,7 @@ async def get_mocked_redis_client(
     on different installations and machines.
     """
     cluster_slots = kwargs.pop("cluster_slots", default_cluster_slots)
+    cluster_shards = kwargs.pop("cluster_shards", default_cluster_shards)
     coverage_res = kwargs.pop("coverage_result", "yes")
     cluster_enabled = kwargs.pop("cluster_enabled", True)
     with mock.patch.object(ClusterNode, "execute_command") as execute_command_mock:
@@ -186,6 +196,10 @@ async def get_mocked_redis_client(
                 else:
                     mock_cluster_slots = cluster_slots
                     return mock_cluster_slots
+            elif _args[0] == "CLUSTER SHARDS":
+                if cluster_slots_raise_error:
+                    raise ResponseError()
+                return cluster_shards
             elif _args[0] == "COMMAND":
                 return {"get": [], "set": []}
             elif _args[0] == "INFO":
@@ -3590,6 +3604,132 @@ class TestNodesManager:
 
         listener.listen.assert_not_called()
         await r.aclose()
+
+
+@pytest.mark.fixed_client
+class TestNodesManagerTopologyProvider:
+    """
+    Unit tests for topology provider selection in the async NodesManager.
+    """
+
+    @staticmethod
+    def _slot_map(client):
+        return {
+            slot: sorted(node.name for node in nodes)
+            for slot, nodes in client.nodes_manager.slots_cache.items()
+        }
+
+    async def test_default_provider_uses_cluster_slots(self):
+        rc = await get_mocked_redis_client(host=default_host, port=default_port)
+
+        assert isinstance(
+            rc.nodes_manager._topology_provider, AsyncClusterSlotsTopologyProvider
+        )
+        await rc.aclose()
+
+    async def test_shards_provider_builds_same_topology_as_slots(self):
+        slots_client = await get_mocked_redis_client(
+            host=default_host, port=default_port
+        )
+        shards_client = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            topology_provider=AsyncClusterShardsTopologyProvider(),
+        )
+
+        assert self._slot_map(shards_client) == self._slot_map(slots_client)
+        assert sorted(shards_client.nodes_manager.nodes_cache) == sorted(
+            slots_client.nodes_manager.nodes_cache
+        )
+        await slots_client.aclose()
+        await shards_client.aclose()
+
+    @pytest.mark.parametrize(
+        "cluster_shards",
+        [
+            default_cluster_shards,
+            default_cluster_shards_bytes_keys,
+            default_cluster_shards_resp2,
+        ],
+        ids=["resp3-str-keys", "resp3-bytes-keys", "resp2"],
+    )
+    async def test_shards_provider_handles_every_response_shape(self, cluster_shards):
+        rc = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_shards=cluster_shards,
+            topology_provider=AsyncClusterShardsTopologyProvider(),
+        )
+
+        assert len(rc.nodes_manager.slots_cache) == REDIS_CLUSTER_HASH_SLOTS
+        assert sorted(rc.nodes_manager.nodes_cache) == [
+            "127.0.0.1:7000",
+            "127.0.0.1:7001",
+            "127.0.0.1:7002",
+            "127.0.0.1:7003",
+        ]
+        await rc.aclose()
+
+    @pytest.mark.parametrize("protocol", [2, 3])
+    @pytest.mark.parametrize("legacy_responses", [True, False])
+    async def test_shards_provider_across_response_callbacks(
+        self, protocol, legacy_responses
+    ):
+        """Each protocol/legacy pairing selects a different CLUSTER SHARDS callback."""
+        slots_client = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            protocol=protocol,
+            legacy_responses=legacy_responses,
+        )
+        shards_client = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            protocol=protocol,
+            legacy_responses=legacy_responses,
+            topology_provider=AsyncClusterShardsTopologyProvider(),
+        )
+
+        assert self._slot_map(shards_client) == self._slot_map(slots_client)
+        await slots_client.aclose()
+        await shards_client.aclose()
+
+    async def test_provider_does_not_leak_into_connection_kwargs(self):
+        rc = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            topology_provider=AsyncClusterShardsTopologyProvider(),
+        )
+
+        assert "topology_provider" not in rc.nodes_manager.connection_kwargs
+        await rc.aclose()
+
+    async def test_provider_attribute_is_declared_in_slots(self):
+        provider = AsyncClusterShardsTopologyProvider()
+        nodes_manager = NodesManager(
+            startup_nodes=[ClusterNode(default_host, default_port)],
+            require_full_coverage=False,
+            connection_kwargs={},
+            topology_provider=provider,
+        )
+
+        assert nodes_manager._topology_provider is provider
+
+    async def test_single_node_cluster_uses_startup_host(self):
+        rc = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_shards=[
+                {
+                    "slots": [0, REDIS_CLUSTER_HASH_SLOTS - 1],
+                    "nodes": [{"endpoint": "", "port": 7000, "role": "master"}],
+                }
+            ],
+            topology_provider=AsyncClusterShardsTopologyProvider(),
+        )
+
+        assert list(rc.nodes_manager.nodes_cache) == ["127.0.0.1:7000"]
+        await rc.aclose()
 
 
 @pytest.mark.fixed_client

@@ -82,6 +82,10 @@ from redis.cluster import (
     parse_cluster_shards_with_str_keys,
     parse_cluster_slots,
 )
+from redis.cluster_topology import (
+    AsyncClusterSlotsTopologyProvider,
+    AsyncClusterTopologyProvider,
+)
 from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
 from redis.commands.helpers import list_or_args, parse_pubsub_subscriptions
 from redis.commands.metadata import (
@@ -467,6 +471,9 @@ class RedisCluster(
         address_remap: Callable[[Tuple[str, int]], Tuple[str, int]] | None = None,
         event_dispatcher: EventDispatcher | None = None,
         policy_resolver: AsyncPolicyResolver | None = None,
+        topology_provider: AsyncClusterTopologyProvider = (
+            AsyncClusterSlotsTopologyProvider()
+        ),
         maint_notifications_config: MaintNotificationsConfig | None = None,
     ) -> None:
         if db:
@@ -615,6 +622,7 @@ class RedisCluster(
             dynamic_startup_nodes=dynamic_startup_nodes,
             address_remap=address_remap,
             event_dispatcher=self._event_dispatcher,
+            topology_provider=topology_provider,
         )
         AsyncMaintNotificationsAbstractRedisCluster.__init__(
             self,
@@ -2020,6 +2028,7 @@ class NodesManager:
         "slots_cache",
         "startup_nodes",
         "address_remap",
+        "_topology_provider",
     )
 
     def __init__(
@@ -2030,11 +2039,15 @@ class NodesManager:
         dynamic_startup_nodes: bool = True,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
+        topology_provider: AsyncClusterTopologyProvider = (
+            AsyncClusterSlotsTopologyProvider()
+        ),
     ) -> None:
         self.startup_nodes = {node.name: node for node in startup_nodes}
         self.require_full_coverage = require_full_coverage
         self.connection_kwargs = connection_kwargs
         self.address_remap = address_remap
+        self._topology_provider = topology_provider
 
         self.default_node: "ClusterNode" = None
         self.nodes_cache: Dict[str, "ClusterNode"] = {}
@@ -2294,11 +2307,12 @@ class NodesManager:
                         )
                         if logger.isEnabledFor(logging.DEBUG):
                             logger.debug(
-                                "Topology refresh: querying CLUSTER SLOTS on "
+                                "Topology refresh: querying "
+                                f"{' '.join(self._topology_provider.command)} on "
                                 f"{startup_node.name}"
                             )
-                        cluster_slots = await startup_node.execute_command(
-                            "CLUSTER SLOTS"
+                        topology_response = await startup_node.execute_command(
+                            *self._topology_provider.command
                         )
                     except ResponseError:
                         raise RedisClusterException(
@@ -2316,28 +2330,16 @@ class NodesManager:
                     exception = e
                     continue
 
-                # CLUSTER SLOTS command results in the following output:
-                # [[slot_section[from_slot,to_slot,master,replica1,...,replicaN]]]
-                # where each node contains the following list: [IP, port, node_id]
-                # Therefore, cluster_slots[0][2][0] will be the IP address of the
-                # primary node of the first slot section.
-                # If there's only one server in the cluster, its ``host`` is ''
-                # Fix it to the host in startup_nodes
-                if (
-                    len(cluster_slots) == 1
-                    and not cluster_slots[0][2][0]
-                    and len(self.startup_nodes) == 1
-                ):
-                    cluster_slots[0][2][0] = startup_node.host
-
-                for slot in cluster_slots:
-                    for i in range(2, len(slot)):
-                        slot[i] = [str_if_bytes(val) for val in slot[i]]
-                    primary_node = slot[2]
-                    host = primary_node[0]
+                for (
+                    start_slot,
+                    end_slot,
+                    primary,
+                    replicas,
+                ) in self._topology_provider.parse(topology_response):
+                    host, port = primary
+                    # A single-node cluster reports its own host as ''.
                     if host == "":
                         host = startup_node.host
-                    port = int(primary_node[1])
                     host, port = self.remap_host_port(host, port)
 
                     nodes_for_slot = []
@@ -2351,24 +2353,26 @@ class NodesManager:
                     tmp_nodes_cache[target_node.name] = target_node
                     nodes_for_slot.append(target_node)
 
-                    replica_nodes = slot[3:]
-                    for replica_node in replica_nodes:
-                        host = replica_node[0]
-                        port = replica_node[1]
-                        host, port = self.remap_host_port(host, port)
+                    for replica_host, replica_port in replicas:
+                        replica_host, replica_port = self.remap_host_port(
+                            replica_host, replica_port
+                        )
 
                         target_replica_node = tmp_nodes_cache.get(
-                            get_node_name(host, port)
+                            get_node_name(replica_host, replica_port)
                         )
                         if not target_replica_node:
                             target_replica_node = ClusterNode(
-                                host, port, REPLICA, **self.connection_kwargs
+                                replica_host,
+                                replica_port,
+                                REPLICA,
+                                **self.connection_kwargs,
                             )
                         # add this node to the nodes cache
                         tmp_nodes_cache[target_replica_node.name] = target_replica_node
                         nodes_for_slot.append(target_replica_node)
 
-                    for i in range(int(slot[0]), int(slot[1]) + 1):
+                    for i in range(start_slot, end_slot + 1):
                         if i not in tmp_slots:
                             tmp_slots[i] = nodes_for_slot
                         else:

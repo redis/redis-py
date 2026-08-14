@@ -37,6 +37,10 @@ from redis._parsers.helpers import parse_scan
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.cache import CacheConfig, CacheFactory, CacheFactoryInterface, CacheInterface
 from redis.client import EMPTY_RESPONSE, CaseInsensitiveDict, PubSub, Redis
+from redis.cluster_topology import (
+    ClusterSlotsTopologyProvider,
+    ClusterTopologyProvider,
+)
 from redis.commands import READ_COMMANDS, RedisClusterCommands
 from redis.commands.helpers import list_or_args, parse_pubsub_subscriptions
 from redis.commands.metadata import (
@@ -733,6 +737,7 @@ class RedisCluster(
         cache_config: Optional[CacheConfig] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
         policy_resolver: Optional[PolicyResolver] = None,
+        topology_provider: ClusterTopologyProvider = ClusterSlotsTopologyProvider(),
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
         metadata_resolver: Optional[MetadataResolver] = None,
         **kwargs,
@@ -804,6 +809,12 @@ class RedisCluster(
             where the node is reachable.  This can be used to map the addresses at
             which the nodes _think_ they are, to addresses at which a client may
             reach them, such as when they sit behind a proxy.
+        :param topology_provider:
+            Selects the command used to discover the cluster's slot mapping.
+            Defaults to `CLUSTER SLOTS`. Pass
+            :class:`~redis.cluster_topology.ClusterShardsTopologyProvider` to use
+            `CLUSTER SHARDS` instead, which requires Redis 7.0+ and returns one
+            entry per shard rather than per slot range.
 
         :param policy_resolver:
             Decides the request/response policies each command is routed by - see
@@ -985,6 +996,7 @@ class RedisCluster(
             event_dispatcher=self._event_dispatcher,
             maint_notifications_config=maint_notifications_config,
             himport_registry=self._himport_registry,
+            topology_provider=topology_provider,
             **kwargs,
         )
 
@@ -2350,6 +2362,7 @@ class NodesManager:
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
         himport_registry: HImportRegistry | None = None,
         metadata_resolver: Optional[MetadataResolver] = None,
+        topology_provider: ClusterTopologyProvider = ClusterSlotsTopologyProvider(),
         **kwargs,
     ):
         # Shared, cluster-wide HIMPORT registry object, injected onto every node's pool
@@ -2372,6 +2385,7 @@ class NodesManager:
         # through the one object the cluster client was configured with.
         self._metadata_resolver = metadata_resolver
 
+        self._topology_provider = topology_provider
         self._cache: Optional[CacheInterface] = None
         if cache:
             self._cache = cache
@@ -2815,11 +2829,14 @@ class NodesManager:
                     try:
                         if is_debug_log_enabled():
                             logger.debug(
-                                "Topology refresh: querying CLUSTER SLOTS on "
+                                "Topology refresh: querying "
+                                f"{' '.join(self._topology_provider.command)} on "
                                 f"{startup_node.name}"
                             )
                         # Make sure cluster mode is enabled on this node
-                        cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
+                        topology_response = r.execute_command(
+                            *self._topology_provider.command
+                        )
                         if disconnect_startup_nodes_pools:
                             with r.connection_pool._lock:
                                 # take care to clear connections before we move on
@@ -2844,26 +2861,16 @@ class NodesManager:
                     exception = e
                     continue
 
-                # CLUSTER SLOTS command results in the following output:
-                # [[slot_section[from_slot,to_slot,master,replica1,...,replicaN]]]
-                # where each node contains the following list: [IP, port, node_id]
-                # Therefore, cluster_slots[0][2][0] will be the IP address of the
-                # primary node of the first slot section.
-                # If there's only one server in the cluster, its ``host`` is ''
-                # Fix it to the host in startup_nodes
-                if (
-                    len(cluster_slots) == 1
-                    and len(cluster_slots[0][2][0]) == 0
-                    and len(self.startup_nodes) == 1
-                ):
-                    cluster_slots[0][2][0] = startup_node.host
-
-                for slot in cluster_slots:
-                    primary_node = slot[2]
-                    host = str_if_bytes(primary_node[0])
+                for (
+                    start_slot,
+                    end_slot,
+                    primary,
+                    replicas,
+                ) in self._topology_provider.parse(topology_response):
+                    host, port = primary
+                    # A single-node cluster reports its own host as ''.
                     if host == "":
                         host = startup_node.host
-                    port = int(primary_node[1])
                     host, port = self.remap_host_port(host, port)
 
                     nodes_for_slot = []
@@ -2873,17 +2880,16 @@ class NodesManager:
                     )
                     nodes_for_slot.append(target_node)
 
-                    replica_nodes = slot[3:]
-                    for replica_node in replica_nodes:
-                        host = str_if_bytes(replica_node[0])
-                        port = int(replica_node[1])
-                        host, port = self.remap_host_port(host, port)
+                    for replica_host, replica_port in replicas:
+                        replica_host, replica_port = self.remap_host_port(
+                            replica_host, replica_port
+                        )
                         target_replica_node = self._get_or_create_cluster_node(
-                            host, port, REPLICA, tmp_nodes_cache
+                            replica_host, replica_port, REPLICA, tmp_nodes_cache
                         )
                         nodes_for_slot.append(target_replica_node)
 
-                    for i in range(int(slot[0]), int(slot[1]) + 1):
+                    for i in range(start_slot, end_slot + 1):
                         if i not in tmp_slots:
                             tmp_slots[i] = nodes_for_slot
                         else:
