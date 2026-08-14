@@ -109,7 +109,7 @@ class ClusterTopologyProvider(ABC):
             response: The reply to the provider's ``command``.
 
         Returns:
-            list[SlotOwners]: ``(start, end, primary, replicas)`` per slot range.
+            One ``(start, end, primary, replicas)`` tuple per slot range.
         """
         pass
 
@@ -128,7 +128,7 @@ class AsyncClusterTopologyProvider(ABC):
             response: The reply to the provider's ``command``.
 
         Returns:
-            list[SlotOwners]: ``(start, end, primary, replicas)`` per slot range.
+            One ``(start, end, primary, replicas)`` tuple per slot range.
         """
         pass
 
