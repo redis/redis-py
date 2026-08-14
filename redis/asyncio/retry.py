@@ -1,4 +1,6 @@
+import warnings
 from asyncio import sleep
+from inspect import iscoroutinefunction
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -84,12 +86,20 @@ class Retry(AbstractRetry[RedisError]):
                     await sleep(backoff)
 
 
-def _to_async_retry(retry: AbstractRetry) -> Retry:
-    """Return an async retry policy equivalent to ``retry``."""
-    if isinstance(retry, Retry):
+def _to_async_retry(retry: Any) -> Any:
+    """Convert a synchronous retry policy while preserving async-shaped ones."""
+    if iscoroutinefunction(getattr(type(retry), "call_with_retry", None)):
         return retry
     if not isinstance(retry, AbstractRetry):
-        raise TypeError("retry must be an instance of redis.asyncio.retry.Retry")
+        return retry
+
+    warnings.warn(
+        "A synchronous redis.retry.Retry was passed to an asyncio client and has "
+        "been converted to redis.asyncio.retry.Retry. A custom call_with_retry "
+        "implementation is not preserved - please use redis.asyncio.retry.Retry.",
+        UserWarning,
+        stacklevel=2,
+    )
 
     return Retry(
         backoff=retry._backoff,

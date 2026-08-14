@@ -1,11 +1,17 @@
+import warnings
 from threading import Lock
 
 import pytest
 from redis.asyncio import Redis, RedisCluster
-from redis.asyncio.connection import Connection, UnixDomainSocketConnection
+from redis.asyncio.connection import (
+    Connection,
+    ConnectionPool,
+    UnixDomainSocketConnection,
+)
 from redis.asyncio.retry import Retry
 from redis.backoff import AbstractBackoff, ExponentialBackoff, NoBackoff
 from redis.exceptions import ConnectionError, TimeoutError
+from redis.retry import AbstractRetry
 from redis.retry import Retry as SyncRetry
 
 
@@ -29,6 +35,28 @@ class UncopyableBackoff(AbstractBackoff):
     def compute(self, failures):
         with self._lock:
             return 0
+
+
+class CustomAsyncRetry(AbstractRetry):
+    def __init__(self):
+        super().__init__(NoBackoff(), 1, (ConnectionError,))
+
+    def __eq__(self, other):
+        return self is other
+
+    async def call_with_retry(self, do, fail, **kwargs):
+        return await do()
+
+
+class DuckTypedAsyncRetry:
+    async def call_with_retry(self, do, fail, **kwargs):
+        return await do()
+
+    def get_retries(self):
+        return 1
+
+    def update_supported_errors(self, specified_errors):
+        pass
 
 
 @pytest.mark.fixed_client
@@ -86,50 +114,91 @@ class TestConnectionConstructorWithRetry:
 
     @pytest.mark.parametrize("Class", [Connection, UnixDomainSocketConnection])
     @pytest.mark.asyncio
-    async def test_sync_retry_is_converted(self, Class):
+    async def test_sync_retry_is_used_by_connect(self, Class, monkeypatch):
         retry = SyncRetry(NoBackoff(), 2)
-        connection = Class(retry=retry)
+        with pytest.warns(UserWarning, match="synchronous redis.retry.Retry"):
+            connection = Class(retry=retry)
         attempts = 0
         failures = 0
 
-        async def do():
+        async def connect_check_health(
+            _self, check_health=True, retry_socket_connect=True
+        ):
             nonlocal attempts
             attempts += 1
-            raise ConnectionError
+            if attempts < 3:
+                raise ConnectionError
 
-        async def fail(_error):
+        async def disconnect(_self, *args, **kwargs):
             nonlocal failures
             failures += 1
 
+        monkeypatch.setattr(Class, "connect_check_health", connect_check_health)
+        monkeypatch.setattr(Class, "disconnect", disconnect)
+
         assert isinstance(connection.retry, Retry)
-        with pytest.raises(ConnectionError):
-            await connection.retry.call_with_retry(do, fail)
+        await connection.connect()
 
         assert attempts == 3
-        assert failures == 3
+        assert failures == 2
+
+    @pytest.mark.asyncio
+    async def test_pool_from_url_converts_sync_retry(self, monkeypatch):
+        retry = SyncRetry(NoBackoff(), 2)
+        with pytest.warns(UserWarning, match="synchronous redis.retry.Retry"):
+            pool = ConnectionPool.from_url(
+                "redis://localhost:6379",
+                retry=retry,
+                retry_on_error=[ConnectionError],
+            )
+
+        async def ensure_connection(_self, _connection):
+            pass
+
+        monkeypatch.setattr(ConnectionPool, "ensure_connection", ensure_connection)
+        connection = await pool.get_connection()
+
+        assert isinstance(connection.retry, Retry)
+        assert connection.retry.get_retries() == 2
+        assert ConnectionError in connection.retry._supported_errors
+
+        await pool.release(connection)
+        await pool.aclose()
+
+    @pytest.mark.parametrize("retry", [CustomAsyncRetry(), DuckTypedAsyncRetry()])
+    def test_async_shaped_retry_is_preserved(self, retry):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            pool = ConnectionPool(retry=retry)
+
+        assert pool.connection_kwargs["retry"] is retry
 
     def test_pool_converts_sync_retry(self):
         retry = SyncRetry(NoBackoff(), 2)
-        client = Redis(retry=retry)
+        with pytest.warns(UserWarning, match="synchronous redis.retry.Retry"):
+            client = Redis(retry=retry)
 
         assert isinstance(client.get_retry(), Retry)
         assert client.get_retry().get_retries() == retry.get_retries()
 
         new_retry = SyncRetry(ExponentialBackoff(), 3)
-        client.set_retry(new_retry)
+        with pytest.warns(UserWarning, match="synchronous redis.retry.Retry"):
+            client.set_retry(new_retry)
 
         assert isinstance(client.get_retry(), Retry)
         assert client.get_retry().get_retries() == new_retry.get_retries()
 
     def test_cluster_converts_sync_retry(self):
         retry = SyncRetry(NoBackoff(), 2)
-        client = RedisCluster(host="127.0.0.1", port=6379, retry=retry)
+        with pytest.warns(UserWarning, match="synchronous redis.retry.Retry"):
+            client = RedisCluster(host="127.0.0.1", port=6379, retry=retry)
 
         assert isinstance(client.retry, Retry)
         assert client.retry.get_retries() == retry.get_retries()
 
         new_retry = SyncRetry(ExponentialBackoff(), 3)
-        client.set_retry(new_retry)
+        with pytest.warns(UserWarning, match="synchronous redis.retry.Retry"):
+            client.set_retry(new_retry)
 
         assert isinstance(client.retry, Retry)
         assert client.retry.get_retries() == new_retry.get_retries()
@@ -138,7 +207,8 @@ class TestConnectionConstructorWithRetry:
         backoff = UncopyableBackoff()
         retry = SyncRetry(backoff, 2)
 
-        client = RedisCluster(host="127.0.0.1", port=6379, retry=retry)
+        with pytest.warns(UserWarning, match="synchronous redis.retry.Retry"):
+            client = RedisCluster(host="127.0.0.1", port=6379, retry=retry)
 
         assert isinstance(client.retry, Retry)
         assert client.retry._backoff is backoff

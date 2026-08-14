@@ -32,8 +32,11 @@ class TestMultiDbClient:
         mock_multi_db_config.command_retry = SyncRetry(NoBackoff(), 2)
         databases = create_weighted_list(mock_db)
 
-        with patch.object(mock_multi_db_config, "databases", return_value=databases):
-            client = MultiDBClient(mock_multi_db_config)
+        with pytest.warns(UserWarning, match="synchronous redis.retry.Retry"):
+            with patch.object(
+                mock_multi_db_config, "databases", return_value=databases
+            ):
+                client = MultiDBClient(mock_multi_db_config)
 
         assert isinstance(client._command_retry, Retry)
         assert client._command_retry.get_retries() == 2
