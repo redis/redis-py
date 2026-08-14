@@ -3728,7 +3728,7 @@ class ClusterPipeline(RedisCluster):
         self._execution_strategy.load_scripts()
 
     def discard(self):
-        """ """
+        """Discards the transactional block."""
         self._execution_strategy.discard()
 
     def watch(self, *names):
@@ -3746,6 +3746,15 @@ class ClusterPipeline(RedisCluster):
         self._execution_strategy.delete(*names)
 
     def unlink(self, *names):
+        """
+        Stages an `UNLINK` for keys ``names``, and returns ``None`` rather than the
+        pipeline, so unlike `delete` it does not chain::
+
+            pipe.unlink("A")
+
+        Outside a transactional block only one key is accepted; more raises
+        :class:`~.RedisClusterException`.
+        """
         self._execution_strategy.unlink(*names)
 
 

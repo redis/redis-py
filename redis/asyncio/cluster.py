@@ -2470,25 +2470,42 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
 
     Which methods must be awaited:
 
-    Outside a transactional block, staging a command returns the pipeline itself, so
-    commands chain and are not awaited, as in the example above. These methods are
-    coroutines and must be awaited individually::
+    Staging a command returns the pipeline itself, so commands chain and are not
+    awaited, as in the example above. The coroutines defined on this class must be
+    awaited individually::
 
         watch, unwatch, unlink, discard, reset, execute, initialize,
         himport_prepare, himport_discard, himport_discard_all
 
-    They return ``None`` rather than the pipeline, so they do not chain even once
-    awaited. `unlink` is the surprising one, because `delete` sits beside it in the note
-    above and behaves the other way::
+    Of those, only ``reset``, ``discard``, ``watch``, ``unwatch`` and ``unlink`` return
+    ``None``, so only they fail to chain once awaited. The rest return a value:
+    ``execute`` a ``list``, ``initialize`` the pipeline, ``himport_prepare`` a ``bool``
+    and the two ``himport_discard`` methods an ``int``. Inherited command coroutines
+    such as ``command_info``, ``cluster_delslots``, ``client_tracking_on`` and the
+    ``hotkeys_*`` family must be awaited too and are not listed here.
+
+    `unlink` is the surprising one, because `delete` sits beside it in the note above
+    and behaves the other way::
 
         pipe = rc.pipeline()
         pipe.delete("A")          # stages, chainable
         await pipe.unlink("B")    # stages, must be awaited, returns None
         await pipe.execute()
 
-    Inside a transactional block opened with :meth:`multi`, commands are sent as they
-    are issued and return a response instead of the pipeline, so they do not chain
-    there either.
+    Between :meth:`watch` and :meth:`multi` commands are sent as they are issued and
+    return a response rather than the pipeline, so they must be awaited. After
+    :meth:`multi` they are queued again and chain as usual::
+
+        async with rc.pipeline(transaction=True) as pipe:
+            await pipe.watch("a")
+            a = await pipe.get("a")     # sent now, so awaited
+            pipe.multi()
+            pipe.set("a", int(a) + 1)   # queued, chains
+            await pipe.execute()
+
+    Outside a transactional pipeline ``watch``, ``unwatch`` and ``discard`` raise
+    :class:`~.RedisClusterException`, and the ``himport_*`` methods act on the shared
+    fieldset registry rather than staging a command.
 
     Retryable errors:
         - :class:`~.ClusterDownError`
