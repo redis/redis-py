@@ -1,5 +1,6 @@
 import binascii
 import datetime
+import inspect
 import select
 import socket
 import socketserver
@@ -31,6 +32,7 @@ from redis.cluster import (
     RedisCluster,
     get_node_name,
 )
+from redis.asyncio.cluster import RedisCluster as AsyncRedisCluster
 from redis.cache import CacheConfig
 from redis.cluster_topology import (
     ClusterShardsTopologyProvider,
@@ -4193,7 +4195,7 @@ class TestClusterTopologyProvider:
         response = [
             {
                 "slots": [0, 10, 100, 110],
-                "nodes": [{"ip": "127.0.0.1", "port": 7000, "role": "master"}],
+                "nodes": [{"endpoint": "127.0.0.1", "port": 7000, "role": "master"}],
             }
         ]
 
@@ -4207,8 +4209,8 @@ class TestClusterTopologyProvider:
             {
                 "slots": [0, 1],
                 "nodes": [
-                    {"ip": "127.0.0.1", "port": 7003, "role": "replica"},
-                    {"ip": "127.0.0.1", "port": 7000, "role": "master"},
+                    {"endpoint": "127.0.0.1", "port": 7003, "role": "replica"},
+                    {"endpoint": "127.0.0.1", "port": 7000, "role": "master"},
                 ],
             }
         ]
@@ -4223,9 +4225,9 @@ class TestClusterTopologyProvider:
             {
                 "slots": [0, 1],
                 "nodes": [
-                    {"ip": "127.0.0.1", "port": 7000, "role": "master"},
+                    {"endpoint": "127.0.0.1", "port": 7000, "role": "master"},
                     {
-                        "ip": "127.0.0.1",
+                        "endpoint": "127.0.0.1",
                         "port": 7003,
                         "role": "replica",
                         "health": health,
@@ -4245,7 +4247,7 @@ class TestClusterTopologyProvider:
                 "slots": [0, 1],
                 "nodes": [
                     {
-                        "ip": "127.0.0.1",
+                        "endpoint": "127.0.0.1",
                         "port": 7000,
                         "role": "master",
                         "health": health,
@@ -4262,7 +4264,7 @@ class TestClusterTopologyProvider:
         response = [
             {
                 "slots": [0, 1],
-                "nodes": [{"ip": "127.0.0.1", "port": 7003, "role": "replica"}],
+                "nodes": [{"endpoint": "127.0.0.1", "port": 7003, "role": "replica"}],
             }
         ]
 
@@ -4272,7 +4274,7 @@ class TestClusterTopologyProvider:
         response = [
             {
                 "slots": [],
-                "nodes": [{"ip": "127.0.0.1", "port": 7000, "role": "master"}],
+                "nodes": [{"endpoint": "127.0.0.1", "port": 7000, "role": "master"}],
             }
         ]
 
@@ -4281,13 +4283,21 @@ class TestClusterTopologyProvider:
     @pytest.mark.parametrize(
         "node,expected_host",
         [
-            ({"endpoint": "", "ip": "127.0.0.1"}, "127.0.0.1"),
-            ({"ip": "127.0.0.1"}, "127.0.0.1"),
-            ({"endpoint": "node.example.com", "ip": "127.0.0.1"}, "node.example.com"),
+            ({"endpoint": "", "ip": "10.0.0.1"}, ""),
+            ({"endpoint": None, "ip": "10.0.0.1"}, ""),
+            ({"ip": "10.0.0.1"}, ""),
+            ({"endpoint": "node.example.com", "ip": "10.0.0.1"}, "node.example.com"),
         ],
-        ids=["empty-endpoint", "absent-endpoint", "endpoint-preferred"],
+        ids=["empty-endpoint", "null-endpoint", "absent-endpoint", "endpoint-present"],
     )
-    def test_host_falls_back_to_ip(self, node, expected_host):
+    def test_unknown_endpoint_is_left_empty(self, node, expected_host):
+        """An unknown endpoint must not resolve to ``ip``.
+
+        Redis returns a null or empty endpoint when the node does not know the
+        address clients reach it at, and requires the caller to reuse the host it
+        queried. ``ip`` is the node's internal address, which is unreachable when
+        the cluster sits behind a load balancer.
+        """
         response = [
             {"slots": [0, 1], "nodes": [{**node, "port": 7000, "role": "master"}]}
         ]
@@ -4302,7 +4312,7 @@ class TestClusterTopologyProvider:
                 "slots": [0, 1],
                 "nodes": [
                     {
-                        "ip": "127.0.0.1",
+                        "endpoint": "127.0.0.1",
                         "port": 7000,
                         "tls-port": 7100,
                         "role": "master",
@@ -4323,7 +4333,7 @@ class TestClusterTopologyProvider:
             {
                 "slots": [0, 1],
                 "nodes": [
-                    {"ip": "127.0.0.1", "tls-port": 7100, "role": "master"},
+                    {"endpoint": "127.0.0.1", "tls-port": 7100, "role": "master"},
                 ],
             }
         ]
@@ -4428,6 +4438,56 @@ class TestNodesManagerTopologyProvider:
         )
 
         assert list(rc.nodes_manager.nodes_cache) == ["127.0.0.1:7000"]
+
+    @pytest.mark.parametrize("endpoint", ["", None], ids=["empty", "null"])
+    def test_unknown_endpoint_routes_to_queried_host(self, endpoint):
+        """Nodes behind a load balancer must not be reached at their internal ip."""
+        rc = get_mocked_redis_client(
+            url="redis://127.0.0.1:7000",
+            cluster_shards=[
+                {
+                    "slots": [0, REDIS_CLUSTER_HASH_SLOTS - 1],
+                    "nodes": [
+                        {
+                            "endpoint": endpoint,
+                            "ip": "10.0.0.1",
+                            "port": 7000,
+                            "role": "master",
+                            "health": "online",
+                        },
+                        {
+                            "endpoint": endpoint,
+                            "ip": "10.0.0.2",
+                            "port": 7001,
+                            "role": "replica",
+                            "health": "online",
+                        },
+                    ],
+                }
+            ],
+            topology_provider=ClusterShardsTopologyProvider(),
+        )
+
+        # The internal 10.0.0.x addresses must not appear for either role.
+        assert sorted(rc.nodes_manager.nodes_cache) == [
+            "127.0.0.1:7000",
+            "127.0.0.1:7001",
+        ]
+
+    @pytest.mark.parametrize(
+        "cluster_class", [RedisCluster, AsyncRedisCluster], ids=["sync", "async"]
+    )
+    def test_topology_provider_is_last_positional_parameter(self, cluster_class):
+        """Appending keeps every pre-existing positional argument at its index."""
+        names = [
+            name
+            for name, parameter in inspect.signature(
+                cluster_class.__init__
+            ).parameters.items()
+            if name != "self" and parameter.kind is parameter.POSITIONAL_OR_KEYWORD
+        ]
+
+        assert names[-1] == "topology_provider"
 
 
 @pytest.mark.fixed_client

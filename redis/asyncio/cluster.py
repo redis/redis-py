@@ -471,10 +471,10 @@ class RedisCluster(
         address_remap: Callable[[Tuple[str, int]], Tuple[str, int]] | None = None,
         event_dispatcher: EventDispatcher | None = None,
         policy_resolver: AsyncPolicyResolver | None = None,
+        maint_notifications_config: MaintNotificationsConfig | None = None,
         topology_provider: AsyncClusterTopologyProvider = (
             AsyncClusterSlotsTopologyProvider()
         ),
-        maint_notifications_config: MaintNotificationsConfig | None = None,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -2337,7 +2337,8 @@ class NodesManager:
                     replicas,
                 ) in self._topology_provider.parse(topology_response):
                     host, port = primary
-                    # A single-node cluster reports its own host as ''.
+                    # An empty host means the node does not know its own address
+                    # and must be reached at the host that answered this command.
                     if host == "":
                         host = startup_node.host
                     host, port = self.remap_host_port(host, port)
@@ -2354,6 +2355,8 @@ class NodesManager:
                     nodes_for_slot.append(target_node)
 
                     for replica_host, replica_port in replicas:
+                        if replica_host == "":
+                            replica_host = startup_node.host
                         replica_host, replica_port = self.remap_host_port(
                             replica_host, replica_port
                         )

@@ -3731,6 +3731,42 @@ class TestNodesManagerTopologyProvider:
         assert list(rc.nodes_manager.nodes_cache) == ["127.0.0.1:7000"]
         await rc.aclose()
 
+    @pytest.mark.parametrize("endpoint", ["", None], ids=["empty", "null"])
+    async def test_unknown_endpoint_routes_to_queried_host(self, endpoint):
+        """Nodes behind a load balancer must not be reached at their internal ip."""
+        rc = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_shards=[
+                {
+                    "slots": [0, REDIS_CLUSTER_HASH_SLOTS - 1],
+                    "nodes": [
+                        {
+                            "endpoint": endpoint,
+                            "ip": "10.0.0.1",
+                            "port": 7000,
+                            "role": "master",
+                            "health": "online",
+                        },
+                        {
+                            "endpoint": endpoint,
+                            "ip": "10.0.0.2",
+                            "port": 7001,
+                            "role": "replica",
+                            "health": "online",
+                        },
+                    ],
+                }
+            ],
+            topology_provider=AsyncClusterShardsTopologyProvider(),
+        )
+
+        assert sorted(rc.nodes_manager.nodes_cache) == [
+            "127.0.0.1:7000",
+            "127.0.0.1:7001",
+        ]
+        await rc.aclose()
+
 
 @pytest.mark.fixed_client
 class TestClusterNodeConnectionHandling:

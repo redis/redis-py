@@ -737,9 +737,9 @@ class RedisCluster(
         cache_config: Optional[CacheConfig] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
         policy_resolver: Optional[PolicyResolver] = None,
-        topology_provider: ClusterTopologyProvider = ClusterSlotsTopologyProvider(),
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
         metadata_resolver: Optional[MetadataResolver] = None,
+        topology_provider: ClusterTopologyProvider = ClusterSlotsTopologyProvider(),
         **kwargs,
     ):
         """
@@ -2868,7 +2868,8 @@ class NodesManager:
                     replicas,
                 ) in self._topology_provider.parse(topology_response):
                     host, port = primary
-                    # A single-node cluster reports its own host as ''.
+                    # An empty host means the node does not know its own address
+                    # and must be reached at the host that answered this command.
                     if host == "":
                         host = startup_node.host
                     host, port = self.remap_host_port(host, port)
@@ -2881,6 +2882,8 @@ class NodesManager:
                     nodes_for_slot.append(target_node)
 
                     for replica_host, replica_port in replicas:
+                        if replica_host == "":
+                            replica_host = startup_node.host
                         replica_host, replica_port = self.remap_host_port(
                             replica_host, replica_port
                         )
