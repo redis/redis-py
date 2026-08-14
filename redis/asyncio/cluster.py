@@ -2480,9 +2480,12 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
     Of those, only ``reset``, ``discard``, ``watch``, ``unwatch`` and ``unlink`` return
     ``None``, so only they fail to chain once awaited. The rest return a value:
     ``execute`` a ``list``, ``initialize`` the pipeline, ``himport_prepare`` a ``bool``
-    and the two ``himport_discard`` methods an ``int``. Inherited command coroutines
-    such as ``command_info``, ``cluster_delslots``, ``client_tracking_on`` and the
-    ``hotkeys_*`` family must be awaited too and are not listed here.
+    and the two ``himport_discard`` methods an ``int``.
+
+    That list covers only the methods defined on this class. Inherited command
+    coroutines such as ``command_info``, ``cluster_delslots``, ``client_tracking_on``
+    and the ``hotkeys_*`` family are not pipeline steps: awaiting one awaits the
+    pipeline itself, which re-initializes it and discards everything staged so far.
 
     `unlink` is the surprising one, because `delete` sits beside it in the note above
     and behaves the other way::
