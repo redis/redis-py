@@ -38,8 +38,12 @@ def _slot_ranges(slots: Any) -> list[tuple[int, int]]:
 
 
 def _node_address(node: dict[str, Any], prefer_tls_port: bool) -> SlotOwner:
-    endpoint = _as_str(node.get("endpoint", ""))
-    host = endpoint or _as_str(node.get("ip", ""))
+    # A null or empty endpoint means the node's address is unknown to itself
+    # (typically because it sits behind a load balancer); the caller must reach
+    # it at the host the topology command was sent to, so leave the host empty
+    # rather than substituting ``ip``, which is the unreachable internal address.
+    endpoint = node.get("endpoint")
+    host = "" if endpoint is None else _as_str(endpoint)
 
     port_keys = ("tls-port", "port") if prefer_tls_port else ("port", "tls-port")
     port = next(
