@@ -599,10 +599,16 @@ class TestClusterCache:
         ]
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
-        # Add a small delay to allow invalidation to be processed
-        time.sleep(0.1)
+        # Add a delay / wait loop to allow invalidation to be processed across cluster nodes
+        start_time = time.time()
+        res = None
+        while time.time() - start_time < 3.0:
+            res = r.get("foo")
+            if res in [b"barbar", "barbar"]:
+                break
+            time.sleep(0.05)
         # Retrieves a new value from server and cache it
-        assert r.get("foo") in [b"barbar", "barbar"]
+        assert res in [b"barbar", "barbar"]
         # Make sure that new value was cached
         assert cache.get(
             CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
