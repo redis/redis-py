@@ -84,20 +84,40 @@ def test_connection_default_parser_matches_default_protocol():
 
 
 @pytest.mark.parametrize(
-    ("buffer", "eof", "expected"),
+    ("buffer", "expected"),
     [
-        (b"", False, False),
-        (b"+OK\r\n", False, True),
-        (b"", True, True),
+        (b"", False),
+        (b"+OK\r\n", True),
     ],
 )
-async def test_async_hiredis_can_read_uses_buffer_without_reading(
-    buffer, eof, expected
-):
-    stream = DummyAsyncStream(buffer=buffer, eof=eof)
+async def test_async_hiredis_can_read_uses_buffer_without_reading(buffer, expected):
+    stream = DummyAsyncStream(buffer=buffer)
     parser = make_async_hiredis_parser(stream)
 
     assert await parser.can_read() is expected
+    assert stream.read_called is False
+
+
+async def test_async_hiredis_can_read_raises_on_eof():
+    # a server-closed connection must raise like the sync SocketBuffer does,
+    # not report readable data (#4252)
+    stream = DummyAsyncStream(eof=True)
+    parser = make_async_hiredis_parser(stream)
+
+    with pytest.raises(ConnectionError):
+        await parser.can_read()
+    assert stream.read_called is False
+
+
+async def test_async_hiredis_can_read_prefers_buffered_data_over_eof():
+    # a reply or push notification the reader already buffered must stay
+    # readable even if the server has since closed the connection,
+    # matching the sync parser's has_data-first ordering
+    stream = DummyAsyncStream(eof=True)
+    parser = make_async_hiredis_parser(stream, response=b"OK", has_data=True)
+
+    assert await parser.can_read() is True
+    assert await parser.read_response() == b"OK"
     assert stream.read_called is False
 
 
@@ -162,6 +182,35 @@ async def test_async_resp_can_read_detects_stream_buffer(parser_class):
     parser = parser_class(socket_read_size=65536)
     parser._connected = True
     parser._stream = stream
+
+    assert await parser.can_read() is True
+    assert stream.read_called is False
+
+
+@pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
+async def test_async_resp_can_read_raises_on_eof(parser_class):
+    # a server-closed connection must raise like the sync SocketBuffer does,
+    # not report readable data (#4252)
+    stream = DummyAsyncStream(eof=True)
+    parser = parser_class(socket_read_size=65536)
+    parser._connected = True
+    parser._stream = stream
+
+    with pytest.raises(ConnectionError):
+        await parser.can_read()
+    assert stream.read_called is False
+
+
+@pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
+async def test_async_resp_can_read_prefers_buffered_data_over_eof(parser_class):
+    # data the parser already buffered must stay readable even if the server
+    # has since closed the connection, matching the sync SocketBuffer's
+    # buffer-first ordering
+    stream = DummyAsyncStream(eof=True)
+    parser = parser_class(socket_read_size=65536)
+    parser._connected = True
+    parser._stream = stream
+    parser._buffer = b"+OK\r\n"
 
     assert await parser.can_read() is True
     assert stream.read_called is False
@@ -562,6 +611,41 @@ async def test_pool_auto_close(request, from_url):
     r1 = await get_redis_connection()
     assert r1.auto_close_connection_pool is True
     await r1.aclose()
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
+@skip_if_server_version_lt("5.0.0")
+async def test_pool_replaces_connection_killed_while_idle(request):
+    """
+    Regression test for #4252: a pooled connection the server closed while
+    it sat idle (CLIENT KILL, idle timeout, server-side reap) must be
+    replaced at pool checkout instead of failing the next command.
+    Retries are disabled so recovery can only come from the pool.
+    """
+    url: str = request.config.getoption("--redis-url")
+    r = Redis.from_url(url, retry=Retry(NoBackoff(), 0))
+    killer = Redis.from_url(url)
+    try:
+        cid = await r.client_id()
+        conn = r.connection_pool._available_connections[0]
+        assert await killer.client_kill_filter(_id=str(cid))
+
+        # wait until the client's event loop has seen the server-side close
+        deadline = asyncio.get_running_loop().time() + 3
+        while not conn._parser._stream.at_eof():
+            assert asyncio.get_running_loop().time() < deadline, (
+                "server-side kill never surfaced on the client socket"
+            )
+            await asyncio.sleep(0.01)
+
+        # the next command must be served by a healthy replacement connection
+        assert await r.ping()
+    finally:
+        await r.aclose()
+        await r.connection_pool.disconnect()
+        await killer.aclose()
+        await killer.connection_pool.disconnect()
 
 
 async def test_close_is_aclose(request):
