@@ -6,6 +6,8 @@ from unittest.mock import patch
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
+from redis._parsers import _AsyncHiredisParser, _AsyncRESP3Parser
+from redis.utils import HIREDIS_AVAILABLE
 from redis.asyncio.connection import (
     BlockingConnectionPool,
     Connection,
@@ -331,6 +333,74 @@ class TestConnectionPool:
             # Clean up
             for conn in connections:
                 await pool.release(conn)
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize(
+        "parser_class",
+        [
+            _AsyncRESP3Parser,
+            pytest.param(
+                _AsyncHiredisParser,
+                marks=pytest.mark.skipif(
+                    not HIREDIS_AVAILABLE, reason="hiredis is not installed"
+                ),
+            ),
+        ],
+    )
+    @pytest.mark.parametrize("maint_notifications_enabled", [True, False])
+    async def test_get_connection_replaces_closed_idle_connection(
+        self, maint_notifications_enabled, parser_class
+    ):
+        """
+        A pooled connection whose socket the server closed while it sat idle
+        must be reconnected at checkout. Regression test for #4252: with
+        maintenance notifications enabled, the pending-push-data exemption
+        must not swallow the EOF signal and hand out the dead connection.
+        """
+        async with self.get_pool(connection_class=redis.Connection) as pool:
+            conn = pool.make_connection()
+            conn.set_parser(parser_class)
+
+            # simulate a connection that was healthy when released to the
+            # pool but whose socket the server has since closed
+            eof_stream = asyncio.StreamReader()
+            eof_stream.feed_eof()
+            conn._parser._connected = True
+            conn._parser._stream = eof_stream
+            if parser_class is _AsyncHiredisParser:
+                # on_connect() normally creates the hiredis reader; the test
+                # never dials, so give it one with an empty buffer
+                conn._parser._reader = mock.Mock(has_data=mock.Mock(return_value=False))
+            fake_writer = mock.Mock()
+            fake_writer.wait_closed = AsyncMock(return_value=None)
+            conn._reader = eof_stream
+            conn._writer = fake_writer
+
+            async def fake_connect():
+                # mirror the real connect(): a no-op unless disconnected
+                if conn.is_connected:
+                    return
+                conn._parser._connected = True
+                conn._parser._stream = asyncio.StreamReader()
+                conn._reader = conn._parser._stream
+                conn._writer = fake_writer
+
+            conn.connect = AsyncMock(side_effect=fake_connect)
+            pool._available_connections.append(conn)
+
+            with mock.patch.object(
+                pool,
+                "maint_notifications_enabled",
+                return_value=maint_notifications_enabled,
+            ):
+                checked_out = await pool.get_connection()
+
+            assert checked_out is conn
+            # ensure_connection() detected the EOF and reconnected: once for
+            # the initial ensure, once after discarding the dead socket
+            assert conn.connect.await_count == 2
+            assert conn._parser._stream is not eof_stream
+            await pool.release(conn)
 
 
 class TestBlockingConnectionPool:
