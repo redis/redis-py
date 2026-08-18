@@ -827,10 +827,16 @@ class RedisCluster(
             routing from the connected server, pass a `DynamicMetadataResolver` built from a
             live `COMMAND` reply - use it with care, because reading that reply relies on a
             class in the private `redis._parsers` package. Note that a server-derived resolver
-            decides routing here too, and the server tips commands such as `EXISTS` and `DEL`
-            with the `multi_shard` request policy this client does not yet implement, so pair
-            one with an explicit `policy_resolver=StaticPolicyResolver()` to keep routing on
-            the shipped records.
+            decides routing here too, and two families of command route worse from the live
+            reply than from the shipped records. The server tips commands such as `EXISTS` and
+            `DEL` with the `multi_shard` request policy this client does not yet implement. And
+            the `movablekeys` reads - `ZINTER`, `ZUNION`, `ZDIFF`, `ZINTERCARD`, `SINTERCARD`,
+            `XREAD` - report their keys only in their key specs, so the live reply yields
+            keyless policies that send them to an arbitrary node rather than the one holding
+            their keys; the shipped records withhold those policies instead, which is what
+            leaves the client to resolve the keys through `COMMAND GETKEYS`. So pair such a
+            resolver with an explicit `policy_resolver=StaticPolicyResolver()` to keep routing
+            on the shipped records.
         :param maint_notifications_config:
             Configures the nodes connections to support maintenance notifications - see
             `redis.maint_notifications.MaintNotificationsConfig` for details.

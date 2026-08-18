@@ -18,6 +18,27 @@ from redis.commands.metadata import (
 )
 from redis.utils import warn_deprecated
 
+# ``STATIC_POLICIES`` is named here because it is served by the module ``__getattr__`` below
+# rather than bound in the module namespace, and a wildcard import only reaches a lazy
+# attribute through ``__all__``. The metadata resolvers this module imports are deliberately
+# left out: their home is ``redis.commands.metadata``.
+__all__ = [
+    "AsyncBasePolicyResolver",
+    "AsyncDynamicPolicyResolver",
+    "AsyncPolicyResolver",
+    "AsyncStaticPolicyResolver",
+    "BasePolicyResolver",
+    "CommandPolicies",
+    "CommandsParser",
+    "DynamicPolicyResolver",
+    "PolicyRecords",
+    "PolicyResolver",
+    "RequestPolicy",
+    "ResponsePolicy",
+    "STATIC_POLICIES",
+    "StaticPolicyResolver",
+]
+
 # =====================================================================================
 # DEPRECATED - DO NOT USE, DO NOT EDIT, DO NOT ADD TO.
 #
@@ -36,6 +57,12 @@ from redis.utils import warn_deprecated
 #
 # To change routing, edit ``_STATIC_COMMAND_METADATA``. Nothing here.
 # =====================================================================================
+#
+# Declared without a value so that linters and type checkers see the name that ``__all__``
+# exports while the module ``__getattr__`` still serves it: an annotation alone binds nothing
+# at runtime, whereas assigning here would bypass the deprecation warning.
+STATIC_POLICIES: PolicyRecords
+
 _DEPRECATED_STATIC_POLICIES: PolicyRecords = {
     "ft": {
         "explaincli": CommandPolicies(

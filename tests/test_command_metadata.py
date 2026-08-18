@@ -34,6 +34,13 @@ from redis.commands.policies import (
     StaticPolicyResolver,
 )
 from redis.utils import str_if_bytes
+from tests.conftest import skip_if_server_version_lt
+
+# The server the static table was generated from.
+# 8.10 is the first release that reports every command the
+# table carries (FT.ALIASLIST) and the first that reports the ``script_runner``
+# flag, so the guards that compare the whole table against the live reply cannot run below it.
+STATIC_TABLE_SERVER_VERSION = "8.10.0"
 
 # Shape of a plain cacheable keyed read, used to stand in for live metadata in the
 # resolver unit tests below.
@@ -1439,11 +1446,17 @@ class TestStaticMetadataAgainstServer:
     what the server says. Assertions on tips a server may not report yet are gated on the
     server reporting that tip for any command at all, rather than on a version number.
 
+    The tests that walk the whole table are gated on the server the table was generated from,
+    which a per-tip probe cannot stand in for: the table carries commands an older server does
+    not report at all (FT.ALIASLIST, and VRANDMEMBER below 8.0), and the ``script_runner`` flag
+    only reaches the client from 8.10 on. The tests that hold on any server are left ungated.
+
     The one exception is ``LIVE_CACHEABILITY_DIVERGENCE``, whose divergence from the reply is
     the point of the record; it is pinned in both directions, so the record cannot rot and the
     day the server starts agreeing shows up as a failure here.
     """
 
+    @skip_if_server_version_lt(STATIC_TABLE_SERVER_VERSION)
     def test_static_metadata_matches_live_command_metadata(self, stack_r):
         live_commands = live_command_details(stack_r.command())
         static_resolver = StaticMetadataResolver()
@@ -1560,6 +1573,7 @@ class TestStaticMetadataAgainstServer:
         # does for the script runners above on a server that predates the script_runner flag.
         assert dynamic_resolver.is_cacheable("touch") is True
 
+    @skip_if_server_version_lt(STATIC_TABLE_SERVER_VERSION)
     def test_dynamic_resolver_matches_the_static_table(self, stack_r):
         """
         Both resolver paths must produce the same record for the same command.
@@ -1626,6 +1640,8 @@ class TestStaticMetadataAgainstServer:
             *ALL_WITHHELD_ROUTING_COMMANDS,
         }
 
+    # VRANDMEMBER is a vectorset command, so it is only reported from Redis 8.0 on.
+    @skip_if_server_version_lt("8.0.0")
     @pytest.mark.parametrize("name,field", LIVE_CACHEABILITY_DIVERGENCE.items())
     def test_the_recorded_divergence_from_the_live_reply_is_still_needed(
         self, stack_r, name, field
@@ -1655,6 +1671,7 @@ class TestStaticMetadataAgainstServer:
         chain = static_resolver.with_fallback(dynamic_resolver)
         assert chain.is_cacheable(name) is False, name
 
+    @skip_if_server_version_lt(STATIC_TABLE_SERVER_VERSION)
     def test_dynamic_resolver_covers_commands_the_static_table_does_not(self, stack_r):
         """
         The commands the table leaves out, resolved from the server instead. These are the
@@ -1690,6 +1707,7 @@ class TestStaticMetadataAgainstServer:
         # Container subcommands resolve under their space-joined name.
         assert dynamic_resolver.resolve("memory usage").is_readonly is True
 
+    @skip_if_server_version_lt(STATIC_TABLE_SERVER_VERSION)
     def test_the_live_chain_broadens_eligibility_only_through_its_fallback(
         self, stack_r
     ):
