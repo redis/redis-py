@@ -8923,11 +8923,6 @@ class SortedSetCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/zrange
         """
-        # Need to support ``desc`` also when using old redis version
-        # because it was supported in 3.5.3 (of redis-py)
-        if not byscore and not bylex and (offset is None and num is None) and desc:
-            return self.zrevrange(name, start, end, withscores, score_cast_func)
-
         return self._zrange(
             "ZRANGE",
             None,
