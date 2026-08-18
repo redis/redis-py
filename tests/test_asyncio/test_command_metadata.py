@@ -768,13 +768,16 @@ class TestAsyncStaticMetadataAgainstServer:
     Async mirror of the sync drift guard for ``_STATIC_COMMAND_METADATA``.
 
     The table is generated from a live ``COMMAND`` reply, so every entry must keep saying
-    what the server says. Assertions on tips a server may not report yet are gated on the
-    server reporting that tip for any command at all, rather than on a version number.
+    what the server says. Within a test, an assertion on a tip the running server may not
+    report yet is gated on the server reporting that tip for any command at all.
 
-    The tests that walk the whole table are gated on the server the table was generated from,
-    which a per-tip probe cannot stand in for: the table carries commands an older server does
-    not report at all (FT.ALIASLIST, and VRANDMEMBER below 8.0), and the ``script_runner`` flag
-    only reaches the client from 8.10 on. The tests that hold on any server are left ungated.
+    The tests that read the live reply for the richer flags and tips 8.10 started reporting -
+    the ``script_runner`` flag, and the ``dont_cache`` tip on the module surfaces - are gated on
+    that release. It is also the server the table was generated from, and the first that reports
+    every command the table carries (FT.ALIASLIST, and VRANDMEMBER below 8.0). Nothing those
+    commands do changed in the server; it only started describing them accurately, and the static
+    table already carries the right data. A test that holds on any server - one that reads no live
+    metadata, or only the absence of a tip - is left ungated.
 
     The one exception is ``LIVE_CACHEABILITY_DIVERGENCE``, whose divergence from the reply is
     the point of the record; it is pinned in both directions, so the record cannot rot and the
@@ -843,6 +846,7 @@ class TestAsyncStaticMetadataAgainstServer:
             len(commands) for commands in _STATIC_COMMAND_METADATA.values()
         )
 
+    @skip_if_server_version_lt(STATIC_TABLE_SERVER_VERSION)
     async def test_eligibility_matches_the_specified_rules(self, stack_client):
         """
         The cacheability view, decided from live server metadata rather than the table.

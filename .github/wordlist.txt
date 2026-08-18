@@ -138,6 +138,7 @@ iff
 ini
 json
 keyevent
+keyless
 keyslot
 keyspace
 kwarg
@@ -185,6 +186,7 @@ reinitialization
 replicaof
 repo
 resharding
+resolvers
 runtime
 sedrik
 serializers
