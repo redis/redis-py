@@ -23,12 +23,14 @@ from redis._parsers.socket import SocketBuffer
 from redis.backoff import NoBackoff
 from redis.cache import (
     CacheConfig,
+    CacheConfigurationInterface,
     CacheEntry,
     CacheEntryStatus,
     CacheInterface,
     CacheKey,
     CacheProxy,
     DefaultCache,
+    EvictionPolicy,
     LRUPolicy,
 )
 from redis.connection import (
@@ -39,6 +41,7 @@ from redis.connection import (
     parse_url,
     BlockingConnectionPool,
 )
+from redis.commands.metadata import DynamicMetadataResolver
 from redis.credentials import UsernamePasswordCredentialProvider
 from redis.event import (
     EventDispatcher,
@@ -1025,6 +1028,139 @@ class TestUnitConnectionPool:
         assert isinstance(connection_pool.make_connection(), CacheProxyConnection)
         connection_pool.disconnect()
 
+    def test_injects_the_metadata_resolver_into_the_cache_config(self):
+        # The eligible set is the resolver's, not the config's: a resolver that carries
+        # nothing reports every command ineligible.
+        empty_resolver = DynamicMetadataResolver({})
+        cache_config = CacheConfig(max_size=17)
+
+        connection_pool = ConnectionPool(
+            protocol=3,
+            cache_config=cache_config,
+            metadata_resolver=empty_resolver,
+        )
+
+        assert connection_pool.metadata_resolver is empty_resolver
+        assert connection_pool.cache.config.is_allowed_to_cache("GET") is False
+        # Every other setting of the caller's config still applies.
+        assert connection_pool.cache.config.get_max_size() == 17
+        connection_pool.disconnect()
+
+    def test_does_not_write_the_resolver_into_the_callers_cache_config(self):
+        """
+        A ``CacheConfig`` carries only sizing and eviction settings, so reusing one across
+        clients is reasonable - and writing the resolver into it would give every one of them
+        whichever resolver was injected last.
+        """
+        empty_resolver = DynamicMetadataResolver({})
+        cache_config = CacheConfig()
+
+        first = ConnectionPool(protocol=3, cache_config=cache_config)
+        second = ConnectionPool(
+            protocol=3, cache_config=cache_config, metadata_resolver=empty_resolver
+        )
+
+        # The caller's object is untouched, so the pool that was given no resolver keeps
+        # deciding through the static default.
+        assert cache_config.is_allowed_to_cache("GET") is True
+        assert first.cache.config.is_allowed_to_cache("GET") is True
+        assert second.cache.config.is_allowed_to_cache("GET") is False
+        first.disconnect()
+        second.disconnect()
+
+    def test_injects_the_metadata_resolver_into_a_given_caches_config(self):
+        # ``cache=`` rather than ``cache_config=``: the configuration lives inside the cache
+        # the caller handed over and cannot be swapped without rebuilding it, so it is set in
+        # place. Both styles end up on the same decision point.
+        empty_resolver = DynamicMetadataResolver({})
+        cache = DefaultCache(CacheConfig())
+
+        connection_pool = ConnectionPool(
+            protocol=3, cache=cache, metadata_resolver=empty_resolver
+        )
+
+        assert cache.config.is_allowed_to_cache("GET") is False
+        connection_pool.disconnect()
+
+    def test_injects_the_metadata_resolver_into_a_cache_factorys_config(
+        self, mock_cache_factory
+    ):
+        empty_resolver = DynamicMetadataResolver({})
+        mock_cache_factory.get_cache.return_value = DefaultCache(CacheConfig())
+
+        connection_pool = ConnectionPool(
+            protocol=3,
+            cache_config=CacheConfig(),
+            cache_factory=mock_cache_factory,
+            metadata_resolver=empty_resolver,
+        )
+
+        assert connection_pool.cache.config.is_allowed_to_cache("GET") is False
+        connection_pool.disconnect()
+
+    def test_leaves_a_custom_cache_configuration_alone(self):
+        """
+        ``CacheConfigurationInterface`` is public and implemented by third parties, so the
+        injection is isinstance-guarded and a custom configuration keeps its own eligibility
+        logic.
+
+        The double implements the ABC without subclassing ``CacheConfig``, which is what makes
+        the guard observable: a ``CacheConfig`` subclass satisfies the isinstance check, so it
+        would be copied and injected into and prove nothing.
+        """
+
+        class _AllowEverything(CacheConfigurationInterface):
+            def get_cache_class(self):
+                return DefaultCache
+
+            def get_max_size(self) -> int:
+                return 10
+
+            def get_eviction_policy(self):
+                return EvictionPolicy.LRU
+
+            def is_exceeds_max_size(self, count: int) -> bool:
+                return count > self.get_max_size()
+
+            def is_allowed_to_cache(self, command: str) -> bool:
+                return True
+
+        cache_config = _AllowEverything()
+        connection_pool = ConnectionPool(
+            protocol=3,
+            cache_config=cache_config,
+            metadata_resolver=DynamicMetadataResolver({}),
+        )
+
+        # Not copied, so the object the cache decides through is the caller's own...
+        assert connection_pool.cache.config is cache_config
+        # ...and not injected into, so it still answers from its own logic rather than from
+        # the resolver, which carries no records and would report everything ineligible.
+        assert connection_pool.cache.config.is_allowed_to_cache("SET") is True
+        assert cache_config.is_allowed_to_cache("SET") is True
+        connection_pool.disconnect()
+
+    def test_cache_config_is_functional_without_an_injected_resolver(self):
+        # No client configured one, so the config decides through the static metadata this
+        # library ships - which is what keeps a standalone ``CacheConfig()`` usable.
+        connection_pool = ConnectionPool(protocol=3, cache_config=CacheConfig())
+
+        assert connection_pool.metadata_resolver is None
+        assert connection_pool.cache.config.is_allowed_to_cache("GET") is True
+        assert connection_pool.cache.config.is_allowed_to_cache("SET") is False
+        connection_pool.disconnect()
+
+    def test_redis_forwards_the_metadata_resolver_to_the_pool(self):
+        empty_resolver = DynamicMetadataResolver({})
+
+        client = Redis(
+            protocol=3, cache_config=CacheConfig(), metadata_resolver=empty_resolver
+        )
+
+        assert client.connection_pool.metadata_resolver is empty_resolver
+        assert client.connection_pool.cache.config.is_allowed_to_cache("GET") is False
+        client.close()
+
 
 @pytest.mark.fixed_client
 class TestUnitCacheProxyConnection:
@@ -1058,6 +1194,59 @@ class TestUnitCacheProxyConnection:
         proxy_connection.disconnect()
 
         assert len(cache.collection) == 0
+
+    def test_cacheable_command_without_keys_bypasses_the_cache(
+        self, mock_cache, mock_connection
+    ):
+        """
+        Eligibility and keyability are separate: a cacheable command whose invocation carries
+        no key list must be sent normally, with caching skipped.
+
+        Regression for ``ValueError: Cannot create cache key.``, which every eligible command
+        method that does not pass ``keys=`` used to raise - ZRANK among them. The reply must
+        be the server's, and nothing may be stored under a key the client cannot build.
+        """
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection._event_dispatcher = EventDispatcher()
+
+        mock_connection.read_response.return_value = 0
+        mock_connection.can_read.return_value = False
+
+        # A real cache holding a VALID entry for a previous command, so that failing to clear
+        # the current cache key would serve that entry as this command's reply.
+        cache = DefaultCache(CacheConfig(max_size=10))
+        stale_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache.set(
+            CacheEntry(
+                cache_key=stale_key,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+        proxy_connection._current_command_cache_key = stale_key
+
+        proxy_connection.send_command("ZRANK", "foo", "bar")
+
+        # Sent, once, exactly as given.
+        mock_connection.send_command.assert_called_once_with("ZRANK", "foo", "bar")
+        # The previous command's key is cleared, so nothing can be served under it...
+        assert proxy_connection._current_command_cache_key is None
+        # ...the reply the caller receives is the server's, not the cached b"bar"...
+        assert proxy_connection.read_response() == 0
+        # ...and nothing new was stored, because there is no key to store it under.
+        assert cache.size == 1
+        assert cache.get(stale_key).cache_value == b"bar"
 
     def test_himport_prepared_is_reassignable_through_proxy(self):
         # Regression: `_himport_prepared` must have a setter that delegates to the
