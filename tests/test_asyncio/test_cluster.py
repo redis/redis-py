@@ -3590,6 +3590,81 @@ class TestClusterNodeConnectionHandling:
         # Should not raise
         await node.disconnect_free_connections()
 
+    async def test_execute_command_reuses_closed_remarked_connection_inline(
+        self,
+    ) -> None:
+        class RaceConnection:
+            def __init__(self, **kwargs: Any) -> None:
+                self.host = kwargs["host"]
+                self.port = kwargs["port"]
+                self.db = kwargs.get("db", 0)
+                self.is_connected = True
+                self._reconnect = False
+                self.send_started = asyncio.Event()
+                self.response_ready = asyncio.Event()
+                self.disconnect_started = asyncio.Event()
+                self.allow_disconnect = asyncio.Event()
+                self.disconnect_calls = 0
+
+            def pack_command(self, *args: Any) -> bytes:
+                return b"packed-command"
+
+            async def send_packed_command(self, command: Any) -> None:
+                self.send_started.set()
+
+            async def read_response(self, *args: Any, **kwargs: Any) -> bytes:
+                await self.response_ready.wait()
+                return b"value"
+
+            def mark_for_reconnect(self) -> None:
+                self._reconnect = True
+
+            def should_reconnect(self) -> bool:
+                return self._reconnect
+
+            def reset_should_reconnect(self) -> None:
+                self._reconnect = False
+
+            async def disconnect(self) -> None:
+                self.disconnect_calls += 1
+                self.reset_should_reconnect()
+
+                if not self.is_connected:
+                    return
+
+                self.disconnect_started.set()
+                await self.allow_disconnect.wait()
+                self.is_connected = False
+
+        node = ClusterNode(
+            default_host,
+            7000,
+            max_connections=1,
+            connection_class=RaceConnection,
+        )
+        connection = RaceConnection(host=default_host, port=7000)
+        node._connections = [connection]
+        node._free.append(connection)
+
+        async def remark_during_disconnect() -> None:
+            await connection.send_started.wait()
+            node.update_active_connections_for_reconnect()
+            connection.response_ready.set()
+
+            await connection.disconnect_started.wait()
+            node.update_active_connections_for_reconnect()
+            connection.allow_disconnect.set()
+
+        remark_task = asyncio.create_task(remark_during_disconnect())
+
+        assert await node.execute_command("GET", "key") == b"value"
+        await remark_task
+
+        assert node.acquire_connection() is connection
+        assert node._background_tasks == set()
+        assert connection.should_reconnect() is False
+        assert connection.disconnect_calls == 1
+
     async def test_release_with_reconnect_flag(self) -> None:
         """
         Test that release() disconnects a connection marked for reconnect before
@@ -3657,6 +3732,8 @@ class TestClusterNodeConnectionHandling:
         """
 
         class FakeConnection:
+            is_connected = True
+
             def should_reconnect(self) -> bool:
                 return True
 
