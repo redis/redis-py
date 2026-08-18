@@ -878,6 +878,17 @@ class TestSSLConnectionURLParsing:
         assert pool.connection_class == redis.SSLConnection
         assert_kwargs_subset(pool.connection_kwargs, {"host": "my.host"})
 
+    def test_custom_ssl_context(self):
+        context = ssl.create_default_context()
+
+        class DummyConnectionPool(redis.ConnectionPool):
+            def get_connection(self):
+                return self.make_connection()
+
+        pool = DummyConnectionPool.from_url("rediss://my.host", ssl_context=context)
+
+        assert pool.get_connection().ssl_context is context
+
     def test_connection_class_override(self):
         class MyConnection(redis.SSLConnection):
             pass

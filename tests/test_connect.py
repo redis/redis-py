@@ -3,8 +3,10 @@ import socket
 import socketserver
 import ssl
 import threading
+import unittest.mock
 
 import pytest
+import redis
 from redis.connection import Connection, SSLConnection, UnixDomainSocketConnection
 from redis.exceptions import RedisError
 
@@ -46,6 +48,29 @@ def test_uds_connect(uds_address):
     path = str(uds_address)
     conn = UnixDomainSocketConnection(path, client_name=_CLIENT_NAME, socket_timeout=10)
     _assert_connect(conn, path)
+
+
+@pytest.mark.ssl
+def test_tcp_ssl_uses_custom_context(tcp_address):
+    context = unittest.mock.Mock(spec=ssl.SSLContext)
+    wrapped_socket = unittest.mock.Mock()
+    context.wrap_socket.return_value = wrapped_socket
+    conn = SSLConnection(host="localhost", port=tcp_address[1], ssl_context=context)
+
+    assert conn._wrap_socket_with_ssl(unittest.mock.Mock()) is wrapped_socket
+    context.wrap_socket.assert_called_once()
+
+
+@pytest.mark.ssl
+def test_redis_passes_custom_context_to_ssl_connection():
+    context = unittest.mock.Mock(spec=ssl.SSLContext)
+    client = redis.Redis(ssl=True, ssl_context=context)
+
+    try:
+        connection = client.connection_pool.make_connection()
+        assert connection.ssl_context is context
+    finally:
+        client.close()
 
 
 @pytest.mark.ssl
