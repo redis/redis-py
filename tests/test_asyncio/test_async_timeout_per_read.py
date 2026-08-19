@@ -476,3 +476,73 @@ async def test_bulk_read_across_many_small_chunks(factory):
     stream = SlowChunkStream(chunks, delay_between_chunks=0)
     parser = factory(stream, read_size=64)
     assert await parser.read_response() == payload.decode()
+
+
+class StallStream:
+    """Mock StreamReader that blocks forever once its queued chunks run out.
+
+    Simulates a server that stops sending mid-reply: the queued chunks are
+    delivered, then every read stalls until the per-read timeout cancels it.
+    """
+
+    def __init__(self, chunks):
+        self._chunks = list(chunks)
+        self._buffer = b""
+        self._pos = 0
+
+    def feed(self, chunk):
+        self._chunks.append(chunk)
+
+    def at_eof(self):
+        return not self._chunks and self._pos >= len(self._buffer)
+
+    async def read(self, _want):
+        if self._pos >= len(self._buffer):
+            if not self._chunks:
+                await asyncio.sleep(60)
+                return b""
+            self._buffer = self._chunks.pop(0)
+            self._pos = 0
+        result = self._buffer[self._pos :]
+        self._pos += len(result)
+        return result
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [_make_resp2_parser, _make_resp3_parser],
+    ids=["AsyncRESP2Parser", "AsyncRESP3Parser"],
+)
+async def test_timeout_preserves_partially_consumed_bulk(factory):
+    """
+    A per-read timeout firing mid-payload must not drop the bytes already
+    consumed from the stream. Explicit caller timeouts make read_response
+    return None without disconnecting, so a retry on the same connection
+    must reparse the complete reply instead of desynchronizing.
+    """
+    payload = b"helloworld"
+    stream = StallStream([b"$10\r\n", payload[:5]])
+    parser = factory(stream)
+
+    with pytest.raises(asyncio.TimeoutError):
+        await parser.read_response(timeout=0.05)
+
+    stream.feed(payload[5:] + b"\r\n")
+    assert await parser.read_response(timeout=1) == payload.decode()
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [_make_resp2_parser, _make_resp3_parser],
+    ids=["AsyncRESP2Parser", "AsyncRESP3Parser"],
+)
+async def test_timeout_preserves_partially_consumed_line(factory):
+    """Same preservation contract for a line split across the timeout."""
+    stream = StallStream([b"+hel", b"lo"])
+    parser = factory(stream)
+
+    with pytest.raises(asyncio.TimeoutError):
+        await parser.read_response(timeout=0.05)
+
+    stream.feed(b" world\r\n")
+    assert await parser.read_response(timeout=1) == "hello world"

@@ -642,18 +642,28 @@ class _AsyncRESPBase(AsyncBaseParser):
         buffered = len(self._buffer)
         if buffered < end:
             chunks = []
-            while buffered < end:
-                need = end - buffered
-                try:
-                    chunk = await self._read_from_stream(
-                        timeout=timeout, max_bytes=min(need, self._read_size)
-                    )
-                except IncompleteReadError as error:
-                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from error
-                if not chunk:
-                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-                chunks.append(chunk)
-                buffered += len(chunk)
+            try:
+                while buffered < end:
+                    need = end - buffered
+                    try:
+                        chunk = await self._read_from_stream(
+                            timeout=timeout, max_bytes=min(need, self._read_size)
+                        )
+                    except IncompleteReadError as error:
+                        raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from error
+                    if not chunk:
+                        raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+                    chunks.append(chunk)
+                    buffered += len(chunk)
+            except BaseException:
+                # A timeout or cancellation must not drop bytes already
+                # consumed from the stream: an explicit caller timeout makes
+                # read_response return None without disconnecting, so a retry
+                # would continue from the wrong offset and desynchronize the
+                # protocol. Flush the partial payload back into the buffer.
+                if chunks:
+                    self._buffer = b"".join((self._buffer, *chunks))
+                raise
             # Join once: repeated ``self._buffer += chunk`` re-copies the
             # whole buffer per chunk, which is quadratic on large bulk
             # replies and can stall the event loop.
@@ -681,21 +691,29 @@ class _AsyncRESPBase(AsyncBaseParser):
         # One byte of lookback catches a '\r' at the end of the unconsumed
         # buffer straddling the first new chunk.
         tail = self._buffer[-1:] if self._pos < len(self._buffer) else b""
-        while True:
-            try:
-                chunk = await self._read_from_stream(timeout=timeout)
-            except IncompleteReadError as error:
-                raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from error
-            if not chunk:
-                raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-            idx = (tail + chunk).find(b"\r\n")
-            if idx >= 0:
-                # Absolute index of the '\r' within buffer + pending + chunk.
-                found = len(self._buffer) + pending + idx - len(tail)
-                self._buffer = b"".join((self._buffer, *chunks, chunk))
-                result = self._buffer[self._pos : found]
-                self._pos = found + 2
-                return result
-            chunks.append(chunk)
-            pending += len(chunk)
-            tail = chunk[-1:]
+        try:
+            while True:
+                try:
+                    chunk = await self._read_from_stream(timeout=timeout)
+                except IncompleteReadError as error:
+                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from error
+                if not chunk:
+                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+                idx = (tail + chunk).find(b"\r\n")
+                if idx >= 0:
+                    # Absolute index of the '\r' within buffer + pending + chunk.
+                    found = len(self._buffer) + pending + idx - len(tail)
+                    self._buffer = b"".join((self._buffer, *chunks, chunk))
+                    result = self._buffer[self._pos : found]
+                    self._pos = found + 2
+                    return result
+                chunks.append(chunk)
+                pending += len(chunk)
+                tail = chunk[-1:]
+        except BaseException:
+            # Same contract as _read: bytes already consumed from the stream
+            # must survive a timeout/cancellation so a retrying caller stays
+            # in sync with the protocol.
+            if chunks:
+                self._buffer = b"".join((self._buffer, *chunks))
+            raise
