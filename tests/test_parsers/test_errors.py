@@ -2,8 +2,9 @@ import socket
 from unittest.mock import patch
 
 import pytest
+from redis._parsers.base import BaseParser
 from redis.client import Redis
-from redis.exceptions import ExternalAuthProviderError
+from redis.exceptions import ExternalAuthProviderError, ResponseError
 
 
 class MockSocket:
@@ -116,6 +117,17 @@ class MockSocket:
 
     def shutdown(self, how):
         pass
+
+
+def test_unmapped_response_error_preserves_status_code_and_message():
+    response = "BUSYGROUP Consumer Group name already exists"
+
+    error = BaseParser.parse_error(response)
+
+    assert type(error) is ResponseError
+    assert str(error) == response
+    assert error.args == (response,)
+    assert error.status_code == "BUSYGROUP"
 
 
 @pytest.mark.fixed_client
