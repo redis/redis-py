@@ -394,6 +394,63 @@ async def test_stored_timeout_none_makes_later_reads_block(factory):
     assert response == payload.decode()
 
 
+@pytest.mark.parametrize(
+    "parser_class, protocol",
+    [(_AsyncRESP2Parser, 2), (_AsyncRESP3Parser, 3)],
+    ids=["AsyncRESP2Parser", "AsyncRESP3Parser"],
+)
+async def test_restore_bounds_in_flight_blocking_read(parser_class, protocol):
+    """
+    A maintenance relax stores None (blocking) on the parser. A read that
+    starts relaxed must still expose its in-flight timeout context so a
+    later restore can bound it; otherwise the Python parser hangs past the
+    restored socket_timeout until the server sends data. The hiredis parser
+    already wraps blocking reads for this reason.
+    """
+    never = asyncio.Event()
+
+    class HangingStream:
+        _buffer = b""
+
+        def at_eof(self):
+            return False
+
+        async def read(self, _want):
+            await never.wait()
+            return b""
+
+    conn = Connection(protocol=protocol, socket_timeout=0.05, parser_class=parser_class)
+    parser = conn._parser
+    parser._stream = HangingStream()
+    parser._connected = True
+    parser.encoder = _DummyEncoder()
+    # The maintenance machinery relaxed this connection to blocking before
+    # the read started.
+    parser._socket_timeout = None
+
+    task = asyncio.create_task(parser.read_response(timeout=0.05))
+    try:
+        for _ in range(100):
+            if parser._active_read_timeout is not None:
+                break
+            await asyncio.sleep(0.01)
+        else:
+            pytest.fail("blocking read never exposed an in-flight timeout context")
+
+        # Maintenance ends: restore the connection socket_timeout. The
+        # in-flight relaxed read must be retightened and abort.
+        conn.update_current_socket_timeout(-1)
+        done, _pending = await asyncio.wait({task}, timeout=2.0)
+        assert task in done, "restored socket_timeout did not bound the in-flight read"
+        with pytest.raises(asyncio.TimeoutError):
+            task.result()
+    finally:
+        never.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 @pytest.mark.parametrize("protocol", [2, 3])
 async def test_update_current_socket_timeout_pushes_to_parser(protocol):
     """

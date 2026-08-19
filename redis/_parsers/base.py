@@ -619,7 +619,10 @@ class _AsyncRESPBase(AsyncBaseParser):
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         size = max_bytes if max_bytes > 0 else self._read_size
         timeout = self._effective_read_timeout(timeout)
-        if timeout is not SENTINEL and isinstance(timeout, (int, float)):
+        if timeout is not SENTINEL:
+            # Enter the context even for a blocking (None) read: a later
+            # maintenance restore can only retighten an in-flight read when
+            # its context is exposed here, mirroring the hiredis parser.
             async with async_timeout(timeout) as active_timeout:
                 # Expose the in-flight deadline so the connection can relax
                 # it when a maintenance notification arrives mid-read (#4177).
