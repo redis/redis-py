@@ -79,6 +79,37 @@ class SlowChunkStream:
         return bytes(result)
 
 
+class HookedStream:
+    """Mock StreamReader that fires a hook after every socket read.
+
+    Used to simulate the maintenance-notification machinery pushing a new
+    per-read timeout onto the parser while a read_response is in progress.
+    """
+
+    def __init__(self, chunks_with_delays, on_read):
+        self._steps = list(chunks_with_delays)
+        self._on_read = on_read
+        self._buffer = b""
+        self._pos = 0
+
+    def at_eof(self):
+        return not self._steps and self._pos >= len(self._buffer)
+
+    async def read(self, _want):
+        if self._pos >= len(self._buffer):
+            if not self._steps:
+                return b""
+            delay, data = self._steps.pop(0)
+            if delay:
+                await asyncio.sleep(delay)
+            self._buffer = data
+            self._pos = 0
+            self._on_read()
+        result = self._buffer[self._pos :]
+        self._pos += len(result)
+        return result
+
+
 class _DummyEncoder:
     decode_responses = False
     encoding = "utf-8"
@@ -284,3 +315,164 @@ async def test_connection_passes_timeout_to_parser(protocol):
     response = await conn.read_response(timeout=0.42)
     assert response == "OK"
     assert recorded["timeout"] is None
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [_make_resp2_parser, _make_resp3_parser],
+    ids=["AsyncRESP2Parser", "AsyncRESP3Parser"],
+)
+async def test_relaxed_timeout_reaches_reads_started_after_update(factory):
+    """
+    When the maintenance machinery relaxes the per-read timeout while a
+    read_response is in progress, socket reads that START after the update
+    must use the relaxed deadline, not the one captured at entry (#4177).
+    """
+    payload = b"x" * 50
+    holder = {}
+
+    def relax():
+        holder["parser"]._socket_timeout = 0.5
+
+    steps = [(0, b"$50\r\n"), (0, payload[:10]), (0.2, payload[10:] + b"\r\n")]
+    stream = HookedStream(steps, on_read=relax)
+    parser = factory(stream)
+    holder["parser"] = parser
+
+    # The entry timeout (0.05) would abort the 0.2s final read; the relaxed
+    # 0.5 deadline pushed after the first read must cover it instead.
+    response = await parser.read_response(timeout=0.05)
+    assert response == payload.decode()
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [_make_resp2_parser, _make_resp3_parser],
+    ids=["AsyncRESP2Parser", "AsyncRESP3Parser"],
+)
+async def test_stored_timeout_overrides_timeout_captured_at_entry(factory):
+    """
+    The stored maintenance timeout wins over the timeout argument captured
+    when read_response was entered, in both directions.
+    """
+    payload = b"x" * 50
+    holder = {}
+
+    def tighten():
+        holder["parser"]._socket_timeout = 0.05
+
+    steps = [(0, b"$50\r\n"), (0, payload[:10]), (0.2, payload[10:] + b"\r\n")]
+    stream = HookedStream(steps, on_read=tighten)
+    parser = factory(stream)
+    holder["parser"] = parser
+
+    # Entry timeout is a generous 0.5s, but the tightened 0.05 deadline
+    # pushed after the first read must abort the 0.2s final read.
+    with pytest.raises(asyncio.TimeoutError):
+        await parser.read_response(timeout=0.5)
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [_make_resp2_parser, _make_resp3_parser],
+    ids=["AsyncRESP2Parser", "AsyncRESP3Parser"],
+)
+async def test_stored_timeout_none_makes_later_reads_block(factory):
+    """A stored None (relaxed with no deadline) makes later reads block."""
+    payload = b"x" * 50
+    holder = {}
+
+    def relax_to_blocking():
+        holder["parser"]._socket_timeout = None
+
+    steps = [(0, b"$50\r\n"), (0, payload[:10]), (0.2, payload[10:] + b"\r\n")]
+    stream = HookedStream(steps, on_read=relax_to_blocking)
+    parser = factory(stream)
+    holder["parser"] = parser
+
+    response = await parser.read_response(timeout=0.05)
+    assert response == payload.decode()
+
+
+@pytest.mark.parametrize("protocol", [2, 3])
+async def test_update_current_socket_timeout_pushes_to_parser(protocol):
+    """
+    Connection.update_current_socket_timeout must push the new deadline
+    onto the parser so reads started after the update pick it up, matching
+    the sync client's update_parser_timeout.
+    """
+    conn = Connection(protocol=protocol, socket_timeout=0.05)
+    parser = conn._parser
+
+    # Relax: parser sees the relaxed deadline.
+    conn.update_current_socket_timeout(0.2)
+    assert parser._socket_timeout == 0.2
+
+    # Relax to blocking: parser reads must block.
+    conn.update_current_socket_timeout(None)
+    assert parser._socket_timeout is None
+
+    # Restore: -1 resolves to the connection's current socket_timeout.
+    conn.update_current_socket_timeout(-1)
+    assert parser._socket_timeout == 0.05
+
+
+@pytest.mark.skipif(not HIREDIS_AVAILABLE, reason="hiredis is not installed")
+async def test_hiredis_relaxed_timeout_reaches_reads_started_after_update():
+    """The hiredis parser must also honor a relaxed deadline on later reads."""
+    import hiredis
+
+    payload = b"x" * 50
+    holder = {}
+
+    def relax():
+        holder["parser"]._socket_timeout = 0.5
+
+    steps = [(0, b"$50\r\n"), (0, payload[:10]), (0.2, payload[10:] + b"\r\n")]
+    stream = HookedStream(steps, on_read=relax)
+
+    parser = _AsyncHiredisParser(socket_read_size=4096)
+    parser._stream = stream
+    parser._connected = True
+    parser._reader = hiredis.Reader(
+        protocolError=Exception,
+        replyError=Exception,
+        notEnoughData=NOT_ENOUGH_DATA,
+    )
+    holder["parser"] = parser
+
+    response = await parser.read_response(timeout=0.05)
+    assert response == payload
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [_make_resp2_parser, _make_resp3_parser],
+    ids=["AsyncRESP2Parser", "AsyncRESP3Parser"],
+)
+async def test_readline_terminator_straddling_chunks(factory):
+    """A '\\r\\n' split across two socket reads must still terminate the line."""
+    stream = SlowChunkStream([b"+OK\r", b"\n"], delay_between_chunks=0)
+    parser = factory(stream)
+    assert await parser.read_response() == "OK"
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [_make_resp2_parser, _make_resp3_parser],
+    ids=["AsyncRESP2Parser", "AsyncRESP3Parser"],
+)
+async def test_bulk_read_across_many_small_chunks(factory):
+    """
+    Bulk replies arriving in many small chunks must parse correctly while
+    the parser accumulates chunks without repeatedly copying the buffer.
+    """
+    payload = bytes(65 + (i % 26) for i in range(4096))
+    chunks = (
+        [b"$4096\r\n"]
+        + [payload[i : i + 64] for i in range(0, len(payload), 64)]
+        + [b"\r\n"]
+    )
+    stream = SlowChunkStream(chunks, delay_between_chunks=0)
+    parser = factory(stream, read_size=64)
+    assert await parser.read_response() == payload.decode()

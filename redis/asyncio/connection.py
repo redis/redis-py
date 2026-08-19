@@ -491,6 +491,14 @@ class AsyncMaintNotificationsAbstractConnection:
     ) -> None:
         timeout = relaxed_timeout if relaxed_timeout != -1 else self.socket_timeout
         self._reschedule_active_read_timeout(timeout)
+        # Also stash the new deadline on the parser so socket reads that
+        # START after this update use it. Rescheduling above only covers
+        # the read that is in flight right now; without this, later reads
+        # in the same read_response keep the deadline captured at entry
+        # (mirrors the sync client's update_parser_timeout, #4177).
+        parser = self._parser
+        if parser is not None and hasattr(parser, "_socket_timeout"):
+            parser._socket_timeout = timeout
 
     def _reschedule_active_read_timeout(self, timeout: float | None) -> None:
         timeout_context = getattr(self, "_active_read_timeout", None)

@@ -178,11 +178,32 @@ class _RESPBase(BaseParser):
 class AsyncBaseParser(BaseParser):
     """Base parsing class for the python-backed async parser"""
 
-    __slots__ = "_stream", "_read_size"
+    __slots__ = "_stream", "_read_size", "_socket_timeout"
 
     def __init__(self, socket_read_size: int):
         self._stream: Optional[StreamReader] = None
         self._read_size = socket_read_size
+        # SENTINEL: no maintenance override active, the timeout argument
+        # passed to read_response is used as-is. A numeric value (or None
+        # for blocking) is pushed here by the connection's
+        # update_current_socket_timeout when a maintenance notification
+        # relaxes or restores socket deadlines mid-response (#4177).
+        self._socket_timeout: Union[float, object, None] = SENTINEL
+
+    def _effective_read_timeout(self, timeout: Union[float, object, None]):
+        """Resolve the per-read timeout for the next socket read.
+
+        A numeric ``timeout`` argument is the connection's socket_timeout
+        handed down by read_response for per-read windows. When the
+        maintenance-notification machinery relaxes or restores that timeout
+        mid-response it pushes the new value onto the parser, so reads that
+        start after the update must use the stored value rather than the
+        one captured when read_response was entered. A stored ``None``
+        means the read must block (relaxed with no deadline).
+        """
+        if isinstance(timeout, (int, float)) and self._socket_timeout is not SENTINEL:
+            return self._socket_timeout
+        return timeout
 
     @deprecated_function(
         version="8.0.0", reason="Use can_read() instead", name="can_read_destructive"
@@ -545,6 +566,9 @@ class _AsyncRESPBase(AsyncBaseParser):
         # Full reset on (re)connect — discard stale data from old connection
         self._buffer = b""
         self._pos = 0
+        # Drop any stale maintenance override; the connection hands its
+        # current socket_timeout down as the read timeout argument.
+        self._socket_timeout = SENTINEL
         self._connected = True
 
     def on_disconnect(self):
@@ -594,6 +618,7 @@ class _AsyncRESPBase(AsyncBaseParser):
         if stream is None:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         size = max_bytes if max_bytes > 0 else self._read_size
+        timeout = self._effective_read_timeout(timeout)
         if timeout is not SENTINEL and isinstance(timeout, (int, float)):
             async with async_timeout(timeout) as active_timeout:
                 # Expose the in-flight deadline so the connection can relax
@@ -614,17 +639,25 @@ class _AsyncRESPBase(AsyncBaseParser):
         """
         want = length + 2
         end = self._pos + want
-        while len(self._buffer) < end:
-            need = end - len(self._buffer)
-            try:
-                chunk = await self._read_from_stream(
-                    timeout=timeout, max_bytes=min(need, self._read_size)
-                )
-            except IncompleteReadError as error:
-                raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from error
-            if not chunk:
-                raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-            self._buffer += chunk
+        buffered = len(self._buffer)
+        if buffered < end:
+            chunks = []
+            while buffered < end:
+                need = end - buffered
+                try:
+                    chunk = await self._read_from_stream(
+                        timeout=timeout, max_bytes=min(need, self._read_size)
+                    )
+                except IncompleteReadError as error:
+                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from error
+                if not chunk:
+                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+                chunks.append(chunk)
+                buffered += len(chunk)
+            # Join once: repeated ``self._buffer += chunk`` re-copies the
+            # whole buffer per chunk, which is quadratic on large bulk
+            # replies and can stall the event loop.
+            self._buffer = b"".join((self._buffer, *chunks))
         result = self._buffer[self._pos : end - 2]
         self._pos = end
         return result
@@ -634,16 +667,35 @@ class _AsyncRESPBase(AsyncBaseParser):
         read an unknown number of bytes up to the next '\r\n'
         line separator, which is discarded.
         """
+        found = self._buffer.find(b"\r\n", self._pos)
+        if found >= 0:
+            result = self._buffer[self._pos : found]
+            self._pos = found + 2
+            return result
+        # The terminator is not fully buffered yet. Read chunk by chunk and
+        # accumulate into a list, joining once at the end — repeated
+        # ``self._buffer += chunk`` re-copies the whole buffer per chunk,
+        # which is quadratic on long lines.
+        chunks = []
+        pending = 0
+        # One byte of lookback catches a '\r' at the end of the unconsumed
+        # buffer straddling the first new chunk.
+        tail = self._buffer[-1:] if self._pos < len(self._buffer) else b""
         while True:
-            found = self._buffer.find(b"\r\n", self._pos)
-            if found >= 0:
-                result = self._buffer[self._pos : found]
-                self._pos = found + 2
-                return result
             try:
                 chunk = await self._read_from_stream(timeout=timeout)
             except IncompleteReadError as error:
                 raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from error
             if not chunk:
                 raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-            self._buffer += chunk
+            idx = (tail + chunk).find(b"\r\n")
+            if idx >= 0:
+                # Absolute index of the '\r' within buffer + pending + chunk.
+                found = len(self._buffer) + pending + idx - len(tail)
+                self._buffer = b"".join((self._buffer, *chunks, chunk))
+                result = self._buffer[self._pos : found]
+                self._pos = found + 2
+                return result
+            chunks.append(chunk)
+            pending += len(chunk)
+            tail = chunk[-1:]

@@ -275,7 +275,7 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
 class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
     """Async implementation of parser class for connections using Hiredis"""
 
-    __slots__ = ("_reader", "_active_read_timeout")
+    __slots__ = ("_reader", "_active_read_timeout", "_socket_timeout")
 
     def __init__(self, socket_read_size: int):
         if not HIREDIS_AVAILABLE:
@@ -283,6 +283,7 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         super().__init__(socket_read_size=socket_read_size)
         self._reader = None
         self._active_read_timeout = None
+        self._socket_timeout = SENTINEL
         self.pubsub_push_handler_func = self.handle_pubsub_push_response
         self.invalidation_push_handler_func = None
         self._hiredis_PushNotificationType = None
@@ -306,6 +307,9 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
             kwargs["errors"] = connection.encoder.encoding_errors
 
         self._reader = hiredis.Reader(**kwargs)
+        # Drop any stale maintenance override; the connection hands its
+        # current socket_timeout down as the read timeout argument.
+        self._socket_timeout = SENTINEL
         self._connected = True
 
         try:
@@ -346,6 +350,7 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         return bool(self._stream._buffer)
 
     async def read_from_socket(self, timeout: Union[float, object] = SENTINEL):
+        timeout = self._effective_read_timeout(timeout)
         if timeout is not SENTINEL:
             async with async_timeout(timeout) as active_timeout:
                 # Expose the in-flight deadline so the connection can relax
