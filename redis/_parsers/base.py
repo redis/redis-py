@@ -521,7 +521,6 @@ class _AsyncRESPBase(AsyncBaseParser):
         "encoder",
         "_buffer",
         "_pos",
-        "_chunks",
         "_active_read_timeout",
     )
 
@@ -529,7 +528,6 @@ class _AsyncRESPBase(AsyncBaseParser):
         super().__init__(socket_read_size)
         self.encoder: Optional[Encoder] = None
         self._buffer = b""
-        self._chunks = []
         self._pos = 0
         self._active_read_timeout = None
 
@@ -537,7 +535,6 @@ class _AsyncRESPBase(AsyncBaseParser):
         """Clear parsed data but preserve unconsumed pipelined bytes."""
         self._buffer = self._buffer[self._pos :]
         self._pos = 0
-        self._chunks.clear()
 
     def on_connect(self, connection):
         """Called when the stream connects"""
@@ -548,7 +545,6 @@ class _AsyncRESPBase(AsyncBaseParser):
         # Full reset on (re)connect — discard stale data from old connection
         self._buffer = b""
         self._pos = 0
-        self._chunks.clear()
         self._connected = True
 
     def on_disconnect(self):

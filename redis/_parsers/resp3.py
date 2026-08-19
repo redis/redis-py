@@ -181,10 +181,6 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
         push_request: bool = False,
         timeout: Union[float, object] = SENTINEL,
     ):
-        if self._chunks:
-            # augment parsing buffer with previously read data
-            self._buffer += b"".join(self._chunks)
-            self._chunks.clear()
         self._pos = 0
         response = await self._read_response(
             disable_decoding=disable_decoding,

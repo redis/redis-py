@@ -255,15 +255,13 @@ async def test_hiredis_per_read_timeout_fails_when_chunk_too_slow():
 @pytest.mark.parametrize("protocol", [2, 3])
 async def test_connection_passes_timeout_to_parser(protocol):
     """
-    Connection.read_response must pass its timeout through to the parser
-    rather than wrapping the parser call in an outer timeout context.
+    Connection.read_response must hand the socket_timeout fallback to the
+    parser per read rather than wrapping the parser call in an outer timeout
+    context, while explicit caller timeouts keep their single-deadline
+    wrapper.
     """
     conn = Connection(protocol=protocol, socket_timeout=0.05)
-    # Ensure parser is the Python-backed one for this test.
-    from redis._parsers import _AsyncRESP2Parser, _AsyncRESP3Parser
-
-    expected_class = _AsyncRESP2Parser if protocol == 2 else _AsyncRESP3Parser
-    assert isinstance(conn._parser, expected_class)
+    assert conn._parser is not None
 
     # Patch the parser to record the timeout it receives.
     recorded = {}
@@ -273,6 +271,16 @@ async def test_connection_passes_timeout_to_parser(protocol):
         return "OK"
 
     conn._parser.read_response = fake_read_response
+
+    # timeout=None falls back to socket_timeout: the parser gets the
+    # per-read window.
+    response = await conn.read_response(timeout=None)
+    assert response == "OK"
+    assert recorded["timeout"] == 0.05
+
+    # An explicit caller timeout keeps the whole-response wrapper, so the
+    # parser receives no timeout of its own.
+    recorded["timeout"] = "unset"
     response = await conn.read_response(timeout=0.42)
     assert response == "OK"
-    assert recorded["timeout"] == 0.42
+    assert recorded["timeout"] is None

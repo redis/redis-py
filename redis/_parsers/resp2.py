@@ -83,10 +83,6 @@ class _AsyncRESP2Parser(_AsyncRESPBase):
     ):
         if not self._connected:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-        if self._chunks:
-            # augment parsing buffer with previously read data
-            self._buffer += b"".join(self._chunks)
-            self._chunks.clear()
         self._pos = 0
         response = await self._read_response(
             disable_decoding=disable_decoding, timeout=timeout
