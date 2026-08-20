@@ -198,7 +198,7 @@ class CommandsParser(AbstractCommandsParser):
         return keys
 
     @deprecated_function(
-        version="8.1.0",
+        version="8.2.0",
         reason="Use get_command_metadata() instead.",
     )
     def get_command_policies(self) -> PolicyRecords:
@@ -363,7 +363,7 @@ class AsyncCommandsParser(AbstractCommandsParser):
         return keys
 
     @deprecated_function(
-        version="8.1.0",
+        version="8.2.0",
         reason="Use get_command_metadata() instead.",
     )
     async def get_command_policies(self) -> PolicyRecords:

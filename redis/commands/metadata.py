@@ -412,14 +412,16 @@ class BaseMetadataResolver(MetadataResolver):
     whole record, each consumer gets the view it needs of the same resolved metadata:
     ``resolve_policies`` for cluster routing, ``is_cacheable`` for client-side caching.
 
-    Both views are memoized by the command name they were asked for. The metadata a resolver
-    serves is a snapshot taken when the resolver is built, so a command's view cannot change,
-    and the memo keeps the projection, the name normalization and the walk down the fallback
-    chain off the command execution path. Concurrent resolves of the same command may each
-    compute it once; the memo is idempotent, so the duplicated work is harmless. The memos
-    grow with the set of distinct command names a caller asks about, and are capped at
-    ``_MEMO_MAX_ENTRIES`` so that a caller asking about unbounded many names - a name that
-    resolves to nothing is memoized too - cannot grow them without bound.
+    Both views are memoized under the lowercased command name, so every spelling of one
+    command - ``GET`` as the command methods write it, ``get`` as the cluster client lowers it
+    - shares a single entry instead of taking one each. The metadata a resolver serves is a
+    snapshot taken when the resolver is built, so a command's view cannot change, and the memo
+    keeps the record lookup, the projection and the walk down the fallback chain off the
+    command execution path. Concurrent resolves of the same command may each compute it once;
+    the memo is idempotent, so the duplicated work is harmless. The memos grow with the set of
+    distinct commands a caller asks about, and are capped at ``_MEMO_MAX_ENTRIES`` so that a
+    caller asking about unbounded many names - a name that resolves to nothing is memoized
+    too - cannot grow them without bound.
     """
 
     def __init__(
@@ -446,8 +448,13 @@ class BaseMetadataResolver(MetadataResolver):
         return metadata
 
     def resolve_policies(self, command_name: str) -> CommandPolicies | None:
+        # Memoized under the lowercased name, so the spellings of one command share an
+        # entry rather than taking one each. ``resolve`` is still asked with the name as
+        # given, so an unresolvable one is reported the way the caller spelled it.
+        memo_key = command_name.lower()
+
         try:
-            return self._policies[command_name]
+            return self._policies[memo_key]
         except KeyError:
             pass
 
@@ -455,7 +462,7 @@ class BaseMetadataResolver(MetadataResolver):
         policies = _to_command_policies(metadata) if metadata is not None else None
 
         if len(self._policies) < _MEMO_MAX_ENTRIES:
-            self._policies[command_name] = policies
+            self._policies[memo_key] = policies
 
         return policies
 
@@ -470,8 +477,12 @@ class BaseMetadataResolver(MetadataResolver):
         if not isinstance(command_name, str):
             return False
 
+        # Memoized under the lowercased name, so the spellings of one command share an
+        # entry rather than taking one each.
+        memo_key = command_name.lower()
+
         try:
-            return self._cacheable[command_name]
+            return self._cacheable[memo_key]
         except KeyError:
             pass
 
@@ -484,7 +495,7 @@ class BaseMetadataResolver(MetadataResolver):
         cacheable = _is_client_side_cacheable(metadata)
 
         if len(self._cacheable) < _MEMO_MAX_ENTRIES:
-            self._cacheable[command_name] = cacheable
+            self._cacheable[memo_key] = cacheable
 
         return cacheable
 
@@ -502,14 +513,16 @@ class AsyncBaseMetadataResolver(AsyncMetadataResolver):
     whole record, each consumer gets the view it needs of the same resolved metadata:
     ``resolve_policies`` for cluster routing, ``is_cacheable`` for client-side caching.
 
-    Both views are memoized by the command name they were asked for. The metadata a resolver
-    serves is a snapshot taken when the resolver is built, so a command's view cannot change,
-    and the memo keeps the projection, the name normalization and the walk down the fallback
-    chain off the command execution path. Concurrent resolves of the same command may each
-    compute it once; the memo is idempotent, so the duplicated work is harmless. The memos
-    grow with the set of distinct command names a caller asks about, and are capped at
-    ``_MEMO_MAX_ENTRIES`` so that a caller asking about unbounded many names - a name that
-    resolves to nothing is memoized too - cannot grow them without bound.
+    Both views are memoized under the lowercased command name, so every spelling of one
+    command - ``GET`` as the command methods write it, ``get`` as the cluster client lowers it
+    - shares a single entry instead of taking one each. The metadata a resolver serves is a
+    snapshot taken when the resolver is built, so a command's view cannot change, and the memo
+    keeps the record lookup, the projection and the walk down the fallback chain off the
+    command execution path. Concurrent resolves of the same command may each compute it once;
+    the memo is idempotent, so the duplicated work is harmless. The memos grow with the set of
+    distinct commands a caller asks about, and are capped at ``_MEMO_MAX_ENTRIES`` so that a
+    caller asking about unbounded many names - a name that resolves to nothing is memoized
+    too - cannot grow them without bound.
     """
 
     def __init__(
@@ -536,8 +549,13 @@ class AsyncBaseMetadataResolver(AsyncMetadataResolver):
         return metadata
 
     async def resolve_policies(self, command_name: str) -> CommandPolicies | None:
+        # Memoized under the lowercased name, so the spellings of one command share an
+        # entry rather than taking one each. ``resolve`` is still asked with the name as
+        # given, so an unresolvable one is reported the way the caller spelled it.
+        memo_key = command_name.lower()
+
         try:
-            return self._policies[command_name]
+            return self._policies[memo_key]
         except KeyError:
             pass
 
@@ -545,7 +563,7 @@ class AsyncBaseMetadataResolver(AsyncMetadataResolver):
         policies = _to_command_policies(metadata) if metadata is not None else None
 
         if len(self._policies) < _MEMO_MAX_ENTRIES:
-            self._policies[command_name] = policies
+            self._policies[memo_key] = policies
 
         return policies
 
@@ -560,8 +578,12 @@ class AsyncBaseMetadataResolver(AsyncMetadataResolver):
         if not isinstance(command_name, str):
             return False
 
+        # Memoized under the lowercased name, so the spellings of one command share an
+        # entry rather than taking one each.
+        memo_key = command_name.lower()
+
         try:
-            return self._cacheable[command_name]
+            return self._cacheable[memo_key]
         except KeyError:
             pass
 
@@ -574,7 +596,7 @@ class AsyncBaseMetadataResolver(AsyncMetadataResolver):
         cacheable = _is_client_side_cacheable(metadata)
 
         if len(self._cacheable) < _MEMO_MAX_ENTRIES:
-            self._cacheable[command_name] = cacheable
+            self._cacheable[memo_key] = cacheable
 
         return cacheable
 

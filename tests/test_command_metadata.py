@@ -1057,6 +1057,34 @@ class TestBaseMetadataResolver:
         assert policy_pair(resolver.resolve_policies("get")) == KEYED_POLICIES
         assert resolver.resolve_calls == 2
 
+    def test_the_memos_are_keyed_by_the_normalized_name(self):
+        """
+        One command takes one memo entry however the caller spells it: the command methods
+        write ``GET``, the cluster client lowercases first, and a raw ``execute_command`` may
+        carry anything, so keying by the name as asked would hold the same answer several
+        times over and spend the cap on spellings.
+        """
+        resolver = CountingStaticMetadataResolver()
+
+        for name in ("GET", "get", "Get"):
+            assert resolver.is_cacheable(name) is True, name
+            assert policy_pair(resolver.resolve_policies(name)) == KEYED_POLICIES, name
+
+        # One record lookup per view, not one per spelling.
+        assert resolver.resolve_calls == 2
+        assert list(resolver._cacheable) == ["get"]
+        assert list(resolver._policies) == ["get"]
+
+    def test_resolve_policies_reports_an_unresolvable_name_as_spelled(self):
+        """
+        The memo is keyed lowercase, but the error still quotes the caller's spelling: it is
+        their input that has to be recognizable in the message.
+        """
+        with pytest.raises(
+            ValueError, match="Wrong command or module name: FOO.BAR.BAZ"
+        ):
+            StaticMetadataResolver().resolve_policies("FOO.BAR.BAZ")
+
     def test_is_cacheable_refuses_an_incomplete_record_that_shadows_a_complete_one(
         self,
     ):
