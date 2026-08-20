@@ -20,6 +20,7 @@ from typing import (
     Deque,
     Dict,
     Generator,
+    Iterable,
     List,
     Literal,
     Mapping,
@@ -47,6 +48,7 @@ from redis._defaults import (
 from redis._parsers import AsyncCommandsParser, Encoder
 from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
 from redis._parsers.helpers import get_response_callbacks
+from redis.asyncio import _himport_exec
 from redis.asyncio.client import PubSub, ResponseCallbackT
 from redis.asyncio.connection import (
     AbstractConnection,
@@ -75,6 +77,7 @@ from redis.cluster import (
     LoadBalancingStrategy,
     block_pipeline_command,
     get_node_name,
+    is_zero_key_eval_command,
     parse_cluster_shards,
     parse_cluster_shards_unified,
     parse_cluster_shards_with_str_keys,
@@ -112,11 +115,13 @@ from redis.exceptions import (
     TryAgainError,
     WatchError,
 )
+from redis.himport import HImportRegistry, parse_himport_set_args
 from redis.maint_notifications import MaintNotificationsConfig
 from redis.typing import (
     AnyKeyT,
     ChannelT,
     EncodableT,
+    FieldT,
     KeyT,
     PubSubHandler,
     Subscription,
@@ -127,6 +132,7 @@ from redis.utils import (
     check_protocol_version,
     deprecated_args,
     deprecated_function,
+    experimental_method,
     safe_str,
     str_if_bytes,
     truncate_text,
@@ -340,9 +346,10 @@ class RedisCluster(
         - `rediss://` creates a SSL wrapped TCP socket connection. See more at:
           <https://www.iana.org/assignments/uri-schemes/prov/rediss>
 
-        The username, password, hostname, path and all querystring values are passed
-        through ``urllib.parse.unquote`` in order to replace any percent-encoded values
-        with their corresponding characters.
+        The username, password, hostname and path are passed through
+        ``urllib.parse.unquote`` in order to replace any percent-encoded values with
+        their corresponding characters. Querystring values are decoded by
+        ``urllib.parse.parse_qs`` and are not unquoted again.
 
         All querystring options are cast to their appropriate Python types. Boolean
         arguments can be specified with string values "True"/"False" or "Yes"/"No".
@@ -364,6 +371,7 @@ class RedisCluster(
         "_lock",
         "maint_notifications_config",
         "_oss_cluster_maint_notifications_handler",
+        "_himport_registry",
         "retry",
         "command_flags",
         "commands_parser",
@@ -543,6 +551,16 @@ class RedisCluster(
             )
         else:
             kwargs["response_callbacks"]["CLUSTER SHARDS"] = parse_cluster_shards
+
+        # Build the client-level HIMPORT registry once (always empty at construction)
+        # and share the same object with every node connection. It rides in
+        # connection_kwargs -> ClusterNode -> each node's Connection, so the registry is
+        # shared cluster-wide and runtime himport_prepare mutates one object. (Async has
+        # no per-node Redis client, so the object flows via connection_kwargs directly to
+        # the Connection, which is internal plumbing, not a public param.)
+        self._himport_registry = HImportRegistry()
+        kwargs["himport_registry"] = self._himport_registry
+
         self.connection_kwargs = kwargs
 
         # Validate maint_notifications_config before NodesManager is constructed
@@ -883,6 +901,40 @@ class RedisCluster(
         """
         return key_slot(self.encoder.encode(key))
 
+    # HIMPORT orchestration (async mirror of redis.cluster.RedisCluster). The one
+    # shared HImportRegistry is mutated once by PREPARE/DISCARD/DISCARDALL and applied
+    # lazily per node; SET routes by key slot to the owning primary's ClusterNode.
+    # See ``.agents/himport_client_support_spec.md``.
+
+    @property
+    def himport_registry(self) -> HImportRegistry:
+        """The cluster-wide HIMPORT fieldset registry (empty if none was declared).
+
+        Read-only: the registry is mutated only through the HIMPORT command methods.
+        """
+        return self._himport_registry
+
+    @experimental_method()
+    async def himport_prepare(
+        self, fieldset_name: str, fields: Iterable[FieldT]
+    ) -> bool:
+        """Declare an HIMPORT fieldset cluster-wide (shared registry, applied lazily)."""
+        await self.initialize()
+        self._himport_registry.prepare(fieldset_name, fields)
+        return True
+
+    @experimental_method()
+    async def himport_discard(self, fieldset_name: str) -> int:
+        """Remove an HIMPORT fieldset cluster-wide (shared registry, applied lazily)."""
+        await self.initialize()
+        return 1 if self._himport_registry.discard(fieldset_name) else 0
+
+    @experimental_method()
+    async def himport_discard_all(self) -> int:
+        """Remove all HIMPORT fieldsets cluster-wide (shared registry, applied lazily)."""
+        await self.initialize()
+        return self._himport_registry.discard_all()
+
     def get_encoder(self) -> Encoder:
         """Get the encoder object of the client."""
         return self.encoder
@@ -1205,10 +1257,18 @@ class RedisCluster(
 
         while ttl > 0:
             ttl -= 1
+            ask_himport = False
             try:
                 if asking:
                     target_node = self.get_node(node_name=redirect_addr)
-                    await target_node.execute_command("ASKING")
+                    if parse_himport_set_args(args) is not None:
+                        # ASKING must sit on the same connection as the SET,
+                        # immediately before it. HIMPORT SET's own executor folds
+                        # ASKING into the SET's packed write after the session setup,
+                        # so don't send it here as a separately pooled command.
+                        ask_himport = True
+                    else:
+                        await target_node.execute_command("ASKING")
                     asking = False
                 elif moved:
                     # MOVED occurred and the slots cache was updated,
@@ -1223,7 +1283,9 @@ class RedisCluster(
                     )
                     moved = False
 
-                response = await target_node.execute_command(*args, **kwargs)
+                response = await target_node.execute_command(
+                    *args, asking=ask_himport, **kwargs
+                )
                 await self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
@@ -1691,14 +1753,18 @@ class ClusterNode:
     def release(self, connection: Connection) -> None:
         """
         Release connection back to free queue.
-        If the connection is marked for reconnect, disconnect it before
-        returning it to the free queue.
+        If a connected connection is marked for reconnect, disconnect it before
+        returning it to the free queue. An already-closed connection can be
+        returned immediately after clearing its reconnect flag.
         """
         if connection.should_reconnect():
-            task = asyncio.create_task(self._disconnect_and_release(connection))
-            self._background_tasks.add(task)
-            task.add_done_callback(self._background_tasks.discard)
-            return
+            if connection.is_connected:
+                task = asyncio.create_task(self._disconnect_and_release(connection))
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
+                return
+            # It may have been re-marked while its own disconnect was in progress.
+            connection.reset_should_reconnect()
         self._free.append(connection)
 
     async def _disconnect_and_release(self, connection: Connection) -> None:
@@ -1779,12 +1845,40 @@ class ClusterNode:
 
         return response
 
-    async def execute_command(self, *args: Any, **kwargs: Any) -> Any:
+    async def execute_command(
+        self, *args: Any, asking: bool = False, **kwargs: Any
+    ) -> Any:
         # Acquire connection
         connection = self.acquire_connection()
         try:
             # Handle lazy disconnect for connections marked for reconnect
             await self.disconnect_if_needed(connection)
+
+            # HIMPORT SET is the one command whose wire form depends on
+            # per-connection state: the fieldset must be PREPAREd on this
+            # connection first, and any fieldset discarded since this connection
+            # last reconciled must be dropped. Doing it here (rather than in
+            # RedisCluster.himport_set) reuses the caller's full retry, MOVED/ASK
+            # and disconnect-on-error handling for HIMPORT SET too.
+            # This per-command branch in the hot dispatch path is deliberate and has
+            # no cleaner alternative: this is the only seam where the concrete routed
+            # connection is known, and connection-scoped session setup can only happen
+            # once that connection is chosen. The overhead is one comparison per
+            # command.
+            # On an ASK redirect ``asking`` is passed here rather than sent as a
+            # separate ASKING command so the allowance sits on this same connection,
+            # folded into the SET's own write immediately before the SET.
+            himport_set = parse_himport_set_args(args)
+            if himport_set is not None:
+                # HIMPORT SET in the joined ("HIMPORT SET", key, ...) or split
+                # ("HIMPORT", "SET", key, ...) raw form; operands at the right
+                # offsets. Too few operands returns None and falls through to the
+                # normal send path below so the server returns its arity error
+                # instead of a client-side IndexError.
+                key, fieldset_name, values = himport_set
+                return await self._himport_execute_set(
+                    connection, key, fieldset_name, values, asking=asking
+                )
 
             # Execute command
             await connection.send_packed_command(connection.pack_command(*args))
@@ -1798,12 +1892,53 @@ class ClusterNode:
                 # Release connection
                 self.release(connection)
 
+    async def _himport_reconcile_discards(self, conn: "Connection") -> None:
+        """Delegate to the shared async HIMPORT executor."""
+        return await _himport_exec.reconcile_discards(self, conn)
+
+    async def _himport_prepare_and_set(
+        self,
+        conn: "Connection",
+        key: KeyT,
+        fieldset_name: str,
+        values: List,
+        fieldset,
+        asking: bool = False,
+    ) -> Any:
+        """Delegate to the shared async HIMPORT executor."""
+        return await _himport_exec.prepare_and_set(
+            self, conn, key, fieldset_name, values, fieldset, asking=asking
+        )
+
+    async def _himport_execute_set(
+        self,
+        conn: "Connection",
+        key: KeyT,
+        fieldset_name: str,
+        values: List,
+        asking: bool = False,
+    ) -> Any:
+        """Delegate to the shared async HIMPORT executor."""
+        return await _himport_exec.execute_set(
+            self, conn, key, fieldset_name, values, asking=asking
+        )
+
+    async def _himport_prepare_pipeline(
+        self, conn: "Connection", commands: List["PipelineCommand"]
+    ) -> None:
+        """Delegate to the shared async HIMPORT executor."""
+        await _himport_exec.prepare_pipeline(self, conn, [cmd.args for cmd in commands])
+
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:
         # Acquire connection
         connection = self.acquire_connection()
         try:
             # Handle lazy disconnect for connections marked for reconnect
             await self.disconnect_if_needed(connection)
+
+            # PREPARE fieldsets referenced by buffered HIMPORT SETs before the
+            # batched write (it bypasses the per-command lazy prepare path).
+            await self._himport_prepare_pipeline(connection, commands)
 
             # Execute command
             await connection.send_packed_command(
@@ -2376,6 +2511,33 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         """Get the nodes manager from the cluster client."""
         return self.cluster_client.nodes_manager
 
+    # HIMPORT lifecycle on a cluster pipeline delegates to the parent client, mutating
+    # the one shared registry that every node pool references. A fieldset declared here
+    # is therefore visible to the batched himport_set pre-flight, mirroring the sync
+    # ClusterPipeline (which inherits these from RedisCluster over the shared registry).
+
+    @property
+    def himport_registry(self) -> HImportRegistry:
+        """The cluster-wide HIMPORT fieldset registry (empty if none was declared).
+
+        Read-only: the registry is mutated only through the HIMPORT command methods.
+        """
+        return self.cluster_client.himport_registry
+
+    async def himport_prepare(
+        self, fieldset_name: str, fields: Iterable[FieldT]
+    ) -> bool:
+        """Declare an HIMPORT fieldset cluster-wide (shared registry, applied lazily)."""
+        return await self.cluster_client.himport_prepare(fieldset_name, fields)
+
+    async def himport_discard(self, fieldset_name: str) -> int:
+        """Remove an HIMPORT fieldset cluster-wide (shared registry, applied lazily)."""
+        return await self.cluster_client.himport_discard(fieldset_name)
+
+    async def himport_discard_all(self) -> int:
+        """Remove all HIMPORT fieldsets cluster-wide (shared registry, applied lazily)."""
+        return await self.cluster_client.himport_discard_all()
+
     def set_response_callback(self, command: str, callback: ResponseCallbackT) -> None:
         """Set a custom response callback on the cluster client."""
         self.cluster_client.set_response_callback(command, callback)
@@ -2917,6 +3079,8 @@ class TransactionStrategy(AbstractStrategy):
         self._explicit_transaction = False
         self._watching = False
         self._pipeline_slots: Set[int] = set()
+        # True once a keyed (non-slot-agnostic) command has fixed the slot
+        self._transaction_has_keyed_slot = False
         self._transaction_node: Optional[ClusterNode] = None
         self._transaction_connection: Optional[Connection] = None
         self._executing = False
@@ -2924,6 +3088,35 @@ class TransactionStrategy(AbstractStrategy):
         self._retry.update_supported_errors(
             RedisCluster.ERRORS_ALLOW_RETRY + self.SLOT_REDIRECT_ERRORS
         )
+
+    async def _resolve_transaction_slot(self, *args) -> Optional[int]:
+        """
+        Pick a slot for a transactional pipeline command.
+
+        Zero-key EVAL/EVALSHA can run on any primary. Reuse an existing
+        transaction slot when present so multiple zero-key scripts (or a
+        mix with keyed commands) stay single-slot.
+        """
+        if args[0] in self.NO_SLOTS_COMMANDS:
+            return None
+
+        if is_zero_key_eval_command(*args):
+            if self._pipeline_slots:
+                return next(iter(self._pipeline_slots))
+            return await self._pipe.cluster_client._determine_slot(*args)
+
+        slot_number = await self._pipe.cluster_client._determine_slot(*args)
+        if (
+            slot_number is not None
+            and self._pipeline_slots
+            and slot_number not in self._pipeline_slots
+            and not self._transaction_has_keyed_slot
+        ):
+            # Prior slots came only from zero-key scripts; retarget.
+            self._pipeline_slots.clear()
+        if slot_number is not None:
+            self._transaction_has_keyed_slot = True
+        return slot_number
 
     def _get_client_and_connection_for_transaction(
         self,
@@ -2982,7 +3175,7 @@ class TransactionStrategy(AbstractStrategy):
 
         slot_number: Optional[int] = None
         if args[0] not in self.NO_SLOTS_COMMANDS:
-            slot_number = await self._pipe.cluster_client._determine_slot(*args)
+            slot_number = await self._resolve_transaction_slot(*args)
 
         if (
             self._watching or args[0] in self.IMMEDIATE_EXECUTE_COMMANDS
@@ -3070,8 +3263,28 @@ class TransactionStrategy(AbstractStrategy):
         Send a command and parse the response
         """
 
-        await connection.send_command(*args)
-        output = await redis_node.parse_response(connection, command_name, **options)
+        # HIMPORT SET's wire form depends on per-connection state: the fieldset
+        # must be PREPAREd on this connection first, and any fieldset discarded
+        # since this connection last reconciled must be dropped. The
+        # immediate/watched path (commands issued after WATCH, before MULTI)
+        # would otherwise send a bare HIMPORT SET and fail with "no such
+        # fieldset". Route it through the node's HIMPORT executor, the same way
+        # the normal cluster path, the batched MULTI/EXEC path, and standalone
+        # watched pipelines all do.
+        himport_set = parse_himport_set_args(args)
+        if himport_set is not None:
+            # HIMPORT SET in the joined or split raw form; operands at the right
+            # offsets. Too few operands returns None and falls through to the bare
+            # send so the server returns its arity error.
+            key, fieldset_name, values = himport_set
+            output = await redis_node._himport_execute_set(
+                connection, key, fieldset_name, values
+            )
+        else:
+            await connection.send_command(*args)
+            output = await redis_node.parse_response(
+                connection, command_name, **options
+            )
 
         if command_name in self.UNWATCH_COMMANDS:
             self._watching = False
@@ -3176,6 +3389,11 @@ class TransactionStrategy(AbstractStrategy):
         # Only disconnect if not watching - disconnecting would lose WATCH state
         if not self._watching:
             await redis_node.disconnect_if_needed(connection)
+
+        # Ensure fieldsets referenced by buffered HIMPORT SETs are prepared on this
+        # node's connection before the MULTI/EXEC block (session state, not
+        # transactional). All keys share one slot here, so it is a single node.
+        await redis_node._himport_prepare_pipeline(connection, stack)
 
         stack = chain(
             [PipelineCommand(0, "MULTI")],
@@ -3327,6 +3545,7 @@ class TransactionStrategy(AbstractStrategy):
             self._watching = False
             self._explicit_transaction = False
             self._pipeline_slots = set()
+            self._transaction_has_keyed_slot = False
             self._executing = False
 
     def multi(self):

@@ -54,10 +54,34 @@ logging.getLogger("redis.cluster").setLevel(logging.DEBUG)
 
 
 STANDALONE_MAINT_TIMEOUT = 60
-SMIGRATING_TIMEOUT = 20
-SMIGRATED_TIMEOUT = 40
+# SMIGRATED / slot-shuffle waits sized for the FI's real reshard budget: the fault injector
+# blocks on the reshard up to 300s (slot-shuffle migrate_slots) / 600s (ASM scale). Sizing the
+# client below that turned slow-but-successful reshards into false failures. Raising a timeout
+# only affects the failure path (it waits longer before failing), so it is free on green runs.
+SMIGRATED_TIMEOUT = 120
 
-SLOT_SHUFFLE_TIMEOUT = 120
+SLOT_SHUFFLE_TIMEOUT = 300
+
+# Wait budget for the FIRST SMIGRATING of a reshard. It has to cover the ASM decision engine's
+# planning time before the first slot actually moves - not just the move itself - so it is sized as
+# a fraction of the FI's own slot-shuffle budget rather than as a "notification should be instant"
+# value. Every reshard test uses this, including remove_add: that effect keeps its maintenance
+# window open the longest, but it is also the heaviest plan, so it is the slowest to open it.
+RESHARD_SMIGRATING_TIMEOUT = int(SLOT_SHUFFLE_TIMEOUT / 2)
+
+# The trigger thread must not give up before the FI finishes the reshard, otherwise it dies and
+# the command-execution workers are left running (their join then hangs to the pytest cap). Cover
+# the FI's slowest reshard (ASM scale = 600s).
+RESHARD_OP_TIMEOUT = 600
+# Default op-wait for non-reshard (standalone / single-window) triggers: comfortably under the
+# standalone tests' 300s pytest cap so a stuck FI poll can't outlive the cap and block teardown on
+# thread.join(). The reshard tests pass RESHARD_OP_TIMEOUT explicitly.
+DEFAULT_TRIGGER_OP_TIMEOUT = 180
+# Per-test cap for the OSS-cluster reshard tests: must exceed the worst-case reshard wall time =
+# the trigger op-wait (RESHARD_OP_TIMEOUT) plus the post-join node-cache drain (SMIGRATED_TIMEOUT),
+# with margin, so a legitimately slow ASM scale runs to completion instead of being killed mid-way.
+# Only bites on the slow path; fast reshards are unaffected.
+RESHARD_TEST_TIMEOUT = RESHARD_OP_TIMEOUT + SMIGRATED_TIMEOUT + 180
 
 DEFAULT_BIND_TTL = 15
 DEFAULT_STANDALONE_CLIENT_SOCKET_TIMEOUT = 1
@@ -111,7 +135,7 @@ class TestPushNotificationsBase:
         target_node: Optional[str] = None,
         empty_node: Optional[str] = None,
         skip_end_notification: bool = False,
-        timeout: int = SLOT_SHUFFLE_TIMEOUT,
+        timeout: int = DEFAULT_TRIGGER_OP_TIMEOUT,
     ):
         trigger_effect_action_id = ClusterOperations.trigger_effect(
             fault_injector=fault_injector_client,
@@ -1416,6 +1440,44 @@ class TestClusterClientPushNotificationsWithEffectTriggerBase(
         )
         return self._client, cluster_endpoint_config
 
+    def _wait_for_node_cache_delta(
+        self,
+        client,
+        connections,
+        initial_count,
+        expected_delta,
+        timeout=SMIGRATED_TIMEOUT,
+    ):
+        """Poll the client node cache until it reflects the expected +/- delta.
+
+        A topology change may arrive as several push notifications (in particular an ASM scale
+        add/remove is a cascade of SMIGRATING/SMIGRATED as the decision engine moves slots), so
+        the client reconciles its node cache over multiple notifications after the server-side
+        operation finishes. Drain pending notifications on the given connections and poll until
+        the cache reaches initial_count + expected_delta, or the timeout elapses. Single-step
+        triggers (migrate/failover) reach the target immediately and return on the first check.
+        """
+        expected = initial_count + expected_delta
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if len(client.nodes_manager.nodes_cache) == expected:
+                return
+            for conn in connections:
+                try:
+                    if conn._sock and conn.can_read(timeout=0.2):
+                        conn.read_response(push_request=True)
+                except Exception:
+                    # A connection to a node being removed may error; that is expected.
+                    pass
+            time.sleep(0.5)
+        # Fail explicitly on a drain timeout so it surfaces as a clear "node cache did not
+        # reconcile" error, rather than silently returning and letting the caller's exact-delta
+        # assertion fail later with a misleading node-count message.
+        pytest.fail(
+            f"Node cache did not reach {expected} (delta {expected_delta}) within {timeout}s; "
+            f"current size={len(client.nodes_manager.nodes_cache)}"
+        )
+
     @pytest.fixture(autouse=True)
     def setup_and_cleanup(
         self,
@@ -1446,7 +1508,9 @@ class TestClusterClientPushNotificationsWithEffectTriggerBase(
 class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
     TestClusterClientPushNotificationsWithEffectTriggerBase
 ):
-    @pytest.mark.timeout(300)  # 5 minutes timeout for this test
+    @pytest.mark.timeout(
+        RESHARD_TEST_TIMEOUT
+    )  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
     @pytest.mark.parametrize(
         "effect_name, trigger, db_config, db_name",
         generate_params(
@@ -1493,6 +1557,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                 effect_name,
                 trigger,
             ),
+            kwargs={"timeout": RESHARD_OP_TIMEOUT},
         )
         self.maintenance_ops_threads.append(trigger_effect_thread)
         trigger_effect_thread.start()
@@ -1501,7 +1566,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
         for conn in in_use_connections.values():
             ClientValidations.wait_push_notification(
                 cluster_client_maint_notifications,
-                timeout=int(SLOT_SHUFFLE_TIMEOUT / 2),
+                timeout=RESHARD_SMIGRATING_TIMEOUT,
                 connection=conn,
             )
 
@@ -1558,7 +1623,9 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
         trigger_effect_thread.join()
         self.maintenance_ops_threads.remove(trigger_effect_thread)
 
-    @pytest.mark.timeout(300)  # 5 minutes timeout for this test
+    @pytest.mark.timeout(
+        RESHARD_TEST_TIMEOUT
+    )  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
     @pytest.mark.parametrize(
         "effect_name, trigger, db_config, db_name",
         generate_params(
@@ -1609,6 +1676,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                 effect_name,
                 trigger,
             ),
+            kwargs={"timeout": RESHARD_OP_TIMEOUT},
         )
         self.maintenance_ops_threads.append(trigger_effect_thread)
         trigger_effect_thread.start()
@@ -1617,7 +1685,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
         for conn in in_use_connections.values():
             ClientValidations.wait_push_notification(
                 cluster_client_maint_notifications,
-                timeout=SMIGRATING_TIMEOUT,
+                timeout=RESHARD_SMIGRATING_TIMEOUT,
                 connection=conn,
             )
 
@@ -1679,7 +1747,9 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
         trigger_effect_thread.join()
         self.maintenance_ops_threads.remove(trigger_effect_thread)
 
-    @pytest.mark.timeout(300)  # 5 minutes timeout for this test
+    @pytest.mark.timeout(
+        RESHARD_TEST_TIMEOUT
+    )  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
     @pytest.mark.parametrize(
         "effect_name, trigger, db_config, db_name",
         generate_params(
@@ -1730,6 +1800,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                 effect_name,
                 trigger,
             ),
+            kwargs={"timeout": RESHARD_OP_TIMEOUT},
         )
         self.maintenance_ops_threads.append(trigger_effect_thread)
         trigger_effect_thread.start()
@@ -1738,7 +1809,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
         for conn in in_use_connections.values():
             ClientValidations.wait_push_notification(
                 cluster_client_maint_notifications,
-                timeout=int(SLOT_SHUFFLE_TIMEOUT / 2),
+                timeout=RESHARD_SMIGRATING_TIMEOUT,
                 connection=conn,
             )
 
@@ -1765,6 +1836,18 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
             connection=con_to_read_smigrated,
         )
 
+        logging.info("Waiting for the operation to finish server-side...")
+        trigger_effect_thread.join()
+        self.maintenance_ops_threads.remove(trigger_effect_thread)
+
+        logging.info("Draining notifications until the node cache reflects -1 node...")
+        self._wait_for_node_cache_delta(
+            cluster_client_maint_notifications,
+            list(in_use_connections.values()),
+            len(initial_cluster_nodes),
+            expected_delta=-1,
+        )
+
         logging.info("Validating connection state after SMIGRATED ...")
 
         updated_cluster_nodes = (
@@ -1788,15 +1871,12 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
         assert conn is not None
         assert conn.should_reconnect() is True
 
-        # validate no other connections are marked for reconnect
-        marked_conns_for_reconnect = 0
-        for conn in in_use_connections.values():
-            if conn.should_reconnect():
-                marked_conns_for_reconnect += 1
-        # only one connection should be marked for reconnect
-        # onle the one that belongs to the node that was from
-        # the src address of the maintenance
-        assert marked_conns_for_reconnect == 1
+        # At least the removed node's connection is marked for reconnect. A single-step migrate
+        # marks exactly one; an ASM scale-in cascade may touch more, so accept >= 1.
+        marked_conns_for_reconnect = sum(
+            1 for conn in in_use_connections.values() if conn.should_reconnect()
+        )
+        assert marked_conns_for_reconnect >= 1
 
         logging.info("Releasing connections back to the pool...")
         for node, conn in in_use_connections.items():
@@ -1804,10 +1884,133 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                 continue
             node.redis_connection.connection_pool.release(conn)
 
+    @pytest.mark.timeout(
+        RESHARD_TEST_TIMEOUT
+    )  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
+    @pytest.mark.parametrize(
+        "effect_name, trigger, db_config, db_name",
+        generate_params(
+            _FAULT_INJECTOR_CLIENT_OSS_API,
+            [
+                SlotMigrateEffects.ADD,
+            ],
+        ),
+    )
+    def test_notification_handling_with_node_add(
+        self,
+        fault_injector_client_oss_api: FaultInjectorClient,
+        effect_name: SlotMigrateEffects,
+        trigger: str,
+        db_config: dict[str, Any],
+        db_name: str,
+    ):
+        """
+        Test push notifications when a cluster operation moves slots such that a previously
+        empty node gains a master shard / endpoint (the client's node cache grows by one).
+        Mirrors test_notification_handling_with_node_remove for the opposite (+1) delta.
+        """
+        logging.info(f"DB name: {db_name}")
+
+        cluster_client_maint_notifications, cluster_endpoint_config = self.setup_env(
+            fault_injector_client_oss_api, db_config
+        )
+
+        logging.info("Creating one connection in each node's pool.")
+        initial_cluster_nodes = (
+            cluster_client_maint_notifications.nodes_manager.nodes_cache.copy()
+        )
+        in_use_connections = {}
+        for node in initial_cluster_nodes.values():
+            in_use_connections[node] = (
+                node.redis_connection.connection_pool.get_connection()
+            )
+
+        logging.info("Executing FI command that triggers the desired effect...")
+        trigger_effect_thread = Thread(
+            target=self._trigger_effect,
+            name="trigger_effect_thread",
+            args=(
+                fault_injector_client_oss_api,
+                cluster_endpoint_config,
+                effect_name,
+                trigger,
+            ),
+            kwargs={"timeout": RESHARD_OP_TIMEOUT},
+        )
+        self.maintenance_ops_threads.append(trigger_effect_thread)
+        trigger_effect_thread.start()
+
+        logging.info("Waiting for SMIGRATING push notifications in all connections...")
+        for conn in in_use_connections.values():
+            ClientValidations.wait_push_notification(
+                cluster_client_maint_notifications,
+                timeout=RESHARD_SMIGRATING_TIMEOUT,
+                connection=conn,
+            )
+
+        logging.info("Validating connection maintenance state...")
+        for conn in in_use_connections.values():
+            assert conn.maintenance_state == MaintenanceState.MAINTENANCE
+            assert conn._sock.gettimeout() == RELAXED_TIMEOUT
+            assert conn.should_reconnect() is False
+
+        # During SMIGRATING (before reconciliation) the added node is not in the cache yet: the
+        # cache size is unchanged and every initial node key is still present. Mirrors the same
+        # invariant asserted by test_notification_handling_with_node_remove.
+        assert len(initial_cluster_nodes) == len(
+            cluster_client_maint_notifications.nodes_manager.nodes_cache
+        )
+        for node_key in initial_cluster_nodes.keys():
+            assert (
+                node_key in cluster_client_maint_notifications.nodes_manager.nodes_cache
+            )
+
+        logging.info("Waiting for SMIGRATED push notifications...")
+        con_to_read_smigrated = random.choice(list(in_use_connections.values()))
+        ClientValidations.wait_push_notification(
+            cluster_client_maint_notifications,
+            timeout=SMIGRATED_TIMEOUT,
+            connection=con_to_read_smigrated,
+        )
+
+        logging.info("Waiting for the operation to finish server-side...")
         trigger_effect_thread.join()
         self.maintenance_ops_threads.remove(trigger_effect_thread)
 
-    @pytest.mark.timeout(300)  # 5 minutes timeout for this test
+        logging.info("Draining notifications until the node cache reflects +1 node...")
+        self._wait_for_node_cache_delta(
+            cluster_client_maint_notifications,
+            list(in_use_connections.values()),
+            len(initial_cluster_nodes),
+            expected_delta=1,
+        )
+
+        logging.info("Validating a node was added to the client's node cache...")
+        updated_cluster_nodes = (
+            cluster_client_maint_notifications.nodes_manager.nodes_cache.copy()
+        )
+        added_nodes = set(updated_cluster_nodes.values()) - set(
+            initial_cluster_nodes.values()
+        )
+        assert len(added_nodes) == 1
+        assert len(updated_cluster_nodes) == len(initial_cluster_nodes) + 1
+
+        # An add moves slots FROM an existing shard onto the previously empty node, so the
+        # connection to that source shard is marked for reconnect.
+        marked_conns_for_reconnect = sum(
+            1 for conn in in_use_connections.values() if conn.should_reconnect()
+        )
+        assert marked_conns_for_reconnect >= 1
+
+        logging.info("Releasing connections back to the pool...")
+        for node, conn in in_use_connections.items():
+            if node.redis_connection is None:
+                continue
+            node.redis_connection.connection_pool.release(conn)
+
+    @pytest.mark.timeout(
+        RESHARD_TEST_TIMEOUT
+    )  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
     @pytest.mark.skipif(
         use_mock_proxy(),
         reason="Mock proxy doesn't support sending notifications to new connections.",
@@ -1822,9 +2025,21 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                 SlotMigrateEffects.REMOVE,
                 SlotMigrateEffects.ADD,
             ],
+            # Catching the in-flight SMIGRATING on a NEWLY opened connection needs a
+            # maintenance window that stays open long enough to open that fresh connection
+            # mid-flight. These combinations close too fast for the test to be reliable:
+            #   - slot_shuffle + failover: maintenance ends almost immediately;
+            #   - reshard + add/remove: a cascade of short SMIGRATING/SMIGRATED windows, so a
+            #     connection opened between windows sees no maintenance state;
+            #   - reshard + slot_shuffle: a single ASM migrate_slots that, for a small slot
+            #     range, closes (SMIGRATED) ~1s after SMIGRATING.
+            # remove_add keeps a long enough combined window and is still exercised here.
             skip_combinations=[
                 (SlotMigrateEffects.SLOT_SHUFFLE, "failover"),
-            ],  # maintenance ends too fast for the test to be reliable
+                (SlotMigrateEffects.SLOT_SHUFFLE, "reshard"),
+                (SlotMigrateEffects.REMOVE, "reshard"),
+                (SlotMigrateEffects.ADD, "reshard"),
+            ],
         ),
     )
     def test_new_connections_receive_last_smigrating_smigrated_notification(
@@ -1865,6 +2080,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                 effect_name,
                 trigger,
             ),
+            kwargs={"timeout": RESHARD_OP_TIMEOUT},
         )
 
         self.maintenance_ops_threads.append(trigger_effect_thread)
@@ -1875,7 +2091,7 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
             for conn in conns_per_node:
                 ClientValidations.wait_push_notification(
                     cluster_client_maint_notifications,
-                    timeout=int(SLOT_SHUFFLE_TIMEOUT / 2),
+                    timeout=RESHARD_SMIGRATING_TIMEOUT,
                     connection=conn,
                 )
                 logging.info(
@@ -1945,7 +2161,9 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
 class TestClusterClientCommandsExecutionWithPushNotificationsWithEffectTrigger(
     TestClusterClientPushNotificationsWithEffectTriggerBase
 ):
-    @pytest.mark.timeout(300)  # 5 minutes timeout for this test
+    @pytest.mark.timeout(
+        RESHARD_TEST_TIMEOUT
+    )  # sized for slow ASM reshard, see RESHARD_OP_TIMEOUT
     @pytest.mark.parametrize(
         "effect_name, trigger, db_config, db_name",
         generate_params(
@@ -1954,7 +2172,6 @@ class TestClusterClientCommandsExecutionWithPushNotificationsWithEffectTrigger(
                 SlotMigrateEffects.SLOT_SHUFFLE,
                 SlotMigrateEffects.REMOVE,
                 SlotMigrateEffects.ADD,
-                SlotMigrateEffects.SLOT_SHUFFLE,
             ],
         ),
     )
@@ -2039,6 +2256,7 @@ class TestClusterClientCommandsExecutionWithPushNotificationsWithEffectTrigger(
                 effect_name,
                 trigger,
             ),
+            kwargs={"timeout": RESHARD_OP_TIMEOUT},
         )
         self.maintenance_ops_threads.append(trigger_effect_thread)
         trigger_effect_thread.start()

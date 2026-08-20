@@ -5,6 +5,7 @@ import select
 import selectors
 import socket
 import ssl
+import sys
 import threading
 import time
 import types
@@ -574,6 +575,69 @@ class TestConnection:
         mock_sock.close.assert_called_once()
         assert conn._sock is None
 
+    def test_connect_breaks_exception_reference_cycle(self):
+        """
+        On connection failure, _connect must not leave its frame retaining the
+        raised exception.
+        The exception's traceback references the frame, so a retained local
+        would form a cycle only reclaimable by the GC.
+        The finally clause in _connect breaks it by clearing the local.
+        """
+        conn = Connection(host="localhost", port=6379)
+        addr_info = (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 6379))
+        with (
+            patch.object(socket, "getaddrinfo", return_value=[addr_info]),
+            patch.object(socket, "socket") as socket_factory,
+        ):
+            socket_factory.return_value.connect.side_effect = OSError("refused")
+            with pytest.raises(OSError) as exc_info:
+                conn._connect()
+
+        # Locate the _connect frame in the propagated traceback and confirm its
+        # err local was cleared, proving no exception<->frame cycle survives.
+        connect_frame = None
+        tb = exc_info.value.__traceback__
+        while tb is not None:
+            if tb.tb_frame.f_code.co_name == "_connect":
+                connect_frame = tb.tb_frame
+            tb = tb.tb_next
+        assert connect_frame is not None
+        assert connect_frame.f_locals.get("err") is None
+
+    def test_connect_breaks_reference_cycle_when_a_later_address_succeeds(self):
+        """
+        When an address fails but a later one connects, _connect must not
+        return while still holding the caught exception.
+        The exception's traceback references the frame, so a retained local
+        would form a cycle only reclaimable by the GC.
+        """
+        conn = Connection(host="localhost", port=6379)
+        addr_infos = [
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 6379)),
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.2", 6379)),
+        ]
+
+        # _connect calls getaddrinfo, so hook that as a way to peek the caller
+        connect_frames = []
+
+        def capturing_getaddrinfo(*args, **kwargs):
+            connect_frames.append(sys._getframe(1))
+            return addr_infos
+
+        failing_sock, working_sock = MagicMock(), MagicMock()
+        failing_sock.connect.side_effect = OSError("refused")
+
+        with (
+            patch.object(socket, "getaddrinfo", capturing_getaddrinfo),
+            patch.object(socket, "socket", side_effect=[failing_sock, working_sock]),
+        ):
+            assert conn._connect() is working_sock
+
+        # Error should be cleared in the connect frame
+        assert len(connect_frames) == 1
+        (connect_frame,) = connect_frames
+        assert connect_frame.f_locals.get("err") is None
+
     @pytest.mark.parametrize(
         "connection_kwargs",
         [
@@ -994,6 +1058,26 @@ class TestUnitCacheProxyConnection:
         proxy_connection.disconnect()
 
         assert len(cache.collection) == 0
+
+    def test_himport_prepared_is_reassignable_through_proxy(self):
+        # Regression: `_himport_prepared` must have a setter that delegates to the
+        # wrapped connection, mirroring `_himport_reconciled_revision`. A getter-only
+        # property would make `conn._himport_prepared = {}` (as `_reset_himport_state`
+        # does) raise AttributeError -- but only when client-side caching is enabled.
+        # Exercise the property descriptors directly, no full construction needed.
+        proxy = object.__new__(CacheProxyConnection)
+
+        class _Wrapped:
+            _himport_prepared = {"fs": 1}
+            _himport_reconciled_revision = 3
+
+        proxy._conn = _Wrapped()
+        assert proxy._himport_prepared == {"fs": 1}  # getter delegates
+        proxy._himport_prepared = {}  # setter delegates (was AttributeError)
+        assert proxy._conn._himport_prepared == {}
+        # symmetry with the existing reconciled-revision setter
+        proxy._himport_reconciled_revision = 7
+        assert proxy._conn._himport_reconciled_revision == 7
 
     @pytest.mark.skipif(
         platform.python_implementation() == "PyPy",

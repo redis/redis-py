@@ -17,6 +17,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    Iterable,
     List,
     Literal,
     Optional,
@@ -29,6 +30,7 @@ from typing import (
 if TYPE_CHECKING:
     from redis.keyspace_notifications import ClusterKeyspaceNotifications
 
+from redis import _himport_exec
 from redis._defaults import DEFAULT_RETRY_BASE, DEFAULT_RETRY_CAP, DEFAULT_RETRY_COUNT
 from redis._parsers import CommandsParser, Encoder
 from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
@@ -73,6 +75,7 @@ from redis.exceptions import (
     TryAgainError,
     WatchError,
 )
+from redis.himport import HImportRegistry, parse_himport_set_args
 from redis.lock import Lock
 from redis.maint_notifications import (
     MaintNotificationsConfig,
@@ -83,12 +86,18 @@ from redis.observability.recorder import (
     record_operation_duration,
 )
 from redis.retry import Retry
-from redis.typing import ChannelT, PubSubHandler, Subscription
+from redis.typing import (
+    ChannelT,
+    FieldT,
+    PubSubHandler,
+    Subscription,
+)
 from redis.utils import (
     check_protocol_version,
     deprecated_args,
     deprecated_function,
     dict_merge,
+    experimental_method,
     list_keys_to_dict,
     merge_result,
     safe_str,
@@ -656,9 +665,10 @@ class RedisCluster(
           <https://www.iana.org/assignments/uri-schemes/prov/rediss>
         - ``unix://``: creates a Unix Domain Socket connection.
 
-        The username, password, hostname, path and all querystring values
-        are passed through urllib.parse.unquote in order to replace any
-        percent-encoded values with their corresponding characters.
+        The username, password, hostname and path are passed through
+        urllib.parse.unquote in order to replace any percent-encoded values
+        with their corresponding characters. Querystring values are decoded
+        by urllib.parse.parse_qs and are not unquoted again.
 
         There are several ways to specify a database number. The first value
         found will be used:
@@ -887,6 +897,14 @@ class RedisCluster(
         if check_protocol_version(protocol, 3) and maint_notifications_config is None:
             maint_notifications_config = MaintNotificationsConfig()
 
+        # Build the client-level HIMPORT registry once (always empty at construction)
+        # and share the same object with every node pool, so the fieldset registry is
+        # shared cluster-wide and runtime himport_prepare mutates one object. It is
+        # handed to the NodesManager and injected onto each node's pool in
+        # create_redis_node; it is deliberately NOT forwarded through connection_kwargs,
+        # so nodes reuse the one shared object rather than each rebuilding their own.
+        self._himport_registry = HImportRegistry()
+
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.node_flags = self.__class__.NODE_FLAGS.copy()
         self.read_from_replicas = read_from_replicas
@@ -909,6 +927,7 @@ class RedisCluster(
             cache_config=cache_config,
             event_dispatcher=self._event_dispatcher,
             maint_notifications_config=maint_notifications_config,
+            himport_registry=self._himport_registry,
             **kwargs,
         )
 
@@ -1370,6 +1389,36 @@ class RedisCluster(
         k = self.encoder.encode(key)
         return key_slot(k)
 
+    # HIMPORT orchestration. PREPARE/DISCARD/DISCARDALL mutate the one shared
+    # HImportRegistry exactly once (every node pool references the same object, so the
+    # change is visible cluster-wide and applied lazily per node). SET routes by key
+    # slot to the owning primary and reuses that node's standalone himport_set (lazy
+    # PREPARE bundled with SET). See ``.agents/himport_client_support_spec.md``.
+
+    @property
+    def himport_registry(self) -> HImportRegistry:
+        """The cluster-wide HIMPORT fieldset registry (empty if none was declared).
+
+        Read-only: the registry is mutated only through the HIMPORT command methods.
+        """
+        return self._himport_registry
+
+    @experimental_method()
+    def himport_prepare(self, fieldset_name: str, fields: Iterable[FieldT]) -> bool:
+        """Declare an HIMPORT fieldset cluster-wide (shared registry, applied lazily)."""
+        self._himport_registry.prepare(fieldset_name, fields)
+        return True
+
+    @experimental_method()
+    def himport_discard(self, fieldset_name: str) -> int:
+        """Remove an HIMPORT fieldset cluster-wide (shared registry, applied lazily)."""
+        return 1 if self._himport_registry.discard(fieldset_name) else 0
+
+    @experimental_method()
+    def himport_discard_all(self) -> int:
+        """Remove all HIMPORT fieldsets cluster-wide (shared registry, applied lazily)."""
+        return self._himport_registry.discard_all()
+
     def _get_command_keys(self, *args):
         """
         Get the keys in the command. If the command has no keys in in, None is
@@ -1627,6 +1676,45 @@ class RedisCluster(
                         )
                     raise e
 
+    def _himport_reconcile_discards(self, redis_node, connection):
+        """Delegate to the shared sync HIMPORT executor."""
+        return _himport_exec.reconcile_discards(redis_node, connection)
+
+    def _himport_prepare_and_set(
+        self,
+        redis_node,
+        connection,
+        key,
+        fieldset_name,
+        values,
+        fieldset,
+        asking: bool = False,
+    ):
+        """Delegate to the shared sync HIMPORT executor."""
+        return _himport_exec.prepare_and_set(
+            redis_node,
+            connection,
+            key,
+            fieldset_name,
+            values,
+            fieldset,
+            asking=asking,
+        )
+
+    def _himport_execute_set(
+        self,
+        redis_node,
+        connection,
+        key,
+        fieldset_name,
+        values,
+        asking: bool = False,
+    ):
+        """Delegate to the shared sync HIMPORT executor."""
+        return _himport_exec.execute_set(
+            redis_node, connection, key, fieldset_name, values, asking=asking
+        )
+
     def _execute_command(self, target_node, *args, **kwargs):
         """
         Send a command to a node in the cluster
@@ -1662,20 +1750,55 @@ class RedisCluster(
 
                 redis_node = self.get_redis_connection(target_node)
                 connection = get_connection(redis_node)
-                if asking:
+                himport_set = parse_himport_set_args(args)
+                if asking and himport_set is None:
                     connection.send_command("ASKING")
                     redis_node.parse_response(connection, "ASKING", **kwargs)
                     asking = False
-                connection.send_command(*args, **kwargs)
-                response = redis_node.parse_response(connection, command, **kwargs)
-
-                # Remove keys entry, it needs only for cache.
-                kwargs.pop("keys", None)
-
-                if command in self.cluster_response_callbacks:
-                    response = self.cluster_response_callbacks[command](
-                        response, **kwargs
+                if himport_set is not None:
+                    # args == (HIMPORT_SET, key, fieldset_name, *values). A raw
+                    # ``execute_command`` with too few args falls through to the
+                    # normal send path below so the server returns its arity error
+                    # instead of a client-side IndexError.
+                    # The cluster
+                    # executor lazily PREPAREs the fieldset on this connection and
+                    # reconciles deferred DISCARDs, then SETs; it already applies the
+                    # HIMPORT SET response callback, so it bypasses the cluster callback
+                    # block below.
+                    # This per-command branch in the hot dispatch path is deliberate
+                    # and has no cleaner alternative: this is the only seam where the
+                    # concrete routed connection is known, and connection-scoped
+                    # session setup can only happen once that connection is chosen.
+                    # On an ASK redirect ``asking`` is folded into the SET's own packed
+                    # write (see the guard above that suppresses the standalone ASKING
+                    # for HIMPORT SET) so the allowance sits immediately before the SET.
+                    # Clear ``asking`` first and carry the allowance in a dedicated
+                    # local: ``_himport_execute_set`` can raise a retriable MOVED/TRYAGAIN
+                    # mid-exchange, and a stale ``asking`` would shadow the moved-retry
+                    # branch on the next loop iteration (mirrors the async client).
+                    key, fieldset_name, values = himport_set
+                    ask_himport = asking
+                    asking = False
+                    response = self._himport_execute_set(
+                        redis_node,
+                        connection,
+                        key,
+                        fieldset_name,
+                        values,
+                        asking=ask_himport,
                     )
+                    kwargs.pop("keys", None)
+                else:
+                    connection.send_command(*args, **kwargs)
+                    response = redis_node.parse_response(connection, command, **kwargs)
+
+                    # Remove keys entry, it needs only for cache.
+                    kwargs.pop("keys", None)
+
+                    if command in self.cluster_response_callbacks:
+                        response = self.cluster_response_callbacks[command](
+                            response, **kwargs
+                        )
 
                 self._record_command_metric(
                     command_name=command,
@@ -2121,8 +2244,13 @@ class NodesManager:
         cache_factory: Optional[CacheFactoryInterface] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+        himport_registry: HImportRegistry | None = None,
         **kwargs,
     ):
+        # Shared, cluster-wide HIMPORT registry object, injected onto every node's pool
+        # in create_redis_node (not forwarded through connection_kwargs, so all nodes
+        # reuse the one object rather than rebuilding it per node).
+        self.himport_registry = himport_registry
         self.nodes_cache: dict[str, ClusterNode] = {}
         self.slots_cache: dict[int, list[ClusterNode]] = {}
         self.startup_nodes: dict[str, ClusterNode] = {n.name: n for n in startup_nodes}
@@ -2402,6 +2530,14 @@ class NodesManager:
                 cache=self._cache,
                 retry=node_retry_config,
                 **kwargs,
+            )
+        # Share the one cluster-wide HIMPORT registry with this node's pool. Injected
+        # here (rather than forwarded via connection_kwargs) so every node reuses the
+        # same object; the node has no connections yet, so this is safe.
+        if self.himport_registry is not None:
+            r.connection_pool.himport_registry = self.himport_registry
+            r.connection_pool.connection_kwargs["himport_registry"] = (
+                self.himport_registry
             )
         return r
 
@@ -3422,6 +3558,11 @@ class ClusterPipeline(RedisCluster):
         """ """
         self.command_stack = []
         self.nodes_manager = nodes_manager
+        # Share the parent cluster's HIMPORT registry (held on the NodesManager and
+        # referenced by every node pool). The inherited himport_prepare/discard/
+        # discard_all mutate this one object, so a fieldset declared on the pipeline is
+        # visible to the batched himport_set pre-flight exactly as on the parent client.
+        self._himport_registry = nodes_manager.himport_registry
         self.commands_parser = commands_parser
         self.refresh_table_asap = False
         self.result_callbacks = (
@@ -3623,6 +3764,20 @@ def block_pipeline_command(name: str) -> Callable[..., Any]:
     return inner
 
 
+def is_zero_key_eval_command(*args) -> bool:
+    """
+    True for EVAL/EVALSHA with numkeys=0 (any primary).
+    """
+    if len(args) < 3:
+        return False
+    if str(args[0]).upper() not in ("EVAL", "EVALSHA"):
+        return False
+    try:
+        return int(args[2]) == 0
+    except (TypeError, ValueError):
+        return False
+
+
 # Blocked pipeline commands
 PIPELINE_BLOCKED_COMMANDS = (
     "BGREWRITEAOF",
@@ -3641,7 +3796,6 @@ PIPELINE_BLOCKED_COMMANDS = (
     "CONFIG",
     "DBSIZE",
     "ECHO",
-    "EVALSHA",
     "FLUSHALL",
     "FLUSHDB",
     "INFO",
@@ -3938,6 +4092,10 @@ class AbstractStrategy(ExecutionStrategy):
         )
         return self._pipe
 
+    def _himport_prepare_pipeline(self, redis_node, conn, commands):
+        """Delegate to the shared sync HIMPORT executor."""
+        _himport_exec.prepare_pipeline(redis_node, conn, [args for args, _ in commands])
+
     @abstractmethod
     def execute(self, raise_on_error: bool = True) -> List[Any]:
         pass
@@ -4077,6 +4235,9 @@ class PipelineStrategy(AbstractStrategy):
         is_default_node = False
         # build a list of node objects based on node names we need to
         nodes: dict[str, NodeCommands] = {}
+        # node objects keyed by name, so each node's connection can be pre-flighted
+        # for HIMPORT SET (PREPARE) before the batched write.
+        node_objs: dict = {}
         nodes_written = 0
         nodes_read = 0
 
@@ -4112,18 +4273,27 @@ class PipelineStrategy(AbstractStrategy):
                         # in a list of pre-defined request policies
                         command_flag = self.command_flags.get(command)
                         if not command_flag:
-                            # Fallback to default policy
-                            if not self._pipe.get_default_node():
-                                keys = None
-                            else:
-                                keys = self._pipe._get_command_keys(*c.args)
-                            if not keys or len(keys) == 0:
-                                command_policies = CommandPolicies()
-                            else:
+                            # Fallback to default policy.
+                            # EVAL/EVALSHA must not use _get_command_keys(): Redis
+                            # <7 breaks on COMMAND GETKEYS when numkeys is 0.
+                            # Other unflagged commands keep the keyless fallback.
+                            if command in ("EVAL", "EVALSHA"):
                                 command_policies = CommandPolicies(
                                     request_policy=RequestPolicy.DEFAULT_KEYED,
                                     response_policy=ResponsePolicy.DEFAULT_KEYED,
                                 )
+                            else:
+                                if not self._pipe.get_default_node():
+                                    keys = None
+                                else:
+                                    keys = self._pipe._get_command_keys(*c.args)
+                                if not keys or len(keys) == 0:
+                                    command_policies = CommandPolicies()
+                                else:
+                                    command_policies = CommandPolicies(
+                                        request_policy=RequestPolicy.DEFAULT_KEYED,
+                                        response_policy=ResponsePolicy.DEFAULT_KEYED,
+                                    )
                         else:
                             if command_flag in self._pipe._command_flags_mapping:
                                 command_policies = CommandPolicies(
@@ -4177,6 +4347,7 @@ class PipelineStrategy(AbstractStrategy):
                         redis_node.connection_pool,
                         connection,
                     )
+                    node_objs[node_name] = node
                 nodes[node_name].append(c)
 
             # send the commands in sequence.
@@ -4187,6 +4358,15 @@ class PipelineStrategy(AbstractStrategy):
             # so that we can read them from different sockets as they come back.
             # we don't multiplex on the sockets as they come available,
             # but that shouldn't make too much difference.
+
+            # HIMPORT SETs in the batch need their fieldsets prepared on each
+            # node's connection first; the packed write bypasses the per-command
+            # lazy prepare, so pre-flight the PREPARE (once per node) here.
+            for node_name, n in nodes.items():
+                redis_node = self._pipe.get_redis_connection(node_objs[node_name])
+                self._himport_prepare_pipeline(
+                    redis_node, n.connection, [(c.args, c.options) for c in n.commands]
+                )
 
             # Start timing for observability
             start_time = time.monotonic()
@@ -4417,12 +4597,43 @@ class TransactionStrategy(AbstractStrategy):
         self._explicit_transaction = False
         self._watching = False
         self._pipeline_slots: Set[int] = set()
+        # True once a keyed (non-slot-agnostic) command has fixed the slot
+        self._transaction_has_keyed_slot = False
         self._transaction_connection: Optional[Connection] = None
         self._executing = False
         self._retry = copy(self._pipe.retry)
         self._retry.update_supported_errors(
             RedisCluster.ERRORS_ALLOW_RETRY + self.SLOT_REDIRECT_ERRORS
         )
+
+    def _resolve_transaction_slot(self, *args) -> Optional[int]:
+        """
+        Pick a slot for a transactional pipeline command.
+
+        Zero-key EVAL/EVALSHA can run on any primary. Reuse an existing
+        transaction slot when present so multiple zero-key scripts (or a
+        mix with keyed commands) stay single-slot.
+        """
+        if args[0] in ClusterPipeline.NO_SLOTS_COMMANDS:
+            return None
+
+        if is_zero_key_eval_command(*args):
+            if self._pipeline_slots:
+                return next(iter(self._pipeline_slots))
+            return self._pipe.determine_slot(*args)
+
+        slot_number = self._pipe.determine_slot(*args)
+        if (
+            slot_number is not None
+            and self._pipeline_slots
+            and slot_number not in self._pipeline_slots
+            and not self._transaction_has_keyed_slot
+        ):
+            # Prior slots came only from zero-key scripts; retarget.
+            self._pipeline_slots.clear()
+        if slot_number is not None:
+            self._transaction_has_keyed_slot = True
+        return slot_number
 
     def _get_client_and_connection_for_transaction(self) -> Tuple[Redis, Connection]:
         """
@@ -4460,7 +4671,7 @@ class TransactionStrategy(AbstractStrategy):
     def execute_command(self, *args, **kwargs):
         slot_number: Optional[int] = None
         if args[0] not in ClusterPipeline.NO_SLOTS_COMMANDS:
-            slot_number = self._pipe.determine_slot(*args)
+            slot_number = self._resolve_transaction_slot(*args)
 
         if (
             self._watching or args[0] in self.IMMEDIATE_EXECUTE_COMMANDS
@@ -4542,8 +4753,24 @@ class TransactionStrategy(AbstractStrategy):
         Send a command and parse the response
         """
 
-        conn.send_command(*args)
-        output = redis_node.parse_response(conn, command_name, **options)
+        # HIMPORT SET's wire form depends on per-connection state: the fieldset
+        # must be PREPAREd on this connection first, and any fieldset discarded
+        # since this connection last reconciled must be dropped. The
+        # immediate/watched path (commands issued after WATCH, before MULTI)
+        # would otherwise send a bare HIMPORT SET and fail with "no such
+        # fieldset". Route it through the node's HIMPORT executor, the same way
+        # the normal cluster path, the batched MULTI/EXEC path, and standalone
+        # watched pipelines all do.
+        himport_set = parse_himport_set_args(args)
+        if himport_set is not None:
+            # HIMPORT SET in the joined or split raw form; operands at the right
+            # offsets. Too few operands returns None and falls through to the bare
+            # send so the server returns its arity error.
+            key, fieldset_name, values = himport_set
+            output = redis_node._himport_execute_set(conn, key, fieldset_name, values)
+        else:
+            conn.send_command(*args)
+            output = redis_node.parse_response(conn, command_name, **options)
 
         if command_name in self.UNWATCH_COMMANDS:
             self._watching = False
@@ -4644,6 +4871,13 @@ class TransactionStrategy(AbstractStrategy):
         self._executing = True
 
         redis_node, connection = self._get_client_and_connection_for_transaction()
+
+        # Ensure fieldsets referenced by buffered HIMPORT SETs are prepared on this
+        # node's connection before the MULTI/EXEC block (session state, not
+        # transactional). All keys share one slot here, so it is a single node.
+        self._himport_prepare_pipeline(
+            redis_node, connection, [(c.args, c.options) for c in stack]
+        )
 
         stack = chain(
             [PipelineCommand(("MULTI",))],
@@ -4785,6 +5019,7 @@ class TransactionStrategy(AbstractStrategy):
         self._watching = False
         self._explicit_transaction = False
         self._pipeline_slots = set()
+        self._transaction_has_keyed_slot = False
         self._executing = False
 
     def send_cluster_commands(

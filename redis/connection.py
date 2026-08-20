@@ -55,6 +55,7 @@ from .exceptions import (
     ResponseError,
     TimeoutError,
 )
+from .himport import HImportRegistry
 from .maint_notifications import (
     MaintenanceState,
     MaintNotificationsConfig,
@@ -841,6 +842,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         oss_cluster_maint_notifications_handler: Optional[
             OSSMaintNotificationsHandler
         ] = None,
+        himport_registry: HImportRegistry | None = None,
     ):
         """
         Initialize a new Connection.
@@ -938,6 +940,11 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
 
         self._command_packer = self._construct_command_packer(command_packer)
         self._should_reconnect = False
+
+        # HIMPORT client-side state. `himport_registry` is the shared client-level
+        # registry (empty if unconfigured) and persists across reconnects.
+        self.himport_registry = himport_registry
+        self._reset_himport_state()
 
         # Set up maintenance notifications
         MaintNotificationsAbstractConnection.__init__(
@@ -1102,11 +1109,22 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
     def _error_message(self, exception):
         return format_error_message(self._host_error(), exception)
 
+    def _reset_himport_state(self):
+        # A fresh server session has no prepared HIMPORT fieldsets, so the next
+        # himport_set must re-prepare on this connection. ``_himport_prepared`` maps
+        # fieldset name -> the version prepared on the server; ``_himport_reconciled
+        # _revision`` is the registry revision this connection last reconciled discards
+        # against. Both are reset on connect/disconnect since the session is gone.
+        self._himport_prepared: dict[str, int] = {}
+        self._himport_reconciled_revision: int = 0
+
     def on_connect(self):
         self.on_connect_check_health(check_health=True)
 
     def on_connect_check_health(self, check_health: bool = True):
         "Initialize the connection, authenticate and select a database"
+        # A fresh socket is a new server session: no prepared HIMPORT fieldsets.
+        self._reset_himport_state()
         self._parser.on_connect(self)
         parser = self._parser
 
@@ -1223,6 +1241,9 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
 
     def disconnect(self, *args, **kwargs):
         "Disconnects from the Redis server"
+        # The server session is gone, so any HIMPORT fieldsets prepared on this
+        # socket no longer exist; reset the tracking.
+        self._reset_himport_state()
         self._parser.on_disconnect()
 
         conn_sock = self._sock
@@ -1555,6 +1576,14 @@ class Connection(AbstractConnection):
         # we want to mimic what socket.create_connection does to support
         # ipv4/ipv6, but we want to set options prior to calling
         # socket.connect()
+
+        # Last caught connection error.
+        # Re-thrown if we are unable to connect to any of the options returned
+        # by getaddrinfo.
+        # Note that we must clear this variable before returning - otherwise,
+        # a caught err's traceback points to this frame, which points to err.
+        # Clearing this lets refcounting reclaim the exception immediately
+        # without deferring to the python garbage collector.
         err = None
 
         for res in socket.getaddrinfo(
@@ -1581,6 +1610,10 @@ class Connection(AbstractConnection):
 
                 # set the socket_timeout now that we're connected
                 sock.settimeout(self.socket_timeout)
+
+                # If a previous connection attempt failed, clear the error
+                err = None
+
                 return sock
 
             except OSError as _:
@@ -1593,7 +1626,11 @@ class Connection(AbstractConnection):
                     sock.close()
 
         if err is not None:
-            raise err
+            try:
+                raise err
+            finally:
+                # Ensure we clear local references to caught exceptions
+                err = None
         raise OSError("socket.getaddrinfo returned an empty list")
 
     def _host_error(self):
@@ -1721,6 +1758,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def send_packed_command(self, command, check_health=True):
         # TODO: Investigate if it's possible to unpack command
         #  or extract keys from packed command
+        # Pre-packed commands are not individually cacheable, so make sure the
+        # next read_response does not try to cache their reply under a stale key.
+        self._current_command_cache_key = None
         self._conn.send_packed_command(command)
 
     def send_command(self, *args, **kwargs):
@@ -1852,6 +1892,34 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
     def pack_commands(self, commands):
         return self._conn.pack_commands(commands)
+
+    # HIMPORT state lives on the wrapped connection (HIMPORT is never cacheable);
+    # delegate so callers treat the proxy like a plain connection and never need
+    # to know a proxy is in play.
+    @property
+    def himport_registry(self):
+        return self._conn.himport_registry
+
+    @property
+    def _himport_prepared(self):
+        return self._conn._himport_prepared
+
+    @_himport_prepared.setter
+    def _himport_prepared(self, value):
+        # Delegate reassignment to the wrapped connection, mirroring
+        # ``_himport_reconciled_revision``. Production code only mutates the dict
+        # in place, but ``_reset_himport_state`` (and any future caller) reassigns
+        # it, and a getter-only property here would raise ``AttributeError`` only
+        # when client-side caching is enabled -- a caching-specific latent trap.
+        self._conn._himport_prepared = value
+
+    @property
+    def _himport_reconciled_revision(self):
+        return self._conn._himport_reconciled_revision
+
+    @_himport_reconciled_revision.setter
+    def _himport_reconciled_revision(self, value):
+        self._conn._himport_reconciled_revision = value
 
     @property
     def handshake_metadata(self) -> Union[Dict[bytes, bytes], Dict[str, str]]:
@@ -2276,11 +2344,10 @@ URL_QUERY_ARGUMENT_PARSERS = {
 
 
 def parse_url(url):
-    if not (
-        url.startswith("redis://")
-        or url.startswith("rediss://")
-        or url.startswith("unix://")
-    ):
+    # Scheme names are case-insensitive (RFC 3986), so normalize before the
+    # prefix check; the "://" is required so a URL like "redis:foo" (which
+    # urlparse would still report as the "redis" scheme) is rejected.
+    if not url.lower().startswith(("redis://", "rediss://", "unix://")):
         raise ValueError(
             "Redis URL must specify one of the following "
             "schemes (redis://, rediss://, unix://)"
@@ -2291,7 +2358,10 @@ def parse_url(url):
 
     for name, value in parse_qs(url.query).items():
         if value and len(value) > 0:
-            value = unquote(value[0])
+            # parse_qs() already percent-decodes query values, so use the value
+            # as-is; unquoting again here would double-decode (e.g. "%2520" ->
+            # "%20" -> " "). See issue #4208.
+            value = value[0]
             parser = URL_QUERY_ARGUMENT_PARSERS.get(name)
             if parser:
                 try:
@@ -2879,9 +2949,10 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
           <https://www.iana.org/assignments/uri-schemes/prov/rediss>
         - ``unix://``: creates a Unix Domain Socket connection.
 
-        The username, password, hostname, path and all querystring values
-        are passed through urllib.parse.unquote in order to replace any
-        percent-encoded values with their corresponding characters.
+        The username, password, hostname and path are passed through
+        urllib.parse.unquote in order to replace any percent-encoded values
+        with their corresponding characters. Querystring values are decoded
+        by urllib.parse.parse_qs and are not unquoted again.
 
         There are several ways to specify a database number. The first value
         found will be used:
@@ -2981,6 +3052,19 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         connection_kwargs.pop("cache", None)
         connection_kwargs.pop("cache_config", None)
 
+        # Resolve the HIMPORT registry. A pre-built ``himport_registry`` (shared, e.g.
+        # from the cluster client) takes precedence; otherwise build a fresh empty one.
+        # A registry always exists so runtime ``himport_prepare`` mutates a single object
+        # every connection already shares. The object stays in ``connection_kwargs`` so
+        # it reaches every connection. It is injected unconditionally (like other
+        # auto-added pool kwargs), so a custom ``connection_class`` must accept
+        # ``**kwargs`` (or a ``himport_registry`` parameter), as built-ins do.
+        himport_registry = connection_kwargs.get("himport_registry")
+        if himport_registry is None:
+            himport_registry = HImportRegistry()
+            connection_kwargs["himport_registry"] = himport_registry
+        self.himport_registry = himport_registry
+
         # a lock to protect the critical section in _checkpid().
         # this lock is acquired when the process id changes, such as
         # after a fork. during this time, multiple threads in the child
@@ -3016,11 +3100,15 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         }
     )
 
+    # Internal plumbing kwargs omitted from __repr__ (not user-facing config).
+    OMIT_REPR_KEYS = frozenset({"himport_registry"})
+
     def __repr__(self) -> str:
         conn_kwargs = ",".join(
             [
                 f"{k}={'<REDACTED>' if k in self.SENSITIVE_REPR_KEYS else v}"
                 for k, v in self.connection_kwargs.items()
+                if k not in self.OMIT_REPR_KEYS
             ]
         )
         return (

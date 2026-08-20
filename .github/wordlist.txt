@@ -122,13 +122,17 @@ docstrings
 eg
 enums
 exc
+fieldset
+fieldsets
 firsttimersonly
 fo
 formatter
 genindex
 gmail
+himport
 hiredis
 http
+idempotent
 idx
 iff
 ini
@@ -160,8 +164,10 @@ opentelemetry
 oss
 parsers
 performant
+pipelined
 pmessage
 png
+positionally
 pre
 psubscribe
 pubsub
@@ -178,6 +184,7 @@ redismodules
 reinitialization
 replicaof
 repo
+resharding
 runtime
 sedrik
 serializers
