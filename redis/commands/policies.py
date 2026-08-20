@@ -13,8 +13,8 @@ from redis.commands.metadata import (
     RequestPolicy,
     ResponsePolicy,
     StaticMetadataResolver,
-    _read_metadata_records,
-    _to_metadata_records,
+    _build_commands_metadata_cache_from_policies,
+    _load_commands_metadata_cache,
 )
 from redis.utils import warn_deprecated
 
@@ -268,7 +268,10 @@ class BasePolicyResolver(PolicyResolver):
                 primary policies cannot handle a specific request.
         """
         self._init_from_metadata_resolver(
-            DynamicMetadataResolver(_to_metadata_records(policies)), fallback
+            DynamicMetadataResolver(
+                _build_commands_metadata_cache_from_policies(policies)
+            ),
+            fallback,
         )
 
     def _init_from_metadata_resolver(
@@ -331,7 +334,10 @@ class AsyncBasePolicyResolver(AsyncPolicyResolver):
                 the primary policies cannot handle a specific request.
         """
         self._init_from_metadata_resolver(
-            AsyncDynamicMetadataResolver(_to_metadata_records(policies)), fallback
+            AsyncDynamicMetadataResolver(
+                _build_commands_metadata_cache_from_policies(policies)
+            ),
+            fallback,
         )
 
     def _init_from_metadata_resolver(
@@ -372,7 +378,8 @@ class DynamicPolicyResolver(BasePolicyResolver):
         """
         self._commands_parser = commands_parser
         self._init_from_metadata_resolver(
-            DynamicMetadataResolver(_read_metadata_records(commands_parser)), fallback
+            DynamicMetadataResolver(_load_commands_metadata_cache(commands_parser)),
+            fallback,
         )
 
     def with_fallback(self, fallback: "PolicyResolver") -> "PolicyResolver":
@@ -414,7 +421,7 @@ class AsyncDynamicPolicyResolver(AsyncBasePolicyResolver):
     Async version of DynamicPolicyResolver.
 
     Takes records rather than the parser that produced them, because
-    ``AsyncCommandsParser.get_command_metadata`` is a coroutine and cannot be awaited in a
+    ``AsyncCommandsParser.get_commands_metadata_cache`` is a coroutine and cannot be awaited in a
     constructor. That is why this class and its sync counterpart differ in what they accept,
     and the difference is forced rather than an oversight: the sync parser can be read in
     ``__init__`` and the async one cannot. To serve full command metadata asynchronously,

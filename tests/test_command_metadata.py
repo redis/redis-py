@@ -5,7 +5,10 @@ from unittest.mock import Mock
 import pytest
 
 from redis._parsers import CommandsParser
-from redis._parsers.commands import _build_command_metadata, _build_policy_records
+from redis._parsers.commands import (
+    _build_commands_metadata_cache,
+    _build_policy_records,
+)
 from redis.cache import CacheConfig
 from redis.commands.metadata import (
     _DEFAULT_KEYED_METADATA,
@@ -15,17 +18,17 @@ from redis.commands.metadata import (
     _STATIC_COMMAND_METADATA,
     PolicyRecords,
     CommandMetadata,
-    CommandMetadataRecords,
+    CommandMetadataRecordsCache,
     CommandPolicies,
     DynamicMetadataResolver,
     RequestPolicy,
     ResponsePolicy,
     StaticMetadataResolver,
+    _build_commands_metadata_cache_from_policies,
     _is_client_side_cacheable,
+    _load_commands_metadata_cache,
     _split_command_name,
-    _read_metadata_records,
     _to_command_policies,
-    _to_metadata_records,
 )
 from redis.commands.policies import (
     BasePolicyResolver,
@@ -125,10 +128,10 @@ class RecordsPolicyResolver(BasePolicyResolver):
         return RecordsPolicyResolver(self._policy_records, fallback)
 
 
-def metadata_parser(metadata_records: CommandMetadataRecords) -> CommandsParser:
+def metadata_parser(metadata_records: CommandMetadataRecordsCache) -> CommandsParser:
     """A ``CommandsParser`` stand-in that reports the given metadata records."""
     commands_parser = Mock(spec=CommandsParser)
-    commands_parser.get_command_metadata.return_value = metadata_records
+    commands_parser.get_commands_metadata_cache.return_value = metadata_records
     return commands_parser
 
 
@@ -146,7 +149,7 @@ def legacy_policy_parser(policy_records: PolicyRecords) -> CommandsParser:
     """
     commands_parser = Mock(spec=CommandsParser)
     commands_parser.get_command_policies.return_value = policy_records
-    del commands_parser.get_command_metadata
+    del commands_parser.get_commands_metadata_cache
     return commands_parser
 
 
@@ -669,7 +672,7 @@ class TestDeprecations:
     """
     The 7.1.0 routing surface warns rather than disappearing.
 
-    ``get_command_policies`` is superseded by ``get_command_metadata``, and
+    ``get_command_policies`` is superseded by ``get_commands_metadata_cache``, and
     ``STATIC_POLICIES`` is a frozen copy of the 7.1.0 table that no code path reads.
     """
 
@@ -677,7 +680,7 @@ class TestDeprecations:
         commands_parser = CommandsParser.__new__(CommandsParser)
         commands_parser.commands = {}
 
-        with pytest.warns(DeprecationWarning, match="get_command_metadata"):
+        with pytest.warns(DeprecationWarning, match="get_commands_metadata_cache"):
             assert commands_parser.get_command_policies() == {}
 
     def test_static_policies_warns_on_access(self):
@@ -795,7 +798,7 @@ class TestBasePolicyResolver:
 
         # The metadata is read through the metadata resolver, not through the policy view
         # of the parser.
-        commands_parser.get_command_metadata.assert_called_once_with()
+        commands_parser.get_commands_metadata_cache.assert_called_once_with()
         commands_parser.get_command_policies.assert_not_called()
 
         assert policy_pair(dynamic_resolver.resolve("pfcount")) == KEYED_POLICIES
@@ -1111,7 +1114,9 @@ class TestBaseMetadataResolver:
         lifted from them keeps its fail-closed default.
         """
         resolver = DynamicMetadataResolver(
-            _to_metadata_records({"core": {"get": CommandPolicies(*KEYED_POLICIES)}})
+            _build_commands_metadata_cache_from_policies(
+                {"core": {"get": CommandPolicies(*KEYED_POLICIES)}}
+            )
         )
 
         assert policy_pair(resolver.resolve_policies("get")) == KEYED_POLICIES
@@ -1121,16 +1126,16 @@ class TestBaseMetadataResolver:
         commands_parser = metadata_parser({"core": {"pfcount": CACHEABLE_KEYED}})
 
         dynamic_resolver = DynamicMetadataResolver(
-            _read_metadata_records(commands_parser)
+            _load_commands_metadata_cache(commands_parser)
         )
 
-        commands_parser.get_command_metadata.assert_called_once_with()
+        commands_parser.get_commands_metadata_cache.assert_called_once_with()
         assert dynamic_resolver.resolve("pfcount") is CACHEABLE_KEYED
 
         # A chained resolver serves the snapshot it already holds, so the parser is read once.
         chained_resolver = dynamic_resolver.with_fallback(StaticMetadataResolver())
 
-        assert commands_parser.get_command_metadata.call_count == 1
+        assert commands_parser.get_commands_metadata_cache.call_count == 1
         assert chained_resolver.resolve("pfcount") is CACHEABLE_KEYED
 
     def test_the_policy_resolver_rereads_the_parser_when_chained(self):
@@ -1143,7 +1148,7 @@ class TestBaseMetadataResolver:
 
         resolver.with_fallback(StaticPolicyResolver())
 
-        assert commands_parser.get_command_metadata.call_count == 2
+        assert commands_parser.get_commands_metadata_cache.call_count == 2
 
     def test_a_parser_serving_only_the_deprecated_policy_view_is_accepted(self):
         """
@@ -1152,7 +1157,7 @@ class TestBaseMetadataResolver:
         object may implement only it, and must keep working.
         """
         resolver = DynamicMetadataResolver(
-            _read_metadata_records(legacy_policy_parser(LEGACY_POLICY_RECORDS))
+            _load_commands_metadata_cache(legacy_policy_parser(LEGACY_POLICY_RECORDS))
         )
 
         assert policy_pair(resolver.resolve_policies("dbsize")) == (
@@ -1174,7 +1179,7 @@ class TestBaseMetadataResolver:
         for metadata that was never supplied.
         """
         resolver = DynamicMetadataResolver(
-            _read_metadata_records(legacy_policy_parser(LEGACY_POLICY_RECORDS))
+            _load_commands_metadata_cache(legacy_policy_parser(LEGACY_POLICY_RECORDS))
         )
 
         assert resolver.resolve("dbsize").has_complete_metadata is False
@@ -1182,7 +1187,7 @@ class TestBaseMetadataResolver:
 
     def test_a_policy_only_parser_does_not_have_to_be_keyed_lowercase(self):
         resolver = DynamicMetadataResolver(
-            _read_metadata_records(
+            _load_commands_metadata_cache(
                 legacy_policy_parser({"CORE": {"DBSIZE": LEGACY_POLICIES}})
             )
         )
@@ -1195,19 +1200,21 @@ class TestBaseMetadataResolver:
     def test_the_metadata_view_wins_when_a_parser_serves_both(self):
         commands_parser = metadata_parser({"core": {"pfcount": CACHEABLE_KEYED}})
 
-        resolver = DynamicMetadataResolver(_read_metadata_records(commands_parser))
+        resolver = DynamicMetadataResolver(
+            _load_commands_metadata_cache(commands_parser)
+        )
 
-        commands_parser.get_command_metadata.assert_called_once_with()
+        commands_parser.get_commands_metadata_cache.assert_called_once_with()
         commands_parser.get_command_policies.assert_not_called()
         assert resolver.resolve("pfcount") is CACHEABLE_KEYED
 
     def test_a_parser_serving_neither_view_is_rejected(self):
         with pytest.raises(
             TypeError,
-            match="object serves neither get_command_metadata\\(\\) nor "
+            match="object serves neither get_commands_metadata_cache\\(\\) nor "
             "get_command_policies\\(\\)",
         ):
-            _read_metadata_records(object())
+            _load_commands_metadata_cache(object())
 
     def test_the_metadata_records_are_required_at_the_call_site(self):
         """A resolver cannot be built without records to resolve through."""
@@ -1367,8 +1374,8 @@ class TestCommandReplyNormalization:
         }
 
     def test_the_metadata_view_reads_bytes_and_str_alike(self):
-        as_bytes = _build_command_metadata(self.command_reply(str.encode))
-        as_str = _build_command_metadata(self.command_reply(str))
+        as_bytes = _build_commands_metadata_cache(self.command_reply(str.encode))
+        as_str = _build_commands_metadata_cache(self.command_reply(str))
 
         assert as_bytes == as_str
 
@@ -1409,7 +1416,7 @@ class TestCommandReplyNormalization:
     @pytest.mark.parametrize("encode", (str.encode, str), ids=("bytes", "str"))
     def test_both_views_read_nested_tips_alike(self, encode):
         # Neither view may raise, and both must find every tip the fragment carries.
-        metadata = _build_command_metadata(self.nested_command_reply(encode))
+        metadata = _build_commands_metadata_cache(self.nested_command_reply(encode))
         policies = _build_policy_records(self.nested_command_reply(encode))
 
         record = metadata["core"]["geodist"]
@@ -1428,9 +1435,9 @@ class TestCommandReplyNormalization:
 
     def test_nesting_does_not_change_what_either_view_resolves(self):
         # The nesting is transparent: same answers as the flat reply it was built from.
-        assert _build_command_metadata(self.nested_command_reply(str.encode)) == (
-            _build_command_metadata(self.command_reply(str.encode))
-        )
+        assert _build_commands_metadata_cache(
+            self.nested_command_reply(str.encode)
+        ) == _build_commands_metadata_cache(self.command_reply(str.encode))
         assert policy_pair(
             _build_policy_records(self.nested_command_reply(str.encode))["core"][
                 "geodist"
@@ -1451,7 +1458,7 @@ class TestCommandsParserMetadata:
 
         policy_records = commands_parser.get_command_policies()
 
-        metadata_records = commands_parser.get_command_metadata()
+        metadata_records = commands_parser.get_commands_metadata_cache()
 
         # Same commands, and the policies of each are the ones the metadata record carries.
         assert policy_records.keys() == metadata_records.keys()
@@ -1558,7 +1565,7 @@ class TestStaticMetadataAgainstServer:
         here rather than silently changing what the client caches.
         """
         dynamic_resolver = DynamicMetadataResolver(
-            _read_metadata_records(CommandsParser(stack_r))
+            _load_commands_metadata_cache(CommandsParser(stack_r))
         )
         live_commands = live_command_details(stack_r.command())
         reports_script_runner = any(
@@ -1626,7 +1633,7 @@ class TestStaticMetadataAgainstServer:
         to disagree, and the disagreement is pinned rather than skipped.
         """
         dynamic_resolver = DynamicMetadataResolver(
-            _read_metadata_records(CommandsParser(stack_r))
+            _load_commands_metadata_cache(CommandsParser(stack_r))
         )
         static_resolver = StaticMetadataResolver()
 
@@ -1687,7 +1694,7 @@ class TestStaticMetadataAgainstServer:
         record can be deleted.
         """
         dynamic_resolver = DynamicMetadataResolver(
-            _read_metadata_records(CommandsParser(stack_r))
+            _load_commands_metadata_cache(CommandsParser(stack_r))
         )
         static_resolver = StaticMetadataResolver()
 
@@ -1710,7 +1717,7 @@ class TestStaticMetadataAgainstServer:
         normalization paths the static entries do not exercise.
         """
         dynamic_resolver = DynamicMetadataResolver(
-            _read_metadata_records(CommandsParser(stack_r))
+            _load_commands_metadata_cache(CommandsParser(stack_r))
         )
 
         # Readonly, keyed, nothing that forbids caching - and absent from the table.
@@ -1755,7 +1762,9 @@ class TestStaticMetadataAgainstServer:
         point. Regenerate it by printing ``sorted(eligible - allow_list)`` here.
         """
         chain = StaticMetadataResolver().with_fallback(
-            DynamicMetadataResolver(_read_metadata_records(CommandsParser(stack_r)))
+            DynamicMetadataResolver(
+                _load_commands_metadata_cache(CommandsParser(stack_r))
+            )
         )
         table_names = {resolver_name for _, _, resolver_name in static_table_names()}
         allow_list = {name.lower() for name in CacheConfig.DEFAULT_ALLOW_LIST}
@@ -1797,7 +1806,9 @@ class TestStaticMetadataAgainstServer:
         """The static-first chain of the unit tests, resolved against a real server."""
         static_resolver = StaticMetadataResolver()
         resolver = static_resolver.with_fallback(
-            DynamicMetadataResolver(_read_metadata_records(CommandsParser(stack_r)))
+            DynamicMetadataResolver(
+                _load_commands_metadata_cache(CommandsParser(stack_r))
+            )
         )
 
         # Not in the table, so the server answers.

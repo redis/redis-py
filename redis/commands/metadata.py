@@ -46,7 +46,7 @@ __all__ = [
     "AsyncStaticMetadataResolver",
     "BaseMetadataResolver",
     "CommandMetadata",
-    "CommandMetadataRecords",
+    "CommandMetadataRecordsCache",
     "CommandPolicies",
     "DynamicMetadataResolver",
     "MetadataResolver",
@@ -203,7 +203,7 @@ class CommandMetadata:
     has_complete_metadata: bool = False
 
 
-CommandMetadataRecords = Mapping[str, Mapping[str, CommandMetadata]]
+CommandMetadataRecordsCache = Mapping[str, Mapping[str, CommandMetadata]]
 """Command metadata keyed by module name, then by command name.
 
 Mirrors the shape of ``PolicyRecords``: non-module commands live under ``"core"``, module
@@ -213,7 +213,9 @@ subcommands under their space-joined name (``"memory usage"``), which is the for
 """
 
 
-def _lowercase_keyed(records: CommandMetadataRecords) -> CommandMetadataRecords:
+def _lowercase_keyed(
+    records: CommandMetadataRecordsCache,
+) -> CommandMetadataRecordsCache:
     """
     Key the given records lowercase, which is how :func:`_split_command_name` looks one up.
 
@@ -426,7 +428,7 @@ class BaseMetadataResolver(MetadataResolver):
 
     def __init__(
         self,
-        metadata: CommandMetadataRecords,
+        metadata: CommandMetadataRecordsCache,
         fallback: MetadataResolver | None = None,
     ) -> None:
         self._metadata = metadata
@@ -527,7 +529,7 @@ class AsyncBaseMetadataResolver(AsyncMetadataResolver):
 
     def __init__(
         self,
-        metadata: CommandMetadataRecords,
+        metadata: CommandMetadataRecordsCache,
         fallback: AsyncMetadataResolver | None = None,
     ) -> None:
         self._metadata = metadata
@@ -614,21 +616,22 @@ class DynamicMetadataResolver(BaseMetadataResolver):
 
     Note: Takes the records rather than the parser that produced them, so that this and
     ``AsyncDynamicMetadataResolver`` accept the same argument: the async parser's
-    ``get_command_metadata`` is a coroutine and cannot be awaited in a constructor, so records
-    are the one shape both stacks can be built from. :func:`_read_metadata_records` turns a
+    ``get_commands_metadata_cache`` is a coroutine and cannot be awaited in a constructor, so records
+    are the one shape both stacks can be built from. :func:`_load_commands_metadata_cache` turns a
     parser into records at the one place that owns one, ``DynamicPolicyResolver``.
     """
 
     def __init__(
         self,
-        metadata_records: CommandMetadataRecords,
+        metadata_records: CommandMetadataRecordsCache,
         fallback: MetadataResolver | None = None,
     ) -> None:
         """
         Parameters:
-            metadata_records (CommandMetadataRecords): Command metadata records, keyed the way
-                ``CommandMetadataRecords`` documents. Keys are lowercased if they are not
-                already, because that is how a resolved command name is looked up.
+            metadata_records (CommandMetadataRecordsCache): Command metadata records,
+                keyed the way ``CommandMetadataRecordsCache`` documents. Keys are
+                lowercased if they are not already, because that is how a resolved
+                command name is looked up.
             fallback (Optional[MetadataResolver]): An optional resolver to be used when the
                 primary metadata cannot handle a specific request.
         """
@@ -661,20 +664,21 @@ class AsyncDynamicMetadataResolver(AsyncBaseMetadataResolver):
     Async version of DynamicMetadataResolver.
 
     Takes the records rather than the parser that produced them, because
-    ``AsyncCommandsParser.get_command_metadata`` is a coroutine and cannot be awaited in a
+    ``AsyncCommandsParser.get_commands_metadata_cache`` is a coroutine and cannot be awaited in a
     constructor.
     """
 
     def __init__(
         self,
-        metadata_records: CommandMetadataRecords,
+        metadata_records: CommandMetadataRecordsCache,
         fallback: AsyncMetadataResolver | None = None,
     ) -> None:
         """
         Parameters:
-            metadata_records (CommandMetadataRecords): Command metadata records, keyed the way
-                ``CommandMetadataRecords`` documents. Keys are lowercased if they are not
-                already, because that is how a resolved command name is looked up.
+            metadata_records (CommandMetadataRecordsCache): Command metadata records,
+                keyed the way ``CommandMetadataRecordsCache`` documents. Keys are
+                lowercased if they are not already, because that is how a resolved
+                command name is looked up.
             fallback (Optional[AsyncMetadataResolver]): An optional resolver to be used when the
                 primary metadata cannot handle a specific request.
         """
@@ -774,9 +778,14 @@ def _is_client_side_cacheable(metadata: CommandMetadata | None) -> bool:
     return True
 
 
-def _to_metadata_records(policy_records: PolicyRecords) -> CommandMetadataRecords:
+def _build_commands_metadata_cache_from_policies(
+    policy_records: PolicyRecords,
+) -> CommandMetadataRecordsCache:
     """
-    Lift policy records into metadata records.
+    Build the metadata records cache from policy records.
+
+    Unlike ``_build_commands_metadata_cache``, which builds the cache from a raw ``COMMAND``
+    reply, this lifts the narrower 7.1.0 routing view into the same shape.
 
     Only the routing policies of each command are known, so every other field keeps its
     fail-closed default. This backs the ``PolicyRecords`` arguments of the policy resolvers:
@@ -799,11 +808,13 @@ def _to_metadata_records(policy_records: PolicyRecords) -> CommandMetadataRecord
     }
 
 
-def _read_metadata_records(commands_parser: object) -> CommandMetadataRecords:
+def _load_commands_metadata_cache(
+    commands_parser: object,
+) -> CommandMetadataRecordsCache:
     """
-    Read the metadata records of a ``COMMAND`` parser.
+    Load the metadata records cache of a ``COMMAND`` parser.
 
-    ``get_command_metadata`` is what a parser serves, and is what this reads.
+    ``get_commands_metadata_cache`` is what a parser serves, and is what this loads.
 
     The ``get_command_policies`` branch is a backwards-compatibility shim, not a second
     supported shape. ``DynamicPolicyResolver`` called nothing but that method in 7.1.0, so code
@@ -820,18 +831,18 @@ def _read_metadata_records(commands_parser: object) -> CommandMetadataRecords:
     Raises:
         TypeError: If the parser serves neither method.
     """
-    get_metadata = getattr(commands_parser, "get_command_metadata", None)
+    get_metadata = getattr(commands_parser, "get_commands_metadata_cache", None)
     if get_metadata is not None:
         return get_metadata()
 
     get_policies = getattr(commands_parser, "get_command_policies", None)
     if get_policies is None:
         raise TypeError(
-            f"{type(commands_parser).__name__} serves neither get_command_metadata() nor "
+            f"{type(commands_parser).__name__} serves neither get_commands_metadata_cache() nor "
             "get_command_policies(); a commands parser must serve one of them"
         )
 
-    return _to_metadata_records(get_policies())
+    return _build_commands_metadata_cache_from_policies(get_policies())
 
 
 # The records the cluster clients fall back to when the policy resolver does not know a
@@ -978,7 +989,7 @@ _DONT_CACHE_WRITE_KEYED = replace(_WRITE_KEYED, is_dont_cache=True)
 # ``zinter``, ``zintercard`` and ``zunion`` - plus ``touch`` and ``vrandmember`` withhold
 # their routing policies entirely, so the cluster client keeps resolving their keys itself.
 # Their cacheability inputs are unaffected.
-_STATIC_COMMAND_METADATA: CommandMetadataRecords = MappingProxyType(
+_STATIC_COMMAND_METADATA: CommandMetadataRecordsCache = MappingProxyType(
     {
         "core": MappingProxyType(
             {

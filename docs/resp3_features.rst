@@ -147,7 +147,7 @@ part of the public API.
     >>> from redis._parsers.commands import CommandsParser
     >>> from redis.cache import CacheConfig
     >>> from redis.commands.metadata import DynamicMetadataResolver, StaticMetadataResolver
-    >>> records = CommandsParser(redis.Redis(host='localhost', port=6379)).get_command_metadata()
+    >>> records = CommandsParser(redis.Redis(host='localhost', port=6379)).get_commands_metadata_cache()
     >>> resolver = StaticMetadataResolver(fallback=DynamicMetadataResolver(records))
     >>> r = redis.Redis(host='localhost', port=6379, protocol=3,
     ...                 cache_config=CacheConfig(), metadata_resolver=resolver)

@@ -10,11 +10,11 @@ from redis.commands.metadata import (
     AsyncDynamicMetadataResolver,
     AsyncStaticMetadataResolver,
     CommandMetadata,
-    CommandMetadataRecords,
+    CommandMetadataRecordsCache,
     CommandPolicies,
     RequestPolicy,
     ResponsePolicy,
-    _to_metadata_records,
+    _build_commands_metadata_cache_from_policies,
 )
 from redis.commands.policies import (
     AsyncBasePolicyResolver,
@@ -80,17 +80,17 @@ class CountingAsyncStaticMetadataResolver(AsyncStaticMetadataResolver):
         return await super().resolve(command_name)
 
 
-async def live_metadata_records(client) -> CommandMetadataRecords:
+async def live_metadata_records(client) -> CommandMetadataRecordsCache:
     """
     The metadata records of the connected server.
 
     ``AsyncDynamicMetadataResolver`` takes the records rather than the parser, because
-    ``AsyncCommandsParser.get_command_metadata`` cannot be awaited in a constructor.
+    ``AsyncCommandsParser.get_commands_metadata_cache`` cannot be awaited in a constructor.
     """
     commands_parser = AsyncCommandsParser()
     await commands_parser.initialize(client)
 
-    return await commands_parser.get_command_metadata()
+    return await commands_parser.get_commands_metadata_cache()
 
 
 @pytest.mark.asyncio
@@ -268,7 +268,7 @@ class TestDeprecations:
     async def test_get_command_policies_warns(self):
         commands_parser = AsyncCommandsParser()
 
-        with pytest.warns(DeprecationWarning, match="get_command_metadata"):
+        with pytest.warns(DeprecationWarning, match="get_commands_metadata_cache"):
             assert await commands_parser.get_command_policies() == {}
 
 
@@ -649,7 +649,9 @@ class TestAsyncBaseMetadataResolver:
         lifted from them keeps its fail-closed default.
         """
         resolver = AsyncDynamicMetadataResolver(
-            _to_metadata_records({"core": {"get": CommandPolicies(*KEYED_POLICIES)}})
+            _build_commands_metadata_cache_from_policies(
+                {"core": {"get": CommandPolicies(*KEYED_POLICIES)}}
+            )
         )
 
         assert policy_pair(await resolver.resolve_policies("get")) == KEYED_POLICIES
@@ -777,7 +779,7 @@ class TestAsyncCommandsParserMetadata:
 
         policy_records = await commands_parser.get_command_policies()
 
-        metadata_records = await commands_parser.get_command_metadata()
+        metadata_records = await commands_parser.get_commands_metadata_cache()
 
         # Same commands, and the policies of each are the ones the metadata record carries.
         assert policy_records.keys() == metadata_records.keys()

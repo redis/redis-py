@@ -14,7 +14,7 @@ from typing import (
 
 from redis.commands.metadata import (
     CommandMetadata,
-    CommandMetadataRecords,
+    CommandMetadataRecordsCache,
     CommandPolicies,
     PolicyRecords,
     RequestPolicy,
@@ -199,13 +199,13 @@ class CommandsParser(AbstractCommandsParser):
 
     @deprecated_function(
         version="8.2.0",
-        reason="Use get_command_metadata() instead.",
+        reason="Use get_commands_metadata_cache() instead.",
     )
     def get_command_policies(self) -> PolicyRecords:
         """
         Retrieve and process the command policies for all commands and subcommands.
 
-        DEPRECATED: use :meth:`get_command_metadata` instead. Nothing in this library calls this
+        DEPRECATED: use :meth:`get_commands_metadata_cache` instead. Nothing in this library calls this
         method any more, and it will be removed in a future release. A metadata resolver keeps a
         compatibility shim for an object that serves only this method, because it was the whole
         contract in 7.1.0; that shim is not an invitation to write one. To decide routing
@@ -216,7 +216,7 @@ class CommandsParser(AbstractCommandsParser):
         associated policies. It supports nested data structures and handles both main commands
         and their subcommands.
 
-        This is the routing view of :meth:`get_command_metadata`: the same traversal of the
+        This is the routing view of :meth:`get_commands_metadata_cache`: the same traversal of the
         same reply, keyed the same way, projected down to the two policies the cluster client
         routes by. A caller that also needs the client-side-caching metadata asks for the
         metadata records instead.
@@ -230,9 +230,9 @@ class CommandsParser(AbstractCommandsParser):
         """
         return _build_policy_records(self.commands)
 
-    def get_command_metadata(self) -> CommandMetadataRecords:
+    def get_commands_metadata_cache(self) -> CommandMetadataRecordsCache:
         """
-        Retrieve and process the command metadata for all commands and subcommands.
+        Retrieve and process the metadata records cache for all commands and subcommands.
 
         This method normalizes the command flags, command tips and key metadata of the
         ``COMMAND`` output into metadata records, keyed the same way as the policy records
@@ -241,13 +241,13 @@ class CommandsParser(AbstractCommandsParser):
         stay in step.
 
         Returns:
-            CommandMetadataRecords: A collection of commands and subcommands associated
-            with their respective metadata.
+            CommandMetadataRecordsCache: A collection of commands and subcommands
+            associated with their respective metadata.
 
         Raises:
             IncorrectPolicyType: If an invalid policy type is encountered during policy extraction.
         """
-        return _build_command_metadata(self.commands)
+        return _build_commands_metadata_cache(self.commands)
 
 
 class AsyncCommandsParser(AbstractCommandsParser):
@@ -364,13 +364,13 @@ class AsyncCommandsParser(AbstractCommandsParser):
 
     @deprecated_function(
         version="8.2.0",
-        reason="Use get_command_metadata() instead.",
+        reason="Use get_commands_metadata_cache() instead.",
     )
     async def get_command_policies(self) -> PolicyRecords:
         """
         Retrieve and process the command policies for all commands and subcommands.
 
-        DEPRECATED: use :meth:`get_command_metadata` instead. Nothing in this library calls this
+        DEPRECATED: use :meth:`get_commands_metadata_cache` instead. Nothing in this library calls this
         method any more, and it will be removed in a future release. A metadata resolver keeps a
         compatibility shim for an object that serves only this method, because it was the whole
         contract in 7.1.0; that shim is not an invitation to write one. To decide routing
@@ -381,7 +381,7 @@ class AsyncCommandsParser(AbstractCommandsParser):
         associated policies. It supports nested data structures and handles both main commands
         and their subcommands.
 
-        This is the routing view of :meth:`get_command_metadata`: the same traversal of the
+        This is the routing view of :meth:`get_commands_metadata_cache`: the same traversal of the
         same reply, keyed the same way, projected down to the two policies the cluster client
         routes by. A caller that also needs the client-side-caching metadata asks for the
         metadata records instead.
@@ -395,9 +395,9 @@ class AsyncCommandsParser(AbstractCommandsParser):
         """
         return _build_policy_records(self.commands)
 
-    async def get_command_metadata(self) -> CommandMetadataRecords:
+    async def get_commands_metadata_cache(self) -> CommandMetadataRecordsCache:
         """
-        Retrieve and process the command metadata for all commands and subcommands.
+        Retrieve and process the metadata records cache for all commands and subcommands.
 
         This method normalizes the command flags, command tips and key metadata of the
         ``COMMAND`` output into metadata records, keyed the same way as the policy records
@@ -406,13 +406,13 @@ class AsyncCommandsParser(AbstractCommandsParser):
         stay in step.
 
         Returns:
-            CommandMetadataRecords: A collection of commands and subcommands associated
-            with their respective metadata.
+            CommandMetadataRecordsCache: A collection of commands and subcommands
+            associated with their respective metadata.
 
         Raises:
             IncorrectPolicyType: If an invalid policy type is encountered during policy extraction.
         """
-        return _build_command_metadata(self.commands)
+        return _build_commands_metadata_cache(self.commands)
 
 
 # =============================================================================
@@ -783,9 +783,11 @@ def _to_command_metadata(
     )
 
 
-def _build_command_metadata(commands: Dict[str, Any]) -> CommandMetadataRecords:
+def _build_commands_metadata_cache(
+    commands: Dict[str, Any],
+) -> CommandMetadataRecordsCache:
     """
-    Retrieve and process the command metadata for all commands and subcommands.
+    Retrieve and process the metadata records cache for all commands and subcommands.
 
     This function traverses through commands and subcommands, normalizing the command
     flags, command tips and key metadata of each into a metadata record. It shares its
@@ -796,8 +798,8 @@ def _build_command_metadata(commands: Dict[str, Any]) -> CommandMetadataRecords:
         commands: The parsed ``COMMAND`` output to build the metadata records from.
 
     Returns:
-        CommandMetadataRecords: A collection of commands and subcommands associated with
-        their respective metadata.
+        CommandMetadataRecordsCache: A collection of commands and subcommands associated
+        with their respective metadata.
 
     Raises:
         IncorrectPolicyType: If an invalid policy type is encountered during policy extraction.
