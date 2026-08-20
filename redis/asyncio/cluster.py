@@ -77,6 +77,7 @@ from redis.cluster import (
     LoadBalancingStrategy,
     block_pipeline_command,
     get_node_name,
+    is_zero_key_eval_command,
     parse_cluster_shards,
     parse_cluster_shards_unified,
     parse_cluster_shards_with_str_keys,
@@ -1752,14 +1753,18 @@ class ClusterNode:
     def release(self, connection: Connection) -> None:
         """
         Release connection back to free queue.
-        If the connection is marked for reconnect, disconnect it before
-        returning it to the free queue.
+        If a connected connection is marked for reconnect, disconnect it before
+        returning it to the free queue. An already-closed connection can be
+        returned immediately after clearing its reconnect flag.
         """
         if connection.should_reconnect():
-            task = asyncio.create_task(self._disconnect_and_release(connection))
-            self._background_tasks.add(task)
-            task.add_done_callback(self._background_tasks.discard)
-            return
+            if connection.is_connected:
+                task = asyncio.create_task(self._disconnect_and_release(connection))
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
+                return
+            # It may have been re-marked while its own disconnect was in progress.
+            connection.reset_should_reconnect()
         self._free.append(connection)
 
     async def _disconnect_and_release(self, connection: Connection) -> None:
@@ -3074,6 +3079,8 @@ class TransactionStrategy(AbstractStrategy):
         self._explicit_transaction = False
         self._watching = False
         self._pipeline_slots: Set[int] = set()
+        # True once a keyed (non-slot-agnostic) command has fixed the slot
+        self._transaction_has_keyed_slot = False
         self._transaction_node: Optional[ClusterNode] = None
         self._transaction_connection: Optional[Connection] = None
         self._executing = False
@@ -3081,6 +3088,35 @@ class TransactionStrategy(AbstractStrategy):
         self._retry.update_supported_errors(
             RedisCluster.ERRORS_ALLOW_RETRY + self.SLOT_REDIRECT_ERRORS
         )
+
+    async def _resolve_transaction_slot(self, *args) -> Optional[int]:
+        """
+        Pick a slot for a transactional pipeline command.
+
+        Zero-key EVAL/EVALSHA can run on any primary. Reuse an existing
+        transaction slot when present so multiple zero-key scripts (or a
+        mix with keyed commands) stay single-slot.
+        """
+        if args[0] in self.NO_SLOTS_COMMANDS:
+            return None
+
+        if is_zero_key_eval_command(*args):
+            if self._pipeline_slots:
+                return next(iter(self._pipeline_slots))
+            return await self._pipe.cluster_client._determine_slot(*args)
+
+        slot_number = await self._pipe.cluster_client._determine_slot(*args)
+        if (
+            slot_number is not None
+            and self._pipeline_slots
+            and slot_number not in self._pipeline_slots
+            and not self._transaction_has_keyed_slot
+        ):
+            # Prior slots came only from zero-key scripts; retarget.
+            self._pipeline_slots.clear()
+        if slot_number is not None:
+            self._transaction_has_keyed_slot = True
+        return slot_number
 
     def _get_client_and_connection_for_transaction(
         self,
@@ -3139,7 +3175,7 @@ class TransactionStrategy(AbstractStrategy):
 
         slot_number: Optional[int] = None
         if args[0] not in self.NO_SLOTS_COMMANDS:
-            slot_number = await self._pipe.cluster_client._determine_slot(*args)
+            slot_number = await self._resolve_transaction_slot(*args)
 
         if (
             self._watching or args[0] in self.IMMEDIATE_EXECUTE_COMMANDS
@@ -3509,6 +3545,7 @@ class TransactionStrategy(AbstractStrategy):
             self._watching = False
             self._explicit_transaction = False
             self._pipeline_slots = set()
+            self._transaction_has_keyed_slot = False
             self._executing = False
 
     def multi(self):

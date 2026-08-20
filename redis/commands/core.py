@@ -8988,7 +8988,7 @@ class SortedSetCommands(CommandsProtocol):
         if withscores:
             pieces.append(b"WITHSCORES")
         options = {"withscores": withscores, "score_cast_func": score_cast_func}
-        options["keys"] = name
+        options["keys"] = [name]
         return self.execute_command(*pieces, **options)
 
     @overload
@@ -10928,10 +10928,15 @@ class Script:
         args = tuple(keys) + tuple(args)
         # make sure the Redis server knows about the script
         from redis.client import Pipeline
+        from redis.cluster import ClusterPipeline
 
         if isinstance(client, Pipeline):
             # Make sure the pipeline can register the script before executing.
             client.scripts.add(self)
+        if isinstance(client, ClusterPipeline):
+            # ClusterPipeline does not support script_load. Queue EVALSHA and
+            # leave NOSCRIPT recovery to the caller (same as AsyncScript).
+            return client.evalsha(self.sha, len(keys), *args)
         try:
             return client.evalsha(self.sha, len(keys), *args)
         except NoScriptError:
@@ -11003,10 +11008,15 @@ class AsyncScript:
         args = tuple(keys) + tuple(args)
         # make sure the Redis server knows about the script
         from redis.asyncio.client import Pipeline
+        from redis.asyncio.cluster import ClusterPipeline
 
         if isinstance(client, Pipeline):
             # Make sure the pipeline can register the script before executing.
             client.scripts.add(self)
+        if isinstance(client, ClusterPipeline):
+            # ClusterPipeline.evalsha queues synchronously. Awaiting the
+            # pipeline would call initialize() and drop the queued command.
+            return client.evalsha(self.sha, len(keys), *args)
         try:
             return await client.evalsha(self.sha, len(keys), *args)
         except NoScriptError:
