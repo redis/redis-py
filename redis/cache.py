@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, List, Optional, Union
 
+from redis.commands.metadata import MetadataResolver, StaticMetadataResolver
 from redis.observability.attributes import CSCReason
 
 
@@ -358,6 +359,17 @@ class CacheConfig(CacheConfigurationInterface):
     DEFAULT_EVICTION_POLICY = EvictionPolicy.LRU
     DEFAULT_MAX_SIZE = 10000
 
+    # DEPRECATED - no longer consulted, and it will be removed in a future release.
+    #
+    # Command eligibility is now decided from command metadata by the metadata resolver this
+    # config holds, so this list no longer describes what gets cached. It is kept as a public
+    # attribute only so an external caller reading it keeps working; editing it changes
+    # nothing. The effective set it is replaced by differs from it by ``+FT.SUGGET``,
+    # ``+FT.SUGLEN`` and ``-XPENDING``, ``-TS.INFO``, ``-XREAD`` - the three removals being
+    # commands the server itself reports as not cacheable.
+    #
+    # To change eligibility, edit ``redis.commands.metadata._STATIC_COMMAND_METADATA`` or pass
+    # a ``metadata_resolver`` to the client. Nothing here.
     DEFAULT_ALLOW_LIST = [
         "BITCOUNT",
         "BITFIELD_RO",
@@ -444,6 +456,38 @@ class CacheConfig(CacheConfigurationInterface):
         self._cache_class = cache_class
         self._max_size = max_size
         self._eviction_policy = eviction_policy
+        # Defaulted here rather than taken as a constructor argument: eligibility is
+        # configured at client level, through the ``metadata_resolver`` of the client or the
+        # pool, which injects it below. Defaulting it means a config built standalone - in a
+        # test, or by a user who configures nothing else - is fully functional, and decides
+        # eligibility from the command metadata this library ships.
+        self._metadata_resolver: MetadataResolver = StaticMetadataResolver()
+
+    def set_metadata_resolver(self, metadata_resolver: MetadataResolver) -> None:
+        """
+        Set the metadata resolver that decides which commands may be cached.
+
+        Called by the connection pool with the client-level resolver, so that one object
+        serves both cluster routing and cache eligibility. Deliberately not part of
+        :class:`CacheConfigurationInterface`: that ABC is public and implemented by third
+        parties, so a custom configuration keeps whatever eligibility logic it has.
+
+        Which object the pool calls this on depends on how the cache was supplied, and the
+        difference is observable to a caller who reuses one configuration:
+
+        - Given ``cache_config=``, the pool copies the configuration first, so the caller's
+          object keeps the resolver it had and two clients sharing it stay independent. A
+          later call to this method on the caller's object does not reach a pool already
+          built from it.
+        - Given ``cache=`` or ``cache_factory=``, the caller supplied a whole cache that
+          reads its configuration on every lookup and cannot be handed a different one, so
+          the pool calls this on the configuration inside it. One configuration reused that
+          way therefore ends up with whichever resolver was injected last.
+
+        Args:
+            metadata_resolver: The resolver to decide eligibility through.
+        """
+        self._metadata_resolver = metadata_resolver
 
     def get_cache_class(self):
         return self._cache_class
@@ -458,7 +502,11 @@ class CacheConfig(CacheConfigurationInterface):
         return count > self._max_size
 
     def is_allowed_to_cache(self, command: str) -> bool:
-        return command in self.DEFAULT_ALLOW_LIST
+        # Fails closed on everything the resolver cannot decide: an unknown command, a name
+        # the record tables cannot be keyed by, and a record built from incomplete metadata
+        # all resolve to False. The verdict is memoized per command name, so this is a dict
+        # hit on the command execution path.
+        return self._metadata_resolver.is_cacheable(command)
 
 
 class CacheFactoryInterface(ABC):

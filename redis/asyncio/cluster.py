@@ -46,7 +46,6 @@ from redis._defaults import (
     DEFAULT_SOCKET_TIMEOUT,
 )
 from redis._parsers import AsyncCommandsParser, Encoder
-from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
 from redis._parsers.helpers import get_response_callbacks
 from redis.asyncio import _himport_exec
 from redis.asyncio.client import PubSub, ResponseCallbackT
@@ -85,6 +84,15 @@ from redis.cluster import (
 )
 from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
 from redis.commands.helpers import list_or_args, parse_pubsub_subscriptions
+from redis.commands.metadata import (
+    _DEFAULT_KEYED_METADATA,
+    _DEFAULT_KEYLESS_METADATA,
+    _METADATA_BY_REQUEST_POLICY,
+    CommandMetadata,
+    CommandPolicies,
+    RequestPolicy,
+    ResponsePolicy,
+)
 from redis.commands.policies import AsyncPolicyResolver, AsyncStaticPolicyResolver
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.credentials import CredentialProvider
@@ -455,7 +463,7 @@ class RedisCluster(
         legacy_responses: bool = True,
         address_remap: Callable[[Tuple[str, int]], Tuple[str, int]] | None = None,
         event_dispatcher: EventDispatcher | None = None,
-        policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver(),
+        policy_resolver: AsyncPolicyResolver | None = None,
         maint_notifications_config: MaintNotificationsConfig | None = None,
     ) -> None:
         if db:
@@ -642,7 +650,14 @@ class RedisCluster(
             ResponsePolicy.DEFAULT_KEYED: lambda res: res,
         }
 
-        self._policy_resolver = policy_resolver
+        # Built here rather than defaulted in the signature, so that each client owns its
+        # resolver and the memos it accumulates are released with the client. The async
+        # ClusterPipeline holds the client and reads this attribute, so a pipeline routes by
+        # whatever the client routes by without any propagation of its own.
+        if policy_resolver is None:
+            self._policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver()
+        else:
+            self._policy_resolver = policy_resolver
         self.commands_parser = AsyncCommandsParser()
         self._aggregate_nodes = None
         self.node_flags = self.__class__.NODE_FLAGS.copy()
@@ -1140,21 +1155,18 @@ class RedisCluster(
                 else:
                     slot = await self._determine_slot(*args)
                 if slot is None:
-                    command_policies = CommandPolicies()
+                    command_policies = _DEFAULT_KEYLESS_METADATA
                 else:
-                    command_policies = CommandPolicies(
-                        request_policy=RequestPolicy.DEFAULT_KEYED,
-                        response_policy=ResponsePolicy.DEFAULT_KEYED,
-                    )
+                    command_policies = _DEFAULT_KEYED_METADATA
             else:
                 if command_flag in self._command_flags_mapping:
-                    command_policies = CommandPolicies(
-                        request_policy=self._command_flags_mapping[command_flag]
-                    )
+                    command_policies = _METADATA_BY_REQUEST_POLICY[
+                        self._command_flags_mapping[command_flag]
+                    ]
                 else:
-                    command_policies = CommandPolicies()
+                    command_policies = _DEFAULT_KEYLESS_METADATA
         elif not command_policies and target_nodes_specified:
-            command_policies = CommandPolicies()
+            command_policies = _DEFAULT_KEYLESS_METADATA
 
         # Add one for the first execution
         execute_attempts = 1 + retry_attempts
@@ -2659,7 +2671,10 @@ class PipelineCommand:
         self.kwargs = kwargs
         self.position = position
         self.result: Union[Any, Exception] = None
-        self.command_policies: Optional[CommandPolicies] = None
+        # Either record type: a policy resolver serves ``CommandPolicies``, while the
+        # fallbacks below reuse the shared ``CommandMetadata`` defaults. Only the two routing
+        # policies, which both carry, are ever read.
+        self.command_policies: Optional[Union[CommandPolicies, CommandMetadata]] = None
 
     def __repr__(self) -> str:
         return f"[{self.position}] {self.args} ({self.kwargs})"
@@ -2908,7 +2923,7 @@ class PipelineStrategy(AbstractStrategy):
                 target_nodes = client._parse_target_nodes(passed_targets)
 
                 if not command_policies:
-                    command_policies = CommandPolicies()
+                    command_policies = _DEFAULT_KEYLESS_METADATA
             else:
                 if not command_policies:
                     command_flag = client.command_flags.get(cmd.args[0])
@@ -2919,21 +2934,16 @@ class PipelineStrategy(AbstractStrategy):
                         else:
                             slot = await client._determine_slot(*cmd.args)
                         if slot is None:
-                            command_policies = CommandPolicies()
+                            command_policies = _DEFAULT_KEYLESS_METADATA
                         else:
-                            command_policies = CommandPolicies(
-                                request_policy=RequestPolicy.DEFAULT_KEYED,
-                                response_policy=ResponsePolicy.DEFAULT_KEYED,
-                            )
+                            command_policies = _DEFAULT_KEYED_METADATA
                     else:
                         if command_flag in client._command_flags_mapping:
-                            command_policies = CommandPolicies(
-                                request_policy=client._command_flags_mapping[
-                                    command_flag
-                                ]
-                            )
+                            command_policies = _METADATA_BY_REQUEST_POLICY[
+                                client._command_flags_mapping[command_flag]
+                            ]
                         else:
-                            command_policies = CommandPolicies()
+                            command_policies = _DEFAULT_KEYLESS_METADATA
 
                 target_nodes = await client._determine_nodes(
                     *cmd.args,

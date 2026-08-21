@@ -113,4 +113,65 @@ Enable caching with custom cache implementation:
 
 CacheImpl should implement a `CacheInterface` specified in `redis.cache` package.
 
+Which commands are cached
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A reply is cached only when both of the following hold:
+
+1. The command's metadata says its reply may be cached at all: it is ``readonly``, is not
+   ``blocking``, takes at least one key name argument, and carries none of the
+   ``nondeterministic_output``, ``script_runner`` or ``dont_cache`` markers.
+2. The client can identify the key arguments of that particular invocation. A command whose
+   keys the client does not yet extract executes normally with caching skipped - it never
+   fails and never changes the reply.
+
+The first question is answered by a ``redis.commands.metadata.MetadataResolver``, which is
+also what the Cluster client resolves its routing by. By default the client resolves the
+command metadata this library ships, so enabling caching adds no ``COMMAND`` round trips.
+An unknown command is never cached.
+
+A different resolver can be supplied as ``metadata_resolver``, which is the seam to implement
+if you need eligibility decided some other way - it is a small public ABC, and
+``StaticMetadataResolver`` shows what a resolver has to answer. Resolvers chain through
+``with_fallback``, first match wins, so a resolver placed in front of the static one overrides
+the commands it carries and the static records answer for everything else.
+
+Eligibility can also be decided from the connected server, by building a
+``DynamicMetadataResolver`` from a live ``COMMAND`` reply. Use it with care: reading that reply
+relies on ``CommandsParser``, which lives in the private ``redis._parsers`` package and is not
+part of the public API.
+
+.. code:: python
+
+    >>> import redis
+    >>> from redis._parsers.commands import CommandsParser
+    >>> from redis.cache import CacheConfig
+    >>> from redis.commands.metadata import DynamicMetadataResolver, StaticMetadataResolver
+    >>> records = CommandsParser(redis.Redis(host='localhost', port=6379)).get_commands_metadata_cache()
+    >>> resolver = StaticMetadataResolver(fallback=DynamicMetadataResolver(records))
+    >>> r = redis.Redis(host='localhost', port=6379, protocol=3,
+    ...                 cache_config=CacheConfig(), metadata_resolver=resolver)
+
+Chained this way the server answers only for the commands the shipped table does not carry;
+swap the order to let the server override it.
+
+The static table stays the more trustworthy source of the two. It carries the commands
+whose server metadata is incomplete or wrong - ``TOUCH`` and ``VRANDMEMBER``, and the
+read-only script runners on servers older than 8.10 - and it withholds the routing policies of
+the ``movablekeys`` reads (``SINTERCARD``, ``ZDIFF``, ``ZINTER``, ``ZINTERCARD``, ``ZUNION``,
+``XREAD``) so the Cluster client keeps resolving their keys itself instead of routing them by
+derived keyless policies.
+
+The same argument is accepted by ``ConnectionPool`` (configure it there when you supply your
+own ``connection_pool=``) and by ``RedisCluster``, which shares the one resolver with every
+node's client. On the Cluster client it also supersedes ``policy_resolver``: given only
+``metadata_resolver``, routing is derived from it, so one object serves both. An explicit
+``policy_resolver`` still decides routing, for backwards compatibility.
+
+``CacheConfig.DEFAULT_ALLOW_LIST`` is deprecated and no longer consulted.
+
+Client-side caching is not yet implemented in the async clients, so
+``redis.asyncio.Redis`` and ``redis.asyncio.RedisCluster`` take no ``metadata_resolver``
+argument.
+
 More comprehensive documentation soon will be available at the `Redis documentation site <https://redis.io/docs/latest/>`_.
