@@ -59,6 +59,17 @@ class DuckTypedAsyncRetry:
         pass
 
 
+class DuckTypedAwaitableRetry:
+    def call_with_retry(self, do, fail, **kwargs):
+        return do()
+
+    def get_retries(self):
+        return 1
+
+    def update_supported_errors(self, specified_errors):
+        pass
+
+
 @pytest.mark.fixed_client
 class TestConnectionConstructorWithRetry:
     "Test that the Connection constructors properly handles Retry objects"
@@ -165,13 +176,34 @@ class TestConnectionConstructorWithRetry:
         await pool.release(connection)
         await pool.aclose()
 
-    @pytest.mark.parametrize("retry", [CustomAsyncRetry(), DuckTypedAsyncRetry()])
+    @pytest.mark.parametrize(
+        "retry",
+        [CustomAsyncRetry(), DuckTypedAsyncRetry(), DuckTypedAwaitableRetry()],
+    )
     def test_async_shaped_retry_is_preserved(self, retry):
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             pool = ConnectionPool(retry=retry)
 
         assert pool.connection_kwargs["retry"] is retry
+
+    @pytest.mark.asyncio
+    async def test_pool_set_retry_applies_to_new_connection(self, monkeypatch):
+        pool = ConnectionPool()
+        retry = Retry(NoBackoff(), 2)
+        pool.set_retry(retry)
+
+        async def ensure_connection(_self, _connection):
+            pass
+
+        monkeypatch.setattr(ConnectionPool, "ensure_connection", ensure_connection)
+        connection = await pool.get_connection()
+
+        assert connection.retry.get_retries() == retry.get_retries()
+        assert isinstance(connection.retry._backoff, NoBackoff)
+
+        await pool.release(connection)
+        await pool.aclose()
 
     def test_pool_converts_sync_retry(self):
         retry = SyncRetry(NoBackoff(), 2)
