@@ -1414,9 +1414,18 @@ def parse_client_info(value):
     "key1=value1 key2=value2 key3=value3"
     """
     client_info = {}
-    for info in str_if_bytes(value).strip().split():
-        key, value = info.split("=")
-        client_info[key] = value
+    last_key = None
+    for token in str_if_bytes(value).strip().split(" "):
+        if "=" in token:
+            # Values might contain '=' (e.g. a client name set to "foo=bar").
+            key, val = token.split("=", 1)
+            client_info[key] = val
+            last_key = key
+        else:
+            # Values may include spaces. For instance, when running Redis via a
+            # Unix socket, the addr/laddr field can be a path such as
+            # "/tmp/redis sock/redis.sock"; reattach the split-off remainder.
+            client_info[last_key] += " " + token
 
     # Those fields are defined as int in networking.c
     for int_key in {

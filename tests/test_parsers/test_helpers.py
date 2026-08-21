@@ -5,6 +5,7 @@ from redis._parsers.helpers import (
     pairs_to_dict_typed,
     parse_acl_log,
     parse_acl_log_resp3_to_resp2_legacy,
+    parse_client_info,
     parse_client_list,
     parse_command,
     parse_info,
@@ -97,6 +98,26 @@ def test_parse_client_list():
     ]
     clients = parse_client_list(response)
     assert clients == expected
+
+
+@pytest.mark.fixed_client
+def test_parse_client_info():
+    # A CLIENT INFO value can contain both a space (a unix-socket addr such as
+    # "/tmp/redis sock/redis.sock") and an "=" (a client name like
+    # "test=_complex_[name]"), the same tricky data parse_client_list handles.
+    # Int-typed fields are additionally coerced to int.
+    info = (
+        "id=7 addr=/tmp/redis sock/redis.sock:0 name=test=_complex_[name] "
+        "age=-1 db=0 lib-ver="
+    )
+    assert parse_client_info(info) == {
+        "id": 7,
+        "addr": "/tmp/redis sock/redis.sock:0",
+        "name": "test=_complex_[name]",
+        "age": -1,
+        "db": 0,
+        "lib-ver": "",
+    }
 
 
 @pytest.mark.fixed_client
