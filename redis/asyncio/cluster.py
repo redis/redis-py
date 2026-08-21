@@ -2205,7 +2205,7 @@ class NodesManager:
                 )
                 return self.slots_cache[slot][node_idx]
             return self.slots_cache[slot][0]
-        except (IndexError, TypeError):
+        except (KeyError, IndexError, TypeError):
             raise SlotNotCoveredError(
                 f'Slot "{slot}" not covered by the cluster. '
                 f'"require_full_coverage={self.require_full_coverage}"'

@@ -21,7 +21,7 @@ import redis.asyncio as redis
 from redis.asyncio import Subscription
 from redis._parsers import Encoder
 from redis.asyncio.client import PubSub
-from redis.asyncio.cluster import ClusterPubSub
+from redis.asyncio.cluster import ClusterPubSub, NodesManager
 from redis.crc import key_slot
 
 from redis.exceptions import ConnectionError, SlotNotCoveredError, TimeoutError
@@ -2273,6 +2273,22 @@ class TestClusterPubSubSlotMigration:
         assert pubsub.node_pubsub_mapping == {}
         assert pubsub._shard_channel_to_node == {b"foo": "127.0.0.1:7000"}
 
+    async def test_ssubscribe_raises_slot_not_covered_for_uncovered_slot(self):
+        """
+        Subscribing to a channel whose slot is missing from the slots cache
+        must surface SlotNotCoveredError from the real nodes-manager
+        resolution — not a bare KeyError — matching the sync client.
+        """
+        pubsub = self._make_cluster_pubsub()
+        nodes_manager = pubsub.cluster.nodes_manager
+        nodes_manager.get_node_from_slot = functools.partial(
+            NodesManager.get_node_from_slot, nodes_manager
+        )
+        pubsub.cluster.keyslot.return_value = 42
+
+        with pytest.raises(SlotNotCoveredError):
+            await pubsub.ssubscribe(b"foo")
+
     async def test_ssubscribe_routes_to_replica_when_read_from_replicas(self):
         """
         Regression for #3266: shard subscriptions must honor the cluster's
@@ -2475,24 +2491,27 @@ class TestClusterPubSubSlotMigration:
         new_ps = self._make_node_pubsub()
         pubsub.node_pubsub_mapping[old_node.name] = old_ps
         pubsub.node_pubsub_mapping[new_node.name] = new_ps
-        pubsub.shard_channels = {covered_channel: None, uncovered_channel: None}
+        # The uncovered channel is iterated FIRST: an implementation that
+        # aborts the pass on SlotNotCoveredError instead of deferring would
+        # never reach the coverable sibling and fail the assertions below.
+        pubsub.shard_channels = {uncovered_channel: None, covered_channel: None}
         pubsub._shard_channel_to_node = {
-            covered_channel: old_node.name,
             uncovered_channel: old_node.name,
+            covered_channel: old_node.name,
         }
 
         pubsub.cluster.keyslot.side_effect = lambda ch: {
             covered_channel: 1,
             uncovered_channel: 2,
         }[ch]
-        pubsub.cluster.nodes_manager.slots_cache = {1: [new_node]}
-
-        def _resolve(slot, *args, **kwargs):
-            if slot == 2:
-                raise SlotNotCoveredError('Slot "2" is not covered by the cluster.')
-            return new_node
-
-        pubsub.cluster.nodes_manager.get_node_from_slot.side_effect = _resolve
+        # Resolve through the real NodesManager.get_node_from_slot with slot 2
+        # genuinely absent from slots_cache, so the test proves the uncovered
+        # slot surfaces as SlotNotCoveredError (not a bare KeyError) here.
+        nodes_manager = pubsub.cluster.nodes_manager
+        nodes_manager.slots_cache = {1: [new_node]}
+        nodes_manager.get_node_from_slot = functools.partial(
+            NodesManager.get_node_from_slot, nodes_manager
+        )
 
         with pytest.raises(SlotNotCoveredError):
             await pubsub.reinitialize_shard_subscriptions()
