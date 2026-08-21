@@ -2517,6 +2517,64 @@ class TestClusterPubSubResubscribe:
             p.close()
 
 
+class TestClusterPubSubReplicaRouting:
+    """
+    Cluster-only end-to-end tests for shard pubsub honoring the cluster's
+    replica routing configuration (#3266).
+    """
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_ssubscribe_with_read_from_replicas_receives_spublish(self, request):
+        """
+        With read_from_replicas enabled, shard subscriptions are round-robined
+        across a slot's primary and replicas; SPUBLISH-ed messages must reach
+        the subscription wherever it was placed.
+        """
+        r = _get_client(redis.RedisCluster, request, read_from_replicas=True)
+        # Same slot via hash tag: two consecutive round-robin resolutions land
+        # on different shard nodes, so with a replica present at least one
+        # subscription lives on a replica and its delivery path is exercised.
+        ch_a, ch_b = "{replica-routed}a", "{replica-routed}b"
+        slot_nodes = r.nodes_manager.slots_cache[r.keyslot(ch_a)]
+        if len(slot_nodes) < 2:
+            pytest.skip("cluster has no replica for the channels' shard")
+
+        p = r.pubsub()
+        try:
+            p.ssubscribe(ch_a, ch_b)
+            for _ in range(2):
+                msg = wait_for_message(p, timeout=2.0, func=p.get_sharded_message)
+                assert msg is not None
+                assert msg["type"] == "ssubscribe"
+
+            subscribed_nodes = {
+                p._shard_channel_to_node[ch_a.encode()],
+                p._shard_channel_to_node[ch_b.encode()],
+            }
+            replica_names = {node.name for node in slot_nodes[1:]}
+            assert subscribed_nodes & replica_names, (
+                "expected at least one shard subscription on a replica"
+            )
+
+            r.spublish(ch_a, "message-a")
+            r.spublish(ch_b, "message-b")
+
+            messages = {}
+            for _ in range(2):
+                msg = wait_for_message(p, timeout=2.0, func=p.get_sharded_message)
+                assert msg is not None
+                assert msg["type"] == "smessage"
+                messages[msg["channel"]] = msg["data"]
+
+            assert messages == {
+                ch_a.encode(): b"message-a",
+                ch_b.encode(): b"message-b",
+            }
+        finally:
+            p.close()
+
+
 @pytest.mark.fixed_client
 class TestClusterPubSubSlotMigration:
     """

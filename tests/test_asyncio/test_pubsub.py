@@ -2019,6 +2019,75 @@ class TestClusterPubSubResubscribe:
             await p.aclose()
 
 
+class TestClusterPubSubReplicaRouting:
+    """
+    Cluster-only end-to-end tests for shard pubsub honoring the cluster's
+    replica routing configuration (#3266).
+    """
+
+    async def _wait_for_sharded_message(self, pubsub, timeout=2.0):
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + timeout
+        while loop.time() < deadline:
+            msg = await pubsub.get_sharded_message(timeout=0.1)
+            if msg is not None:
+                return msg
+        return None
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("7.0.0")
+    async def test_ssubscribe_with_read_from_replicas_receives_spublish(
+        self, create_redis
+    ):
+        """
+        With read_from_replicas enabled, shard subscriptions are round-robined
+        across a slot's primary and replicas; SPUBLISH-ed messages must reach
+        the subscription wherever it was placed.
+        """
+        r = await create_redis(cls=redis.RedisCluster, read_from_replicas=True)
+        # Same slot via hash tag: two consecutive round-robin resolutions land
+        # on different shard nodes, so with a replica present at least one
+        # subscription lives on a replica and its delivery path is exercised.
+        ch_a, ch_b = "{replica-routed}a", "{replica-routed}b"
+        slot_nodes = r.nodes_manager.slots_cache[r.keyslot(ch_a)]
+        if len(slot_nodes) < 2:
+            pytest.skip("cluster has no replica for the channels' shard")
+
+        p = r.pubsub()
+        try:
+            await p.ssubscribe(ch_a, ch_b)
+            for _ in range(2):
+                msg = await self._wait_for_sharded_message(p)
+                assert msg is not None
+                assert msg["type"] == "ssubscribe"
+
+            subscribed_nodes = {
+                p._shard_channel_to_node[ch_a.encode()],
+                p._shard_channel_to_node[ch_b.encode()],
+            }
+            replica_names = {node.name for node in slot_nodes[1:]}
+            assert subscribed_nodes & replica_names, (
+                "expected at least one shard subscription on a replica"
+            )
+
+            await r.spublish(ch_a, "message-a")
+            await r.spublish(ch_b, "message-b")
+
+            messages = {}
+            for _ in range(2):
+                msg = await self._wait_for_sharded_message(p)
+                assert msg is not None
+                assert msg["type"] == "smessage"
+                messages[msg["channel"]] = msg["data"]
+
+            assert messages == {
+                ch_a.encode(): b"message-a",
+                ch_b.encode(): b"message-b",
+            }
+        finally:
+            await p.aclose()
+
+
 @pytest.mark.fixed_client
 class TestClusterPubSubSlotMigration:
     """
