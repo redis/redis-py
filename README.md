@@ -219,7 +219,7 @@ This is useful when:
 1. You have more than one Redis deployment. This might include two independent Redis servers or two or more Redis databases replicated across multiple [active-active Redis Enterprise](https://redis.io/docs/latest/operate/rs/databases/active-active/) clusters.
 2. You want your application to connect to one deployment at a time and to fail over to the next available deployment if the first deployment becomes unavailable.
 
-For the complete failover configuration options and examples, see the [Multi-database client docs](https://redis.readthedocs.io/en/latest/multi_database.html).
+For the complete failover configuration options and examples, see the [Multi-database client docs](https://redis.readthedocs.io/en/latest/geographic_failover.html).
 
 ### Bulk hash ingestion (HIMPORT)
 
