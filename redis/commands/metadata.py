@@ -546,10 +546,20 @@ class BaseMetadataResolver(MetadataResolver):
 
         if command_name.upper() in READ_COMMANDS:
             replica_safe = True
-        elif command_name.lower() in _STATIC_COMMAND_METADATA:
-            replica_safe = False
         else:
-            replica_safe = metadata.is_readonly if metadata is not None else False
+            try:
+                module, command = _split_command_name(command_name)
+                is_static = (
+                    module in _STATIC_COMMAND_METADATA
+                    and command in _STATIC_COMMAND_METADATA[module]
+                )
+            except ValueError:
+                is_static = False
+
+            if is_static:
+                replica_safe = False
+            else:
+                replica_safe = metadata.is_readonly if metadata is not None else False
 
         if len(self._replica_safe) < _MEMO_MAX_ENTRIES:
             self._replica_safe[memo_key] = replica_safe
@@ -676,10 +686,20 @@ class AsyncBaseMetadataResolver(AsyncMetadataResolver):
             
         if command_name.upper() in READ_COMMANDS:
             replica_safe = True
-        elif command_name.lower() in _STATIC_COMMAND_METADATA:
-            replica_safe = False
         else:
-            replica_safe = metadata.is_readonly if metadata is not None else False
+            try:
+                module, command = _split_command_name(command_name)
+                is_static = (
+                    module in _STATIC_COMMAND_METADATA
+                    and command in _STATIC_COMMAND_METADATA[module]
+                )
+            except ValueError:
+                is_static = False
+
+            if is_static:
+                replica_safe = False
+            else:
+                replica_safe = metadata.is_readonly if metadata is not None else False
 
         if len(self._replica_safe) < _MEMO_MAX_ENTRIES:
             self._replica_safe[memo_key] = replica_safe
