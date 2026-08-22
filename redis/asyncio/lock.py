@@ -279,11 +279,16 @@ class Lock:
         try:
             await self.do_release(expected_token)
         except LockNotOwnedError:
-            # Lock doesn't exist in Redis, safe to clear token
-            self.local.token = None
+            # Lock doesn't exist in Redis, so clear the token, but only if it is still
+            # ours. threading.local() is shared by every task on one event loop, so a
+            # Lock shared between tasks may already hold another acquirer's token;
+            # overwriting it would leave the new owner unable to release.
+            if self.local.token == expected_token:
+                self.local.token = None
             raise
-        # Only clear token after successful release
-        self.local.token = None
+        # Only clear token after successful release, and only if it is still ours.
+        if self.local.token == expected_token:
+            self.local.token = None
 
     async def do_release(self, expected_token: bytes) -> None:
         if not bool(

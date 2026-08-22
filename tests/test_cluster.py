@@ -25,12 +25,20 @@ from redis.cluster import (
     REDIS_CLUSTER_HASH_SLOTS,
     REPLICA,
     ClusterNode,
+    ClusterPipeline,
     LoadBalancingStrategy,
     NodesManager,
     RedisCluster,
     get_node_name,
 )
+from redis.cache import CacheConfig
 from redis.commands.core import HotkeysMetricsTypes
+from redis.commands.metadata import (
+    DynamicMetadataResolver,
+    RequestPolicy,
+    StaticMetadataResolver,
+)
+from redis.commands.policies import StaticPolicyResolver
 from redis.connection import BlockingConnectionPool, Connection, ConnectionPool
 from redis.crc import key_slot
 from redis.event import (
@@ -57,6 +65,7 @@ from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
 from redis.retry import Retry
 from redis.utils import str_if_bytes
+from tests.test_command_metadata import slot_routed_static_commands
 from tests.test_pubsub import wait_for_message
 
 from .conftest import (
@@ -2849,6 +2858,309 @@ class TestClusterRedisCommands:
             r.hotkeys_reset()
         with pytest.raises(NotImplementedError):
             r.hotkeys_stop()
+
+
+class TestStaticMetadataRouting:
+    """
+    Every command ``_STATIC_COMMAND_METADATA`` routes by its keys must reach the node holding
+    them.
+
+    The static table decides the routing of ~100 commands where the shipped 7.1.0 table decided
+    27, so every entry it gained is a command whose routing moved from the client's own slot
+    resolution into the table. A wrong entry is close to invisible in a functional test: MOVED
+    redirection still returns the right answer, at the cost of a round trip per call and a full
+    topology re-discovery every ``reinitialize_steps`` MOVEDs.
+
+    The ``movablekeys`` reads are the sharp case, and get their own test. Their keys live only in
+    the ``COMMAND`` key specifications, so ``first_key_pos`` is 0 and the derived policies come
+    out keyless; their records withhold the routing policies so the client keeps resolving them.
+
+    Key extraction itself is covered by ``tests/test_command_parser.py``, so it is stubbed here
+    and these tests assert only the node the command is dispatched to.
+    """
+
+    MOVABLE_KEYS_READS = (
+        "sintercard",
+        "xread",
+        "zdiff",
+        "zinter",
+        "zintercard",
+        "zunion",
+    )
+
+    @staticmethod
+    def _mocked_cluster():
+        # The policy resolver is built here rather than reusing the import-time default
+        # instance, which every client in the process shares along with its memo.
+        return get_mocked_redis_client(
+            host=default_host, port=7000, policy_resolver=StaticPolicyResolver()
+        )
+
+    @pytest.mark.fixed_client
+    def test_the_shipped_default_is_this_resolver(self):
+        """The routing below is the default behaviour, not one this test opted into."""
+        rc = get_mocked_redis_client(host=default_host, port=7000)
+
+        assert isinstance(rc._policy_resolver, StaticPolicyResolver)
+
+    @pytest.mark.fixed_client
+    def test_the_default_resolver_is_built_per_client(self):
+        """
+        Each client owns its resolver, so the memos a resolver accumulates are released with
+        the client rather than retained for the life of the process. A default evaluated in
+        the signature would hand every client in the process the same object.
+        """
+        first = get_mocked_redis_client(host=default_host, port=7000)
+        second = get_mocked_redis_client(host=default_host, port=7000)
+
+        assert first._policy_resolver is not second._policy_resolver
+
+    @pytest.mark.fixed_client
+    def test_a_pipeline_routes_through_the_clients_resolver(self):
+        """
+        Routing must not change just because the commands go through a pipeline. The client's
+        resolver used not to reach ``ClusterPipeline``, which built its own static one, so a
+        caller-supplied resolver was silently ignored for every pipelined command.
+        """
+        resolver = StaticPolicyResolver()
+        rc = get_mocked_redis_client(
+            host=default_host, port=7000, policy_resolver=resolver
+        )
+
+        with rc.pipeline() as pipe:
+            assert pipe._policy_resolver is resolver
+            # The execution strategy resolves through the pipeline, so assert what it reads.
+            assert pipe._execution_strategy._pipe._policy_resolver is resolver
+
+    @pytest.mark.fixed_client
+    def test_a_directly_built_pipeline_still_gets_a_default(self):
+        rc = get_mocked_redis_client(host=default_host, port=7000)
+
+        pipe = ClusterPipeline(
+            nodes_manager=rc.nodes_manager, commands_parser=rc.commands_parser
+        )
+
+        assert isinstance(pipe._policy_resolver, StaticPolicyResolver)
+
+    @pytest.mark.fixed_client
+    def test_routing_derives_from_a_given_metadata_resolver(self):
+        """
+        A policy resolver is the routing view of a metadata resolver, so a client given only a
+        metadata resolver must route by it - otherwise a user who supplies live metadata would
+        still route by the static table, and the two would disagree about the same command.
+        """
+        resolver = StaticMetadataResolver()
+        rc = get_mocked_redis_client(
+            host=default_host, port=7000, metadata_resolver=resolver
+        )
+
+        assert rc._metadata_resolver is resolver
+        assert rc._policy_resolver._metadata_resolver is resolver
+
+        with rc.pipeline() as pipe:
+            assert pipe._metadata_resolver is resolver
+            assert pipe._policy_resolver._metadata_resolver is resolver
+
+    @pytest.mark.fixed_client
+    def test_an_explicit_policy_resolver_still_wins_for_routing(self):
+        """
+        ``policy_resolver`` shipped in 7.1.0 as the routing extension point, so its behaviour
+        must not move. Passing both is accepted rather than rejected, because a user migrating
+        incrementally will legitimately do it.
+        """
+        policy_resolver = StaticPolicyResolver()
+        metadata_resolver = StaticMetadataResolver()
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            policy_resolver=policy_resolver,
+            metadata_resolver=metadata_resolver,
+        )
+
+        assert rc._policy_resolver is policy_resolver
+        assert rc._metadata_resolver is metadata_resolver
+        # Not derived from the metadata resolver, which is the point of the precedence rule.
+        assert rc._policy_resolver._metadata_resolver is not metadata_resolver
+
+    @pytest.mark.fixed_client
+    def test_every_node_client_gets_the_same_resolver(self):
+        """
+        The resolver has to reach every node's ``Redis``, because that is where the pools -
+        and therefore the CSC connections - live. Asserted by identity, since two static
+        resolvers give the same answers and only identity proves distribution.
+
+        This covers the host/port branch of ``create_redis_node``; the ``from_url`` branch is
+        covered by the live cluster test in ``tests/test_cache.py``.
+        """
+        resolver = StaticMetadataResolver()
+        rc = get_mocked_redis_client(
+            host=default_host, port=7000, metadata_resolver=resolver
+        )
+
+        assert rc.nodes_manager._metadata_resolver is resolver
+        nodes = list(rc.nodes_manager.nodes_cache.values())
+        assert len(nodes) > 1
+        for node in nodes:
+            pool = node.redis_connection.connection_pool
+            assert pool.metadata_resolver is resolver, node.name
+
+    @pytest.mark.fixed_client
+    def test_does_not_write_the_resolver_into_the_callers_cache_config(self):
+        """
+        Sync parity with the standalone client, which copies the caller's ``CacheConfig``
+        before injecting.
+
+        The cluster builds one cache from ``cache_config`` and hands it to every node, so each
+        node's pool sees a ``cache=`` and sets the resolver on the configuration inside it -
+        which is the caller's object, because ``CacheFactory`` holds it by reference. Without
+        the copy in ``NodesManager``, a ``CacheConfig`` reused across clients picks up
+        whichever resolver was injected last.
+        """
+        # A resolver that carries nothing, so anything deciding through it reports every
+        # command ineligible - which is how the injection is observable.
+        empty_resolver = DynamicMetadataResolver({})
+        cache_config = CacheConfig()
+
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            protocol=3,
+            cache_config=cache_config,
+            metadata_resolver=empty_resolver,
+        )
+
+        # The caller's object is untouched, so another client sharing it still caches GET.
+        assert cache_config.is_allowed_to_cache("GET") is True
+
+        # The cluster-wide cache decides through the resolver, on a copy of that config.
+        cluster_config = rc.nodes_manager._cache.config
+        assert cluster_config is not cache_config
+        assert cluster_config.is_allowed_to_cache("GET") is False
+        # Every other setting of the caller's config still applies to the copy.
+        assert cluster_config.get_max_size() == cache_config.get_max_size()
+
+        # And every node decides through that one copy, not through the caller's object.
+        nodes = list(rc.nodes_manager.nodes_cache.values())
+        assert len(nodes) > 1
+        for node in nodes:
+            pool = node.redis_connection.connection_pool
+            assert pool.cache.config is cluster_config, node.name
+
+    @pytest.mark.fixed_client
+    def test_the_default_metadata_resolver_is_built_per_client(self):
+        """Same reasoning as the policy-resolver default: the memos die with the client."""
+        first = get_mocked_redis_client(host=default_host, port=7000)
+        second = get_mocked_redis_client(host=default_host, port=7000)
+
+        assert isinstance(first._metadata_resolver, StaticMetadataResolver)
+        assert first._metadata_resolver is not second._metadata_resolver
+
+    @pytest.mark.fixed_client
+    def test_the_static_policy_resolver_preserves_its_metadata_resolver(self):
+        """``with_fallback`` must not drop the resolver the caller configured."""
+        resolver = StaticMetadataResolver()
+        policy_resolver = StaticPolicyResolver(metadata_resolver=resolver)
+
+        chained = policy_resolver.with_fallback(StaticPolicyResolver())
+
+        assert chained._metadata_resolver is resolver
+
+    @pytest.mark.fixed_client
+    def test_the_movablekeys_reads_are_reported_unresolved(self):
+        """
+        The deterministic half of this: a withheld record makes the resolver answer None, which
+        is what sends the client to ``determine_slot``. The dispatch assertion below can only
+        catch a wrong policy probabilistically, because keyless routing picks a random node.
+        """
+        rc = self._mocked_cluster()
+
+        for command in self.MOVABLE_KEYS_READS:
+            assert rc._policy_resolver.resolve(command) is None, command
+
+        # A keyed read that is not movablekeys still resolves, so the None above is the
+        # withheld record rather than a resolver that knows nothing.
+        assert (
+            rc._policy_resolver.resolve("get").request_policy
+            == RequestPolicy.DEFAULT_KEYED
+        )
+
+    @pytest.mark.fixed_client
+    def test_every_slot_routed_entry_is_dispatched_to_the_node_holding_its_key(self):
+        """
+        Every static-table entry that must route by its keys, not only the withheld ones.
+
+        The table answers ~100 commands where the shipped 7.1.0 table answered 27, so each one
+        is a command whose routing the table now decides. This walks the whole slot-routed set,
+        so an entry added or edited later is covered without touching this test.
+
+        Note what this alone cannot catch: the set is derived from the table, so an entry wrongly
+        recorded keyless drops out of it rather than failing here. That hole is closed by
+        ``TestWithheldRoutingPolicies.test_no_entry_that_takes_a_key_is_routed_keyless``, which
+        asserts the classification itself. The two are only airtight together.
+        """
+        rc = self._mocked_cluster()
+        expected_node = rc.nodes_manager.get_node_from_slot(key_slot(b"{foo}a"))
+        commands = list(slot_routed_static_commands())
+
+        assert len(commands) > 70, "the slot-routed set looks truncated"
+
+        for command in commands:
+            with (
+                patch.object(
+                    RedisCluster, "_get_command_keys", return_value=["{foo}a"]
+                ),
+                patch.object(
+                    RedisCluster, "_execute_command", return_value="OK"
+                ) as execute_command,
+            ):
+                rc.execute_command(command, "{foo}a")
+
+            assert execute_command.call_count == 1, command
+            assert execute_command.call_args[0][0] is expected_node, command
+
+
+class TestSlotResolutionWithoutADefaultNode:
+    """
+    A keyed command on a client with no default node must name that as the reason.
+
+    ``_get_command_keys`` resolves keys through the default node, and the static metadata table
+    answers most keyed reads directly, so ``_internal_execute_command`` no longer passes through
+    the fallback that used to substitute keyless routing when the default node was missing.
+    ``NodesManager.close`` clears the default node, so this is reachable on a closed client.
+
+    The keys are unknown rather than absent, so the error has to say so: reporting a missing key
+    for ``GET foo`` sends the caller looking for a key they did supply.
+
+    The async stack needs no counterpart: ``AsyncCommandsParser`` holds the node it was
+    initialized with and never reads the default node.
+    """
+
+    @staticmethod
+    def _cluster_without_a_default_node():
+        rc = get_mocked_redis_client(host=default_host, port=7000)
+        # What ``NodesManager.close`` leaves behind, without closing the connections.
+        rc.nodes_manager.default_node = None
+        return rc
+
+    @pytest.mark.fixed_client
+    def test_get_command_keys_reports_the_missing_default_node(self):
+        rc = self._cluster_without_a_default_node()
+
+        with pytest.raises(RedisClusterException, match="no default node") as excinfo:
+            rc._get_command_keys("GET", "foo")
+
+        # The command is named, and the key is not reported as missing.
+        assert "GET" in str(excinfo.value)
+        assert "Missing key" not in str(excinfo.value)
+
+    @pytest.mark.fixed_client
+    def test_a_keyed_command_raises_the_cluster_error(self):
+        rc = self._cluster_without_a_default_node()
+
+        # GET is answered by the static table as DEFAULT_KEYED, so it goes straight to
+        # determine_slot rather than through the fallback that guards the default node.
+        with pytest.raises(RedisClusterException, match="no default node"):
+            rc.execute_command("GET", "foo")
 
 
 class TestNodesManager:
