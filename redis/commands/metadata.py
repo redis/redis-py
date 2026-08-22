@@ -546,6 +546,8 @@ class BaseMetadataResolver(MetadataResolver):
 
         if command_name.upper() in READ_COMMANDS:
             replica_safe = True
+        elif command_name.lower() in _STATIC_COMMAND_METADATA:
+            replica_safe = False
         else:
             replica_safe = metadata.is_readonly if metadata is not None else False
 
@@ -674,6 +676,8 @@ class AsyncBaseMetadataResolver(AsyncMetadataResolver):
             
         if command_name.upper() in READ_COMMANDS:
             replica_safe = True
+        elif command_name.lower() in _STATIC_COMMAND_METADATA:
+            replica_safe = False
         else:
             replica_safe = metadata.is_readonly if metadata is not None else False
 
