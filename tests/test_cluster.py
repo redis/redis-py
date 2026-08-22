@@ -5640,29 +5640,4 @@ class TestClusterPipelineMetricsRecording:
             assert isinstance(duration, float)
             assert duration >= 0
 
-    def test_register_read_command(self):
-        import redis.asyncio.cluster as async_cluster_mod
-        import redis.cluster as sync_cluster_mod
-        from redis.asyncio.cluster import (
-            register_read_command as async_register_read_command,
-        )
-        from redis.cluster import (
-            register_read_command as sync_register_read_command,
-        )
-        from redis.commands import READ_COMMANDS, register_read_command
 
-        assert sync_register_read_command is register_read_command
-        assert async_register_read_command is register_read_command
-
-        assert "GRAPH.RO_QUERY" in READ_COMMANDS
-        assert "GRAPH.EXPLAIN" in READ_COMMANDS
-
-        try:
-            register_read_command("custom.read_cmd")
-            assert "CUSTOM.READ_CMD" in sync_cluster_mod.READ_COMMANDS
-            assert "custom.read_cmd" in sync_cluster_mod.READ_COMMANDS
-            assert "CUSTOM.READ_CMD" in async_cluster_mod.READ_COMMANDS
-            assert "custom.read_cmd" in async_cluster_mod.READ_COMMANDS
-        finally:
-            READ_COMMANDS.discard("CUSTOM.READ_CMD")
-            READ_COMMANDS.discard("custom.read_cmd")

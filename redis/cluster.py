@@ -37,11 +37,7 @@ from redis._parsers.helpers import parse_scan
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.cache import CacheConfig, CacheFactory, CacheFactoryInterface, CacheInterface
 from redis.client import EMPTY_RESPONSE, CaseInsensitiveDict, PubSub, Redis
-from redis.commands import (
-    READ_COMMANDS,
-    RedisClusterCommands,
-    register_read_command,  # noqa: F401
-)
+from redis.commands import READ_COMMANDS, RedisClusterCommands
 from redis.commands.helpers import list_or_args, parse_pubsub_subscriptions
 from redis.commands.metadata import (
     _DEFAULT_KEYED_METADATA,
@@ -1126,7 +1122,9 @@ class RedisCluster(
         """
         Returns random primary or all nodes depends on READONLY mode.
         """
-        if self.read_from_replicas and command_name in READ_COMMANDS:
+        if self.read_from_replicas and self._metadata_resolver.is_replica_safe(
+            command_name
+        ):
             return self.get_random_node()
 
         return self.get_random_primary_node()
@@ -1166,10 +1164,11 @@ class RedisCluster(
         """
         # get the node that holds the key's slot
         slot = self.determine_slot(*args)
+        replica_safe = self._metadata_resolver.is_replica_safe(command)
         node = self.nodes_manager.get_node_from_slot(
             slot,
-            self.read_from_replicas and command in READ_COMMANDS,
-            self.load_balancing_strategy if command in READ_COMMANDS else None,
+            self.read_from_replicas and replica_safe,
+            self.load_balancing_strategy if replica_safe else None,
         )
         return [node]
 
@@ -1835,12 +1834,11 @@ class RedisCluster(
                     # MOVED occurred and the slots cache was updated,
                     # refresh the target node
                     slot = self.determine_slot(*args)
+                    replica_safe = self._metadata_resolver.is_replica_safe(command)
                     target_node = self.nodes_manager.get_node_from_slot(
                         slot,
-                        self.read_from_replicas and command in READ_COMMANDS,
-                        self.load_balancing_strategy
-                        if command in READ_COMMANDS
-                        else None,
+                        self.read_from_replicas and replica_safe,
+                        self.load_balancing_strategy if replica_safe else None,
                     )
                     moved = False
 

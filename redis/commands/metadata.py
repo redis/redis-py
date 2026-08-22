@@ -326,6 +326,19 @@ class MetadataResolver(ABC):
         pass
 
     @abstractmethod
+    def is_replica_safe(self, command_name: str) -> bool:
+        """
+        Determines whether a command is safe to execute on a replica.
+
+        Args:
+            command_name: The name of the command to check, in any case.
+
+        Returns:
+            bool: True if the command is replica safe.
+        """
+        pass
+
+    @abstractmethod
     def with_fallback(self, fallback: "MetadataResolver") -> "MetadataResolver":
         """
         Factory method to instantiate a metadata resolver with a fallback resolver.
@@ -390,6 +403,19 @@ class AsyncMetadataResolver(ABC):
         pass
 
     @abstractmethod
+    async def is_replica_safe(self, command_name: str) -> bool:
+        """
+        Determines whether a command is safe to execute on a replica.
+
+        Args:
+            command_name: The name of the command to check, in any case.
+
+        Returns:
+            bool: True if the command is replica safe.
+        """
+        pass
+
+    @abstractmethod
     def with_fallback(
         self, fallback: "AsyncMetadataResolver"
     ) -> "AsyncMetadataResolver":
@@ -435,6 +461,7 @@ class BaseMetadataResolver(MetadataResolver):
         self._fallback = fallback
         self._policies: dict[str, CommandPolicies | None] = {}
         self._cacheable: dict[str, bool] = {}
+        self._replica_safe: dict[str, bool] = {}
 
     def resolve(self, command_name: str) -> CommandMetadata | None:
         module, command = _split_command_name(command_name)
@@ -501,6 +528,29 @@ class BaseMetadataResolver(MetadataResolver):
 
         return cacheable
 
+    def is_replica_safe(self, command_name: str) -> bool:
+        if not isinstance(command_name, str):
+            return False
+
+        memo_key = command_name.lower()
+
+        try:
+            return self._replica_safe[memo_key]
+        except KeyError:
+            pass
+
+        try:
+            metadata = self.resolve(command_name)
+        except ValueError:
+            metadata = None
+        
+        replica_safe = metadata.is_readonly if metadata is not None else False
+
+        if len(self._replica_safe) < _MEMO_MAX_ENTRIES:
+            self._replica_safe[memo_key] = replica_safe
+
+        return replica_safe
+
     @abstractmethod
     def with_fallback(self, fallback: "MetadataResolver") -> "MetadataResolver":
         pass
@@ -536,6 +586,7 @@ class AsyncBaseMetadataResolver(AsyncMetadataResolver):
         self._fallback = fallback
         self._policies: dict[str, CommandPolicies | None] = {}
         self._cacheable: dict[str, bool] = {}
+        self._replica_safe: dict[str, bool] = {}
 
     async def resolve(self, command_name: str) -> CommandMetadata | None:
         module, command = _split_command_name(command_name)
@@ -601,6 +652,29 @@ class AsyncBaseMetadataResolver(AsyncMetadataResolver):
             self._cacheable[memo_key] = cacheable
 
         return cacheable
+
+    async def is_replica_safe(self, command_name: str) -> bool:
+        if not isinstance(command_name, str):
+            return False
+
+        memo_key = command_name.lower()
+
+        try:
+            return self._replica_safe[memo_key]
+        except KeyError:
+            pass
+
+        try:
+            metadata = await self.resolve(command_name)
+        except ValueError:
+            metadata = None
+            
+        replica_safe = metadata.is_readonly if metadata is not None else False
+
+        if len(self._replica_safe) < _MEMO_MAX_ENTRIES:
+            self._replica_safe[memo_key] = replica_safe
+
+        return replica_safe
 
     @abstractmethod
     def with_fallback(

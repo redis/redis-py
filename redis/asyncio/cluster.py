@@ -82,11 +82,7 @@ from redis.cluster import (
     parse_cluster_shards_with_str_keys,
     parse_cluster_slots,
 )
-from redis.commands import (
-    READ_COMMANDS,
-    AsyncRedisClusterCommands,
-    register_read_command,  # noqa: F401
-)
+from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
 from redis.commands.helpers import list_or_args, parse_pubsub_subscriptions
 from redis.commands.metadata import (
     _DEFAULT_KEYED_METADATA,
@@ -469,6 +465,7 @@ class RedisCluster(
         event_dispatcher: EventDispatcher | None = None,
         policy_resolver: AsyncPolicyResolver | None = None,
         maint_notifications_config: MaintNotificationsConfig | None = None,
+        metadata_resolver: AsyncMetadataResolver | None = None,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -658,8 +655,17 @@ class RedisCluster(
         # resolver and the memos it accumulates are released with the client. The async
         # ClusterPipeline holds the client and reads this attribute, so a pipeline routes by
         # whatever the client routes by without any propagation of its own.
+        if metadata_resolver is None:
+            self._metadata_resolver: AsyncMetadataResolver = (
+                AsyncStaticMetadataResolver()
+            )
+        else:
+            self._metadata_resolver = metadata_resolver
+
         if policy_resolver is None:
-            self._policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver()
+            self._policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver(
+                metadata_resolver=self._metadata_resolver
+            )
         else:
             self._policy_resolver = policy_resolver
         self.commands_parser = AsyncCommandsParser()
@@ -873,11 +879,13 @@ class RedisCluster(
 
         return slot_cache[node_idx]
 
-    def get_random_primary_or_all_nodes(self, command_name):
+    async def get_random_primary_or_all_nodes(self, command_name):
         """
         Returns random primary or all nodes depends on READONLY mode.
         """
-        if self.read_from_replicas and command_name in READ_COMMANDS:
+        if self.read_from_replicas and await self._metadata_resolver.is_replica_safe(
+            command_name
+        ):
             return self.get_random_node()
 
         return self.get_random_primary_node()
@@ -893,11 +901,12 @@ class RedisCluster(
         Returns a list of nodes that hold the specified keys' slots.
         """
         # get the node that holds the key's slot
+        replica_safe = await self._metadata_resolver.is_replica_safe(command)
         return [
             self.nodes_manager.get_node_from_slot(
                 await self._determine_slot(command, *args),
-                self.read_from_replicas and command in READ_COMMANDS,
-                self.load_balancing_strategy if command in READ_COMMANDS else None,
+                self.read_from_replicas and replica_safe,
+                self.load_balancing_strategy if replica_safe else None,
             )
         ]
 
@@ -990,7 +999,7 @@ class RedisCluster(
         if request_policy == RequestPolicy.DEFAULT_KEYED:
             nodes = await policy_callback(command, *args)
         elif request_policy == RequestPolicy.DEFAULT_KEYLESS:
-            nodes = policy_callback(command)
+            nodes = [await self.get_random_primary_or_all_nodes(command)]
         else:
             nodes = policy_callback()
 
@@ -1290,12 +1299,13 @@ class RedisCluster(
                     # MOVED occurred and the slots cache was updated,
                     # refresh the target node
                     slot = await self._determine_slot(*args)
+                    replica_safe = await self._metadata_resolver.is_replica_safe(
+                        args[0]
+                    )
                     target_node = self.nodes_manager.get_node_from_slot(
                         slot,
-                        self.read_from_replicas and args[0] in READ_COMMANDS,
-                        self.load_balancing_strategy
-                        if args[0] in READ_COMMANDS
-                        else None,
+                        self.read_from_replicas and replica_safe,
+                        self.load_balancing_strategy if replica_safe else None,
                     )
                     moved = False
 

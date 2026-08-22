@@ -60,7 +60,7 @@ if TYPE_CHECKING:
 
 # Not complete, but covers the major ones
 # https://redis.io/commands
-READ_COMMANDS = set(
+READ_COMMANDS = frozenset(
     [
         # Bit Operations
         "BITCOUNT",
@@ -170,22 +170,8 @@ READ_COMMANDS = set(
         "FT.INFO",
         "FT.PROFILE",
         "FT.SEARCH",
-        # FalkorDB / RedisGraph Module
-        "GRAPH.EXPLAIN",
-        "GRAPH.RO_QUERY",
     ]
 )
-
-
-def register_read_command(command_name: str) -> None:
-    """
-    Register a custom or module command (e.g. GRAPH.RO_QUERY) as read-only
-    for cluster replica routing.
-    """
-    cmd = command_name.strip()
-    if cmd:
-        READ_COMMANDS.add(cmd.upper())
-        READ_COMMANDS.add(cmd.lower())
 
 
 class ClusterMultiKeyCommands(ClusterCommandsProtocol):
@@ -218,7 +204,8 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
     def _execute_pipeline_by_slot(
         self, command: str, slots_to_args: Mapping[int, Iterable[EncodableT]]
     ) -> List[Any]:
-        read_from_replicas = self.read_from_replicas and command in READ_COMMANDS
+        replica_safe = self._metadata_resolver.is_replica_safe(command)
+        read_from_replicas = self.read_from_replicas and replica_safe
         pipe = self.pipeline()
         [
             pipe.execute_command(
@@ -440,7 +427,8 @@ class AsyncClusterMultiKeyCommands(ClusterMultiKeyCommands):
     ) -> List[Any]:
         if self._initialize:
             await self.initialize()
-        read_from_replicas = self.read_from_replicas and command in READ_COMMANDS
+        replica_safe = await self._metadata_resolver.is_replica_safe(command)
+        read_from_replicas = self.read_from_replicas and replica_safe
         pipe = self.pipeline()
         [
             pipe.execute_command(
