@@ -121,6 +121,15 @@ def test_parse_client_info():
 
 
 @pytest.mark.fixed_client
+def test_parse_client_info_empty():
+    # An empty or whitespace-only client-info stays an empty dict rather than
+    # raising. ACL LOG entries omit client-info as "" (see parse_acl_log), so
+    # this path must not crash.
+    assert parse_client_info("") == {}
+    assert parse_client_info("   ") == {}
+
+
+@pytest.mark.fixed_client
 def test_parse_command_preserves_acl_categories():
     response = [
         [

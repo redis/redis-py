@@ -1421,10 +1421,12 @@ def parse_client_info(value):
             key, val = token.split("=", 1)
             client_info[key] = val
             last_key = key
-        else:
+        elif last_key is not None:
             # Values may include spaces. For instance, when running Redis via a
             # Unix socket, the addr/laddr field can be a path such as
             # "/tmp/redis sock/redis.sock"; reattach the split-off remainder.
+            # (last_key is None only for empty/whitespace input, e.g. an ACL LOG
+            # entry with no client-info, which should stay an empty dict.)
             client_info[last_key] += " " + token
 
     # Those fields are defined as int in networking.c
