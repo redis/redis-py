@@ -92,6 +92,8 @@ from redis.commands.metadata import (
     CommandPolicies,
     RequestPolicy,
     ResponsePolicy,
+    AsyncStaticMetadataResolver,
+    AsyncMetadataResolver,
 )
 from redis.commands.policies import AsyncPolicyResolver, AsyncStaticPolicyResolver
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
@@ -274,6 +276,10 @@ class RedisCluster(
         | Enable read from replicas in READONLY mode and defines the load balancing
           strategy that will be used for cluster node selection.
           The data read from replicas is eventually consistent with the data in primary nodes.
+    :param metadata_resolver:
+        | Optional :class:`~.AsyncMetadataResolver` instance used to map command names 
+          to replica-safe routing rules. If not provided, an AsyncStaticMetadataResolver 
+          is used by default.
     :param dynamic_startup_nodes:
         | Set the RedisCluster's startup nodes to all the discovered nodes.
           If true (default value), the cluster's discovered nodes will be used to
@@ -879,9 +885,18 @@ class RedisCluster(
 
         return slot_cache[node_idx]
 
-    async def get_random_primary_or_all_nodes(self, command_name):
+    def get_random_primary_or_all_nodes(self, command_name):
         """
         Returns random primary or all nodes depends on READONLY mode.
+        """
+        if self.read_from_replicas and command_name.upper() in READ_COMMANDS:
+            return self.get_random_node()
+
+        return self.get_random_primary_node()
+
+    async def _get_random_primary_or_all_nodes_for_command(self, command_name):
+        """
+        Internal async version of get_random_primary_or_all_nodes that awaits metadata.
         """
         if self.read_from_replicas and await self._metadata_resolver.is_replica_safe(
             command_name
@@ -999,7 +1014,7 @@ class RedisCluster(
         if request_policy == RequestPolicy.DEFAULT_KEYED:
             nodes = await policy_callback(command, *args)
         elif request_policy == RequestPolicy.DEFAULT_KEYLESS:
-            nodes = [await self.get_random_primary_or_all_nodes(command)]
+            nodes = [await self._get_random_primary_or_all_nodes_for_command(command)]
         else:
             nodes = policy_callback()
 

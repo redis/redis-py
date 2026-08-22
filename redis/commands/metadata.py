@@ -39,6 +39,8 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from types import MappingProxyType
 
+from redis.commands.cluster import READ_COMMANDS
+
 __all__ = [
     "AsyncBaseMetadataResolver",
     "AsyncDynamicMetadataResolver",
@@ -325,7 +327,6 @@ class MetadataResolver(ABC):
         """
         pass
 
-    @abstractmethod
     def is_replica_safe(self, command_name: str) -> bool:
         """
         Determines whether a command is safe to execute on a replica.
@@ -336,7 +337,7 @@ class MetadataResolver(ABC):
         Returns:
             bool: True if the command is replica safe.
         """
-        pass
+        return False
 
     @abstractmethod
     def with_fallback(self, fallback: "MetadataResolver") -> "MetadataResolver":
@@ -402,7 +403,6 @@ class AsyncMetadataResolver(ABC):
         """
         pass
 
-    @abstractmethod
     async def is_replica_safe(self, command_name: str) -> bool:
         """
         Determines whether a command is safe to execute on a replica.
@@ -413,7 +413,7 @@ class AsyncMetadataResolver(ABC):
         Returns:
             bool: True if the command is replica safe.
         """
-        pass
+        return False
 
     @abstractmethod
     def with_fallback(
@@ -543,8 +543,11 @@ class BaseMetadataResolver(MetadataResolver):
             metadata = self.resolve(command_name)
         except ValueError:
             metadata = None
-        
-        replica_safe = metadata.is_readonly if metadata is not None else False
+
+        if command_name.upper() in READ_COMMANDS:
+            replica_safe = True
+        else:
+            replica_safe = metadata.is_readonly if metadata is not None else False
 
         if len(self._replica_safe) < _MEMO_MAX_ENTRIES:
             self._replica_safe[memo_key] = replica_safe
@@ -669,7 +672,10 @@ class AsyncBaseMetadataResolver(AsyncMetadataResolver):
         except ValueError:
             metadata = None
             
-        replica_safe = metadata.is_readonly if metadata is not None else False
+        if command_name.upper() in READ_COMMANDS:
+            replica_safe = True
+        else:
+            replica_safe = metadata.is_readonly if metadata is not None else False
 
         if len(self._replica_safe) < _MEMO_MAX_ENTRIES:
             self._replica_safe[memo_key] = replica_safe
