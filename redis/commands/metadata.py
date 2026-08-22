@@ -337,7 +337,7 @@ class MetadataResolver(ABC):
         Returns:
             bool: True if the command is replica safe.
         """
-        return False
+        return command_name.upper() in READ_COMMANDS
 
     @abstractmethod
     def with_fallback(self, fallback: "MetadataResolver") -> "MetadataResolver":
@@ -413,7 +413,7 @@ class AsyncMetadataResolver(ABC):
         Returns:
             bool: True if the command is replica safe.
         """
-        return False
+        return command_name.upper() in READ_COMMANDS
 
     @abstractmethod
     def with_fallback(
