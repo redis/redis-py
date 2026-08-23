@@ -33,7 +33,7 @@ from redis.cluster import (
     get_node_name,
 )
 from redis.commands.core import HotkeysMetricsTypes
-from redis.commands.metadata import RequestPolicy
+from redis.commands.metadata import AsyncDynamicMetadataResolver, RequestPolicy
 from redis.commands.policies import AsyncStaticPolicyResolver
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.event import (
@@ -56,7 +56,7 @@ from redis.exceptions import (
 )
 from redis.himport import HIMPORT_SET
 from redis.utils import str_if_bytes
-from tests.test_command_metadata import slot_routed_static_commands
+from tests.test_command_metadata import CACHEABLE_KEYED, slot_routed_static_commands
 from tests.conftest import (
     assert_resp_response,
     expects_resp2_shape,
@@ -2806,6 +2806,48 @@ class TestStaticMetadataRouting:
 
         assert rc.pipeline().cluster_client._policy_resolver is resolver
 
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_explicit_policy_resolver_keeps_legacy_replica_routing(self) -> None:
+        metadata_resolver = AsyncDynamicMetadataResolver(
+            {"core": {"set": CACHEABLE_KEYED}}
+        )
+        rc = await get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            read_from_replicas=True,
+            policy_resolver=AsyncStaticPolicyResolver(),
+            metadata_resolver=metadata_resolver,
+        )
+
+        with (
+            mock.patch.object(rc, "_determine_slot", return_value=0),
+            mock.patch.object(
+                type(rc.nodes_manager), "get_node_from_slot", autospec=True
+            ) as get_node,
+        ):
+            await rc.get_nodes_from_slot("set", "key", "value")
+
+        get_node.assert_called_once_with(rc.nodes_manager, 0, False, None)
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_keyless_routing_honors_the_public_node_selector(self) -> None:
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+        selected_node = rc.get_primaries()[0]
+
+        with mock.patch.object(
+            type(rc),
+            "get_random_primary_or_all_nodes",
+            return_value=selected_node,
+        ) as select_node:
+            nodes = await rc._determine_nodes(
+                "dbsize", request_policy=RequestPolicy.DEFAULT_KEYLESS
+            )
+
+        assert nodes == [selected_node]
+        select_node.assert_called_once_with("dbsize")
         await rc.aclose()
 
     @pytest.mark.fixed_client

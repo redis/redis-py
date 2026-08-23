@@ -1227,8 +1227,8 @@ class TestSSLCache:
         ]
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
-        # Timeout needed for Cluster connection because there's timeout
-        # between data appears in socket buffer
+        # Allow time for asynchronous invalidation delivery and processing,
+        # which can be delayed under CI load.
         time.sleep(0.5)
         # Retrieves a new value from server and cache_data it
         assert r.get("foo") in [b"barbar", "barbar"]

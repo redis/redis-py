@@ -955,6 +955,22 @@ class TestBaseMetadataResolver:
         assert static_resolver.is_cacheable("touch") is False
         assert static_resolver.is_cacheable("eval_ro") is False
 
+    def test_custom_metadata_decides_replica_safety_for_known_module_reads(self):
+        resolver = DynamicMetadataResolver(
+            {
+                "ts": {"get": CACHEABLE_KEYED},
+                "ft": {"aggregate": CACHEABLE_KEYED},
+            }
+        )
+
+        assert resolver.is_replica_safe("ts.get") is True
+        assert resolver.is_replica_safe("ft.aggregate") is True
+
+    def test_touch_remains_replica_unsafe_despite_readonly_metadata(self):
+        resolver = DynamicMetadataResolver({"core": {"touch": CACHEABLE_KEYED}})
+
+        assert resolver.is_replica_safe("touch") is False
+
     def test_the_default_eligible_set_differs_from_the_legacy_allow_list_by_exactly_this(
         self,
     ):

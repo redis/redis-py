@@ -511,6 +511,24 @@ class TestAsyncBaseMetadataResolver:
         assert await static_resolver.is_cacheable("touch") is False
         assert await static_resolver.is_cacheable("eval_ro") is False
 
+    async def test_custom_metadata_decides_replica_safety_for_known_module_reads(self):
+        resolver = AsyncDynamicMetadataResolver(
+            {
+                "ts": {"get": CACHEABLE_KEYED},
+                "ft": {"aggregate": CACHEABLE_KEYED},
+            }
+        )
+
+        assert await resolver.is_replica_safe("ts.get") is True
+        assert await resolver.is_replica_safe("ft.aggregate") is True
+
+    async def test_touch_remains_replica_unsafe_despite_readonly_metadata(self):
+        resolver = AsyncDynamicMetadataResolver(
+            {"core": {"touch": CACHEABLE_KEYED}}
+        )
+
+        assert await resolver.is_replica_safe("touch") is False
+
     async def test_is_cacheable_fails_closed_for_an_unresolvable_name(self):
         """
         A name the record tables cannot be keyed by is not a raise on the command execution

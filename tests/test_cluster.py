@@ -65,7 +65,7 @@ from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
 from redis.retry import Retry
 from redis.utils import str_if_bytes
-from tests.test_command_metadata import slot_routed_static_commands
+from tests.test_command_metadata import CACHEABLE_KEYED, slot_routed_static_commands
 from tests.test_pubsub import wait_for_message
 
 from .conftest import (
@@ -2983,6 +2983,30 @@ class TestStaticMetadataRouting:
         assert rc._policy_resolver._metadata_resolver is not metadata_resolver
 
     @pytest.mark.fixed_client
+    def test_explicit_policy_resolver_keeps_legacy_replica_routing(self):
+        metadata_resolver = DynamicMetadataResolver(
+            {"core": {"set": CACHEABLE_KEYED}}
+        )
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            read_from_replicas=True,
+            policy_resolver=StaticPolicyResolver(),
+            metadata_resolver=metadata_resolver,
+        )
+
+        with (
+            patch.object(rc, "determine_slot", return_value=0),
+            patch.object(
+                type(rc.nodes_manager), "get_node_from_slot", autospec=True
+            ) as get_node,
+        ):
+            rc.get_nodes_from_slot("set", "set", "key", "value")
+
+        get_node.assert_called_once_with(rc.nodes_manager, 0, False, None)
+        assert rc.pipeline()._routing_uses_metadata is False
+
+    @pytest.mark.fixed_client
     def test_every_node_client_gets_the_same_resolver(self):
         """
         The resolver has to reach every node's ``Redis``, because that is where the pools -
@@ -5639,5 +5663,4 @@ class TestClusterPipelineMetricsRecording:
             duration = call_obj[0][0]
             assert isinstance(duration, float)
             assert duration >= 0
-
 

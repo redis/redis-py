@@ -276,6 +276,12 @@ def _split_command_name(command_name: str) -> tuple[str, str]:
 # answer correctly; they just recompute.
 _MEMO_MAX_ENTRIES = 4096
 
+# Commands whose ``readonly`` flag is not sufficient to make replica routing safe. TOUCH
+# changes key idle-time state even though Redis reports it readonly, so it must continue to
+# reach a primary. Keep this exception narrow: caller-supplied metadata remains authoritative
+# for ordinary core and module reads.
+_REPLICA_UNSAFE_COMMANDS = frozenset({"TOUCH"})
+
 
 class MetadataResolver(ABC):
     @abstractmethod
@@ -544,22 +550,13 @@ class BaseMetadataResolver(MetadataResolver):
         except ValueError:
             metadata = None
 
-        if command_name.upper() in READ_COMMANDS:
+        normalized_name = command_name.upper()
+        if normalized_name in _REPLICA_UNSAFE_COMMANDS:
+            replica_safe = False
+        elif normalized_name in READ_COMMANDS:
             replica_safe = True
         else:
-            try:
-                module, command = _split_command_name(command_name)
-                is_static = (
-                    module in _STATIC_COMMAND_METADATA
-                    and command in _STATIC_COMMAND_METADATA[module]
-                )
-            except ValueError:
-                is_static = False
-
-            if is_static:
-                replica_safe = False
-            else:
-                replica_safe = metadata.is_readonly if metadata is not None else False
+            replica_safe = metadata.is_readonly if metadata is not None else False
 
         if len(self._replica_safe) < _MEMO_MAX_ENTRIES:
             self._replica_safe[memo_key] = replica_safe
@@ -683,23 +680,14 @@ class AsyncBaseMetadataResolver(AsyncMetadataResolver):
             metadata = await self.resolve(command_name)
         except ValueError:
             metadata = None
-            
-        if command_name.upper() in READ_COMMANDS:
+
+        normalized_name = command_name.upper()
+        if normalized_name in _REPLICA_UNSAFE_COMMANDS:
+            replica_safe = False
+        elif normalized_name in READ_COMMANDS:
             replica_safe = True
         else:
-            try:
-                module, command = _split_command_name(command_name)
-                is_static = (
-                    module in _STATIC_COMMAND_METADATA
-                    and command in _STATIC_COMMAND_METADATA[module]
-                )
-            except ValueError:
-                is_static = False
-
-            if is_static:
-                replica_safe = False
-            else:
-                replica_safe = metadata.is_readonly if metadata is not None else False
+            replica_safe = metadata.is_readonly if metadata is not None else False
 
         if len(self._replica_safe) < _MEMO_MAX_ENTRIES:
             self._replica_safe[memo_key] = replica_safe

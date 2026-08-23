@@ -88,12 +88,12 @@ from redis.commands.metadata import (
     _DEFAULT_KEYED_METADATA,
     _DEFAULT_KEYLESS_METADATA,
     _METADATA_BY_REQUEST_POLICY,
+    AsyncMetadataResolver,
+    AsyncStaticMetadataResolver,
     CommandMetadata,
     CommandPolicies,
     RequestPolicy,
     ResponsePolicy,
-    AsyncStaticMetadataResolver,
-    AsyncMetadataResolver,
 )
 from redis.commands.policies import AsyncPolicyResolver, AsyncStaticPolicyResolver
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
@@ -277,8 +277,8 @@ class RedisCluster(
           strategy that will be used for cluster node selection.
           The data read from replicas is eventually consistent with the data in primary nodes.
     :param metadata_resolver:
-        | Optional :class:`~.AsyncMetadataResolver` instance used to map command names 
-          to replica-safe routing rules. If not provided, an AsyncStaticMetadataResolver 
+        | Optional :class:`~.AsyncMetadataResolver` instance used to map command names
+          to replica-safe routing rules. If not provided, an AsyncStaticMetadataResolver
           is used by default.
     :param dynamic_startup_nodes:
         | Set the RedisCluster's startup nodes to all the discovered nodes.
@@ -644,9 +644,9 @@ class RedisCluster(
         self._policies_callback_mapping: dict[
             Union[RequestPolicy, ResponsePolicy], Callable
         ] = {
-            RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [
-                self.get_random_primary_or_all_nodes(command_name)
-            ],
+            RequestPolicy.DEFAULT_KEYLESS: (
+                self._get_random_primary_or_all_nodes_for_command
+            ),
             RequestPolicy.DEFAULT_KEYED: self.get_nodes_from_slot,
             RequestPolicy.DEFAULT_NODE: lambda: [self.get_default_node()],
             RequestPolicy.ALL_SHARDS: self.get_primaries,
@@ -668,6 +668,7 @@ class RedisCluster(
         else:
             self._metadata_resolver = metadata_resolver
 
+        self._routing_uses_metadata = policy_resolver is None
         if policy_resolver is None:
             self._policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver(
                 metadata_resolver=self._metadata_resolver
@@ -898,12 +899,25 @@ class RedisCluster(
         """
         Internal async version of get_random_primary_or_all_nodes that awaits metadata.
         """
-        if self.read_from_replicas and await self._metadata_resolver.is_replica_safe(
-            command_name
+        # Preserve the public node-selection extension point. The built-in implementation
+        # cannot await metadata, but a subclass override must still control command routing.
+        if (
+            type(self).get_random_primary_or_all_nodes
+            is not RedisCluster.get_random_primary_or_all_nodes
         ):
+            return self.get_random_primary_or_all_nodes(command_name)
+
+        if self.read_from_replicas and await self._is_replica_safe(command_name):
             return self.get_random_node()
 
         return self.get_random_primary_node()
+
+    async def _is_replica_safe(self, command_name):
+        if self._routing_uses_metadata:
+            return await self._metadata_resolver.is_replica_safe(command_name)
+        return (
+            isinstance(command_name, str) and command_name.upper() in READ_COMMANDS
+        )
 
     def get_random_primary_node(self) -> "ClusterNode":
         """
@@ -916,7 +930,7 @@ class RedisCluster(
         Returns a list of nodes that hold the specified keys' slots.
         """
         # get the node that holds the key's slot
-        replica_safe = await self._metadata_resolver.is_replica_safe(command)
+        replica_safe = await self._is_replica_safe(command)
         return [
             self.nodes_manager.get_node_from_slot(
                 await self._determine_slot(command, *args),
@@ -1014,7 +1028,7 @@ class RedisCluster(
         if request_policy == RequestPolicy.DEFAULT_KEYED:
             nodes = await policy_callback(command, *args)
         elif request_policy == RequestPolicy.DEFAULT_KEYLESS:
-            nodes = [await self._get_random_primary_or_all_nodes_for_command(command)]
+            nodes = [await policy_callback(command)]
         else:
             nodes = policy_callback()
 
@@ -1314,9 +1328,7 @@ class RedisCluster(
                     # MOVED occurred and the slots cache was updated,
                     # refresh the target node
                     slot = await self._determine_slot(*args)
-                    replica_safe = await self._metadata_resolver.is_replica_safe(
-                        args[0]
-                    )
+                    replica_safe = await self._is_replica_safe(args[0])
                     target_node = self.nodes_manager.get_node_from_slot(
                         slot,
                         self.read_from_replicas and replica_safe,

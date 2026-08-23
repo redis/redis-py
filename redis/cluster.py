@@ -1037,6 +1037,7 @@ class RedisCluster(
         # both: an explicit ``policy_resolver`` - the extension point that shipped in 7.1.0
         # - keeps deciding routing, and otherwise routing is derived from the metadata
         # resolver, so one object serves routing and cache eligibility alike.
+        self._routing_uses_metadata = policy_resolver is None
         if policy_resolver is None:
             self._policy_resolver: PolicyResolver = StaticPolicyResolver(
                 metadata_resolver=self._metadata_resolver
@@ -1122,12 +1123,17 @@ class RedisCluster(
         """
         Returns random primary or all nodes depends on READONLY mode.
         """
-        if self.read_from_replicas and self._metadata_resolver.is_replica_safe(
-            command_name
-        ):
+        if self.read_from_replicas and self._is_replica_safe(command_name):
             return self.get_random_node()
 
         return self.get_random_primary_node()
+
+    def _is_replica_safe(self, command_name):
+        if self._routing_uses_metadata:
+            return self._metadata_resolver.is_replica_safe(command_name)
+        return (
+            isinstance(command_name, str) and command_name.upper() in READ_COMMANDS
+        )
 
     def get_nodes(self):
         return list(self.nodes_manager.nodes_cache.values())
@@ -1164,7 +1170,7 @@ class RedisCluster(
         """
         # get the node that holds the key's slot
         slot = self.determine_slot(*args)
-        replica_safe = self._metadata_resolver.is_replica_safe(command)
+        replica_safe = self._is_replica_safe(command)
         node = self.nodes_manager.get_node_from_slot(
             slot,
             self.read_from_replicas and replica_safe,
@@ -1324,6 +1330,7 @@ class RedisCluster(
             # pipeline resolves through the same objects the client does.
             policy_resolver=self._policy_resolver,
             metadata_resolver=self._metadata_resolver,
+            _routing_uses_metadata=self._routing_uses_metadata,
             event_dispatcher=self._event_dispatcher,
         )
 
@@ -1834,7 +1841,7 @@ class RedisCluster(
                     # MOVED occurred and the slots cache was updated,
                     # refresh the target node
                     slot = self.determine_slot(*args)
-                    replica_safe = self._metadata_resolver.is_replica_safe(command)
+                    replica_safe = self._is_replica_safe(command)
                     target_node = self.nodes_manager.get_node_from_slot(
                         slot,
                         self.read_from_replicas and replica_safe,
@@ -3671,6 +3678,7 @@ class ClusterPipeline(RedisCluster):
         policy_resolver: Optional[PolicyResolver] = None,
         event_dispatcher: Optional["EventDispatcher"] = None,
         metadata_resolver: Optional[MetadataResolver] = None,
+        _routing_uses_metadata: Optional[bool] = None,
         **kwargs,
     ):
         """ """
@@ -3753,6 +3761,11 @@ class ClusterPipeline(RedisCluster):
             self._metadata_resolver: MetadataResolver = StaticMetadataResolver()
         else:
             self._metadata_resolver = metadata_resolver
+
+        if _routing_uses_metadata is None:
+            self._routing_uses_metadata = policy_resolver is None
+        else:
+            self._routing_uses_metadata = _routing_uses_metadata
 
         if policy_resolver is None:
             self._policy_resolver: PolicyResolver = StaticPolicyResolver(
