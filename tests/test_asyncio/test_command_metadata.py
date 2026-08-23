@@ -523,9 +523,7 @@ class TestAsyncBaseMetadataResolver:
         assert await resolver.is_replica_safe("ft.aggregate") is True
 
     async def test_touch_remains_replica_unsafe_despite_readonly_metadata(self):
-        resolver = AsyncDynamicMetadataResolver(
-            {"core": {"touch": CACHEABLE_KEYED}}
-        )
+        resolver = AsyncDynamicMetadataResolver({"core": {"touch": CACHEABLE_KEYED}})
 
         assert await resolver.is_replica_safe("touch") is False
 

@@ -2984,9 +2984,7 @@ class TestStaticMetadataRouting:
 
     @pytest.mark.fixed_client
     def test_explicit_policy_resolver_keeps_legacy_replica_routing(self):
-        metadata_resolver = DynamicMetadataResolver(
-            {"core": {"set": CACHEABLE_KEYED}}
-        )
+        metadata_resolver = DynamicMetadataResolver({"core": {"set": CACHEABLE_KEYED}})
         rc = get_mocked_redis_client(
             host=default_host,
             port=7000,
@@ -3005,6 +3003,30 @@ class TestStaticMetadataRouting:
 
         get_node.assert_called_once_with(rc.nodes_manager, 0, False, None)
         assert rc.pipeline()._routing_uses_metadata is False
+
+    @pytest.mark.fixed_client
+    def test_split_multi_key_routing_respects_explicit_policy_resolver(self):
+        metadata_resolver = DynamicMetadataResolver({"core": {"mset": CACHEABLE_KEYED}})
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            read_from_replicas=True,
+            policy_resolver=StaticPolicyResolver(),
+            metadata_resolver=metadata_resolver,
+        )
+        pipe = Mock()
+        pipe.execute.return_value = [True]
+
+        with (
+            patch.object(rc, "pipeline", return_value=pipe),
+            patch.object(
+                type(rc.nodes_manager), "get_node_from_slot", autospec=True
+            ) as get_node,
+        ):
+            rc.mset_nonatomic({"key": "value"})
+
+        slot = key_slot(rc.encoder.encode("key"))
+        get_node.assert_called_once_with(rc.nodes_manager, slot, False)
 
     @pytest.mark.fixed_client
     def test_every_node_client_gets_the_same_resolver(self):
@@ -5663,4 +5685,3 @@ class TestClusterPipelineMetricsRecording:
             duration = call_obj[0][0]
             assert isinstance(duration, float)
             assert duration >= 0
-

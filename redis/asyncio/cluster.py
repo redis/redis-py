@@ -915,9 +915,7 @@ class RedisCluster(
     async def _is_replica_safe(self, command_name):
         if self._routing_uses_metadata:
             return await self._metadata_resolver.is_replica_safe(command_name)
-        return (
-            isinstance(command_name, str) and command_name.upper() in READ_COMMANDS
-        )
+        return isinstance(command_name, str) and command_name.upper() in READ_COMMANDS
 
     def get_random_primary_node(self) -> "ClusterNode":
         """

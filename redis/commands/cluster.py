@@ -204,7 +204,7 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
     def _execute_pipeline_by_slot(
         self, command: str, slots_to_args: Mapping[int, Iterable[EncodableT]]
     ) -> List[Any]:
-        replica_safe = self._metadata_resolver.is_replica_safe(command)
+        replica_safe = self._is_replica_safe(command)
         read_from_replicas = self.read_from_replicas and replica_safe
         pipe = self.pipeline()
         [
@@ -427,7 +427,7 @@ class AsyncClusterMultiKeyCommands(ClusterMultiKeyCommands):
     ) -> List[Any]:
         if self._initialize:
             await self.initialize()
-        replica_safe = await self._metadata_resolver.is_replica_safe(command)
+        replica_safe = await self._is_replica_safe(command)
         read_from_replicas = self.read_from_replicas and replica_safe
         pipe = self.pipeline()
         [

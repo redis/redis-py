@@ -2833,6 +2833,35 @@ class TestStaticMetadataRouting:
         await rc.aclose()
 
     @pytest.mark.fixed_client
+    async def test_split_multi_key_routing_respects_explicit_policy_resolver(
+        self,
+    ) -> None:
+        metadata_resolver = AsyncDynamicMetadataResolver(
+            {"core": {"mset": CACHEABLE_KEYED}}
+        )
+        rc = await get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            read_from_replicas=True,
+            policy_resolver=AsyncStaticPolicyResolver(),
+            metadata_resolver=metadata_resolver,
+        )
+        pipe = mock.MagicMock()
+        pipe.execute = mock.AsyncMock(return_value=[True])
+
+        with (
+            mock.patch.object(rc, "pipeline", return_value=pipe),
+            mock.patch.object(
+                type(rc.nodes_manager), "get_node_from_slot", autospec=True
+            ) as get_node,
+        ):
+            await rc.mset_nonatomic({"key": "value"})
+
+        slot = key_slot(rc.encoder.encode("key"))
+        get_node.assert_called_once_with(rc.nodes_manager, slot, False)
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
     async def test_keyless_routing_honors_the_public_node_selector(self) -> None:
         rc = await get_mocked_redis_client(host=default_host, port=7000)
         selected_node = rc.get_primaries()[0]
