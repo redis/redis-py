@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import socket
 import ssl
 import types
@@ -956,3 +956,18 @@ async def test_disconnect_no_current_task_calls_close(request):
             mock_on_disconnect.assert_called_once()
 
     assert not conn.is_connected
+
+def test_retry_on_error_list_not_mutated_by_connection_init():
+    # Constructing an asyncio Connection must not mutate the caller-supplied
+    # retry_on_error list: defaults are appended to a copy instead (#4278).
+    my_errors = [ValueError]
+    snapshot = list(my_errors)
+
+    conn = Connection(
+        host="localhost",
+        retry_on_error=my_errors,
+        retry_on_timeout=True,
+    )
+
+    assert TimeoutError in conn.retry_on_error
+    assert my_errors == snapshot
