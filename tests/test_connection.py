@@ -6,7 +6,6 @@ import select
 import selectors
 import socket
 import ssl
-import sys
 import threading
 import time
 import types
