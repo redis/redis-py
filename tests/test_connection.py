@@ -1976,3 +1976,23 @@ class TestBlockingConnectionPoolGetConnectionCount:
         assert used_count == 0
 
         pool.disconnect()
+
+
+def test_parse_url_resolves_retry_on_error_exception_classes():
+    # issue #4277: the URL value is a comma-separated list of exception
+    # CLASS names, not a bare string to be char-split by list().
+    from redis.connection import parse_url
+    from redis.exceptions import ConnectionError, TimeoutError
+
+    kwargs = parse_url(
+        "redis://localhost:6379/0"
+        "?retry_on_error=ConnectionError,TimeoutError&retry_on_timeout=true"
+    )
+    assert kwargs["retry_on_error"] == [ConnectionError, TimeoutError]
+
+
+def test_parse_url_rejects_unknown_retry_on_error_name():
+    from redis.connection import parse_url
+
+    with pytest.raises(ValueError):
+        parse_url("redis://localhost:6379/0?retry_on_error=Nonsense")

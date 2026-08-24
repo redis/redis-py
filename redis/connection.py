@@ -33,6 +33,7 @@ from redis.cache import (
     CacheProxy,
 )
 from redis.commands.metadata import MetadataResolver
+from redis import exceptions
 
 from ._defaults import (
     DEFAULT_SOCKET_CONNECT_TIMEOUT,
@@ -2334,6 +2335,26 @@ def parse_ssl_verify_flags(value):
     return verify_flags
 
 
+
+
+def _parse_retry_on_error(value):
+    """Resolve a comma-separated list of exception class names taken from a
+    connection URL into actual exception classes.
+
+    A plain ``list`` parser here used to char-split the string into single
+    characters (#4277), producing a retry list that broke all error handling.
+    """
+    if not isinstance(value, str):
+        return value
+    resolved = []
+    for name in (v.strip() for v in value.split(",") if v.strip()):
+        exc_class = getattr(exceptions, name, None)
+        if isinstance(exc_class, type) and issubclass(exc_class, Exception):
+            resolved.append(exc_class)
+        else:
+            raise ValueError(f"Unknown exception class: {name!r}")
+    return resolved
+
 URL_QUERY_ARGUMENT_PARSERS = {
     "db": int,
     "socket_timeout": float,
@@ -2341,7 +2362,7 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "socket_read_size": int,
     "socket_keepalive": to_bool,
     "retry_on_timeout": to_bool,
-    "retry_on_error": list,
+    "retry_on_error": _parse_retry_on_error,
     "max_connections": int,
     "health_check_interval": int,
     "ssl_check_hostname": to_bool,
