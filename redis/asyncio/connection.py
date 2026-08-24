@@ -491,9 +491,21 @@ class AsyncMaintNotificationsAbstractConnection:
     ) -> None:
         timeout = relaxed_timeout if relaxed_timeout != -1 else self.socket_timeout
         self._reschedule_active_read_timeout(timeout)
+        # Also stash the new deadline on the parser so socket reads that
+        # START after this update use it. Rescheduling above only covers
+        # the read that is in flight right now; without this, later reads
+        # in the same read_response keep the deadline captured at entry
+        # (mirrors the sync client's update_parser_timeout, #4177).
+        parser = self._parser
+        if parser is not None and hasattr(parser, "_socket_timeout"):
+            parser._socket_timeout = timeout
 
     def _reschedule_active_read_timeout(self, timeout: float | None) -> None:
         timeout_context = getattr(self, "_active_read_timeout", None)
+        if timeout_context is None and self._parser is not None:
+            # Per-read timeouts (#3454) live inside the parser; the parser
+            # stashes the in-flight read context there instead.
+            timeout_context = getattr(self._parser, "_active_read_timeout", None)
         if timeout_context is None:
             # No read_response call is currently inside its socket timeout
             # context, so there is no in-flight deadline to relax or restore.
@@ -1277,24 +1289,32 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             read_timeout = timeout if timeout is not None else self.socket_timeout
         host_error = self._host_error()
         try:
-            if read_timeout is not None:
-                timeout_context = async_timeout(read_timeout)
-                if timeout is None:
-                    async with timeout_context as active_timeout:
-                        self._active_read_timeout = active_timeout
-                        try:
-                            response = await self._read_response_from_parser(
-                                disable_decoding=disable_decoding,
-                                push_request=push_request,
-                            )
-                        finally:
-                            self._active_read_timeout = None
+            if timeout is None and read_timeout is not None:
+                # socket_timeout fallback: hand the timeout to the parser so
+                # each individual stream read gets its own window (#3454),
+                # matching the sync client's per-recv semantics. The parser
+                # stashes each in-flight read context so the maintenance
+                # notification machinery can still relax a deadline (#4177).
+                if check_protocol_version(self.protocol, 3):
+                    response = await self._parser.read_response(
+                        disable_decoding=disable_decoding,
+                        push_request=push_request,
+                        timeout=read_timeout,
+                    )
                 else:
-                    async with timeout_context:
-                        response = await self._read_response_from_parser(
-                            disable_decoding=disable_decoding,
-                            push_request=push_request,
-                        )
+                    response = await self._parser.read_response(
+                        disable_decoding=disable_decoding,
+                        timeout=read_timeout,
+                    )
+            elif read_timeout is not None:
+                # explicit caller timeout: single deadline for the whole
+                # response. Not tracked for rescheduling, matching the
+                # previous behavior for caller-supplied timeouts.
+                async with async_timeout(read_timeout):
+                    response = await self._read_response_from_parser(
+                        disable_decoding=disable_decoding,
+                        push_request=push_request,
+                    )
             else:
                 response = await self._read_response_from_parser(
                     disable_decoding=disable_decoding,

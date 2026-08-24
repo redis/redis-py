@@ -1,8 +1,14 @@
 import select
 import selectors
 import socket
+import sys
 from logging import getLogger
 from typing import Callable, List, Optional, TypedDict, Union
+
+if sys.version_info >= (3, 11, 3):
+    from asyncio import timeout as async_timeout
+else:
+    from async_timeout import timeout as async_timeout
 
 from ..exceptions import ConnectionError, InvalidResponse, RedisError, TimeoutError
 from ..typing import EncodableT
@@ -269,13 +275,15 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
 class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
     """Async implementation of parser class for connections using Hiredis"""
 
-    __slots__ = ("_reader",)
+    __slots__ = ("_reader", "_active_read_timeout", "_socket_timeout")
 
     def __init__(self, socket_read_size: int):
         if not HIREDIS_AVAILABLE:
             raise RedisError("Hiredis is not available.")
         super().__init__(socket_read_size=socket_read_size)
         self._reader = None
+        self._active_read_timeout = None
+        self._socket_timeout = SENTINEL
         self.pubsub_push_handler_func = self.handle_pubsub_push_response
         self.invalidation_push_handler_func = None
         self._hiredis_PushNotificationType = None
@@ -299,6 +307,9 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
             kwargs["errors"] = connection.encoder.encoding_errors
 
         self._reader = hiredis.Reader(**kwargs)
+        # Drop any stale maintenance override; the connection hands its
+        # current socket_timeout down as the read timeout argument.
+        self._socket_timeout = SENTINEL
         self._connected = True
 
         try:
@@ -338,8 +349,19 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         # with a real StreamReader guard this private buffer API in CI.
         return bool(self._stream._buffer)
 
-    async def read_from_socket(self):
-        buffer = await self._stream.read(self._read_size)
+    async def read_from_socket(self, timeout: Union[float, object] = SENTINEL):
+        timeout = self._effective_read_timeout(timeout)
+        if timeout is not SENTINEL:
+            async with async_timeout(timeout) as active_timeout:
+                # Expose the in-flight deadline so the connection can relax
+                # it when a maintenance notification arrives mid-read (#4177).
+                self._active_read_timeout = active_timeout
+                try:
+                    buffer = await self._stream.read(self._read_size)
+                finally:
+                    self._active_read_timeout = None
+        else:
+            buffer = await self._stream.read(self._read_size)
         if not buffer or not isinstance(buffer, bytes):
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
         self._reader.feed(buffer)
@@ -348,7 +370,10 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         return True
 
     async def read_response(
-        self, disable_decoding: bool = False, push_request: bool = False
+        self,
+        disable_decoding: bool = False,
+        push_request: bool = False,
+        timeout: Union[float, object] = SENTINEL,
     ) -> Union[EncodableT, List[EncodableT]]:
         # If `on_disconnect()` has been called, prohibit any more reads
         # even if they could happen because data might be present.
@@ -362,7 +387,7 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
             response = self._reader.gets()
 
         while response is NOT_ENOUGH_DATA:
-            await self.read_from_socket()
+            await self.read_from_socket(timeout=timeout)
             if disable_decoding:
                 response = self._reader.gets(False)
             else:
@@ -379,7 +404,9 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
             response = await self.handle_push_response(response)
             if not push_request:
                 return await self.read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
+                    disable_decoding=disable_decoding,
+                    push_request=push_request,
+                    timeout=timeout,
                 )
             else:
                 return response

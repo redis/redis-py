@@ -153,6 +153,7 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
             return self._read_response(
                 disable_decoding=disable_decoding,
                 push_request=push_request,
+                timeout=timeout,
             )
         else:
             raise InvalidResponse(f"Protocol Error: {raw!r}")
@@ -175,26 +176,30 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
         return response
 
     async def read_response(
-        self, disable_decoding: bool = False, push_request: bool = False
+        self,
+        disable_decoding: bool = False,
+        push_request: bool = False,
+        timeout: Union[float, object] = SENTINEL,
     ):
-        if self._chunks:
-            # augment parsing buffer with previously read data
-            self._buffer += b"".join(self._chunks)
-            self._chunks.clear()
         self._pos = 0
         response = await self._read_response(
-            disable_decoding=disable_decoding, push_request=push_request
+            disable_decoding=disable_decoding,
+            push_request=push_request,
+            timeout=timeout,
         )
         # Successfully parsing a response allows us to clear our parsing buffer
         self._clear()
         return response
 
     async def _read_response(
-        self, disable_decoding: bool = False, push_request: bool = False
+        self,
+        disable_decoding: bool = False,
+        push_request: bool = False,
+        timeout: Union[float, object] = SENTINEL,
     ) -> Union[EncodableT, ResponseError, None]:
         if not self._stream or not self.encoder:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-        raw = await self._readline()
+        raw = await self._readline(timeout=timeout)
         response: Any
         byte, response = raw[:1], raw[1:]
 
@@ -204,7 +209,7 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
         # server returned an error
         if byte in (b"-", b"!"):
             if byte == b"!":
-                response = await self._read(int(response))
+                response = await self._read(int(response), timeout=timeout)
             response = response.decode("utf-8", errors="replace")
             error = self.parse_error(response)
             # if the error is a ConnectionError, raise immediately so the user
@@ -234,14 +239,18 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
             return response == b"t"
         # bulk response
         elif byte == b"$":
-            response = await self._read(int(response))
+            response = await self._read(int(response), timeout=timeout)
         # verbatim string response
         elif byte == b"=":
-            response = (await self._read(int(response)))[4:]
+            response = (await self._read(int(response), timeout=timeout))[4:]
         # array response
         elif byte == b"*":
             response = [
-                (await self._read_response(disable_decoding=disable_decoding))
+                (
+                    await self._read_response(
+                        disable_decoding=disable_decoding, timeout=timeout
+                    )
+                )
                 for _ in range(int(response))
             ]
         # set response
@@ -249,7 +258,11 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
             # redis can return unhashable types (like dict) in a set,
             # so we always convert to a list, to have predictable return types
             response = [
-                (await self._read_response(disable_decoding=disable_decoding))
+                (
+                    await self._read_response(
+                        disable_decoding=disable_decoding, timeout=timeout
+                    )
+                )
                 for _ in range(int(response))
             ]
         # map response
@@ -259,9 +272,13 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
             # became defined to be left-right in version 3.8
             resp_dict = {}
             for _ in range(int(response)):
-                key = await self._read_response(disable_decoding=disable_decoding)
+                key = await self._read_response(
+                    disable_decoding=disable_decoding, timeout=timeout
+                )
                 resp_dict[key] = await self._read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
+                    disable_decoding=disable_decoding,
+                    push_request=push_request,
+                    timeout=timeout,
                 )
             response = resp_dict
         # push response
@@ -269,7 +286,9 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
             response = [
                 (
                     await self._read_response(
-                        disable_decoding=disable_decoding, push_request=push_request
+                        disable_decoding=disable_decoding,
+                        push_request=push_request,
+                        timeout=timeout,
                     )
                 )
                 for _ in range(int(response))
@@ -277,7 +296,9 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
             response = await self.handle_push_response(response)
             if not push_request:
                 return await self._read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
+                    disable_decoding=disable_decoding,
+                    push_request=push_request,
+                    timeout=timeout,
                 )
             else:
                 return response
