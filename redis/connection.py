@@ -2394,8 +2394,12 @@ def parse_url(url):
                 try:
                     kwargs[name] = parser(value)
                 except (TypeError, ValueError) as err:
+                    if parser is parse_retry_on_error:
+                        raise ValueError(
+                            f"Invalid value for '{name}' in connection URL: {err}"
+                        ) from err
                     raise ValueError(
-                        f"Invalid value for '{name}' in connection URL: {err}"
+                        f"Invalid value for '{name}' in connection URL."
                     ) from err
             else:
                 kwargs[name] = value

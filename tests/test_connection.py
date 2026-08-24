@@ -1990,9 +1990,20 @@ def test_parse_url_retry_on_error_comma_separated():
     assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
 
 
+def test_parse_url_invalid_db_keeps_stable_message():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?db=not-an-int")
+    assert str(exc_info.value) == "Invalid value for 'db' in connection URL."
+
+
 def test_parse_url_retry_on_error_unknown_name():
-    with pytest.raises(ValueError, match="NotARealError"):
+    with pytest.raises(ValueError) as exc_info:
         parse_url("redis://localhost:6379/?retry_on_error=NotARealError")
+    message = str(exc_info.value)
+    assert message == (
+        "Invalid value for 'retry_on_error' in connection URL: "
+        "Unknown redis exception 'NotARealError'"
+    )
 
 
 def test_parse_url_retry_on_error_usable_in_retry():

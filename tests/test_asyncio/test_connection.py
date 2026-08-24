@@ -970,9 +970,36 @@ def test_parse_url_retry_on_error_comma_separated():
     assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
 
 
+def test_parse_url_invalid_db_keeps_stable_message():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?db=not-an-int")
+    assert str(exc_info.value) == "Invalid value for 'db' in connection URL."
+
+
 def test_parse_url_retry_on_error_unknown_name():
-    with pytest.raises(ValueError, match="NotARealError"):
+    with pytest.raises(ValueError) as exc_info:
         parse_url("redis://localhost:6379/?retry_on_error=NotARealError")
+    message = str(exc_info.value)
+    assert message == (
+        "Invalid value for 'retry_on_error' in connection URL: "
+        "Unknown redis exception 'NotARealError'"
+    )
+
+
+def test_parse_url_retry_on_error_does_not_mutate_shared_list():
+    kw = parse_url(
+        "redis://localhost:6379/?retry_on_error=ConnectionError&retry_on_timeout=true"
+    )
+    snapshot = list(kw["retry_on_error"])
+
+    c1 = Connection(**kw)
+    c2 = Connection(**kw)
+
+    assert kw["retry_on_error"] == snapshot
+    assert kw["retry_on_error"] is not c1.retry_on_error
+    assert ConnectionError in c1.retry_on_error
+    assert TimeoutError in c1.retry_on_error
+    assert c1.retry_on_error == c2.retry_on_error
 
 
 @pytest.mark.asyncio
