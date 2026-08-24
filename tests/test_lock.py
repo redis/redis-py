@@ -286,6 +286,14 @@ class TestLock:
         assert 8000 < r.pttl("foo") <= 10000
         lock.release()
 
+    def test_extend_lock_zero_timeout_replace_ttl_keeps_lock(self, r):
+        lock = self.get_lock(r, "foo", timeout=0)
+        assert lock.acquire(blocking=False)
+        assert lock.extend(0, replace_ttl=True)
+        assert r.get("foo") == lock.local.token
+        assert r.pttl("foo") == -1
+        lock.release()
+
     def test_extend_lock_float(self, r):
         lock = self.get_lock(r, "foo", timeout=10.5)
         assert lock.acquire(blocking=False)
@@ -321,6 +329,14 @@ class TestLock:
         assert r.pttl("foo") <= 5000
         assert lock.reacquire()
         assert 8000 < r.pttl("foo") <= 10000
+        lock.release()
+
+    def test_reacquire_lock_zero_timeout_keeps_lock(self, r):
+        lock = self.get_lock(r, "foo", timeout=0)
+        assert lock.acquire(blocking=False)
+        assert lock.reacquire()
+        assert r.get("foo") == lock.local.token
+        assert r.pttl("foo") == -1
         lock.release()
 
     def test_reacquiring_unlocked_lock_raises_error(self, r):
