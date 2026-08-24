@@ -34,6 +34,7 @@ from redis.cache import (
 )
 from redis.commands.metadata import MetadataResolver
 
+from . import exceptions as redis_exceptions
 from ._defaults import (
     DEFAULT_SOCKET_CONNECT_TIMEOUT,
     DEFAULT_SOCKET_READ_SIZE,
@@ -2334,6 +2335,21 @@ def parse_ssl_verify_flags(value):
     return verify_flags
 
 
+def parse_retry_on_error(value):
+    # exception class names are passed as a comma-separated list,
+    # e.g. ConnectionError,TimeoutError
+    retry_on_error = []
+    for name in value.replace("[", "").replace("]", "").split(","):
+        name = name.strip()
+        if not name:
+            continue
+        exc = getattr(redis_exceptions, name, None)
+        if not (isinstance(exc, type) and issubclass(exc, BaseException)):
+            raise ValueError(f"Unknown redis exception {name!r}")
+        retry_on_error.append(exc)
+    return retry_on_error
+
+
 URL_QUERY_ARGUMENT_PARSERS = {
     "db": int,
     "socket_timeout": float,
@@ -2341,7 +2357,7 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "socket_read_size": int,
     "socket_keepalive": to_bool,
     "retry_on_timeout": to_bool,
-    "retry_on_error": list,
+    "retry_on_error": parse_retry_on_error,
     "max_connections": int,
     "health_check_interval": int,
     "ssl_check_hostname": to_bool,
@@ -2377,8 +2393,10 @@ def parse_url(url):
             if parser:
                 try:
                     kwargs[name] = parser(value)
-                except (TypeError, ValueError):
-                    raise ValueError(f"Invalid value for '{name}' in connection URL.")
+                except (TypeError, ValueError) as err:
+                    raise ValueError(
+                        f"Invalid value for '{name}' in connection URL: {err}"
+                    ) from err
             else:
                 kwargs[name] = value
 

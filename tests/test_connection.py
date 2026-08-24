@@ -1976,3 +1976,41 @@ class TestBlockingConnectionPoolGetConnectionCount:
         assert used_count == 0
 
         pool.disconnect()
+
+
+def test_parse_url_retry_on_error_resolves_exception_names():
+    kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
+    assert kw["retry_on_error"] == [ConnectionError]
+
+
+def test_parse_url_retry_on_error_comma_separated():
+    kw = parse_url(
+        "redis://localhost:6379/?retry_on_error=ConnectionError,TimeoutError"
+    )
+    assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
+
+
+def test_parse_url_retry_on_error_unknown_name():
+    with pytest.raises(ValueError, match="NotARealError"):
+        parse_url("redis://localhost:6379/?retry_on_error=NotARealError")
+
+
+def test_parse_url_retry_on_error_usable_in_retry():
+    kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
+    conn = Connection(**kw)
+    assert ConnectionError in conn.retry._supported_errors
+    assert all(
+        isinstance(err, type) and issubclass(err, BaseException)
+        for err in conn.retry._supported_errors
+    )
+
+    calls = 0
+
+    def do():
+        nonlocal calls
+        calls += 1
+        raise ConnectionError("simulated network drop")
+
+    with pytest.raises(ConnectionError):
+        conn.retry.call_with_retry(do=do, fail=lambda e: None)
+    assert calls == 2
