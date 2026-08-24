@@ -665,6 +665,9 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         self.retry_on_timeout = retry_on_timeout
         if retry_on_error is SENTINEL:
             retry_on_error = []
+        else:
+            # Copy so we never mutate the caller-supplied list (parity with sync).
+            retry_on_error = list(retry_on_error)
         if retry_on_timeout:
             retry_on_error.append(TimeoutError)
             retry_on_error.append(socket.timeout)
