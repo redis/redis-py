@@ -72,7 +72,11 @@ class Lock:
         if not token or token ~= ARGV[1] then
             return 0
         end
-        redis.call('pexpire', KEYS[1], ARGV[2])
+        -- A lock acquired with timeout=0 has no expiry by design; reacquiring
+        -- it must only re-verify ownership, never delete the key via pexpire(0)
+        if ARGV[2] ~= '0' then
+            redis.call('pexpire', KEYS[1], ARGV[2])
+        end
         return 1
     """
 

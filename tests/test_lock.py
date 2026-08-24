@@ -368,3 +368,23 @@ class TestLockClassSelection:
 
         lock = r.lock("foo", lock_class=MyLock)
         assert isinstance(lock, MyLock)
+
+    def test_reacquire_lock_zero_timeout_keeps_lock_persistent(self, r):
+        # issue #4279: reacquiring a persistent (timeout=0) lock used to
+        # delete the key via pexpire(0) while reporting success.
+        lock = self.get_lock(r, "foo", timeout=0)
+        assert lock.acquire(blocking=False)
+        assert r.pttl("foo") == -1
+        assert lock.reacquire()
+        assert r.exists("foo") == 1
+        assert r.pttl("foo") == -1
+        lock.release()
+        assert r.exists("foo") == 0
+
+    def test_extend_replace_ttl_on_zero_timeout_lock_raises_not_delete(self, r):
+        lock = self.get_lock(r, "foo", timeout=0)
+        assert lock.acquire(blocking=False)
+        with pytest.raises(LockError):
+            lock.extend(10, replace_ttl=True)
+        assert r.exists("foo") == 1
+        lock.release()
