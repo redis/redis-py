@@ -612,6 +612,10 @@ class TestConnection:
         assert "err" in connect_frame.f_locals
         assert connect_frame.f_locals["err"] is None
 
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Immediate reclamation is a refcounting property",
+    )
     def test_connect_breaks_reference_cycle_when_a_later_address_succeeds(self):
         """
         When an address fails but a later one connects, _connect must not
@@ -645,6 +649,7 @@ class TestConnection:
         failing_sock, working_sock = MagicMock(), MagicMock()
         failing_sock.connect.side_effect = fail_to_connect
 
+        gc_was_enabled = gc.isenabled()
         gc.disable()
         try:
             with (
@@ -658,7 +663,8 @@ class TestConnection:
             (ref,) = raised_ref
             assert ref() is None
         finally:
-            gc.enable()
+            if gc_was_enabled:
+                gc.enable()
 
     @pytest.mark.parametrize(
         "connection_kwargs",
