@@ -1177,6 +1177,10 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             await self.check_health()
 
         try:
+            # Fail fast because writing to a closed transport can raise TypeError
+            # on CPython 3.12 (#4287).
+            if self._writer is None or self._writer.transport.is_closing():
+                raise ConnectionError("Connection closed by the server before write")
             if isinstance(command, str):
                 command = command.encode()
             if isinstance(command, bytes):
