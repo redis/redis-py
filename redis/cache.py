@@ -234,7 +234,7 @@ class DefaultCache(CacheInterface):
                     keys_to_delete.append(cache_key)
                     response.append(True)
 
-        for key in keys_to_delete:
+        for key in dict.fromkeys(keys_to_delete):
             self._cache.pop(key)
 
         return response

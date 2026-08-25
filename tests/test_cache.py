@@ -1530,6 +1530,46 @@ class TestUnitDefaultCache:
         assert results[0] is True
         assert results[1] is True, "Cache did not remove entry for non-UTF8 bytes key"
 
+    def test_delete_by_redis_keys_dedupes_entries_hit_multiple_times(
+        self, mock_connection
+    ):
+        """A cache entry matched by several redis keys must be removed only once."""
+        cache = DefaultCache(CacheConfig(max_size=5))
+
+        cache_key1 = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache_key2 = CacheKey(
+            command="MGET",
+            redis_keys=("foo", "bar"),
+            redis_args=("MGET", "foo", "bar"),
+        )
+
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key1,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key2,
+                cache_value=b"bar2",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        # Both "foo" and "bar" match cache_key2 (MGET foo bar), so it is added
+        # to the delete list twice. Popping it twice raises KeyError and leaves
+        # the other matched entries cached, so they must be deduplicated.
+        assert cache.delete_by_redis_keys([b"foo", b"bar"]) == [True, True, True]
+        assert len(cache.collection) == 0
+        assert cache.get(cache_key1) is None
+        assert cache.get(cache_key2) is None
+
     def test_flush(self, mock_connection):
         cache = DefaultCache(CacheConfig(max_size=5))
 
