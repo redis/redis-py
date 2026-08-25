@@ -2344,7 +2344,7 @@ def parse_retry_on_error(value):
         if not name:
             continue
         exc = getattr(redis_exceptions, name, None)
-        if not (isinstance(exc, type) and issubclass(exc, BaseException)):
+        if not (isinstance(exc, type) and issubclass(exc, Exception)):
             raise ValueError(f"Unknown redis exception {name!r}")
         retry_on_error.append(exc)
     return retry_on_error
@@ -2393,14 +2393,8 @@ def parse_url(url):
             if parser:
                 try:
                     kwargs[name] = parser(value)
-                except (TypeError, ValueError) as err:
-                    if parser is parse_retry_on_error:
-                        raise ValueError(
-                            f"Invalid value for '{name}' in connection URL: {err}"
-                        ) from err
-                    raise ValueError(
-                        f"Invalid value for '{name}' in connection URL."
-                    ) from err
+                except (TypeError, ValueError):
+                    raise ValueError(f"Invalid value for '{name}' in connection URL.")
             else:
                 kwargs[name] = value
 

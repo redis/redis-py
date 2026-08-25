@@ -724,7 +724,7 @@ class TestConnectionPoolURLParsing:
         ]
 
     def test_retry_on_error_querystring_invalid(self):
-        with pytest.raises(ValueError, match="NotARealError"):
+        with pytest.raises(ValueError, match="Invalid value for 'retry_on_error'"):
             redis.ConnectionPool.from_url(
                 "redis://localhost?retry_on_error=NotARealError"
             )
