@@ -280,7 +280,7 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
             await self._register_command_execution(args)
             return response
 
-        return await self._execute_with_failure_detection(callback, *args)
+        return await self._execute_with_failure_detection(callback, args)
 
     async def execute_pubsub_run(
         self, sleep_time: float, exception_handler=None, pubsub=None
