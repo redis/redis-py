@@ -591,7 +591,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         socket_timeout: float | None = DEFAULT_SOCKET_TIMEOUT,
         socket_connect_timeout: float | None = DEFAULT_SOCKET_CONNECT_TIMEOUT,
         retry_on_timeout: bool = False,
-        retry_on_error: list | object = SENTINEL,
+        retry_on_error: Iterable[Type[Exception]] | object = SENTINEL,
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
         decode_responses: bool = False,
