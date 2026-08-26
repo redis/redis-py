@@ -52,7 +52,7 @@ class Lock:
             expiration = 0
         end
         if expiration < 0 then
-            if expiration == -1 and ARGV[2] == "0" then
+            if expiration == -1 and ARGV[2] == "0" and ARGV[3] == "1" then
                 return 1
             end
             return 0

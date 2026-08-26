@@ -294,6 +294,33 @@ class TestLock:
         assert r.pttl("foo") == -1
         lock.release()
 
+    def test_extend_lock_zero_timeout_replace_ttl_keeps_existing_ttl(self, r):
+        lock = self.get_lock(r, "foo", timeout=10)
+        assert lock.acquire(blocking=False)
+        old_ttl = r.pttl("foo")
+        assert lock.extend(0, replace_ttl=True)
+        assert r.get("foo") == lock.local.token
+        assert 0 < r.pttl("foo") <= old_ttl
+        lock.release()
+
+    def test_extend_lock_negative_timeout_replace_ttl_keeps_existing_ttl(self, r):
+        lock = self.get_lock(r, "foo", timeout=10)
+        assert lock.acquire(blocking=False)
+        old_ttl = r.pttl("foo")
+        assert lock.extend(-1, replace_ttl=True)
+        assert r.get("foo") == lock.local.token
+        assert 0 < r.pttl("foo") <= old_ttl
+        lock.release()
+
+    def test_extend_lock_zero_timeout_without_replace_raises_error(self, r):
+        lock = self.get_lock(r, "foo", timeout=0)
+        assert lock.acquire(blocking=False)
+        with pytest.raises(LockNotOwnedError):
+            lock.extend(0)
+        assert r.get("foo") == lock.local.token
+        assert r.pttl("foo") == -1
+        lock.release()
+
     def test_extend_lock_float(self, r):
         lock = self.get_lock(r, "foo", timeout=10.5)
         assert lock.acquire(blocking=False)
