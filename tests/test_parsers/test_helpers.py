@@ -130,6 +130,18 @@ def test_parse_client_info_empty():
 
 
 @pytest.mark.fixed_client
+def test_parse_client_list_shares_guard():
+    # parse_client_list and parse_client_info parse the same server blob and
+    # now share one tokenizer, so the leading-token guard added for CLIENT INFO
+    # also protects CLIENT LIST. A line whose first token has no "=" (only
+    # possible with malformed input) is skipped instead of raising KeyError.
+    assert parse_client_list("junk id=3") == [{"id": "3"}]
+    # A double space between pairs must not glue a trailing space onto the
+    # previous value.
+    assert parse_client_list("id=1  name=foo") == [{"id": "1", "name": "foo"}]
+
+
+@pytest.mark.fixed_client
 def test_parse_command_preserves_acl_categories():
     response = [
         [

@@ -886,23 +886,39 @@ def parse_zadd(response, **options):
     return int(response)
 
 
+def _parse_client_info_fields(value):
+    """Tokenize a single ``key=value`` client-info blob into a dict.
+
+    The server emits this space-separated format for each client in
+    ``CLIENT INFO`` and ``CLIENT LIST``, and inside ``ACL LOG`` entries.
+    Two quirks have to be preserved: a value may contain ``=`` (a client
+    name set to ``foo=bar``), so only the first ``=`` splits key from value;
+    and a value may contain spaces (a Unix-socket ``addr``/``laddr`` path
+    such as ``/tmp/redis sock/redis.sock``), so a token with no ``=`` is
+    reattached to the previous value. ``last_key is None`` guards the leading
+    and empty/whitespace-only cases, which yield an empty dict rather than
+    raising.
+    """
+    fields = {}
+    last_key = None
+    for token in value.split(" "):
+        if not token:
+            # Collapse runs of whitespace so a double space between pairs does
+            # not leave a trailing space glued onto the previous value.
+            continue
+        if "=" in token:
+            key, val = token.split("=", 1)
+            fields[key] = val
+            last_key = key
+        elif last_key is not None:
+            fields[last_key] += " " + token
+    return fields
+
+
 def parse_client_list(response, **options):
     clients = []
     for c in str_if_bytes(response).splitlines():
-        client_dict = {}
-        tokens = c.split(" ")
-        last_key = None
-        for token in tokens:
-            if "=" in token:
-                # Values might contain '='
-                key, value = token.split("=", 1)
-                client_dict[key] = value
-                last_key = key
-            else:
-                # Values may include spaces. For instance, when running Redis via a Unix socket — such as
-                # "/tmp/redis sock/redis.sock" — the addr or laddr field will include a space.
-                client_dict[last_key] += " " + token
-
+        client_dict = _parse_client_info_fields(c)
         if client_dict:
             clients.append(client_dict)
     return clients
@@ -1413,21 +1429,7 @@ def parse_client_info(value):
     Parsing client-info in ACL Log in following format.
     "key1=value1 key2=value2 key3=value3"
     """
-    client_info = {}
-    last_key = None
-    for token in str_if_bytes(value).strip().split(" "):
-        if "=" in token:
-            # Values might contain '=' (e.g. a client name set to "foo=bar").
-            key, val = token.split("=", 1)
-            client_info[key] = val
-            last_key = key
-        elif last_key is not None:
-            # Values may include spaces. For instance, when running Redis via a
-            # Unix socket, the addr/laddr field can be a path such as
-            # "/tmp/redis sock/redis.sock"; reattach the split-off remainder.
-            # (last_key is None only for empty/whitespace input, e.g. an ACL LOG
-            # entry with no client-info, which should stay an empty dict.)
-            client_info[last_key] += " " + token
+    client_info = _parse_client_info_fields(str_if_bytes(value).strip())
 
     # Those fields are defined as int in networking.c
     for int_key in {

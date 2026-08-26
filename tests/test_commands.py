@@ -667,6 +667,16 @@ class TestRedisCommands:
         assert "addr" in info
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    def test_client_info_name_with_equals(self, r):
+        # A client name may contain "=", which the "key=value" CLIENT INFO
+        # format made easy to mis-split. Check the name survives the round trip
+        # through the real server rather than only the unit-tested parser.
+        r.client_setname("test=name")
+        info = r.client_info()
+        assert info["name"] == "test=name"
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("5.0.0")
     def test_client_list_types_not_replica(self, r):
         with pytest.raises(exceptions.RedisError):
