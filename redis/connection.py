@@ -23,6 +23,7 @@ from typing import (
 from urllib.parse import parse_qs, unquote, urlparse
 
 from redis.cache import (
+    CacheConfig,
     CacheEntry,
     CacheEntryStatus,
     CacheFactory,
@@ -31,6 +32,7 @@ from redis.cache import (
     CacheKey,
     CacheProxy,
 )
+from redis.commands.metadata import MetadataResolver
 
 from ._defaults import (
     DEFAULT_SOCKET_CONNECT_TIMEOUT,
@@ -1776,12 +1778,21 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 self._conn.send_command(*args, **kwargs)
                 return
 
-        if kwargs.get("keys") is None:
-            raise ValueError("Cannot create cache key.")
+        # Eligibility and keyability are two separate questions, and both must be answered
+        # yes before a reply may be stored. The command metadata answers the first; the
+        # presence of ``keys`` answers the second, because a command's key positions are
+        # supplied by its command method rather than derived here. A cacheable command
+        # whose invocation carries no key list is therefore a gap in what this client has
+        # been taught, not an error: send it normally and cache nothing.
+        keys = kwargs.get("keys")
+        if keys is None:
+            self._current_command_cache_key = None
+            self._conn.send_command(*args, **kwargs)
+            return
 
         # Creates cache key.
         self._current_command_cache_key = CacheKey(
-            command=args[0], redis_keys=tuple(kwargs.get("keys")), redis_args=args
+            command=args[0], redis_keys=tuple(keys), redis_args=args
         )
 
         with self._cache_lock:
@@ -2926,6 +2937,14 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
     If the ``maint_notifications_config`` is not provided but the ``protocol`` is 3,
     the maintenance notifications will be enabled by default.
 
+    If ``metadata_resolver`` is provided, it decides which commands are eligible for
+    client-side caching - see `redis.commands.metadata.MetadataResolver`. It is handed to the
+    cache configuration, so one resolver can serve cache eligibility and cluster routing
+    alike. Defaults to the static command metadata this library ships, which the cache
+    configuration resolves through on its own. A resolver built from a live ``COMMAND`` reply
+    is a snapshot of the server it was read from, so give each pool its own rather than
+    sharing one across pools on different servers.
+
     Any additional keyword arguments are passed to the constructor of
     ``connection_class``.
     """
@@ -2986,6 +3005,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         max_connections: Optional[int] = None,
         cache_factory: Optional[CacheFactoryInterface] = None,
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+        metadata_resolver: Optional[MetadataResolver] = None,
         **connection_kwargs,
     ):
         max_connections = max_connections or 100
@@ -2997,6 +3017,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         self.max_connections = max_connections
         self.cache = None
         self._cache_factory = cache_factory
+        self.metadata_resolver = metadata_resolver
 
         try:
             supports_maint_notifications = issubclass(
@@ -3029,6 +3050,35 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 raise RedisError("Client caching is only supported with RESP version 3")
 
             cache = self._connection_kwargs.get("cache")
+            cache_config = self._connection_kwargs.get("cache_config")
+
+            # Hand the client-level metadata resolver to the cache configuration, which is
+            # where command eligibility is decided, so routing and caching read the same
+            # records. Skipped when no resolver was configured, which leaves ``CacheConfig``
+            # on the static default it builds for itself.
+            #
+            # Done on a copy rather than on the caller's object: a ``CacheConfig`` carries
+            # only sizing and eviction settings, so reusing one across clients is reasonable,
+            # and writing the resolver into it would give every one of them whichever
+            # resolver was injected last. Every other setting is read-only after
+            # construction, so the copy diverges from the caller's object in nothing but the
+            # resolver - and a later ``set_metadata_resolver`` on the original does not reach
+            # this pool, which is the intended direction: a pool decides eligibility by the
+            # resolver its client was built with. Note that the ``cache=`` /
+            # ``cache_factory=`` path below cannot copy, and so does write into the caller's
+            # configuration; ``CacheConfig.set_metadata_resolver`` documents the difference.
+            #
+            # Guarded by ``isinstance`` rather than done through
+            # ``CacheConfigurationInterface``: that ABC is public and implemented by third
+            # parties, so a custom configuration keeps its own eligibility logic.
+            if (
+                metadata_resolver is not None
+                and cache is None
+                and self._cache_factory is None
+                and isinstance(cache_config, CacheConfig)
+            ):
+                cache_config = copy.copy(cache_config)
+                cache_config.set_metadata_resolver(metadata_resolver)
 
             if cache is not None:
                 if not isinstance(cache, CacheInterface):
@@ -3039,9 +3089,23 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 if self._cache_factory is not None:
                     self.cache = CacheProxy(self._cache_factory.get_cache())
                 else:
-                    self.cache = CacheFactory(
-                        self._connection_kwargs.get("cache_config")
-                    ).get_cache()
+                    self.cache = CacheFactory(cache_config).get_cache()
+
+            # A caller who supplied a whole cache - ``cache=`` or ``cache_factory=`` - owns
+            # the configuration inside it, and it cannot be swapped without rebuilding the
+            # cache, so the resolver is set on it in place. This is the one path that writes
+            # into the caller's configuration rather than into a copy of it, because a cache
+            # reads its configuration on every lookup and ``CacheInterface`` exposes no way to
+            # hand it a different one. Sharing one cache object across clients already shares
+            # its entries, which couples them far more tightly than its eligibility does, so
+            # the asymmetry with the ``cache_config=`` copy above is documented on
+            # ``CacheConfig.set_metadata_resolver`` rather than removed.
+            if metadata_resolver is not None and (
+                cache is not None or self._cache_factory is not None
+            ):
+                own_config = self.cache.config
+                if isinstance(own_config, CacheConfig):
+                    own_config.set_metadata_resolver(metadata_resolver)
 
             init_csc_items()
             register_csc_items_callback(

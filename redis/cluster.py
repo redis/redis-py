@@ -33,13 +33,23 @@ if TYPE_CHECKING:
 from redis import _himport_exec
 from redis._defaults import DEFAULT_RETRY_BASE, DEFAULT_RETRY_CAP, DEFAULT_RETRY_COUNT
 from redis._parsers import CommandsParser, Encoder
-from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
 from redis._parsers.helpers import parse_scan
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.cache import CacheConfig, CacheFactory, CacheFactoryInterface, CacheInterface
 from redis.client import EMPTY_RESPONSE, CaseInsensitiveDict, PubSub, Redis
 from redis.commands import READ_COMMANDS, RedisClusterCommands
 from redis.commands.helpers import list_or_args, parse_pubsub_subscriptions
+from redis.commands.metadata import (
+    _DEFAULT_KEYED_METADATA,
+    _DEFAULT_KEYLESS_METADATA,
+    _METADATA_BY_REQUEST_POLICY,
+    CommandMetadata,
+    CommandPolicies,
+    MetadataResolver,
+    RequestPolicy,
+    ResponsePolicy,
+    StaticMetadataResolver,
+)
 from redis.commands.policies import PolicyResolver, StaticPolicyResolver
 from redis.connection import (
     Connection,
@@ -720,8 +730,9 @@ class RedisCluster(
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
-        policy_resolver: PolicyResolver = StaticPolicyResolver(),
+        policy_resolver: Optional[PolicyResolver] = None,
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+        metadata_resolver: Optional[MetadataResolver] = None,
         **kwargs,
     ):
         """
@@ -792,6 +803,40 @@ class RedisCluster(
             which the nodes _think_ they are, to addresses at which a client may
             reach them, such as when they sit behind a proxy.
 
+        :param policy_resolver:
+            Decides the request/response policies each command is routed by - see
+            `redis.commands.policies.PolicyResolver`. Defaults to a
+            `StaticPolicyResolver` built for this client, which resolves the command
+            metadata this library ships. A resolver built from a live `COMMAND` reply is a
+            snapshot of the server it was read from, so give each client its own rather
+            than sharing one across clients on different servers.
+            This is the narrow routing view of `metadata_resolver`, which supersedes it:
+            prefer `metadata_resolver`, which serves routing and every other
+            command-metadata consumer from one object. When both are given this one still
+            decides routing, so that its 7.1.0 behaviour does not move.
+        :param metadata_resolver:
+            Serves the command metadata this client reads - see
+            `redis.commands.metadata.MetadataResolver`. Routing is derived from it, and it
+            is handed to every node's client, where it also decides which commands are
+            eligible for client-side caching. Defaults to a `StaticMetadataResolver` built
+            for this client, which resolves the command metadata this library ships; the
+            library never reads `COMMAND` on its own behalf for this, so the default adds no
+            round trips. Resolvers chain through `with_fallback`, first match wins, so one
+            placed in front of `StaticMetadataResolver` overrides the commands it carries
+            while the static records answer for everything else. To decide eligibility and
+            routing from the connected server, pass a `DynamicMetadataResolver` built from a
+            live `COMMAND` reply - use it with care, because reading that reply relies on a
+            class in the private `redis._parsers` package. Note that a server-derived resolver
+            decides routing here too, and two families of command route worse from the live
+            reply than from the shipped records. The server tips commands such as `EXISTS` and
+            `DEL` with the `multi_shard` request policy this client does not yet implement. And
+            the `movablekeys` reads - `ZINTER`, `ZUNION`, `ZDIFF`, `ZINTERCARD`, `SINTERCARD`,
+            `XREAD` - report their keys only in their key specs, so the live reply yields
+            keyless policies that send them to an arbitrary node rather than the one holding
+            their keys; the shipped records withhold those policies instead, which is what
+            leaves the client to resolve the keys through `COMMAND GETKEYS`. So pair such a
+            resolver with an explicit `policy_resolver=StaticPolicyResolver()` to keep routing
+            on the shipped records.
         :param maint_notifications_config:
             Configures the nodes connections to support maintenance notifications - see
             `redis.maint_notifications.MaintNotificationsConfig` for details.
@@ -917,6 +962,15 @@ class RedisCluster(
             self._event_dispatcher = event_dispatcher
         self.startup_nodes = startup_nodes
 
+        # Built here rather than defaulted in the signature, so that each client owns its
+        # resolver and the memos it accumulates are released with the client. The one object
+        # is shared with every node's client below, so a cluster resolves command metadata -
+        # routing and cache eligibility both - from a single source of truth.
+        if metadata_resolver is None:
+            self._metadata_resolver: MetadataResolver = StaticMetadataResolver()
+        else:
+            self._metadata_resolver = metadata_resolver
+
         self.nodes_manager = NodesManager(
             startup_nodes=startup_nodes,
             from_url=from_url,
@@ -925,6 +979,7 @@ class RedisCluster(
             address_remap=address_remap,
             cache=cache,
             cache_config=cache_config,
+            metadata_resolver=self._metadata_resolver,
             event_dispatcher=self._event_dispatcher,
             maint_notifications_config=maint_notifications_config,
             himport_registry=self._himport_registry,
@@ -976,7 +1031,23 @@ class RedisCluster(
             ResponsePolicy.DEFAULT_KEYED: lambda res: res,
         }
 
-        self._policy_resolver = policy_resolver
+        # ``policy_resolver`` is the routing view of a metadata resolver, so the two
+        # arguments overlap. Resolved by precedence rather than by rejecting the
+        # combination, because a user migrating from one to the other will legitimately pass
+        # both: an explicit ``policy_resolver`` - the extension point that shipped in 7.1.0
+        # - keeps deciding routing, and otherwise routing is derived from the metadata
+        # resolver, so one object serves routing and cache eligibility alike.
+        if policy_resolver is None:
+            self._policy_resolver: PolicyResolver = StaticPolicyResolver(
+                metadata_resolver=self._metadata_resolver
+            )
+        else:
+            self._policy_resolver = policy_resolver
+            if metadata_resolver is not None:
+                logger.debug(
+                    "Both policy_resolver and metadata_resolver were given; routing "
+                    "resolves through policy_resolver and ignores metadata_resolver."
+                )
         self.commands_parser = CommandsParser(self)
 
         # Node where FT.AGGREGATE command is executed.
@@ -1246,6 +1317,10 @@ class RedisCluster(
             retry=self.retry,
             lock=self._lock,
             transaction=transaction,
+            # Routing must not change just because the commands go through a pipeline, so the
+            # pipeline resolves through the same objects the client does.
+            policy_resolver=self._policy_resolver,
+            metadata_resolver=self._metadata_resolver,
             event_dispatcher=self._event_dispatcher,
         )
 
@@ -1430,9 +1505,27 @@ class RedisCluster(
          - fix: https://github.com/redis/redis/pull/9733
 
         So, don't use this function with EVAL or EVALSHA.
+
+        Raises:
+            RedisClusterException: If the cluster has no default node to resolve
+                the keys against, which is the case before the slots cache is
+                first populated and after the client is closed.
         """
-        redis_conn = self.get_default_node().redis_connection
-        return self.commands_parser.get_keys(redis_conn, *args)
+        default_node = self.get_default_node()
+        if default_node is None:
+            # The keys are unknown rather than absent: there is no node to resolve them
+            # against. Say that, rather than reporting a missing key the caller did
+            # supply, or raising AttributeError from in here.
+            #
+            # The async stack needs no counterpart: its parser holds the node it
+            # was initialized with and never reads the default node.
+            raise RedisClusterException(
+                "The cluster has no default node to resolve the keys of this "
+                "command against. The client may be closed, or not initialized "
+                f"yet.\nCommand: {args}"
+            )
+
+        return self.commands_parser.get_keys(default_node.redis_connection, *args)
 
     def determine_slot(self, *args) -> Optional[int]:
         """
@@ -1440,7 +1533,9 @@ class RedisCluster(
 
         Raises a RedisClusterException if there's a missing key and we can't
             determine what slots to map the command to; or, if the keys don't
-            all map to the same key slot.
+            all map to the same key slot; or, when the keys have to be resolved
+            through ``_get_command_keys``, if the cluster has no default node to
+            resolve them against.
         """
         command = args[0]
         if self.command_flags.get(command) == SLOT_ID:
@@ -1576,21 +1671,18 @@ class RedisCluster(
                 else:
                     slot = self.determine_slot(*args)
                 if slot is None:
-                    command_policies = CommandPolicies()
+                    command_policies = _DEFAULT_KEYLESS_METADATA
                 else:
-                    command_policies = CommandPolicies(
-                        request_policy=RequestPolicy.DEFAULT_KEYED,
-                        response_policy=ResponsePolicy.DEFAULT_KEYED,
-                    )
+                    command_policies = _DEFAULT_KEYED_METADATA
             else:
                 if command_flag in self._command_flags_mapping:
-                    command_policies = CommandPolicies(
-                        request_policy=self._command_flags_mapping[command_flag]
-                    )
+                    command_policies = _METADATA_BY_REQUEST_POLICY[
+                        self._command_flags_mapping[command_flag]
+                    ]
                 else:
-                    command_policies = CommandPolicies()
+                    command_policies = _DEFAULT_KEYLESS_METADATA
         elif not command_policies and target_nodes_specified:
-            command_policies = CommandPolicies()
+            command_policies = _DEFAULT_KEYLESS_METADATA
 
         # If an error that allows retrying was thrown, the nodes and slots
         # cache were reinitialized. We will retry executing the command with
@@ -2245,6 +2337,7 @@ class NodesManager:
         event_dispatcher: Optional[EventDispatcher] = None,
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
         himport_registry: HImportRegistry | None = None,
+        metadata_resolver: Optional[MetadataResolver] = None,
         **kwargs,
     ):
         # Shared, cluster-wide HIMPORT registry object, injected onto every node's pool
@@ -2261,12 +2354,32 @@ class NodesManager:
         self._dynamic_startup_nodes = dynamic_startup_nodes
         self.connection_pool_class = connection_pool_class
         self.address_remap = address_remap
+        # Shared, cluster-wide metadata resolver, injected onto every node's client in
+        # create_redis_node for the same reason the cache and the HIMPORT registry are:
+        # every node must resolve command metadata - and therefore cache eligibility -
+        # through the one object the cluster client was configured with.
+        self._metadata_resolver = metadata_resolver
+
         self._cache: Optional[CacheInterface] = None
         if cache:
             self._cache = cache
         elif cache_factory is not None:
             self._cache = cache_factory.get_cache()
         elif cache_config is not None:
+            # Injected here, on a copy, rather than left to the node pools: the cluster hands
+            # every node the one cache built below, so each pool sees a ``cache=`` and would
+            # set the resolver on the configuration inside it - which is the caller's object,
+            # since ``CacheFactory`` holds it by reference. Copying keeps a ``CacheConfig``
+            # reused across clients from picking up whichever resolver was injected last,
+            # exactly as ``ConnectionPool.__init__`` does for the standalone client.
+            #
+            # Only this branch needs it. ``cache=`` and ``cache_factory=`` hand over a whole
+            # cache whose configuration the caller owns, and the node pools set the resolver
+            # on it in place - the same thing they do for a standalone client given one.
+            if metadata_resolver is not None and isinstance(cache_config, CacheConfig):
+                cache_config = copy(cache_config)
+                cache_config.set_metadata_resolver(metadata_resolver)
+
             self._cache = CacheFactory(cache_config).get_cache()
         self.connection_kwargs = kwargs
         self.read_load_balancer = LoadBalancer()
@@ -2521,6 +2634,7 @@ class NodesManager:
             kwargs.update({"host": host})
             kwargs.update({"port": port})
             kwargs.update({"cache": self._cache})
+            kwargs.update({"metadata_resolver": self._metadata_resolver})
             kwargs.update({"retry": node_retry_config})
             r = Redis(connection_pool=self.connection_pool_class(**kwargs))
         else:
@@ -2528,6 +2642,7 @@ class NodesManager:
                 host=host,
                 port=port,
                 cache=self._cache,
+                metadata_resolver=self._metadata_resolver,
                 retry=node_retry_config,
                 **kwargs,
             )
@@ -3551,8 +3666,9 @@ class ClusterPipeline(RedisCluster):
         retry: Optional[Retry] = None,
         lock=None,
         transaction=False,
-        policy_resolver: PolicyResolver = StaticPolicyResolver(),
+        policy_resolver: Optional[PolicyResolver] = None,
         event_dispatcher: Optional["EventDispatcher"] = None,
+        metadata_resolver: Optional[MetadataResolver] = None,
         **kwargs,
     ):
         """ """
@@ -3627,7 +3743,21 @@ class ClusterPipeline(RedisCluster):
             ResponsePolicy.DEFAULT_KEYED: lambda res: res,
         }
 
-        self._policy_resolver = policy_resolver
+        # ``RedisCluster.pipeline`` passes the client's own resolvers, so a pipeline routes by
+        # whatever the client routes by. Only a pipeline built directly, without either, falls
+        # back to the static default. Precedence between the two mirrors ``RedisCluster`` -
+        # see the note there.
+        if metadata_resolver is None:
+            self._metadata_resolver: MetadataResolver = StaticMetadataResolver()
+        else:
+            self._metadata_resolver = metadata_resolver
+
+        if policy_resolver is None:
+            self._policy_resolver: PolicyResolver = StaticPolicyResolver(
+                metadata_resolver=self._metadata_resolver
+            )
+        else:
+            self._policy_resolver = policy_resolver
 
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -3868,7 +3998,10 @@ class PipelineCommand:
         self.result = None
         self.node = None
         self.asking = False
-        self.command_policies: Optional[CommandPolicies] = None
+        # Either record type: a policy resolver serves ``CommandPolicies``, while the
+        # fallbacks below reuse the shared ``CommandMetadata`` defaults. Only the two routing
+        # policies, which both carry, are ever read.
+        self.command_policies: Optional[Union[CommandPolicies, CommandMetadata]] = None
 
 
 class NodeCommands:
@@ -4258,7 +4391,7 @@ class PipelineStrategy(AbstractStrategy):
                     target_nodes = self._parse_target_nodes(passed_targets)
 
                     if not command_policies:
-                        command_policies = CommandPolicies()
+                        command_policies = _DEFAULT_KEYLESS_METADATA
                 else:
                     if not command_policies:
                         command = c.args[0].upper()
@@ -4278,31 +4411,23 @@ class PipelineStrategy(AbstractStrategy):
                             # <7 breaks on COMMAND GETKEYS when numkeys is 0.
                             # Other unflagged commands keep the keyless fallback.
                             if command in ("EVAL", "EVALSHA"):
-                                command_policies = CommandPolicies(
-                                    request_policy=RequestPolicy.DEFAULT_KEYED,
-                                    response_policy=ResponsePolicy.DEFAULT_KEYED,
-                                )
+                                command_policies = _DEFAULT_KEYED_METADATA
                             else:
                                 if not self._pipe.get_default_node():
                                     keys = None
                                 else:
                                     keys = self._pipe._get_command_keys(*c.args)
                                 if not keys or len(keys) == 0:
-                                    command_policies = CommandPolicies()
+                                    command_policies = _DEFAULT_KEYLESS_METADATA
                                 else:
-                                    command_policies = CommandPolicies(
-                                        request_policy=RequestPolicy.DEFAULT_KEYED,
-                                        response_policy=ResponsePolicy.DEFAULT_KEYED,
-                                    )
+                                    command_policies = _DEFAULT_KEYED_METADATA
                         else:
                             if command_flag in self._pipe._command_flags_mapping:
-                                command_policies = CommandPolicies(
-                                    request_policy=self._pipe._command_flags_mapping[
-                                        command_flag
-                                    ]
-                                )
+                                command_policies = _METADATA_BY_REQUEST_POLICY[
+                                    self._pipe._command_flags_mapping[command_flag]
+                                ]
                             else:
-                                command_policies = CommandPolicies()
+                                command_policies = _DEFAULT_KEYLESS_METADATA
 
                     target_nodes = self._determine_nodes(
                         *c.args,

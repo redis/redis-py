@@ -265,6 +265,11 @@ class Lock:
     def release(self) -> None:
         """
         Releases the already acquired lock
+
+        The token is only cleared after the Redis release operation completes
+        successfully. If the release fails with a connection or timeout error
+        the lock may still exist in Redis, so the token is preserved and the
+        release can be retried.
         """
         expected_token = self.local.token
         if expected_token is None:
@@ -272,8 +277,19 @@ class Lock:
                 "Cannot release a lock that's not owned or is already unlocked.",
                 lock_name=self.name,
             )
-        self.local.token = None
-        self.do_release(expected_token)
+        try:
+            self.do_release(expected_token)
+        except LockNotOwnedError:
+            # Lock doesn't exist in Redis, so clear the token, but only if it is still
+            # ours. With thread_local=False the namespace is shared, so another acquirer
+            # may already have stored its own token; overwriting it would leave the new
+            # owner unable to release.
+            if self.local.token == expected_token:
+                self.local.token = None
+            raise
+        # Only clear token after successful release, and only if it is still ours.
+        if self.local.token == expected_token:
+            self.local.token = None
 
     def do_release(self, expected_token: str) -> None:
         if not bool(

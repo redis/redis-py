@@ -212,6 +212,38 @@ class TestLock:
         # even though we errored, the token is still cleared
         assert lock.local.token is None
 
+    async def test_release_does_not_clear_another_acquirers_token(self, r, monkeypatch):
+        """
+        release() must only clear the token if it is still ours.
+
+        threading.local() is shared by every task on one event loop, so a Lock
+        shared between tasks can have another acquirer's token stored between
+        do_release() and the clear. Clearing unconditionally leaves that new
+        owner holding a lock it cannot release.
+        """
+        lock = self.get_lock(r, "foo")
+        await lock.acquire(blocking=False)
+
+        async def steal(expected_token):
+            lock.local.token = "another-acquirers-token"
+
+        monkeypatch.setattr(lock, "do_release", steal)
+        await lock.release()
+        assert lock.local.token == "another-acquirers-token"
+
+        async def steal_and_raise(expected_token):
+            lock.local.token = "another-acquirers-token"
+            raise LockNotOwnedError("Cannot release a lock that's no longer owned")
+
+        lock.local.token = "ours"
+        monkeypatch.setattr(lock, "do_release", steal_and_raise)
+        with pytest.raises(LockNotOwnedError):
+            await lock.release()
+        assert lock.local.token == "another-acquirers-token"
+
+        monkeypatch.undo()
+        await r.delete("foo")
+
     async def test_extend_lock(self, r):
         lock = self.get_lock(r, "foo", timeout=10)
         assert await lock.acquire(blocking=False)

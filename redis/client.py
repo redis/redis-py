@@ -40,6 +40,7 @@ from redis.commands import (
 )
 from redis.commands.core import Script
 from redis.commands.helpers import parse_pubsub_subscriptions, pubsub_subscription_args
+from redis.commands.metadata import MetadataResolver
 from redis.connection import (
     AbstractConnection,
     Connection,
@@ -325,6 +326,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         maint_notifications_config: MaintNotificationsConfig | None = None,
         oss_cluster_maint_notifications_handler: OSSMaintNotificationsHandler
         | None = None,
+        metadata_resolver: MetadataResolver | None = None,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -389,6 +391,19 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             `redis.maint_notifications.OSSMaintNotificationsHandler` for details.
             Only supported with RESP3
             Argument is ignored when connection_pool is provided.
+        metadata_resolver:
+            decides which commands are eligible for client-side caching - see
+            `redis.commands.metadata.MetadataResolver`. Defaults to the static command
+            metadata this library ships. Resolvers chain through `with_fallback`, first match
+            wins, so one placed in front of `StaticMetadataResolver` overrides the commands it
+            carries while the static records answer for everything else.
+            The library never reads `COMMAND` on its own behalf for this, so the default adds
+            no round trips. To decide eligibility from the connected server, pass a
+            `DynamicMetadataResolver` built from a live `COMMAND` reply - use it with care,
+            because reading that reply relies on a class in the private `redis._parsers`
+            package.
+            Argument is ignored when connection_pool is provided - configure it on the pool
+            instead.
         """
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -481,6 +496,14 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                         {
                             "cache": cache,
                             "cache_config": cache_config,
+                        }
+                    )
+                if metadata_resolver is not None:
+                    # A named ``ConnectionPool`` parameter, not a connection kwarg, so it
+                    # reaches the pool without also being forwarded to every connection.
+                    kwargs.update(
+                        {
+                            "metadata_resolver": metadata_resolver,
                         }
                     )
                 maint_notifications_enabled = (
