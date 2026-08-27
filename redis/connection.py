@@ -53,6 +53,7 @@ from .exceptions import (
     ChildDeadlockedError,
     ConnectionError,
     DataError,
+    InvalidResponse,
     MaxConnectionsError,
     RedisError,
     ResponseError,
@@ -1424,6 +1425,15 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             if disconnect_on_error:
                 self.disconnect()
             raise ConnectionError(f"Error while reading from {host_error} : {e.args}")
+        except InvalidResponse:
+            # A framing violation means the parser can no longer locate reply
+            # boundaries, so the stream position is untrustworthy. The parsers
+            # rewind on error, leaving every byte of the offending reply
+            # queued, so honouring disconnect_on_error=False here would make
+            # the next read fail identically, forever. Drop the connection
+            # regardless of what the caller asked for. See #4291.
+            self.disconnect()
+            raise
         except BaseException:
             # Also by default close in case of BaseException.  A lot of code
             # relies on this behaviour when doing Command/Response pairs.

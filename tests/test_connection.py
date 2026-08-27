@@ -2066,3 +2066,93 @@ def test_parse_url_retry_on_error_usable_in_retry():
     with pytest.raises(ConnectionError):
         conn.retry.call_with_retry(do=do, fail=lambda e: None)
     assert calls == 2
+
+class _CannedSocket:
+    """Serves a canned byte stream, then behaves like an open-but-idle socket."""
+
+    def __init__(self, data):
+        self.data = data
+        self.timeout = None
+
+    def recv(self, n):
+        if not self.data:
+            raise socket.timeout("idle")
+        chunk, self.data = self.data[:n], self.data[n:]
+        return chunk
+
+    def settimeout(self, t):
+        self.timeout = t
+
+    def gettimeout(self):
+        return self.timeout
+
+    def close(self):
+        pass
+
+    def shutdown(self, how):
+        pass
+
+
+def _connection_with_stream(data):
+    conn = Connection(protocol=2)
+    conn._sock = _CannedSocket(data)
+    conn._parser.on_connect(conn)
+    return conn
+
+
+class TestInvalidResponseInvalidatesConnection:
+    """A framing violation must drop the connection even when the caller
+    passed disconnect_on_error=False, otherwise the rewound bytes stay queued
+    and every subsequent read fails identically. See #4291.
+    """
+
+    # The signature PubSub.parse_response uses.
+    PUBSUB_KWARGS = dict(disconnect_on_error=False, push_request=True)
+
+    def test_framing_error_disconnects_on_pubsub_path(self):
+        conn = _connection_with_stream(b"?bogus\r\n+SECOND\r\n")
+
+        with pytest.raises(redis.InvalidResponse):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        assert conn.is_connected is False
+        assert conn._parser._buffer is None
+
+    def test_pubsub_path_recovers_after_framing_error(self, monkeypatch):
+        conn = _connection_with_stream(b"?bogus\r\n+SECOND\r\n")
+
+        def fake_connect():
+            if conn._sock is None:
+                conn._sock = _CannedSocket(b"+RECOVERED\r\n")
+                conn._parser.on_connect(conn)
+
+        monkeypatch.setattr(conn, "connect", fake_connect)
+
+        with pytest.raises(redis.InvalidResponse):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        # PubSub.parse_response then calls conn.connect() before reading
+        # again. On master the connection is still up, so connect() is a
+        # no-op, the poisoned bytes are still queued, and this read raises
+        # InvalidResponse again -- forever. After the fix connect() really
+        # reconnects and the next read sees a clean stream.
+        conn.connect()
+        assert conn.read_response(**self.PUBSUB_KWARGS) == b"RECOVERED"
+
+    def test_in_band_response_error_does_not_disconnect(self):
+        """The rewind exists for in-band ResponseError; it must keep working."""
+        conn = _connection_with_stream(b"-ERR in band\r\n+SECOND\r\n")
+
+        with pytest.raises(redis.ResponseError):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        assert conn.is_connected is True
+        assert conn.read_response(**self.PUBSUB_KWARGS) == b"SECOND"
+
+    def test_framing_error_still_disconnects_by_default(self):
+        conn = _connection_with_stream(b"?bogus\r\n")
+
+        with pytest.raises(redis.InvalidResponse):
+            conn.read_response()
+
+        assert conn.is_connected is False
