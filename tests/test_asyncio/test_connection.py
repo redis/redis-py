@@ -62,6 +62,12 @@ class DummyAsyncStream:
         self.read_called = True
         raise AssertionError("can_read should not read from the stream")
 
+    async def readline(self):
+        self.read_called = True
+        data = bytes(self._buffer)
+        self._buffer.clear()
+        return data
+
 
 def make_async_hiredis_parser(
     stream, response=NOT_ENOUGH_DATA, decoded_response=None, has_data=False
@@ -213,6 +219,20 @@ async def test_async_resp_can_read_prefers_buffered_data_over_eof(parser_class):
     parser._buffer = b"+OK\r\n"
 
     assert await parser.can_read() is True
+    assert stream.read_called is False
+
+
+@pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
+async def test_async_resp_read_response_raises_after_disconnect(parser_class):
+    # A late reply read after disconnect could be assigned to the next
+    # cluster pipeline command.
+    stream = DummyAsyncStream(buffer=b"+OK\r\n")
+    parser = parser_class(socket_read_size=65536)
+    parser.on_connect(types.SimpleNamespace(_reader=stream, encoder=mock.Mock()))
+    parser.on_disconnect()
+
+    with pytest.raises(ConnectionError):
+        await parser.read_response()
     assert stream.read_called is False
 
 
