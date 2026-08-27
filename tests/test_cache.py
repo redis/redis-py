@@ -1,3 +1,4 @@
+import threading
 import time
 from unittest.mock import MagicMock
 
@@ -2043,3 +2044,45 @@ class TestUnitCacheProxy:
         # SET is not cachable
         cache_key = CacheKey(command="SET", redis_keys=("foo",), redis_args=())
         assert proxy.is_cachable(cache_key) is False
+
+
+class TestUnitCacheProxyConnectionInvalidations:
+    """A framing violation while draining invalidations now disconnects the raw
+    connection (see #4291). That disconnect skips CacheProxyConnection.disconnect(),
+    so the flush it performs has to happen on this path too -- otherwise the next
+    connect() opens a CLIENT TRACKING session the server holds no invalidation
+    state for, while the local cache keeps serving entries from the old one.
+    """
+
+    def _proxy_and_cache(self, read_response_error):
+        conn = MagicMock()
+        conn.can_read.return_value = True
+        conn.read_response.side_effect = read_response_error
+        cache = DefaultCache(CacheConfig(max_size=5))
+        cache.set(
+            CacheEntry(
+                cache_key=CacheKey(command="GET", redis_keys=("foo",), redis_args=()),
+                cache_value=b"stale",
+                status=CacheEntryStatus.VALID,
+                connection_ref=conn,
+            )
+        )
+        assert cache.size == 1
+        proxy = redis.connection.CacheProxyConnection(conn, cache, threading.RLock())
+        return proxy, cache
+
+    def test_framing_error_while_draining_flushes_cache(self):
+        proxy, cache = self._proxy_and_cache(redis.InvalidResponse("bad framing"))
+
+        with pytest.raises(redis.InvalidResponse):
+            proxy._process_pending_invalidations()
+
+        assert cache.size == 0
+
+    def test_idle_connection_leaves_cache_intact(self):
+        """The drain loop's normal exit must not flush anything."""
+        proxy, cache = self._proxy_and_cache(redis.TimeoutError())
+
+        proxy._process_pending_invalidations()
+
+        assert cache.size == 1

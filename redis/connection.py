@@ -1814,15 +1814,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 entry = self._cache.get(self._current_command_cache_key)
 
                 with self._pool_lock:
-                    while entry.connection_ref.can_read():
-                        try:
-                            entry.connection_ref.read_response(
-                                push_request=True,
-                                timeout=0,
-                                disconnect_on_error=False,
-                            )
-                        except TimeoutError:
-                            break
+                    self._drain_invalidations(entry.connection_ref)
 
                 # Re-check: if the entry was invalidated during the drain,
                 # fall through to send the command over the network.
@@ -2074,14 +2066,28 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         conn.read_response()
         conn._parser.set_invalidation_push_handler(self._on_invalidation_callback)
 
-    def _process_pending_invalidations(self):
-        while self.can_read():
+    def _drain_invalidations(self, conn: ConnectionInterface):
+        while conn.can_read():
             try:
-                self._conn.read_response(
+                conn.read_response(
                     push_request=True, timeout=0, disconnect_on_error=False
                 )
             except TimeoutError:
                 break
+            except InvalidResponse:
+                # Invalidation replies are read straight off the raw
+                # connection, so the disconnect a framing violation now forces
+                # bypasses this proxy's disconnect() and its cache flush. The
+                # next connect() opens a fresh CLIENT TRACKING session that the
+                # server has no invalidation state for, so entries cached under
+                # the old session would be served as if still tracked. Flush
+                # them here for the same reason disconnect() does.
+                with self._cache_lock:
+                    self._cache.flush()
+                raise
+
+    def _process_pending_invalidations(self):
+        self._drain_invalidations(self._conn)
 
     def _on_invalidation_callback(self, data: List[Union[str, Optional[List[bytes]]]]):
         with self._cache_lock:
