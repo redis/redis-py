@@ -82,6 +82,7 @@ from redis.exceptions import (
     AuthenticationWrongNumberOfArgsError,
     ConnectionError,
     DataError,
+    InvalidResponse,
     MaxConnectionsError,
     RedisError,
     ResponseError,
@@ -1418,6 +1419,13 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                 add_debug_log_for_connection_failure(self, e, "reading response")
                 await self.disconnect(nowait=True)
             raise ConnectionError(f"Error while reading from {host_error} : {e.args}")
+        except InvalidResponse:
+            # See the sync Connection.read_response and #4291: a framing
+            # violation leaves the offending reply queued (the parsers rewind
+            # on error), so the connection is not reusable no matter what
+            # disconnect_on_error says.
+            await self.disconnect(nowait=True)
+            raise
         except BaseException as e:
             # Also by default close in case of BaseException.  A lot of code
             # relies on this behaviour when doing Command/Response pairs.

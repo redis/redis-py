@@ -1199,3 +1199,24 @@ def test_async_connection_accepts_numeric_port_string():
 def test_async_connection_rejects_out_of_range_port(port):
     with pytest.raises(ValueError, match="port must be in 0..65535"):
         Connection(port=port)
+
+
+@pytest.mark.parametrize("disconnect_on_error", [True, False])
+async def test_invalid_response_always_disconnects(disconnect_on_error):
+    """A framing violation invalidates the connection regardless of
+    disconnect_on_error. The parsers rewind on error, so the offending reply
+    stays queued and every later read would fail identically. See #4291.
+    """
+    conn = Connection()
+    with (
+        mock.patch.object(
+            conn,
+            "_read_response_from_parser",
+            side_effect=InvalidResponse("Protocol Error"),
+        ),
+        mock.patch.object(conn, "disconnect") as disconnect,
+    ):
+        with pytest.raises(InvalidResponse):
+            await conn.read_response(disconnect_on_error=disconnect_on_error)
+
+    disconnect.assert_called_once_with(nowait=True)
