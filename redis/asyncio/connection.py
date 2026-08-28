@@ -1757,7 +1757,7 @@ def parse_retry_on_error(value):
     for name in value.replace("[", "").replace("]", "").split(","):
         name = name.strip()
         if not name:
-            continue
+            raise ValueError("Empty retry_on_error entry")
         exc = getattr(redis_exceptions, name, None)
         if not (isinstance(exc, type) and issubclass(exc, Exception)):
             raise ValueError(f"Unknown redis exception {name!r}")
