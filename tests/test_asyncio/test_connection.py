@@ -1062,3 +1062,69 @@ async def test_disconnect_no_current_task_calls_close(request):
             mock_on_disconnect.assert_called_once()
 
     assert not conn.is_connected
+
+
+def test_parse_url_retry_on_error_resolves_exception_names():
+    kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
+    assert kw["retry_on_error"] == [ConnectionError]
+
+
+def test_parse_url_retry_on_error_comma_separated():
+    kw = parse_url(
+        "redis://localhost:6379/?retry_on_error=ConnectionError,TimeoutError"
+    )
+    assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
+
+
+def test_parse_url_retry_on_error_bracket_list():
+    kw = parse_url(
+        "redis://localhost:6379/?retry_on_error=[ConnectionError,TimeoutError]"
+    )
+    assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
+
+
+def test_parse_url_retry_on_error_blank_entry():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?retry_on_error=,")
+    assert str(exc_info.value) == (
+        "Invalid value for 'retry_on_error' in connection URL."
+    )
+
+
+def test_parse_url_invalid_db_keeps_stable_message():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?db=not-an-int")
+    assert str(exc_info.value) == "Invalid value for 'db' in connection URL."
+
+
+def test_parse_url_retry_on_error_unknown_name():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?retry_on_error=NotARealError")
+    assert str(exc_info.value) == (
+        "Invalid value for 'retry_on_error' in connection URL."
+    )
+
+
+@pytest.mark.asyncio
+async def test_parse_url_retry_on_error_usable_in_retry():
+    kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
+    conn = Connection(**kw)
+    assert ConnectionError in conn.retry._supported_errors
+    assert all(
+        isinstance(err, type) and issubclass(err, Exception)
+        for err in conn.retry._supported_errors
+    )
+
+    calls = 0
+
+    async def do():
+        nonlocal calls
+        calls += 1
+        raise ConnectionError("simulated network drop")
+
+    async def fail(error):
+        return None
+
+    with pytest.raises(ConnectionError):
+        await conn.retry.call_with_retry(do=do, fail=fail)
+    assert calls == 2
