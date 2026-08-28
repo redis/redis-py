@@ -1166,8 +1166,21 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             )
 
     async def _send_packed_command(self, command: Iterable[bytes]) -> None:
-        self._writer.writelines(command)
-        await self._writer.drain()
+        writer = self._writer
+        if writer is None or writer.transport.is_closing():
+            raise ConnectionError("Connection closed by the server before write")
+        try:
+            writer.writelines(command)
+            await writer.drain()
+        except (TypeError, AttributeError) as e:
+            # CPython gh-136234 adds the missing connection-lost check in 3.13.10+
+            # and 3.14.1+. Python 3.12, 3.13.0-3.13.9, and 3.14.0 can instead
+            # leak TypeError or AttributeError from the transport (#4287).
+            if writer.transport.is_closing():
+                raise ConnectionError(
+                    "Connection closed by the server while writing"
+                ) from e
+            raise
 
     async def send_packed_command(
         self, command: Union[bytes, str, Iterable[bytes]], check_health: bool = True
@@ -1187,8 +1200,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                     self._send_packed_command(command), self.socket_timeout
                 )
             else:
-                self._writer.writelines(command)
-                await self._writer.drain()
+                await self._send_packed_command(command)
         except asyncio.TimeoutError:
             await self.disconnect(nowait=True)
             raise TimeoutError("Timeout writing to socket") from None
