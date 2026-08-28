@@ -5775,6 +5775,18 @@ class TestClusterPubSubWithMocks:
 
         cluster.initialize.assert_awaited_once_with()
 
+    async def test_empty_sunsubscribe_does_not_initialize_cluster(self) -> None:
+        cluster = Mock()
+        cluster._initialize = True
+        cluster.initialize = mock.AsyncMock()
+        cluster.read_from_replicas = False
+        cluster.load_balancing_strategy = None
+        pubsub = self._make_pubsub(cluster)
+
+        await pubsub.sunsubscribe()
+
+        cluster.initialize.assert_not_awaited()
+
     async def test_get_node_pubsub_uses_adapter(self) -> None:
         """
         _get_node_pubsub must build a PubSub backed by a

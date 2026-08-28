@@ -4027,12 +4027,15 @@ class ClusterPubSub(PubSub):
 
         :param args: Channel names to unsubscribe from. If empty, unsubscribe from all.
         """
-        if self.cluster._initialize:
-            await self.cluster.initialize()
         if args:
             args = list_or_args(args[0], args[1:])
         else:
             args = list(self.shard_channels.keys())
+
+        if not args:
+            return
+        if self.cluster._initialize:
+            await self.cluster.initialize()
 
         # Serialize against reinitialize_shard_subscriptions: the reverse
         # index and node_pubsub_mapping must not change between the lookup
