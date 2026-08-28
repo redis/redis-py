@@ -52,9 +52,6 @@ class Lock:
             expiration = 0
         end
         if expiration < 0 then
-            if expiration == -1 and ARGV[2] == "0" and ARGV[3] == "1" then
-                return 1
-            end
             return 0
         end
 
@@ -320,6 +317,9 @@ class Lock:
         ``replace_ttl`` if False (the default), add `additional_time` to
         the lock's existing ttl. If True, replace the lock's ttl with
         `additional_time`.
+
+        When the resulting TTL is non-positive for a lock with an expiry, the
+        current expiry is left unchanged and ``True`` is returned.
         """
         if self.local.token is None:
             raise LockError("Cannot extend an unlocked lock", lock_name=self.name)

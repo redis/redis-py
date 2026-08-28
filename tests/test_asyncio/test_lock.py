@@ -260,10 +260,11 @@ class TestLock:
         assert 8000 < (await r.pttl("foo")) <= 10000
         await lock.release()
 
-    async def test_extend_lock_zero_timeout_replace_ttl_keeps_lock(self, r):
+    async def test_extend_lock_zero_additional_time_replace_ttl_raises_error(self, r):
         lock = self.get_lock(r, "foo", timeout=0)
         assert await lock.acquire(blocking=False)
-        assert await lock.extend(0, replace_ttl=True)
+        with pytest.raises(LockNotOwnedError):
+            await lock.extend(0, replace_ttl=True)
         assert await r.get("foo") == lock.local.token
         assert await r.pttl("foo") == -1
         await lock.release()
