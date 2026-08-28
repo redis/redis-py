@@ -592,7 +592,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         socket_timeout: float | None = DEFAULT_SOCKET_TIMEOUT,
         socket_connect_timeout: float | None = DEFAULT_SOCKET_CONNECT_TIMEOUT,
         retry_on_timeout: bool = False,
-        retry_on_error: list | object = SENTINEL,
+        retry_on_error: Iterable[Type[Exception]] | object = SENTINEL,
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
         decode_responses: bool = False,
@@ -666,6 +666,9 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         self.retry_on_timeout = retry_on_timeout
         if retry_on_error is SENTINEL:
             retry_on_error = []
+        else:
+            # Copy so we never mutate the caller-supplied list (parity with sync).
+            retry_on_error = list(retry_on_error)
         if retry_on_timeout:
             retry_on_error.append(TimeoutError)
             retry_on_error.append(socket.timeout)
