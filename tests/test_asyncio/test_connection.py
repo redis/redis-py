@@ -271,6 +271,92 @@ def test_get_resolved_ip_uses_async_writer_peer_before_dns():
     getaddrinfo.assert_not_called()
 
 
+async def test_send_packed_command_rejects_closed_transport():
+    conn = Connection(health_check_interval=0)
+    writer = mock.Mock()
+    writer.transport.is_closing.return_value = True
+    writer.drain = mock.AsyncMock()
+    conn._reader = mock.Mock()
+    conn._writer = writer
+
+    with pytest.raises(ConnectionError, match="closed") as exc_info:
+        await conn.send_packed_command(b"PING", check_health=False)
+
+    assert type(exc_info.value) is ConnectionError
+    writer.writelines.assert_not_called()
+    writer.drain.assert_not_awaited()
+    writer.close.assert_called_once()
+    assert not conn.is_connected
+
+
+@pytest.mark.parametrize("socket_timeout", [None, 1])
+async def test_send_packed_command_writes_to_open_transport(socket_timeout):
+    conn = Connection(socket_timeout=socket_timeout, health_check_interval=0)
+    writer = mock.Mock()
+    writer.transport.is_closing.return_value = False
+    writer.drain = mock.AsyncMock()
+    conn._reader = mock.Mock()
+    conn._writer = writer
+
+    await conn.send_packed_command(b"PING", check_health=False)
+
+    writer.transport.is_closing.assert_called_once_with()
+    writer.writelines.assert_called_once_with([b"PING"])
+    writer.drain.assert_awaited_once_with()
+    await conn.disconnect(nowait=True)
+
+
+@pytest.mark.parametrize(
+    ("error_type", "message"),
+    [
+        (TypeError, "'NoneType' object is not callable"),
+        (AttributeError, "'NoneType' object has no attribute '_add_writer'"),
+    ],
+)
+async def test_send_packed_command_translates_closed_transport_error(
+    error_type, message
+):
+    conn = Connection(health_check_interval=0)
+    writer = mock.Mock()
+    writer.transport.is_closing.side_effect = [False, True]
+    error = error_type(message)
+    writer.writelines.side_effect = error
+    writer.drain = mock.AsyncMock()
+    conn._reader = mock.Mock()
+    conn._writer = writer
+
+    with pytest.raises(ConnectionError) as exc_info:
+        await conn.send_packed_command(b"PING", check_health=False)
+
+    assert type(exc_info.value) is ConnectionError
+    assert str(exc_info.value) == "Connection closed by the server while writing"
+    assert exc_info.value.__cause__ is error
+    assert writer.transport.is_closing.call_count == 2
+    writer.drain.assert_not_awaited()
+    writer.close.assert_called_once()
+    assert not conn.is_connected
+
+
+async def test_send_packed_command_preserves_type_error_on_open_transport():
+    conn = Connection(health_check_interval=0)
+    writer = mock.Mock()
+    writer.transport.is_closing.return_value = False
+    error = TypeError("sequence item 0: expected a bytes-like object")
+    writer.writelines.side_effect = error
+    writer.drain = mock.AsyncMock()
+    conn._reader = mock.Mock()
+    conn._writer = writer
+
+    with pytest.raises(TypeError) as exc_info:
+        await conn.send_packed_command(b"PING", check_health=False)
+
+    assert exc_info.value is error
+    assert writer.transport.is_closing.call_count == 2
+    writer.drain.assert_not_awaited()
+    writer.close.assert_called_once()
+    assert not conn.is_connected
+
+
 @pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "client_kwargs",
