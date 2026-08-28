@@ -5775,7 +5775,10 @@ class TestClusterPubSubWithMocks:
 
         cluster.initialize.assert_awaited_once_with()
 
-    async def test_empty_sunsubscribe_does_not_initialize_cluster(self) -> None:
+    @pytest.mark.parametrize("method", ["ssubscribe", "sunsubscribe"])
+    async def test_empty_shard_command_does_not_initialize_cluster(
+        self, method
+    ) -> None:
         cluster = Mock()
         cluster._initialize = True
         cluster.initialize = mock.AsyncMock()
@@ -5783,7 +5786,7 @@ class TestClusterPubSubWithMocks:
         cluster.load_balancing_strategy = None
         pubsub = self._make_pubsub(cluster)
 
-        await pubsub.sunsubscribe()
+        await getattr(pubsub, method)()
 
         cluster.initialize.assert_not_awaited()
 

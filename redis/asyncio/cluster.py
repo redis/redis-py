@@ -3982,6 +3982,8 @@ class ClusterPubSub(PubSub):
         """
         s_channels = parse_pubsub_subscriptions(args, kwargs)
 
+        if not s_channels:
+            return
         if self.cluster._initialize:
             await self.cluster.initialize()
 
