@@ -2217,7 +2217,7 @@ class NodesManager:
                 )
                 return self.slots_cache[slot][node_idx]
             return self.slots_cache[slot][0]
-        except (IndexError, TypeError):
+        except (IndexError, KeyError, TypeError):
             raise SlotNotCoveredError(
                 f'Slot "{slot}" not covered by the cluster. '
                 f'"require_full_coverage={self.require_full_coverage}"'
@@ -3982,6 +3982,9 @@ class ClusterPubSub(PubSub):
         """
         s_channels = parse_pubsub_subscriptions(args, kwargs)
 
+        if self.cluster._initialize:
+            await self.cluster.initialize()
+
         # Serialize against reinitialize_shard_subscriptions (background
         # task) so the reverse index, shard_channels, and node_pubsub_mapping
         # are not mutated concurrently. _migrate_shard_channel below does not
@@ -4024,6 +4027,8 @@ class ClusterPubSub(PubSub):
 
         :param args: Channel names to unsubscribe from. If empty, unsubscribe from all.
         """
+        if self.cluster._initialize:
+            await self.cluster.initialize()
         if args:
             args = list_or_args(args[0], args[1:])
         else:
@@ -4299,6 +4304,9 @@ class ClusterPubSub(PubSub):
         # NOTE: don't parse the response in this function -- it could pull a
         # legitimate message off the stack if the connection is already
         # subscribed to one or more channels
+
+        if self.cluster._initialize:
+            await self.cluster.initialize()
 
         # For shard commands, route to appropriate node
         command = args[0].upper() if args else ""

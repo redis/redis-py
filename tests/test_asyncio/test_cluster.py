@@ -53,6 +53,7 @@ from redis.exceptions import (
     RedisClusterException,
     RedisError,
     ResponseError,
+    SlotNotCoveredError,
 )
 from redis.himport import HIMPORT_SET
 from redis.utils import str_if_bytes
@@ -2870,6 +2871,12 @@ class TestNodesManager:
     """
     Tests for the NodesManager class
     """
+
+    async def test_get_node_from_slot_with_missing_slot(self) -> None:
+        nodes_manager = NodesManager([], False, {})
+
+        with pytest.raises(SlotNotCoveredError):
+            nodes_manager.get_node_from_slot(42)
 
     @pytest.mark.onlycluster
     async def test_load_balancer(self, r: RedisCluster) -> None:
@@ -5735,6 +5742,38 @@ class TestClusterPubSubWithMocks:
 
         assert pubsub.node is None
         assert pubsub.connection_pool is None
+
+    @pytest.mark.parametrize(
+        "method", ["execute_command", "ssubscribe", "sunsubscribe"]
+    )
+    async def test_pubsub_commands_initialize_cluster(self, method) -> None:
+        cluster = Mock()
+        cluster._initialize = True
+        cluster.initialize = mock.AsyncMock()
+        cluster.read_from_replicas = False
+        cluster.load_balancing_strategy = None
+        node = ClusterNode("127.0.0.1", 7000)
+
+        def get_node(*_args):
+            if cluster.initialize.await_count == 0:
+                raise KeyError
+            return node
+
+        cluster.nodes_manager.get_node_from_slot.side_effect = get_node
+        cluster.get_node_from_key.side_effect = get_node
+        pubsub = self._make_pubsub(cluster)
+        if method == "execute_command":
+            args = ("SUBSCRIBE", "channel")
+        else:
+            args = ("channel",)
+
+        with mock.patch(
+            f"redis.asyncio.client.PubSub.{method}",
+            new=mock.AsyncMock(return_value=None),
+        ):
+            await getattr(pubsub, method)(*args)
+
+        cluster.initialize.assert_awaited_once_with()
 
     async def test_get_node_pubsub_uses_adapter(self) -> None:
         """
