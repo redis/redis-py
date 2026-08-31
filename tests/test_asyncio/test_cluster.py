@@ -5745,8 +5745,12 @@ class TestClusterPubSubWithMocks:
 
     async def test_subscribe_initializes_cluster(self) -> None:
         client = await get_mocked_redis_client(host=default_host, port=default_port)
+        slots_cache = client.nodes_manager.slots_cache
+        client.nodes_manager.slots_cache = {}
         client._initialize = True
-        client.initialize = mock.AsyncMock()
+        client.initialize = mock.AsyncMock(
+            side_effect=lambda: client.nodes_manager.slots_cache.update(slots_cache)
+        )
         pubsub = client.pubsub()
 
         with mock.patch(
@@ -5754,7 +5758,7 @@ class TestClusterPubSubWithMocks:
         ):
             await pubsub.subscribe("channel")
 
-        client.initialize.assert_awaited_once_with()
+        assert pubsub.node in client.get_nodes()
 
     @pytest.mark.parametrize("method", ["ssubscribe", "sunsubscribe"])
     async def test_empty_shard_command_does_not_initialize_cluster(
