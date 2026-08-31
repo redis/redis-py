@@ -1,3 +1,4 @@
+import os
 import socket
 from unittest import mock
 
@@ -8,6 +9,7 @@ import redis.sentinel
 from redis import exceptions
 from redis.sentinel import (
     MasterNotFoundError,
+    ReplicaNotFoundError,
     Sentinel,
     SentinelConnectionPool,
     SlaveNotFoundError,
@@ -216,6 +218,19 @@ def test_discover_slaves(cluster, sentinel):
 
 
 @pytest.mark.onlynoncluster
+def test_discover_replicas(cluster, sentinel):
+    assert sentinel.discover_replicas("mymaster") == []
+
+    cluster.slaves = [
+        {"ip": "slave0", "port": 1234, "is_odown": False, "is_sdown": False},
+        {"ip": "slave1", "port": 1234, "is_odown": True, "is_sdown": False},
+    ]
+
+    assert sentinel.filter_replicas(cluster.slaves) == [("slave0", 1234)]
+    assert sentinel.discover_replicas("mymaster") == [("slave0", 1234)]
+
+
+@pytest.mark.onlynoncluster
 def test_master_for(sentinel, master_ip):
     master = sentinel.master_for("mymaster", db=9)
     assert master.ping()
@@ -236,11 +251,30 @@ def test_slave_for(cluster, sentinel):
 
 
 @pytest.mark.onlynoncluster
+def test_replica_for(cluster, sentinel):
+    cluster.slaves = [
+        {"ip": "127.0.0.1", "port": 6379, "is_odown": False, "is_sdown": False}
+    ]
+    replica = sentinel.replica_for("mymaster", db=9)
+    assert replica.ping()
+
+
+@pytest.mark.onlynoncluster
 def test_slave_for_slave_not_found_error(cluster, sentinel):
     cluster.master["is_odown"] = True
     slave = sentinel.slave_for("mymaster", db=9)
     with pytest.raises(SlaveNotFoundError):
         slave.ping()
+
+
+@pytest.mark.onlynoncluster
+def test_replica_not_found_alias(cluster, sentinel):
+    assert ReplicaNotFoundError is SlaveNotFoundError
+
+    cluster.master["is_odown"] = True
+    replica = sentinel.replica_for("mymaster", db=9)
+    with pytest.raises(ReplicaNotFoundError):
+        replica.ping()
 
 
 @pytest.mark.onlynoncluster
@@ -256,6 +290,63 @@ def test_slave_round_robin(cluster, sentinel, master_ip):
     # Fallback to master
     assert next(rotator) == (master_ip, 6379)
     with pytest.raises(SlaveNotFoundError):
+        next(rotator)
+
+
+@pytest.mark.fixed_client
+@pytest.mark.onlynoncluster
+def test_master_failover_reclaims_discarded_connection_slot():
+    master_a = ("master-a", 6379)
+    master_b = ("master-b", 6379)
+
+    class FakeConnection:
+        def __init__(self, **kwargs):
+            self.host, self.port = master_a
+            self.pid = os.getpid()
+
+        def connect(self):
+            pass
+
+        def disconnect(self):
+            pass
+
+        def can_read(self, timeout=0):
+            return False
+
+        def should_reconnect(self):
+            return False
+
+    pool = SentinelConnectionPool(
+        "mymaster",
+        mock.MagicMock(),
+        connection_class=FakeConnection,
+        max_connections=2,
+    )
+    pool.proxy.master_address = master_a
+
+    for _ in range(pool.max_connections):
+        connection = pool.get_connection()
+        pool.proxy.master_address = master_b
+        pool.release(connection)
+        pool.proxy.master_address = master_a
+
+    assert pool._created_connections == 0
+    pool.get_connection()
+
+
+@pytest.mark.onlynoncluster
+def test_replica_round_robin(cluster, sentinel, master_ip):
+    cluster.slaves = [
+        {"ip": "slave0", "port": 6379, "is_odown": False, "is_sdown": False},
+        {"ip": "slave1", "port": 6379, "is_odown": False, "is_sdown": False},
+    ]
+    pool = SentinelConnectionPool("mymaster", sentinel)
+    rotator = pool.rotate_replicas()
+    assert next(rotator) in (("slave0", 6379), ("slave1", 6379))
+    assert next(rotator) in (("slave0", 6379), ("slave1", 6379))
+    # Fallback to master
+    assert next(rotator) == (master_ip, 6379)
+    with pytest.raises(ReplicaNotFoundError):
         next(rotator)
 
 
@@ -279,7 +370,7 @@ def test_reset(cluster, sentinel):
 
 
 @pytest.mark.onlynoncluster
-@pytest.mark.parametrize("method_name", ["master_for", "slave_for"])
+@pytest.mark.parametrize("method_name", ["master_for", "slave_for", "replica_for"])
 def test_auto_close_pool(cluster, sentinel, method_name):
     """
     Check that the connection pool created by the sentinel client is
@@ -301,6 +392,42 @@ def test_auto_close_pool(cluster, sentinel, method_name):
 
     assert calls == 1
     pool.disconnect()
+
+
+@pytest.mark.onlynoncluster
+def test_close(cluster, sentinel):
+    sentinel.sentinels = [mock.Mock() for _ in range(2)]
+
+    with sentinel as entered:
+        assert entered is sentinel
+
+    # exiting the context closes every sentinel client and its pool
+    for s in sentinel.sentinels:
+        s.close.assert_called_once()
+
+
+@pytest.mark.onlynoncluster
+def test_close_error_still_closes_remaining_clients(cluster, sentinel):
+    sentinel.sentinels = [mock.Mock() for _ in range(3)]
+    sentinel.sentinels[0].close.side_effect = Exception("sentinel down")
+
+    with pytest.raises(Exception, match="sentinel down"):
+        sentinel.close()
+
+    # the failing client must not prevent closing the others
+    for s in sentinel.sentinels:
+        s.close.assert_called_once()
+
+
+@pytest.mark.onlynoncluster
+def test_close_idempotent(cluster, sentinel):
+    sentinel.sentinels = [mock.Mock() for _ in range(2)]
+
+    sentinel.close()
+    sentinel.close()
+
+    for s in sentinel.sentinels:
+        assert s.close.call_count == 2
 
 
 # Tests against real sentinel instances
@@ -370,3 +497,67 @@ def test_sentinel_commands_with_strict_redis_client(request):
     assert isinstance(client.sentinel_ckquorum("redis-py-test"), bool)
 
     client.close()
+
+
+# ---------------------------------------------------------------------------
+# HIMPORT on Sentinel
+# ---------------------------------------------------------------------------
+# HIMPORT needs no Sentinel-specific code: the client returned by ``master_for``
+# is a normal ``Redis`` whose ``SentinelConnectionPool`` inherits the shared
+# ``HImportRegistry`` from ``ConnectionPool``. Fieldsets are declared at runtime
+# with ``himport_prepare`` and survive failover because the registry lives on the
+# long-lived pool while the per-connection PREPARE is reset on reconnect and
+# re-applied lazily on the next ``himport_set``.
+
+
+@pytest.mark.onlynoncluster
+def test_himport_master_for_exposes_runtime_prepare(sentinel):
+    """``master_for`` returns a client exposing the HIMPORT family; runtime
+    ``himport_prepare`` populates the client's registry with no init argument, and
+    discard is never forbidden."""
+    master = sentinel.master_for("mymaster", db=9)
+    assert master.himport_prepare("users", ["name", "email", "age"]) is True
+    fs = master.himport_registry.get("users")
+    assert fs is not None
+    assert fs.fields == ("name", "email", "age")
+    # Discard is always allowed under the runtime-only model.
+    assert master.himport_discard("users") == 1
+    assert master.himport_registry.get("users") is None
+
+
+@pytest.mark.onlynoncluster
+def test_himport_registry_shared_with_pool_connections(sentinel):
+    """The runtime-prepared fieldset lives on the pool-level registry object that is
+    injected into every connection via ``connection_kwargs``, so a connection created
+    after a Sentinel failover (pool re-point) still sees it."""
+    master = sentinel.master_for("mymaster", db=9)
+    master.himport_prepare("shared", ["a", "b"])
+    pool = master.connection_pool
+    # The same registry object reaches every connection the pool creates.
+    assert pool.connection_kwargs["himport_registry"] is pool.himport_registry
+    assert "shared" in pool.himport_registry
+
+
+@pytest.mark.onlynoncluster
+def test_himport_prepare_set_survives_reconnect(deployed_sentinel):
+    """Runtime ``himport_prepare`` on a reused ``master_for`` client survives a
+    connection drop (the Sentinel-failover analog): the per-connection PREPARE is
+    reset on reconnect and re-applied lazily on the next ``himport_set`` against the
+    re-pointed pool. Requires a deployed Sentinel and Redis >= 8.9.0."""
+    master = deployed_sentinel.master_for("redis-py-test", db=0)
+    try:
+        master.himport_prepare("users", ["name", "email"])
+        master.delete("himport:sentinel:1")
+        master.himport_set("himport:sentinel:1", "users", ["alice", "a@x.com"])
+    except exceptions.ResponseError as exc:
+        if "unknown command" in str(exc).lower() or "no such fieldset" in str(exc):
+            pytest.skip("server does not support HIMPORT")
+        raise
+    assert master.hget("himport:sentinel:1", "name") == "alice"
+    # Drop the pooled connection to simulate the failover reconnect, then reuse the
+    # same client: the fieldset is re-prepared lazily on the next himport_set.
+    for conn in list(master.connection_pool._available_connections):
+        conn.disconnect()
+    master.delete("himport:sentinel:2")
+    master.himport_set("himport:sentinel:2", "users", ["bob", "b@x.com"])
+    assert master.hget("himport:sentinel:2", "email") == "b@x.com"

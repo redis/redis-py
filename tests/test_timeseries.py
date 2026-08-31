@@ -4,6 +4,7 @@ from time import sleep
 
 import pytest
 import redis
+from redis.commands.timeseries.commands import TimeSeriesCommands
 
 from .conftest import (
     _get_client,
@@ -686,6 +687,124 @@ def test_mrange(client):
         assert {"Test": "This", "team": "ny"} == res["1"][0]
 
 
+def _mrange_returned_keys(client, res):
+    """Return the set of series key names in a TS.MRANGE/MREVRANGE reply,
+    normalizing the RESP2 (list of single-key dicts) and RESP3/unified
+    (dict keyed by name) shapes."""
+    if expects_resp2_shape(client):
+        return {next(iter(entry)) for entry in res}
+    return set(res.keys())
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_mrange_exclude_empty(client):
+    client.ts().create("s", labels={"sensor": "1", "type": "demo"})
+    client.ts().create("t", labels={"sensor": "1", "type": "demo"})
+    client.ts().create("u", labels={"sensor": "1", "type": "demo"})
+    client.ts().madd(
+        [
+            ("s", 100, 100),
+            ("t", 100, 100),
+            ("s", 200, 200),
+            ("t", 300, 300),
+            ("s", 400, 400),
+            ("t", 400, 400),
+            ("u", 2000, 2000),
+        ]
+    )
+
+    # Without EXCLUDEEMPTY, "u" matches the filter but has no samples in range.
+    res = client.ts().mrange("-", 500, filters=["sensor=1"])
+    assert {"s", "t", "u"} == _mrange_returned_keys(client, res)
+
+    # With EXCLUDEEMPTY, "u" is omitted from the top-level reply.
+    res = client.ts().mrange("-", 500, filters=["sensor=1"], exclude_empty=True)
+    assert {"s", "t"} == _mrange_returned_keys(client, res)
+
+    # Composing with WITHLABELS should not change the exclusion behavior.
+    res = client.ts().mrange(
+        "-", 500, filters=["sensor=1"], with_labels=True, exclude_empty=True
+    )
+    assert {"s", "t"} == _mrange_returned_keys(client, res)
+
+    # Composing with AGGREGATION should still omit the empty series.
+    res = client.ts().mrange(
+        "-",
+        500,
+        filters=["sensor=1"],
+        aggregation_type="min",
+        bucket_size_msec=100,
+        exclude_empty=True,
+    )
+    assert {"s", "t"} == _mrange_returned_keys(client, res)
+
+    # When every matching series is empty, no series is reported (an empty
+    # top-level reply; shape is [] in RESP2 and {} in RESP3).
+    res = client.ts().mrange(1, 50, filters=["sensor=1"], exclude_empty=True)
+    assert 0 == len(res)
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
+def test_mrevrange_exclude_empty(client):
+    client.ts().create("s", labels={"sensor": "1", "type": "demo"})
+    client.ts().create("t", labels={"sensor": "1", "type": "demo"})
+    client.ts().create("u", labels={"sensor": "1", "type": "demo"})
+    client.ts().madd(
+        [
+            ("s", 100, 100),
+            ("t", 100, 100),
+            ("s", 200, 200),
+            ("t", 300, 300),
+            ("s", 400, 400),
+            ("t", 400, 400),
+            ("u", 2000, 2000),
+        ]
+    )
+
+    res = client.ts().mrevrange("-", 500, filters=["sensor=1"])
+    assert {"s", "t", "u"} == _mrange_returned_keys(client, res)
+
+    res = client.ts().mrevrange("-", 500, filters=["sensor=1"], exclude_empty=True)
+    assert {"s", "t"} == _mrange_returned_keys(client, res)
+
+    # All matching series empty -> empty top-level reply ([] in RESP2, {} in RESP3).
+    res = client.ts().mrevrange(1, 50, filters=["sensor=1"], exclude_empty=True)
+    assert 0 == len(res)
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+def test_mrange_exclude_empty_with_groupby_raises(client):
+    # EXCLUDEEMPTY is mutually exclusive with GROUPBY. This is validated
+    # client-side, so it does not require server support.
+    with pytest.raises(
+        redis.DataError, match="EXCLUDEEMPTY is not allowed with GROUPBY"
+    ):
+        client.ts().mrange(
+            "-",
+            500,
+            filters=["sensor=1"],
+            groupby="type",
+            reduce="max",
+            exclude_empty=True,
+        )
+    with pytest.raises(
+        redis.DataError, match="EXCLUDEEMPTY is not allowed with GROUPBY"
+    ):
+        client.ts().mrevrange(
+            "-",
+            500,
+            filters=["sensor=1"],
+            groupby="type",
+            reduce="max",
+            exclude_empty=True,
+        )
+
+
 @pytest.mark.onlynoncluster
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.10.0", "timeseries")
@@ -1153,6 +1272,97 @@ def test_query_index(client):
     assert 2 == len(client.ts().queryindex(["Test=This"]))
     assert 1 == len(client.ts().queryindex(["Taste=That"]))
     assert_resp_response(client, client.ts().queryindex(["Taste=That"]), [2], ["2"])
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("8.9.0")
+def test_query_labels(client):
+    client.ts().create(
+        1, labels={"type": "sensor", "location": "LivingRoom", "sensortype": "temp"}
+    )
+    client.ts().create(
+        2, labels={"type": "sensor", "location": "Kitchen", "sensortype": "temp"}
+    )
+    client.ts().create(3, labels={"type": "gauge", "location": "BedRoom"})
+
+    # LABELS mode with a filter returns the union of label names across the
+    # matching series, including the label used in the filter itself.
+    labels = client.ts().querylabels(filters=["type=sensor"])
+    assert isinstance(labels, set)
+    assert sorted(labels) == ["location", "sensortype", "type"]
+
+    # Omitting the filter queries all indexed series.
+    assert sorted(client.ts().querylabels()) == [
+        "location",
+        "sensortype",
+        "type",
+    ]
+
+    # A filter that matches nothing is a normal empty reply, not an error.
+    assert client.ts().querylabels(filters=["type=missing"]) == set()
+
+    # `filters` accepts any iterable, not just a list (a tuple and a single-pass
+    # generator both work).
+    assert sorted(client.ts().querylabels(filters=("type=sensor",))) == [
+        "location",
+        "sensortype",
+        "type",
+    ]
+    assert sorted(client.ts().querylabels(filters=(f for f in ["type=sensor"]))) == [
+        "location",
+        "sensortype",
+        "type",
+    ]
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("8.9.0")
+def test_query_label_values(client):
+    client.ts().create(1, labels={"type": "sensor", "location": "LivingRoom"})
+    client.ts().create(2, labels={"type": "sensor", "location": "Kitchen"})
+    client.ts().create(3, labels={"type": "gauge", "location": "BedRoom"})
+
+    # VALUES mode returns the deduplicated union of a label's values.
+    values = client.ts().querylabels("location", filters=["type=sensor"])
+    assert isinstance(values, set)
+    assert sorted(values) == ["Kitchen", "LivingRoom"]
+
+    # Omitting the filter collects values across all indexed series.
+    assert sorted(client.ts().querylabels("location")) == [
+        "BedRoom",
+        "Kitchen",
+        "LivingRoom",
+    ]
+
+    # A label carried by no matching series yields an empty reply.
+    assert client.ts().querylabels("nonexistent", filters=["type=sensor"]) == set()
+
+    # Values are byte-exact strings and are never coerced to numbers.
+    client.ts().create(4, labels={"type": "sensor", "code": "123"})
+    assert client.ts().querylabels("code", filters=["type=sensor"]) == {"123"}
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("8.9.0")
+def test_query_labels_empty_filters_raises(client):
+    # An explicitly empty filter collection is a local usage error; pass None
+    # (omit the argument) to query all indexed series instead.
+    with pytest.raises(redis.DataError):
+        client.ts().querylabels(filters=[])
+    with pytest.raises(redis.DataError):
+        client.ts().querylabels("location", filters=[])
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("8.9.0")
+def test_query_labels_server_errors(client):
+    # Server-side filter parsing errors surface unchanged as ResponseError.
+    with pytest.raises(redis.ResponseError):
+        client.ts().querylabels("location", filters=["badexpr"])
 
 
 @pytest.mark.redismod
@@ -1810,6 +2020,31 @@ def test_nrange_aggregation_one_per_key(client):
 
 @pytest.mark.redismod
 @skip_if_server_version_lt("8.9.0")
+def test_nrange_multiple_aggregators_per_key_layout(client):
+    # A per-key spec may list several aggregators. That key then contributes one
+    # value per aggregator (in spec order), and each row's value array is the
+    # per-key blocks concatenated in key order: here [a_avg, a_max, b_sum].
+    # key a: bucket [0,10) avg=2 max=3; bucket [10,20) avg=15 max=20
+    for ts, val in [(0, 1.0), (5, 3.0), (10, 10.0), (15, 20.0)]:
+        client.ts().add("{s}:a", ts, val)
+    # key b: bucket [0,10) sum=10; bucket [10,20) sum=7
+    for ts, val in [(0, 5.0), (5, 5.0), (10, 7.0)]:
+        client.ts().add("{s}:b", ts, val)
+
+    res = client.ts().nrange(
+        ["{s}:a", "{s}:b"],
+        from_time=0,
+        to_time=20,
+        aggregators=["avg,max", "sum"],
+        bucket_size_msec=10,
+    )
+    _assert_nrange_rows(res, [[0, [2.0, 3.0, 10.0]], [10, [15.0, 20.0, 7.0]]])
+    # 2 columns for key a (avg, max) + 1 for key b (sum).
+    assert all(len(row[1]) == 3 for row in res)
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
 def test_nrange_count_limits_rows(client):
     for ts in range(5):
         client.ts().add("{s}:a", ts, ts)
@@ -1825,29 +2060,29 @@ def test_nrange_empty_result(client):
 
 @pytest.mark.redismod
 @skip_if_server_version_lt("8.9.0")
-def test_nrange_single_aggregator_applies_to_all_keys(client):
-    for ts, val in [(0, 1.0), (1, 2.0), (10, 3.0), (11, 4.0)]:
-        client.ts().add("{s}:a", ts, val)
-    for ts, val in [(0, 5.0), (1, 6.0), (10, 7.0), (11, 8.0)]:
-        client.ts().add("{s}:b", ts, val)
-
-    # A single aggregator string is expanded to one token per key; here
-    # "max" is applied to both series.
-    res = client.ts().nrange(
-        ["{s}:a", "{s}:b"],
-        from_time=0,
-        to_time=20,
-        aggregators="max",
-        bucket_size_msec=10,
-    )
-    _assert_nrange_rows(res, [[0, [2.0, 6.0]], [10, [4.0, 8.0]]])
+def test_nrange_single_aggregator_multi_key_raises(client):
+    # A single aggregator is NOT broadcast across keys (RedisTimeSeries PR
+    # #2079): with more than one key, each needs its own spec token. Raised
+    # client-side before any server round trip.
+    with pytest.raises(
+        redis.exceptions.DataError, match="one aggregation spec per key"
+    ):
+        client.ts().nrange(
+            ["{s}:a", "{s}:b"],
+            from_time=0,
+            to_time=20,
+            aggregators="max",
+            bucket_size_msec=10,
+        )
 
 
 @pytest.mark.redismod
 @skip_if_server_version_lt("8.9.0")
 def test_nrange_aggregator_count_mismatch_raises(client):
-    # An aggregator list whose length differs from the key count is invalid.
-    with pytest.raises(redis.exceptions.DataError, match="one aggregator per key"):
+    # A spec list whose length differs from the key count is invalid.
+    with pytest.raises(
+        redis.exceptions.DataError, match="one aggregation spec per key"
+    ):
         client.ts().nrange(
             ["{s}:a", "{s}:b"],
             from_time=0,
@@ -1855,6 +2090,22 @@ def test_nrange_aggregator_count_mismatch_raises(client):
             aggregators=["min"],
             bucket_size_msec=10,
         )
+
+
+def test_nrange_aggregation_builds_one_spec_token_per_key():
+    # Server-free: each per-key spec is its own token and may hold multiple
+    # comma-separated aggregators -> AGGREGATION avg,max sum 1000 for two keys
+    # (RedisTimeSeries PR #2079; no broadcast, no single comma-joined token).
+    params = []
+    TimeSeriesCommands._append_n_aggregation(params, ["avg,max", "sum"], 1000, 2)
+    assert params == ["AGGREGATION", "avg,max", "sum", 1000]
+
+
+def test_nrange_aggregation_single_key_single_spec():
+    # Server-free: a bare string is the single-key spec (may be comma-joined).
+    params = []
+    TimeSeriesCommands._append_n_aggregation(params, "avg,max", 1000, 1)
+    assert params == ["AGGREGATION", "avg,max", 1000]
 
 
 @pytest.mark.redismod

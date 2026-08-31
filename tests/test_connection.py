@@ -1,4 +1,5 @@
 import copy
+import gc
 import os
 import platform
 import select
@@ -8,6 +9,7 @@ import ssl
 import threading
 import time
 import types
+import weakref
 from errno import ECONNREFUSED, EWOULDBLOCK
 from typing import Any
 from unittest import mock
@@ -22,12 +24,14 @@ from redis._parsers.socket import SocketBuffer
 from redis.backoff import NoBackoff
 from redis.cache import (
     CacheConfig,
+    CacheConfigurationInterface,
     CacheEntry,
     CacheEntryStatus,
     CacheInterface,
     CacheKey,
     CacheProxy,
     DefaultCache,
+    EvictionPolicy,
     LRUPolicy,
 )
 from redis.connection import (
@@ -38,6 +42,7 @@ from redis.connection import (
     parse_url,
     BlockingConnectionPool,
 )
+from redis.commands.metadata import DynamicMetadataResolver
 from redis.credentials import UsernamePasswordCredentialProvider
 from redis.event import (
     EventDispatcher,
@@ -51,7 +56,7 @@ from redis.observability.attributes import (
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE, SENTINEL
 
-from .conftest import skip_if_server_version_lt
+from .conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 from .mocks import MockSocket
 
 
@@ -574,6 +579,96 @@ class TestConnection:
         mock_sock.close.assert_called_once()
         assert conn._sock is None
 
+    def test_connect_breaks_exception_reference_cycle(self):
+        """
+        On connection failure, _connect must not leave its frame retaining the
+        raised exception.
+        The exception's traceback references the frame, so a retained local
+        would form a cycle only reclaimable by the GC.
+        The finally clause in _connect breaks it by clearing the local.
+
+        The exception escapes to the caller here, so it cannot be asserted
+        dead; the frame is what has to be checked. See the sibling test for
+        the reclamation property, which does not depend on the local's name.
+        """
+        conn = Connection(host="localhost", port=6379)
+        addr_info = (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 6379))
+        with (
+            patch.object(socket, "getaddrinfo", return_value=[addr_info]),
+            patch.object(socket, "socket") as socket_factory,
+        ):
+            socket_factory.return_value.connect.side_effect = OSError("refused")
+            with pytest.raises(OSError) as exc_info:
+                conn._connect()
+
+        # Locate the _connect frame in the propagated traceback and confirm its
+        # err local was cleared, proving no exception<->frame cycle survives.
+        connect_frame = None
+        tb = exc_info.value.__traceback__
+        while tb is not None:
+            if tb.tb_frame.f_code.co_name == "_connect":
+                connect_frame = tb.tb_frame
+            tb = tb.tb_next
+        assert connect_frame is not None
+        # `is None` alone also holds when no such local exists, so assert the
+        # name is present before asserting its value.
+        assert "err" in connect_frame.f_locals
+        assert connect_frame.f_locals["err"] is None
+
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Immediate reclamation is a refcounting property",
+    )
+    def test_connect_breaks_reference_cycle_when_a_later_address_succeeds(self):
+        """
+        When an address fails but a later one connects, _connect must not
+        return while still holding the caught exception.
+        """
+
+        class WeakReferenceableOSError(OSError):
+            """OSError itself cannot be weak-referenced."""
+
+        conn = Connection(host="localhost", port=6379)
+        addr_infos = [
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 6379)),
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.2", 6379)),
+        ]
+
+        # Raise from a factory so the test itself never holds a strong
+        # reference; the weakref is the only handle on the failure.
+        raised_ref = []
+
+        def fail_to_connect(*args, **kwargs):
+            err = WeakReferenceableOSError("refused")
+            raised_ref.append(weakref.ref(err))
+            try:
+                raise err
+            finally:
+                # Clear this frame's local too, or the traceback keeps the
+                # exception alive here and the assertion measures the test
+                # rather than _connect.
+                err = None
+
+        failing_sock, working_sock = MagicMock(), MagicMock()
+        failing_sock.connect.side_effect = fail_to_connect
+
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            with (
+                patch.object(socket, "getaddrinfo", return_value=addr_infos),
+                patch.object(
+                    socket, "socket", side_effect=[failing_sock, working_sock]
+                ),
+            ):
+                assert conn._connect() is working_sock
+
+            (ref,) = raised_ref
+            assert ref() is None
+        finally:
+            if gc_was_enabled:
+                gc.enable()
+
     @pytest.mark.parametrize(
         "connection_kwargs",
         [
@@ -600,6 +695,9 @@ class TestConnection:
     def clear(self, conn):
         conn.retry_on_error.clear()
 
+    # Client-internal test: builds a default localhost Connection, so it cannot
+    # target a remote managed Redis Enterprise endpoint.
+    @skip_if_redis_enterprise()
     def test_retry_connect_on_timeout_error(self):
         """Test that the _connect function is retried in case of a timeout"""
         conn = Connection(retry_on_timeout=True, retry=Retry(NoBackoff(), 3))
@@ -628,6 +726,10 @@ class TestConnection:
             assert _connect.call_count == 1
             self.clear(conn)
 
+    # Client-internal test: builds a default localhost Connection and mocks the
+    # socket to count handshake retries, so it needs a co-located server rather
+    # than a remote managed Redis Enterprise endpoint.
+    @skip_if_redis_enterprise()
     def test_connect_with_retries(self):
         """
         Validate that retries occur for the entire connect+handshake flow when OSError
@@ -743,6 +845,8 @@ def test_pack_command_respects_connection_encoding(protocol):
 
 
 @pytest.mark.fixed_client
+# Hardcodes a localhost URL, so it cannot target a remote managed Redis Enterprise endpoint.
+@skip_if_redis_enterprise()
 def test_create_single_connection_client_from_url():
     client = redis.Redis.from_url(
         "redis://localhost:6379/0?", single_connection_client=True
@@ -961,6 +1065,139 @@ class TestUnitConnectionPool:
         assert isinstance(connection_pool.make_connection(), CacheProxyConnection)
         connection_pool.disconnect()
 
+    def test_injects_the_metadata_resolver_into_the_cache_config(self):
+        # The eligible set is the resolver's, not the config's: a resolver that carries
+        # nothing reports every command ineligible.
+        empty_resolver = DynamicMetadataResolver({})
+        cache_config = CacheConfig(max_size=17)
+
+        connection_pool = ConnectionPool(
+            protocol=3,
+            cache_config=cache_config,
+            metadata_resolver=empty_resolver,
+        )
+
+        assert connection_pool.metadata_resolver is empty_resolver
+        assert connection_pool.cache.config.is_allowed_to_cache("GET") is False
+        # Every other setting of the caller's config still applies.
+        assert connection_pool.cache.config.get_max_size() == 17
+        connection_pool.disconnect()
+
+    def test_does_not_write_the_resolver_into_the_callers_cache_config(self):
+        """
+        A ``CacheConfig`` carries only sizing and eviction settings, so reusing one across
+        clients is reasonable - and writing the resolver into it would give every one of them
+        whichever resolver was injected last.
+        """
+        empty_resolver = DynamicMetadataResolver({})
+        cache_config = CacheConfig()
+
+        first = ConnectionPool(protocol=3, cache_config=cache_config)
+        second = ConnectionPool(
+            protocol=3, cache_config=cache_config, metadata_resolver=empty_resolver
+        )
+
+        # The caller's object is untouched, so the pool that was given no resolver keeps
+        # deciding through the static default.
+        assert cache_config.is_allowed_to_cache("GET") is True
+        assert first.cache.config.is_allowed_to_cache("GET") is True
+        assert second.cache.config.is_allowed_to_cache("GET") is False
+        first.disconnect()
+        second.disconnect()
+
+    def test_injects_the_metadata_resolver_into_a_given_caches_config(self):
+        # ``cache=`` rather than ``cache_config=``: the configuration lives inside the cache
+        # the caller handed over and cannot be swapped without rebuilding it, so it is set in
+        # place. Both styles end up on the same decision point.
+        empty_resolver = DynamicMetadataResolver({})
+        cache = DefaultCache(CacheConfig())
+
+        connection_pool = ConnectionPool(
+            protocol=3, cache=cache, metadata_resolver=empty_resolver
+        )
+
+        assert cache.config.is_allowed_to_cache("GET") is False
+        connection_pool.disconnect()
+
+    def test_injects_the_metadata_resolver_into_a_cache_factorys_config(
+        self, mock_cache_factory
+    ):
+        empty_resolver = DynamicMetadataResolver({})
+        mock_cache_factory.get_cache.return_value = DefaultCache(CacheConfig())
+
+        connection_pool = ConnectionPool(
+            protocol=3,
+            cache_config=CacheConfig(),
+            cache_factory=mock_cache_factory,
+            metadata_resolver=empty_resolver,
+        )
+
+        assert connection_pool.cache.config.is_allowed_to_cache("GET") is False
+        connection_pool.disconnect()
+
+    def test_leaves_a_custom_cache_configuration_alone(self):
+        """
+        ``CacheConfigurationInterface`` is public and implemented by third parties, so the
+        injection is isinstance-guarded and a custom configuration keeps its own eligibility
+        logic.
+
+        The double implements the ABC without subclassing ``CacheConfig``, which is what makes
+        the guard observable: a ``CacheConfig`` subclass satisfies the isinstance check, so it
+        would be copied and injected into and prove nothing.
+        """
+
+        class _AllowEverything(CacheConfigurationInterface):
+            def get_cache_class(self):
+                return DefaultCache
+
+            def get_max_size(self) -> int:
+                return 10
+
+            def get_eviction_policy(self):
+                return EvictionPolicy.LRU
+
+            def is_exceeds_max_size(self, count: int) -> bool:
+                return count > self.get_max_size()
+
+            def is_allowed_to_cache(self, command: str) -> bool:
+                return True
+
+        cache_config = _AllowEverything()
+        connection_pool = ConnectionPool(
+            protocol=3,
+            cache_config=cache_config,
+            metadata_resolver=DynamicMetadataResolver({}),
+        )
+
+        # Not copied, so the object the cache decides through is the caller's own...
+        assert connection_pool.cache.config is cache_config
+        # ...and not injected into, so it still answers from its own logic rather than from
+        # the resolver, which carries no records and would report everything ineligible.
+        assert connection_pool.cache.config.is_allowed_to_cache("SET") is True
+        assert cache_config.is_allowed_to_cache("SET") is True
+        connection_pool.disconnect()
+
+    def test_cache_config_is_functional_without_an_injected_resolver(self):
+        # No client configured one, so the config decides through the static metadata this
+        # library ships - which is what keeps a standalone ``CacheConfig()`` usable.
+        connection_pool = ConnectionPool(protocol=3, cache_config=CacheConfig())
+
+        assert connection_pool.metadata_resolver is None
+        assert connection_pool.cache.config.is_allowed_to_cache("GET") is True
+        assert connection_pool.cache.config.is_allowed_to_cache("SET") is False
+        connection_pool.disconnect()
+
+    def test_redis_forwards_the_metadata_resolver_to_the_pool(self):
+        empty_resolver = DynamicMetadataResolver({})
+
+        client = Redis(
+            protocol=3, cache_config=CacheConfig(), metadata_resolver=empty_resolver
+        )
+
+        assert client.connection_pool.metadata_resolver is empty_resolver
+        assert client.connection_pool.cache.config.is_allowed_to_cache("GET") is False
+        client.close()
+
 
 @pytest.mark.fixed_client
 class TestUnitCacheProxyConnection:
@@ -994,6 +1231,79 @@ class TestUnitCacheProxyConnection:
         proxy_connection.disconnect()
 
         assert len(cache.collection) == 0
+
+    def test_cacheable_command_without_keys_bypasses_the_cache(
+        self, mock_cache, mock_connection
+    ):
+        """
+        Eligibility and keyability are separate: a cacheable command whose invocation carries
+        no key list must be sent normally, with caching skipped.
+
+        Regression for ``ValueError: Cannot create cache key.``, which every eligible command
+        method that does not pass ``keys=`` used to raise - ZRANK among them. The reply must
+        be the server's, and nothing may be stored under a key the client cannot build.
+        """
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection._event_dispatcher = EventDispatcher()
+
+        mock_connection.read_response.return_value = 0
+        mock_connection.can_read.return_value = False
+
+        # A real cache holding a VALID entry for a previous command, so that failing to clear
+        # the current cache key would serve that entry as this command's reply.
+        cache = DefaultCache(CacheConfig(max_size=10))
+        stale_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache.set(
+            CacheEntry(
+                cache_key=stale_key,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+        proxy_connection._current_command_cache_key = stale_key
+
+        proxy_connection.send_command("ZRANK", "foo", "bar")
+
+        # Sent, once, exactly as given.
+        mock_connection.send_command.assert_called_once_with("ZRANK", "foo", "bar")
+        # The previous command's key is cleared, so nothing can be served under it...
+        assert proxy_connection._current_command_cache_key is None
+        # ...the reply the caller receives is the server's, not the cached b"bar"...
+        assert proxy_connection.read_response() == 0
+        # ...and nothing new was stored, because there is no key to store it under.
+        assert cache.size == 1
+        assert cache.get(stale_key).cache_value == b"bar"
+
+    def test_himport_prepared_is_reassignable_through_proxy(self):
+        # Regression: `_himport_prepared` must have a setter that delegates to the
+        # wrapped connection, mirroring `_himport_reconciled_revision`. A getter-only
+        # property would make `conn._himport_prepared = {}` (as `_reset_himport_state`
+        # does) raise AttributeError -- but only when client-side caching is enabled.
+        # Exercise the property descriptors directly, no full construction needed.
+        proxy = object.__new__(CacheProxyConnection)
+
+        class _Wrapped:
+            _himport_prepared = {"fs": 1}
+            _himport_reconciled_revision = 3
+
+        proxy._conn = _Wrapped()
+        assert proxy._himport_prepared == {"fs": 1}  # getter delegates
+        proxy._himport_prepared = {}  # setter delegates (was AttributeError)
+        assert proxy._conn._himport_prepared == {}
+        # symmetry with the existing reconciled-revision setter
+        proxy._himport_reconciled_revision = 7
+        assert proxy._conn._himport_reconciled_revision == 7
 
     @pytest.mark.skipif(
         platform.python_implementation() == "PyPy",
@@ -1703,3 +2013,65 @@ class TestBlockingConnectionPoolGetConnectionCount:
         assert used_count == 0
 
         pool.disconnect()
+
+
+def test_parse_url_retry_on_error_resolves_exception_names():
+    kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
+    assert kw["retry_on_error"] == [ConnectionError]
+
+
+def test_parse_url_retry_on_error_comma_separated():
+    kw = parse_url(
+        "redis://localhost:6379/?retry_on_error=ConnectionError,TimeoutError"
+    )
+    assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
+
+
+def test_parse_url_retry_on_error_bracket_list():
+    kw = parse_url(
+        "redis://localhost:6379/?retry_on_error=[ConnectionError,TimeoutError]"
+    )
+    assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
+
+
+def test_parse_url_retry_on_error_blank_entry():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?retry_on_error=,")
+    assert str(exc_info.value) == (
+        "Invalid value for 'retry_on_error' in connection URL."
+    )
+
+
+def test_parse_url_invalid_db_keeps_stable_message():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?db=not-an-int")
+    assert str(exc_info.value) == "Invalid value for 'db' in connection URL."
+
+
+def test_parse_url_retry_on_error_unknown_name():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?retry_on_error=NotARealError")
+    assert str(exc_info.value) == (
+        "Invalid value for 'retry_on_error' in connection URL."
+    )
+
+
+def test_parse_url_retry_on_error_usable_in_retry():
+    kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
+    conn = Connection(**kw)
+    assert ConnectionError in conn.retry._supported_errors
+    assert all(
+        isinstance(err, type) and issubclass(err, Exception)
+        for err in conn.retry._supported_errors
+    )
+
+    calls = 0
+
+    def do():
+        nonlocal calls
+        calls += 1
+        raise ConnectionError("simulated network drop")
+
+    with pytest.raises(ConnectionError):
+        conn.retry.call_with_retry(do=do, fail=lambda e: None)
+    assert calls == 2

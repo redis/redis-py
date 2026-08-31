@@ -127,7 +127,7 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
 
     def handle_pubsub_push_response(self, response):
         logger = getLogger("push_response")
-        logger.debug("Push response: " + str(response))
+        logger.debug("Push response: %s", response)
         return response
 
     def on_connect(self, connection, **kwargs):
@@ -282,7 +282,7 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
 
     async def handle_pubsub_push_response(self, response):
         logger = getLogger("push_response")
-        logger.debug("Push response: " + str(response))
+        logger.debug("Push response: %s", response)
         return response
 
     def on_connect(self, connection):
@@ -323,9 +323,16 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         # connection state, not only whether application data can be read.
         if not self._connected:
             raise OSError("Buffer is closed.")
-        # EOF means the connection is closed and not safe to reuse.
-        if self._reader.has_data() or self._stream.at_eof():
+        # buffered data wins over EOF, like the sync parser: a pending
+        # response or push notification must stay readable even if the
+        # server has since closed the connection.
+        if self._reader.has_data():
             return True
+        if self._stream.at_eof():
+            # Raise like the sync parser does on a server-closed connection,
+            # so callers that tolerate pending data (push notifications)
+            # can't mistake EOF for a readable connection.
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         # asyncio.StreamReader has no public non-destructive API for checking
         # buffered bytes. Preserve dirty-connection detection for hiredis; tests
         # with a real StreamReader guard this private buffer API in CI.

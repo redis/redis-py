@@ -1727,11 +1727,12 @@ class TestAsyncClusterClientCommandsExecutionWithPushNotificationsWithEffectTrig
                     except RedisConnectionError:
                         # remove/failover migrations close connections to the
                         # removed/failed-over node server-side. async can_read()
-                        # reports True on EOF (it also flags a closed/dirty
-                        # connection, not just buffered data), so the drain enters
-                        # read_response() and hits "Connection closed by server".
-                        # A closed connection has nothing left to drain — this is
-                        # expected during the migration, not an unconsumed push.
+                        # reports buffered data first, then raises on EOF (a
+                        # closed connection must not be reused), and
+                        # read_response() hits "Connection closed by server" if
+                        # the close lands mid-read. A closed connection has
+                        # nothing left to drain — this is expected during the
+                        # migration, not an unconsumed push.
                         pass
             logging.info(f"Consumed all buffers for node: {node.name}")
         logging.info("All buffers consumed.")

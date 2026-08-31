@@ -23,6 +23,7 @@ from typing import (
 from urllib.parse import parse_qs, unquote, urlparse
 
 from redis.cache import (
+    CacheConfig,
     CacheEntry,
     CacheEntryStatus,
     CacheFactory,
@@ -31,7 +32,9 @@ from redis.cache import (
     CacheKey,
     CacheProxy,
 )
+from redis.commands.metadata import MetadataResolver
 
+from . import exceptions as redis_exceptions
 from ._defaults import (
     DEFAULT_SOCKET_CONNECT_TIMEOUT,
     DEFAULT_SOCKET_READ_SIZE,
@@ -55,6 +58,7 @@ from .exceptions import (
     ResponseError,
     TimeoutError,
 )
+from .himport import HImportRegistry
 from .maint_notifications import (
     MaintenanceState,
     MaintNotificationsConfig,
@@ -847,6 +851,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         oss_cluster_maint_notifications_handler: Optional[
             OSSMaintNotificationsHandler
         ] = None,
+        himport_registry: HImportRegistry | None = None,
     ):
         """
         Initialize a new Connection.
@@ -944,6 +949,11 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
 
         self._command_packer = self._construct_command_packer(command_packer)
         self._should_reconnect = False
+
+        # HIMPORT client-side state. `himport_registry` is the shared client-level
+        # registry (empty if unconfigured) and persists across reconnects.
+        self.himport_registry = himport_registry
+        self._reset_himport_state()
 
         # Set up maintenance notifications
         MaintNotificationsAbstractConnection.__init__(
@@ -1109,11 +1119,22 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
     def _error_message(self, exception):
         return format_error_message(self._host_error(), exception)
 
+    def _reset_himport_state(self):
+        # A fresh server session has no prepared HIMPORT fieldsets, so the next
+        # himport_set must re-prepare on this connection. ``_himport_prepared`` maps
+        # fieldset name -> the version prepared on the server; ``_himport_reconciled
+        # _revision`` is the registry revision this connection last reconciled discards
+        # against. Both are reset on connect/disconnect since the session is gone.
+        self._himport_prepared: dict[str, int] = {}
+        self._himport_reconciled_revision: int = 0
+
     def on_connect(self):
         self.on_connect_check_health(check_health=True)
 
     def on_connect_check_health(self, check_health: bool = True):
         "Initialize the connection, authenticate and select a database"
+        # A fresh socket is a new server session: no prepared HIMPORT fieldsets.
+        self._reset_himport_state()
         self._parser.on_connect(self)
         parser = self._parser
 
@@ -1230,6 +1251,9 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
 
     def disconnect(self, *args, **kwargs):
         "Disconnects from the Redis server"
+        # The server session is gone, so any HIMPORT fieldsets prepared on this
+        # socket no longer exist; reset the tracking.
+        self._reset_himport_state()
         self._parser.on_disconnect()
 
         conn_sock = self._sock
@@ -1562,6 +1586,14 @@ class Connection(AbstractConnection):
         # we want to mimic what socket.create_connection does to support
         # ipv4/ipv6, but we want to set options prior to calling
         # socket.connect()
+
+        # Last caught connection error.
+        # Re-thrown if we are unable to connect to any of the options returned
+        # by getaddrinfo.
+        # Note that we must clear this variable before returning - otherwise,
+        # a caught err's traceback points to this frame, which points to err.
+        # Clearing this lets refcounting reclaim the exception immediately
+        # without deferring to the python garbage collector.
         err = None
 
         for res in socket.getaddrinfo(
@@ -1588,6 +1620,10 @@ class Connection(AbstractConnection):
 
                 # set the socket_timeout now that we're connected
                 sock.settimeout(self.socket_timeout)
+
+                # If a previous connection attempt failed, clear the error
+                err = None
+
                 return sock
 
             except OSError as _:
@@ -1600,7 +1636,11 @@ class Connection(AbstractConnection):
                     sock.close()
 
         if err is not None:
-            raise err
+            try:
+                raise err
+            finally:
+                # Ensure we clear local references to caught exceptions
+                err = None
         raise OSError("socket.getaddrinfo returned an empty list")
 
     def _host_error(self):
@@ -1728,6 +1768,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def send_packed_command(self, command, check_health=True):
         # TODO: Investigate if it's possible to unpack command
         #  or extract keys from packed command
+        # Pre-packed commands are not individually cacheable, so make sure the
+        # next read_response does not try to cache their reply under a stale key.
+        self._current_command_cache_key = None
         self._conn.send_packed_command(command)
 
     def send_command(self, *args, **kwargs):
@@ -1743,12 +1786,21 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 self._conn.send_command(*args, **kwargs)
                 return
 
-        if kwargs.get("keys") is None:
-            raise ValueError("Cannot create cache key.")
+        # Eligibility and keyability are two separate questions, and both must be answered
+        # yes before a reply may be stored. The command metadata answers the first; the
+        # presence of ``keys`` answers the second, because a command's key positions are
+        # supplied by its command method rather than derived here. A cacheable command
+        # whose invocation carries no key list is therefore a gap in what this client has
+        # been taught, not an error: send it normally and cache nothing.
+        keys = kwargs.get("keys")
+        if keys is None:
+            self._current_command_cache_key = None
+            self._conn.send_command(*args, **kwargs)
+            return
 
         # Creates cache key.
         self._current_command_cache_key = CacheKey(
-            command=args[0], redis_keys=tuple(kwargs.get("keys")), redis_args=args
+            command=args[0], redis_keys=tuple(keys), redis_args=args
         )
 
         with self._cache_lock:
@@ -1859,6 +1911,34 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
     def pack_commands(self, commands):
         return self._conn.pack_commands(commands)
+
+    # HIMPORT state lives on the wrapped connection (HIMPORT is never cacheable);
+    # delegate so callers treat the proxy like a plain connection and never need
+    # to know a proxy is in play.
+    @property
+    def himport_registry(self):
+        return self._conn.himport_registry
+
+    @property
+    def _himport_prepared(self):
+        return self._conn._himport_prepared
+
+    @_himport_prepared.setter
+    def _himport_prepared(self, value):
+        # Delegate reassignment to the wrapped connection, mirroring
+        # ``_himport_reconciled_revision``. Production code only mutates the dict
+        # in place, but ``_reset_himport_state`` (and any future caller) reassigns
+        # it, and a getter-only property here would raise ``AttributeError`` only
+        # when client-side caching is enabled -- a caching-specific latent trap.
+        self._conn._himport_prepared = value
+
+    @property
+    def _himport_reconciled_revision(self):
+        return self._conn._himport_reconciled_revision
+
+    @_himport_reconciled_revision.setter
+    def _himport_reconciled_revision(self, value):
+        self._conn._himport_reconciled_revision = value
 
     @property
     def handshake_metadata(self) -> Union[Dict[bytes, bytes], Dict[str, str]]:
@@ -2262,6 +2342,21 @@ def parse_ssl_verify_flags(value):
     return verify_flags
 
 
+def parse_retry_on_error(value):
+    # exception class names are passed as a comma-separated list,
+    # e.g. ConnectionError,TimeoutError
+    retry_on_error = []
+    for name in value.replace("[", "").replace("]", "").split(","):
+        name = name.strip()
+        if not name:
+            raise ValueError("Empty retry_on_error entry")
+        exc = getattr(redis_exceptions, name, None)
+        if not (isinstance(exc, type) and issubclass(exc, Exception)):
+            raise ValueError(f"Unknown redis exception {name!r}")
+        retry_on_error.append(exc)
+    return retry_on_error
+
+
 URL_QUERY_ARGUMENT_PARSERS = {
     "db": int,
     "socket_timeout": float,
@@ -2269,7 +2364,7 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "socket_read_size": int,
     "socket_keepalive": to_bool,
     "retry_on_timeout": to_bool,
-    "retry_on_error": list,
+    "retry_on_error": parse_retry_on_error,
     "max_connections": int,
     "health_check_interval": int,
     "ssl_check_hostname": to_bool,
@@ -2283,11 +2378,10 @@ URL_QUERY_ARGUMENT_PARSERS = {
 
 
 def parse_url(url):
-    if not (
-        url.startswith("redis://")
-        or url.startswith("rediss://")
-        or url.startswith("unix://")
-    ):
+    # Scheme names are case-insensitive (RFC 3986), so normalize before the
+    # prefix check; the "://" is required so a URL like "redis:foo" (which
+    # urlparse would still report as the "redis" scheme) is rejected.
+    if not url.lower().startswith(("redis://", "rediss://", "unix://")):
         raise ValueError(
             "Redis URL must specify one of the following "
             "schemes (redis://, rediss://, unix://)"
@@ -2298,7 +2392,10 @@ def parse_url(url):
 
     for name, value in parse_qs(url.query).items():
         if value and len(value) > 0:
-            value = unquote(value[0])
+            # parse_qs() already percent-decodes query values, so use the value
+            # as-is; unquoting again here would double-decode (e.g. "%2520" ->
+            # "%20" -> " "). See issue #4208.
+            value = value[0]
             parser = URL_QUERY_ARGUMENT_PARSERS.get(name)
             if parser:
                 try:
@@ -2863,6 +2960,14 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
     If the ``maint_notifications_config`` is not provided but the ``protocol`` is 3,
     the maintenance notifications will be enabled by default.
 
+    If ``metadata_resolver`` is provided, it decides which commands are eligible for
+    client-side caching - see `redis.commands.metadata.MetadataResolver`. It is handed to the
+    cache configuration, so one resolver can serve cache eligibility and cluster routing
+    alike. Defaults to the static command metadata this library ships, which the cache
+    configuration resolves through on its own. A resolver built from a live ``COMMAND`` reply
+    is a snapshot of the server it was read from, so give each pool its own rather than
+    sharing one across pools on different servers.
+
     Any additional keyword arguments are passed to the constructor of
     ``connection_class``.
     """
@@ -2886,9 +2991,10 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
           <https://www.iana.org/assignments/uri-schemes/prov/rediss>
         - ``unix://``: creates a Unix Domain Socket connection.
 
-        The username, password, hostname, path and all querystring values
-        are passed through urllib.parse.unquote in order to replace any
-        percent-encoded values with their corresponding characters.
+        The username, password, hostname and path are passed through
+        urllib.parse.unquote in order to replace any percent-encoded values
+        with their corresponding characters. Querystring values are decoded
+        by urllib.parse.parse_qs and are not unquoted again.
 
         There are several ways to specify a database number. The first value
         found will be used:
@@ -2922,6 +3028,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         max_connections: Optional[int] = None,
         cache_factory: Optional[CacheFactoryInterface] = None,
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+        metadata_resolver: Optional[MetadataResolver] = None,
         **connection_kwargs,
     ):
         max_connections = max_connections or 100
@@ -2933,6 +3040,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         self.max_connections = max_connections
         self.cache = None
         self._cache_factory = cache_factory
+        self.metadata_resolver = metadata_resolver
 
         try:
             supports_maint_notifications = issubclass(
@@ -2965,6 +3073,35 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 raise RedisError("Client caching is only supported with RESP version 3")
 
             cache = self._connection_kwargs.get("cache")
+            cache_config = self._connection_kwargs.get("cache_config")
+
+            # Hand the client-level metadata resolver to the cache configuration, which is
+            # where command eligibility is decided, so routing and caching read the same
+            # records. Skipped when no resolver was configured, which leaves ``CacheConfig``
+            # on the static default it builds for itself.
+            #
+            # Done on a copy rather than on the caller's object: a ``CacheConfig`` carries
+            # only sizing and eviction settings, so reusing one across clients is reasonable,
+            # and writing the resolver into it would give every one of them whichever
+            # resolver was injected last. Every other setting is read-only after
+            # construction, so the copy diverges from the caller's object in nothing but the
+            # resolver - and a later ``set_metadata_resolver`` on the original does not reach
+            # this pool, which is the intended direction: a pool decides eligibility by the
+            # resolver its client was built with. Note that the ``cache=`` /
+            # ``cache_factory=`` path below cannot copy, and so does write into the caller's
+            # configuration; ``CacheConfig.set_metadata_resolver`` documents the difference.
+            #
+            # Guarded by ``isinstance`` rather than done through
+            # ``CacheConfigurationInterface``: that ABC is public and implemented by third
+            # parties, so a custom configuration keeps its own eligibility logic.
+            if (
+                metadata_resolver is not None
+                and cache is None
+                and self._cache_factory is None
+                and isinstance(cache_config, CacheConfig)
+            ):
+                cache_config = copy.copy(cache_config)
+                cache_config.set_metadata_resolver(metadata_resolver)
 
             if cache is not None:
                 if not isinstance(cache, CacheInterface):
@@ -2975,9 +3112,23 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 if self._cache_factory is not None:
                     self.cache = CacheProxy(self._cache_factory.get_cache())
                 else:
-                    self.cache = CacheFactory(
-                        self._connection_kwargs.get("cache_config")
-                    ).get_cache()
+                    self.cache = CacheFactory(cache_config).get_cache()
+
+            # A caller who supplied a whole cache - ``cache=`` or ``cache_factory=`` - owns
+            # the configuration inside it, and it cannot be swapped without rebuilding the
+            # cache, so the resolver is set on it in place. This is the one path that writes
+            # into the caller's configuration rather than into a copy of it, because a cache
+            # reads its configuration on every lookup and ``CacheInterface`` exposes no way to
+            # hand it a different one. Sharing one cache object across clients already shares
+            # its entries, which couples them far more tightly than its eligibility does, so
+            # the asymmetry with the ``cache_config=`` copy above is documented on
+            # ``CacheConfig.set_metadata_resolver`` rather than removed.
+            if metadata_resolver is not None and (
+                cache is not None or self._cache_factory is not None
+            ):
+                own_config = self.cache.config
+                if isinstance(own_config, CacheConfig):
+                    own_config.set_metadata_resolver(metadata_resolver)
 
             init_csc_items()
             register_csc_items_callback(
@@ -2987,6 +3138,19 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
         connection_kwargs.pop("cache", None)
         connection_kwargs.pop("cache_config", None)
+
+        # Resolve the HIMPORT registry. A pre-built ``himport_registry`` (shared, e.g.
+        # from the cluster client) takes precedence; otherwise build a fresh empty one.
+        # A registry always exists so runtime ``himport_prepare`` mutates a single object
+        # every connection already shares. The object stays in ``connection_kwargs`` so
+        # it reaches every connection. It is injected unconditionally (like other
+        # auto-added pool kwargs), so a custom ``connection_class`` must accept
+        # ``**kwargs`` (or a ``himport_registry`` parameter), as built-ins do.
+        himport_registry = connection_kwargs.get("himport_registry")
+        if himport_registry is None:
+            himport_registry = HImportRegistry()
+            connection_kwargs["himport_registry"] = himport_registry
+        self.himport_registry = himport_registry
 
         # a lock to protect the critical section in _checkpid().
         # this lock is acquired when the process id changes, such as
@@ -3023,11 +3187,15 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         }
     )
 
+    # Internal plumbing kwargs omitted from __repr__ (not user-facing config).
+    OMIT_REPR_KEYS = frozenset({"himport_registry"})
+
     def __repr__(self) -> str:
         conn_kwargs = ",".join(
             [
                 f"{k}={'<REDACTED>' if k in self.SENSITIVE_REPR_KEYS else v}"
                 for k, v in self.connection_kwargs.items()
+                if k not in self.OMIT_REPR_KEYS
             ]
         )
         return (
@@ -3308,10 +3476,14 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             else:
                 # Pool doesn't own this connection, do not add it back
                 # to the pool.
-                # The created connections count should not be changed,
-                # because the connection was not created by the pool.
                 # Still need to decrement USED since it was counted in get_connection()
                 connection.disconnect()
+                # Subclasses such as SentinelConnectionPool can override
+                # owns_connection() with a comparison different from local PID
+                # ownership. When such a subclass rejects a connection, also require
+                # connection.pid == self.pid before reclaiming its slot.
+                if connection.pid == self.pid:
+                    self._created_connections -= 1
                 record_connection_count(
                     pool_name="unknown_pool",
                     connection_state=ConnectionState.USED,

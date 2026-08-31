@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Callable, TypeVar
 from unittest import mock
 from unittest.mock import Mock
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import pytest
 import redis
@@ -182,6 +182,50 @@ def pytest_addoption(parser):
         default=None,
         help="Name of the Redis endpoint with OSS API the tests should be executed on",
     )
+
+
+def _redis_url_from_endpoints_config():
+    """Build a connection URL for a Redis Enterprise database.
+
+    Reads the database named by ``RE_DB_NAME`` (default ``standalone``) from the
+    endpoints config at ``REDIS_ENDPOINTS_CONFIG_PATH`` and returns a redis URL
+    carrying the resolved host, port, credentials and (for ``rediss``) TLS. This
+    is the same endpoints-config shape consumed by ``tests/test_scenario``.
+    """
+    db_name = os.getenv("RE_DB_NAME", "standalone")
+    config_path = os.getenv("REDIS_ENDPOINTS_CONFIG_PATH")
+    if not (config_path and os.path.exists(config_path)):
+        raise FileNotFoundError(f"Endpoints config file not found: {config_path}")
+
+    with open(config_path, "r") as f:
+        data = json.load(f)
+    db = data[db_name]
+
+    parsed = urlparse(db["endpoints"][0])
+    scheme = parsed.scheme or "redis"
+    host = parsed.hostname
+    port = parsed.port or 6379
+    username = db.get("username") or ""
+    password = db.get("password")
+
+    userinfo = ""
+    if password is not None:
+        userinfo = f"{quote(username, safe='')}:{quote(password, safe='')}@"
+
+    url = f"{scheme}://{userinfo}{host}:{port}"
+    if scheme == "rediss":
+        url += "?ssl_cert_reqs=none&ssl_check_hostname=false"
+    return url
+
+
+def pytest_configure(config):
+    # When RE_CLUSTER is set, point the suite at the managed Redis Enterprise
+    # database resolved from the endpoints config instead of localhost. When the
+    # variable is unset, behaviour is unchanged (localhost:6379, no auth).
+    if os.getenv("RE_CLUSTER", "").lower() == "true":
+        re_url = _redis_url_from_endpoints_config()
+        config.option.redis_url = re_url
+        config.option.redis_mod_url = re_url
 
 
 def _get_info(redis_url):
