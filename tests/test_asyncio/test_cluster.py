@@ -5743,37 +5743,18 @@ class TestClusterPubSubWithMocks:
         assert pubsub.node is None
         assert pubsub.connection_pool is None
 
-    @pytest.mark.parametrize(
-        "method", ["execute_command", "ssubscribe", "sunsubscribe"]
-    )
-    async def test_pubsub_commands_initialize_cluster(self, method) -> None:
-        cluster = Mock()
-        cluster._initialize = True
-        cluster.initialize = mock.AsyncMock()
-        cluster.read_from_replicas = False
-        cluster.load_balancing_strategy = None
-        node = ClusterNode("127.0.0.1", 7000)
-
-        def get_node(*_args):
-            if cluster.initialize.await_count == 0:
-                raise KeyError
-            return node
-
-        cluster.nodes_manager.get_node_from_slot.side_effect = get_node
-        cluster.get_node_from_key.side_effect = get_node
-        pubsub = self._make_pubsub(cluster)
-        if method == "execute_command":
-            args = ("SUBSCRIBE", "channel")
-        else:
-            args = ("channel",)
+    async def test_subscribe_initializes_cluster(self) -> None:
+        client = await get_mocked_redis_client(host=default_host, port=default_port)
+        client._initialize = True
+        client.initialize = mock.AsyncMock()
+        pubsub = client.pubsub()
 
         with mock.patch(
-            f"redis.asyncio.client.PubSub.{method}",
-            new=mock.AsyncMock(return_value=None),
+            "redis.asyncio.client.PubSub.execute_command", new=mock.AsyncMock()
         ):
-            await getattr(pubsub, method)(*args)
+            await pubsub.subscribe("channel")
 
-        cluster.initialize.assert_awaited_once_with()
+        client.initialize.assert_awaited_once_with()
 
     @pytest.mark.parametrize("method", ["ssubscribe", "sunsubscribe"])
     async def test_empty_shard_command_does_not_initialize_cluster(

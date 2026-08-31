@@ -2047,6 +2047,7 @@ class TestClusterPubSubSlotMigration:
         pubsub.ignore_subscribe_messages = False
         # ClusterPubSub-specific state.
         pubsub.cluster = MagicMock()
+        pubsub.cluster._initialize = False
         pubsub.node_pubsub_mapping = {}
         pubsub._shard_channel_to_node = {}
         pubsub._shard_state_lock = asyncio.Lock()

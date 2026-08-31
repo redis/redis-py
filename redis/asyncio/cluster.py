@@ -3799,6 +3799,10 @@ class ClusterPubSub(PubSub):
             AsyncAfterSlotsCacheRefreshEvent,
         )
 
+    async def _ensure_cluster_initialized(self) -> None:
+        if self.cluster._initialize:
+            await self.cluster.initialize()
+
     def set_pubsub_node(
         self,
         cluster: "RedisCluster",
@@ -3984,8 +3988,7 @@ class ClusterPubSub(PubSub):
 
         if not s_channels:
             return
-        if self.cluster._initialize:
-            await self.cluster.initialize()
+        await self._ensure_cluster_initialized()
 
         # Serialize against reinitialize_shard_subscriptions (background
         # task) so the reverse index, shard_channels, and node_pubsub_mapping
@@ -4036,8 +4039,7 @@ class ClusterPubSub(PubSub):
 
         if not args:
             return
-        if self.cluster._initialize:
-            await self.cluster.initialize()
+        await self._ensure_cluster_initialized()
 
         # Serialize against reinitialize_shard_subscriptions: the reverse
         # index and node_pubsub_mapping must not change between the lookup
@@ -4310,8 +4312,7 @@ class ClusterPubSub(PubSub):
         # legitimate message off the stack if the connection is already
         # subscribed to one or more channels
 
-        if self.cluster._initialize:
-            await self.cluster.initialize()
+        await self._ensure_cluster_initialized()
 
         # For shard commands, route to appropriate node
         command = args[0].upper() if args else ""
