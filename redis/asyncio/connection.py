@@ -60,6 +60,7 @@ if sys.version_info >= (3, 11, 3):
 else:
     from async_timeout import timeout as async_timeout
 
+from redis import exceptions as redis_exceptions
 from redis.asyncio.maint_notifications import (
     AsyncMaintNotificationsConnectionHandler,
     AsyncMaintNotificationsPoolHandler,
@@ -591,7 +592,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         socket_timeout: float | None = DEFAULT_SOCKET_TIMEOUT,
         socket_connect_timeout: float | None = DEFAULT_SOCKET_CONNECT_TIMEOUT,
         retry_on_timeout: bool = False,
-        retry_on_error: list | object = SENTINEL,
+        retry_on_error: Iterable[Type[Exception]] | object = SENTINEL,
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
         decode_responses: bool = False,
@@ -665,6 +666,9 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         self.retry_on_timeout = retry_on_timeout
         if retry_on_error is SENTINEL:
             retry_on_error = []
+        else:
+            # Copy so we never mutate the caller-supplied list (parity with sync).
+            retry_on_error = list(retry_on_error)
         if retry_on_timeout:
             retry_on_error.append(TimeoutError)
             retry_on_error.append(socket.timeout)
@@ -1746,6 +1750,21 @@ def parse_ssl_verify_flags(value):
     return verify_flags
 
 
+def parse_retry_on_error(value):
+    # exception class names are passed as a comma-separated list,
+    # e.g. ConnectionError,TimeoutError
+    retry_on_error = []
+    for name in value.replace("[", "").replace("]", "").split(","):
+        name = name.strip()
+        if not name:
+            raise ValueError("Empty retry_on_error entry")
+        exc = getattr(redis_exceptions, name, None)
+        if not (isinstance(exc, type) and issubclass(exc, Exception)):
+            raise ValueError(f"Unknown redis exception {name!r}")
+        retry_on_error.append(exc)
+    return retry_on_error
+
+
 URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyType(
     {
         "db": int,
@@ -1754,6 +1773,7 @@ URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyTy
         "socket_read_size": int,
         "socket_keepalive": to_bool,
         "retry_on_timeout": to_bool,
+        "retry_on_error": parse_retry_on_error,
         "max_connections": int,
         "health_check_interval": int,
         "ssl_check_hostname": to_bool,

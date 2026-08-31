@@ -536,6 +536,48 @@ class TestConnectionPoolURLParsing:
                 "redis://localhost/2?socket_timeout=_&socket_connect_timeout=abc"
             )
 
+    def test_retry_on_error_querystring(self):
+        pool = redis.ConnectionPool.from_url(
+            "redis://localhost?retry_on_error=ConnectionError"
+        )
+        assert pool.connection_kwargs["retry_on_error"] == [redis.ConnectionError]
+
+    def test_retry_on_error_querystring_multiple(self):
+        pool = redis.ConnectionPool.from_url(
+            "redis://localhost?retry_on_error=ConnectionError,TimeoutError"
+        )
+        assert pool.connection_kwargs["retry_on_error"] == [
+            redis.ConnectionError,
+            redis.TimeoutError,
+        ]
+
+    def test_retry_on_error_querystring_brackets(self):
+        pool = redis.ConnectionPool.from_url(
+            "redis://localhost?retry_on_error=[ConnectionError,TimeoutError]"
+        )
+        assert pool.connection_kwargs["retry_on_error"] == [
+            redis.ConnectionError,
+            redis.TimeoutError,
+        ]
+
+    def test_retry_on_error_querystring_blank(self):
+        with pytest.raises(ValueError, match="Invalid value for 'retry_on_error'"):
+            redis.ConnectionPool.from_url("redis://localhost?retry_on_error=,")
+
+    def test_retry_on_error_querystring_invalid(self):
+        with pytest.raises(ValueError, match="Invalid value for 'retry_on_error'"):
+            redis.ConnectionPool.from_url(
+                "redis://localhost?retry_on_error=NotARealError"
+            )
+
+    def test_from_url_retry_on_error(self):
+        client = redis.Redis.from_url(
+            "redis://localhost?retry_on_error=ConnectionError"
+        )
+        assert client.connection_pool.connection_kwargs["retry_on_error"] == [
+            redis.ConnectionError
+        ]
+
     def test_extra_querystring_options(self):
         pool = redis.ConnectionPool.from_url("redis://localhost?a=1&b=2")
         assert pool.connection_class == redis.Connection
