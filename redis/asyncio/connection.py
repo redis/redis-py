@@ -60,6 +60,7 @@ if sys.version_info >= (3, 11, 3):
 else:
     from async_timeout import timeout as async_timeout
 
+from redis import exceptions as redis_exceptions
 from redis.asyncio.maint_notifications import (
     AsyncMaintNotificationsConnectionHandler,
     AsyncMaintNotificationsPoolHandler,
@@ -591,7 +592,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         socket_timeout: float | None = DEFAULT_SOCKET_TIMEOUT,
         socket_connect_timeout: float | None = DEFAULT_SOCKET_CONNECT_TIMEOUT,
         retry_on_timeout: bool = False,
-        retry_on_error: list | object = SENTINEL,
+        retry_on_error: Iterable[Type[Exception]] | object = SENTINEL,
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
         decode_responses: bool = False,
@@ -665,6 +666,9 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         self.retry_on_timeout = retry_on_timeout
         if retry_on_error is SENTINEL:
             retry_on_error = []
+        else:
+            # Copy so we never mutate the caller-supplied list (parity with sync).
+            retry_on_error = list(retry_on_error)
         if retry_on_timeout:
             retry_on_error.append(TimeoutError)
             retry_on_error.append(socket.timeout)
@@ -1165,8 +1169,21 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             )
 
     async def _send_packed_command(self, command: Iterable[bytes]) -> None:
-        self._writer.writelines(command)
-        await self._writer.drain()
+        writer = self._writer
+        if writer is None or writer.transport.is_closing():
+            raise ConnectionError("Connection closed by the server before write")
+        try:
+            writer.writelines(command)
+            await writer.drain()
+        except (TypeError, AttributeError) as e:
+            # CPython gh-136234 adds the missing connection-lost check in 3.13.10+
+            # and 3.14.1+. Python 3.12, 3.13.0-3.13.9, and 3.14.0 can instead
+            # leak TypeError or AttributeError from the transport (#4287).
+            if writer.transport.is_closing():
+                raise ConnectionError(
+                    "Connection closed by the server while writing"
+                ) from e
+            raise
 
     async def send_packed_command(
         self, command: Union[bytes, str, Iterable[bytes]], check_health: bool = True
@@ -1186,8 +1203,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                     self._send_packed_command(command), self.socket_timeout
                 )
             else:
-                self._writer.writelines(command)
-                await self._writer.drain()
+                await self._send_packed_command(command)
         except asyncio.TimeoutError:
             await self.disconnect(nowait=True)
             raise TimeoutError("Timeout writing to socket") from None
@@ -1734,6 +1750,21 @@ def parse_ssl_verify_flags(value):
     return verify_flags
 
 
+def parse_retry_on_error(value):
+    # exception class names are passed as a comma-separated list,
+    # e.g. ConnectionError,TimeoutError
+    retry_on_error = []
+    for name in value.replace("[", "").replace("]", "").split(","):
+        name = name.strip()
+        if not name:
+            raise ValueError("Empty retry_on_error entry")
+        exc = getattr(redis_exceptions, name, None)
+        if not (isinstance(exc, type) and issubclass(exc, Exception)):
+            raise ValueError(f"Unknown redis exception {name!r}")
+        retry_on_error.append(exc)
+    return retry_on_error
+
+
 URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyType(
     {
         "db": int,
@@ -1742,6 +1773,7 @@ URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyTy
         "socket_read_size": int,
         "socket_keepalive": to_bool,
         "retry_on_timeout": to_bool,
+        "retry_on_error": parse_retry_on_error,
         "max_connections": int,
         "health_check_interval": int,
         "ssl_check_hostname": to_bool,

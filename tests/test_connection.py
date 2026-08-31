@@ -1,14 +1,15 @@
 import copy
+import gc
 import os
 import platform
 import select
 import selectors
 import socket
 import ssl
-import sys
 import threading
 import time
 import types
+import weakref
 from errno import ECONNREFUSED, EWOULDBLOCK
 from typing import Any
 from unittest import mock
@@ -585,6 +586,10 @@ class TestConnection:
         The exception's traceback references the frame, so a retained local
         would form a cycle only reclaimable by the GC.
         The finally clause in _connect breaks it by clearing the local.
+
+        The exception escapes to the caller here, so it cannot be asserted
+        dead; the frame is what has to be checked. See the sibling test for
+        the reclamation property, which does not depend on the local's name.
         """
         conn = Connection(host="localhost", port=6379)
         addr_info = (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 6379))
@@ -605,41 +610,64 @@ class TestConnection:
                 connect_frame = tb.tb_frame
             tb = tb.tb_next
         assert connect_frame is not None
-        assert connect_frame.f_locals.get("err") is None
+        # `is None` alone also holds when no such local exists, so assert the
+        # name is present before asserting its value.
+        assert "err" in connect_frame.f_locals
+        assert connect_frame.f_locals["err"] is None
 
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Immediate reclamation is a refcounting property",
+    )
     def test_connect_breaks_reference_cycle_when_a_later_address_succeeds(self):
         """
         When an address fails but a later one connects, _connect must not
         return while still holding the caught exception.
-        The exception's traceback references the frame, so a retained local
-        would form a cycle only reclaimable by the GC.
         """
+
+        class WeakReferenceableOSError(OSError):
+            """OSError itself cannot be weak-referenced."""
+
         conn = Connection(host="localhost", port=6379)
         addr_infos = [
             (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 6379)),
             (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.2", 6379)),
         ]
 
-        # _connect calls getaddrinfo, so hook that as a way to peek the caller
-        connect_frames = []
+        # Raise from a factory so the test itself never holds a strong
+        # reference; the weakref is the only handle on the failure.
+        raised_ref = []
 
-        def capturing_getaddrinfo(*args, **kwargs):
-            connect_frames.append(sys._getframe(1))
-            return addr_infos
+        def fail_to_connect(*args, **kwargs):
+            err = WeakReferenceableOSError("refused")
+            raised_ref.append(weakref.ref(err))
+            try:
+                raise err
+            finally:
+                # Clear this frame's local too, or the traceback keeps the
+                # exception alive here and the assertion measures the test
+                # rather than _connect.
+                err = None
 
         failing_sock, working_sock = MagicMock(), MagicMock()
-        failing_sock.connect.side_effect = OSError("refused")
+        failing_sock.connect.side_effect = fail_to_connect
 
-        with (
-            patch.object(socket, "getaddrinfo", capturing_getaddrinfo),
-            patch.object(socket, "socket", side_effect=[failing_sock, working_sock]),
-        ):
-            assert conn._connect() is working_sock
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            with (
+                patch.object(socket, "getaddrinfo", return_value=addr_infos),
+                patch.object(
+                    socket, "socket", side_effect=[failing_sock, working_sock]
+                ),
+            ):
+                assert conn._connect() is working_sock
 
-        # Error should be cleared in the connect frame
-        assert len(connect_frames) == 1
-        (connect_frame,) = connect_frames
-        assert connect_frame.f_locals.get("err") is None
+            (ref,) = raised_ref
+            assert ref() is None
+        finally:
+            if gc_was_enabled:
+                gc.enable()
 
     @pytest.mark.parametrize(
         "connection_kwargs",
@@ -1976,3 +2004,65 @@ class TestBlockingConnectionPoolGetConnectionCount:
         assert used_count == 0
 
         pool.disconnect()
+
+
+def test_parse_url_retry_on_error_resolves_exception_names():
+    kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
+    assert kw["retry_on_error"] == [ConnectionError]
+
+
+def test_parse_url_retry_on_error_comma_separated():
+    kw = parse_url(
+        "redis://localhost:6379/?retry_on_error=ConnectionError,TimeoutError"
+    )
+    assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
+
+
+def test_parse_url_retry_on_error_bracket_list():
+    kw = parse_url(
+        "redis://localhost:6379/?retry_on_error=[ConnectionError,TimeoutError]"
+    )
+    assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
+
+
+def test_parse_url_retry_on_error_blank_entry():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?retry_on_error=,")
+    assert str(exc_info.value) == (
+        "Invalid value for 'retry_on_error' in connection URL."
+    )
+
+
+def test_parse_url_invalid_db_keeps_stable_message():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?db=not-an-int")
+    assert str(exc_info.value) == "Invalid value for 'db' in connection URL."
+
+
+def test_parse_url_retry_on_error_unknown_name():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?retry_on_error=NotARealError")
+    assert str(exc_info.value) == (
+        "Invalid value for 'retry_on_error' in connection URL."
+    )
+
+
+def test_parse_url_retry_on_error_usable_in_retry():
+    kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
+    conn = Connection(**kw)
+    assert ConnectionError in conn.retry._supported_errors
+    assert all(
+        isinstance(err, type) and issubclass(err, Exception)
+        for err in conn.retry._supported_errors
+    )
+
+    calls = 0
+
+    def do():
+        nonlocal calls
+        calls += 1
+        raise ConnectionError("simulated network drop")
+
+    with pytest.raises(ConnectionError):
+        conn.retry.call_with_retry(do=do, fail=lambda e: None)
+    assert calls == 2

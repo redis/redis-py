@@ -62,6 +62,12 @@ class DummyAsyncStream:
         self.read_called = True
         raise AssertionError("can_read should not read from the stream")
 
+    async def readline(self):
+        self.read_called = True
+        data = bytes(self._buffer)
+        self._buffer.clear()
+        return data
+
 
 def make_async_hiredis_parser(
     stream, response=NOT_ENOUGH_DATA, decoded_response=None, has_data=False
@@ -216,6 +222,20 @@ async def test_async_resp_can_read_prefers_buffered_data_over_eof(parser_class):
     assert stream.read_called is False
 
 
+@pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
+async def test_async_resp_read_response_raises_after_disconnect(parser_class):
+    # A late reply read after disconnect could be assigned to the next
+    # cluster pipeline command.
+    stream = DummyAsyncStream(buffer=b"+OK\r\n")
+    parser = parser_class(socket_read_size=65536)
+    parser.on_connect(types.SimpleNamespace(_reader=stream, encoder=mock.Mock()))
+    parser.on_disconnect()
+
+    with pytest.raises(ConnectionError):
+        await parser.read_response()
+    assert stream.read_called is False
+
+
 @pytest.mark.parametrize(
     ("protocol", "parser_class", "expected_parser_class"),
     [
@@ -249,6 +269,92 @@ def test_get_resolved_ip_uses_async_writer_peer_before_dns():
             conn._writer = None
 
     getaddrinfo.assert_not_called()
+
+
+async def test_send_packed_command_rejects_closed_transport():
+    conn = Connection(health_check_interval=0)
+    writer = mock.Mock()
+    writer.transport.is_closing.return_value = True
+    writer.drain = mock.AsyncMock()
+    conn._reader = mock.Mock()
+    conn._writer = writer
+
+    with pytest.raises(ConnectionError, match="closed") as exc_info:
+        await conn.send_packed_command(b"PING", check_health=False)
+
+    assert type(exc_info.value) is ConnectionError
+    writer.writelines.assert_not_called()
+    writer.drain.assert_not_awaited()
+    writer.close.assert_called_once()
+    assert not conn.is_connected
+
+
+@pytest.mark.parametrize("socket_timeout", [None, 1])
+async def test_send_packed_command_writes_to_open_transport(socket_timeout):
+    conn = Connection(socket_timeout=socket_timeout, health_check_interval=0)
+    writer = mock.Mock()
+    writer.transport.is_closing.return_value = False
+    writer.drain = mock.AsyncMock()
+    conn._reader = mock.Mock()
+    conn._writer = writer
+
+    await conn.send_packed_command(b"PING", check_health=False)
+
+    writer.transport.is_closing.assert_called_once_with()
+    writer.writelines.assert_called_once_with([b"PING"])
+    writer.drain.assert_awaited_once_with()
+    await conn.disconnect(nowait=True)
+
+
+@pytest.mark.parametrize(
+    ("error_type", "message"),
+    [
+        (TypeError, "'NoneType' object is not callable"),
+        (AttributeError, "'NoneType' object has no attribute '_add_writer'"),
+    ],
+)
+async def test_send_packed_command_translates_closed_transport_error(
+    error_type, message
+):
+    conn = Connection(health_check_interval=0)
+    writer = mock.Mock()
+    writer.transport.is_closing.side_effect = [False, True]
+    error = error_type(message)
+    writer.writelines.side_effect = error
+    writer.drain = mock.AsyncMock()
+    conn._reader = mock.Mock()
+    conn._writer = writer
+
+    with pytest.raises(ConnectionError) as exc_info:
+        await conn.send_packed_command(b"PING", check_health=False)
+
+    assert type(exc_info.value) is ConnectionError
+    assert str(exc_info.value) == "Connection closed by the server while writing"
+    assert exc_info.value.__cause__ is error
+    assert writer.transport.is_closing.call_count == 2
+    writer.drain.assert_not_awaited()
+    writer.close.assert_called_once()
+    assert not conn.is_connected
+
+
+async def test_send_packed_command_preserves_type_error_on_open_transport():
+    conn = Connection(health_check_interval=0)
+    writer = mock.Mock()
+    writer.transport.is_closing.return_value = False
+    error = TypeError("sequence item 0: expected a bytes-like object")
+    writer.writelines.side_effect = error
+    writer.drain = mock.AsyncMock()
+    conn._reader = mock.Mock()
+    conn._writer = writer
+
+    with pytest.raises(TypeError) as exc_info:
+        await conn.send_packed_command(b"PING", check_health=False)
+
+    assert exc_info.value is error
+    assert writer.transport.is_closing.call_count == 2
+    writer.drain.assert_not_awaited()
+    writer.close.assert_called_once()
+    assert not conn.is_connected
 
 
 @pytest.mark.fixed_client
@@ -956,3 +1062,69 @@ async def test_disconnect_no_current_task_calls_close(request):
             mock_on_disconnect.assert_called_once()
 
     assert not conn.is_connected
+
+
+def test_parse_url_retry_on_error_resolves_exception_names():
+    kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
+    assert kw["retry_on_error"] == [ConnectionError]
+
+
+def test_parse_url_retry_on_error_comma_separated():
+    kw = parse_url(
+        "redis://localhost:6379/?retry_on_error=ConnectionError,TimeoutError"
+    )
+    assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
+
+
+def test_parse_url_retry_on_error_bracket_list():
+    kw = parse_url(
+        "redis://localhost:6379/?retry_on_error=[ConnectionError,TimeoutError]"
+    )
+    assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
+
+
+def test_parse_url_retry_on_error_blank_entry():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?retry_on_error=,")
+    assert str(exc_info.value) == (
+        "Invalid value for 'retry_on_error' in connection URL."
+    )
+
+
+def test_parse_url_invalid_db_keeps_stable_message():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?db=not-an-int")
+    assert str(exc_info.value) == "Invalid value for 'db' in connection URL."
+
+
+def test_parse_url_retry_on_error_unknown_name():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?retry_on_error=NotARealError")
+    assert str(exc_info.value) == (
+        "Invalid value for 'retry_on_error' in connection URL."
+    )
+
+
+@pytest.mark.asyncio
+async def test_parse_url_retry_on_error_usable_in_retry():
+    kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
+    conn = Connection(**kw)
+    assert ConnectionError in conn.retry._supported_errors
+    assert all(
+        isinstance(err, type) and issubclass(err, Exception)
+        for err in conn.retry._supported_errors
+    )
+
+    calls = 0
+
+    async def do():
+        nonlocal calls
+        calls += 1
+        raise ConnectionError("simulated network drop")
+
+    async def fail(error):
+        return None
+
+    with pytest.raises(ConnectionError):
+        await conn.retry.call_with_retry(do=do, fail=fail)
+    assert calls == 2
