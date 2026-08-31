@@ -1445,7 +1445,17 @@ class PubSub:
         # removed. That swap is a breaking change to the
         # Connection.read_response signature so it must wait for a
         # major release.
-        read_timeout = math.inf if block else timeout
+        #
+        # Non-blocking reads mirror the sync PubSub path: wait for
+        # readability (or buffered data) via can_read() and then read
+        # without scheduling asyncio.timeout(), which can corrupt the
+        # event loop callback heap under tight PubSub polling (#3748).
+        if not block:
+            if not await conn.can_read(timeout=timeout):
+                return None
+            read_timeout = math.inf
+        else:
+            read_timeout = math.inf
         response = await self._execute(
             conn,
             conn.read_response,

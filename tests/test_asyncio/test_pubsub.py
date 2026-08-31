@@ -1516,6 +1516,28 @@ class TestAsyncPubSubTimeoutPropagation:
         await p.aclose()
 
     @pytest.mark.asyncio
+    async def test_pubsub_polling_avoids_async_timeout_scheduler(self, r, mocker):
+        """
+        Regression for #3748: tight PubSub polling must not schedule
+        asyncio.timeout(), which can corrupt the event loop callback heap.
+        """
+        from redis.asyncio import connection as async_connection
+
+        mock_timeout = mocker.patch.object(async_connection, "async_timeout")
+
+        p = r.pubsub()
+        await p.subscribe("foo")
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        for _ in range(100):
+            await p.get_message(timeout=0)
+            await p.get_message(timeout=0.01)
+
+        mock_timeout.assert_not_called()
+        await p.aclose()
+
+    @pytest.mark.asyncio
     async def test_get_message_timeout_none_blocks(self, r):
         """
         Test that get_message(timeout=None) blocks indefinitely.
