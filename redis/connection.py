@@ -43,7 +43,14 @@ from ._defaults import (
     DEFAULT_SOCKET_TIMEOUT,
     get_default_socket_keepalive_options,
 )
-from ._parsers import BaseParser, Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
+from ._parsers import (
+    UNRECOVERABLE_PARSE_ERRORS,
+    BaseParser,
+    Encoder,
+    _HiredisParser,
+    _RESP2Parser,
+    _RESP3Parser,
+)
 from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
@@ -55,7 +62,6 @@ from .exceptions import (
     ChildDeadlockedError,
     ConnectionError,
     DataError,
-    InvalidResponse,
     MaxConnectionsError,
     RedisError,
     ResponseError,
@@ -1550,13 +1556,15 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 add_debug_log_for_connection_failure(self, e, "reading response")
                 self.disconnect()
             raise ConnectionError(f"Error while reading from {host_error} : {e.args}")
-        except InvalidResponse as e:
-            # A framing violation means the parser can no longer locate reply
-            # boundaries, so the stream position is untrustworthy. The parsers
-            # rewind on error, leaving every byte of the offending reply
-            # queued, so honouring disconnect_on_error=False here would make
-            # the next read fail identically, forever. Drop the connection
-            # regardless of what the caller asked for. See #4291.
+        except UNRECOVERABLE_PARSE_ERRORS as e:
+            # The parser failed partway through a reply, after the read cursor
+            # had already passed bytes it cannot re-interpret. The rewind and
+            # disconnect_on_error=False exist so an *interrupted* read can be
+            # re-parsed from the start (#2510, #2695) - an in-band ResponseError
+            # is returned as a value and purged, never rewound. Re-parsing here
+            # just reproduces the same failure, so honouring
+            # disconnect_on_error=False would make every later read fail
+            # identically, forever. Drop the connection regardless. See #4291.
             add_debug_log_for_connection_failure(self, e, "reading response")
             self.disconnect()
             raise
@@ -2233,9 +2241,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 )
             except TimeoutError:
                 break
-            except InvalidResponse:
+            except UNRECOVERABLE_PARSE_ERRORS:
                 # Invalidation replies are read straight off the raw
-                # connection, so the disconnect a framing violation now forces
+                # connection, so the disconnect a parse failure now forces
                 # bypasses this proxy's disconnect() and its cache flush. The
                 # next connect() opens a fresh CLIENT TRACKING session that the
                 # server has no invalidation state for, so entries cached under
