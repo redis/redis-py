@@ -3414,7 +3414,6 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         "Create a new connection"
         if self._created_connections >= self.max_connections:
             raise MaxConnectionsError("Too many connections")
-        self._created_connections += 1
 
         kwargs = dict(self.connection_kwargs)
 
@@ -3425,6 +3424,9 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             )
         else:
             connection = self.connection_class(**kwargs)
+
+        # Only a connection that exists can be released, so count it here.
+        self._created_connections += 1
 
         # Record new connection created (starts as IDLE) - only after successful construction
         record_connection_count(
@@ -3798,7 +3800,12 @@ class BlockingConnectionPool(ConnectionPool):
             if connection is None:
                 # Start timing for observability
                 start_time_created = time.monotonic()
-                connection = self.make_connection()
+                try:
+                    connection = self.make_connection()
+                except BaseException:
+                    # Hand the slot back, or the pool shrinks on every failure.
+                    self.pool.put_nowait(None)
+                    raise
                 is_created = True
         finally:
             if self._locked:
