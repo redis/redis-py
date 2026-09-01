@@ -603,19 +603,10 @@ def add_debug_log_for_notification(
     notification: Union[str, MaintenanceNotification],
 ):
     if logger.isEnabledFor(logging.DEBUG):
-        socket_address = None
-        try:
-            socket_address = (
-                connection._sock.getsockname() if connection._sock else None
-            )
-            socket_address = socket_address[1] if socket_address else None
-        except (AttributeError, OSError):
-            pass
-
         logger.debug(
             f"Handling maintenance notification: {notification}, "
-            f"with connection: {connection}, connected to ip {connection.get_resolved_ip()}, "
-            f"local socket port: {socket_address}",
+            f"with connection: {connection}, "
+            f"{connection.extract_connection_details() if connection else 'no connection'}",
         )
 
 
@@ -650,7 +641,8 @@ class MaintNotificationsConfig:
             proactive_reconnect (bool): Whether to proactively reconnect when a node is replaced.
                 Defaults to True.
             relaxed_timeout (Number): The relaxed timeout to use for the connection during maintenance.
-                If -1 is provided - the relaxed timeout is disabled. Defaults to 20.
+                If -1 is provided - the relaxed timeout is disabled. If None is provided - the
+                affected operations become blocking. Defaults to 10.
             endpoint_type (Optional[EndpointType]): Override for the endpoint type to use in CLIENT MAINT_NOTIFICATIONS.
                 If None, the endpoint type will be automatically determined based on the host and TLS configuration.
                 Defaults to None.

@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import inspect
+import logging
 import math
 import re
 import time
@@ -39,6 +40,7 @@ from redis._defaults import (
 from redis._parsers.helpers import bool_ok, get_response_callbacks
 from redis.asyncio import _himport_exec
 from redis.asyncio.connection import (
+    AbstractConnection,
     Connection,
     ConnectionPool,
     SSLConnection,
@@ -120,6 +122,31 @@ _NormalizeKeysT = TypeVar("_NormalizeKeysT", bound=Mapping[ChannelT, object])
 if TYPE_CHECKING:
     from redis.asyncio.keyspace_notifications import AsyncKeyspaceNotifications
     from redis.commands.core import Script
+
+
+logger = logging.getLogger(__name__)
+
+
+def is_debug_log_enabled():
+    return logger.isEnabledFor(logging.DEBUG)
+
+
+def add_debug_log_for_operation_failure(
+    connection: AbstractConnection,
+    error: BaseException | None = None,
+    args: Iterable[Any] | None = None,
+):
+    details = connection.extract_connection_details() if connection else "no connection"
+    prefix = (
+        f"{type(error).__name__} received" if error is not None else "Operation failed"
+    )
+    command = (
+        f" for command {truncate_text(' '.join(map(safe_str, args)))}" if args else ""
+    )
+    suffix = f", error: {error}" if error is not None else ""
+    logger.debug(
+        f"{prefix}{command}, with connection: {connection}, details: {details}{suffix}",
+    )
 
 
 class ResponseCallbackProtocol(Protocol):
@@ -935,6 +962,8 @@ class Redis(
         actual_retry_attempts = 0
 
         def failure_callback(error, failure_count):
+            if is_debug_log_enabled():
+                add_debug_log_for_operation_failure(conn, error, args)
             nonlocal actual_retry_attempts
             actual_retry_attempts = failure_count
             return self._close_connection(
@@ -1347,6 +1376,8 @@ class PubSub:
         actual_retry_attempts = 0
 
         def failure_callback(error, failure_count):
+            if is_debug_log_enabled():
+                add_debug_log_for_operation_failure(conn, error, args)
             nonlocal actual_retry_attempts
             actual_retry_attempts = failure_count
             return self._reconnect(conn, error, failure_count, start_time, command_name)
@@ -1968,6 +1999,8 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         actual_retry_attempts = 0
 
         def failure_callback(error, failure_count):
+            if is_debug_log_enabled():
+                add_debug_log_for_operation_failure(conn, error, args)
             nonlocal actual_retry_attempts
             actual_retry_attempts = failure_count
             return self._disconnect_reset_raise_on_watching(
@@ -2253,6 +2286,8 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         actual_retry_attempts = 0
 
         def failure_callback(error, failure_count):
+            if is_debug_log_enabled():
+                add_debug_log_for_operation_failure(conn, error, (operation_name,))
             nonlocal actual_retry_attempts
             actual_retry_attempts = failure_count
             return self._disconnect_raise_on_watching(

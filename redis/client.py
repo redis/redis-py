@@ -116,10 +116,21 @@ def is_debug_log_enabled():
     return logger.isEnabledFor(logging.DEBUG)
 
 
-def add_debug_log_for_operation_failure(connection: "AbstractConnection"):
+def add_debug_log_for_operation_failure(
+    connection: AbstractConnection,
+    error: BaseException | None = None,
+    args: Iterable[Any] | None = None,
+):
+    details = connection.extract_connection_details() if connection else "no connection"
+    prefix = (
+        f"{type(error).__name__} received" if error is not None else "Operation failed"
+    )
+    command = (
+        f" for command {truncate_text(' '.join(map(safe_str, args)))}" if args else ""
+    )
+    suffix = f", error: {error}" if error is not None else ""
     logger.debug(
-        f"Operation failed, "
-        f"with connection: {connection}, details: {connection.extract_connection_details() if connection else 'no connection'}",
+        f"{prefix}{command}, with connection: {connection}, details: {details}{suffix}",
     )
 
 
@@ -903,7 +914,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         def failure_callback(error, failure_count):
             if is_debug_log_enabled():
-                add_debug_log_for_operation_failure(conn)
+                add_debug_log_for_operation_failure(conn, error, args)
             actual_retry_attempts[0] = failure_count
             self._close_connection(conn, error, failure_count, start_time, command_name)
 
@@ -1324,6 +1335,8 @@ class PubSub:
         actual_retry_attempts = [0]
 
         def failure_callback(error, failure_count):
+            if is_debug_log_enabled():
+                add_debug_log_for_operation_failure(conn, error, args)
             actual_retry_attempts[0] = failure_count
             self._reconnect(conn, error, failure_count, start_time, command_name)
 
@@ -1981,7 +1994,7 @@ class Pipeline(Redis):
 
         def failure_callback(error, failure_count):
             if is_debug_log_enabled():
-                add_debug_log_for_operation_failure(conn)
+                add_debug_log_for_operation_failure(conn, error, args)
             actual_retry_attempts[0] = failure_count
             self._disconnect_reset_raise_on_watching(
                 conn, error, failure_count, start_time, command_name
@@ -2247,7 +2260,7 @@ class Pipeline(Redis):
 
         def failure_callback(error, failure_count):
             if is_debug_log_enabled():
-                add_debug_log_for_operation_failure(conn)
+                add_debug_log_for_operation_failure(conn, error, (operation_name,))
             actual_retry_attempts[0] = failure_count
             self._disconnect_raise_on_watching(
                 conn, error, failure_count, start_time, operation_name
