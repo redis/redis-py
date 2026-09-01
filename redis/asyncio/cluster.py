@@ -116,6 +116,7 @@ from redis.exceptions import (
     MaxConnectionsError,
     MovedError,
     RedisClusterException,
+    RedisClusterUnreachableError,
     RedisError,
     ResponseError,
     SlotNotCoveredError,
@@ -2385,7 +2386,7 @@ class NodesManager:
                     break
 
             if not startup_nodes_reachable:
-                raise RedisClusterException(
+                raise RedisClusterUnreachableError(
                     f"Redis Cluster cannot be connected. Please provide at least "
                     f"one reachable node: {str(exception)}"
                 ) from exception
