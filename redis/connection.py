@@ -1,4 +1,5 @@
 import copy
+import functools
 import os
 import socket
 import sys
@@ -673,9 +674,9 @@ class MaintNotificationsAbstractConnection:
 
     def _add_maint_notifications_to_handshake(self, deferred_reads, check_health=True):
         # If maintenance notifications are enabled for this connection, send the
-        # CLIENT MAINT_NOTIFICATIONS command as part of the pipelined handshake tail
-        # and defer reading its reply (appended to deferred_reads), rather than paying
-        # its own round-trip. When enabled == "auto" a failure is logged and swallowed;
+        # CLIENT MAINT_NOTIFICATIONS command with the rest of the handshake tail and
+        # defer reading its reply (appended to deferred_reads), rather than paying its
+        # own round-trip. When enabled == "auto" a failure is logged and swallowed;
         # when enabled is True it raises.
         if not self._should_enable_maint_notifications():
             return
@@ -710,6 +711,19 @@ class MaintNotificationsAbstractConnection:
                 logger.debug(f"Failed to enable maintenance notifications: {e}")
             else:
                 raise
+
+    def _read_ok_or_raise(self, error_message):
+        # Read one handshake reply and require it to be "OK".
+        if str_if_bytes(self.read_response()) != "OK":
+            raise ConnectionError(error_message)
+
+    def _read_optional_setinfo(self):
+        # Read one CLIENT SETINFO reply. Older servers may not support the command,
+        # so a ResponseError is swallowed instead of failing the connection.
+        try:
+            self.read_response()
+        except ResponseError:
+            pass
 
     def get_resolved_ip(self) -> Optional[str]:
         """
@@ -1218,23 +1232,26 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
 
         # The tail of the handshake (optional CLIENT MAINT_NOTIFICATIONS, then
         # CLIENT SETNAME / SETINFO / SELECT) does not affect control flow -- the replies
-        # are only validated or discarded. So we pipeline it: send every command first
-        # (without blocking on a reply between them), then read the replies back in send
-        # order. All requests are on the wire before we block on the first read, so the
-        # whole tail costs a single round-trip instead of one per command. This mirrors
-        # the async stack (redis/asyncio/connection.py). AUTH/HELLO stays a separate
-        # round-trip above because its reply drives the RESP2->RESP3 parser upgrade, the
-        # pre-6.0 AUTH retry, and proto validation.
+        # are only validated or discarded. So we optimize the flow: send every command
+        # first (without blocking on a reply between them), then read the replies back in
+        # send order. All requests are on the wire before we block on the first read, so
+        # the whole tail costs a single round-trip instead of one per command. AUTH/HELLO
+        # stays a separate round-trip above because its reply drives the RESP2->RESP3
+        # parser upgrade, the pre-6.0 AUTH retry, and proto validation.
         #
         # deferred_reads holds one zero-arg handler per command sent below; each reads
         # exactly one reply (in send order) and validates it. Per-command check_health
         # reproduces the original behavior: at most one health PING/PONG fires before the
         # first tail command (only when no HELLO/AUTH ran, e.g. RESP2 no-auth), and it is
-        # self-contained so it never desyncs the pipelined replies.
+        # self-contained so it never desyncs the deferred replies.
+        #
+        # TODO: apply the same optimization to the async handshake in
+        # redis/asyncio/connection.py, where not all tail commands are handled this way
+        # yet (e.g. maintenance notifications are still issued separately there).
         deferred_reads = []
 
         # Maintenance notifications (RESP3-only, opt-in) go first when enabled, so their
-        # reply is pipelined with the rest of the tail.
+        # reply is read together with the rest of the tail.
         self._add_maint_notifications_to_handshake(deferred_reads, check_health)
 
         # if a client_name is given, set it
@@ -1242,21 +1259,12 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             self.send_command(
                 "CLIENT", "SETNAME", self.client_name, check_health=check_health
             )
-
-            def _read_setname_response():
-                if str_if_bytes(self.read_response()) != "OK":
-                    raise ConnectionError("Error setting client name")
-
-            deferred_reads.append(_read_setname_response)
+            deferred_reads.append(
+                functools.partial(self._read_ok_or_raise, "Error setting client name")
+            )
 
         # Set the library name and version from driver_info. Older servers may not
         # support CLIENT SETINFO, so any ResponseError to these replies is swallowed.
-        def _read_setinfo_response():
-            try:
-                self.read_response()
-            except ResponseError:
-                pass
-
         if self.driver_info and self.driver_info.formatted_name:
             self.send_command(
                 "CLIENT",
@@ -1265,7 +1273,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 self.driver_info.formatted_name,
                 check_health=check_health,
             )
-            deferred_reads.append(_read_setinfo_response)
+            deferred_reads.append(self._read_optional_setinfo)
 
         if self.driver_info and self.driver_info.lib_version:
             self.send_command(
@@ -1275,17 +1283,14 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 self.driver_info.lib_version,
                 check_health=check_health,
             )
-            deferred_reads.append(_read_setinfo_response)
+            deferred_reads.append(self._read_optional_setinfo)
 
         # if a database is specified, switch to it
         if self.db:
             self.send_command("SELECT", self.db, check_health=check_health)
-
-            def _read_select_response():
-                if str_if_bytes(self.read_response()) != "OK":
-                    raise ConnectionError("Invalid Database")
-
-            deferred_reads.append(_read_select_response)
+            deferred_reads.append(
+                functools.partial(self._read_ok_or_raise, "Invalid Database")
+            )
 
         # Read the deferred replies in the order the commands were sent.
         for read_and_validate_response in deferred_reads:
