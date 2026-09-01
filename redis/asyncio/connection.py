@@ -1258,7 +1258,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             if stream is None:
                 return False
             await asyncio.wait_for(stream._wait_for_data("read"), timeout=timeout)
-            return True
+            return await self._parser.can_read()
         except asyncio.TimeoutError:
             return False
         except OSError as e:
