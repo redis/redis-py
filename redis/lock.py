@@ -345,6 +345,9 @@ class Lock:
     def reacquire(self) -> Literal[True]:
         """
         Resets a TTL of an already acquired lock back to a timeout value.
+
+        When the resulting TTL is non-positive, the current expiry is left
+        unchanged and ``True`` is returned.
         """
         if self.local.token is None:
             raise LockError("Cannot reacquire an unlocked lock", lock_name=self.name)

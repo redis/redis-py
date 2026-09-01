@@ -287,6 +287,17 @@ class TestLock:
         assert 0 < (await r.pttl("foo")) <= old_ttl
         await lock.release()
 
+    async def test_extend_lock_negative_additional_time_without_replace_keeps_existing_ttl(
+        self, r
+    ):
+        lock = self.get_lock(r, "foo", timeout=10)
+        assert await lock.acquire(blocking=False)
+        old_ttl = await r.pttl("foo")
+        assert await lock.extend(-20)
+        assert await r.get("foo") == lock.local.token
+        assert 0 < (await r.pttl("foo")) <= old_ttl
+        await lock.release()
+
     async def test_extend_lock_zero_timeout_without_replace_raises_error(self, r):
         lock = self.get_lock(r, "foo", timeout=0)
         assert await lock.acquire(blocking=False)
