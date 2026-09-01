@@ -4,6 +4,7 @@ from time import sleep
 
 import pytest
 import redis
+from redis.commands.timeseries.commands import TimeSeriesCommands
 
 from .conftest import (
     _get_client,
@@ -2019,6 +2020,31 @@ def test_nrange_aggregation_one_per_key(client):
 
 @pytest.mark.redismod
 @skip_if_server_version_lt("8.9.0")
+def test_nrange_multiple_aggregators_per_key_layout(client):
+    # A per-key spec may list several aggregators. That key then contributes one
+    # value per aggregator (in spec order), and each row's value array is the
+    # per-key blocks concatenated in key order: here [a_avg, a_max, b_sum].
+    # key a: bucket [0,10) avg=2 max=3; bucket [10,20) avg=15 max=20
+    for ts, val in [(0, 1.0), (5, 3.0), (10, 10.0), (15, 20.0)]:
+        client.ts().add("{s}:a", ts, val)
+    # key b: bucket [0,10) sum=10; bucket [10,20) sum=7
+    for ts, val in [(0, 5.0), (5, 5.0), (10, 7.0)]:
+        client.ts().add("{s}:b", ts, val)
+
+    res = client.ts().nrange(
+        ["{s}:a", "{s}:b"],
+        from_time=0,
+        to_time=20,
+        aggregators=["avg,max", "sum"],
+        bucket_size_msec=10,
+    )
+    _assert_nrange_rows(res, [[0, [2.0, 3.0, 10.0]], [10, [15.0, 20.0, 7.0]]])
+    # 2 columns for key a (avg, max) + 1 for key b (sum).
+    assert all(len(row[1]) == 3 for row in res)
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.9.0")
 def test_nrange_count_limits_rows(client):
     for ts in range(5):
         client.ts().add("{s}:a", ts, ts)
@@ -2034,29 +2060,29 @@ def test_nrange_empty_result(client):
 
 @pytest.mark.redismod
 @skip_if_server_version_lt("8.9.0")
-def test_nrange_single_aggregator_applies_to_all_keys(client):
-    for ts, val in [(0, 1.0), (1, 2.0), (10, 3.0), (11, 4.0)]:
-        client.ts().add("{s}:a", ts, val)
-    for ts, val in [(0, 5.0), (1, 6.0), (10, 7.0), (11, 8.0)]:
-        client.ts().add("{s}:b", ts, val)
-
-    # A single aggregator string is expanded to one token per key; here
-    # "max" is applied to both series.
-    res = client.ts().nrange(
-        ["{s}:a", "{s}:b"],
-        from_time=0,
-        to_time=20,
-        aggregators="max",
-        bucket_size_msec=10,
-    )
-    _assert_nrange_rows(res, [[0, [2.0, 6.0]], [10, [4.0, 8.0]]])
+def test_nrange_single_aggregator_multi_key_raises(client):
+    # A single aggregator is NOT broadcast across keys (RedisTimeSeries PR
+    # #2079): with more than one key, each needs its own spec token. Raised
+    # client-side before any server round trip.
+    with pytest.raises(
+        redis.exceptions.DataError, match="one aggregation spec per key"
+    ):
+        client.ts().nrange(
+            ["{s}:a", "{s}:b"],
+            from_time=0,
+            to_time=20,
+            aggregators="max",
+            bucket_size_msec=10,
+        )
 
 
 @pytest.mark.redismod
 @skip_if_server_version_lt("8.9.0")
 def test_nrange_aggregator_count_mismatch_raises(client):
-    # An aggregator list whose length differs from the key count is invalid.
-    with pytest.raises(redis.exceptions.DataError, match="one aggregator per key"):
+    # A spec list whose length differs from the key count is invalid.
+    with pytest.raises(
+        redis.exceptions.DataError, match="one aggregation spec per key"
+    ):
         client.ts().nrange(
             ["{s}:a", "{s}:b"],
             from_time=0,
@@ -2064,6 +2090,22 @@ def test_nrange_aggregator_count_mismatch_raises(client):
             aggregators=["min"],
             bucket_size_msec=10,
         )
+
+
+def test_nrange_aggregation_builds_one_spec_token_per_key():
+    # Server-free: each per-key spec is its own token and may hold multiple
+    # comma-separated aggregators -> AGGREGATION avg,max sum 1000 for two keys
+    # (RedisTimeSeries PR #2079; no broadcast, no single comma-joined token).
+    params = []
+    TimeSeriesCommands._append_n_aggregation(params, ["avg,max", "sum"], 1000, 2)
+    assert params == ["AGGREGATION", "avg,max", "sum", 1000]
+
+
+def test_nrange_aggregation_single_key_single_spec():
+    # Server-free: a bare string is the single-key spec (may be comma-joined).
+    params = []
+    TimeSeriesCommands._append_n_aggregation(params, "avg,max", 1000, 1)
+    assert params == ["AGGREGATION", "avg,max", 1000]
 
 
 @pytest.mark.redismod

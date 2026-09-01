@@ -6,6 +6,8 @@ from unittest.mock import patch
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
+from redis._parsers import _AsyncHiredisParser, _AsyncRESP3Parser
+from redis.utils import HIREDIS_AVAILABLE
 from redis.asyncio.connection import (
     BlockingConnectionPool,
     Connection,
@@ -332,6 +334,74 @@ class TestConnectionPool:
             for conn in connections:
                 await pool.release(conn)
 
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize(
+        "parser_class",
+        [
+            _AsyncRESP3Parser,
+            pytest.param(
+                _AsyncHiredisParser,
+                marks=pytest.mark.skipif(
+                    not HIREDIS_AVAILABLE, reason="hiredis is not installed"
+                ),
+            ),
+        ],
+    )
+    @pytest.mark.parametrize("maint_notifications_enabled", [True, False])
+    async def test_get_connection_replaces_closed_idle_connection(
+        self, maint_notifications_enabled, parser_class
+    ):
+        """
+        A pooled connection whose socket the server closed while it sat idle
+        must be reconnected at checkout. Regression test for #4252: with
+        maintenance notifications enabled, the pending-push-data exemption
+        must not swallow the EOF signal and hand out the dead connection.
+        """
+        async with self.get_pool(connection_class=redis.Connection) as pool:
+            conn = pool.make_connection()
+            conn.set_parser(parser_class)
+
+            # simulate a connection that was healthy when released to the
+            # pool but whose socket the server has since closed
+            eof_stream = asyncio.StreamReader()
+            eof_stream.feed_eof()
+            conn._parser._connected = True
+            conn._parser._stream = eof_stream
+            if parser_class is _AsyncHiredisParser:
+                # on_connect() normally creates the hiredis reader; the test
+                # never dials, so give it one with an empty buffer
+                conn._parser._reader = mock.Mock(has_data=mock.Mock(return_value=False))
+            fake_writer = mock.Mock()
+            fake_writer.wait_closed = AsyncMock(return_value=None)
+            conn._reader = eof_stream
+            conn._writer = fake_writer
+
+            async def fake_connect():
+                # mirror the real connect(): a no-op unless disconnected
+                if conn.is_connected:
+                    return
+                conn._parser._connected = True
+                conn._parser._stream = asyncio.StreamReader()
+                conn._reader = conn._parser._stream
+                conn._writer = fake_writer
+
+            conn.connect = AsyncMock(side_effect=fake_connect)
+            pool._available_connections.append(conn)
+
+            with mock.patch.object(
+                pool,
+                "maint_notifications_enabled",
+                return_value=maint_notifications_enabled,
+            ):
+                checked_out = await pool.get_connection()
+
+            assert checked_out is conn
+            # ensure_connection() detected the EOF and reconnected: once for
+            # the initial ensure, once after discarding the dead socket
+            assert conn.connect.await_count == 2
+            assert conn._parser._stream is not eof_stream
+            await pool.release(conn)
+
 
 class TestBlockingConnectionPool:
     @asynccontextmanager
@@ -617,11 +687,68 @@ class TestConnectionPoolURLParsing:
         pool = redis.ConnectionPool.from_url("redis://location?client_name=test-client")
         assert pool.connection_kwargs["client_name"] == "test-client"
 
+    def test_querystring_value_percent_decoded_once(self):
+        # A single percent-encoded sequence is decoded exactly once.
+        pool = redis.ConnectionPool.from_url(
+            "redis://location?client_name=worker%20name"
+        )
+        assert pool.connection_kwargs["client_name"] == "worker name"
+
+    def test_querystring_value_not_double_percent_decoded(self):
+        # A literal percent sign in a query value (encoded as %2520) must survive
+        # as "%20" rather than being decoded a second time into a space. See #4208.
+        pool = redis.ConnectionPool.from_url(
+            "redis://location?client_name=worker%2520name"
+        )
+        assert pool.connection_kwargs["client_name"] == "worker%20name"
+
     def test_invalid_extra_typed_querystring_options(self):
         with pytest.raises(ValueError):
             redis.ConnectionPool.from_url(
                 "redis://localhost/2?socket_timeout=_&socket_connect_timeout=abc"
             )
+
+    def test_retry_on_error_querystring(self):
+        pool = redis.ConnectionPool.from_url(
+            "redis://localhost?retry_on_error=ConnectionError"
+        )
+        assert pool.connection_kwargs["retry_on_error"] == [redis.ConnectionError]
+
+    def test_retry_on_error_querystring_multiple(self):
+        pool = redis.ConnectionPool.from_url(
+            "redis://localhost?retry_on_error=ConnectionError,TimeoutError"
+        )
+        assert pool.connection_kwargs["retry_on_error"] == [
+            redis.ConnectionError,
+            redis.TimeoutError,
+        ]
+
+    def test_retry_on_error_querystring_brackets(self):
+        pool = redis.ConnectionPool.from_url(
+            "redis://localhost?retry_on_error=[ConnectionError,TimeoutError]"
+        )
+        assert pool.connection_kwargs["retry_on_error"] == [
+            redis.ConnectionError,
+            redis.TimeoutError,
+        ]
+
+    def test_retry_on_error_querystring_blank(self):
+        with pytest.raises(ValueError, match="Invalid value for 'retry_on_error'"):
+            redis.ConnectionPool.from_url("redis://localhost?retry_on_error=,")
+
+    def test_retry_on_error_querystring_invalid(self):
+        with pytest.raises(ValueError, match="Invalid value for 'retry_on_error'"):
+            redis.ConnectionPool.from_url(
+                "redis://localhost?retry_on_error=NotARealError"
+            )
+
+    def test_from_url_retry_on_error(self):
+        client = redis.Redis.from_url(
+            "redis://localhost?retry_on_error=ConnectionError"
+        )
+        assert client.connection_pool.connection_kwargs["retry_on_error"] == [
+            redis.ConnectionError
+        ]
 
     def test_extra_querystring_options(self):
         pool = redis.ConnectionPool.from_url("redis://localhost?a=1&b=2")
@@ -646,6 +773,28 @@ class TestConnectionPoolURLParsing:
             "Redis URL must specify one of the following schemes "
             "(redis://, rediss://, unix://)"
         )
+
+    def test_invalid_scheme_raises_error_when_double_slash_missing(self):
+        with pytest.raises(ValueError) as cm:
+            redis.ConnectionPool.from_url("redis:foo.bar.com:12345")
+        assert str(cm.value) == (
+            "Redis URL must specify one of the following schemes "
+            "(redis://, rediss://, unix://)"
+        )
+
+    def test_uppercase_scheme_is_accepted(self):
+        # URL schemes are case-insensitive (RFC 3986)
+        pool = redis.ConnectionPool.from_url("REDIS://my.host")
+        assert pool.connection_class == redis.Connection
+        assert_kwargs_subset(pool.connection_kwargs, {"host": "my.host"})
+
+        ssl_pool = redis.ConnectionPool.from_url("REDISS://my.host")
+        assert ssl_pool.connection_class == redis.SSLConnection
+        assert_kwargs_subset(ssl_pool.connection_kwargs, {"host": "my.host"})
+
+        unix_pool = redis.ConnectionPool.from_url("UNIX:///tmp/redis.sock")
+        assert unix_pool.connection_class == redis.UnixDomainSocketConnection
+        assert_kwargs_subset(unix_pool.connection_kwargs, {"path": "/tmp/redis.sock"})
 
 
 @pytest.mark.fixed_client
@@ -682,13 +831,15 @@ class TestConnectionPoolUnixSocketURLParsing:
     def test_defaults(self):
         pool = redis.ConnectionPool.from_url("unix:///socket")
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket"}
+        assert_kwargs_subset(pool.connection_kwargs, {"path": "/socket"})
 
     @skip_if_server_version_lt("6.0.0")
     def test_username(self):
         pool = redis.ConnectionPool.from_url("unix://myuser:@/socket")
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "username": "myuser"}
+        assert_kwargs_subset(
+            pool.connection_kwargs, {"path": "/socket", "username": "myuser"}
+        )
 
     @skip_if_server_version_lt("6.0.0")
     def test_quoted_username(self):
@@ -696,45 +847,56 @@ class TestConnectionPoolUnixSocketURLParsing:
             "unix://%2Fmyuser%2F%2B name%3D%24+:@/socket"
         )
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {
-            "path": "/socket",
-            "username": "/myuser/+ name=$+",
-        }
+        assert_kwargs_subset(
+            pool.connection_kwargs,
+            {
+                "path": "/socket",
+                "username": "/myuser/+ name=$+",
+            },
+        )
 
     def test_password(self):
         pool = redis.ConnectionPool.from_url("unix://:mypassword@/socket")
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "password": "mypassword"}
+        assert_kwargs_subset(
+            pool.connection_kwargs, {"path": "/socket", "password": "mypassword"}
+        )
 
     def test_quoted_password(self):
         pool = redis.ConnectionPool.from_url(
             "unix://:%2Fmypass%2F%2B word%3D%24+@/socket"
         )
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {
-            "path": "/socket",
-            "password": "/mypass/+ word=$+",
-        }
+        assert_kwargs_subset(
+            pool.connection_kwargs,
+            {
+                "path": "/socket",
+                "password": "/mypass/+ word=$+",
+            },
+        )
 
     def test_quoted_path(self):
         pool = redis.ConnectionPool.from_url(
             "unix://:mypassword@/my%2Fpath%2Fto%2F..%2F+_%2B%3D%24ocket"
         )
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {
-            "path": "/my/path/to/../+_+=$ocket",
-            "password": "mypassword",
-        }
+        assert_kwargs_subset(
+            pool.connection_kwargs,
+            {
+                "path": "/my/path/to/../+_+=$ocket",
+                "password": "mypassword",
+            },
+        )
 
     def test_db_as_argument(self):
         pool = redis.ConnectionPool.from_url("unix:///socket", db=1)
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "db": 1}
+        assert_kwargs_subset(pool.connection_kwargs, {"path": "/socket", "db": 1})
 
     def test_db_in_querystring(self):
         pool = redis.ConnectionPool.from_url("unix:///socket?db=2", db=1)
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "db": 2}
+        assert_kwargs_subset(pool.connection_kwargs, {"path": "/socket", "db": 2})
 
     def test_client_name_in_querystring(self):
         pool = redis.ConnectionPool.from_url("redis://location?client_name=test-client")
@@ -743,7 +905,9 @@ class TestConnectionPoolUnixSocketURLParsing:
     def test_extra_querystring_options(self):
         pool = redis.ConnectionPool.from_url("unix:///socket?a=1&b=2")
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "a": "1", "b": "2"}
+        assert_kwargs_subset(
+            pool.connection_kwargs, {"path": "/socket", "a": "1", "b": "2"}
+        )
 
 
 @pytest.mark.fixed_client

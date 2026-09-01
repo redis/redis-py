@@ -3,7 +3,7 @@ import time
 import pytest
 from redis import lock as lock_module
 from redis.client import Redis
-from redis.exceptions import LockError, LockNotOwnedError
+from redis.exceptions import ConnectionError, LockError, LockNotOwnedError
 from redis.lock import Lock
 
 from .conftest import _get_client
@@ -206,6 +206,69 @@ class TestLock:
             lock.release()
         # even though we errored, the token is still cleared
         assert lock.local.token is None
+
+    def test_release_connection_error_preserves_lock_state(self, r, monkeypatch):
+        """
+        A failed release must leave the lock retryable.
+
+        Same state as GitHub issue #3847, reached through a connection error
+        instead of a cancellation. Clearing the token before the round trip
+        left owned() False while the Redis key survived, so the caller could
+        neither retry the release nor extend the lock.
+        """
+        lock = self.get_lock(r, "foo")
+        lock.acquire(blocking=False)
+        original_token = lock.local.token
+        assert original_token is not None
+
+        def fail(expected_token):
+            raise ConnectionError("Connection closed by server.")
+
+        monkeypatch.setattr(lock, "do_release", fail)
+        with pytest.raises(ConnectionError):
+            lock.release()
+
+        # the lock is still held in Redis, so the token must survive
+        assert lock.local.token == original_token
+        assert lock.owned()
+        assert lock.locked()
+
+        # and the release can now be retried
+        monkeypatch.undo()
+        lock.release()
+        assert lock.locked() is False
+
+    def test_release_does_not_clear_another_acquirers_token(self, r, monkeypatch):
+        """
+        release() must only clear the token if it is still ours.
+
+        With thread_local=False the token namespace is shared, so another
+        acquirer can store its token between our do_release() and the clear.
+        Clearing unconditionally there is the overwrite #489 fixed in 2014, and
+        it leaves the new owner holding a lock it cannot release.
+        """
+        lock = self.get_lock(r, "foo")
+        lock.acquire(blocking=False)
+
+        def steal(expected_token):
+            lock.local.token = "another-acquirers-token"
+
+        monkeypatch.setattr(lock, "do_release", steal)
+        lock.release()
+        assert lock.local.token == "another-acquirers-token"
+
+        def steal_and_raise(expected_token):
+            lock.local.token = "another-acquirers-token"
+            raise LockNotOwnedError("Cannot release a lock that's no longer owned")
+
+        lock.local.token = "ours"
+        monkeypatch.setattr(lock, "do_release", steal_and_raise)
+        with pytest.raises(LockNotOwnedError):
+            lock.release()
+        assert lock.local.token == "another-acquirers-token"
+
+        monkeypatch.undo()
+        r.delete("foo")
 
     def test_extend_lock(self, r):
         lock = self.get_lock(r, "foo", timeout=10)

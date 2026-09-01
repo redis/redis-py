@@ -30,6 +30,7 @@ from ..exceptions import (
     MovedError,
     NoPermissionError,
     NoScriptError,
+    NoSuchFieldsetError,
     OutOfMemoryError,
     ReadOnlyError,
     ResponseError,
@@ -61,6 +62,13 @@ EXTERNAL_AUTH_PROVIDER_ERROR = {
     "problem with LDAP service": ExternalAuthProviderError,
 }
 
+# HIMPORT SET referencing a fieldset the connection has not prepared. The server
+# reply is a fixed message with no fieldset name appended (verified against the
+# server: always exactly ``ERR no such fieldset``), so an exact match is correct.
+NO_SUCH_FIELDSET_ERROR = {
+    "no such fieldset": NoSuchFieldsetError,
+}
+
 logger = logging.getLogger(__name__)
 
 
@@ -83,6 +91,7 @@ class BaseParser(ABC):
             MODULE_UNLOAD_NOT_POSSIBLE_ERROR: ModuleError,
             **NO_AUTH_SET_ERROR,
             **EXTERNAL_AUTH_PROVIDER_ERROR,
+            **NO_SUCH_FIELDSET_ERROR,
         },
         "OOM": OutOfMemoryError,
         "WRONGPASS": AuthenticationError,
@@ -538,12 +547,20 @@ class _AsyncRESPBase(AsyncBaseParser):
         # connection state, not only whether application data can be read.
         if not self._connected:
             raise OSError("Buffer is closed.")
+        # buffered data wins over EOF, like the sync SocketBuffer: a pending
+        # response or push notification must stay readable even if the server
+        # has since closed the connection.
         if self._buffer:
             return True
+        if self._stream.at_eof():
+            # Raise like the sync SocketBuffer does on a server-closed
+            # connection, so callers that tolerate pending data (push
+            # notifications) can't mistake EOF for a readable connection.
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         # asyncio.StreamReader has no public non-destructive API for checking
         # buffered bytes. Preserve dirty-connection detection for the Python
         # parser and fail loudly if the private buffer API changes.
-        return bool(self._stream._buffer) or self._stream.at_eof()
+        return bool(self._stream._buffer)
 
     async def _read(self, length: int) -> bytes:
         """

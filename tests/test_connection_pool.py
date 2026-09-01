@@ -515,11 +515,68 @@ class TestConnectionPoolURLParsing:
         pool = redis.ConnectionPool.from_url("redis://location?client_name=test-client")
         assert pool.connection_kwargs["client_name"] == "test-client"
 
+    def test_querystring_value_percent_decoded_once(self):
+        # A single percent-encoded sequence is decoded exactly once.
+        pool = redis.ConnectionPool.from_url(
+            "redis://location?client_name=worker%20name"
+        )
+        assert pool.connection_kwargs["client_name"] == "worker name"
+
+    def test_querystring_value_not_double_percent_decoded(self):
+        # A literal percent sign in a query value (encoded as %2520) must survive
+        # as "%20" rather than being decoded a second time into a space. See #4208.
+        pool = redis.ConnectionPool.from_url(
+            "redis://location?client_name=worker%2520name"
+        )
+        assert pool.connection_kwargs["client_name"] == "worker%20name"
+
     def test_invalid_extra_typed_querystring_options(self):
         with pytest.raises(ValueError):
             redis.ConnectionPool.from_url(
                 "redis://localhost/2?socket_timeout=_&socket_connect_timeout=abc"
             )
+
+    def test_retry_on_error_querystring(self):
+        pool = redis.ConnectionPool.from_url(
+            "redis://localhost?retry_on_error=ConnectionError"
+        )
+        assert pool.connection_kwargs["retry_on_error"] == [redis.ConnectionError]
+
+    def test_retry_on_error_querystring_multiple(self):
+        pool = redis.ConnectionPool.from_url(
+            "redis://localhost?retry_on_error=ConnectionError,TimeoutError"
+        )
+        assert pool.connection_kwargs["retry_on_error"] == [
+            redis.ConnectionError,
+            redis.TimeoutError,
+        ]
+
+    def test_retry_on_error_querystring_brackets(self):
+        pool = redis.ConnectionPool.from_url(
+            "redis://localhost?retry_on_error=[ConnectionError,TimeoutError]"
+        )
+        assert pool.connection_kwargs["retry_on_error"] == [
+            redis.ConnectionError,
+            redis.TimeoutError,
+        ]
+
+    def test_retry_on_error_querystring_blank(self):
+        with pytest.raises(ValueError, match="Invalid value for 'retry_on_error'"):
+            redis.ConnectionPool.from_url("redis://localhost?retry_on_error=,")
+
+    def test_retry_on_error_querystring_invalid(self):
+        with pytest.raises(ValueError, match="Invalid value for 'retry_on_error'"):
+            redis.ConnectionPool.from_url(
+                "redis://localhost?retry_on_error=NotARealError"
+            )
+
+    def test_from_url_retry_on_error(self):
+        client = redis.Redis.from_url(
+            "redis://localhost?retry_on_error=ConnectionError"
+        )
+        assert client.connection_pool.connection_kwargs["retry_on_error"] == [
+            redis.ConnectionError
+        ]
 
     def test_extra_querystring_options(self):
         pool = redis.ConnectionPool.from_url("redis://localhost?a=1&b=2")
@@ -595,6 +652,20 @@ class TestConnectionPoolURLParsing:
             "Redis URL must specify one of the following schemes "
             "(redis://, rediss://, unix://)"
         )
+
+    def test_uppercase_scheme_is_accepted(self):
+        # URL schemes are case-insensitive (RFC 3986)
+        pool = redis.ConnectionPool.from_url("REDIS://my.host")
+        assert pool.connection_class == redis.Connection
+        assert_kwargs_subset(pool.connection_kwargs, {"host": "my.host"})
+
+        ssl_pool = redis.ConnectionPool.from_url("REDISS://my.host")
+        assert ssl_pool.connection_class == redis.SSLConnection
+        assert_kwargs_subset(ssl_pool.connection_kwargs, {"host": "my.host"})
+
+        unix_pool = redis.ConnectionPool.from_url("UNIX:///tmp/redis.sock")
+        assert unix_pool.connection_class == redis.UnixDomainSocketConnection
+        assert_kwargs_subset(unix_pool.connection_kwargs, {"path": "/tmp/redis.sock"})
 
 
 @pytest.mark.fixed_client

@@ -26,7 +26,7 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
 
     def handle_pubsub_push_response(self, response):
         logger = getLogger("push_response")
-        logger.debug("Push response: " + str(response))
+        logger.debug("Push response: %s", response)
         return response
 
     def read_response(
@@ -171,12 +171,14 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
 
     async def handle_pubsub_push_response(self, response):
         logger = getLogger("push_response")
-        logger.debug("Push response: " + str(response))
+        logger.debug("Push response: %s", response)
         return response
 
     async def read_response(
         self, disable_decoding: bool = False, push_request: bool = False
     ):
+        if not self._connected:
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         if self._chunks:
             # augment parsing buffer with previously read data
             self._buffer += b"".join(self._chunks)

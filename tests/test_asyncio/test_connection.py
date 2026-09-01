@@ -62,6 +62,12 @@ class DummyAsyncStream:
         self.read_called = True
         raise AssertionError("can_read should not read from the stream")
 
+    async def readline(self):
+        self.read_called = True
+        data = bytes(self._buffer)
+        self._buffer.clear()
+        return data
+
 
 def make_async_hiredis_parser(
     stream, response=NOT_ENOUGH_DATA, decoded_response=None, has_data=False
@@ -84,20 +90,40 @@ def test_connection_default_parser_matches_default_protocol():
 
 
 @pytest.mark.parametrize(
-    ("buffer", "eof", "expected"),
+    ("buffer", "expected"),
     [
-        (b"", False, False),
-        (b"+OK\r\n", False, True),
-        (b"", True, True),
+        (b"", False),
+        (b"+OK\r\n", True),
     ],
 )
-async def test_async_hiredis_can_read_uses_buffer_without_reading(
-    buffer, eof, expected
-):
-    stream = DummyAsyncStream(buffer=buffer, eof=eof)
+async def test_async_hiredis_can_read_uses_buffer_without_reading(buffer, expected):
+    stream = DummyAsyncStream(buffer=buffer)
     parser = make_async_hiredis_parser(stream)
 
     assert await parser.can_read() is expected
+    assert stream.read_called is False
+
+
+async def test_async_hiredis_can_read_raises_on_eof():
+    # a server-closed connection must raise like the sync SocketBuffer does,
+    # not report readable data (#4252)
+    stream = DummyAsyncStream(eof=True)
+    parser = make_async_hiredis_parser(stream)
+
+    with pytest.raises(ConnectionError):
+        await parser.can_read()
+    assert stream.read_called is False
+
+
+async def test_async_hiredis_can_read_prefers_buffered_data_over_eof():
+    # a reply or push notification the reader already buffered must stay
+    # readable even if the server has since closed the connection,
+    # matching the sync parser's has_data-first ordering
+    stream = DummyAsyncStream(eof=True)
+    parser = make_async_hiredis_parser(stream, response=b"OK", has_data=True)
+
+    assert await parser.can_read() is True
+    assert await parser.read_response() == b"OK"
     assert stream.read_called is False
 
 
@@ -167,6 +193,49 @@ async def test_async_resp_can_read_detects_stream_buffer(parser_class):
     assert stream.read_called is False
 
 
+@pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
+async def test_async_resp_can_read_raises_on_eof(parser_class):
+    # a server-closed connection must raise like the sync SocketBuffer does,
+    # not report readable data (#4252)
+    stream = DummyAsyncStream(eof=True)
+    parser = parser_class(socket_read_size=65536)
+    parser._connected = True
+    parser._stream = stream
+
+    with pytest.raises(ConnectionError):
+        await parser.can_read()
+    assert stream.read_called is False
+
+
+@pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
+async def test_async_resp_can_read_prefers_buffered_data_over_eof(parser_class):
+    # data the parser already buffered must stay readable even if the server
+    # has since closed the connection, matching the sync SocketBuffer's
+    # buffer-first ordering
+    stream = DummyAsyncStream(eof=True)
+    parser = parser_class(socket_read_size=65536)
+    parser._connected = True
+    parser._stream = stream
+    parser._buffer = b"+OK\r\n"
+
+    assert await parser.can_read() is True
+    assert stream.read_called is False
+
+
+@pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
+async def test_async_resp_read_response_raises_after_disconnect(parser_class):
+    # A late reply read after disconnect could be assigned to the next
+    # cluster pipeline command.
+    stream = DummyAsyncStream(buffer=b"+OK\r\n")
+    parser = parser_class(socket_read_size=65536)
+    parser.on_connect(types.SimpleNamespace(_reader=stream, encoder=mock.Mock()))
+    parser.on_disconnect()
+
+    with pytest.raises(ConnectionError):
+        await parser.read_response()
+    assert stream.read_called is False
+
+
 @pytest.mark.parametrize(
     ("protocol", "parser_class", "expected_parser_class"),
     [
@@ -200,6 +269,92 @@ def test_get_resolved_ip_uses_async_writer_peer_before_dns():
             conn._writer = None
 
     getaddrinfo.assert_not_called()
+
+
+async def test_send_packed_command_rejects_closed_transport():
+    conn = Connection(health_check_interval=0)
+    writer = mock.Mock()
+    writer.transport.is_closing.return_value = True
+    writer.drain = mock.AsyncMock()
+    conn._reader = mock.Mock()
+    conn._writer = writer
+
+    with pytest.raises(ConnectionError, match="closed") as exc_info:
+        await conn.send_packed_command(b"PING", check_health=False)
+
+    assert type(exc_info.value) is ConnectionError
+    writer.writelines.assert_not_called()
+    writer.drain.assert_not_awaited()
+    writer.close.assert_called_once()
+    assert not conn.is_connected
+
+
+@pytest.mark.parametrize("socket_timeout", [None, 1])
+async def test_send_packed_command_writes_to_open_transport(socket_timeout):
+    conn = Connection(socket_timeout=socket_timeout, health_check_interval=0)
+    writer = mock.Mock()
+    writer.transport.is_closing.return_value = False
+    writer.drain = mock.AsyncMock()
+    conn._reader = mock.Mock()
+    conn._writer = writer
+
+    await conn.send_packed_command(b"PING", check_health=False)
+
+    writer.transport.is_closing.assert_called_once_with()
+    writer.writelines.assert_called_once_with([b"PING"])
+    writer.drain.assert_awaited_once_with()
+    await conn.disconnect(nowait=True)
+
+
+@pytest.mark.parametrize(
+    ("error_type", "message"),
+    [
+        (TypeError, "'NoneType' object is not callable"),
+        (AttributeError, "'NoneType' object has no attribute '_add_writer'"),
+    ],
+)
+async def test_send_packed_command_translates_closed_transport_error(
+    error_type, message
+):
+    conn = Connection(health_check_interval=0)
+    writer = mock.Mock()
+    writer.transport.is_closing.side_effect = [False, True]
+    error = error_type(message)
+    writer.writelines.side_effect = error
+    writer.drain = mock.AsyncMock()
+    conn._reader = mock.Mock()
+    conn._writer = writer
+
+    with pytest.raises(ConnectionError) as exc_info:
+        await conn.send_packed_command(b"PING", check_health=False)
+
+    assert type(exc_info.value) is ConnectionError
+    assert str(exc_info.value) == "Connection closed by the server while writing"
+    assert exc_info.value.__cause__ is error
+    assert writer.transport.is_closing.call_count == 2
+    writer.drain.assert_not_awaited()
+    writer.close.assert_called_once()
+    assert not conn.is_connected
+
+
+async def test_send_packed_command_preserves_type_error_on_open_transport():
+    conn = Connection(health_check_interval=0)
+    writer = mock.Mock()
+    writer.transport.is_closing.return_value = False
+    error = TypeError("sequence item 0: expected a bytes-like object")
+    writer.writelines.side_effect = error
+    writer.drain = mock.AsyncMock()
+    conn._reader = mock.Mock()
+    conn._writer = writer
+
+    with pytest.raises(TypeError) as exc_info:
+        await conn.send_packed_command(b"PING", check_health=False)
+
+    assert exc_info.value is error
+    assert writer.transport.is_closing.call_count == 2
+    writer.drain.assert_not_awaited()
+    writer.close.assert_called_once()
+    assert not conn.is_connected
 
 
 @pytest.mark.fixed_client
@@ -564,6 +719,41 @@ async def test_pool_auto_close(request, from_url):
     await r1.aclose()
 
 
+@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
+@skip_if_server_version_lt("5.0.0")
+async def test_pool_replaces_connection_killed_while_idle(request):
+    """
+    Regression test for #4252: a pooled connection the server closed while
+    it sat idle (CLIENT KILL, idle timeout, server-side reap) must be
+    replaced at pool checkout instead of failing the next command.
+    Retries are disabled so recovery can only come from the pool.
+    """
+    url: str = request.config.getoption("--redis-url")
+    r = Redis.from_url(url, retry=Retry(NoBackoff(), 0))
+    killer = Redis.from_url(url)
+    try:
+        cid = await r.client_id()
+        conn = r.connection_pool._available_connections[0]
+        assert await killer.client_kill_filter(_id=str(cid))
+
+        # wait until the client's event loop has seen the server-side close
+        deadline = asyncio.get_running_loop().time() + 3
+        while not conn._parser._stream.at_eof():
+            assert asyncio.get_running_loop().time() < deadline, (
+                "server-side kill never surfaced on the client socket"
+            )
+            await asyncio.sleep(0.01)
+
+        # the next command must be served by a healthy replacement connection
+        assert await r.ping()
+    finally:
+        await r.aclose()
+        await r.connection_pool.disconnect()
+        await killer.aclose()
+        await killer.connection_pool.disconnect()
+
+
 async def test_close_is_aclose(request):
     """Verify close() calls aclose()"""
     calls = 0
@@ -872,3 +1062,69 @@ async def test_disconnect_no_current_task_calls_close(request):
             mock_on_disconnect.assert_called_once()
 
     assert not conn.is_connected
+
+
+def test_parse_url_retry_on_error_resolves_exception_names():
+    kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
+    assert kw["retry_on_error"] == [ConnectionError]
+
+
+def test_parse_url_retry_on_error_comma_separated():
+    kw = parse_url(
+        "redis://localhost:6379/?retry_on_error=ConnectionError,TimeoutError"
+    )
+    assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
+
+
+def test_parse_url_retry_on_error_bracket_list():
+    kw = parse_url(
+        "redis://localhost:6379/?retry_on_error=[ConnectionError,TimeoutError]"
+    )
+    assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
+
+
+def test_parse_url_retry_on_error_blank_entry():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?retry_on_error=,")
+    assert str(exc_info.value) == (
+        "Invalid value for 'retry_on_error' in connection URL."
+    )
+
+
+def test_parse_url_invalid_db_keeps_stable_message():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?db=not-an-int")
+    assert str(exc_info.value) == "Invalid value for 'db' in connection URL."
+
+
+def test_parse_url_retry_on_error_unknown_name():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?retry_on_error=NotARealError")
+    assert str(exc_info.value) == (
+        "Invalid value for 'retry_on_error' in connection URL."
+    )
+
+
+@pytest.mark.asyncio
+async def test_parse_url_retry_on_error_usable_in_retry():
+    kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
+    conn = Connection(**kw)
+    assert ConnectionError in conn.retry._supported_errors
+    assert all(
+        isinstance(err, type) and issubclass(err, Exception)
+        for err in conn.retry._supported_errors
+    )
+
+    calls = 0
+
+    async def do():
+        nonlocal calls
+        calls += 1
+        raise ConnectionError("simulated network drop")
+
+    async def fail(error):
+        return None
+
+    with pytest.raises(ConnectionError):
+        await conn.retry.call_with_retry(do=do, fail=fail)
+    assert calls == 2

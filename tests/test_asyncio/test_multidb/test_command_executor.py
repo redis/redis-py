@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from redis.asyncio.multidb.failure_detector import FailureDetectorAsyncWrapper
-from redis.event import EventDispatcher
+from redis.event import EventDispatcher, OnCommandsFailEvent
 from redis.exceptions import ConnectionError
 from redis.asyncio.multidb.command_executor import DefaultCommandExecutor
 from redis.asyncio.retry import Retry
@@ -180,3 +180,83 @@ class TestDefaultCommandExecutor:
         assert await executor.execute_command("SET", "key", "value") == "OK2"
         assert await executor.execute_command("SET", "key", "value") == "OK1"
         assert mock_selector.call_count == 3
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mock_db,mock_db1,mock_db2",
+        [
+            (
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    async def test_execute_pubsub_method_forwards_multiple_args(
+        self, mock_db, mock_db1, mock_db2, mock_fd, mock_fs, mock_ed
+    ):
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+
+        executor = DefaultCommandExecutor(
+            failure_detectors=[mock_fd],
+            databases=databases,
+            failover_strategy=mock_fs,
+            event_dispatcher=mock_ed,
+            command_retry=Retry(NoBackoff(), 0),
+        )
+
+        await executor.set_active_database(mock_db1, GeoFailoverReason.MANUAL)
+        executor.active_pubsub = AsyncMock()
+
+        # Subscribing to more than one channel used to raise TypeError,
+        # because execute_pubsub_method star-unpacked the args tuple into
+        # _execute_with_failure_detection, which only accepts one extra arg.
+        await executor.execute_pubsub_method("subscribe", "channel-1", "channel-2")
+
+        executor.active_pubsub.subscribe.assert_called_once_with(
+            "channel-1", "channel-2"
+        )
+        mock_fd.register_command_execution.assert_called_once_with(
+            ("channel-1", "channel-2")
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mock_db,mock_db1,mock_db2",
+        [
+            (
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    async def test_execute_pubsub_method_failure_reports_intact_command_tuple(
+        self, mock_db, mock_db1, mock_db2, mock_fd, mock_fs, mock_ed
+    ):
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+
+        executor = DefaultCommandExecutor(
+            failure_detectors=[mock_fd],
+            databases=databases,
+            failover_strategy=mock_fs,
+            event_dispatcher=mock_ed,
+            command_retry=Retry(NoBackoff(), 0),
+        )
+
+        await executor.set_active_database(mock_db1, GeoFailoverReason.MANUAL)
+        mock_pubsub = AsyncMock()
+        mock_pubsub.subscribe.side_effect = ConnectionError("boom")
+        executor.active_pubsub = mock_pubsub
+
+        # With a single channel the old code passed a bare string as `cmds`,
+        # so the failure event star-unpacked it into individual characters
+        # instead of the channel name.
+        with pytest.raises(ConnectionError):
+            await executor.execute_pubsub_method("subscribe", "channel-1")
+
+        event = mock_ed.dispatch_async.call_args[0][0]
+        assert isinstance(event, OnCommandsFailEvent)
+        assert event.commands == ("channel-1",)
