@@ -1138,6 +1138,15 @@ class Monitor:
             yield await self.next_command()
 
 
+async def _await_connection_can_read(conn: "Connection", timeout: float = 0) -> bool:
+    """Call ``can_read`` on a connection, tolerating legacy no-arg overrides."""
+    can_read = conn.can_read
+    try:
+        return await can_read(timeout=timeout)
+    except TypeError:
+        return await can_read()
+
+
 class PubSub:
     """
     PubSub provides publish, subscribe and listen support to Redis channels.
@@ -1445,24 +1454,20 @@ class PubSub:
         # removed. That swap is a breaking change to the
         # Connection.read_response signature so it must wait for a
         # major release.
-        #
-        # Non-blocking reads mirror the sync PubSub path: wait for
-        # readability (or buffered data) via can_read() and then read
-        # without scheduling asyncio.timeout(), which can corrupt the
-        # event loop callback heap under tight PubSub polling (#3748).
-        if not block:
-            if not await conn.can_read(timeout=timeout):
-                return None
-            read_timeout = math.inf
-        else:
-            read_timeout = math.inf
-        response = await self._execute(
-            conn,
-            conn.read_response,
-            timeout=read_timeout,
-            disconnect_on_error=False,
-            push_request=True,
-        )
+        async def try_read():
+            if not block:
+                if not await _await_connection_can_read(conn, timeout):
+                    return None
+                read_timeout = timeout
+            else:
+                read_timeout = math.inf
+            return await conn.read_response(
+                timeout=read_timeout,
+                disconnect_on_error=False,
+                push_request=True,
+            )
+
+        response = await self._execute(conn, try_read)
 
         if conn.health_check_interval and response in self.health_check_response:
             # ignore the health check message as user might not expect it
