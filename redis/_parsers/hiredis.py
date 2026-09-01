@@ -348,7 +348,11 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         return True
 
     async def read_response(
-        self, disable_decoding: bool = False, push_request: bool = False
+        self,
+        disable_decoding: bool = False,
+        push_request: bool = False,
+        *,
+        buffered_only: bool = False,
     ) -> Union[EncodableT, List[EncodableT]]:
         # If `on_disconnect()` has been called, prohibit any more reads
         # even if they could happen because data might be present.
@@ -362,6 +366,8 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
             response = self._reader.gets()
 
         while response is NOT_ENOUGH_DATA:
+            if buffered_only:
+                return None
             await self.read_from_socket()
             if disable_decoding:
                 response = self._reader.gets(False)
@@ -379,7 +385,9 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
             response = await self.handle_push_response(response)
             if not push_request:
                 return await self.read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
+                    disable_decoding=disable_decoding,
+                    push_request=push_request,
+                    buffered_only=buffered_only,
                 )
             else:
                 return response

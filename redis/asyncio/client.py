@@ -1457,6 +1457,10 @@ class PubSub:
         async def try_read():
             if not block:
                 if not await _await_connection_can_read(conn, timeout):
+                    if timeout == 0:
+                        # Match PubSub.run(): yield so other tasks make progress
+                        # when polling with timeout=0 and no buffered data.
+                        await asyncio.sleep(0)
                     return None
                 read_timeout = timeout
             else:

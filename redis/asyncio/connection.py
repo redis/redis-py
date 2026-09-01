@@ -1311,6 +1311,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                 response = await self._read_response_from_parser(
                     disable_decoding=disable_decoding,
                     push_request=push_request,
+                    buffered_only=True,
                 )
             elif read_timeout is not None:
                 timeout_context = async_timeout(read_timeout)
@@ -1364,13 +1365,22 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         return response
 
     async def _read_response_from_parser(
-        self, disable_decoding: bool = False, push_request: bool | None = False
+        self,
+        disable_decoding: bool = False,
+        push_request: bool | None = False,
+        *,
+        buffered_only: bool = False,
     ):
         if check_protocol_version(self.protocol, 3):
             return await self._parser.read_response(
-                disable_decoding=disable_decoding, push_request=push_request
+                disable_decoding=disable_decoding,
+                push_request=push_request,
+                buffered_only=buffered_only,
             )
-        return await self._parser.read_response(disable_decoding=disable_decoding)
+        return await self._parser.read_response(
+            disable_decoding=disable_decoding,
+            buffered_only=buffered_only,
+        )
 
     def pack_command(self, *args: EncodableT) -> List[bytes]:
         """Pack a series of arguments into the Redis protocol"""

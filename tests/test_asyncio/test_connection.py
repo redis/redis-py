@@ -182,6 +182,16 @@ async def test_async_hiredis_can_read_leaves_decoding_to_read_response():
     assert await parser.read_response() == raw.decode()
 
 
+async def test_async_hiredis_read_response_buffered_only_returns_none_incomplete():
+    stream = DummyAsyncStream()
+    parser = make_async_hiredis_parser(
+        stream, response=NOT_ENOUGH_DATA, has_data=True
+    )
+
+    assert await parser.read_response(buffered_only=True) is None
+    assert stream.read_called is False
+
+
 @pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
 async def test_async_resp_can_read_detects_stream_buffer(parser_class):
     stream = DummyAsyncStream(buffer=b"+OK\r\n")
@@ -219,6 +229,23 @@ async def test_async_resp_can_read_prefers_buffered_data_over_eof(parser_class):
     parser._buffer = b"+OK\r\n"
 
     assert await parser.can_read() is True
+    assert stream.read_called is False
+
+
+@pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
+async def test_async_resp_read_response_buffered_only_returns_none_incomplete(
+    parser_class,
+):
+    stream = DummyAsyncStream()
+    parser = parser_class(socket_read_size=65536)
+    parser._connected = True
+    parser._stream = stream
+    parser._buffer = b"$10\r\n"
+    parser._pos = 0
+    parser.encoder = mock.Mock()
+    parser.encoder.decode.side_effect = lambda value: value
+
+    assert await parser.read_response(buffered_only=True) is None
     assert stream.read_called is False
 
 
