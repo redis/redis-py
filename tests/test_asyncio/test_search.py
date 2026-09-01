@@ -4174,9 +4174,12 @@ class TestHybridSearch(AsyncSearchTestsBase):
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
+        # MAXIDLE is expressed in milliseconds, and the two cursors created here
+        # are read over two further round trips. Keep the idle window wide enough
+        # to survive that when the target deployment is remote.
         res = await decoded_r.ft().hybrid_search(
             query=hybrid_query,
-            cursor=HybridCursorQuery(count=5, max_idle=100),
+            cursor=HybridCursorQuery(count=5, max_idle=10000),
             params_substitution={
                 "vec": np.array([1, 2, 7, 6], dtype=np.float32).tobytes()
             },
