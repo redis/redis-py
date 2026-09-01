@@ -52,7 +52,6 @@ from .conftest import (
     expects_unified_shape,
     get_protocol_version,
     skip_if_redis_enterprise,
-    skip_if_resp_version,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_ifmodversion_lt,
@@ -895,6 +894,66 @@ class TestBaseSearchFunctionality(SearchTestsBase):
             _ = alias_client2.search("*").docs[0]
 
     @pytest.mark.redismod
+    @skip_if_server_version_lt("8.9.0")
+    def test_aliaslist(self, client):
+        index = client.ft("aliaslistidx")
+        index.create_index((TextField("txt"),))
+
+        # An existing index with no aliases returns an empty set, not an error.
+        assert index.aliaslist() == set()
+
+        # Aliases are returned as an unordered collection.
+        index.aliasadd("alias1")
+        index.aliasadd("alias2")
+        aliases = index.aliaslist()
+        assert isinstance(aliases, set)
+        assert aliases == {"alias1", "alias2"}
+
+        # FT.ALIASUPDATE moving an alias to another index removes it from the
+        # previous index's listing.
+        index2 = client.ft("aliaslistidx2")
+        index2.create_index((TextField("txt"),))
+        index2.aliasupdate("alias1")
+        assert index.aliaslist() == {"alias2"}
+        assert index2.aliaslist() == {"alias1"}
+
+        # FT.ALIASDEL removes the alias from the listing.
+        index.aliasdel("alias2")
+        assert index.aliaslist() == set()
+
+        # A missing index and an alias name supplied as the index both fail
+        # with the index-not-found error; the client must not resolve aliases.
+        with pytest.raises(redis.ResponseError):
+            client.ft("nonexistent_aliaslist_index").aliaslist()
+        with pytest.raises(redis.ResponseError):
+            client.ft("alias1").aliaslist()
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("8.9.0")
+    @skip_if_redis_enterprise()
+    def test_aliaslist_decode_responses_false(self, request, stack_url):
+        # ``decode_responses`` is not part of the CI protocol/legacy matrix,
+        # so pin only that here and let the harness supply the protocol x
+        # legacy combinations (as it does for ``test_aliaslist`` above).
+        client = _get_client(
+            redis.Redis, request, decode_responses=False, from_url=stack_url
+        )
+        index = client.ft("aliaslistbytesidx")
+        index.create_index((TextField("txt"),))
+
+        # ``aliasadd`` accepts a ``KeyT`` (str | bytes | memoryview); mix a
+        # ``str`` and a ``bytes`` alias to exercise the widened input type.
+        index.aliasadd("alias1")
+        index.aliasadd(b"alias2")
+
+        # Alias names are user data, so with ``decode_responses=False`` they
+        # are returned as ``bytes`` (honoring the flag, like FT.TAGVALS /
+        # FT.DICTDUMP) rather than being force-decoded to ``str``.
+        aliases = index.aliaslist()
+        assert isinstance(aliases, set)
+        assert aliases == {b"alias1", b"alias2"}
+
+    @pytest.mark.redismod
     def test_textfield_sortable_nostem(self, client):
         # Creating the index definition with sortable and no_stem
         client.ft().create_index((TextField("txt", sortable=True, no_stem=True),))
@@ -1355,7 +1414,6 @@ class TestBaseSearchFunctionality(SearchTestsBase):
             assert "telmatosaurus" == total["results"][0]["extra_attributes"]["txt"]
 
     @pytest.mark.redismod
-    @skip_if_resp_version(3)
     def test_binary_and_text_fields(self, client):
         fake_vec = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
 
@@ -1390,17 +1448,104 @@ class TestBaseSearchFunctionality(SearchTestsBase):
             .return_field("vector_emb", decode_field=False)
             .return_field("first_name")
         )
-        docs = client.ft(index_name).search(query=query, query_params={}).docs
+        result = client.ft(index_name).search(query=query, query_params={})
+
+        if expects_resp3_shape(client):
+            # protocol=3 + legacy_responses=True returns the native RESP3 dict;
+            # text fields are decoded while the binary field is kept as bytes.
+            results = result["results"]
+            assert len(results) > 0, f"Returned search results are empty: {result}"
+            attributes = results[0]["extra_attributes"]
+        else:
+            docs = result.docs
+            assert len(docs) > 0, f"Returned search results are empty: {result}"
+            attributes = docs[0]
+
         decoded_vec_from_search_results = np.frombuffer(
-            docs[0]["vector_emb"], dtype=np.float32
+            attributes["vector_emb"], dtype=np.float32
         )
 
         assert np.array_equal(decoded_vec_from_search_results, fake_vec), (
             "The vectors are not equal"
         )
 
-        assert docs[0]["first_name"] == mixed_data["first_name"], (
+        assert attributes["first_name"] == mixed_data["first_name"], (
             "The text field is not decoded correctly"
+        )
+
+    def test_return_field_encoding_is_keyed_by_alias(self):
+        # The server returns an aliased field under its alias, so that is the
+        # name the response is looked up under when decoding.
+        query = Query("*").return_field(
+            "$.vector_emb", as_field="vector_emb", decode_field=False
+        )
+        assert query._return_fields_decode_as == {"vector_emb": None}
+        assert query.get_args()[:4] == ["*", "RETURN", 3, "$.vector_emb"]
+
+        raw = b"\x00\x01\x82\xff"
+        res = Result(
+            [1, "doc:1", ["vector_emb", raw]],
+            True,
+            field_encodings=query._return_fields_decode_as,
+        )
+        assert res.docs[0].vector_emb == raw
+
+        res = Result.from_resp3(
+            {
+                "total_results": 1,
+                "results": [{"id": "doc:1", "extra_attributes": {"vector_emb": raw}}],
+            },
+            field_encodings=query._return_fields_decode_as,
+        )
+        assert res.docs[0].vector_emb == raw
+
+    @pytest.mark.redismod
+    def test_binary_field_survives_alias_with_decode_field_false(self, client):
+        # Regression test: return_field() used to key the decode-encoding map
+        # by the field identifier instead of the AS alias, so an aliased
+        # binary field was decoded (and silently truncated) instead of being
+        # kept raw. Covered against a real server across the protocol /
+        # legacy_responses matrix that CI runs this suite under.
+        fake_vec = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
+
+        index_name = "aliased_binary_index"
+        client.hset(f"{index_name}:1", mapping={"vector_emb": fake_vec.tobytes()})
+
+        client.ft(index_name).create_index(
+            fields=(
+                VectorField(
+                    "vector_emb",
+                    algorithm="HNSW",
+                    attributes={
+                        "TYPE": "FLOAT32",
+                        "DIM": 4,
+                        "DISTANCE_METRIC": "COSINE",
+                    },
+                ),
+            ),
+            definition=IndexDefinition(
+                prefix=[f"{index_name}:"], index_type=IndexType.HASH
+            ),
+        )
+        self.waitForIndex(client, index_name)
+
+        query = Query("*").return_field(
+            "vector_emb", as_field="emb", decode_field=False
+        )
+        result = client.ft(index_name).search(query=query, query_params={})
+
+        if expects_resp3_shape(client):
+            results = result["results"]
+            assert len(results) > 0, f"Returned search results are empty: {result}"
+            attributes = results[0]["extra_attributes"]
+        else:
+            docs = result.docs
+            assert len(docs) > 0, f"Returned search results are empty: {result}"
+            attributes = docs[0]
+
+        decoded_vec = np.frombuffer(attributes["emb"], dtype=np.float32)
+        assert np.array_equal(decoded_vec, fake_vec), (
+            "The aliased binary field was not preserved intact"
         )
 
     @pytest.mark.redismod
@@ -3419,6 +3564,38 @@ class TestDifferentFieldTypesSearch(SearchTestsBase):
         with pytest.raises(Exception):
             r.ft().create_index((VectorField("v", "SORT", {}),))
 
+    @pytest.mark.fixed_client
+    def test_vector_field_rerank(self):
+        # Pure serialization check: VectorField builds the FT.CREATE args with
+        # no server round-trip, so this test needs no Redis and is not gated.
+        # RERANK is a boolean key-value attribute for HNSW vector fields on
+        # disk-backed (Flex / Auto-Tiering) deployments, where it is mandatory.
+        # It toggles the exact FP32 rerank pass over the approximate candidates
+        # returned by the on-disk graph traversal. It flows through the generic
+        # ``attributes`` dict as the string "TRUE"/"FALSE" (a bare flag is
+        # rejected by the server, and Python bools are rejected by the client
+        # encoder), and the attribute-count token accounts for the extra pair.
+        field = VectorField(
+            "v",
+            "HNSW",
+            {"TYPE": "FLOAT32", "DIM": 128, "DISTANCE_METRIC": "L2", "RERANK": "TRUE"},
+        )
+        assert field.args[0] == "VECTOR"
+        assert field.args[1] == "HNSW"
+        assert field.args[2] == 8  # 4 attribute pairs -> 8 tokens
+        assert "RERANK" in field.args
+        assert "TRUE" in field.args
+
+        # MS2 also accepts RERANK FALSE (opt out of the rerank pass).
+        field = VectorField(
+            "v",
+            "HNSW",
+            {"TYPE": "FLOAT32", "DIM": 128, "DISTANCE_METRIC": "L2", "RERANK": "FALSE"},
+        )
+        assert field.args[2] == 8
+        assert "RERANK" in field.args
+        assert "FALSE" in field.args
+
     @pytest.mark.redismod
     @skip_ifmodversion_lt("2.4.3", "search")
     def test_text_params(self, client):
@@ -3639,6 +3816,30 @@ class TestPipeline(SearchTestsBase):
                 == res[3]["results"][1]["extra_attributes"]
                 == {"txt": "foo bar"}
             )
+
+    @pytest.mark.redismod
+    @skip_if_redis_enterprise()
+    @skip_if_server_version_lt("8.9.0")
+    def test_aliaslist_in_pipeline(self, client):
+        index = client.ft("aliaslistpipeidx")
+        index.create_index((TextField("txt"),))
+
+        # An empty listing normalizes to ``set()`` through the pipeline, not
+        # the raw ``[]`` wire response.
+        p = index.pipeline()
+        p.aliaslist()
+        res = p.execute()
+        assert isinstance(res[0], set)
+        assert res[0] == set()
+
+        # Aliases are returned as an unordered set, matching the direct call.
+        index.aliasadd("alias1")
+        index.aliasadd("alias2")
+        p = index.pipeline()
+        p.aliaslist()
+        res = p.execute()
+        assert isinstance(res[0], set)
+        assert res[0] == {"alias1", "alias2"}
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.4.0")
@@ -4600,7 +4801,11 @@ class TestSearchWithVamana(SearchTestsBase):
 
 class TestHybridSearch(SearchTestsBase):
     _HYBRID_TIMEOUT_DIM = 8192
-    _HYBRID_TIMEOUT_DOCS = 1500
+    # The 1ms timeout only fires once the query runs long enough to hit a
+    # server timeout checkpoint; smaller data sets slip through and return no
+    # warnings. 6000 docs keeps the query comfortably above the 1ms limit so
+    # the timeout reliably triggers across hardware.
+    _HYBRID_TIMEOUT_DOCS = 6000
 
     def _create_hybrid_search_index(self, client, dim=4):
         client.ft().create_index(
@@ -5933,7 +6138,9 @@ class TestHybridSearch(SearchTestsBase):
             warnings = res["warnings"]
             assert res["execution_time"] > 0
 
-        assert any(
+        assert warnings, f"Expected timeout warnings but none were returned: {warnings}"
+
+        all_match = all(
             safe_str(warning)
             in {
                 "Timeout limit was reached (VSIM)",
@@ -5941,6 +6148,7 @@ class TestHybridSearch(SearchTestsBase):
             }
             for warning in warnings
         )
+        assert all_match, f"Not all warning are matching the pattern: {warnings}"
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")

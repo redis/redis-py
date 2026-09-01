@@ -37,6 +37,12 @@ from redis.asyncio.observability.recorder import (
     record_streaming_lag_from_response as async_record_streaming_lag,
 )
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
+from redis.himport import (
+    HIMPORT_DISCARD,
+    HIMPORT_DISCARDALL,
+    HIMPORT_PREPARE,
+    HIMPORT_SET,
+)
 from redis.typing import (
     AbsExpiryT,
     ACLGetUserData,
@@ -8296,7 +8302,7 @@ class SortedSetCommands(CommandsProtocol):
                 "ZADD option 'incr' only works when passing a single element/score pair"
             )
         if nx and (gt or lt):
-            raise DataError("Only one of 'nx', 'lt', or 'gr' may be defined.")
+            raise DataError("Only one of 'nx', 'gt', or 'lt' may be defined.")
 
         pieces: list[EncodableT] = []
         options = {}
@@ -8982,7 +8988,7 @@ class SortedSetCommands(CommandsProtocol):
         if withscores:
             pieces.append(b"WITHSCORES")
         options = {"withscores": withscores, "score_cast_func": score_cast_func}
-        options["keys"] = name
+        options["keys"] = [name]
         return self.execute_command(*pieces, **options)
 
     @overload
@@ -10748,6 +10754,141 @@ class HashCommands(CommandsProtocol):
             "HPTTL", key, "FIELDS", len(fields), *fields, keys=[key]
         )
 
+    # -- HIMPORT (Hinted Hash Templates) --------------------------------------
+    # himport_set is the full public command: the executor lazily PREPAREs the
+    # fieldset on the serving connection and reconciles deferred DISCARDs, so it
+    # needs no client-level wrapper. The *_internal methods are the pure PREPARE /
+    # DISCARD / DISCARDALL wire mappings; the client-side orchestration around them
+    # (the shared registry, and running them immediately on a single-connection
+    # client) lives on the client classes as himport_prepare / himport_discard /
+    # himport_discard_all.
+
+    @overload
+    def himport_prepare_internal(
+        self: SyncClientProtocol, fieldset_name: str, fields: Iterable[FieldT]
+    ) -> bool: ...
+
+    @overload
+    def himport_prepare_internal(
+        self: AsyncClientProtocol, fieldset_name: str, fields: Iterable[FieldT]
+    ) -> Awaitable[bool]: ...
+
+    def himport_prepare_internal(
+        self, fieldset_name: str, fields: Iterable[FieldT]
+    ) -> bool | Awaitable[bool]:
+        """Send ``HIMPORT PREPARE fieldset_name field [field ...]``.
+
+        Registers the ordered field list under ``fieldset_name`` in the executing
+        connection's session. Fields are sent in the caller's order, unmodified.
+
+        .. warning::
+            Internal wire mapping — not for direct use on a pooled client. It
+            PREPAREs on a single arbitrary borrowed connection and bypasses the
+            client's shared fieldset registry, so other connections stay unaware and
+            reintroduce the nondeterministic "no such fieldset" the HIMPORT design
+            prevents. Use the client's ``himport_prepare`` instead; call this only
+            on a pinned single-connection client where you manage session state
+            yourself.
+        """
+        return self.execute_command(HIMPORT_PREPARE, fieldset_name, *fields)
+
+    @overload
+    def himport_set(
+        self: SyncClientProtocol,
+        key: KeyT,
+        fieldset_name: str,
+        values: Iterable[EncodableT],
+    ) -> bool: ...
+
+    @overload
+    def himport_set(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        fieldset_name: str,
+        values: Iterable[EncodableT],
+    ) -> Awaitable[bool]: ...
+
+    @experimental_method()
+    def himport_set(
+        self, key: KeyT, fieldset_name: str, values: Iterable[EncodableT]
+    ) -> bool | Awaitable[bool]:
+        """Create/replace ``key`` as a hash using ``fieldset_name``'s field list.
+
+        Values are sent in the caller's order and map positionally to the prepared
+        fields. The fieldset is prepared on the serving connection on first use
+        (PREPARE bundled with SET in one write) and reused on subsequent calls;
+        runtime discards are reconciled on the next use of the connection. All of
+        this happens inside the normal command path, so retry, disconnect-on-error
+        and (for the cluster) routing / MOVED-ASK apply exactly as for any command.
+
+        .. note::
+            Recovery from a mid-connection fieldset loss (the server dropping the
+            prepared fieldset without dropping the socket, e.g. ``RESET`` or
+            ``maxmemory-clients`` eviction) applies only to a standalone
+            ``himport_set`` call: it catches the resulting ``no such fieldset`` and
+            re-prepares on the same socket, retrying the SET once. A ``himport_set``
+            buffered in a **pipeline or transaction** has no such per-command
+            recovery — its fieldset is PREPAREd once as a pre-flight before the
+            batch, and if the server loses it between that pre-flight and the batch
+            the SET fails and surfaces as an error in the batch results. Callers who
+            need the automatic recovery should issue those sets outside a pipeline.
+        """
+        # A bare str/bytes-like value is iterable element-by-element; splatting it
+        # would send single chars/bytes as separate positional values instead of one
+        # value. Reject it as a caller mistake, mirroring HImportRegistry's field-list
+        # guard.
+        if isinstance(values, (str, bytes, bytearray, memoryview)):
+            raise DataError(
+                "HIMPORT values must be a collection of values, not a string"
+            )
+        return self.execute_command(
+            HIMPORT_SET, key, fieldset_name, *values, keys=[key]
+        )
+
+    @overload
+    def himport_discard_internal(
+        self: SyncClientProtocol, fieldset_name: str
+    ) -> int: ...
+
+    @overload
+    def himport_discard_internal(
+        self: AsyncClientProtocol, fieldset_name: str
+    ) -> Awaitable[int]: ...
+
+    def himport_discard_internal(self, fieldset_name: str) -> int | Awaitable[int]:
+        """Send ``HIMPORT DISCARD fieldset_name`` (``1`` removed, ``0`` not found).
+
+        .. warning::
+            Internal wire mapping — not for direct use on a pooled client. It
+            DISCARDs on a single arbitrary borrowed connection and bypasses the
+            client's shared fieldset registry, leaving other connections and the
+            registry out of sync. Use the client's ``himport_discard`` instead; call
+            this only on a pinned single-connection client where you manage session
+            state yourself.
+        """
+        return self.execute_command(HIMPORT_DISCARD, fieldset_name)
+
+    @overload
+    def himport_discard_all_internal(self: SyncClientProtocol) -> int: ...
+
+    @overload
+    def himport_discard_all_internal(
+        self: AsyncClientProtocol,
+    ) -> Awaitable[int]: ...
+
+    def himport_discard_all_internal(self) -> int | Awaitable[int]:
+        """Send ``HIMPORT DISCARDALL`` (returns the number of fieldsets removed).
+
+        .. warning::
+            Internal wire mapping — not for direct use on a pooled client. It
+            DISCARDs on a single arbitrary borrowed connection and bypasses the
+            client's shared fieldset registry, leaving other connections and the
+            registry out of sync. Use the client's ``himport_discard_all`` instead;
+            call this only on a pinned single-connection client where you manage
+            session state yourself.
+        """
+        return self.execute_command(HIMPORT_DISCARDALL)
+
 
 AsyncHashCommands = HashCommands
 
@@ -10787,10 +10928,15 @@ class Script:
         args = tuple(keys) + tuple(args)
         # make sure the Redis server knows about the script
         from redis.client import Pipeline
+        from redis.cluster import ClusterPipeline
 
         if isinstance(client, Pipeline):
             # Make sure the pipeline can register the script before executing.
             client.scripts.add(self)
+        if isinstance(client, ClusterPipeline):
+            # ClusterPipeline does not support script_load. Queue EVALSHA and
+            # leave NOSCRIPT recovery to the caller (same as AsyncScript).
+            return client.evalsha(self.sha, len(keys), *args)
         try:
             return client.evalsha(self.sha, len(keys), *args)
         except NoScriptError:
@@ -10862,10 +11008,15 @@ class AsyncScript:
         args = tuple(keys) + tuple(args)
         # make sure the Redis server knows about the script
         from redis.asyncio.client import Pipeline
+        from redis.asyncio.cluster import ClusterPipeline
 
         if isinstance(client, Pipeline):
             # Make sure the pipeline can register the script before executing.
             client.scripts.add(self)
+        if isinstance(client, ClusterPipeline):
+            # ClusterPipeline.evalsha queues synchronously. Awaiting the
+            # pipeline would call initialize() and drop the queued command.
+            return client.evalsha(self.sha, len(keys), *args)
         try:
             return await client.evalsha(self.sha, len(keys), *args)
         except NoScriptError:

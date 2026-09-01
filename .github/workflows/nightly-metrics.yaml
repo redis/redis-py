@@ -1,0 +1,82 @@
+name: Nightly test metrics
+
+# Once a day, run the redis-py standalone test suite (master, default
+# client configuration, modules included) against a Redis server built
+# from redis' unstable branch, and report per-test durations to Grafana
+# for performance regression tracking.
+
+on:
+  schedule:
+    - cron: '30 3 * * *' # nightly, staggered from the 01:00 CI run
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-metrics
+  cancel-in-progress: false
+
+permissions:
+  contents: read # to fetch code (actions/checkout)
+
+jobs:
+  nightly-metrics:
+    name: Redis unstable; test metrics
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      # Secrets can't be used in `if:` conditions, so a first step checks
+      # the token and later steps are gated on its output. Without the
+      # secret the job prints a warning and skips everything.
+      - name: Check for the metrics token
+        id: gate
+        env:
+          OTEL_TOKEN: ${{ secrets.OTEL_CI_VISIBILITY_TOKEN }}
+        run: |
+          if [ -z "$OTEL_TOKEN" ]; then
+            echo "::warning::The OTEL_CI_VISIBILITY_TOKEN secret is not set; skipping the nightly metrics run."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.gate.outputs.run == 'true'
+
+      - name: Resolve latest unstable Redis image
+        id: unstable-image
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          # Pick the newest tag client-side instead of relying on the API's
+          # ordering parameter.
+          tag=$(curl -sf "https://hub.docker.com/v2/repositories/redislabs/client-libs-test/tags?page_size=100&name=unstable-" \
+            | jq -r '.results | max_by(.last_updated) | .name // empty')
+          if [ -z "$tag" ]; then
+            echo "::error::Could not resolve an unstable client-libs-test image tag from Docker Hub"
+            exit 1
+          fi
+          echo "Using image tag: $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Run tests
+        if: steps.gate.outputs.run == 'true'
+        uses: ./.github/actions/run-tests
+        with:
+          python-version: '3.12'
+          parser-backend: 'plain'
+          # The server under test is the unstable image resolved above;
+          # redis-version only drives run-tests' setup branching and the
+          # artifact name, and it must be numeric.
+          redis-version: '8.10'
+          client-libs-test-image: ${{ steps.unstable-image.outputs.tag }}
+          # One config, so each test reports exactly one duration per night.
+          test-config: 'default-legacy_responses-standalone'
+
+      - name: Report test metrics
+        # Report even when tests fail, but not when the run was cancelled.
+        if: ${{ !cancelled() && steps.gate.outputs.run == 'true' }}
+        uses: redis-developer/cae-otel-ci-visibility@v4
+        with:
+          junit-xml-folder: 'junit-results'
+          otlp-endpoint: 'https://otlp-gateway-prod-us-central-0.grafana.net/otlp/v1/metrics'
+          otlp-headers: 'Authorization=Basic ${{ secrets.OTEL_CI_VISIBILITY_TOKEN }}'
+          server-version: 'unstable'

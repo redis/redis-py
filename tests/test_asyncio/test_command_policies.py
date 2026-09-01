@@ -4,12 +4,8 @@ from unittest.mock import patch
 import pytest
 
 from redis import ResponseError
-from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
 from redis.asyncio import RedisCluster
-from redis.commands.policies import (
-    AsyncDynamicPolicyResolver,
-    AsyncStaticPolicyResolver,
-)
+from redis.commands.metadata import RequestPolicy
 from redis.commands.search.aggregation import AggregateRequest, Cursor
 from redis.commands.search.field import NumericField, TextField
 from tests.conftest import (
@@ -17,72 +13,6 @@ from tests.conftest import (
     expects_unified_shape,
     skip_if_server_version_lt,
 )
-
-
-@pytest.mark.asyncio
-@pytest.mark.onlycluster
-class TestBasePolicyResolver:
-    async def test_resolve(self):
-        zcount_policy = CommandPolicies(
-            request_policy=RequestPolicy.DEFAULT_KEYED,
-            response_policy=ResponsePolicy.DEFAULT_KEYED,
-        )
-        rpoplpush_policy = CommandPolicies(
-            request_policy=RequestPolicy.DEFAULT_KEYED,
-            response_policy=ResponsePolicy.DEFAULT_KEYED,
-        )
-
-        dynamic_resolver = AsyncDynamicPolicyResolver(
-            {
-                "core": {
-                    "zcount": zcount_policy,
-                    "rpoplpush": rpoplpush_policy,
-                }
-            }
-        )
-        assert await dynamic_resolver.resolve("zcount") == zcount_policy
-        assert await dynamic_resolver.resolve("rpoplpush") == rpoplpush_policy
-
-        with pytest.raises(
-            ValueError, match="Wrong command or module name: foo.bar.baz"
-        ):
-            await dynamic_resolver.resolve("foo.bar.baz")
-
-        assert await dynamic_resolver.resolve("foo.bar") is None
-        assert await dynamic_resolver.resolve("core.foo") is None
-
-        # Test that policy fallback correctly
-        static_resolver = AsyncStaticPolicyResolver()
-        with_fallback_dynamic_resolver = dynamic_resolver.with_fallback(static_resolver)
-        resolved_policies = await with_fallback_dynamic_resolver.resolve("ft.aggregate")
-
-        assert resolved_policies.request_policy == RequestPolicy.DEFAULT_KEYLESS
-        assert resolved_policies.response_policy == ResponsePolicy.DEFAULT_KEYLESS
-
-        # Extended chain with one more resolver
-        foo_bar_policy = CommandPolicies(
-            request_policy=RequestPolicy.DEFAULT_KEYLESS,
-            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
-        )
-
-        another_dynamic_resolver = AsyncDynamicPolicyResolver(
-            {
-                "foo": {
-                    "bar": foo_bar_policy,
-                }
-            }
-        )
-        with_fallback_static_resolver = static_resolver.with_fallback(
-            another_dynamic_resolver
-        )
-        with_double_fallback_dynamic_resolver = dynamic_resolver.with_fallback(
-            with_fallback_static_resolver
-        )
-
-        assert (
-            await with_double_fallback_dynamic_resolver.resolve("foo.bar")
-            == foo_bar_policy
-        )
 
 
 @pytest.mark.onlycluster
