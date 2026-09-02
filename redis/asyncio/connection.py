@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import copy
 import inspect
+import logging
 import math
 import socket
 import sys
@@ -131,6 +132,32 @@ if HIREDIS_AVAILABLE:
 else:
     DefaultParser = _AsyncRESP3Parser
 
+logger = logging.getLogger(__name__)
+
+
+def add_debug_log_for_connection_failure(
+    connection: "AbstractConnection",
+    error: BaseException,
+    operation: str,
+) -> None:
+    """
+    Render the connection's live state on a failure that is about to close it.
+
+    Must be called *before* ``disconnect()``. ``extract_connection_details()``
+    reads the local port and the in-flight read deadline off the transport, so
+    once it is gone it can only report ``not connected`` - which hides exactly
+    the state needed to explain the failure. In particular it is what tells
+    apart a read that ran under the original timeout from one that ran under a
+    relaxed maintenance timeout.
+    """
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            f"{type(error).__name__} while {operation}, "
+            f"with connection: {connection}, "
+            f"details: {connection.extract_connection_details()}, "
+            f"error: {error}",
+        )
+
 
 class ConnectCallbackProtocol(Protocol):
     def __call__(self, connection: "AbstractConnection"): ...
@@ -218,6 +245,10 @@ class AsyncMaintNotificationsAbstractConnection:
 
     @abstractmethod
     def getpeername(self) -> str | None:
+        pass
+
+    @abstractmethod
+    def extract_connection_details(self) -> str:
         pass
 
     def _configure_maintenance_notifications(
@@ -424,9 +455,6 @@ class AsyncMaintNotificationsAbstractConnection:
                 and maint_notifications_config.enabled == "auto"
             ):
                 # Log warning but don't fail the connection
-                import logging
-
-                logger = logging.getLogger(__name__)
                 logger.debug(f"Failed to enable maintenance notifications: {e}")
             else:
                 raise
@@ -816,6 +844,63 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             return str(peername[0])
         return None
 
+    def extract_connection_details(self) -> str:
+        """
+        Render the connection's identity, maintenance state and effective timeouts.
+
+        This is what the debug logs use to explain a failed or timed out command:
+
+        - ``host`` vs ``orig host`` says whether the connection still points at the
+          node being moved away from, or has already been repointed at the new one.
+        - ``state`` says whether maintenance handling touched this connection at
+          all, so an unaffected node's connections are distinguishable.
+        - ``socket_timeout`` vs ``active read timeout`` says which timeout the read
+          actually ran under. ``active read timeout`` is the remaining deadline of
+          the in-flight ``read_response`` (``None`` when no read is in flight), so
+          the two diverge for a command that was already reading when the relaxed
+          timeout was applied.
+        """
+        writer = self._writer
+        if writer is None:
+            return "not connected"
+
+        socket_address = None
+        try:
+            socket_name = writer.get_extra_info("sockname")
+            # AF_UNIX sockets report a path string rather than a (host, port) tuple
+            if isinstance(socket_name, tuple) and len(socket_name) > 1:
+                socket_address = socket_name[1]
+        except (AttributeError, OSError):
+            pass
+
+        # Unlike the sync client there is no timeout armed on the socket; the
+        # deadline lives in the timeout context wrapping the in-flight read.
+        active_read_timeout = None
+        timeout_context = self._active_read_timeout
+        if timeout_context is not None:
+            try:
+                when = timeout_context.when()
+                if when is not None:
+                    active_read_timeout = round(
+                        when - asyncio.get_running_loop().time(), 3
+                    )
+            except (AttributeError, RuntimeError):
+                pass
+
+        state = getattr(self.maintenance_state, "value", self.maintenance_state)
+        return (
+            f"connected to ip {self.get_resolved_ip()}, "
+            f"local socket port: {socket_address}, "
+            f"host: {self._host_error()} "
+            f"(orig: {getattr(self, 'orig_host_address', None)}), "
+            f"state: {state}, "
+            f"socket_timeout: {self.socket_timeout} "
+            f"(orig: {getattr(self, 'orig_socket_timeout', None)}), "
+            f"active read timeout: {active_read_timeout}, "
+            f"should_reconnect: {self.should_reconnect()}, "
+            f"notification_hash: {self.maintenance_notification_hash}"
+        )
+
     async def connect(self):
         """Connects to the Redis server if not already connected"""
         # try once the socket connect with the handshake, retry the whole
@@ -1204,10 +1289,12 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                 )
             else:
                 await self._send_packed_command(command)
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
+            add_debug_log_for_connection_failure(self, e, "writing command")
             await self.disconnect(nowait=True)
             raise TimeoutError("Timeout writing to socket") from None
         except OSError as e:
+            add_debug_log_for_connection_failure(self, e, "writing command")
             await self.disconnect(nowait=True)
             if len(e.args) == 1:
                 err_no, errmsg = "UNKNOWN", e.args[0]
@@ -1217,11 +1304,12 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             raise ConnectionError(
                 f"Error {err_no} while writing to socket. {errmsg}."
             ) from e
-        except BaseException:
+        except BaseException as e:
             # BaseExceptions can be raised when a socket send operation is not
             # finished, e.g. due to a timeout.  Ideally, a caller could then re-try
             # to send un-sent data. However, the send_packed_command() API
             # does not support it so there is no point in keeping the connection open.
+            add_debug_log_for_connection_failure(self, e, "writing command")
             await self.disconnect(nowait=True)
             raise
 
@@ -1316,23 +1404,26 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                     disable_decoding=disable_decoding,
                     push_request=push_request,
                 )
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
             if timeout is not None:
                 # user requested timeout, return None. Operation can be retried
                 return None
             # it was a self.socket_timeout error.
             if disconnect_on_error:
+                add_debug_log_for_connection_failure(self, e, "reading response")
                 await self.disconnect(nowait=True)
             raise TimeoutError(f"Timeout reading from {host_error}")
         except OSError as e:
             if disconnect_on_error:
+                add_debug_log_for_connection_failure(self, e, "reading response")
                 await self.disconnect(nowait=True)
             raise ConnectionError(f"Error while reading from {host_error} : {e.args}")
-        except BaseException:
+        except BaseException as e:
             # Also by default close in case of BaseException.  A lot of code
             # relies on this behaviour when doing Command/Response pairs.
             # See #1128.
             if disconnect_on_error:
+                add_debug_log_for_connection_failure(self, e, "reading response")
                 await self.disconnect(nowait=True)
             raise
 
@@ -2264,6 +2355,11 @@ class AsyncMaintNotificationsAbstractConnectionPool:
                         "Either maint_notifications_pool_handler or "
                         "oss_cluster_maint_notifications_handler must be set"
                     )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Marking active connection for reconnect after config update "
+                        f"config update: {conn}, {conn.extract_connection_details()}"
+                    )
                 conn.mark_for_reconnect()
 
     def _should_update_connection(
@@ -2460,6 +2556,12 @@ class AsyncMaintNotificationsAbstractConnectionPool:
         changes must happen under one pool-owned lock; otherwise a connection
         can move between active/free lists and escape handling.
         """
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                f"Applying MOVING notification to pool: {notification}, "
+                f"moving address src: {moving_address_src}, "
+                f"proactive reconnect: {run_proactive_reconnect}"
+            )
         async with self._get_pool_lock():
             # Opt BlockingConnectionPool into serializing its get/release
             # with this critical section. Other pools do not define
@@ -2514,10 +2616,16 @@ class AsyncMaintNotificationsAbstractConnectionPool:
         reused by larger atomic operations that already hold the non-reentrant
         `asyncio.Lock`.
         """
+        debug = logger.isEnabledFor(logging.DEBUG)
         for conn in self._get_in_use_connections():
             if self._should_update_connection(
                 conn, "connected_address", moving_address_src
             ):
+                if debug:
+                    logger.debug(
+                        f"Marking active connection for reconnect: {conn}, "
+                        f"{conn.extract_connection_details()}"
+                    )
                 conn.mark_for_reconnect()
 
         free_connections = [
@@ -2527,6 +2635,12 @@ class AsyncMaintNotificationsAbstractConnectionPool:
                 conn, "connected_address", moving_address_src
             )
         ]
+        if debug:
+            for conn in free_connections:
+                logger.debug(
+                    f"Disconnecting free connection: {conn}, "
+                    f"{conn.extract_connection_details()}"
+                )
         await self._disconnect_connections(free_connections)
 
     async def cleanup_moving_notification(
@@ -2543,6 +2657,12 @@ class AsyncMaintNotificationsAbstractConnectionPool:
         acquire/release interleave, which can leave stale MOVING state or undo a
         newer overlapping MOVING notification.
         """
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Cleaning up MOVING pool state for notification hash "
+                f"{notification_hash}, reset_relaxed_timeout="
+                f"{reset_relaxed_timeout}, reset_host_address={reset_host_address}"
+            )
         async with self._get_pool_lock():
             kwargs = _build_moving_cleanup_connection_kwargs(
                 self.connection_kwargs, notification_hash
@@ -2920,6 +3040,11 @@ class ConnectionPool(
             self._in_use_connections.remove(connection)
 
             if connection.should_reconnect():
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Disconnecting released connection marked for reconnect: "
+                        f"{connection}, {connection.extract_connection_details()}"
+                    )
                 await connection.disconnect()
 
             self._available_connections.append(connection)
@@ -2968,8 +3093,14 @@ class ConnectionPool(
         """
         Mark all active connections for reconnect.
         """
+        debug = logger.isEnabledFor(logging.DEBUG)
         async with self._lock:
             for conn in self._in_use_connections:
+                if debug:
+                    logger.debug(
+                        f"Marking active connection for reconnect: {conn}, "
+                        f"{conn.extract_connection_details()}"
+                    )
                 conn.mark_for_reconnect()
 
     async def aclose(self) -> None:

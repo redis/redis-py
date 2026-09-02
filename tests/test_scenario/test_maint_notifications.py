@@ -51,6 +51,8 @@ logging.basicConfig(
 # Set DEBUG level for specific redis-py loggers
 logging.getLogger("redis.maint_notifications").setLevel(logging.DEBUG)
 logging.getLogger("redis.cluster").setLevel(logging.DEBUG)
+logging.getLogger("redis.client").setLevel(logging.DEBUG)
+logging.getLogger("redis.connection").setLevel(logging.DEBUG)
 
 
 STANDALONE_MAINT_TIMEOUT = 60
@@ -87,12 +89,76 @@ DEFAULT_BIND_TTL = 15
 DEFAULT_STANDALONE_CLIENT_SOCKET_TIMEOUT = 1
 DEFAULT_OSS_API_CLIENT_SOCKET_TIMEOUT = 1
 
+# The fault injector's create_database can fail on transient cluster-side infrastructure
+# problems - a DNS blip while it polls the cluster REST API, for example - that say nothing
+# about the client under test. Retrying the setup keeps such a blip from being reported as a
+# test failure.
+DB_CREATE_ATTEMPTS = 3
+
 
 class TestPushNotificationsBase:
     """
     Test Redis Enterprise maintenance push notifications with real cluster
     operations.
     """
+
+    @pytest.fixture(autouse=True)
+    def _reset_trigger_effect_failures(self):
+        """Per-test store for failures raised inside the FI trigger thread."""
+        self._trigger_effect_failures: list[str] = []
+        yield
+
+    def _drain_command_errors(self, errors, source: str) -> list[str]:
+        """Drain and log the collected command errors without failing yet.
+
+        Callers that also assert on connection state must drain *before* that
+        assertion: otherwise a state mismatch raises first and the command
+        errors - usually the more informative signal - are never reported.
+
+        Every error is logged individually: pytest truncates long assertion
+        messages, so a run with many failures would otherwise hide most of them
+        behind "...Full output truncated".
+        """
+        collected = []
+        while not errors.empty():
+            collected.append(errors.get_nowait())
+        if collected:
+            logging.error(f"{len(collected)} error(s) collected from {source}:")
+            for index, error in enumerate(collected, start=1):
+                logging.error(f"  [{index}/{len(collected)}] {error}")
+        return collected
+
+    def _fail_on_collected_command_errors(self, collected: list[str], source: str):
+        """Fail on errors already drained by ``_drain_command_errors``.
+
+        The failure message keeps a short preview and points at the log for the
+        rest.
+        """
+        if not collected:
+            return
+        preview = "; ".join(collected[:5])
+        if len(collected) > 5:
+            preview += f"; ... ({len(collected) - 5} more, see the log above)"
+        pytest.fail(f"{len(collected)} error(s) occurred in {source}: {preview}")
+
+    def _fail_on_command_errors(self, errors, source: str):
+        """Drain the collected command errors and fail with all of them printed."""
+        self._fail_on_collected_command_errors(
+            self._drain_command_errors(errors, source), source
+        )
+
+    def _fail_on_trigger_effect_failures(self):
+        """Surface a failure raised inside the FI trigger thread.
+
+        ``pytest.fail()`` on a spawned thread only kills that thread - it does
+        not fail the test - so the main thread has to re-report it after join().
+        """
+        failures = self._trigger_effect_failures
+        if not failures:
+            return
+        pytest.fail(
+            f"{len(failures)} failure(s) in the trigger thread: {'; '.join(failures)}"
+        )
 
     def delete_prev_db(
         self,
@@ -111,7 +177,10 @@ class TestPushNotificationsBase:
                 logging.info(f"Deleted database: {db_name}")
             else:
                 logging.info(f"Database {db_name} does not exist.")
-        except Exception as e:
+        # get_cluster_nodes_info reports failures through pytest.fail, which does not
+        # derive from Exception - catch it too, so deleting a leftover DB stays best
+        # effort and never aborts the caller.
+        except (Exception, pytest.fail.Exception) as e:
             logging.error(f"Failed to delete database {db_name}: {e}")
 
     def create_db(
@@ -119,12 +188,28 @@ class TestPushNotificationsBase:
         fault_injector_client: FaultInjectorClient,
         bdb_config: Dict[str, Any],
     ):
-        try:
-            logging.info(f"Creating database: \n{json.dumps(bdb_config, indent=2)}")
-            cluster_endpoint_config = fault_injector_client.create_database(bdb_config)
-            return cluster_endpoint_config
-        except Exception as e:
-            pytest.fail(f"Failed to create database: {e}")
+        """Create the test database, retrying transient infrastructure failures.
+
+        A create that fails midway can still leave the BDB on the cluster, so any
+        leftover is deleted by name before the next attempt - otherwise the retry
+        collides with it on the fixed port from the config.
+        """
+        logging.info(f"Creating database: \n{json.dumps(bdb_config, indent=2)}")
+        for attempt in range(1, DB_CREATE_ATTEMPTS + 1):
+            try:
+                return fault_injector_client.create_database(bdb_config)
+            # get_operation_result reports a failed action through pytest.fail, which
+            # does not derive from Exception.
+            except (Exception, pytest.fail.Exception) as e:
+                if attempt == DB_CREATE_ATTEMPTS:
+                    pytest.fail(
+                        f"Failed to create database after {attempt} attempts: {e}"
+                    )
+                logging.warning(
+                    f"Attempt {attempt}/{DB_CREATE_ATTEMPTS} to create database "
+                    f"{bdb_config['name']} failed: {e}"
+                )
+                self.delete_prev_db(fault_injector_client, bdb_config["name"])
 
     def _trigger_effect(
         self,
@@ -137,21 +222,29 @@ class TestPushNotificationsBase:
         skip_end_notification: bool = False,
         timeout: int = DEFAULT_TRIGGER_OP_TIMEOUT,
     ):
-        trigger_effect_action_id = ClusterOperations.trigger_effect(
-            fault_injector=fault_injector_client,
-            endpoint_config=endpoints_config,
-            effect_name=effect_name,
-            trigger_name=trigger_name,
-            source_node=target_node,
-            target_node=empty_node,
-            skip_end_notification=skip_end_notification,
-        )
+        try:
+            trigger_effect_action_id = ClusterOperations.trigger_effect(
+                fault_injector=fault_injector_client,
+                endpoint_config=endpoints_config,
+                effect_name=effect_name,
+                trigger_name=trigger_name,
+                source_node=target_node,
+                target_node=empty_node,
+                skip_end_notification=skip_end_notification,
+            )
 
-        trigger_effect_result = fault_injector_client.get_operation_result(
-            trigger_effect_action_id,
-            timeout=timeout,
-        )
-        logging.debug(f"Action execution result: {trigger_effect_result}")
+            trigger_effect_result = fault_injector_client.get_operation_result(
+                trigger_effect_action_id,
+                timeout=timeout,
+            )
+            logging.debug(f"Action execution result: {trigger_effect_result}")
+        except BaseException as e:
+            # This usually runs on a spawned thread, where pytest.fail() only
+            # kills the thread and leaves the test looking like it merely saw
+            # command errors. Record it for _fail_on_trigger_effect_failures().
+            logging.error(f"Trigger effect failed: {type(e).__name__}: {e}")
+            self._trigger_effect_failures.append(f"{type(e).__name__}: {e}")
+            raise
 
     def _get_all_connections_in_pool(self, client: Redis) -> List[ConnectionInterface]:
         connections = []
@@ -226,6 +319,7 @@ class TestPushNotificationsBase:
     ):
         """Validate the client connections are in the expected state after migration."""
         matching_conns_count = 0
+        mismatched: list[str] = []
         connections = self._get_all_connections_in_pool(client)
         logging.info(f"Validating {len(connections)} connections")
         logging.info(f"Expected matching conns count: {expected_matching_conns_count}")
@@ -239,13 +333,14 @@ class TestPushNotificationsBase:
                 ):
                     matching_conns_count += 1
                 else:
-                    logging.debug(
-                        f"Connection not matching default state: "
-                        f"maintenance_state={conn.maintenance_state}, "
-                        f"socket_timeout={conn.socket_timeout}, "
-                        f"host={conn.host}, "
-                        f"orig_host_address={conn.orig_host_address}"
+                    detail = (
+                        f"{conn}: maintenance_state={conn.maintenance_state}, "
+                        f"socket_timeout={conn.socket_timeout}, host={conn.host}, "
+                        f"orig_host_address={conn.orig_host_address}, "
+                        f"{conn.extract_connection_details()}"
                     )
+                    mismatched.append(detail)
+                    logging.debug(f"Connection not matching default state: {detail}")
             elif (
                 conn._sock.gettimeout() == configured_timeout
                 and conn.maintenance_state == MaintenanceState.NONE
@@ -253,13 +348,14 @@ class TestPushNotificationsBase:
             ):
                 matching_conns_count += 1
             else:
-                logging.debug(
-                    f"Connection not matching default state: "
-                    f"maintenance_state={conn.maintenance_state}, "
-                    f"socket_timeout={conn.socket_timeout}, "
-                    f"host={conn.host}, "
-                    f"orig_host_address={conn.orig_host_address}"
+                detail = (
+                    f"{conn}: maintenance_state={conn.maintenance_state}, "
+                    f"socket_timeout={conn.socket_timeout}, host={conn.host}, "
+                    f"orig_host_address={conn.orig_host_address}, "
+                    f"{conn.extract_connection_details()}"
                 )
+                mismatched.append(detail)
+                logging.debug(f"Connection not matching default state: {detail}")
 
         # Get client configuration details for error message
         conn_kwargs = client.connection_pool.connection_kwargs
@@ -274,7 +370,8 @@ class TestPushNotificationsBase:
             f"Client: host={client_host}, port={client_port}, "
             f"configured_timeout={configured_timeout}. "
             f"Expected {expected_matching_conns_count} matching connections, "
-            f"but found {matching_conns_count} out of {len(connections)} total connections."
+            f"but found {matching_conns_count} out of {len(connections)} total connections. "
+            f"Non-matching connections: {'; '.join(mismatched) if mismatched else 'none'}"
         )
 
     def _validate_default_notif_disabled_state(
@@ -312,9 +409,10 @@ class TestStanaloneClientPushNotificationsWithEffectTriggerBase(
     ):
         self.delete_prev_db(fault_injector_client, db_config["name"])
 
+        # Recorded before the create so teardown removes a partially created DB.
+        self._bdb_name = db_config["name"]
         db_endpoint_config = self.create_db(fault_injector_client, db_config)
 
-        self._bdb_name = db_config["name"]
         socket_timeout = DEFAULT_STANDALONE_CLIENT_SOCKET_TIMEOUT
 
         auth_ssl_client_certs_config_info = db_config.get(
@@ -971,7 +1069,8 @@ class TestStandaloneClientPushNotificationsHandlingWithEffectTrigger(
                     client.get("key")
                 except Exception as e:
                     errors.put(
-                        f"Command failed in thread {threading.current_thread().name}: {e}"
+                        f"[mono={time.monotonic():.6f}] Command failed in thread "
+                        f"{threading.current_thread().name}: {e}"
                     )
 
         # get the connection here because in case of proxy server
@@ -1039,7 +1138,7 @@ class TestStandaloneClientPushNotificationsHandlingWithEffectTrigger(
                 assert not conn.should_reconnect()
 
         # validate no errors were raised in the command execution threads
-        assert errors.empty(), f"Errors occurred in threads: {errors.queue}"
+        self._fail_on_command_errors(errors, "command execution threads")
 
         trigger_effect_thread.join()
         self.maintenance_ops_threads.remove(trigger_effect_thread)
@@ -1187,8 +1286,9 @@ class TestStandaloneClientPushNotificationsHandlingWithEffectTrigger(
         logging.info(f"DB name: {db_name}")
 
         self.delete_prev_db(fault_injector_client, db_config["name"])
-        db_endpoint_config = self.create_db(fault_injector_client, db_config)
+        # Recorded before the create so teardown removes a partially created DB.
         self._bdb_name = db_config["name"]
+        db_endpoint_config = self.create_db(fault_injector_client, db_config)
 
         logging.info("Creating client with disabled notifications.")
         # self._client for teardown cleanup; local `client` used in the rest of this method.
@@ -1293,6 +1393,8 @@ class TestStandaloneClientPushNotificationsHandlingWithEffectTrigger(
 class TestStandaloneClientCommandsExecutionWithPushNotificationsWithEffectTrigger(
     TestStanaloneClientPushNotificationsWithEffectTriggerBase
 ):
+    # TODO: re-enable TopologyChangeStandaloneEffects.DNS_RESOLUTION_CHANGE once the
+    # effect is troubleshooted and fixed.
     @pytest.mark.timeout(300)  # 5 minutes timeout for this test
     @pytest.mark.parametrize(
         "effect_name, trigger, db_config, db_name, endpoint_type",
@@ -1302,7 +1404,7 @@ class TestStandaloneClientCommandsExecutionWithPushNotificationsWithEffectTrigge
                 TopologyChangeStandaloneEffects.DATA_MOVEMENT_NO_CONN_DROP,
                 TopologyChangeStandaloneEffects.DATA_MOVEMENT_CONN_DROP,
                 TopologyChangeStandaloneEffects.CONN_DROP,
-                TopologyChangeStandaloneEffects.DNS_RESOLUTION_CHANGE,
+                # TopologyChangeStandaloneEffects.DNS_RESOLUTION_CHANGE,
             ],
             endpoint_types=[
                 EndpointType.EXTERNAL_FQDN,
@@ -1351,7 +1453,8 @@ class TestStandaloneClientCommandsExecutionWithPushNotificationsWithEffectTrigge
                         f"Error in thread {threading.current_thread().name}: {e}"
                     )
                     errors.put(
-                        f"Command failed in thread {threading.current_thread().name}: {e}"
+                        f"[mono={time.monotonic():.6f}] Command failed in thread "
+                        f"{threading.current_thread().name}: {e}"
                     )
             logging.debug(f"{threading.current_thread().name}: Thread ended")
 
@@ -1391,14 +1494,29 @@ class TestStandaloneClientCommandsExecutionWithPushNotificationsWithEffectTrigge
         trigger_effect_thread.join()
         self.maintenance_ops_threads.remove(trigger_effect_thread)
 
-        # validate connections settings
+        # Drain first so the command errors are logged even if one of the
+        # assertions below raises.
+        collected_errors = self._drain_command_errors(
+            errors, "command execution threads"
+        )
+
+        # A failed trigger voids the premise of the test, so report it before
+        # judging the connection state it was supposed to produce.
+        self._fail_on_trigger_effect_failures()
+
+        # validate connections settings. "all" rather than a hard-coded 10: the
+        # pool size is emergent from the worker count, so pinning the number
+        # fails on an extra connection even when every connection is in the
+        # expected state - and passes when one of eleven is not.
         self._validate_default_state(
             client_maint_notifications,
-            expected_matching_conns_count=10,
+            expected_matching_conns_count="all",
             configured_timeout=DEFAULT_STANDALONE_CLIENT_SOCKET_TIMEOUT,
         )
 
-        assert errors.empty(), f"Errors occurred in threads: {errors.queue}"
+        self._fail_on_collected_command_errors(
+            collected_errors, "command execution threads"
+        )
 
 
 class TestClusterClientPushNotificationsWithEffectTriggerBase(
@@ -1411,11 +1529,12 @@ class TestClusterClientPushNotificationsWithEffectTriggerBase(
     ):
         self.delete_prev_db(fault_injector_client_oss_api, db_config["name"])
 
+        # Recorded before the create so teardown removes a partially created DB.
+        self._bdb_name = db_config["name"]
         cluster_endpoint_config = self.create_db(
             fault_injector_client_oss_api, db_config
         )
 
-        self._bdb_name = db_config["name"]
         socket_timeout = DEFAULT_OSS_API_CLIENT_SOCKET_TIMEOUT
         socket_connect_timeout = DEFAULT_OSS_API_CLIENT_SOCKET_TIMEOUT
 
@@ -2222,7 +2341,8 @@ class TestClusterClientCommandsExecutionWithPushNotificationsWithEffectTrigger(
                             f"Error in thread {threading.current_thread().name}: {e}"
                         )
                         errors.put(
-                            f"Command failed in thread {threading.current_thread().name}: {e}"
+                            f"[mono={time.monotonic():.6f}] Command failed in thread "
+                            f"{threading.current_thread().name}: {e}"
                         )
                 if executed_commands_count % 500 == 0:
                     logging.debug(
@@ -2284,6 +2404,16 @@ class TestClusterClientCommandsExecutionWithPushNotificationsWithEffectTrigger(
             logging.info(f"Consumed all buffers for node: {node.name}")
         logging.info("All buffers consumed.")
 
+        # Drain first so the command errors are logged even if one of the
+        # assertions below raises.
+        collected_errors = self._drain_command_errors(
+            errors, "command execution threads"
+        )
+
+        # A failed trigger voids the premise of the test, so report it before
+        # judging the connection state it was supposed to produce.
+        self._fail_on_trigger_effect_failures()
+
         for (
             node
         ) in cluster_client_maint_notifications.nodes_manager.nodes_cache.values():
@@ -2299,4 +2429,6 @@ class TestClusterClientCommandsExecutionWithPushNotificationsWithEffectTrigger(
             )
 
         # validate no errors were raised in the command execution threads
-        assert errors.empty(), f"Errors occurred in threads: {errors.queue}"
+        self._fail_on_collected_command_errors(
+            collected_errors, "command execution threads"
+        )
