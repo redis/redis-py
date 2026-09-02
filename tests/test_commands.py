@@ -1286,6 +1286,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_start_basic(self, r):
         """Test basic HOTKEYS START command with CPU metric"""
         # Reset any previous session
@@ -1300,6 +1301,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_start_with_all_metrics(self, r):
         """Test HOTKEYS START with both CPU and NET metrics"""
         try:
@@ -1314,6 +1316,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_start_with_duration(self, r):
         """Test HOTKEYS START with duration parameter"""
         try:
@@ -1328,6 +1331,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_start_with_sample_ratio(self, r):
         """Test HOTKEYS START with sample ratio"""
         try:
@@ -1342,6 +1346,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_start_fail__on_noncluster_setup_with_slots(self, r):
         """Test HOTKEYS START with specific hash slots"""
         try:
@@ -1357,6 +1362,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_start_with_all_parameters(self, r):
         """Test HOTKEYS START with all optional parameters"""
         try:
@@ -1374,6 +1380,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_stop(self, r):
         """Test HOTKEYS STOP command"""
         try:
@@ -1390,6 +1397,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_reset(self, r):
         """Test HOTKEYS RESET command"""
         try:
@@ -1431,6 +1439,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_get_ongoing_session(self, r):
         """Test HOTKEYS GET during an ongoing collection session"""
         try:
@@ -1463,6 +1472,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_get_terminated_session(self, r):
         """Test HOTKEYS GET after stopping a collection session"""
         try:
@@ -1493,6 +1503,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_get_all_fields(self, r):
         """Test HOTKEYS GET returns all documented fields"""
         try:
@@ -1544,6 +1555,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_get_all_fields_decoded(self, decoded_r: redis.Redis):
         """Test HOTKEYS GET returns all documented fields"""
         try:
