@@ -68,6 +68,7 @@ from redis.event import (
 from redis.exceptions import (
     AskError,
     AuthenticationError,
+    AuthorizationError,
     ClusterDownError,
     ClusterError,
     ConnectionError,
@@ -78,6 +79,7 @@ from redis.exceptions import (
     MaxConnectionsError,
     MovedError,
     RedisClusterException,
+    RedisClusterUnreachableError,
     RedisError,
     ResponseError,
     SlotNotCoveredError,
@@ -2888,6 +2890,22 @@ class NodesManager:
                     break
 
             if not startup_nodes_reachable:
+                # The unreachable subtype is reserved for connectivity failures:
+                # MultiDB registers it as retryable, so a deterministic
+                # server/configuration error (e.g. cluster mode disabled or
+                # invalid credentials - AuthenticationError and
+                # AuthorizationError subclass ConnectionError but cannot be
+                # repaired by a failover) must keep surfacing as a plain
+                # RedisClusterException.
+                if isinstance(
+                    exception, (ConnectionError, TimeoutError, OSError)
+                ) and not isinstance(
+                    exception, (AuthenticationError, AuthorizationError)
+                ):
+                    raise RedisClusterUnreachableError(
+                        f"Redis Cluster cannot be connected. Please provide at least "
+                        f"one reachable node: {str(exception)}"
+                    ) from exception
                 raise RedisClusterException(
                     f"Redis Cluster cannot be connected. Please provide at least "
                     f"one reachable node: {str(exception)}"
