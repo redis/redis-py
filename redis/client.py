@@ -1636,9 +1636,12 @@ class PubSub:
             if self.subscribed_event.wait(timeout) is True:
                 # The connection was subscribed during the timeout time frame.
                 # The timeout should be adjusted based on the time spent
-                # waiting for the subscription
-                time_spent = time.monotonic() - start_time
-                timeout = max(0.0, timeout - time_spent)
+                # waiting for the subscription. timeout=None means "block
+                # indefinitely" and has nothing to charge against, so leave it
+                # alone rather than raising TypeError on the subtraction.
+                if timeout is not None:
+                    time_spent = time.monotonic() - start_time
+                    timeout = max(0.0, timeout - time_spent)
             else:
                 # The connection isn't subscribed to any channels or patterns,
                 # so no messages are available

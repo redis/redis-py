@@ -1143,6 +1143,28 @@ class OSSMaintNotificationsHandler:
                 # we execute a CLUSTER SLOTS command that can use a different connection
                 # that has also has the notification and we don't want to
                 # process the same notification twice
+                #
+                # This cheap pre-check runs under _lock alone, before the
+                # topology refresh lock below. The server delivers the same
+                # SMIGRATED on every connection, so the vast majority of
+                # arrivals land here; making them wait for an in-flight CLUSTER
+                # SLOTS round trip just to discard a notification would stall
+                # arbitrary command threads inside read_response.
+                return
+
+        # Lock order: _initialization_lock BEFORE _lock. initialize() below runs a
+        # CLUSTER SLOTS round trip while holding _initialization_lock, and the
+        # response can carry another SMIGRATED push that is handled inline on that
+        # thread and needs _lock - so a thread holding _lock must never wait for
+        # _initialization_lock. See the _initialization_lock comment in
+        # NodesManager.__init__ for the full ordering rule.
+        with self.cluster_client.nodes_manager._initialization_lock, self._lock:
+            if (
+                notification in self._in_progress
+                or notification in self._processed_notifications
+            ):
+                # Re-check now that both locks are held: another thread may have
+                # handled the notification while we waited for the refresh lock.
                 return
 
             if logger.isEnabledFor(logging.DEBUG):
