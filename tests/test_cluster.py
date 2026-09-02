@@ -2983,8 +2983,12 @@ class TestStaticMetadataRouting:
         assert rc._policy_resolver._metadata_resolver is not metadata_resolver
 
     @pytest.mark.fixed_client
-    def test_explicit_policy_resolver_keeps_legacy_replica_routing(self):
-        metadata_resolver = DynamicMetadataResolver({"core": {"set": CACHEABLE_KEYED}})
+    def test_metadata_resolver_decides_replica_routing_with_explicit_policy_resolver(
+        self,
+    ):
+        metadata_resolver = DynamicMetadataResolver(
+            {"core": {"set": CACHEABLE_KEYED}}
+        )
         rc = get_mocked_redis_client(
             host=default_host,
             port=7000,
@@ -3001,12 +3005,13 @@ class TestStaticMetadataRouting:
         ):
             rc.get_nodes_from_slot("set", "set", "key", "value")
 
-        get_node.assert_called_once_with(rc.nodes_manager, 0, False, None)
-        assert rc.pipeline()._routing_uses_metadata is False
+        get_node.assert_called_once_with(rc.nodes_manager, 0, True, None)
 
     @pytest.mark.fixed_client
-    def test_split_multi_key_routing_respects_explicit_policy_resolver(self):
-        metadata_resolver = DynamicMetadataResolver({"core": {"mset": CACHEABLE_KEYED}})
+    def test_split_multi_key_routing_respects_metadata_resolver(self):
+        metadata_resolver = DynamicMetadataResolver(
+            {"core": {"mset": CACHEABLE_KEYED}}
+        )
         rc = get_mocked_redis_client(
             host=default_host,
             port=7000,
@@ -3026,7 +3031,20 @@ class TestStaticMetadataRouting:
             rc.mset_nonatomic({"key": "value"})
 
         slot = key_slot(rc.encoder.encode("key"))
-        get_node.assert_called_once_with(rc.nodes_manager, slot, False)
+        get_node.assert_called_once_with(rc.nodes_manager, slot, True)
+
+    @pytest.mark.fixed_client
+    def test_mixin_default_is_replica_safe_emits_deprecation_warning(self):
+        from redis.commands.cluster import RedisClusterCommands
+
+        class StandaloneClusterCommands(RedisClusterCommands):
+            pass
+
+        instance = StandaloneClusterCommands()
+        with pytest.deprecated_call():
+            assert instance._is_replica_safe("GET") is True
+        with pytest.deprecated_call():
+            assert instance._is_replica_safe("SET") is False
 
     @pytest.mark.fixed_client
     def test_every_node_client_gets_the_same_resolver(self):

@@ -2829,11 +2829,11 @@ class TestStaticMetadataRouting:
         ):
             await rc.get_nodes_from_slot("set", "key", "value")
 
-        get_node.assert_called_once_with(rc.nodes_manager, 0, False, None)
+        get_node.assert_called_once_with(rc.nodes_manager, 0)
         await rc.aclose()
 
     @pytest.mark.fixed_client
-    async def test_split_multi_key_routing_respects_explicit_policy_resolver(
+    async def test_split_multi_key_routing_respects_metadata_resolver(
         self,
     ) -> None:
         metadata_resolver = AsyncDynamicMetadataResolver(
@@ -2858,8 +2858,23 @@ class TestStaticMetadataRouting:
             await rc.mset_nonatomic({"key": "value"})
 
         slot = key_slot(rc.encoder.encode("key"))
-        get_node.assert_called_once_with(rc.nodes_manager, slot, False)
+        get_node.assert_called_once_with(rc.nodes_manager, slot, True)
         await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_mixin_default_is_replica_safe_emits_deprecation_warning(
+        self,
+    ) -> None:
+        from redis.commands.cluster import AsyncRedisClusterCommands
+
+        class StandaloneAsyncClusterCommands(AsyncRedisClusterCommands):
+            pass
+
+        instance = StandaloneAsyncClusterCommands()
+        with pytest.deprecated_call():
+            assert await instance._is_replica_safe("GET") is True
+        with pytest.deprecated_call():
+            assert await instance._is_replica_safe("SET") is False
 
     @pytest.mark.fixed_client
     async def test_keyless_routing_honors_the_public_node_selector(self) -> None:

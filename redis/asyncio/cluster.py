@@ -667,8 +667,6 @@ class RedisCluster(
             )
         else:
             self._metadata_resolver = metadata_resolver
-
-        self._routing_uses_metadata = policy_resolver is None
         if policy_resolver is None:
             self._policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver(
                 metadata_resolver=self._metadata_resolver
@@ -912,10 +910,8 @@ class RedisCluster(
 
         return self.get_random_primary_node()
 
-    async def _is_replica_safe(self, command_name):
-        if self._routing_uses_metadata:
-            return await self._metadata_resolver.is_replica_safe(command_name)
-        return isinstance(command_name, str) and command_name.upper() in READ_COMMANDS
+    async def _is_replica_safe(self, command_name: str) -> bool:
+        return await self._metadata_resolver.is_replica_safe(command_name)
 
     def get_random_primary_node(self) -> "ClusterNode":
         """
@@ -928,12 +924,9 @@ class RedisCluster(
         Returns a list of nodes that hold the specified keys' slots.
         """
         # get the node that holds the key's slot
-        replica_safe = await self._is_replica_safe(command)
         return [
             self.nodes_manager.get_node_from_slot(
-                await self._determine_slot(command, *args),
-                self.read_from_replicas and replica_safe,
-                self.load_balancing_strategy if replica_safe else None,
+                await self._determine_slot(command, *args)
             )
         ]
 

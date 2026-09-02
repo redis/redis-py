@@ -62,7 +62,9 @@ KEYED_POLICIES = (RequestPolicy.DEFAULT_KEYED, ResponsePolicy.DEFAULT_KEYED)
 # rather than command by command, because a table edit that gives any of them a routing policy
 # sends it to an arbitrary node instead of the one holding its keys.
 WITHHELD_ROUTING_COMMANDS = (
+    "sdiffcard",
     "sintercard",
+    "sunioncard",
     "xread",
     "zdiff",
     "zinter",
@@ -971,6 +973,32 @@ class TestBaseMetadataResolver:
 
         assert resolver.is_replica_safe("touch") is False
 
+    def test_static_resolver_decides_replica_safety(self):
+        resolver = StaticMetadataResolver()
+
+        # Replica safe commands
+        assert resolver.is_replica_safe("get") is True
+        assert resolver.is_replica_safe("GET") is True
+        assert resolver.is_replica_safe("dbsize") is True
+        assert resolver.is_replica_safe("ttl") is True
+        assert resolver.is_replica_safe("eval_ro") is True
+        assert resolver.is_replica_safe("xread") is True
+        assert resolver.is_replica_safe("json.get") is True
+        assert resolver.is_replica_safe("ft.search") is True
+
+        # Replica unsafe commands
+        assert resolver.is_replica_safe("set") is False
+        assert resolver.is_replica_safe("SET") is False
+        assert resolver.is_replica_safe("touch") is False
+        assert resolver.is_replica_safe("TOUCH") is False
+        assert resolver.is_replica_safe("hset") is False
+        assert resolver.is_replica_safe("ft.create") is False
+
+        # Non-string or unknown commands
+        assert resolver.is_replica_safe(None) is False
+        assert resolver.is_replica_safe(123) is False
+        assert resolver.is_replica_safe("nosuchcommand") is False
+
     def test_the_default_eligible_set_differs_from_the_legacy_allow_list_by_exactly_this(
         self,
     ):
@@ -990,9 +1018,19 @@ class TestBaseMetadataResolver:
         }
         allow_list = set(CacheConfig.DEFAULT_ALLOW_LIST)
 
-        # Newly eligible: two suggestion-dictionary reads the allow-list never carried. Both
-        # arrive without a key list, so they are inert until their methods pass ``keys=``.
-        assert eligible - allow_list == {"FT.SUGGET", "FT.SUGLEN"}
+        # Newly eligible: suggestion-dictionary reads and newly added core/module reads
+        # the legacy allow-list never carried.
+        assert eligible - allow_list == {
+            "DIGEST",
+            "EXPIRETIME",
+            "FT.SUGGET",
+            "FT.SUGLEN",
+            "HEXPIRETIME",
+            "HPEXPIRETIME",
+            "PEXPIRETIME",
+            "SDIFFCARD",
+            "SUNIONCARD",
+        }
         # No longer eligible, and all three server-confirmed defects in the allow-list.
         assert allow_list - eligible == {"XPENDING", "TS.INFO", "XREAD"}
 

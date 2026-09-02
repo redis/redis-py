@@ -527,6 +527,32 @@ class TestAsyncBaseMetadataResolver:
 
         assert await resolver.is_replica_safe("touch") is False
 
+    async def test_static_resolver_decides_replica_safety(self):
+        resolver = AsyncStaticMetadataResolver()
+
+        # Replica safe commands
+        assert await resolver.is_replica_safe("get") is True
+        assert await resolver.is_replica_safe("GET") is True
+        assert await resolver.is_replica_safe("dbsize") is True
+        assert await resolver.is_replica_safe("ttl") is True
+        assert await resolver.is_replica_safe("eval_ro") is True
+        assert await resolver.is_replica_safe("xread") is True
+        assert await resolver.is_replica_safe("json.get") is True
+        assert await resolver.is_replica_safe("ft.search") is True
+
+        # Replica unsafe commands
+        assert await resolver.is_replica_safe("set") is False
+        assert await resolver.is_replica_safe("SET") is False
+        assert await resolver.is_replica_safe("touch") is False
+        assert await resolver.is_replica_safe("TOUCH") is False
+        assert await resolver.is_replica_safe("hset") is False
+        assert await resolver.is_replica_safe("ft.create") is False
+
+        # Non-string or unknown commands
+        assert await resolver.is_replica_safe(None) is False
+        assert await resolver.is_replica_safe(123) is False
+        assert await resolver.is_replica_safe("nosuchcommand") is False
+
     async def test_is_cacheable_fails_closed_for_an_unresolvable_name(self):
         """
         A name the record tables cannot be keyed by is not a raise on the command execution
