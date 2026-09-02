@@ -8,10 +8,12 @@ from typing import List, Optional, Tuple, Type, Union
 from redis.asyncio import Redis as AsyncRedis
 from redis.asyncio.cluster import ClusterNode as AsyncClusterNode
 from redis.asyncio.cluster import RedisCluster as AsyncRedisCluster
+from redis.asyncio.connection import SSLConnection as AsyncSSLConnection
 from redis.asyncio.http.http_client import DEFAULT_TIMEOUT, AsyncHTTPClientWrapper
 from redis.backoff import NoBackoff
 from redis.client import Redis as SyncRedis
 from redis.cluster import RedisCluster as SyncRedisCluster
+from redis.connection import SSLConnection as SyncSSLConnection
 from redis.exceptions import ConnectionError, TimeoutError
 from redis.http.http_client import HttpClient
 from redis.multidb.exception import UnhealthyDatabaseException
@@ -40,6 +42,28 @@ def _filter_kwargs(kwargs: dict, cls: Type) -> dict:
     """Filter kwargs to only include parameters accepted by the class's __init__."""
     allowed = _get_init_params(cls)
     return {k: v for k, v in kwargs.items() if k in allowed}
+
+
+def _uses_tls(client, conn_kwargs: dict) -> bool:
+    """Detect whether a client's transport is TLS.
+
+    The clients turn ``ssl=True`` into ``connection_class=SSLConnection``:
+    the standalone clients hold it on their connection pool, the async
+    cluster keeps it inside its connection kwargs, and the sync cluster
+    keeps the plain ``ssl`` key there. None of these survive
+    ``_filter_kwargs`` (``connection_class`` is not an ``__init__``
+    parameter of the rebuilt clients), so TLS must be re-expressed as
+    ``ssl=True`` explicitly.
+    """
+    if conn_kwargs.get("ssl"):
+        return True
+    connection_class = conn_kwargs.get("connection_class")
+    if connection_class is None:
+        pool = getattr(client, "connection_pool", None)
+        connection_class = getattr(pool, "connection_class", None)
+    return isinstance(connection_class, type) and issubclass(
+        connection_class, (SyncSSLConnection, AsyncSSLConnection)
+    )
 
 
 DEFAULT_HEALTH_CHECK_PROBES = 3
@@ -178,12 +202,23 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
             if isinstance(database.client, (AsyncRedis, SyncRedis)):
                 conn_kwargs = database.client.get_connection_kwargs()
                 filtered_kwargs = _filter_kwargs(conn_kwargs, AsyncRedis)
+                if _uses_tls(database.client, conn_kwargs):
+                    # Preserve the original transport: the source kwargs carry
+                    # TLS as connection_class=SSLConnection, which the filter
+                    # drops, so without this the probe would speak plaintext
+                    # to a TLS port and mark a healthy database unavailable.
+                    filtered_kwargs["ssl"] = True
                 client = AsyncRedis(**filtered_kwargs)
             elif isinstance(database.client, (AsyncRedisCluster, SyncRedisCluster)):
                 # Cluster client - create a single cluster client that handles
                 # topology changes internally
                 conn_kwargs = database.client.get_connection_kwargs().copy()
                 filtered_kwargs = _filter_kwargs(conn_kwargs, AsyncRedisCluster)
+                if _uses_tls(database.client, conn_kwargs):
+                    # Same transport preservation as the standalone branch
+                    # above; the async cluster also represents TLS as
+                    # connection_class=SSLConnection in its connection kwargs.
+                    filtered_kwargs["ssl"] = True
                 startup_nodes = database.client.startup_nodes
                 if startup_nodes:
                     nodes_manager = database.client.nodes_manager

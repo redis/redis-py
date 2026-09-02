@@ -48,6 +48,7 @@ from redis.event import (
 )
 from redis.exceptions import (
     AskError,
+    AuthenticationError,
     ClusterDownError,
     ConnectionError,
     CrossSlotTransactionError,
@@ -3397,7 +3398,8 @@ class TestNodesManager:
         contacted, but not when a node responded and rejected CLUSTER SLOTS:
         MultiDB registers the unreachable subtype as retryable, so a
         deterministic configuration error must keep surfacing as a plain
-        RedisClusterException.
+        RedisClusterException. Authentication failures subclass ConnectionError
+        but cannot be repaired by a failover, so they stay plain as well.
         """
         with patch.object(NodesManager, "create_redis_node") as create_redis_node:
             create_redis_node.side_effect = ConnectionError("mock connection error")
@@ -3405,6 +3407,14 @@ class TestNodesManager:
             with pytest.raises(RedisClusterUnreachableError) as e:
                 RedisCluster(startup_nodes=[ClusterNode("127.0.0.1", 7000)])
             assert "Redis Cluster cannot be connected" in str(e.value)
+
+        with patch.object(NodesManager, "create_redis_node") as create_redis_node:
+            create_redis_node.side_effect = AuthenticationError("invalid password")
+
+            with pytest.raises(RedisClusterException) as e:
+                RedisCluster(startup_nodes=[ClusterNode("127.0.0.1", 7000)])
+            assert not isinstance(e.value, RedisClusterUnreachableError)
+            assert "invalid password" in str(e.value)
 
         with pytest.raises(RedisClusterException) as e:
             get_mocked_redis_client(

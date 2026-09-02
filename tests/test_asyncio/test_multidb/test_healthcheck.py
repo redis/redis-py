@@ -6,6 +6,7 @@ import pytest
 from redis.asyncio import Redis
 from redis.asyncio.cluster import ClusterNode as AsyncClusterNode
 from redis.asyncio.cluster import RedisCluster as AsyncRedisCluster
+from redis.asyncio.connection import SSLConnection as AsyncSSLConnection
 from redis.asyncio.multidb.database import Database
 from redis.asyncio.multidb.healthcheck import (
     PingHealthCheck,
@@ -935,6 +936,51 @@ class TestAbstractHealthCheckPolicy:
                 ("node1.example.com", 7000),
                 ("node2.example.com", 7001),
             }
+        finally:
+            await policy.close()
+
+    @pytest.mark.asyncio
+    async def test_get_client_preserves_tls_for_standalone(self):
+        """
+        Verify the health-check client keeps the underlying client's TLS
+        transport: the source connection kwargs carry TLS as
+        connection_class=SSLConnection, which the kwargs filter drops, so
+        without re-expressing it as ssl=True the probe would speak plaintext
+        to a TLS port and mark a healthy database unavailable.
+        """
+        from redis import Redis as SyncRedis
+
+        underlying = SyncRedis(host="localhost", port=6379, ssl=True)
+        mock_db = Mock(spec=Database)
+        mock_db.client = underlying
+
+        policy = HealthyAllPolicy()
+        try:
+            client = await policy.get_client(mock_db)
+            assert client.connection_pool.connection_class is AsyncSSLConnection
+        finally:
+            await policy.close()
+
+    @pytest.mark.asyncio
+    async def test_get_client_preserves_tls_for_cluster(self):
+        """
+        Same as the standalone TLS test, for the cluster path: the async
+        cluster also represents TLS as connection_class=SSLConnection in its
+        connection kwargs.
+        """
+        underlying = AsyncRedisCluster(
+            startup_nodes=[AsyncClusterNode("node1.example.com", 7000)],
+            ssl=True,
+        )
+        mock_db = Mock(spec=Database)
+        mock_db.client = underlying
+
+        policy = HealthyAllPolicy()
+        try:
+            client = await policy.get_client(mock_db)
+            assert (
+                client.connection_kwargs.get("connection_class") is AsyncSSLConnection
+            )
         finally:
             await policy.close()
 
