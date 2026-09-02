@@ -1932,7 +1932,9 @@ class RedisCluster(
                         if connection
                         else "no connection"
                     )
-                    args_log_str = truncate_text(" ".join(map(safe_str, args)))
+                    # Log only the command name - argument values can carry
+                    # secrets or user data.
+                    args_log_str = safe_str(args[0])
                     logger.debug(
                         f"{type(e).__name__} received for command {args_log_str}, on node {target_node.name}, "
                         f"and connection: {connection}, {connection_details}, error: {e}"
@@ -1979,7 +1981,9 @@ class RedisCluster(
                         if connection
                         else "no connection"
                     )
-                    args_log_str = truncate_text(" ".join(map(safe_str, args)))
+                    # Log only the command name - argument values can carry
+                    # secrets or user data.
+                    args_log_str = safe_str(args[0])
                     logger.debug(
                         f"MOVED error received for command {args_log_str}, on node {target_node.name}, "
                         f"and connection: {connection}, {connection_details}, error: {e}"
@@ -2021,7 +2025,9 @@ class RedisCluster(
                         if connection
                         else "no connection"
                     )
-                    args_log_str = truncate_text(" ".join(map(safe_str, args)))
+                    # Log only the command name - argument values can carry
+                    # secrets or user data.
+                    args_log_str = safe_str(args[0])
                     logger.debug(
                         f"TRYAGAIN error received for command {args_log_str}, on node {target_node.name}, "
                         f"and connection: {connection}, {connection_details}"
@@ -2046,7 +2052,9 @@ class RedisCluster(
                         if connection
                         else "no connection"
                     )
-                    args_log_str = truncate_text(" ".join(map(safe_str, args)))
+                    # Log only the command name - argument values can carry
+                    # secrets or user data.
+                    args_log_str = safe_str(args[0])
                     logger.debug(
                         f"ASK error received for command {args_log_str}, on node {target_node.name}, "
                         f"and connection: {connection}, {connection_details}, error: {e}"

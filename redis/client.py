@@ -14,6 +14,7 @@ from typing import (
     Literal,
     Mapping,
     Optional,
+    Sequence,
     Set,
     Type,
     Union,
@@ -119,15 +120,15 @@ def is_debug_log_enabled():
 def add_debug_log_for_operation_failure(
     connection: AbstractConnection,
     error: BaseException | None = None,
-    args: Iterable[Any] | None = None,
+    args: Sequence[Any] | None = None,
 ):
     details = connection.extract_connection_details() if connection else "no connection"
     prefix = (
         f"{type(error).__name__} received" if error is not None else "Operation failed"
     )
-    command = (
-        f" for command {truncate_text(' '.join(map(safe_str, args)))}" if args else ""
-    )
+    # Log only the command name - argument values can carry secrets
+    # (AUTH, CONFIG SET requirepass, ACL SETUSER) or user data.
+    command = f" for command {safe_str(args[0])}" if args else ""
     suffix = f", error: {error}" if error is not None else ""
     logger.debug(
         f"{prefix}{command}, with connection: {connection}, details: {details}{suffix}",
