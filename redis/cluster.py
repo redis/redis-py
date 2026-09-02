@@ -1415,7 +1415,7 @@ class RedisCluster(
         self.cluster_response_callbacks[command] = callback
 
     def _determine_nodes(
-        self, *args, request_policy: RequestPolicy, **kwargs
+        self, *args, request_policy: Optional[RequestPolicy] = None, **kwargs
     ) -> List["ClusterNode"]:
         """
         Determines a nodes the command should be executed on.
@@ -1428,12 +1428,13 @@ class RedisCluster(
         if nodes_flag is not None:
             # nodes flag passed by the user
             command_flag = nodes_flag
-        else:
+            if command_flag in self._command_flags_mapping:
+                request_policy = self._command_flags_mapping[command_flag]
+        elif request_policy is None:
             # get the nodes group for this command if it was predefined
             command_flag = self.command_flags.get(command)
-
-        if command_flag in self._command_flags_mapping:
-            request_policy = self._command_flags_mapping[command_flag]
+            if command_flag in self._command_flags_mapping:
+                request_policy = self._command_flags_mapping[command_flag]
 
         policy_callback = self._policies_callback_mapping[request_policy]
 

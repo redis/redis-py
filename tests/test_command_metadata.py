@@ -100,6 +100,7 @@ LIVE_CACHEABILITY_DIVERGENCE = {
 ALL_WITHHELD_ROUTING_COMMANDS = (
     *WITHHELD_ROUTING_COMMANDS,
     *INELIGIBLE_RECORD_COMMANDS,
+    "scan",
 )
 
 
@@ -197,16 +198,19 @@ def slot_routed_static_commands() -> Iterator[str]:
     """
     The names of every static-table entry the cluster client must route by its keys.
 
-    That is the entries recorded ``DEFAULT_KEYED`` plus the entries that withhold their routing
-    policies: the first route by slot directly, the second send the client down its own slot
-    resolution, and both must land on the node holding the key. Derived from the table so the
+    That is the entries recorded ``DEFAULT_KEYED`` plus the keyed entries that withhold their
+    routing policies: the first route by slot directly, the second send the client down its own
+    slot resolution, and both must land on the node holding the key. Derived from the table so the
     routing tests in ``tests/test_cluster.py`` and its async mirror cannot drift from it.
     """
     for _, _, name in static_table_names():
         module, command = _split_command_name(name)
-        request_policy = _STATIC_COMMAND_METADATA[module][command].request_policy
+        metadata = _STATIC_COMMAND_METADATA[module][command]
 
-        if request_policy is None or request_policy is RequestPolicy.DEFAULT_KEYED:
+        if (
+            metadata.request_policy is None
+            or metadata.request_policy is RequestPolicy.DEFAULT_KEYED
+        ) and metadata.has_key_argument:
             yield name
 
 
@@ -464,6 +468,19 @@ class TestWithheldRoutingPolicies:
         )
         for name in ("eval_ro", "evalsha_ro", "fcall_ro"):
             assert static_resolver.resolve(name).is_script_runner is True, name
+
+    def test_scan_withholds_routing_and_is_replica_safe(self):
+        static_resolver = StaticMetadataResolver()
+        metadata = static_resolver.resolve("scan")
+
+        assert metadata is not None
+        assert metadata.request_policy is None
+        assert metadata.response_policy is None
+        assert metadata.is_readonly is True
+        assert metadata.has_key_argument is False
+        assert metadata.has_complete_metadata is True
+        assert static_resolver.is_cacheable("scan") is False
+        assert static_resolver.is_replica_safe("scan") is True
 
     def test_the_ineligible_records_decide_ahead_of_a_live_layer(self):
         """

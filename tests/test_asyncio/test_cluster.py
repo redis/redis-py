@@ -2881,6 +2881,16 @@ class TestStaticMetadataRouting:
             assert await instance._is_replica_safe("SET") is False
 
     @pytest.mark.fixed_client
+    async def test_cluster_scan_routes_to_all_primaries_by_default(self) -> None:
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+        primaries = rc.get_primaries()
+        assert len(primaries) > 1
+
+        nodes = await rc._determine_nodes("scan", request_policy=None)
+        assert set(nodes) == set(primaries)
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
     async def test_keyless_routing_honors_the_public_node_selector(self) -> None:
         rc = await get_mocked_redis_client(host=default_host, port=7000)
         selected_node = rc.get_primaries()[0]

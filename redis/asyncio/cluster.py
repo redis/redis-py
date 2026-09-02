@@ -1008,17 +1008,18 @@ class RedisCluster(
         self,
         command: str,
         *args: Any,
-        request_policy: RequestPolicy,
+        request_policy: Optional[RequestPolicy] = None,
         node_flag: Optional[str] = None,
     ) -> List["ClusterNode"]:
         # Determine which nodes should be executed the command on.
         # Returns a list of target nodes.
-        if not node_flag:
-            # get the nodes group for this command if it was predefined
-            node_flag = self.command_flags.get(command)
-
-        if node_flag in self._command_flags_mapping:
-            request_policy = self._command_flags_mapping[node_flag]
+        if node_flag is not None:
+            if node_flag in self._command_flags_mapping:
+                request_policy = self._command_flags_mapping[node_flag]
+        elif request_policy is None:
+            command_flag = self.command_flags.get(command.upper())
+            if command_flag in self._command_flags_mapping:
+                request_policy = self._command_flags_mapping[command_flag]
 
         policy_callback = self._policies_callback_mapping[request_policy]
 

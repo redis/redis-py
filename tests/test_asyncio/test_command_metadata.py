@@ -154,6 +154,19 @@ class TestWithheldRoutingPolicies:
         for name in ("eval_ro", "evalsha_ro", "fcall_ro"):
             assert (await static_resolver.resolve(name)).is_script_runner is True, name
 
+    async def test_scan_withholds_routing_and_is_replica_safe(self):
+        static_resolver = AsyncStaticMetadataResolver()
+        metadata = await static_resolver.resolve("scan")
+
+        assert metadata is not None
+        assert metadata.request_policy is None
+        assert metadata.response_policy is None
+        assert metadata.is_readonly is True
+        assert metadata.has_key_argument is False
+        assert metadata.has_complete_metadata is True
+        assert await static_resolver.is_cacheable("scan") is False
+        assert await static_resolver.is_replica_safe("scan") is True
+
     async def test_the_ineligible_records_decide_ahead_of_a_live_layer(self):
         """
         Why the documented chain order is static-first, pinned in both directions and offline.

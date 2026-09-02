@@ -3049,6 +3049,15 @@ class TestStaticMetadataRouting:
             assert instance._is_replica_safe("SET") is False
 
     @pytest.mark.fixed_client
+    def test_cluster_scan_routes_to_all_primaries_by_default(self):
+        rc = get_mocked_redis_client(host=default_host, port=7000)
+        primaries = rc.get_primaries()
+        assert len(primaries) > 1
+
+        nodes = rc._determine_nodes("scan", request_policy=None)
+        assert set(nodes) == set(primaries)
+
+    @pytest.mark.fixed_client
     def test_every_node_client_gets_the_same_resolver(self):
         """
         The resolver has to reach every node's ``Redis``, because that is where the pools -

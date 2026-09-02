@@ -1084,11 +1084,11 @@ _DONT_CACHE_WRITE_KEYED = replace(_WRITE_KEYED, is_dont_cache=True)
 # ``exists`` and ``mget`` stand in the keyed defaults for the unimplemented ``multi_shard``
 # tips, ``ft.cursor`` is SPECIAL, a client-side decision the server does not tip, ``touch`` is
 # recorded ``dont_cache`` where the server reports it cacheable, and ``vrandmember`` is
-# recorded ``nondeterministic_output`` where the server tips it nothing. The ``movablekeys``
-# reads - ``eval_ro``, ``evalsha_ro``, ``fcall_ro``, ``sdiffcard``, ``sintercard``,
-# ``sunioncard``, ``xread``, ``zdiff``, ``zinter``, ``zintercard`` and ``zunion`` - plus
-# ``touch`` and ``vrandmember`` withhold their routing policies entirely, so the cluster
-# client keeps resolving their keys itself. Their cacheability inputs are unaffected.
+# recorded ``nondeterministic_output`` where the server tips it nothing. The ``movablekeys`` reads - ``eval_ro``, ``evalsha_ro``, ``fcall_ro``, ``sdiffcard``,
+# ``sintercard``, ``sunioncard``, ``xread``, ``zdiff``, ``zinter``, ``zintercard`` and
+# ``zunion`` - plus ``scan``, ``touch`` and ``vrandmember`` withhold their routing policies
+# entirely, so the cluster client keeps resolving their targets itself. Their cacheability
+# inputs are unaffected.
 _STATIC_COMMAND_METADATA: CommandMetadataRecordsCache = MappingProxyType(
     {
         "core": MappingProxyType(
@@ -1160,7 +1160,15 @@ _STATIC_COMMAND_METADATA: CommandMetadataRecordsCache = MappingProxyType(
                 "pexpiretime": _CACHEABLE_KEYED,
                 "pttl": _NONDETERMINISTIC_KEYED,
                 "randomkey": _READONLY_KEYLESS,
-                "scan": _READONLY_KEYLESS,
+                # Readonly and keyless. Routing policies are withheld so the cluster client keeps
+                # routing SCAN to all primary nodes (PRIMARIES) rather than a single random node.
+                "scan": CommandMetadata(
+                    request_policy=None,
+                    response_policy=None,
+                    is_readonly=True,
+                    has_key_argument=False,
+                    has_complete_metadata=True,
+                ),
                 "scard": _CACHEABLE_KEYED,
                 "sdiff": _CACHEABLE_KEYED,
                 "sdiffcard": _CACHEABLE_MOVABLE_KEYS,
