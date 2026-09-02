@@ -295,7 +295,9 @@ class TestActiveActive:
             sleep(0.5)
 
         # Execute pipeline until database failover
-        for _ in range(5):
+        deadline = monotonic() + FAILOVER_TIMEOUT
+        while not listener.is_changed_flag:
+            assert monotonic() < deadline, FAILOVER_TIMEOUT_MESSAGE
             retry.call_with_retry(lambda: callback(), lambda _: dummy_fail())
             sleep(0.5)
 
@@ -347,7 +349,9 @@ class TestActiveActive:
             sleep(0.5)
 
         # Execute pipeline until database failover
-        for _ in range(5):
+        deadline = monotonic() + FAILOVER_TIMEOUT
+        while not listener.is_changed_flag:
+            assert monotonic() < deadline, FAILOVER_TIMEOUT_MESSAGE
             retry.call_with_retry(lambda: callback(), lambda _: dummy_fail())
             sleep(0.5)
 

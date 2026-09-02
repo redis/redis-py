@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import os
-from time import monotonic
+from time import monotonic, sleep
 
 import pytest
 
@@ -100,8 +100,12 @@ async def trigger_network_failure_action(
     logger.info(f"Action completed. Status: {status_result['status']}")
 
 
-@pytest.mark.skip(reason="Temporarily disabled")
 class TestActiveActive:
+    def teardown_method(self, method):
+        # Timeout so the cluster could recover from network failure. Runs between
+        # tests, outside the per-test event loop, so a blocking sleep is fine.
+        sleep(10)
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "r_multi_db",
@@ -302,7 +306,9 @@ class TestActiveActive:
                 await asyncio.sleep(0.5)
 
             # Execute pipeline until database failover
-            for _ in range(5):
+            deadline = monotonic() + FAILOVER_TIMEOUT
+            while not listener.is_changed_flag:
+                assert monotonic() < deadline, FAILOVER_TIMEOUT_MESSAGE
                 await retry.call_with_retry(
                     lambda: callback(), lambda _: dummy_fail_async()
                 )
@@ -362,7 +368,9 @@ class TestActiveActive:
                 await asyncio.sleep(0.5)
 
             # Execute pipeline until database failover
-            for _ in range(5):
+            deadline = monotonic() + FAILOVER_TIMEOUT
+            while not listener.is_changed_flag:
+                assert monotonic() < deadline, FAILOVER_TIMEOUT_MESSAGE
                 await retry.call_with_retry(
                     lambda: callback(), lambda _: dummy_fail_async()
                 )

@@ -2386,7 +2386,16 @@ class NodesManager:
                     break
 
             if not startup_nodes_reachable:
-                raise RedisClusterUnreachableError(
+                # The unreachable subtype is reserved for connectivity failures:
+                # MultiDB registers it as retryable, so a deterministic
+                # server/configuration error (e.g. cluster mode disabled) must
+                # keep surfacing as a plain RedisClusterException.
+                if isinstance(exception, (ConnectionError, TimeoutError, OSError)):
+                    raise RedisClusterUnreachableError(
+                        f"Redis Cluster cannot be connected. Please provide at least "
+                        f"one reachable node: {str(exception)}"
+                    ) from exception
+                raise RedisClusterException(
                     f"Redis Cluster cannot be connected. Please provide at least "
                     f"one reachable node: {str(exception)}"
                 ) from exception

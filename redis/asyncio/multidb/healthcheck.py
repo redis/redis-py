@@ -6,11 +6,13 @@ from enum import Enum
 from typing import List, Optional, Tuple, Type, Union
 
 from redis.asyncio import Redis as AsyncRedis
+from redis.asyncio.cluster import ClusterNode as AsyncClusterNode
 from redis.asyncio.cluster import RedisCluster as AsyncRedisCluster
 from redis.asyncio.http.http_client import DEFAULT_TIMEOUT, AsyncHTTPClientWrapper
 from redis.backoff import NoBackoff
 from redis.client import Redis as SyncRedis
 from redis.cluster import RedisCluster as SyncRedisCluster
+from redis.exceptions import ConnectionError, TimeoutError
 from redis.http.http_client import HttpClient
 from redis.multidb.exception import UnhealthyDatabaseException
 from redis.retry import Retry
@@ -183,9 +185,7 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
                 conn_kwargs = database.client.get_connection_kwargs().copy()
                 filtered_kwargs = _filter_kwargs(conn_kwargs, AsyncRedisCluster)
                 startup_nodes = database.client.startup_nodes
-                # Use the first node as the startup node
                 if startup_nodes:
-                    first_node = startup_nodes[0]
                     nodes_manager = database.client.nodes_manager
                     # The sync and async NodesManager expose this setting under
                     # different names (``_require_full_coverage`` vs
@@ -196,9 +196,15 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
                         "require_full_coverage",
                         getattr(nodes_manager, "_require_full_coverage", True),
                     )
+                    # Seed the health-check client with every configured startup
+                    # node, not just the first: if the first seed is down while
+                    # another is healthy, the probe must still be able to discover
+                    # the cluster instead of marking the database unhealthy.
                     client = AsyncRedisCluster(
-                        host=first_node.host,
-                        port=first_node.port,
+                        startup_nodes=[
+                            AsyncClusterNode(node.host, node.port)
+                            for node in startup_nodes
+                        ],
                         dynamic_startup_nodes=nodes_manager._dynamic_startup_nodes,
                         address_remap=nodes_manager.address_remap,
                         require_full_coverage=require_full_coverage,
@@ -411,6 +417,14 @@ class PingHealthCheck(AbstractHealthCheck):
 
             for result in results:
                 if isinstance(result, BaseException):
+                    if isinstance(result, (ConnectionError, TimeoutError, OSError)):
+                        # A failing node may have been removed or replaced in the
+                        # cluster, and direct node probes bypass the client's own
+                        # topology-refresh path. Closing the client resets its lazy
+                        # initialization, so the next probe re-discovers the
+                        # topology from the startup nodes instead of pinging the
+                        # stale node forever.
+                        await hc_client.aclose()
                     raise result
 
                 if not result:
@@ -547,11 +561,11 @@ class LagAwareHealthCheck(AbstractHealthCheck):
         # response - sending the second request to the wrong cluster.
         base_url = f"{database.health_check_url}:{self._rest_api_port}"
 
-        # Find bdb matching to the current database host
+        # Find bdb matching to the current database host. The per-request
+        # deadline stays the client's configured http_timeout; the whole check
+        # is already bounded by health_check_timeout in the policy.
         matching_bdb = self._find_matching_bdb(
-            await self._http_client.get(
-                f"{base_url}/v1/bdbs", timeout=self.health_check_timeout
-            ),
+            await self._http_client.get(f"{base_url}/v1/bdbs"),
             db_hosts,
         )
 
@@ -566,9 +580,7 @@ class LagAwareHealthCheck(AbstractHealthCheck):
             f"{base_url}/v1/bdbs/{matching_bdb['uid']}/availability"
             f"?extend_check=lag&availability_lag_tolerance_ms={self._lag_aware_tolerance}"
         )
-        await self._http_client.get(
-            url, expect_json=False, timeout=self.health_check_timeout
-        )
+        await self._http_client.get(url, expect_json=False)
 
         # Status checked in an http client, otherwise HttpError will be raised
         return True

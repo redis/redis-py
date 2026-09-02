@@ -55,6 +55,7 @@ from redis.exceptions import (
     MovedError,
     NoPermissionError,
     RedisClusterException,
+    RedisClusterUnreachableError,
     RedisError,
     ResponseError,
     TimeoutError,
@@ -3388,6 +3389,32 @@ class TestNodesManager:
                 cluster_enabled=False,
             )
             assert "Cluster mode is not enabled on this node" in str(e.value)
+
+    @pytest.mark.fixed_client
+    def test_unreachable_error_is_reserved_for_connectivity_failures(self):
+        """
+        RedisClusterUnreachableError is raised when no startup node could be
+        contacted, but not when a node responded and rejected CLUSTER SLOTS:
+        MultiDB registers the unreachable subtype as retryable, so a
+        deterministic configuration error must keep surfacing as a plain
+        RedisClusterException.
+        """
+        with patch.object(NodesManager, "create_redis_node") as create_redis_node:
+            create_redis_node.side_effect = ConnectionError("mock connection error")
+
+            with pytest.raises(RedisClusterUnreachableError) as e:
+                RedisCluster(startup_nodes=[ClusterNode("127.0.0.1", 7000)])
+            assert "Redis Cluster cannot be connected" in str(e.value)
+
+        with pytest.raises(RedisClusterException) as e:
+            get_mocked_redis_client(
+                cluster_slots_raise_error=True,
+                host=default_host,
+                port=default_port,
+                cluster_enabled=False,
+            )
+        assert not isinstance(e.value, RedisClusterUnreachableError)
+        assert "Cluster mode is not enabled on this node" in str(e.value)
 
     @pytest.mark.fixed_client
     def test_empty_startup_nodes(self):

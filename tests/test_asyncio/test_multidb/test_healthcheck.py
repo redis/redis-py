@@ -17,7 +17,7 @@ from redis.asyncio.multidb.healthcheck import (
 )
 from redis.http.http_client import HttpError
 from redis.multidb.circuit import State as CBState
-from redis.exceptions import ConnectionError
+from redis.exceptions import ConnectionError, ResponseError
 from redis.multidb.exception import UnhealthyDatabaseException
 
 
@@ -491,6 +491,51 @@ class TestPingHealthCheck:
         mock_node2.execute_command.assert_awaited_once_with("PING")
         mock_node3.execute_command.assert_awaited_once_with("PING")
 
+    @pytest.mark.asyncio
+    async def test_cluster_client_is_reset_when_ping_fails_with_connection_error(
+        self, mock_client, mock_cb
+    ):
+        """
+        Verify that a connectivity failure on a node probe closes the health
+        check client. Direct node probes bypass the client's own
+        topology-refresh path, so without the reset a node that was removed or
+        replaced in the cluster would keep failing every probe against the
+        stale topology.
+        """
+        mock_node1 = _mock_cluster_node(ping_result=True)
+        mock_node2 = _mock_cluster_node()
+        mock_node2.execute_command.side_effect = ConnectionError("Node is down")
+        mock_hc_client = _mock_cluster_client(mock_node1, mock_node2)
+
+        hc = PingHealthCheck()
+        db = Database(mock_client, mock_cb, 0.9)
+
+        with pytest.raises(ConnectionError, match="Node is down"):
+            await hc.check_health(db, mock_hc_client)
+
+        mock_hc_client.aclose.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_cluster_client_is_kept_when_ping_fails_with_server_error(
+        self, mock_client, mock_cb
+    ):
+        """
+        Verify that a non-connectivity failure does not reset the health check
+        client: the topology is not in question, so re-discovering it would
+        only add load without changing the outcome.
+        """
+        mock_node = _mock_cluster_node()
+        mock_node.execute_command.side_effect = ResponseError("some server error")
+        mock_hc_client = _mock_cluster_client(mock_node)
+
+        hc = PingHealthCheck()
+        db = Database(mock_client, mock_cb, 0.9)
+
+        with pytest.raises(ResponseError, match="some server error"):
+            await hc.check_health(db, mock_hc_client)
+
+        mock_hc_client.aclose.assert_not_awaited()
+
 
 @pytest.mark.onlynoncluster
 class TestLagAwareHealthCheck:
@@ -618,10 +663,10 @@ class TestLagAwareHealthCheck:
         with pytest.raises(ValueError, match="Could not find a matching bdb"):
             await hc.check_health(db, mock_hc_client)
 
-        # Only the listing call should have happened
+        # Only the listing call should have happened, without a per-request
+        # timeout override - the client's configured http_timeout applies.
         mock_http.get.assert_called_once_with(
-            "https://healthcheck.example.com:9443/v1/bdbs",
-            timeout=hc.health_check_timeout,
+            "https://healthcheck.example.com:9443/v1/bdbs"
         )
 
     @pytest.mark.asyncio
@@ -865,6 +910,33 @@ class TestAbstractHealthCheckPolicy:
         assert client1 is mock_redis1
         assert client2 is mock_redis2
         assert client1 is not client2
+
+    @pytest.mark.asyncio
+    async def test_get_client_seeds_cluster_client_with_all_startup_nodes(self):
+        """
+        Verify the health-check cluster client is constructed from every
+        configured startup node, not just the first: if the first seed is down
+        while another is healthy, the probe must still be able to discover the
+        cluster instead of marking the database unhealthy.
+        """
+        underlying = AsyncRedisCluster(
+            startup_nodes=[
+                AsyncClusterNode("node1.example.com", 7000),
+                AsyncClusterNode("node2.example.com", 7001),
+            ]
+        )
+        mock_db = Mock(spec=Database)
+        mock_db.client = underlying
+
+        policy = HealthyAllPolicy()
+        try:
+            client = await policy.get_client(mock_db)
+            assert {(node.host, node.port) for node in client.startup_nodes} == {
+                ("node1.example.com", 7000),
+                ("node2.example.com", 7001),
+            }
+        finally:
+            await policy.close()
 
     @pytest.mark.asyncio
     async def test_close_closes_all_clients(self):
