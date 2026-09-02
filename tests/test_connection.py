@@ -2066,3 +2066,212 @@ def test_parse_url_retry_on_error_usable_in_retry():
     with pytest.raises(ConnectionError):
         conn.retry.call_with_retry(do=do, fail=lambda e: None)
     assert calls == 2
+
+
+class _CannedSocket:
+    """Serves a canned byte stream, then behaves like an open-but-idle socket."""
+
+    def __init__(self, data):
+        self.data = data
+        self.timeout = None
+
+    def recv(self, n):
+        if not self.data:
+            raise socket.timeout("idle")
+        chunk, self.data = self.data[:n], self.data[n:]
+        return chunk
+
+    def recv_into(self, buffer, nbytes=0):
+        # _HiredisParser reads through recv_into, so both parsers must be
+        # served here: the CI matrix runs the suite with and without hiredis
+        # installed, and pinning one parser would leave the other untested.
+        chunk = self.recv(nbytes or len(buffer))
+        buffer[: len(chunk)] = chunk
+        return len(chunk)
+
+    def settimeout(self, t):
+        self.timeout = t
+
+    def gettimeout(self):
+        return self.timeout
+
+    def close(self):
+        pass
+
+    def shutdown(self, how):
+        pass
+
+
+def _connection_with_stream(data, parser_class=None, **kwargs):
+    if parser_class is not None:
+        kwargs["parser_class"] = parser_class
+    conn = Connection(protocol=2, **kwargs)
+    conn._sock = _CannedSocket(data)
+    conn._parser.on_connect(conn)
+    return conn
+
+
+def _reconnect_with(conn, monkeypatch, data):
+    """Make conn.connect() serve `data`, the way a real reconnect would."""
+
+    def fake_connect():
+        if conn._sock is None:
+            conn._sock = _CannedSocket(data)
+            conn._parser.on_connect(conn)
+
+    monkeypatch.setattr(conn, "connect", fake_connect)
+
+
+# A binary PUBLISH payload delivered to a decode_responses=True subscriber.
+# Encoder.decode runs at the tail of _read_response, after the cursor has
+# already passed the payload, so this raises UnicodeDecodeError mid-reply on
+# both parser backends.
+BINARY_PUBSUB_MESSAGE = b"*3\r\n$7\r\nmessage\r\n$4\r\nchan\r\n$3\r\n\xff\xfe\xfd\r\n"
+
+
+class TestInvalidResponseInvalidatesConnection:
+    """A framing violation must drop the connection even when the caller
+    passed disconnect_on_error=False, otherwise the rewound bytes stay queued
+    and every subsequent read fails identically. See #4291.
+    """
+
+    # The signature PubSub.parse_response uses.
+    PUBSUB_KWARGS = dict(disconnect_on_error=False, push_request=True)
+
+    def test_framing_error_disconnects_on_pubsub_path(self):
+        conn = _connection_with_stream(b"?bogus\r\n+SECOND\r\n")
+
+        with pytest.raises(redis.InvalidResponse):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        assert conn.is_connected is False
+
+    def test_pubsub_path_recovers_after_framing_error(self, monkeypatch):
+        conn = _connection_with_stream(b"?bogus\r\n+SECOND\r\n")
+        _reconnect_with(conn, monkeypatch, b"+RECOVERED\r\n")
+
+        with pytest.raises(redis.InvalidResponse):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        # PubSub.parse_response then calls conn.connect() before reading
+        # again. On master the connection is still up, so connect() is a
+        # no-op, the poisoned bytes are still queued, and this read raises
+        # InvalidResponse again -- forever. After the fix connect() really
+        # reconnects and the next read sees a clean stream.
+        conn.connect()
+        assert conn.read_response(**self.PUBSUB_KWARGS) == b"RECOVERED"
+
+    def test_in_band_response_error_does_not_disconnect(self):
+        """The rewind exists for in-band ResponseError; it must keep working."""
+        conn = _connection_with_stream(b"-ERR in band\r\n+SECOND\r\n")
+
+        with pytest.raises(redis.ResponseError):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        assert conn.is_connected is True
+        assert conn.read_response(**self.PUBSUB_KWARGS) == b"SECOND"
+
+    def test_framing_error_still_disconnects_by_default(self):
+        conn = _connection_with_stream(b"?bogus\r\n")
+
+        with pytest.raises(redis.InvalidResponse):
+            conn.read_response()
+
+        assert conn.is_connected is False
+
+
+@pytest.mark.parametrize(
+    "parser_class",
+    [_RESP2Parser, _HiredisParser],
+    ids=["RESP2Parser", "HiredisParser"],
+)
+class TestBinaryPubSubPayloadInvalidatesConnection:
+    """The realistic pubsub trigger is not an unknown type byte but
+    Encoder.decode at the tail of _read_response: a decode_responses=True
+    subscriber handed a binary PUBLISH payload raises UnicodeDecodeError after
+    the cursor has passed the payload. Both parser backends raise it, and
+    PubSub.parse_response passes disconnect_on_error=False, so before the
+    widened predicate the connection stayed up with the undecodable bytes
+    queued and every later read raised identically. See #4291.
+    """
+
+    PUBSUB_KWARGS = dict(disconnect_on_error=False, push_request=True)
+
+    def _subscriber(self, data, parser_class):
+        if parser_class is _HiredisParser and not HIREDIS_AVAILABLE:
+            pytest.skip("Hiredis not available")
+        return _connection_with_stream(
+            data, parser_class, encoding="utf-8", decode_responses=True
+        )
+
+    def test_binary_payload_disconnects(self, parser_class):
+        conn = self._subscriber(BINARY_PUBSUB_MESSAGE + b"+SECOND\r\n", parser_class)
+
+        with pytest.raises(UnicodeDecodeError):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        assert conn.is_connected is False
+
+    def test_next_read_is_clean_after_binary_payload(self, parser_class, monkeypatch):
+        conn = self._subscriber(BINARY_PUBSUB_MESSAGE + b"+SECOND\r\n", parser_class)
+        _reconnect_with(conn, monkeypatch, b"+RECOVERED\r\n")
+
+        with pytest.raises(UnicodeDecodeError):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        # PubSub.parse_response calls conn.connect() before reading again.
+        # Before the fix the connection was still up, connect() was a no-op,
+        # and this read raised UnicodeDecodeError on the same queued bytes.
+        conn.connect()
+        assert conn.read_response(**self.PUBSUB_KWARGS) == "RECOVERED"
+
+    def test_decodable_payload_leaves_connection_up(self, parser_class):
+        """A payload that decodes cleanly must not trip the new predicate."""
+        conn = self._subscriber(
+            b"*3\r\n$7\r\nmessage\r\n$4\r\nchan\r\n$2\r\nhi\r\n", parser_class
+        )
+
+        assert conn.read_response(**self.PUBSUB_KWARGS) == ["message", "chan", "hi"]
+        assert conn.is_connected is True
+
+
+def _deeply_nested_reply(depth):
+    # Matches what Redis emits for
+    #   EVAL "local t={} local c=t for i=1,3000 do local n={} c[1]=n c=n end return t" 0
+    # which is an ordinary command reply, not a synthetic stream (#4291).
+    return b"*1\r\n" * depth + b"*0\r\n"
+
+
+class TestDeeplyNestedReplyInvalidatesConnection:
+    """Deeply nested aggregate replies fail mid-parse: the pure-Python parsers
+    exhaust the stack (RecursionError) and hiredis hits its own nesting limit
+    (InvalidResponse). Both are unrecoverable by re-parsing, so both must drop
+    the connection even under disconnect_on_error=False. #4144 converts the
+    pure-Python case into a bounded-depth InvalidResponse; catching
+    RecursionError here is what stops the loop until that lands.
+    """
+
+    PUBSUB_KWARGS = dict(disconnect_on_error=False, push_request=True)
+
+    def test_python_parser_recursion_error_disconnects(self):
+        conn = _connection_with_stream(_deeply_nested_reply(3000), _RESP2Parser)
+
+        with pytest.raises(RecursionError):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        assert conn.is_connected is False
+
+    @pytest.mark.skipif(not HIREDIS_AVAILABLE, reason="hiredis is not installed")
+    def test_hiredis_nesting_limit_disconnects(self):
+        conn = _connection_with_stream(_deeply_nested_reply(3000), _HiredisParser)
+
+        with pytest.raises(redis.InvalidResponse):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        assert conn.is_connected is False
+
+    def test_shallow_nesting_still_parses(self):
+        conn = _connection_with_stream(_deeply_nested_reply(3), _RESP2Parser)
+
+        assert conn.read_response(**self.PUBSUB_KWARGS) == [[[[]]]]
+        assert conn.is_connected is True

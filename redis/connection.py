@@ -41,7 +41,14 @@ from ._defaults import (
     DEFAULT_SOCKET_TIMEOUT,
     get_default_socket_keepalive_options,
 )
-from ._parsers import BaseParser, Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
+from ._parsers import (
+    UNRECOVERABLE_PARSE_ERRORS,
+    BaseParser,
+    Encoder,
+    _HiredisParser,
+    _RESP2Parser,
+    _RESP3Parser,
+)
 from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
@@ -1424,6 +1431,17 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             if disconnect_on_error:
                 self.disconnect()
             raise ConnectionError(f"Error while reading from {host_error} : {e.args}")
+        except UNRECOVERABLE_PARSE_ERRORS:
+            # The parser failed partway through a reply, after the read cursor
+            # had already passed bytes it cannot re-interpret. The rewind and
+            # disconnect_on_error=False exist so an *interrupted* read can be
+            # re-parsed from the start (#2510, #2695) - an in-band ResponseError
+            # is returned as a value and purged, never rewound. Re-parsing here
+            # just reproduces the same failure, so honouring
+            # disconnect_on_error=False would make every later read fail
+            # identically, forever. Drop the connection regardless. See #4291.
+            self.disconnect()
+            raise
         except BaseException:
             # Also by default close in case of BaseException.  A lot of code
             # relies on this behaviour when doing Command/Response pairs.
@@ -1804,15 +1822,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 entry = self._cache.get(self._current_command_cache_key)
 
                 with self._pool_lock:
-                    while entry.connection_ref.can_read():
-                        try:
-                            entry.connection_ref.read_response(
-                                push_request=True,
-                                timeout=0,
-                                disconnect_on_error=False,
-                            )
-                        except TimeoutError:
-                            break
+                    self._drain_invalidations(entry.connection_ref)
 
                 # Re-check: if the entry was invalidated during the drain,
                 # fall through to send the command over the network.
@@ -2064,14 +2074,28 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         conn.read_response()
         conn._parser.set_invalidation_push_handler(self._on_invalidation_callback)
 
-    def _process_pending_invalidations(self):
-        while self.can_read():
+    def _drain_invalidations(self, conn: ConnectionInterface):
+        while conn.can_read():
             try:
-                self._conn.read_response(
+                conn.read_response(
                     push_request=True, timeout=0, disconnect_on_error=False
                 )
             except TimeoutError:
                 break
+            except UNRECOVERABLE_PARSE_ERRORS:
+                # Invalidation replies are read straight off the raw
+                # connection, so the disconnect a parse failure now forces
+                # bypasses this proxy's disconnect() and its cache flush. The
+                # next connect() opens a fresh CLIENT TRACKING session that the
+                # server has no invalidation state for, so entries cached under
+                # the old session would be served as if still tracked. Flush
+                # them here for the same reason disconnect() does.
+                with self._cache_lock:
+                    self._cache.flush()
+                raise
+
+    def _process_pending_invalidations(self):
+        self._drain_invalidations(self._conn)
 
     def _on_invalidation_callback(self, data: List[Union[str, Optional[List[bytes]]]]):
         with self._cache_lock:

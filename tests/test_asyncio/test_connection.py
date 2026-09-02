@@ -1128,3 +1128,80 @@ async def test_parse_url_retry_on_error_usable_in_retry():
     with pytest.raises(ConnectionError):
         await conn.retry.call_with_retry(do=do, fail=fail)
     assert calls == 2
+
+
+@pytest.mark.parametrize("disconnect_on_error", [True, False])
+async def test_invalid_response_always_disconnects(disconnect_on_error):
+    """A framing violation invalidates the connection regardless of
+    disconnect_on_error. The parsers rewind on error, so the offending reply
+    stays queued and every later read would fail identically. See #4291.
+    """
+    conn = Connection()
+    with (
+        mock.patch.object(
+            conn,
+            "_read_response_from_parser",
+            side_effect=InvalidResponse("Protocol Error"),
+        ),
+        mock.patch.object(conn, "disconnect") as disconnect,
+    ):
+        with pytest.raises(InvalidResponse):
+            await conn.read_response(disconnect_on_error=disconnect_on_error)
+
+    disconnect.assert_called_once_with(nowait=True)
+
+
+# A binary PUBLISH payload delivered to a decode_responses=True subscriber.
+# Encoder.decode runs at the tail of _read_response, after the payload has
+# already been consumed, so this raises UnicodeDecodeError mid-reply.
+BINARY_PUBSUB_MESSAGE = b"*3\r\n$7\r\nmessage\r\n$4\r\nchan\r\n$3\r\n\xff\xfe\xfd\r\n"
+
+
+def _attach_stream(conn, data):
+    """Wire `data` onto conn as if a connect() had just succeeded."""
+    conn._reader = MockStream(data)
+    conn._writer = mock.Mock()
+    conn._writer.close = mock.Mock()
+    conn._writer.wait_closed = mock.AsyncMock()
+    conn._parser.on_connect(conn)
+
+
+@pytest.mark.parametrize(
+    "parser_class",
+    [_AsyncRESP2Parser, _AsyncHiredisParser],
+    ids=["AsyncRESP2Parser", "AsyncHiredisParser"],
+)
+async def test_binary_pubsub_payload_invalidates_connection(parser_class):
+    """The async pubsub read path: a decode_responses=True subscriber handed a
+    binary PUBLISH payload raises UnicodeDecodeError from Encoder.decode, and
+    PubSub.parse_response passes disconnect_on_error=False. The async parser
+    re-parses from self._pos = 0 rather than rewinding a socket buffer, so the
+    undecodable bytes are still there on the next read and it fails identically
+    unless the connection is dropped. See #4291.
+    """
+    if parser_class is _AsyncHiredisParser and not HIREDIS_AVAILABLE:
+        pytest.skip("Hiredis not available")
+
+    conn = Connection(
+        protocol=2,
+        parser_class=parser_class,
+        encoding="utf-8",
+        decode_responses=True,
+    )
+    _attach_stream(conn, BINARY_PUBSUB_MESSAGE + b"+SECOND\r\n")
+
+    with pytest.raises(UnicodeDecodeError):
+        await conn.read_response(disconnect_on_error=False, push_request=True)
+
+    assert conn.is_connected is False
+
+    # PubSub.parse_response calls connect() before reading again. Now that the
+    # connection was really dropped, the reconnect gets a clean stream; before
+    # the fix connect() was a no-op and this read raised again.
+    _attach_stream(conn, b"+RECOVERED\r\n")
+    assert (
+        await conn.read_response(disconnect_on_error=False, push_request=True)
+        == "RECOVERED"
+    )
+
+    await conn.disconnect()
