@@ -1387,9 +1387,14 @@ def test_pipeline(client):
 def test_uncompressed(client):
     client.ts().create("compressed")
     client.ts().create("uncompressed", uncompressed=True)
+    # Append the samples with a single TS.MADD instead of 2000 individual TS.ADD
+    # round trips, which are slow enough to hit the test timeout when the target
+    # deployment is remote.
+    samples = []
     for i in range(1000):
-        client.ts().add("compressed", i, i)
-        client.ts().add("uncompressed", i, i)
+        samples.append(("compressed", i, i))
+        samples.append(("uncompressed", i, i))
+    assert len(client.ts().madd(samples)) == 2000
     compressed_info = client.ts().info("compressed")
     uncompressed_info = client.ts().info("uncompressed")
     if is_resp2_connection(client):
