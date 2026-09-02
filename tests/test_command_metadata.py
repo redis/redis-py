@@ -110,6 +110,7 @@ ALL_WITHHELD_ROUTING_COMMANDS = (
     *WITHHELD_ROUTING_COMMANDS,
     *INELIGIBLE_RECORD_COMMANDS,
     *WITHHELD_KEYLESS_READS,
+    "command",
 )
 
 
@@ -491,6 +492,19 @@ class TestWithheldRoutingPolicies:
             assert metadata.has_complete_metadata is True, name
             assert static_resolver.is_cacheable(name) is False, name
             assert static_resolver.is_replica_safe(name) is True, name
+
+    def test_command_withholds_routing_and_is_not_replica_safe(self):
+        static_resolver = StaticMetadataResolver()
+        metadata = static_resolver.resolve("command")
+
+        assert metadata is not None
+        assert metadata.request_policy is None
+        assert metadata.response_policy is None
+        assert metadata.is_readonly is False
+        assert metadata.has_key_argument is False
+        assert metadata.has_complete_metadata is True
+        assert static_resolver.is_cacheable("command") is False
+        assert static_resolver.is_replica_safe("command") is False
 
     def test_the_ineligible_records_decide_ahead_of_a_live_layer(self):
         """

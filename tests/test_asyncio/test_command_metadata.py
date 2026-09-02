@@ -169,6 +169,19 @@ class TestWithheldRoutingPolicies:
             assert await static_resolver.is_cacheable(name) is False, name
             assert await static_resolver.is_replica_safe(name) is True, name
 
+    async def test_command_withholds_routing_and_is_not_replica_safe(self):
+        static_resolver = AsyncStaticMetadataResolver()
+        metadata = await static_resolver.resolve("command")
+
+        assert metadata is not None
+        assert metadata.request_policy is None
+        assert metadata.response_policy is None
+        assert metadata.is_readonly is False
+        assert metadata.has_key_argument is False
+        assert metadata.has_complete_metadata is True
+        assert await static_resolver.is_cacheable("command") is False
+        assert await static_resolver.is_replica_safe("command") is False
+
     async def test_the_ineligible_records_decide_ahead_of_a_live_layer(self):
         """
         Why the documented chain order is static-first, pinned in both directions and offline.

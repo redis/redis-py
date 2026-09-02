@@ -221,14 +221,22 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
     def _execute_pipeline_by_slot(
         self, command: str, slots_to_args: Mapping[int, Iterable[EncodableT]]
     ) -> List[Any]:
-        read_from_replicas = self.read_from_replicas and self._is_replica_safe(command)
+        replica_safe = self._is_replica_safe(command)
+        read_from_replicas = (
+            getattr(self, "read_from_replicas", False) and replica_safe
+        )
+        load_balancing_strategy = (
+            getattr(self, "load_balancing_strategy", None) if replica_safe else None
+        )
         pipe = self.pipeline()
         [
             pipe.execute_command(
                 command,
                 *slot_args,
                 target_nodes=[
-                    self.nodes_manager.get_node_from_slot(slot, read_from_replicas)
+                    self.nodes_manager.get_node_from_slot(
+                        slot, read_from_replicas, load_balancing_strategy
+                    )
                 ],
             )
             for slot, slot_args in slots_to_args.items()
@@ -452,8 +460,12 @@ class AsyncClusterMultiKeyCommands(ClusterMultiKeyCommands):
     ) -> List[Any]:
         if self._initialize:
             await self.initialize()
-        read_from_replicas = self.read_from_replicas and await self._is_replica_safe(
-            command
+        replica_safe = await self._is_replica_safe(command)
+        read_from_replicas = (
+            getattr(self, "read_from_replicas", False) and replica_safe
+        )
+        load_balancing_strategy = (
+            getattr(self, "load_balancing_strategy", None) if replica_safe else None
         )
         pipe = self.pipeline()
         [
@@ -461,7 +473,9 @@ class AsyncClusterMultiKeyCommands(ClusterMultiKeyCommands):
                 command,
                 *slot_args,
                 target_nodes=[
-                    self.nodes_manager.get_node_from_slot(slot, read_from_replicas)
+                    self.nodes_manager.get_node_from_slot(
+                        slot, read_from_replicas, load_balancing_strategy
+                    )
                 ],
             )
             for slot, slot_args in slots_to_args.items()

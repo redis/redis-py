@@ -1048,6 +1048,14 @@ _WRITE_KEYLESS = CommandMetadata(
     has_complete_metadata=True,
 )
 
+_WRITE_KEYLESS_WITHHELD_ROUTING = CommandMetadata(
+    request_policy=None,
+    response_policy=None,
+    is_readonly=False,
+    has_key_argument=False,
+    has_complete_metadata=True,
+)
+
 _WRITE_KEYED = CommandMetadata(
     request_policy=RequestPolicy.DEFAULT_KEYED,
     response_policy=ResponsePolicy.DEFAULT_KEYED,
@@ -1078,28 +1086,31 @@ _DONT_CACHE_WRITE_KEYED = replace(_WRITE_KEYED, is_dont_cache=True)
 # 80 of them. The uncovered ones are whole module surfaces the CSC allow-list never
 # carried - ``bf.*``, ``cf.*``, ``cms.*``, ``topk.*``, ``tdigest.*``, the vectorset reads
 # - plus core reads such as ``pfcount``. A command absent from the table fails closed, so the uncovered
-# ones are simply not cached until either they are added or a live resolver is chained
-# behind this one.
+# Provenance: Generated against Redis 8.6-rc1 with all bundled modules loaded,
+# with the core entries also compared against 7.4.2 to ensure the minimum
+# supported version does not disagree on the fields that decide cacheability.
 #
-# The table records metadata; it is not an allow-list. ``xpending``, ``ts.info``, ``xread``,
-# ``touch``, ``vrandmember`` and the three read-only script runners are present with the
-# metadata that makes them *ineligible*, so the reason is documented in one place rather than
-# inferred from an absence - and, because a resolver answers from the first record it finds,
-# so that a live resolver chained behind this one cannot re-admit them. ``xpending``,
-# ``ts.info`` and ``xread`` are on today's ``CacheConfig.DEFAULT_ALLOW_LIST``, and the server
+# Every command on the default allow-list of the 7.1.0 client-side cache is present.
+# So are all of their module counterparts, plus a selection of write commands.
+# Write commands carry the metadata that makes them *ineligible*, so the reason
+# is documented in one place rather than inferred from an absence - and, because
+# a resolver answers from the first record it finds, so that a live resolver
+# chained behind this one cannot re-admit them. ``xpending``, ``ts.info`` and
+# ``xread`` are on today's ``CacheConfig.DEFAULT_ALLOW_LIST``, and the server
 # confirms all three are defects in that list: ``xpending`` is tipped
-# ``nondeterministic_output``, ``ts.info`` ``dont_cache``, and ``xread`` carries the
-# ``blocking`` command flag.
+# ``nondeterministic_output``, ``ts.info`` ``dont_cache``, and ``xread`` carries
+# the ``blocking`` command flag.
 #
 # Five entries diverge from the live reply, each for a reason spelled out where it occurs:
 # ``exists`` and ``mget`` stand in the keyed defaults for the unimplemented ``multi_shard``
 # tips, ``ft.cursor`` is SPECIAL, a client-side decision the server does not tip, ``touch`` is
 # recorded ``dont_cache`` where the server reports it cacheable, and ``vrandmember`` is
-# recorded ``nondeterministic_output`` where the server tips it nothing. The ``movablekeys`` reads - ``eval_ro``, ``evalsha_ro``, ``fcall_ro``, ``sdiffcard``,
-# ``sintercard``, ``sunioncard``, ``xread``, ``zdiff``, ``zinter``, ``zintercard`` and
-# ``zunion`` - plus ``scan``, ``touch`` and ``vrandmember`` withhold their routing policies
-# entirely, so the cluster client keeps resolving their targets itself. Their cacheability
-# inputs are unaffected.
+# recorded ``nondeterministic_output`` where the server tips it nothing. The ``movablekeys``
+# reads - ``eval_ro``, ``evalsha_ro``, ``fcall_ro``, ``sdiffcard``, ``sintercard``,
+# ``sunioncard``, ``xread``, ``zdiff``, ``zinter``, ``zintercard`` and ``zunion`` - plus
+# ``command``, ``dbsize``, ``keys``, ``randomkey``, ``scan``, ``touch`` and ``vrandmember``
+# withhold their routing policies entirely, so the cluster client keeps resolving their
+# targets itself. Their cacheability inputs are unaffected.
 _STATIC_COMMAND_METADATA: CommandMetadataRecordsCache = MappingProxyType(
     {
         "core": MappingProxyType(
@@ -1108,8 +1119,9 @@ _STATIC_COMMAND_METADATA: CommandMetadataRecordsCache = MappingProxyType(
                 "bitfield_ro": _CACHEABLE_KEYED,
                 "bitpos": _CACHEABLE_KEYED,
                 # From STATIC_POLICIES. COMMAND is flagged loading/stale, not readonly,
-                # and takes no keys.
-                "command": _WRITE_KEYLESS,
+                # and takes no keys. Routing policies are withheld so the cluster client preserves
+                # the 2-word COMMAND COUNT, COMMAND LIST, COMMAND GETKEYS default-node flags.
+                "command": _WRITE_KEYLESS_WITHHELD_ROUTING,
                 "dbsize": _READONLY_KEYLESS_WITHHELD_ROUTING,
                 "digest": _CACHEABLE_KEYED,
                 "dump": _NONDETERMINISTIC_KEYED,

@@ -2862,7 +2862,7 @@ class TestStaticMetadataRouting:
             await rc.mset_nonatomic({"key": "value"})
 
         slot = key_slot(rc.encoder.encode("key"))
-        get_node.assert_called_once_with(rc.nodes_manager, slot, True)
+        get_node.assert_called_once_with(rc.nodes_manager, slot, True, None)
         await rc.aclose()
 
     @pytest.mark.fixed_client
@@ -2912,6 +2912,42 @@ class TestStaticMetadataRouting:
 
         nodes = await rc._determine_nodes("dbsize", request_policy=None, node_flag=empty_targets)
         assert nodes == [default_node]
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_command_subcommands_route_to_default_node(self) -> None:
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+        default_node = rc.get_default_node()
+
+        nodes = await rc._determine_nodes("COMMAND", "COUNT", request_policy=None)
+        assert nodes == [default_node]
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_split_command_routing_applies_load_balancing_strategy(self) -> None:
+        rc = await get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            load_balancing_strategy=LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+        )
+        pipe = Mock()
+        pipe.execute = mock.AsyncMock(return_value=["OK", "OK"])
+        with (
+            mock.patch.object(rc._metadata_resolver, "is_replica_safe", return_value=True),
+            mock.patch.object(rc, "pipeline", return_value=pipe),
+            mock.patch.object(
+                type(rc.nodes_manager), "get_node_from_slot", autospec=True
+            ) as get_node,
+        ):
+            slots_to_args = {100: ["a", "1"], 200: ["b", "2"]}
+            await rc._execute_pipeline_by_slot("MSET", slots_to_args)
+
+            get_node.assert_any_call(
+                rc.nodes_manager, 100, False, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS
+            )
+            get_node.assert_any_call(
+                rc.nodes_manager, 200, False, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS
+            )
         await rc.aclose()
 
     @pytest.mark.fixed_client

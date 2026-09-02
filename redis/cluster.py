@@ -4651,7 +4651,7 @@ class PipelineStrategy(AbstractStrategy):
         return nodes
 
     def _determine_nodes(
-        self, *args, request_policy: RequestPolicy, **kwargs
+        self, *args, request_policy: Optional[RequestPolicy] = None, **kwargs
     ) -> List["ClusterNode"]:
         # Determine which nodes should be executed the command on.
         # Returns a list of target nodes.
@@ -4663,15 +4663,16 @@ class PipelineStrategy(AbstractStrategy):
             command = f"{args[0]} {args[1]}".upper()
 
         nodes_flag = kwargs.pop("nodes_flag", None)
-        if nodes_flag is not None:
+        if nodes_flag and self._is_nodes_flag(nodes_flag):
             # nodes flag passed by the user
             command_flag = nodes_flag
-        else:
+            if command_flag in self._pipe._command_flags_mapping:
+                request_policy = self._pipe._command_flags_mapping[command_flag]
+        elif request_policy is None:
             # get the nodes group for this command if it was predefined
             command_flag = self._pipe.command_flags.get(command)
-
-        if command_flag in self._pipe._command_flags_mapping:
-            request_policy = self._pipe._command_flags_mapping[command_flag]
+            if command_flag in self._pipe._command_flags_mapping:
+                request_policy = self._pipe._command_flags_mapping[command_flag]
 
         policy_callback = self._pipe._policies_callback_mapping[request_policy]
 
