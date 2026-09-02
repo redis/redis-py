@@ -352,7 +352,18 @@ def generate_params(
                             )
                     else:
                         params.append((effect_name, trigger, dbconfig, db_name_pattern))
+    except NotImplementedError as e:
+        # Not every backend implements every effect - the mock proxy server
+        # rejects the topology-change triggers outright - so an empty
+        # parametrization is the correct outcome rather than a failure.
+        logging.info(f"No params for test, unsupported by this fault injector: {e}")
     except Exception as e:
         logging.error(f"Failed to extract params for test: {e}")
+        if not params:
+            # Partial results are still worth running, but an *empty*
+            # parametrization makes pytest report success while having executed
+            # nothing at all. A fault injector that is unreachable or rejecting
+            # requests has to surface as a collection error instead.
+            raise
 
     return params
