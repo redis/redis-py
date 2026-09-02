@@ -924,9 +924,12 @@ class RedisCluster(
         Returns a list of nodes that hold the specified keys' slots.
         """
         # get the node that holds the key's slot
+        replica_safe = await self._is_replica_safe(command)
         return [
             self.nodes_manager.get_node_from_slot(
-                await self._determine_slot(command, *args)
+                await self._determine_slot(command, *args),
+                self.read_from_replicas and replica_safe,
+                self.load_balancing_strategy if replica_safe else None,
             )
         ]
 

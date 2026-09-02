@@ -2809,7 +2809,9 @@ class TestStaticMetadataRouting:
         await rc.aclose()
 
     @pytest.mark.fixed_client
-    async def test_explicit_policy_resolver_keeps_legacy_replica_routing(self) -> None:
+    async def test_metadata_resolver_decides_replica_routing_with_explicit_policy_resolver(
+        self,
+    ) -> None:
         metadata_resolver = AsyncDynamicMetadataResolver(
             {"core": {"set": CACHEABLE_KEYED}}
         )
@@ -2829,7 +2831,7 @@ class TestStaticMetadataRouting:
         ):
             await rc.get_nodes_from_slot("set", "key", "value")
 
-        get_node.assert_called_once_with(rc.nodes_manager, 0)
+        get_node.assert_called_once_with(rc.nodes_manager, 0, True, None)
         await rc.aclose()
 
     @pytest.mark.fixed_client
