@@ -165,18 +165,17 @@ class TestLock:
                 time.sleep(0.15)
 
     def test_context_manager_not_raise_on_release_lock_error(self, r):
+        # No lock timeout here: the error under test is the LockError raised by the
+        # redundant release in __exit__, not the LockNotOwnedError of an expired lock
+        # (covered by test_context_manager_not_raise_on_release_lock_not_owned_error).
         try:
-            with self.get_lock(
-                r, "foo", timeout=0.1, raise_on_release_error=False
-            ) as lock:
+            with self.get_lock(r, "foo", raise_on_release_error=False) as lock:
                 lock.release()
         except LockError:
             pytest.fail("LockError should not have been raised")
 
         with pytest.raises(LockError):
-            with self.get_lock(
-                r, "foo", timeout=0.1, raise_on_release_error=True
-            ) as lock:
+            with self.get_lock(r, "foo", raise_on_release_error=True) as lock:
                 lock.release()
 
     def test_high_sleep_small_blocking_timeout(self, r, fake_lock_time):

@@ -43,6 +43,7 @@ from redis.event import (
 )
 from redis.exceptions import (
     AskError,
+    AuthenticationError,
     ClusterDownError,
     ConnectionError,
     CrossSlotTransactionError,
@@ -51,6 +52,7 @@ from redis.exceptions import (
     MovedError,
     NoPermissionError,
     RedisClusterException,
+    RedisClusterUnreachableError,
     RedisError,
     ResponseError,
 )
@@ -3110,6 +3112,58 @@ class TestNodesManager:
                 cluster_enabled=False,
             )
             await rc.aclose()
+        assert "Cluster mode is not enabled on this node" in str(e.value)
+
+    @pytest.mark.fixed_client
+    async def test_unreachable_error_is_reserved_for_connectivity_failures(
+        self,
+    ) -> None:
+        """
+        RedisClusterUnreachableError is raised when no startup node could be
+        contacted, but not when a node responded and rejected CLUSTER SLOTS:
+        MultiDB registers the unreachable subtype as retryable, so a
+        deterministic configuration error must keep surfacing as a plain
+        RedisClusterException. Authentication failures subclass ConnectionError
+        but cannot be repaired by a failover, so they stay plain as well.
+        """
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True
+        ) as execute_command:
+
+            async def mocked_execute_command(self, *args, **kwargs):
+                raise ConnectionError("mock connection error")
+
+            execute_command.side_effect = mocked_execute_command
+
+            with pytest.raises(RedisClusterUnreachableError) as e:
+                async with RedisCluster(startup_nodes=[ClusterNode("127.0.0.1", 7000)]):
+                    ...
+            assert "Redis Cluster cannot be connected" in str(e.value)
+
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True
+        ) as execute_command:
+
+            async def mocked_execute_command_auth(self, *args, **kwargs):
+                raise AuthenticationError("invalid password")
+
+            execute_command.side_effect = mocked_execute_command_auth
+
+            with pytest.raises(RedisClusterException) as e:
+                async with RedisCluster(startup_nodes=[ClusterNode("127.0.0.1", 7000)]):
+                    ...
+            assert not isinstance(e.value, RedisClusterUnreachableError)
+            assert "invalid password" in str(e.value)
+
+        with pytest.raises(RedisClusterException) as e:
+            rc = await get_mocked_redis_client(
+                cluster_slots_raise_error=True,
+                host=default_host,
+                port=default_port,
+                cluster_enabled=False,
+            )
+            await rc.aclose()
+        assert not isinstance(e.value, RedisClusterUnreachableError)
         assert "Cluster mode is not enabled on this node" in str(e.value)
 
     @pytest.mark.fixed_client
