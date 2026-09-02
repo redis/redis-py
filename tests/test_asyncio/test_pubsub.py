@@ -2106,6 +2106,27 @@ class TestClusterPubSubSlotMigration:
         owner_ps.ssubscribe.assert_not_awaited()
         assert pubsub._shard_channel_to_node[channel] == owner.name
 
+    async def test_reinitialize_skips_pending_unsubscribe(self):
+        """A topology refresh must not restore a channel being removed."""
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        old_ps = self._make_node_pubsub({channel: None})
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub.pending_unsubscribe_shard_channels = {channel}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+
+        await pubsub.reinitialize_shard_subscriptions()
+
+        old_ps.sunsubscribe.assert_not_awaited()
+        new_ps.ssubscribe.assert_not_awaited()
+        assert pubsub._shard_channel_to_node[channel] == old_node.name
+
     async def test_reinitialize_tolerates_old_node_disconnect(self):
         """
         When the old node is still part of the cluster topology but just

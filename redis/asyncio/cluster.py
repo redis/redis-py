@@ -664,10 +664,8 @@ class RedisCluster(
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.response_callbacks = kwargs["response_callbacks"]
         self.result_callbacks = self.__class__.RESULT_CALLBACKS.copy()
-        self.result_callbacks["CLUSTER SLOTS"] = (
-            lambda cmd, res, **kwargs: parse_cluster_slots(
-                list(res.values())[0], **kwargs
-            )
+        self.result_callbacks["CLUSTER SLOTS"] = lambda cmd, res, **kwargs: (
+            parse_cluster_slots(list(res.values())[0], **kwargs)
         )
 
         self._initialize = True
@@ -4039,12 +4037,15 @@ class ClusterPubSub(PubSub):
 
         if not args:
             return
-        await self._ensure_cluster_initialized()
 
         # Serialize against reinitialize_shard_subscriptions: the reverse
         # index and node_pubsub_mapping must not change between the lookup
         # and the per-node sunsubscribe call below.
         async with self._shard_state_lock:
+            # Initialization dispatches a slots-changed notification. Keep
+            # the resulting reconciler behind this lock until the channels
+            # below have been marked as pending unsubscription.
+            await self._ensure_cluster_initialized()
             for s_channel in args:
                 normalized_key = next(iter(self._normalize_keys({s_channel: None})))
                 # Route via the reverse index so we unsubscribe on the node
@@ -4076,6 +4077,8 @@ class ClusterPubSub(PubSub):
         first_migrate_error: Optional[BaseException] = None
         async with self._shard_state_lock:
             for channel, handler in list(self.shard_channels.items()):
+                if channel in self.pending_unsubscribe_shard_channels:
+                    continue
                 try:
                     new_node = self.cluster.get_node_from_key(channel)
                 except SlotNotCoveredError:
