@@ -2,7 +2,7 @@ import json
 import logging
 import os
 import re
-from typing import Optional
+from typing import Any, Generator, Optional
 from urllib.parse import urlparse
 
 import pytest
@@ -146,7 +146,9 @@ def fault_injector_client_oss_api():
 @pytest.fixture()
 def r_multi_db(
     request,
-) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListener, dict]:
+) -> Generator[
+    tuple[MultiDBClient, CheckActiveDatabaseChangedListener, dict], Any, Any
+]:
     client_class = request.param.get("client_class", Redis)
 
     if client_class == Redis:
@@ -213,7 +215,14 @@ def r_multi_db(
         health_check_delay=health_check_delay,
     )
 
-    return MultiDBClient(config), listener, endpoint_config
+    client = MultiDBClient(config)
+
+    yield client, listener, endpoint_config
+
+    # Without this the client keeps a health check loop thread and its event loop
+    # thread running for the rest of the session, polling the databases of a test
+    # that already finished.
+    client.close()
 
 
 def extract_cluster_fqdn(url):
