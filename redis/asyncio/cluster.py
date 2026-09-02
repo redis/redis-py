@@ -105,6 +105,8 @@ from redis.event import (
 )
 from redis.exceptions import (
     AskError,
+    AuthenticationError,
+    AuthorizationError,
     BusyLoadingError,
     ClusterDownError,
     ClusterError,
@@ -116,6 +118,7 @@ from redis.exceptions import (
     MaxConnectionsError,
     MovedError,
     RedisClusterException,
+    RedisClusterUnreachableError,
     RedisError,
     ResponseError,
     SlotNotCoveredError,
@@ -2291,6 +2294,11 @@ class NodesManager:
                                 self.connection_kwargs.get("credential_provider", None),
                             )
                         )
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(
+                                "Topology refresh: querying CLUSTER SLOTS on "
+                                f"{startup_node.name}"
+                            )
                         cluster_slots = await startup_node.execute_command(
                             "CLUSTER SLOTS"
                         )
@@ -2302,6 +2310,11 @@ class NodesManager:
                 except Exception as e:
                     # Try the next startup node.
                     # The exception is saved and raised only if we have no more nodes.
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            "Topology refresh: CLUSTER SLOTS failed on "
+                            f"{startup_node.name}: {type(e).__name__}: {e}"
+                        )
                     exception = e
                     continue
 
@@ -2381,10 +2394,32 @@ class NodesManager:
                     if i not in tmp_slots:
                         fully_covered = False
                         break
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        f"Topology refresh: CLUSTER SLOTS from {startup_node.name} "
+                        f"reported nodes {sorted(tmp_nodes_cache)}; "
+                        f"slots fully covered: {fully_covered}"
+                    )
                 if fully_covered:
                     break
 
             if not startup_nodes_reachable:
+                # The unreachable subtype is reserved for connectivity failures:
+                # MultiDB registers it as retryable, so a deterministic
+                # server/configuration error (e.g. cluster mode disabled or
+                # invalid credentials - AuthenticationError and
+                # AuthorizationError subclass ConnectionError but cannot be
+                # repaired by a failover) must keep surfacing as a plain
+                # RedisClusterException.
+                if isinstance(
+                    exception, (ConnectionError, TimeoutError, OSError)
+                ) and not isinstance(
+                    exception, (AuthenticationError, AuthorizationError)
+                ):
+                    raise RedisClusterUnreachableError(
+                        f"Redis Cluster cannot be connected. Please provide at least "
+                        f"one reachable node: {str(exception)}"
+                    ) from exception
                 raise RedisClusterException(
                     f"Redis Cluster cannot be connected. Please provide at least "
                     f"one reachable node: {str(exception)}"
