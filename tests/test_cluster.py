@@ -3058,6 +3058,24 @@ class TestStaticMetadataRouting:
         assert set(nodes) == set(primaries)
 
     @pytest.mark.fixed_client
+    @pytest.mark.parametrize("command", ["dbsize", "keys", "randomkey"])
+    def test_default_node_commands_route_to_default_node_by_default(self, command):
+        rc = get_mocked_redis_client(host=default_host, port=7000)
+        default_node = rc.get_default_node()
+
+        nodes = rc._determine_nodes(command, request_policy=None)
+        assert nodes == [default_node]
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("empty_targets", [[], {}])
+    def test_empty_target_nodes_does_not_raise_and_falls_back(self, empty_targets):
+        rc = get_mocked_redis_client(host=default_host, port=7000)
+        default_node = rc.get_default_node()
+
+        nodes = rc._determine_nodes("dbsize", request_policy=None, nodes_flag=empty_targets)
+        assert nodes == [default_node]
+
+    @pytest.mark.fixed_client
     def test_every_node_client_gets_the_same_resolver(self):
         """
         The resolver has to reach every node's ``Redis``, because that is where the pools -

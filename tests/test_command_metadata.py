@@ -96,11 +96,20 @@ LIVE_CACHEABILITY_DIVERGENCE = {
     "vrandmember": "has_nondeterministic_output",
 }
 
+# Keyless readonly commands whose routing policies are withheld so the cluster client routes
+# them via COMMAND_FLAGS (e.g. DEFAULT_NODE or PRIMARIES).
+WITHHELD_KEYLESS_READS = (
+    "dbsize",
+    "keys",
+    "randomkey",
+    "scan",
+)
+
 # Every entry of the static table whose routing view is None.
 ALL_WITHHELD_ROUTING_COMMANDS = (
     *WITHHELD_ROUTING_COMMANDS,
     *INELIGIBLE_RECORD_COMMANDS,
-    "scan",
+    *WITHHELD_KEYLESS_READS,
 )
 
 
@@ -469,18 +478,19 @@ class TestWithheldRoutingPolicies:
         for name in ("eval_ro", "evalsha_ro", "fcall_ro"):
             assert static_resolver.resolve(name).is_script_runner is True, name
 
-    def test_scan_withholds_routing_and_is_replica_safe(self):
+    def test_keyless_reads_withhold_routing_and_are_replica_safe(self):
         static_resolver = StaticMetadataResolver()
-        metadata = static_resolver.resolve("scan")
+        for name in WITHHELD_KEYLESS_READS:
+            metadata = static_resolver.resolve(name)
 
-        assert metadata is not None
-        assert metadata.request_policy is None
-        assert metadata.response_policy is None
-        assert metadata.is_readonly is True
-        assert metadata.has_key_argument is False
-        assert metadata.has_complete_metadata is True
-        assert static_resolver.is_cacheable("scan") is False
-        assert static_resolver.is_replica_safe("scan") is True
+            assert metadata is not None, name
+            assert metadata.request_policy is None, name
+            assert metadata.response_policy is None, name
+            assert metadata.is_readonly is True, name
+            assert metadata.has_key_argument is False, name
+            assert metadata.has_complete_metadata is True, name
+            assert static_resolver.is_cacheable(name) is False, name
+            assert static_resolver.is_replica_safe(name) is True, name
 
     def test_the_ineligible_records_decide_ahead_of_a_live_layer(self):
         """

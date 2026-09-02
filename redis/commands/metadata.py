@@ -1024,6 +1024,17 @@ _READONLY_KEYLESS = CommandMetadata(
     has_complete_metadata=True,
 )
 
+# Readonly and keyless with routing policies withheld, so the cluster client keeps
+# resolving its target node via COMMAND_FLAGS (e.g. DEFAULT_NODE for DBSIZE/KEYS/RANDOMKEY
+# or PRIMARIES for SCAN).
+_READONLY_KEYLESS_WITHHELD_ROUTING = CommandMetadata(
+    request_policy=None,
+    response_policy=None,
+    is_readonly=True,
+    has_key_argument=False,
+    has_complete_metadata=True,
+)
+
 # Readonly and keyed, but tipped nondeterministic_output, which makes it ineligible
 # for client-side caching.
 _NONDETERMINISTIC_KEYED = replace(_CACHEABLE_KEYED, has_nondeterministic_output=True)
@@ -1099,7 +1110,7 @@ _STATIC_COMMAND_METADATA: CommandMetadataRecordsCache = MappingProxyType(
                 # From STATIC_POLICIES. COMMAND is flagged loading/stale, not readonly,
                 # and takes no keys.
                 "command": _WRITE_KEYLESS,
-                "dbsize": _READONLY_KEYLESS,
+                "dbsize": _READONLY_KEYLESS_WITHHELD_ROUTING,
                 "digest": _CACHEABLE_KEYED,
                 "dump": _NONDETERMINISTIC_KEYED,
                 # Not cacheable: script_runner. See the shape's note for why all three are
@@ -1147,7 +1158,7 @@ _STATIC_COMMAND_METADATA: CommandMetadataRecordsCache = MappingProxyType(
                 "hstrlen": _CACHEABLE_KEYED,
                 "httl": _NONDETERMINISTIC_KEYED,
                 "hvals": _CACHEABLE_KEYED,
-                "keys": _READONLY_KEYLESS,
+                "keys": _READONLY_KEYLESS_WITHHELD_ROUTING,
                 "lcs": _CACHEABLE_KEYED,
                 "lindex": _CACHEABLE_KEYED,
                 "llen": _CACHEABLE_KEYED,
@@ -1159,16 +1170,10 @@ _STATIC_COMMAND_METADATA: CommandMetadataRecordsCache = MappingProxyType(
                 "mget": _CACHEABLE_KEYED,
                 "pexpiretime": _CACHEABLE_KEYED,
                 "pttl": _NONDETERMINISTIC_KEYED,
-                "randomkey": _READONLY_KEYLESS,
+                "randomkey": _READONLY_KEYLESS_WITHHELD_ROUTING,
                 # Readonly and keyless. Routing policies are withheld so the cluster client keeps
                 # routing SCAN to all primary nodes (PRIMARIES) rather than a single random node.
-                "scan": CommandMetadata(
-                    request_policy=None,
-                    response_policy=None,
-                    is_readonly=True,
-                    has_key_argument=False,
-                    has_complete_metadata=True,
-                ),
+                "scan": _READONLY_KEYLESS_WITHHELD_ROUTING,
                 "scard": _CACHEABLE_KEYED,
                 "sdiff": _CACHEABLE_KEYED,
                 "sdiffcard": _CACHEABLE_MOVABLE_KEYS,

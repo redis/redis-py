@@ -30,6 +30,7 @@ from tests.test_command_metadata import (
     KEYED_POLICIES,
     LIVE_CACHEABILITY_DIVERGENCE,
     STATIC_TABLE_SERVER_VERSION,
+    WITHHELD_KEYLESS_READS,
     WITHHELD_ROUTING_COMMANDS,
     cacheability_fields,
     command_flags,
@@ -154,18 +155,19 @@ class TestWithheldRoutingPolicies:
         for name in ("eval_ro", "evalsha_ro", "fcall_ro"):
             assert (await static_resolver.resolve(name)).is_script_runner is True, name
 
-    async def test_scan_withholds_routing_and_is_replica_safe(self):
+    async def test_keyless_reads_withhold_routing_and_are_replica_safe(self):
         static_resolver = AsyncStaticMetadataResolver()
-        metadata = await static_resolver.resolve("scan")
+        for name in WITHHELD_KEYLESS_READS:
+            metadata = await static_resolver.resolve(name)
 
-        assert metadata is not None
-        assert metadata.request_policy is None
-        assert metadata.response_policy is None
-        assert metadata.is_readonly is True
-        assert metadata.has_key_argument is False
-        assert metadata.has_complete_metadata is True
-        assert await static_resolver.is_cacheable("scan") is False
-        assert await static_resolver.is_replica_safe("scan") is True
+            assert metadata is not None, name
+            assert metadata.request_policy is None, name
+            assert metadata.response_policy is None, name
+            assert metadata.is_readonly is True, name
+            assert metadata.has_key_argument is False, name
+            assert metadata.has_complete_metadata is True, name
+            assert await static_resolver.is_cacheable(name) is False, name
+            assert await static_resolver.is_replica_safe(name) is True, name
 
     async def test_the_ineligible_records_decide_ahead_of_a_live_layer(self):
         """

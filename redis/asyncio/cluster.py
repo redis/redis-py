@@ -1013,7 +1013,7 @@ class RedisCluster(
     ) -> List["ClusterNode"]:
         # Determine which nodes should be executed the command on.
         # Returns a list of target nodes.
-        if node_flag is not None:
+        if node_flag and self._is_node_flag(node_flag):
             if node_flag in self._command_flags_mapping:
                 request_policy = self._command_flags_mapping[node_flag]
         elif request_policy is None:

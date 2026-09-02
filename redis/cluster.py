@@ -1425,7 +1425,7 @@ class RedisCluster(
             command = f"{args[0]} {args[1]}".upper()
 
         nodes_flag = kwargs.pop("nodes_flag", None)
-        if nodes_flag is not None:
+        if nodes_flag and self._is_nodes_flag(nodes_flag):
             # nodes flag passed by the user
             command_flag = nodes_flag
             if command_flag in self._command_flags_mapping:
