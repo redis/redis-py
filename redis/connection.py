@@ -3804,7 +3804,10 @@ class BlockingConnectionPool(ConnectionPool):
                     connection = self.make_connection()
                 except BaseException:
                     # Hand the slot back, or the pool shrinks on every failure.
-                    self.pool.put_nowait(None)
+                    try:
+                        self.pool.put_nowait(None)
+                    except Full:
+                        pass
                     raise
                 is_created = True
         finally:
