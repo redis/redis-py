@@ -3894,6 +3894,81 @@ class TestClusterPubSubSlotMigration:
         assert old_node.name not in pubsub.node_pubsub_mapping
         assert channel in new_ps.shard_channels
 
+    def test_ssubscribe_reroute_collects_old_pubsub_once_detach_empties_it(self):
+        """
+        Regression: the detach-driven collection cannot be left to the
+        end-of-pass garbage collection, because ``ssubscribe``'s lazy re-route
+        reaches ``_forget_shard_channel_on_old_node`` without ever running
+        ``reinitialize_shard_subscriptions``. The other two collectors cannot
+        reach it either: no ``SUNSUBSCRIBE`` confirmation can arrive for a
+        channel forgotten locally, so ``get_sharded_message``'s unsubscribe
+        branch never fires, and the old node is still in the topology, so the
+        departed-node fast path does not apply.
+
+        An empty pubsub left in ``node_pubsub_mapping`` has had its
+        ``subscribed_event`` cleared by the detach, so ``_poll_node_pubsub``
+        waits on an event nothing will ever set - forever for a
+        ``timeout=None`` caller, and for the whole timeout of every pass
+        otherwise, before a single healthy node is read.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        old_ps = self._make_stateful_node_pubsub({channel: None})
+        new_ps = self._make_stateful_node_pubsub()
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        # The reader has just failed to reach the old node, so the migration
+        # forgets the channel locally rather than paying a reconnect for a
+        # SUNSUBSCRIBE that cannot arrive.
+        pubsub._unreachable_nodes = {old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+        # Still in the topology - the departed-node fast path must not be what
+        # collects it, or this test would pass with the bug present.
+        pubsub.cluster.get_node.return_value = old_node
+
+        pubsub.ssubscribe(channel)
+
+        assert channel in new_ps.shard_channels
+        assert pubsub._shard_channel_to_node[channel] == new_node.name
+        assert not old_ps.subscribed
+        assert old_ps.reset_calls == 1
+        assert old_node.name not in pubsub.node_pubsub_mapping
+
+    def test_ssubscribe_reroute_keeps_old_pubsub_with_sibling_channels(self):
+        """
+        The collection above is conditional on the detach having emptied the
+        pubsub. A node that still holds a sibling subscription has to stay in
+        ``node_pubsub_mapping``, so the reader keeps delivering that sibling.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        migrated = b"foo"
+        staying = b"bar"
+        old_ps = self._make_stateful_node_pubsub({migrated: None, staying: None})
+        new_ps = self._make_stateful_node_pubsub()
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {migrated: None, staying: None}
+        pubsub._shard_channel_to_node = {
+            migrated: old_node.name,
+            staying: old_node.name,
+        }
+        pubsub._unreachable_nodes = {old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+        pubsub.cluster.get_node.return_value = old_node
+
+        pubsub.ssubscribe(migrated)
+
+        assert migrated not in old_ps.shard_channels
+        assert staying in old_ps.shard_channels
+        assert old_ps.reset_calls == 0
+        assert old_node.name in pubsub.node_pubsub_mapping
+
     def _prime_generator(self, pubsub):
         from redis.cluster import ClusterPubSub
 

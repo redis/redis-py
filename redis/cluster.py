@@ -4019,13 +4019,27 @@ class ClusterPubSub(PubSub):
         subscription would never work again.
         """
         self._detach_shard_channel(old_pubsub, channel)
-        # If the old node has left the cluster topology there is no reconnect
-        # target, so drop the pubsub eagerly rather than let the round-robin
-        # generator keep yielding a dead one. If it is still known, the
-        # end-of-pass GC collects it once the detach above has left it with no
-        # subscriptions, and any sibling subscription it still holds recovers
-        # through ``PubSub._execute``'s reconnect and ``on_connect`` replay.
-        if self.cluster.get_node(node_name=old_name) is None:
+        # Drop the per-node pubsub when either the old node has left the cluster
+        # topology - no reconnect target, so the round-robin generator must stop
+        # yielding a dead one, and any sibling subscription it still holds
+        # recovers through ``PubSub._execute``'s reconnect and ``on_connect``
+        # replay - or the detach above left it with nothing subscribed.
+        #
+        # The empty case cannot be deferred to a collector elsewhere, because
+        # neither of the other two can reach it. ``get_sharded_message``'s
+        # unsubscribe branch needs a ``SUNSUBSCRIBE`` confirmation, and none will
+        # arrive for a channel this method forgot locally - that is the whole
+        # reason it is forgotten. ``reinitialize_shard_subscriptions``'s
+        # end-of-pass GC only runs for the reconciliation caller, while
+        # ``ssubscribe``'s lazy re-route reaches here without it. An empty pubsub
+        # left in the mapping has had its ``subscribed_event`` cleared by the
+        # detach, so ``_poll_node_pubsub`` waits on an event nothing will ever
+        # set: forever when the caller passed ``timeout=None``, and for the whole
+        # timeout of every pass otherwise, before a single healthy node is read.
+        if (
+            self.cluster.get_node(node_name=old_name) is None
+            or not old_pubsub.subscribed
+        ):
             try:
                 with self._pubsub_io_lock(old_pubsub):
                     old_pubsub.reset()
