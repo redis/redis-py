@@ -2845,10 +2845,19 @@ class NodesManager:
                                 r.connection_pool.update_active_connections_for_reconnect()
                                 # Needed to clear READONLY state when it is no longer applicable
                                 r.connection_pool.disconnect_free_connections()
-                    except ResponseError:
+                    except ResponseError as e:
+                        # A server too old for the configured topology command
+                        # rejects the subcommand itself; reporting that as cluster
+                        # mode being off would send the reader somewhere useless.
+                        if "unknown subcommand" in str(e).lower():
+                            raise RedisClusterException(
+                                f"Topology discovery with "
+                                f"{' '.join(self._topology_provider.command)} is "
+                                f"not supported on this node: {e}"
+                            ) from e
                         raise RedisClusterException(
                             "Cluster mode is not enabled on this node"
-                        )
+                        ) from e
                     startup_nodes_reachable = True
                 except Exception as e:
                     # Try the next startup node.

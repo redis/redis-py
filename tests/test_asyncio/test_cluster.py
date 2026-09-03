@@ -185,6 +185,7 @@ async def get_mocked_redis_client(
     """
     cluster_slots = kwargs.pop("cluster_slots", default_cluster_slots)
     cluster_shards = kwargs.pop("cluster_shards", default_cluster_shards)
+    topology_error = kwargs.pop("topology_error", None)
     coverage_res = kwargs.pop("coverage_result", "yes")
     cluster_enabled = kwargs.pop("cluster_enabled", True)
     with mock.patch.object(ClusterNode, "execute_command") as execute_command_mock:
@@ -192,13 +193,13 @@ async def get_mocked_redis_client(
         async def execute_command(*_args, **_kwargs):
             if _args[0] == "CLUSTER SLOTS":
                 if cluster_slots_raise_error:
-                    raise ResponseError()
+                    raise topology_error or ResponseError()
                 else:
                     mock_cluster_slots = cluster_slots
                     return mock_cluster_slots
             elif _args[0] == "CLUSTER SHARDS":
                 if cluster_slots_raise_error:
-                    raise ResponseError()
+                    raise topology_error or ResponseError()
                 return cluster_shards
             elif _args[0] == "COMMAND":
                 return {"get": [], "set": []}
@@ -3730,6 +3731,36 @@ class TestNodesManagerTopologyProvider:
 
         assert list(rc.nodes_manager.nodes_cache) == ["127.0.0.1:7000"]
         await rc.aclose()
+
+    async def test_slots_null_endpoint_routes_to_queried_host(self):
+        """A null CLUSTER SLOTS host must not be cached as ``None:port``."""
+        rc = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_slots=[[0, REDIS_CLUSTER_HASH_SLOTS - 1, [None, 7000, "node_0"]]],
+        )
+
+        assert list(rc.nodes_manager.nodes_cache) == ["127.0.0.1:7000"]
+        await rc.aclose()
+
+    async def test_unsupported_topology_command_is_not_reported_as_cluster_disabled(
+        self,
+    ):
+        """An unknown subcommand must not be diagnosed as cluster mode being off."""
+        with pytest.raises(RedisClusterException) as excinfo:
+            await get_mocked_redis_client(
+                host=default_host,
+                port=default_port,
+                cluster_slots_raise_error=True,
+                topology_provider=AsyncClusterShardsTopologyProvider(),
+                topology_error=ResponseError(
+                    "Unknown subcommand or wrong number of arguments for 'SHARDS'."
+                ),
+            )
+
+        message = str(excinfo.value)
+        assert "Cluster mode is not enabled" not in message
+        assert "CLUSTER SHARDS" in message
 
     @pytest.mark.parametrize("endpoint", ["", None], ids=["empty", "null"])
     async def test_unknown_endpoint_routes_to_queried_host(self, endpoint):
