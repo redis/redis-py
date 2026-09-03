@@ -682,10 +682,8 @@ class RedisCluster(
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.response_callbacks = kwargs["response_callbacks"]
         self.result_callbacks = self.__class__.RESULT_CALLBACKS.copy()
-        self.result_callbacks["CLUSTER SLOTS"] = (
-            lambda cmd, res, **kwargs: parse_cluster_slots(
-                list(res.values())[0], **kwargs
-            )
+        self.result_callbacks["CLUSTER SLOTS"] = lambda cmd, res, **kwargs: (
+            parse_cluster_slots(list(res.values())[0], **kwargs)
         )
 
         self._initialize = True
@@ -2274,7 +2272,7 @@ class NodesManager:
                 )
                 return self.slots_cache[slot][node_idx]
             return self.slots_cache[slot][0]
-        except (IndexError, TypeError):
+        except (IndexError, KeyError, TypeError):
             raise SlotNotCoveredError(
                 f'Slot "{slot}" not covered by the cluster. '
                 f'"require_full_coverage={self.require_full_coverage}"'
@@ -3888,6 +3886,10 @@ class ClusterPubSub(PubSub):
             AsyncAfterSlotsCacheRefreshEvent,
         )
 
+    async def _ensure_cluster_initialized(self) -> None:
+        if self.cluster._initialize:
+            await self.cluster.initialize()
+
     def set_pubsub_node(
         self,
         cluster: "RedisCluster",
@@ -4071,6 +4073,10 @@ class ClusterPubSub(PubSub):
         """
         s_channels = parse_pubsub_subscriptions(args, kwargs)
 
+        if not s_channels:
+            return
+        await self._ensure_cluster_initialized()
+
         # Serialize against reinitialize_shard_subscriptions (background
         # task) so the reverse index, shard_channels, and node_pubsub_mapping
         # are not mutated concurrently. _migrate_shard_channel below does not
@@ -4118,6 +4124,12 @@ class ClusterPubSub(PubSub):
         else:
             args = list(self.shard_channels.keys())
 
+        if not self.node_pubsub_mapping:
+            return
+        # Keep initialization outside the shard-state lock: it can dispatch a
+        # topology refresh whose reconciler must remain able to make progress.
+        await self._ensure_cluster_initialized()
+
         # Serialize against reinitialize_shard_subscriptions: the reverse
         # index and node_pubsub_mapping must not change between the lookup
         # and the per-node sunsubscribe call below.
@@ -4153,6 +4165,8 @@ class ClusterPubSub(PubSub):
         first_migrate_error: Optional[BaseException] = None
         async with self._shard_state_lock:
             for channel, handler in list(self.shard_channels.items()):
+                if channel in self.pending_unsubscribe_shard_channels:
+                    continue
                 try:
                     new_node = self.cluster.get_node_from_key(channel)
                 except SlotNotCoveredError:
@@ -4388,6 +4402,8 @@ class ClusterPubSub(PubSub):
         # NOTE: don't parse the response in this function -- it could pull a
         # legitimate message off the stack if the connection is already
         # subscribed to one or more channels
+
+        await self._ensure_cluster_initialized()
 
         # For shard commands, route to appropriate node
         command = args[0].upper() if args else ""
