@@ -14,11 +14,17 @@ SlotOwner = tuple[str, int]
 SlotOwners = tuple[int, int, SlotOwner, list[SlotOwner]]
 
 _MASTER_ROLE = "master"
+_UNKNOWN_HOSTNAME = "?"
 _ONLINE_HEALTH = "online"
 
 
 def _as_str(value: Any) -> str:
     return str_if_bytes(value) if isinstance(value, bytes) else value
+
+
+def _as_host(value: Any) -> str:
+    """Normalize a missing address to the empty host callers fall back on."""
+    return "" if value is None else _as_str(value)
 
 
 def _as_mapping(entry: Any) -> dict[str, Any]:
@@ -42,14 +48,16 @@ def _node_address(node: dict[str, Any], prefer_tls_port: bool) -> SlotOwner:
     # (typically because it sits behind a load balancer); the caller must reach
     # it at the host the topology command was sent to, so leave the host empty
     # rather than substituting ``ip``, which is the unreachable internal address.
-    endpoint = node.get("endpoint")
-    host = "" if endpoint is None else _as_str(endpoint)
+    host = _as_host(node.get("endpoint"))
+    # "?" means a hostname was preferred but never announced. It denotes an
+    # unknown node rather than the one being queried, so the queried host must
+    # not be reused for it; ``ip`` is the only address left to try.
+    if host == _UNKNOWN_HOSTNAME:
+        host = _as_host(node.get("ip"))
 
     port_keys = ("tls-port", "port") if prefer_tls_port else ("port", "tls-port")
-    port = next(
-        (node[key] for key in port_keys if node.get(key) is not None),
-        None,
-    )
+    # A disabled listener is reported as port 0, which is never connectable.
+    port = next((node[key] for key in port_keys if node.get(key)), None)
     return host, int(port)
 
 
@@ -58,8 +66,8 @@ def parse_cluster_slots_topology(response: Any) -> list[SlotOwners]:
     topology = []
     for slot in response:
         start, end = int(slot[0]), int(slot[1])
-        primary = (_as_str(slot[2][0]), int(slot[2][1]))
-        replicas = [(_as_str(node[0]), int(node[1])) for node in slot[3:]]
+        primary = (_as_host(slot[2][0]), int(slot[2][1]))
+        replicas = [(_as_host(node[0]), int(node[1])) for node in slot[3:]]
         topology.append((start, end, primary, replicas))
     return topology
 
