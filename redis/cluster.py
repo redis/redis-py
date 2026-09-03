@@ -11,6 +11,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext
 from copy import copy
 from enum import Enum
+from functools import partial
 from itertools import chain
 from types import MethodType
 from typing import (
@@ -3419,6 +3420,23 @@ class ClusterPubSub(PubSub):
         is being migrated away from, on every reconnect. Once the caller has
         decided the channel belongs to a different node, the local intent is
         the only truth left, so drop it here.
+
+        Deliberately without the per-node I/O lock, unlike every other writer
+        on a per-node pubsub. ``_forget_shard_channel_on_old_node`` calls this
+        for a node the reader has just failed to reach, and a bounded poll holds
+        that lock across ``PubSub._execute``'s reconnect and its whole retry
+        budget - far longer than the timeout the poll was given. Waiting for it
+        here, while this pass holds ``_shard_state_lock``, is the migration
+        slow enough to look like a permanent delivery stall that the
+        ``_unreachable_nodes`` fast path exists to avoid.
+
+        Nothing needs the lock: each mutation below is individually atomic, and
+        every interleaving with ``handle_message``'s unsubscribe bookkeeping (the
+        only concurrent writer of the same state, and one that runs under that
+        lock) converges on the same end state - the channel gone from both the
+        subscription dict and the pending set. That bookkeeping discards rather
+        than removes precisely so this detach cannot make it raise ``KeyError``
+        into a poll no caller catches.
         """
         pubsub.shard_channels.pop(channel, None)
         pubsub.pending_unsubscribe_shard_channels.discard(channel)
@@ -3655,6 +3673,17 @@ class ClusterPubSub(PubSub):
         it on the reconciliation worker so a bounded poll does not pay for a
         ``CLUSTER SLOTS`` round trip, and throttle it because a node that is
         down fails every poll.
+
+        ``disconnect_startup_nodes_pools=False``, unlike every other caller: the
+        default marks the in-use connections of the startup node that answered
+        ``CLUSTER SLOTS`` for reconnect and drops its idle ones, to clear a
+        ``READONLY`` state that may no longer apply. A per-node pubsub draws its
+        connection from that very pool, so on the default one unreachable shard
+        would recycle command and pubsub connections on a *healthy* node once
+        per throttle window - forcing a resubscribe and dropping in-flight
+        messages on a node that never failed. A fresh slot map is all this
+        repair asks for. The async counterpart has no such parameter and never
+        recycles those pools, so this is also the shape parity asks for.
         """
         if not self.shard_channels:
             return
@@ -3670,7 +3699,12 @@ class ClusterPubSub(PubSub):
         # check in NodesManager.initialize dedups only overlapping refreshes,
         # not queued ones), bounded by the throttle window.
         self._next_topology_repair = now + SHARD_TOPOLOGY_REPAIR_INTERVAL_SECONDS
-        self._submit_reconcile_work(self.cluster.nodes_manager.initialize)
+        self._submit_reconcile_work(
+            partial(
+                self.cluster.nodes_manager.initialize,
+                disconnect_startup_nodes_pools=False,
+            )
+        )
 
     def _handle_moved_on_read(self, pubsub, error: MovedError) -> None:
         """Re-route shard channels pinned to a node that lost their slot.
@@ -3740,7 +3774,23 @@ class ClusterPubSub(PubSub):
             # KeyError. None pubsub falls through to "no message available".
             pubsub = self.node_pubsub_mapping.get(target_node.name)
             if pubsub is not None:
-                message = self._poll_node_pubsub(pubsub, timeout)
+                try:
+                    message = self._poll_node_pubsub(pubsub, timeout)
+                except MovedError as e:
+                    # Same handling as the round-robin path: the caller cannot
+                    # act on a MovedError raised out of a pubsub read, and the
+                    # channels this node no longer owns have to be re-routed or
+                    # they never recover. Cool off too, so a slots cache that
+                    # cannot be corrected does not re-run the repair on every
+                    # poll. Unlike that path, connectivity errors still
+                    # propagate: they are swallowed there only to keep one sick
+                    # node from starving its healthy siblings, and a caller that
+                    # named a single node has no sibling to protect.
+                    self._poll_cool_off[pubsub] = (
+                        time.monotonic() + SHARD_POLL_COOL_OFF_SECONDS
+                    )
+                    self._handle_moved_on_read(pubsub, e)
+                    message = None
             else:
                 message = None
         else:
@@ -4124,6 +4174,11 @@ class ClusterPubSub(PubSub):
             # cannot yield them between teardown and re-subscription.
             self.node_pubsub_mapping.clear()
             self._unreachable_nodes.clear()
+            # Drop the throttle window too: a reused pubsub that keeps a
+            # deadline armed before the teardown would skip the first repair
+            # after resubscribing, delaying the move of its shard channels
+            # off a node that is already gone.
+            self._next_topology_repair = 0.0
             # _pubsubs_generator captures node_pubsub_mapping.values() into
             # a local list inside ``yield from``; clearing the mapping does
             # not reach references already held by that captured snapshot,

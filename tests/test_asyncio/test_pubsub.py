@@ -2760,6 +2760,19 @@ class TestClusterPubSubSlotMigration:
         assert pubsub._reconcile_tasks == set()
         assert reconcile_task.cancelled()
 
+    async def test_aclose_clears_the_topology_repair_throttle(self):
+        """
+        A reused pubsub must not inherit the previous incarnation's throttle
+        window: it would skip the first repair after resubscribing, delaying the
+        move of its shard channels off a node that is already gone.
+        """
+        pubsub = self._make_cluster_pubsub()
+        pubsub._next_topology_repair = time.monotonic() + 300
+
+        await pubsub.aclose()
+
+        assert pubsub._next_topology_repair == 0.0
+
     async def test_migration_driven_sunsubscribe_drops_empty_pubsub(self):
         """
         Regression: when a migration-driven sunsubscribe confirmation arrives
@@ -3047,6 +3060,95 @@ class TestClusterPubSubSlotMigration:
         # re-run on every poll.
         assert stale in pubsub._poll_cool_off
 
+    async def test_sunsubscribe_bookkeeping_survives_a_racing_detach(self):
+        """
+        Mirrors the sync regression: ``handle_message`` did its unsubscribe
+        bookkeeping as a check-then-``remove`` on
+        ``pending_unsubscribe_shard_channels``, which a concurrent
+        ``_detach_shard_channel`` of the same channel could turn into a
+        ``KeyError`` raised out of a pubsub read that no caller catches. The
+        async detach cannot actually interleave (it runs to completion without
+        an ``await``), but the bookkeeping is a mirror and must not drift.
+        """
+        # A real PubSub, not a mock: handle_message's bookkeeping is the code
+        # under test here.
+        node_pubsub = PubSub.__new__(PubSub)
+        # __del__ reads it, so a bare __new__ instance would raise on collection.
+        node_pubsub.connection = None
+        node_pubsub.shard_channels = {b"foo": None}
+        node_pubsub.channels = {}
+        node_pubsub.patterns = {}
+        node_pubsub.ignore_subscribe_messages = False
+
+        class _RacingSet(set):
+            """Detaches the channel exactly in the check-to-removal window."""
+
+            def __contains__(self, item):
+                present = super().__contains__(item)
+                if present:
+                    ClusterPubSub._detach_shard_channel(node_pubsub, item)
+                return present
+
+        node_pubsub.pending_unsubscribe_shard_channels = _RacingSet({b"foo"})
+
+        await node_pubsub.handle_message(
+            ["sunsubscribe", b"foo", 0], ignore_subscribe_messages=False
+        )
+
+        assert b"foo" not in node_pubsub.shard_channels
+        assert b"foo" not in node_pubsub.pending_unsubscribe_shard_channels
+
+    async def test_target_node_poll_repairs_moved(self):
+        """
+        Regression: a poll that names one node used to hand the caller a raw
+        ``MovedError`` - an error it cannot act on - and left the channel pinned
+        to the former owner, while the round-robin path re-routed it. The two
+        poll paths must repair the same way.
+        """
+        from redis.crc import key_slot
+        from redis.exceptions import MovedError
+
+        pubsub = self._make_cluster_pubsub()
+        channel = b"foo"
+        node = self._make_node("127.0.0.1:7000")
+        stale = self._make_stateful_node_pubsub({channel: None})
+        pubsub.node_pubsub_mapping = {node.name: stale}
+        pubsub.shard_channels = {channel: None}
+        pubsub._shard_channel_to_node = {channel: node.name}
+        stale.get_message_error = MovedError(f"{key_slot(channel)} 127.0.0.1:7001")
+        pubsub.cluster.nodes_manager.move_slot = AsyncMock()
+        pubsub.on_slots_changed = AsyncMock()
+
+        message = await pubsub.get_sharded_message(timeout=0.01, target_node=node)
+
+        assert message is None
+
+        # Same repair as the round-robin path: the stale subscription is dropped
+        # so on_connect stops replaying it, its recorded owner is forgotten, the
+        # cluster-level intent is kept for reconciliation to walk, and the node
+        # is cooled off so an uncorrectable slots cache cannot re-run the repair
+        # on every poll.
+        assert channel not in stale.shard_channels
+        assert channel not in pubsub._shard_channel_to_node
+        assert channel in pubsub.shard_channels
+        pubsub.on_slots_changed.assert_awaited_once()
+        assert stale in pubsub._poll_cool_off
+
+    async def test_target_node_poll_still_raises_connection_errors(self):
+        """
+        Isolation from a sick node exists to protect its healthy siblings, and a
+        caller that named a single node has no sibling to protect - so a
+        connectivity failure stays visible there.
+        """
+        pubsub = self._make_cluster_pubsub()
+        node = self._make_node("127.0.0.1:7000")
+        bad = self._make_stateful_node_pubsub({b"foo": None})
+        bad.get_message_error = ConnectionError("node is gone")
+        pubsub.node_pubsub_mapping = {node.name: bad}
+
+        with pytest.raises(ConnectionError):
+            await pubsub.get_sharded_message(timeout=0.01, target_node=node)
+
     async def test_sharded_message_generator_survives_a_failing_redirect(self):
         """
         ``move_slot`` indexes ``slots_cache`` by the redirected slot, so an
@@ -3152,9 +3254,13 @@ class TestClusterPubSubSlotMigration:
         bad.get_message.side_effect = ConnectionError("node is gone")
         pubsub.node_pubsub_mapping = {"127.0.0.1:7000": bad}
         self._prime_generator(pubsub)
-        pubsub._poll_cool_off[bad] = time.monotonic() + 0.05
 
+        # Anchor the deadline to ``start``: _wait_out_cool_off sleeps up to the
+        # absolute deadline, so a deadline taken before ``start`` shortens the
+        # measured wait by the setup's own cost and makes the lower bound below
+        # unreachable.
         start = time.monotonic()
+        pubsub._poll_cool_off[bad] = start + 0.05
         assert await pubsub._sharded_message_generator(timeout=30) == (None, None)
         elapsed = time.monotonic() - start
 
