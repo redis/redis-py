@@ -4,6 +4,7 @@ import pytest
 import pytest_asyncio
 
 from redis._parsers import AsyncCommandsParser
+from redis.asyncio.cluster import RedisCluster
 from redis.commands.metadata import (
     _MEMO_MAX_ENTRIES,
     _STATIC_COMMAND_METADATA,
@@ -181,6 +182,49 @@ class TestWithheldRoutingPolicies:
         assert metadata.has_complete_metadata is True
         assert await static_resolver.is_cacheable("command") is False
         assert await static_resolver.is_replica_safe("command") is False
+
+    async def test_all_static_entries_in_cluster_command_flags_withhold_routing(self):
+        """
+        Verify that every command appearing in RedisCluster.command_flags that is present
+        in _STATIC_COMMAND_METADATA has its routing view withheld (request_policy=None and
+        response_policy=None).
+        """
+        static_resolver = AsyncStaticMetadataResolver()
+        table_core = _STATIC_COMMAND_METADATA["core"]
+
+        for flag_cmd in RedisCluster.command_flags:
+            base_cmd = flag_cmd.split()[0].lower()
+            if base_cmd in table_core:
+                metadata = await static_resolver.resolve(base_cmd)
+                assert metadata is not None
+                assert (
+                    metadata.request_policy is None
+                ), f"Command '{base_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold request_policy in _STATIC_COMMAND_METADATA"
+                assert (
+                    metadata.response_policy is None
+                ), f"Command '{base_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold response_policy in _STATIC_COMMAND_METADATA"
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "ft.aggregate",
+            "ft.spellcheck",
+            "ft.tagvals",
+            "ft.syndump",
+            "ft.dictdump",
+            "ft.explaincli",
+            "ts.get",
+            "ts.range",
+            "ts.revrange",
+            "sort_ro",
+            "georadius_ro",
+            "georadiusbymember_ro",
+            "substr",
+        ],
+    )
+    async def test_newly_replica_eligible_commands_are_replica_safe(self, cmd):
+        resolver = AsyncStaticMetadataResolver()
+        assert await resolver.is_replica_safe(cmd) is True
 
     async def test_the_ineligible_records_decide_ahead_of_a_live_layer(self):
         """

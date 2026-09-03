@@ -2924,6 +2924,13 @@ class TestStaticMetadataRouting:
         await rc.aclose()
 
     @pytest.mark.fixed_client
+    async def test_determine_nodes_raises_exception_when_no_policy_resolved(self) -> None:
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+        with pytest.raises(RedisClusterException, match="No targets were found"):
+            await rc._determine_nodes("UNRECOGNIZED_COMMAND", request_policy=None)
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
     async def test_split_command_routing_applies_load_balancing_strategy(self) -> None:
         rc = await get_mocked_redis_client(
             host=default_host,
@@ -2943,10 +2950,10 @@ class TestStaticMetadataRouting:
             await rc._execute_pipeline_by_slot("MSET", slots_to_args)
 
             get_node.assert_any_call(
-                rc.nodes_manager, 100, False, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS
+                rc.nodes_manager, 100, True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS
             )
             get_node.assert_any_call(
-                rc.nodes_manager, 200, False, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS
+                rc.nodes_manager, 200, True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS
             )
         await rc.aclose()
 

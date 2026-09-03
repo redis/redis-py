@@ -3085,6 +3085,16 @@ class TestStaticMetadataRouting:
         assert nodes == [default_node]
 
     @pytest.mark.fixed_client
+    def test_determine_nodes_raises_exception_when_no_policy_resolved(self):
+        rc = get_mocked_redis_client(host=default_host, port=7000)
+        with pytest.raises(RedisClusterException, match="No targets were found"):
+            rc._determine_nodes("UNRECOGNIZED_COMMAND", request_policy=None)
+
+        with rc.pipeline() as pipe:
+            with pytest.raises(RedisClusterException, match="No targets were found"):
+                pipe._determine_nodes("UNRECOGNIZED_COMMAND", request_policy=None)
+
+    @pytest.mark.fixed_client
     def test_pipeline_determine_nodes_honors_resolved_metadata_policy(self):
         resolver = DynamicMetadataResolver(
             {"core": {"dbsize": CommandMetadata(request_policy=RequestPolicy.DEFAULT_KEYLESS)}}
@@ -3124,10 +3134,10 @@ class TestStaticMetadataRouting:
             rc._execute_pipeline_by_slot("MSET", slots_to_args)
 
             get_node.assert_any_call(
-                rc.nodes_manager, 100, False, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS
+                rc.nodes_manager, 100, True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS
             )
             get_node.assert_any_call(
-                rc.nodes_manager, 200, False, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS
+                rc.nodes_manager, 200, True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS
             )
 
     @pytest.mark.fixed_client

@@ -221,13 +221,9 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
     def _execute_pipeline_by_slot(
         self, command: str, slots_to_args: Mapping[int, Iterable[EncodableT]]
     ) -> List[Any]:
-        replica_safe = self._is_replica_safe(command)
-        read_from_replicas = (
-            getattr(self, "read_from_replicas", False) and replica_safe
-        )
-        load_balancing_strategy = (
-            getattr(self, "load_balancing_strategy", None) if replica_safe else None
-        )
+        replica_safe = (
+            self.read_from_replicas or self.load_balancing_strategy is not None
+        ) and self._is_replica_safe(command)
         pipe = self.pipeline()
         [
             pipe.execute_command(
@@ -235,7 +231,9 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
                 *slot_args,
                 target_nodes=[
                     self.nodes_manager.get_node_from_slot(
-                        slot, read_from_replicas, load_balancing_strategy
+                        slot,
+                        replica_safe,
+                        self.load_balancing_strategy if replica_safe else None,
                     )
                 ],
             )
@@ -460,13 +458,9 @@ class AsyncClusterMultiKeyCommands(ClusterMultiKeyCommands):
     ) -> List[Any]:
         if self._initialize:
             await self.initialize()
-        replica_safe = await self._is_replica_safe(command)
-        read_from_replicas = (
-            getattr(self, "read_from_replicas", False) and replica_safe
-        )
-        load_balancing_strategy = (
-            getattr(self, "load_balancing_strategy", None) if replica_safe else None
-        )
+        replica_safe = (
+            self.read_from_replicas or self.load_balancing_strategy is not None
+        ) and await self._is_replica_safe(command)
         pipe = self.pipeline()
         [
             pipe.execute_command(
@@ -474,7 +468,9 @@ class AsyncClusterMultiKeyCommands(ClusterMultiKeyCommands):
                 *slot_args,
                 target_nodes=[
                     self.nodes_manager.get_node_from_slot(
-                        slot, read_from_replicas, load_balancing_strategy
+                        slot,
+                        replica_safe,
+                        self.load_balancing_strategy if replica_safe else None,
                     )
                 ],
             )

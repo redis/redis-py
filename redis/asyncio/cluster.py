@@ -82,7 +82,7 @@ from redis.cluster import (
     parse_cluster_shards_with_str_keys,
     parse_cluster_slots,
 )
-from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
+from redis.commands import AsyncRedisClusterCommands
 from redis.commands.helpers import list_or_args, parse_pubsub_subscriptions
 from redis.commands.metadata import (
     _DEFAULT_KEYED_METADATA,
@@ -891,7 +891,12 @@ class RedisCluster(
         """
         Returns random primary or all nodes depends on READONLY mode.
         """
-        if self.read_from_replicas and command_name.upper() in READ_COMMANDS:
+        replica_safe = False
+        if hasattr(self._metadata_resolver, "_replica_safe"):
+            replica_safe = self._metadata_resolver._replica_safe.get(
+                command_name.lower(), False
+            )
+        if self.read_from_replicas and replica_safe:
             return self.get_random_node()
 
         return self.get_random_primary_node()
@@ -908,7 +913,10 @@ class RedisCluster(
         ):
             return self.get_random_primary_or_all_nodes(command_name)
 
-        if self.read_from_replicas and await self._is_replica_safe(command_name):
+        replica_safe = (
+            self.read_from_replicas or self.load_balancing_strategy is not None
+        ) and await self._is_replica_safe(command_name)
+        if replica_safe:
             return self.get_random_node()
 
         return self.get_random_primary_node()
@@ -927,11 +935,13 @@ class RedisCluster(
         Returns a list of nodes that hold the specified keys' slots.
         """
         # get the node that holds the key's slot
-        replica_safe = await self._is_replica_safe(command)
+        replica_safe = (
+            self.read_from_replicas or self.load_balancing_strategy is not None
+        ) and await self._is_replica_safe(command)
         return [
             self.nodes_manager.get_node_from_slot(
                 await self._determine_slot(command, *args),
-                self.read_from_replicas and replica_safe,
+                replica_safe,
                 self.load_balancing_strategy if replica_safe else None,
             )
         ]
@@ -1020,6 +1030,11 @@ class RedisCluster(
             command_flag = self.command_flags.get(command.upper())
             if command_flag in self._command_flags_mapping:
                 request_policy = self._command_flags_mapping[command_flag]
+
+        if request_policy is None:
+            raise RedisClusterException(
+                f"No targets were found to execute {command} command on"
+            )
 
         policy_callback = self._policies_callback_mapping[request_policy]
 
@@ -1326,10 +1341,13 @@ class RedisCluster(
                     # MOVED occurred and the slots cache was updated,
                     # refresh the target node
                     slot = await self._determine_slot(*args)
-                    replica_safe = await self._is_replica_safe(args[0])
+                    replica_safe = (
+                        self.read_from_replicas
+                        or self.load_balancing_strategy is not None
+                    ) and await self._is_replica_safe(args[0])
                     target_node = self.nodes_manager.get_node_from_slot(
                         slot,
-                        self.read_from_replicas and replica_safe,
+                        replica_safe,
                         self.load_balancing_strategy if replica_safe else None,
                     )
                     moved = False

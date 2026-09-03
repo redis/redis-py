@@ -10,6 +10,7 @@ from redis._parsers.commands import (
     _build_policy_records,
 )
 from redis.cache import CacheConfig
+from redis.cluster import RedisCluster
 from redis.commands.metadata import (
     _DEFAULT_KEYED_METADATA,
     _DEFAULT_KEYLESS_METADATA,
@@ -505,6 +506,55 @@ class TestWithheldRoutingPolicies:
         assert metadata.has_complete_metadata is True
         assert static_resolver.is_cacheable("command") is False
         assert static_resolver.is_replica_safe("command") is False
+
+    def test_all_static_entries_in_cluster_command_flags_withhold_routing(self):
+        """
+        Verify that every command appearing in RedisCluster.command_flags that is present
+        in _STATIC_COMMAND_METADATA has its routing view withheld (request_policy=None and
+        response_policy=None).
+
+        _determine_nodes gives precedence to resolved metadata request_policy over COMMAND_FLAGS,
+        so any static table record for a COMMAND_FLAGS command must withhold its routing policies
+        to ensure the legacy COMMAND_FLAGS routing (e.g. DEFAULT_NODE, PRIMARIES) is consulted.
+        """
+        static_resolver = StaticMetadataResolver()
+        table_core = _STATIC_COMMAND_METADATA["core"]
+
+        for flag_cmd in RedisCluster.command_flags:
+            # For container commands like "COMMAND COUNT" or "SLOWLOG GET", the primary command name
+            # in the metadata table is the first token (e.g. "command", "slowlog").
+            base_cmd = flag_cmd.split()[0].lower()
+            if base_cmd in table_core:
+                metadata = static_resolver.resolve(base_cmd)
+                assert metadata is not None
+                assert (
+                    metadata.request_policy is None
+                ), f"Command '{base_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold request_policy in _STATIC_COMMAND_METADATA"
+                assert (
+                    metadata.response_policy is None
+                ), f"Command '{base_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold response_policy in _STATIC_COMMAND_METADATA"
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "ft.aggregate",
+            "ft.spellcheck",
+            "ft.tagvals",
+            "ft.syndump",
+            "ft.dictdump",
+            "ft.explaincli",
+            "ts.get",
+            "ts.range",
+            "ts.revrange",
+            "sort_ro",
+            "georadius_ro",
+            "georadiusbymember_ro",
+            "substr",
+        ],
+    )
+    def test_newly_replica_eligible_commands_are_replica_safe(self, cmd):
+        resolver = StaticMetadataResolver()
+        assert resolver.is_replica_safe(cmd) is True
 
     def test_the_ineligible_records_decide_ahead_of_a_live_layer(self):
         """

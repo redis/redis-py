@@ -1037,7 +1037,7 @@ class RedisCluster(
         # arguments overlap. Resolved by precedence rather than by rejecting the
         # combination, because a user migrating from one to the other will legitimately pass
         # both: an explicit ``policy_resolver`` - the extension point that shipped in 7.1.0
-        # - keeps deciding routing, and otherwise routing is derived from the metadata
+        # - keeps deciding routing, and otherwise routing is derived from the metadata resolver.
         if policy_resolver is None:
             self._policy_resolver: PolicyResolver = StaticPolicyResolver(
                 metadata_resolver=self._metadata_resolver
@@ -1166,10 +1166,12 @@ class RedisCluster(
         """
         # get the node that holds the key's slot
         slot = self.determine_slot(*args)
-        replica_safe = self._is_replica_safe(command)
+        replica_safe = (
+            self.read_from_replicas or self.load_balancing_strategy is not None
+        ) and self._is_replica_safe(command)
         node = self.nodes_manager.get_node_from_slot(
             slot,
-            self.read_from_replicas and replica_safe,
+            replica_safe,
             self.load_balancing_strategy if replica_safe else None,
         )
         return [node]
@@ -1435,6 +1437,11 @@ class RedisCluster(
             command_flag = self.command_flags.get(command)
             if command_flag in self._command_flags_mapping:
                 request_policy = self._command_flags_mapping[command_flag]
+
+        if request_policy is None:
+            raise RedisClusterException(
+                f"No targets were found to execute {args} command on"
+            )
 
         policy_callback = self._policies_callback_mapping[request_policy]
 
@@ -1837,10 +1844,13 @@ class RedisCluster(
                     # MOVED occurred and the slots cache was updated,
                     # refresh the target node
                     slot = self.determine_slot(*args)
-                    replica_safe = self._is_replica_safe(command)
+                    replica_safe = (
+                        self.read_from_replicas
+                        or self.load_balancing_strategy is not None
+                    ) and self._is_replica_safe(command)
                     target_node = self.nodes_manager.get_node_from_slot(
                         slot,
-                        self.read_from_replicas and replica_safe,
+                        replica_safe,
                         self.load_balancing_strategy if replica_safe else None,
                     )
                     moved = False
@@ -4699,6 +4709,11 @@ class PipelineStrategy(AbstractStrategy):
             command_flag = self._pipe.command_flags.get(command)
             if command_flag in self._pipe._command_flags_mapping:
                 request_policy = self._pipe._command_flags_mapping[command_flag]
+
+        if request_policy is None:
+            raise RedisClusterException(
+                f"No targets were found to execute {args} command on"
+            )
 
         policy_callback = self._pipe._policies_callback_mapping[request_policy]
 
