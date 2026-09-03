@@ -1,3 +1,4 @@
+import functools
 import logging
 import platform
 import queue
@@ -13,7 +14,7 @@ import redis
 from redis import Subscription
 from redis._parsers import Encoder
 from redis.client import PubSub
-from redis.cluster import ClusterPubSub
+from redis.cluster import ClusterPubSub, NodesManager
 from redis.crc import key_slot
 from redis.event import EventDispatcher
 from redis.exceptions import ConnectionError, SlotNotCoveredError, TimeoutError
@@ -2516,6 +2517,64 @@ class TestClusterPubSubResubscribe:
             p.close()
 
 
+class TestClusterPubSubReplicaRouting:
+    """
+    Cluster-only end-to-end tests for shard pubsub honoring the cluster's
+    replica routing configuration (#3266).
+    """
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_ssubscribe_with_read_from_replicas_receives_spublish(self, request):
+        """
+        With read_from_replicas enabled, shard subscriptions are round-robined
+        across a slot's primary and replicas; SPUBLISH-ed messages must reach
+        the subscription wherever it was placed.
+        """
+        r = _get_client(redis.RedisCluster, request, read_from_replicas=True)
+        # Same slot via hash tag: two consecutive round-robin resolutions land
+        # on different shard nodes, so with a replica present at least one
+        # subscription lives on a replica and its delivery path is exercised.
+        ch_a, ch_b = "{replica-routed}a", "{replica-routed}b"
+        slot_nodes = r.nodes_manager.slots_cache[r.keyslot(ch_a)]
+        if len(slot_nodes) < 2:
+            pytest.skip("cluster has no replica for the channels' shard")
+
+        p = r.pubsub()
+        try:
+            p.ssubscribe(ch_a, ch_b)
+            for _ in range(2):
+                msg = wait_for_message(p, timeout=2.0, func=p.get_sharded_message)
+                assert msg is not None
+                assert msg["type"] == "ssubscribe"
+
+            subscribed_nodes = {
+                p._shard_channel_to_node[ch_a.encode()],
+                p._shard_channel_to_node[ch_b.encode()],
+            }
+            replica_names = {node.name for node in slot_nodes[1:]}
+            assert subscribed_nodes & replica_names, (
+                "expected at least one shard subscription on a replica"
+            )
+
+            r.spublish(ch_a, "message-a")
+            r.spublish(ch_b, "message-b")
+
+            messages = {}
+            for _ in range(2):
+                msg = wait_for_message(p, timeout=2.0, func=p.get_sharded_message)
+                assert msg is not None
+                assert msg["type"] == "smessage"
+                messages[msg["channel"]] = msg["data"]
+
+            assert messages == {
+                ch_a.encode(): b"message-a",
+                ch_b.encode(): b"message-b",
+            }
+        finally:
+            p.close()
+
+
 @pytest.mark.fixed_client
 class TestClusterPubSubSlotMigration:
     """
@@ -2546,6 +2605,9 @@ class TestClusterPubSubSlotMigration:
         pubsub.ignore_subscribe_messages = False
         # ClusterPubSub-specific state.
         pubsub.cluster = mock.MagicMock()
+        pubsub.cluster.read_from_replicas = False
+        pubsub.cluster.load_balancing_strategy = None
+        pubsub.cluster.nodes_manager.slots_cache = {}
         pubsub.node_pubsub_mapping = {}
         pubsub._shard_channel_to_node = {}
         pubsub._shard_state_lock = threading.RLock()
@@ -2578,7 +2640,9 @@ class TestClusterPubSubSlotMigration:
         pubsub.node_pubsub_mapping[new_node.name] = new_ps
         pubsub.shard_channels = {channel: None}
         pubsub._shard_channel_to_node = {channel: old_node.name}
-        pubsub.cluster.get_node_from_key.return_value = new_node
+        pubsub.cluster.keyslot.return_value = 42
+        pubsub.cluster.nodes_manager.slots_cache = {42: [new_node]}
+        pubsub.cluster.nodes_manager.get_node_from_slot.return_value = new_node
 
         pubsub.reinitialize_shard_subscriptions()
 
@@ -2594,12 +2658,14 @@ class TestClusterPubSubSlotMigration:
         pubsub.node_pubsub_mapping[owner.name] = owner_ps
         pubsub.shard_channels = {channel: None}
         pubsub._shard_channel_to_node = {channel: owner.name}
-        pubsub.cluster.get_node_from_key.return_value = owner
+        pubsub.cluster.keyslot.return_value = 42
+        pubsub.cluster.nodes_manager.slots_cache = {42: [owner]}
 
         pubsub.reinitialize_shard_subscriptions()
 
         owner_ps.sunsubscribe.assert_not_called()
         owner_ps.ssubscribe.assert_not_called()
+        pubsub.cluster.nodes_manager.get_node_from_slot.assert_not_called()
         assert pubsub._shard_channel_to_node[channel] == owner.name
 
     def test_reinitialize_tolerates_old_node_disconnect(self):
@@ -2622,7 +2688,9 @@ class TestClusterPubSubSlotMigration:
         pubsub.node_pubsub_mapping[new_node.name] = new_ps
         pubsub.shard_channels = {channel: None}
         pubsub._shard_channel_to_node = {channel: old_node.name}
-        pubsub.cluster.get_node_from_key.return_value = new_node
+        pubsub.cluster.keyslot.return_value = 42
+        pubsub.cluster.nodes_manager.slots_cache = {42: [new_node]}
+        pubsub.cluster.nodes_manager.get_node_from_slot.return_value = new_node
         # Old node is still known to the cluster (transient error).
         pubsub.cluster.get_node.return_value = old_node
 
@@ -2657,7 +2725,9 @@ class TestClusterPubSubSlotMigration:
         pubsub.node_pubsub_mapping[new_node.name] = new_ps
         pubsub.shard_channels = {channel: None}
         pubsub._shard_channel_to_node = {channel: old_node.name}
-        pubsub.cluster.get_node_from_key.return_value = new_node
+        pubsub.cluster.keyslot.return_value = 42
+        pubsub.cluster.nodes_manager.slots_cache = {42: [new_node]}
+        pubsub.cluster.nodes_manager.get_node_from_slot.return_value = new_node
         # Old node was removed from topology.
         pubsub.cluster.get_node.return_value = None
 
@@ -2671,8 +2741,8 @@ class TestClusterPubSubSlotMigration:
         """
         After a slot migration, sunsubscribe must hit the node that currently
         holds the subscription (tracked in ``_shard_channel_to_node``) rather
-        than re-resolving via ``cluster.get_node_from_key``, which by then
-        points to the new owner and would miss the actual subscription.
+        than re-resolving by slot, which by then points to the new owner and
+        would miss the actual subscription.
         """
         pubsub = self._make_cluster_pubsub()
         holding_node_name = "127.0.0.1:7000"
@@ -2684,7 +2754,6 @@ class TestClusterPubSubSlotMigration:
         pubsub.node_pubsub_mapping[new_owner.name] = new_ps
         pubsub.shard_channels = {channel: None}
         pubsub._shard_channel_to_node = {channel: holding_node_name}
-        pubsub.cluster.get_node_from_key.return_value = new_owner
 
         pubsub.sunsubscribe(channel)
 
@@ -2709,7 +2778,9 @@ class TestClusterPubSubSlotMigration:
         # Channel was previously subscribed with no handler.
         pubsub.shard_channels = {channel: None}
         pubsub._shard_channel_to_node = {channel: old_node.name}
-        pubsub.cluster.get_node_from_key.return_value = new_node
+        pubsub.cluster.keyslot.return_value = 42
+        pubsub.cluster.nodes_manager.slots_cache = {42: [new_node]}
+        pubsub.cluster.nodes_manager.get_node_from_slot.return_value = new_node
 
         new_handler = mock.Mock()
         pubsub.ssubscribe(foo=new_handler)
@@ -2728,7 +2799,9 @@ class TestClusterPubSubSlotMigration:
         pubsub.node_pubsub_mapping[new_node.name] = new_ps
         pubsub.shard_channels = {channel: None}
         pubsub._shard_channel_to_node = {channel: old_node.name}
-        pubsub.cluster.get_node_from_key.return_value = new_node
+        pubsub.cluster.keyslot.return_value = 42
+        pubsub.cluster.nodes_manager.slots_cache = {42: [new_node]}
+        pubsub.cluster.nodes_manager.get_node_from_slot.return_value = new_node
 
         new_handler = mock.Mock()
         pubsub.ssubscribe(Subscription(channel, new_handler))
@@ -2738,14 +2811,14 @@ class TestClusterPubSubSlotMigration:
 
     def test_ssubscribe_skips_channel_when_node_resolution_returns_none(self):
         """
-        Regression: cluster.get_node_from_key may return None for channels
-        whose slot is transiently uncovered. ssubscribe must skip such
-        channels rather than dereference None (which would crash on
-        ``node.name`` either in the reverse-index comparison or inside
+        Regression: cluster.nodes_manager.get_node_from_slot may return None
+        for channels whose slot is transiently uncovered. ssubscribe must
+        skip such channels rather than dereference None (which would crash
+        on ``node.name`` either in the reverse-index comparison or inside
         ``_get_node_pubsub``). Mirrors the async counterpart's guard.
         """
         pubsub = self._make_cluster_pubsub()
-        pubsub.cluster.get_node_from_key.return_value = None
+        pubsub.cluster.nodes_manager.get_node_from_slot.return_value = None
         # Stale reverse-index entry also present to exercise both crash paths:
         # the old_name != node.name comparison and the downstream fallthrough.
         pubsub._shard_channel_to_node = {b"foo": "127.0.0.1:7000"}
@@ -2755,6 +2828,140 @@ class TestClusterPubSubSlotMigration:
         # No migration, no per-node pubsub creation, no mapping mutation.
         assert pubsub.node_pubsub_mapping == {}
         assert pubsub._shard_channel_to_node == {b"foo": "127.0.0.1:7000"}
+
+    def test_ssubscribe_raises_slot_not_covered_for_uncovered_slot(self):
+        """
+        Subscribing to a channel whose slot is missing from the slots cache
+        must surface SlotNotCoveredError from the real nodes-manager
+        resolution — not a bare KeyError — matching the async client.
+        """
+        pubsub = self._make_cluster_pubsub()
+        nodes_manager = pubsub.cluster.nodes_manager
+        nodes_manager.get_node_from_slot = functools.partial(
+            NodesManager.get_node_from_slot, nodes_manager
+        )
+        pubsub.cluster.keyslot.return_value = 42
+
+        with pytest.raises(SlotNotCoveredError):
+            pubsub.ssubscribe(b"foo")
+
+    def test_ssubscribe_routes_to_replica_when_read_from_replicas(self):
+        """
+        Regression for #3266: shard subscriptions must honor the cluster's
+        read_from_replicas / load_balancing_strategy routing instead of
+        always resolving the slot's primary.
+        """
+        pubsub = self._make_cluster_pubsub()
+        pubsub.cluster.read_from_replicas = True
+        replica = self._make_node("127.0.0.1:7001")
+        replica_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[replica.name] = replica_ps
+        pubsub.cluster.keyslot.return_value = 42
+        pubsub.cluster.nodes_manager.get_node_from_slot.return_value = replica
+
+        pubsub.ssubscribe(b"foo")
+
+        pubsub.cluster.nodes_manager.get_node_from_slot.assert_called_once_with(
+            42, True, None
+        )
+        replica_ps.ssubscribe.assert_called_once_with(b"foo")
+        assert pubsub._shard_channel_to_node[b"foo"] == replica.name
+
+    def test_ssubscribe_keeps_tracked_node_when_balancer_picks_sibling(self):
+        """
+        Re-subscribing must not bounce a channel between nodes of the same
+        shard: when the tracked node still serves the slot, the subscription
+        stays put even if the balancer would pick a sibling now.
+        """
+        pubsub = self._make_cluster_pubsub()
+        pubsub.cluster.read_from_replicas = True
+        primary = self._make_node("127.0.0.1:7000")
+        replica = self._make_node("127.0.0.1:7001")
+        replica_ps = self._make_node_pubsub({b"foo": None})
+        pubsub.node_pubsub_mapping[replica.name] = replica_ps
+        pubsub.shard_channels = {b"foo": None}
+        pubsub._shard_channel_to_node = {b"foo": replica.name}
+        pubsub.cluster.keyslot.return_value = 42
+        pubsub.cluster.nodes_manager.slots_cache = {42: [primary, replica]}
+        pubsub.cluster.nodes_manager.get_node_from_slot.return_value = primary
+
+        handler = mock.Mock()
+        pubsub.ssubscribe(Subscription(b"foo", handler))
+
+        replica_ps.sunsubscribe.assert_not_called()
+        replica_ps.ssubscribe.assert_called_once_with(Subscription(b"foo", handler))
+        assert pubsub._shard_channel_to_node[b"foo"] == replica.name
+
+    def test_reinitialize_keeps_channel_on_replica_still_serving_slot(self):
+        """
+        With replica routing enabled, a topology refresh must not migrate a
+        shard subscription off a node that still serves the channel's slot.
+        """
+        pubsub = self._make_cluster_pubsub()
+        pubsub.cluster.read_from_replicas = True
+        primary = self._make_node("127.0.0.1:7000")
+        replica = self._make_node("127.0.0.1:7001")
+        replica_ps = self._make_node_pubsub({b"foo": None})
+        pubsub.node_pubsub_mapping[replica.name] = replica_ps
+        pubsub.shard_channels = {b"foo": None}
+        pubsub._shard_channel_to_node = {b"foo": replica.name}
+        pubsub.cluster.keyslot.return_value = 42
+        pubsub.cluster.nodes_manager.slots_cache = {42: [primary, replica]}
+
+        pubsub.reinitialize_shard_subscriptions()
+
+        replica_ps.sunsubscribe.assert_not_called()
+        pubsub.cluster.nodes_manager.get_node_from_slot.assert_not_called()
+        assert pubsub._shard_channel_to_node[b"foo"] == replica.name
+
+    def test_reinitialize_migrates_channel_when_node_stops_serving_slot(self):
+        pubsub = self._make_cluster_pubsub()
+        pubsub.cluster.read_from_replicas = True
+        old_replica = self._make_node("127.0.0.1:7001")
+        new_replica = self._make_node("127.0.0.1:7003")
+        old_ps = self._make_node_pubsub({b"foo": None})
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[old_replica.name] = old_ps
+        pubsub.node_pubsub_mapping[new_replica.name] = new_ps
+        pubsub.shard_channels = {b"foo": None}
+        pubsub._shard_channel_to_node = {b"foo": old_replica.name}
+        pubsub.cluster.keyslot.return_value = 42
+        pubsub.cluster.nodes_manager.slots_cache = {
+            42: [self._make_node("127.0.0.1:7002"), new_replica]
+        }
+        pubsub.cluster.nodes_manager.get_node_from_slot.return_value = new_replica
+
+        pubsub.reinitialize_shard_subscriptions()
+
+        old_ps.sunsubscribe.assert_called_once_with(b"foo")
+        new_ps.ssubscribe.assert_called_once_with(b"foo")
+        assert pubsub._shard_channel_to_node[b"foo"] == new_replica.name
+
+    def test_sunsubscribe_fallback_considers_all_slot_nodes(self):
+        """
+        When the reverse index has no entry, the fallback must route to the
+        node whose pubsub actually holds the subscription (which may be a
+        replica when replica routing is enabled), not simply the first
+        slot-serving node that has a per-node pubsub.
+        """
+        pubsub = self._make_cluster_pubsub()
+        pubsub.cluster.read_from_replicas = True
+        primary = self._make_node("127.0.0.1:7000")
+        replica = self._make_node("127.0.0.1:7001")
+        # The primary also has a per-node pubsub (for other channels), but
+        # only the replica's pubsub holds the target subscription.
+        primary_ps = self._make_node_pubsub({b"other": None})
+        replica_ps = self._make_node_pubsub({b"foo": None})
+        pubsub.node_pubsub_mapping[primary.name] = primary_ps
+        pubsub.node_pubsub_mapping[replica.name] = replica_ps
+        pubsub.shard_channels = {b"foo": None}
+        pubsub.cluster.keyslot.return_value = 42
+        pubsub.cluster.nodes_manager.slots_cache = {42: [primary, replica]}
+
+        pubsub.sunsubscribe(b"foo")
+
+        replica_ps.sunsubscribe.assert_called_once_with(b"foo")
+        primary_ps.sunsubscribe.assert_not_called()
 
     def test_migration_driven_sunsubscribe_drops_empty_pubsub(self):
         """
@@ -2811,18 +3018,27 @@ class TestClusterPubSubSlotMigration:
         new_ps = self._make_node_pubsub()
         pubsub.node_pubsub_mapping[old_node.name] = old_ps
         pubsub.node_pubsub_mapping[new_node.name] = new_ps
-        pubsub.shard_channels = {covered_channel: None, uncovered_channel: None}
+        # The uncovered channel is iterated FIRST: an implementation that
+        # aborts the pass on SlotNotCoveredError instead of deferring would
+        # never reach the coverable sibling and fail the assertions below.
+        pubsub.shard_channels = {uncovered_channel: None, covered_channel: None}
         pubsub._shard_channel_to_node = {
-            covered_channel: old_node.name,
             uncovered_channel: old_node.name,
+            covered_channel: old_node.name,
         }
 
-        def _resolve(channel, *args, **kwargs):
-            if channel == uncovered_channel:
-                raise SlotNotCoveredError('Slot "0" is not covered by the cluster.')
-            return new_node
-
-        pubsub.cluster.get_node_from_key.side_effect = _resolve
+        pubsub.cluster.keyslot.side_effect = lambda ch: {
+            covered_channel: 1,
+            uncovered_channel: 2,
+        }[ch]
+        # Resolve through the real NodesManager.get_node_from_slot with slot 2
+        # genuinely absent from slots_cache, so the test proves the uncovered
+        # slot surfaces as SlotNotCoveredError (not a bare KeyError) here.
+        nodes_manager = pubsub.cluster.nodes_manager
+        nodes_manager.slots_cache = {1: [new_node]}
+        nodes_manager.get_node_from_slot = functools.partial(
+            NodesManager.get_node_from_slot, nodes_manager
+        )
 
         with pytest.raises(SlotNotCoveredError):
             pubsub.reinitialize_shard_subscriptions()
@@ -2941,7 +3157,8 @@ class TestClusterPubSubSlotMigration:
         node = self._make_node("127.0.0.1:7000")
         node_ps = self._make_node_pubsub()
         pubsub.node_pubsub_mapping[node.name] = node_ps
-        pubsub.cluster.get_node_from_key.return_value = node
+        pubsub.cluster.keyslot.return_value = 42
+        pubsub.cluster.nodes_manager.get_node_from_slot.return_value = node
 
         holder_acquired = threading.Event()
         release_holder = threading.Event()
