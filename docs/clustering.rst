@@ -190,6 +190,65 @@ the channel name in the request to find its keyslot 2. Selecting a node
 that handles the keyslot: If read_from_replicas is set to true or
 load_balancing_strategy is provided, a replica can be selected.
 
+Topology Discovery
+------------------
+
+On initialization, and on every topology refresh, the client asks one of the
+cluster's nodes which nodes own which slots. By default it uses ``CLUSTER
+SLOTS``, which returns one entry per contiguous slot range.
+
+``CLUSTER SHARDS`` is available as an alternative. It returns one entry per
+*shard* rather than per slot range, so its reply stays compact on clusters whose
+slot ranges have become fragmented — typically after resharding. On a freshly
+built cluster with contiguous ranges the two commands are close to equivalent,
+so this is a tuning option for a specific class of deployment rather than a
+universal improvement. ``CLUSTER SHARDS`` requires Redis 7.0 or later.
+
+Pass a provider to opt in. Both providers produce the same slot mapping, so
+switching is transparent to the rest of the client:
+
+.. code:: python
+
+   >>> from redis.cluster import RedisCluster as Redis
+   >>> from redis.cluster_topology import ClusterShardsTopologyProvider
+   >>> rc = Redis(host='localhost', port=6379,
+   ...            topology_provider=ClusterShardsTopologyProvider())
+
+The async client takes the async provider of the same name:
+
+.. code:: python
+
+   >>> from redis.asyncio.cluster import RedisCluster as Redis
+   >>> from redis.cluster_topology import AsyncClusterShardsTopologyProvider
+   >>> rc = Redis(host='localhost', port=6379,
+   ...            topology_provider=AsyncClusterShardsTopologyProvider())
+
+Unlike ``CLUSTER SLOTS``, ``CLUSTER SHARDS`` reports a health status per node.
+Replicas reported as ``failed`` or ``loading`` are left out of the slot mapping
+so that reads are not routed to them. A primary is always kept regardless of its
+health, because dropping it would leave its slots uncovered and, with
+``require_full_coverage=True``, turn a transient state into a connection error.
+
+If your cluster's nodes advertise a TLS port, ask the provider for it:
+
+.. code:: python
+
+   >>> ClusterShardsTopologyProvider(prefer_tls_port=True)
+
+To discover topology some other way — for example from a service registry —
+subclass ``ClusterTopologyProvider``, name the command to issue, and return one
+``(start_slot, end_slot, primary, replicas)`` tuple per slot range:
+
+.. code:: python
+
+   >>> from redis.cluster_topology import ClusterTopologyProvider
+   >>>
+   >>> class MyTopologyProvider(ClusterTopologyProvider):
+   ...     command = ("CLUSTER SLOTS",)
+   ...
+   ...     def parse(self, response):
+   ...         return [(0, 16383, ("10.0.0.1", 6379), [("10.0.0.2", 6379)])]
+
 Known PubSub Limitations
 ------------------------
 
