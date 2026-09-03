@@ -15,11 +15,28 @@ from redis.cache import (
     EvictionPolicyType,
     LRUPolicy,
 )
+from redis.commands.metadata import (
+    CommandMetadata,
+    DynamicMetadataResolver,
+    RequestPolicy,
+    ResponsePolicy,
+    StaticMetadataResolver,
+)
 from redis.event import (
     EventDispatcher,
 )
 from redis.observability.attributes import CSCReason
 from tests.conftest import _get_client, skip_if_resp_version, skip_if_server_version_lt
+
+# A record for a command a resolver must report as ineligible, used to prove that eligibility
+# comes from the resolver the config holds rather than from the config itself.
+WRITE_KEYED = CommandMetadata(
+    request_policy=RequestPolicy.DEFAULT_KEYED,
+    response_policy=ResponsePolicy.DEFAULT_KEYED,
+    is_readonly=False,
+    has_key_argument=True,
+    has_complete_metadata=True,
+)
 
 
 @pytest.fixture()
@@ -423,6 +440,126 @@ class TestCache:
         indirect=True,
     )
     @pytest.mark.onlynoncluster
+    def test_eligible_command_without_keys_does_not_raise(self, r):
+        """
+        Regression: an eligible command whose method does not pass ``keys=`` used to raise
+        ``ValueError: Cannot create cache key.`` on a CSC connection.
+
+        ZRANK is eligible by metadata and passes no key list, so it is the two-step
+        eligibility end to end: the command executes normally and nothing is cached.
+        """
+        cache = r.get_cache()
+        assert r.zadd("foo", {"a": 1, "b": 2}) == 2
+
+        assert r.zrank("foo", "b") == 1
+        assert cache.size == 0
+
+        # And the reply is still the server's on a second call, rather than a cached one.
+        assert r.zrank("foo", "a") == 0
+        assert cache.size == 0
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "single_connection_client": False,
+            },
+        ],
+        ids=["pool"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_cache_skips_a_command_the_metadata_excludes(self, r):
+        """
+        XPENDING is on the legacy ``DEFAULT_ALLOW_LIST`` and does pass ``keys=``, but the
+        server tips it ``nondeterministic_output``, so metadata-driven eligibility excludes
+        it. The command must still work.
+        """
+        cache = r.get_cache()
+        r.xadd("foo", {"a": 1})
+        r.xgroup_create("foo", "group", 0)
+
+        assert r.xpending("foo", "group")["pending"] == 0
+        assert cache.size == 0
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "kwargs": {
+                    "metadata_resolver": DynamicMetadataResolver(
+                        {"core": {"get": WRITE_KEYED}}
+                    )
+                },
+            },
+        ],
+        ids=["pool"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_client_level_metadata_resolver_decides_eligibility(self, r):
+        """
+        The resolver the client was built with is what CSC reads: this one carries a single
+        record saying GET is a write, so the reply of the one command CSC always caches is not
+        cached - and the command still returns the right value.
+        """
+        cache = r.get_cache()
+        r.set("foo", "bar")
+
+        assert r.get("foo") == b"bar"
+        assert cache.size == 0
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "kwargs": {
+                    "metadata_resolver": StaticMetadataResolver(),
+                },
+            },
+        ],
+        ids=["pool"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_the_pool_resolves_eligibility_through_the_given_resolver(self, r):
+        """The injected resolver is the object the decision point reads, by identity."""
+        pool = r.connection_pool
+        resolver = pool.metadata_resolver
+
+        assert isinstance(resolver, StaticMetadataResolver)
+        assert pool.cache.config._metadata_resolver is resolver
+
+        r.set("foo", "bar")
+        assert r.get("foo") == b"bar"
+        assert (
+            r.get_cache()
+            .get(
+                CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+            )
+            .cache_value
+            == b"bar"
+        )
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "single_connection_client": True,
+            },
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "single_connection_client": False,
+            },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
     def test_cache_invalidate_all_related_responses(self, r):
         cache = r.get_cache()
         # Add keys
@@ -566,6 +703,48 @@ class TestClusterCache:
         # Make sure that cache is shared between nodes.
         assert (
             cache == r.nodes_manager.get_node_from_slot(1).redis_connection.get_cache()
+        )
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "kwargs": {"metadata_resolver": StaticMetadataResolver()},
+            },
+        ],
+        ids=["pool"],
+        indirect=True,
+    )
+    @pytest.mark.onlycluster
+    def test_metadata_resolver_reaches_every_node_client(self, r):
+        """
+        One resolver, shared cluster-wide. Asserted by identity rather than behaviour: two
+        static resolvers give the same answers, so only identity proves the object was
+        distributed rather than rebuilt per node.
+        """
+        resolver = r._metadata_resolver
+
+        assert r.nodes_manager._metadata_resolver is resolver
+        nodes = list(r.nodes_manager.nodes_cache.values())
+        assert len(nodes) > 1
+        for node in nodes:
+            pool = node.redis_connection.connection_pool
+            assert pool.metadata_resolver is resolver, node.name
+            assert pool.cache.config._metadata_resolver is resolver, node.name
+
+        # And routing derives from it, since no policy_resolver was given.
+        assert r._policy_resolver._metadata_resolver is resolver
+
+        # Still caches what it should, through the distributed resolver.
+        r.set("foo", "bar")
+        assert r.get("foo") == b"bar"
+        cache = r.nodes_manager.get_node_from_slot(12000).redis_connection.get_cache()
+        assert (
+            cache.get(
+                CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+            ).cache_value
+            == b"bar"
         )
 
     @pytest.mark.parametrize(
@@ -1555,6 +1734,86 @@ class TestUnitCacheConfiguration:
     def test_is_allowed_to_cache(self, cache_conf: CacheConfig):
         assert cache_conf.is_allowed_to_cache("GET")
         assert not cache_conf.is_allowed_to_cache("SET")
+
+    @pytest.mark.parametrize(
+        "command,allowed",
+        [
+            # Readonly, keyed, nothing that forbids caching - core and module alike, since
+            # eligibility is decided by metadata rather than by command-name prefix.
+            ("GET", True),
+            ("HGETALL", True),
+            ("JSON.GET", True),
+            ("TS.GET", True),
+            ("FT.SUGGET", True),
+            # A write command.
+            ("SET", False),
+            # Readonly but with no key name argument.
+            ("KEYS", False),
+            ("FT.SEARCH", False),
+            # Nondeterministic output.
+            ("XPENDING", False),
+            # The script runners.
+            ("EVAL_RO", False),
+            ("EVALSHA_RO", False),
+            ("FCALL_RO", False),
+            # A server-side effect no server flag expresses.
+            ("TOUCH", False),
+            # No readonly flag.
+            ("XREADGROUP", False),
+            # Blocking, even though it is readonly and keyed.
+            ("XREAD", False),
+            # Tipped dont_cache by the server.
+            ("TS.INFO", False),
+            # Unknown, so unproven: fails closed rather than being cached.
+            ("NOSUCHCOMMAND", False),
+            ("NOSUCHMODULE.NOSUCHCOMMAND", False),
+            # A container command whose subcommand is in args[1], so the name alone proves
+            # nothing.
+            ("OBJECT", False),
+        ],
+    )
+    def test_is_allowed_to_cache_follows_the_metadata_rules(
+        self, cache_conf: CacheConfig, command, allowed
+    ):
+        assert cache_conf.is_allowed_to_cache(command) is allowed
+
+    def test_is_allowed_to_cache_is_case_insensitive(self, cache_conf: CacheConfig):
+        # The command methods spell a command the way they send it, and the record tables are
+        # keyed lowercase.
+        for command in ("get", "GET", "Get"):
+            assert cache_conf.is_allowed_to_cache(command) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # More than one module prefix, which the record tables cannot be keyed by.
+            "a.b.c",
+            # ``execute_command`` accepts an arbitrary first argument, and the request encoder
+            # accepts bytes, so a non-str name reaches eligibility unchanged. Regression:
+            # these used to raise TypeError/AttributeError out of the command path.
+            b"GET",
+            bytearray(b"GET"),
+            memoryview(b"GET"),
+            1,
+            None,
+        ],
+        ids=["two-dots", "bytes", "bytearray", "memoryview", "int", "none"],
+    )
+    def test_is_allowed_to_cache_does_not_raise_on_an_undecidable_name(
+        self, cache_conf: CacheConfig, command
+    ):
+        # A raw command whose name eligibility cannot decide must still reach the server and
+        # come back with the server's own error, not a client-side exception.
+        assert cache_conf.is_allowed_to_cache(command) is False
+
+    def test_is_allowed_to_cache_uses_an_injected_resolver(self):
+        cache_conf = CacheConfig()
+        assert cache_conf.is_allowed_to_cache("GET") is True
+
+        cache_conf.set_metadata_resolver(
+            DynamicMetadataResolver({"core": {"get": WRITE_KEYED}})
+        )
+        assert cache_conf.is_allowed_to_cache("GET") is False
 
 
 class TestUnitCacheProxy:

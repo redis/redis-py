@@ -11,6 +11,11 @@ from redis.event import EventDispatcher, OnCommandsFailEvent
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
 from redis.multidb.config import InitialHealthCheck, DatabaseConfig
 from redis.multidb.database import SyncDatabase
+from redis.exceptions import (
+    ConnectionError,
+    RedisClusterException,
+    RedisClusterUnreachableError,
+)
 from redis.multidb.client import MultiDBClient
 from redis.multidb.exception import (
     NoValidDatabaseException,
@@ -26,6 +31,43 @@ from tests.test_multidb.conftest import create_weighted_list
 
 @pytest.mark.fixed_client
 class TestMultiDbClient:
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    def test_cluster_unreachable_error_is_registered_as_retryable(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        """
+        A cluster database that cannot be reached reports a
+        ``RedisClusterUnreachableError`` rather than the ``ConnectionError`` a
+        standalone database reports, so the command retry has to support that type
+        for a cluster database to fail over. The overloaded ``RedisClusterException``
+        base must stay unsupported - it also covers deterministic caller errors such
+        as cross-slot commands, which must be raised without retries.
+        """
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
+        mock_hc.check_health.return_value = True
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+                supported = client._command_retry._supported_errors
+                assert RedisClusterUnreachableError in supported
+                assert ConnectionError in supported
+                assert RedisClusterException not in supported
+            finally:
+                client.close()
+
     @pytest.mark.parametrize(
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
