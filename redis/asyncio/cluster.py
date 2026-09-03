@@ -4070,11 +4070,11 @@ class ClusterPubSub(PubSub):
         else:
             args = list(self.shard_channels.keys())
 
+        if not self.node_pubsub_mapping:
+            return
         # Keep initialization outside the shard-state lock: it can dispatch a
         # topology refresh whose reconciler must remain able to make progress.
         await self._ensure_cluster_initialized()
-        if not self.node_pubsub_mapping:
-            return
 
         # Serialize against reinitialize_shard_subscriptions: the reverse
         # index and node_pubsub_mapping must not change between the lookup
