@@ -1,3 +1,5 @@
+import json
+
 import pytest
 import redis
 from redis import Redis, exceptions
@@ -1618,46 +1620,42 @@ def test_set_file(client):
 
 
 @pytest.mark.redismod
-def test_set_path(client):
-    import json
-    import os
-    import tempfile
-
-    root = tempfile.mkdtemp()
+def test_set_path(client, tmp_path):
     # Place the file under a directory whose name contains a dot, to guard
-    # against the derived key being truncated at the first dot rather than at
-    # the file extension.
-    sub = os.path.join(root, "v1.2")
-    os.makedirs(sub)
-    jsonfile = tempfile.mkstemp(suffix=".json", dir=sub)[1]
-    nojsonfile = tempfile.mkstemp(dir=root)[1]
+    # against the derived key being truncated at a dot in the directory rather
+    # than at the file extension.
+    dotted_dir = tmp_path / "v1.2"
+    dotted_dir.mkdir()
+    jsonfile = dotted_dir / "data.json"
+    jsonfile.write_text(json.dumps({"hello": "world"}))
+    nojsonfile = tmp_path / "notes.txt"
+    nojsonfile.write_text("hello")
 
-    with open(jsonfile, "w+") as fp:
-        fp.write(json.dumps({"hello": "world"}))
-    with open(nojsonfile, "a+") as fp:
-        fp.write("hello")
-
-    result = {jsonfile: True, nojsonfile: False}
-    assert client.json().set_path(Path.root_path(), root) == result
-    res = {"hello": "world"}
-    assert client.json().get(jsonfile.rsplit(".", 1)[0]) == res
+    result = {str(jsonfile): True, str(nojsonfile): False}
+    assert client.json().set_path(Path.root_path(), str(tmp_path)) == result
+    # State the expected key directly (the file path with only its extension
+    # stripped) rather than repeating the implementation's split.
+    expected_key = str(dotted_dir / "data")
+    assert client.json().get(expected_key) == {"hello": "world"}
 
 
-def test_set_path_key_strips_only_extension(monkeypatch):
-    # Regression test: JSON.set_path must strip only the file extension when
-    # deriving the key, so a path containing dots in a directory (e.g. a
-    # versioned "v1.2" folder) is not truncated at the first dot. set_file is
-    # stubbed so this runs without a server.
-    import json
-    import os
-    import tempfile
-
-    root = tempfile.mkdtemp()
-    dotted_dir = os.path.join(root, "v1.2")
-    os.makedirs(dotted_dir)
-    json_file = os.path.join(dotted_dir, "data.json")
-    with open(json_file, "w") as fp:
-        fp.write(json.dumps({"hello": "world"}))
+def test_set_path_key_strips_only_extension(tmp_path, monkeypatch):
+    # Regression test: JSON.set_path must strip only the extension of the final
+    # path component when deriving the key. A dot in a directory (a versioned
+    # "v1.2" folder), a file with no extension, a dotfile, and a multi-part
+    # extension must all be handled correctly. set_file is stubbed so this runs
+    # without a server.
+    dotted_dir = tmp_path / "v1.2"
+    dotted_dir.mkdir()
+    # Map each file to the key set_path is expected to derive for it.
+    expected_keys = {
+        dotted_dir / "data.json": dotted_dir / "data",
+        dotted_dir / "report.tar.gz": dotted_dir / "report.tar",
+        dotted_dir / "README": dotted_dir / "README",
+        dotted_dir / ".env": dotted_dir / ".env",
+    }
+    for file_path in expected_keys:
+        file_path.write_text("{}")
 
     json_client = redis.Redis().json()
     captured = []
@@ -1668,8 +1666,6 @@ def test_set_path_key_strips_only_extension(monkeypatch):
 
     monkeypatch.setattr(json_client, "set_file", fake_set_file)
 
-    result = json_client.set_path(Path.root_path(), root)
+    json_client.set_path(Path.root_path(), str(tmp_path))
 
-    expected_key = json_file[: -len(".json")]
-    assert captured == [expected_key]
-    assert result == {json_file: True}
+    assert set(captured) == {str(key) for key in expected_keys.values()}

@@ -1144,21 +1144,23 @@ async def test_toggle_dollar(decoded_r: redis.Redis):
         await decoded_r.json().toggle("non_existing_doc", "$..a")
 
 
-async def test_set_path_key_strips_only_extension(monkeypatch):
-    # Regression test: JSON.set_path must strip only the file extension when
-    # deriving the key, so a path containing dots in a directory (e.g. a
-    # versioned "v1.2" folder) is not truncated at the first dot. set_file is
-    # stubbed so this runs without a server.
-    import json
-    import os
-    import tempfile
-
-    root = tempfile.mkdtemp()
-    dotted_dir = os.path.join(root, "v1.2")
-    os.makedirs(dotted_dir)
-    json_file = os.path.join(dotted_dir, "data.json")
-    with open(json_file, "w") as fp:
-        fp.write(json.dumps({"hello": "world"}))
+async def test_set_path_key_strips_only_extension(tmp_path, monkeypatch):
+    # Regression test: JSON.set_path must strip only the extension of the final
+    # path component when deriving the key. A dot in a directory (a versioned
+    # "v1.2" folder), a file with no extension, a dotfile, and a multi-part
+    # extension must all be handled correctly. set_file is stubbed so this runs
+    # without a server.
+    dotted_dir = tmp_path / "v1.2"
+    dotted_dir.mkdir()
+    # Map each file to the key set_path is expected to derive for it.
+    expected_keys = {
+        dotted_dir / "data.json": dotted_dir / "data",
+        dotted_dir / "report.tar.gz": dotted_dir / "report.tar",
+        dotted_dir / "README": dotted_dir / "README",
+        dotted_dir / ".env": dotted_dir / ".env",
+    }
+    for file_path in expected_keys:
+        file_path.write_text("{}")
 
     json_client = redis.Redis().json()
     captured = []
@@ -1169,8 +1171,6 @@ async def test_set_path_key_strips_only_extension(monkeypatch):
 
     monkeypatch.setattr(json_client, "set_file", fake_set_file)
 
-    result = await json_client.set_path(Path.root_path(), root)
+    await json_client.set_path(Path.root_path(), str(tmp_path))
 
-    expected_key = json_file[: -len(".json")]
-    assert captured == [expected_key]
-    assert result == {json_file: True}
+    assert set(captured) == {str(key) for key in expected_keys.values()}
