@@ -4070,17 +4070,16 @@ class ClusterPubSub(PubSub):
         else:
             args = list(self.shard_channels.keys())
 
-        if not args:
+        # Keep initialization outside the shard-state lock: it can dispatch a
+        # topology refresh whose reconciler must remain able to make progress.
+        await self._ensure_cluster_initialized()
+        if not self.node_pubsub_mapping:
             return
 
         # Serialize against reinitialize_shard_subscriptions: the reverse
         # index and node_pubsub_mapping must not change between the lookup
         # and the per-node sunsubscribe call below.
         async with self._shard_state_lock:
-            # Initialization dispatches a slots-changed notification. Keep
-            # the resulting reconciler behind this lock until the channels
-            # below have been marked as pending unsubscription.
-            await self._ensure_cluster_initialized()
             for s_channel in args:
                 normalized_key = next(iter(self._normalize_keys({s_channel: None})))
                 # Route via the reverse index so we unsubscribe on the node

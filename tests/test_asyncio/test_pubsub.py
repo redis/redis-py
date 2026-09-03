@@ -2127,6 +2127,38 @@ class TestClusterPubSubSlotMigration:
         new_ps.ssubscribe.assert_not_awaited()
         assert pubsub._shard_channel_to_node[channel] == old_node.name
 
+    async def test_initialize_refresh_does_not_restore_sunsubscribed_channel(self):
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        old_ps = self._make_node_pubsub({channel: None})
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping = {old_node.name: old_ps, new_node.name: new_ps}
+        pubsub.shard_channels = {channel: None}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        pubsub.cluster._initialize = True
+        pubsub.cluster.get_node_from_key.return_value = new_node
+        old_ps.sunsubscribe.side_effect = lambda *_: (
+            pubsub.pending_unsubscribe_shard_channels.add(channel)
+        )
+        reconcile_task = None
+
+        async def initialize():
+            nonlocal reconcile_task
+            pubsub.cluster._initialize = False
+            reconcile_task = asyncio.create_task(
+                pubsub.reinitialize_shard_subscriptions()
+            )
+
+        pubsub.cluster.initialize = AsyncMock(side_effect=initialize)
+
+        await pubsub.sunsubscribe(channel)
+        await reconcile_task
+
+        new_ps.ssubscribe.assert_not_awaited()
+        assert channel in pubsub.pending_unsubscribe_shard_channels
+
     async def test_reinitialize_tolerates_old_node_disconnect(self):
         """
         When the old node is still part of the cluster topology but just
