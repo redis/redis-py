@@ -4053,6 +4053,71 @@ class TestClusterPubSubSlotMigration:
         # re-run on every poll.
         assert stale in pubsub._poll_cool_off
 
+    def test_moved_repair_collects_the_pubsub_it_empties(self):
+        """
+        A node that lost its only slot answers ``MOVED`` for every channel it
+        held, so the repair's detach can leave its pubsub with nothing
+        subscribed - and an empty one left in ``node_pubsub_mapping`` has had
+        its ``subscribed_event`` cleared, so ``_poll_node_pubsub`` waits on an
+        event nothing will ever set: for the whole timeout of every pass, and
+        forever for a ``timeout=None`` caller. The other collectors cannot
+        reach it: no ``SUNSUBSCRIBE`` confirmation arrives for a channel
+        forgotten locally, and the reconciliation pass scheduled by the repair
+        only garbage-collects it once the worker runs - a whole poll cool-off
+        later, at best.
+        """
+        from redis.crc import key_slot
+        from redis.exceptions import MovedError
+
+        pubsub = self._make_cluster_pubsub()
+        channel = b"foo"
+        stale = self._make_stateful_node_pubsub({channel: None})
+        pubsub.node_pubsub_mapping = {"127.0.0.1:7000": stale}
+        pubsub.shard_channels = {channel: None}
+        pubsub._shard_channel_to_node = {channel: "127.0.0.1:7000"}
+        self._prime_generator(pubsub)
+        stale.get_message_error = MovedError(f"{key_slot(channel)} 127.0.0.1:7001")
+        pubsub.on_slots_changed = mock.MagicMock()
+
+        assert pubsub._sharded_message_generator(timeout=0.01) == (None, None)
+
+        assert stale.reset_calls == 1
+        assert "127.0.0.1:7000" not in pubsub.node_pubsub_mapping
+        # The cluster-level intent survives, so the reconciliation the repair
+        # scheduled still re-attaches the channel on its new owner.
+        assert channel in pubsub.shard_channels
+
+    def test_moved_repair_keeps_a_pubsub_with_other_slots(self):
+        """
+        Only the channels of the moved slot are re-routed, so a pubsub that
+        still holds a subscription on another slot must stay in the mapping and
+        keep serving it.
+        """
+        from redis.crc import key_slot
+        from redis.exceptions import MovedError
+
+        pubsub = self._make_cluster_pubsub()
+        moved = b"foo"
+        staying = b"bar"
+        stale = self._make_stateful_node_pubsub({moved: None, staying: None})
+        pubsub.node_pubsub_mapping = {"127.0.0.1:7000": stale}
+        pubsub.shard_channels = {moved: None, staying: None}
+        pubsub._shard_channel_to_node = {
+            moved: "127.0.0.1:7000",
+            staying: "127.0.0.1:7000",
+        }
+        self._prime_generator(pubsub)
+        stale.get_message_error = MovedError(f"{key_slot(moved)} 127.0.0.1:7001")
+        pubsub.on_slots_changed = mock.MagicMock()
+
+        assert pubsub._sharded_message_generator(timeout=0.01) == (None, None)
+
+        assert stale.reset_calls == 0
+        assert pubsub.node_pubsub_mapping == {"127.0.0.1:7000": stale}
+        assert moved not in stale.shard_channels
+        assert staying in stale.shard_channels
+        assert pubsub._shard_channel_to_node == {staying: "127.0.0.1:7000"}
+
     def test_target_node_poll_repairs_moved(self):
         """
         Regression: a poll that names one node used to hand the caller a raw

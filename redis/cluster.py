@@ -3443,6 +3443,32 @@ class ClusterPubSub(PubSub):
         if not pubsub.channels and not pubsub.patterns and not pubsub.shard_channels:
             pubsub.subscribed_event.clear()
 
+    def _drop_node_pubsub(self, name: str, pubsub) -> None:
+        """Retire a per-node pubsub and drop it from ``node_pubsub_mapping``.
+
+        Callers hold ``_shard_state_lock``, the lock that every mutation of
+        that mapping observes. ``reset()`` runs under the per-node I/O lock so
+        the socket is not torn down beneath a concurrent bounded poll parked in
+        ``parse_response``, and its errors are swallowed: retiring one node's
+        pubsub must not abort the caller's pass, and this also runs from the
+        ``__del__`` fallback path through ``reset()``.
+
+        Every caller must leave nothing subscribed on ``pubsub`` (or have lost
+        the node itself). An empty per-node pubsub left in the mapping is what
+        ``_poll_node_pubsub`` parks on: its ``subscribed_event`` is cleared, so
+        the prelude waits for the whole timeout of every pass - forever when the
+        caller passed ``timeout=None``, since the ``reset()`` below only clears
+        that event again and no message can arrive on a subscription that is
+        gone.
+        """
+        try:
+            with self._pubsub_io_lock(pubsub):
+                pubsub.reset()
+        except Exception:
+            pass
+        self.node_pubsub_mapping.pop(name, None)
+        self._unreachable_nodes.discard(name)
+
     def _sharded_message_generator(self, timeout=0.0):
         first_error: Optional[BaseException] = None
         polled = 0
@@ -3731,6 +3757,17 @@ class ClusterPubSub(PubSub):
                 self._detach_shard_channel(pubsub, channel)
                 if self._shard_channel_to_node.get(channel) == node_name:
                     del self._shard_channel_to_node[channel]
+            # The detach above can leave this pubsub with nothing subscribed -
+            # a node that lost its only slot answers MOVED for every channel it
+            # held. Retire it here rather than leave it in the mapping for a
+            # collector elsewhere: no SUNSUBSCRIBE confirmation will arrive for
+            # a channel forgotten locally, so get_sharded_message's collector
+            # cannot reach it, and the reconciliation pass scheduled below only
+            # GCs it once the worker gets to run - a whole poll cool-off later,
+            # at best, while an unbounded poll that reaches the empty pubsub
+            # first parks on it for good (see _drop_node_pubsub).
+            if node_name is not None and not pubsub.subscribed:
+                self._drop_node_pubsub(node_name, pubsub)
         # move_slot applies the redirect to the slots cache and dispatches
         # AfterSlotsCacheRefreshEvent, which reaches on_slots_changed. Call
         # on_slots_changed unconditionally too: move_slot skips the dispatch on
@@ -3825,13 +3862,7 @@ class ClusterPubSub(PubSub):
                 if pubsub is not None and not pubsub.subscribed:
                     name = self._find_node_name_for_pubsub(pubsub)
                     if name is not None:
-                        try:
-                            with self._pubsub_io_lock(pubsub):
-                                pubsub.reset()
-                        except Exception:
-                            pass
-                        self.node_pubsub_mapping.pop(name, None)
-                        self._unreachable_nodes.discard(name)
+                        self._drop_node_pubsub(name, pubsub)
                 # Mirror PubSub.handle_message: the empty-check belongs in the
                 # unsubscribe branch since that is the only path that can
                 # reduce shard_channels here.
@@ -3984,13 +4015,7 @@ class ClusterPubSub(PubSub):
             # subscription so their connections are released.
             for name, pubsub in list(self.node_pubsub_mapping.items()):
                 if not pubsub.subscribed:
-                    try:
-                        with self._pubsub_io_lock(pubsub):
-                            pubsub.reset()
-                    except Exception:
-                        pass
-                    self.node_pubsub_mapping.pop(name, None)
-                    self._unreachable_nodes.discard(name)
+                    self._drop_node_pubsub(name, pubsub)
         if uncovered:
             # Surface the uncovered channels so the caller (and observer
             # notification path) knows reconciliation was incomplete. All
@@ -4040,13 +4065,7 @@ class ClusterPubSub(PubSub):
             self.cluster.get_node(node_name=old_name) is None
             or not old_pubsub.subscribed
         ):
-            try:
-                with self._pubsub_io_lock(old_pubsub):
-                    old_pubsub.reset()
-            except Exception:
-                pass
-            self.node_pubsub_mapping.pop(old_name, None)
-            self._unreachable_nodes.discard(old_name)
+            self._drop_node_pubsub(old_name, old_pubsub)
 
     def _migrate_shard_channel(self, channel, handler, old_name, new_node):
         # Detach from the old per-node pubsub, best-effort: the old node may

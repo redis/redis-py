@@ -2409,6 +2409,7 @@ class TestClusterPubSubSlotMigration:
         pubsub._next_topology_repair = 0.0
         pubsub._shard_state_lock = asyncio.Lock()
         pubsub._reconcile_tasks = set()
+        pubsub._topology_repair_tasks = set()
         pubsub.push_handler_func = None
         return pubsub
 
@@ -2769,6 +2770,38 @@ class TestClusterPubSubSlotMigration:
         assert pubsub._shard_channel_to_node == {}
         assert pubsub._reconcile_tasks == set()
         assert reconcile_task.cancelled()
+
+    async def test_aclose_does_not_cancel_a_topology_refresh(self):
+        """
+        Regression: the topology repair used to be tracked in the same set
+        aclose() cancels. ``NodesManager.initialize`` refreshes the slots cache
+        of the whole cluster client, which every other command on it reads, so
+        closing one pubsub used to abort a refresh in flight and leave that
+        shared cache stale until some later MOVED or failed poll asked again.
+        The sync counterpart has the same property: ``reset()`` retires the
+        reconciliation executor with ``cancel_futures=True``, which drops queued
+        work but lets a running ``initialize`` finish.
+        """
+        pubsub = self._make_cluster_pubsub()
+        started = asyncio.Event()
+        finished = asyncio.Event()
+
+        async def _refresh():
+            started.set()
+            await asyncio.sleep(0)
+            finished.set()
+
+        pubsub.shard_channels = {b"foo": None}
+        pubsub.cluster.nodes_manager.initialize = _refresh
+        pubsub._schedule_topology_repair()
+        (task,) = list(pubsub._topology_repair_tasks)
+        await started.wait()
+
+        await pubsub.aclose()
+
+        assert not task.cancelled()
+        await task
+        assert finished.is_set()
 
     async def test_aclose_clears_the_topology_repair_throttle(self):
         """
@@ -3145,6 +3178,72 @@ class TestClusterPubSubSlotMigration:
         # re-run on every poll.
         assert stale in pubsub._poll_cool_off
 
+    async def test_moved_repair_collects_the_pubsub_it_empties(self):
+        """
+        A node that lost its only slot answers ``MOVED`` for every channel it
+        held, so the repair's detach can leave its pubsub with nothing
+        subscribed - and an empty one left in ``node_pubsub_mapping`` keeps a
+        live connection with nothing subscribed on it, which
+        ``_poll_node_pubsub`` blocks on reading. The other collectors cannot
+        reach it: no ``SUNSUBSCRIBE`` confirmation arrives for a channel
+        forgotten locally, and the reconciliation pass scheduled by the repair
+        only garbage-collects it once its task runs - a whole poll cool-off
+        later, at best.
+        """
+        from redis.crc import key_slot
+        from redis.exceptions import MovedError
+
+        pubsub = self._make_cluster_pubsub()
+        channel = b"foo"
+        stale = self._make_stateful_node_pubsub({channel: None})
+        pubsub.node_pubsub_mapping = {"127.0.0.1:7000": stale}
+        pubsub.shard_channels = {channel: None}
+        pubsub._shard_channel_to_node = {channel: "127.0.0.1:7000"}
+        self._prime_generator(pubsub)
+        stale.get_message_error = MovedError(f"{key_slot(channel)} 127.0.0.1:7001")
+        pubsub.cluster.nodes_manager.move_slot = AsyncMock()
+        pubsub.on_slots_changed = AsyncMock()
+
+        assert await pubsub._sharded_message_generator(timeout=0.01) == (None, None)
+
+        assert stale.aclose_calls == 1
+        assert "127.0.0.1:7000" not in pubsub.node_pubsub_mapping
+        # The cluster-level intent survives, so the reconciliation the repair
+        # scheduled still re-attaches the channel on its new owner.
+        assert channel in pubsub.shard_channels
+
+    async def test_moved_repair_keeps_a_pubsub_with_other_slots(self):
+        """
+        Only the channels of the moved slot are re-routed, so a pubsub that
+        still holds a subscription on another slot must stay in the mapping and
+        keep serving it.
+        """
+        from redis.crc import key_slot
+        from redis.exceptions import MovedError
+
+        pubsub = self._make_cluster_pubsub()
+        moved = b"foo"
+        staying = b"bar"
+        stale = self._make_stateful_node_pubsub({moved: None, staying: None})
+        pubsub.node_pubsub_mapping = {"127.0.0.1:7000": stale}
+        pubsub.shard_channels = {moved: None, staying: None}
+        pubsub._shard_channel_to_node = {
+            moved: "127.0.0.1:7000",
+            staying: "127.0.0.1:7000",
+        }
+        self._prime_generator(pubsub)
+        stale.get_message_error = MovedError(f"{key_slot(moved)} 127.0.0.1:7001")
+        pubsub.cluster.nodes_manager.move_slot = AsyncMock()
+        pubsub.on_slots_changed = AsyncMock()
+
+        assert await pubsub._sharded_message_generator(timeout=0.01) == (None, None)
+
+        assert stale.aclose_calls == 0
+        assert pubsub.node_pubsub_mapping == {"127.0.0.1:7000": stale}
+        assert moved not in stale.shard_channels
+        assert staying in stale.shard_channels
+        assert pubsub._shard_channel_to_node == {staying: "127.0.0.1:7000"}
+
     async def test_sunsubscribe_bookkeeping_survives_a_racing_detach(self):
         """
         Mirrors the sync regression: ``handle_message`` did its unsubscribe
@@ -3400,7 +3499,7 @@ class TestClusterPubSubSlotMigration:
 
         with pytest.raises(ConnectionError):
             await pubsub._sharded_message_generator(timeout=0.01)
-        await asyncio.gather(*pubsub._reconcile_tasks, return_exceptions=True)
+        await asyncio.gather(*pubsub._topology_repair_tasks, return_exceptions=True)
         assert pubsub.cluster.nodes_manager.initialize.await_count == 1
         assert pubsub._unreachable_nodes == {"127.0.0.1:7000"}
 
@@ -3408,7 +3507,7 @@ class TestClusterPubSubSlotMigration:
         pubsub._poll_cool_off.pop(bad, None)
         with pytest.raises(ConnectionError):
             await pubsub._sharded_message_generator(timeout=0.01)
-        await asyncio.gather(*pubsub._reconcile_tasks, return_exceptions=True)
+        await asyncio.gather(*pubsub._topology_repair_tasks, return_exceptions=True)
         assert pubsub.cluster.nodes_manager.initialize.await_count == 1
 
         # Once the window expires the next failure asks again.
@@ -3418,7 +3517,7 @@ class TestClusterPubSubSlotMigration:
         pubsub._poll_cool_off.pop(bad, None)
         with pytest.raises(ConnectionError):
             await pubsub._sharded_message_generator(timeout=0.01)
-        await asyncio.gather(*pubsub._reconcile_tasks, return_exceptions=True)
+        await asyncio.gather(*pubsub._topology_repair_tasks, return_exceptions=True)
         assert pubsub.cluster.nodes_manager.initialize.await_count == 2
 
     async def test_failed_poll_does_not_refresh_without_shard_channels(self):

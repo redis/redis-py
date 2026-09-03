@@ -5777,11 +5777,25 @@ class TestClusterPubSub:
                 await pubsub.ssubscribe(second)
                 resubscribed.set()
 
+        async def wait_for_ssubscribe_ack(s_channel):
+            # ssubscribe only writes the command, it does not wait for the
+            # server's confirmation, and spublish travels on a separate
+            # connection. Publishing before the confirmation has been read can
+            # therefore reach the node first and report zero receivers, so wait
+            # for the ack before asserting on the delivery count.
+            async with async_timeout(10):
+                while True:
+                    message = await pubsub.get_sharded_message(timeout=0.05)
+                    if (
+                        message is not None
+                        and str_if_bytes(message["type"]) == "ssubscribe"
+                        and message["channel"] == s_channel.encode()
+                    ):
+                        return
+
         try:
             await pubsub.ssubscribe(**{first: handler})
-            for _ in range(20):
-                if (await pubsub.get_sharded_message(timeout=0.2)) is not None:
-                    break
+            await wait_for_ssubscribe_ack(first)
 
             assert await r.spublish(first, "go") == 1
             async with async_timeout(10):
@@ -5789,6 +5803,7 @@ class TestClusterPubSub:
                     await pubsub.get_sharded_message(timeout=0.05)
             assert resubscribed.is_set()
 
+            await wait_for_ssubscribe_ack(second)
             assert await r.spublish(second, "hi") == 1
             delivered = []
             async with async_timeout(10):

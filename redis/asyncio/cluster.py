@@ -3852,6 +3852,11 @@ class ClusterPubSub(PubSub):
         self._shard_state_lock: asyncio.Lock = asyncio.Lock()
         # Background tasks created by on_slots_changed; kept to prevent GC.
         self._reconcile_tasks: Set[asyncio.Task] = set()
+        # Background NodesManager.initialize() tasks created by
+        # _schedule_topology_repair; kept to prevent GC, and kept apart from
+        # _reconcile_tasks because aclose() cancels that set and this work is
+        # not ours to cancel - see _schedule_topology_repair.
+        self._topology_repair_tasks: Set[asyncio.Task] = set()
         self._pubsubs_generator = self._pubsubs_generator()
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -4022,6 +4027,30 @@ class ClusterPubSub(PubSub):
         """
         pubsub.shard_channels.pop(channel, None)
         pubsub.pending_unsubscribe_shard_channels.discard(channel)
+
+    async def _drop_node_pubsub(self, name: str, pubsub: PubSub) -> None:
+        """Retire a per-node pubsub and drop it from ``node_pubsub_mapping``.
+
+        Callers hold ``_shard_state_lock``, the lock that every mutation of
+        that mapping observes. ``aclose()`` runs under the per-node I/O lock so
+        the socket is not torn down beneath a concurrent bounded poll parked in
+        ``parse_response``, and its errors are swallowed: retiring one node's
+        pubsub must not abort the caller's pass.
+
+        Every caller must leave nothing subscribed on ``pubsub`` (or have lost
+        the node itself). An empty per-node pubsub left in the mapping keeps a
+        live connection with nothing subscribed on it, so ``_poll_node_pubsub``
+        passes its ``connection is None`` guard and blocks reading a socket no
+        message can arrive on - for the whole timeout of every pass, and until
+        the connection is torn down when the caller passed ``timeout=None``.
+        """
+        try:
+            async with self._pubsub_io_lock(pubsub):
+                await pubsub.aclose()
+        except Exception:
+            pass
+        self.node_pubsub_mapping.pop(name, None)
+        self._unreachable_nodes.discard(name)
 
     async def _sharded_message_generator(
         self, timeout: float = 0.0
@@ -4253,9 +4282,17 @@ class ClusterPubSub(PubSub):
         if now < self._next_topology_repair:
             return
         self._next_topology_repair = now + SHARD_TOPOLOGY_REPAIR_INTERVAL_SECONDS
+        # Not tracked in _reconcile_tasks: that set is cancelled by aclose(),
+        # and ``initialize`` refreshes the slots cache of the whole cluster
+        # client, which every other command on it reads - closing one pubsub
+        # must not abort a refresh in flight, leaving the shared cache stale
+        # until some later MOVED or failed poll asks again. The sync
+        # counterpart has the same property for free: ``reset()`` retires the
+        # reconciliation executor with ``cancel_futures=True``, which drops
+        # queued work but lets a running ``initialize`` finish.
         task = asyncio.create_task(self.cluster.nodes_manager.initialize())
-        self._reconcile_tasks.add(task)
-        task.add_done_callback(self._reconcile_tasks.discard)
+        self._topology_repair_tasks.add(task)
+        task.add_done_callback(self._topology_repair_tasks.discard)
         task.add_done_callback(self._log_reconcile_task_exception)
 
     async def _handle_moved_on_read(self, pubsub: PubSub, error: MovedError) -> None:
@@ -4283,6 +4320,17 @@ class ClusterPubSub(PubSub):
                 self._detach_shard_channel(pubsub, channel)
                 if self._shard_channel_to_node.get(channel) == node_name:
                     del self._shard_channel_to_node[channel]
+            # The detach above can leave this pubsub with nothing subscribed -
+            # a node that lost its only slot answers MOVED for every channel it
+            # held. Retire it here rather than leave it in the mapping for a
+            # collector elsewhere: no SUNSUBSCRIBE confirmation will arrive for
+            # a channel forgotten locally, so get_sharded_message's collector
+            # cannot reach it, and the reconciliation pass scheduled below only
+            # GCs it once its task gets to run - a whole poll cool-off later,
+            # at best, while a poll that reaches the empty pubsub first blocks
+            # on a socket no message can arrive on (see _drop_node_pubsub).
+            if node_name is not None and not pubsub.subscribed:
+                await self._drop_node_pubsub(node_name, pubsub)
         # move_slot applies the redirect to the slots cache and dispatches
         # AsyncAfterSlotsCacheRefreshEvent, which reaches on_slots_changed. Call
         # on_slots_changed unconditionally too: move_slot skips the dispatch on
@@ -4388,13 +4436,7 @@ class ClusterPubSub(PubSub):
                 if pubsub is not None and not pubsub.subscribed:
                     name = self._find_node_name_for_pubsub(pubsub)
                     if name is not None:
-                        try:
-                            async with self._pubsub_io_lock(pubsub):
-                                await pubsub.aclose()
-                        except Exception:
-                            pass
-                        self.node_pubsub_mapping.pop(name, None)
-                        self._unreachable_nodes.discard(name)
+                        await self._drop_node_pubsub(name, pubsub)
 
         # Only suppress subscribe/unsubscribe messages, not data messages (smessage)
         if str_if_bytes(message["type"]) in ("ssubscribe", "sunsubscribe"):
@@ -4561,13 +4603,7 @@ class ClusterPubSub(PubSub):
             # subscription so their connections are released.
             for name, pubsub in list(self.node_pubsub_mapping.items()):
                 if not pubsub.subscribed:
-                    try:
-                        async with self._pubsub_io_lock(pubsub):
-                            await pubsub.aclose()
-                    except Exception:
-                        pass
-                    self.node_pubsub_mapping.pop(name, None)
-                    self._unreachable_nodes.discard(name)
+                    await self._drop_node_pubsub(name, pubsub)
         if uncovered:
             # Surface the uncovered channels so the caller (and observer
             # notification path) knows reconciliation was incomplete. All
@@ -4620,13 +4656,7 @@ class ClusterPubSub(PubSub):
             self.cluster.get_node(node_name=old_name) is None
             or not old_pubsub.subscribed
         ):
-            try:
-                async with self._pubsub_io_lock(old_pubsub):
-                    await old_pubsub.aclose()
-            except Exception:
-                pass
-            self.node_pubsub_mapping.pop(old_name, None)
-            self._unreachable_nodes.discard(old_name)
+            await self._drop_node_pubsub(old_name, old_pubsub)
 
     async def _migrate_shard_channel(
         self,
@@ -4732,6 +4762,11 @@ class ClusterPubSub(PubSub):
         # reentrant, gathering while holding it would deadlock. Awaiting
         # each task with suppressed CancelledError also avoids unhandled-
         # exception warnings if the task was created but not yet scheduled.
+        # _topology_repair_tasks is deliberately left alone: it holds
+        # NodesManager.initialize() calls that refresh the whole client's
+        # slots cache, which is not this pubsub's to abort (see
+        # _schedule_topology_repair). The set keeps them referenced until
+        # they finish and discard themselves.
         if self._reconcile_tasks:
             tasks = list(self._reconcile_tasks)
             for task in tasks:
