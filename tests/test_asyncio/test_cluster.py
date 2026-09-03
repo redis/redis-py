@@ -55,6 +55,7 @@ from redis.exceptions import (
     RedisClusterUnreachableError,
     RedisError,
     ResponseError,
+    SlotNotCoveredError,
 )
 from redis.himport import HIMPORT_SET
 from redis.utils import str_if_bytes
@@ -2872,6 +2873,12 @@ class TestNodesManager:
     """
     Tests for the NodesManager class
     """
+
+    async def test_get_node_from_slot_with_missing_slot(self) -> None:
+        nodes_manager = NodesManager([], False, {})
+
+        with pytest.raises(SlotNotCoveredError):
+            nodes_manager.get_node_from_slot(42)
 
     @pytest.mark.onlycluster
     async def test_load_balancer(self, r: RedisCluster) -> None:
@@ -5789,6 +5796,38 @@ class TestClusterPubSubWithMocks:
 
         assert pubsub.node is None
         assert pubsub.connection_pool is None
+
+    async def test_subscribe_initializes_cluster(self) -> None:
+        client = await get_mocked_redis_client(host=default_host, port=default_port)
+        slots_cache = client.nodes_manager.slots_cache
+        client.nodes_manager.slots_cache = {}
+        client._initialize = True
+        client.initialize = mock.AsyncMock(
+            side_effect=lambda: client.nodes_manager.slots_cache.update(slots_cache)
+        )
+        pubsub = client.pubsub()
+
+        with mock.patch(
+            "redis.asyncio.client.PubSub.execute_command", new=mock.AsyncMock()
+        ):
+            await pubsub.subscribe("channel")
+
+        assert pubsub.node in client.get_nodes()
+
+    @pytest.mark.parametrize("method", ["ssubscribe", "sunsubscribe"])
+    async def test_empty_shard_command_does_not_initialize_cluster(
+        self, method
+    ) -> None:
+        cluster = Mock()
+        cluster._initialize = True
+        cluster.initialize = mock.AsyncMock()
+        cluster.read_from_replicas = False
+        cluster.load_balancing_strategy = None
+        pubsub = self._make_pubsub(cluster)
+
+        await getattr(pubsub, method)()
+
+        cluster.initialize.assert_not_awaited()
 
     async def test_get_node_pubsub_uses_adapter(self) -> None:
         """
