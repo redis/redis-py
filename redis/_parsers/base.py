@@ -72,6 +72,10 @@ NO_SUCH_FIELDSET_ERROR = {
 logger = logging.getLogger(__name__)
 
 
+class BufferedResponseIncomplete(Exception):
+    """Raised when a buffered-only read needs more socket data."""
+
+
 class BaseParser(ABC):
     EXCEPTION_CLASSES = {
         "ERR": {
@@ -562,7 +566,7 @@ class _AsyncRESPBase(AsyncBaseParser):
         # parser and fail loudly if the private buffer API changes.
         return bool(self._stream._buffer)
 
-    async def _read(self, length: int) -> bytes:
+    async def _read(self, length: int, *, buffered_only: bool = False) -> bytes:
         """
         Read `length` bytes of data.  These are assumed to be followed
         by a '\r\n' terminator which is subsequently discarded.
@@ -572,6 +576,8 @@ class _AsyncRESPBase(AsyncBaseParser):
         if len(self._buffer) >= end:
             result = self._buffer[self._pos : end - 2]
         else:
+            if buffered_only:
+                raise BufferedResponseIncomplete()
             tail = self._buffer[self._pos :]
             try:
                 data = await self._stream.readexactly(want - len(tail))
@@ -582,7 +588,7 @@ class _AsyncRESPBase(AsyncBaseParser):
         self._pos += want
         return result
 
-    async def _readline(self) -> bytes:
+    async def _readline(self, *, buffered_only: bool = False) -> bytes:
         """
         read an unknown number of bytes up to the next '\r\n'
         line separator, which is discarded.
@@ -591,6 +597,8 @@ class _AsyncRESPBase(AsyncBaseParser):
         if found >= 0:
             result = self._buffer[self._pos : found]
         else:
+            if buffered_only:
+                raise BufferedResponseIncomplete()
             tail = self._buffer[self._pos :]
             data = await self._stream.readline()
             if not data.endswith(b"\r\n"):

@@ -1516,6 +1516,58 @@ class TestAsyncPubSubTimeoutPropagation:
         await p.aclose()
 
     @pytest.mark.asyncio
+    async def test_pubsub_timeout_zero_avoids_async_timeout_zero(self, r):
+        """
+        Regression for #3748: timeout=0 polling must not schedule
+        asyncio.timeout(0), which can corrupt the event loop callback heap.
+        """
+        from redis.asyncio import connection as async_connection
+
+        p = r.pubsub()
+        await p.subscribe("foo")
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        async_timeout_calls = []
+        real_async_timeout = async_connection.async_timeout
+
+        def tracking_async_timeout(timeout):
+            async_timeout_calls.append(timeout)
+            return real_async_timeout(timeout)
+
+        with patch.object(
+            async_connection, "async_timeout", side_effect=tracking_async_timeout
+        ):
+            for _ in range(50):
+                await p.get_message(timeout=0)
+
+        assert 0 not in async_timeout_calls
+        await p.aclose()
+
+    @pytest.mark.asyncio
+    async def test_get_message_timeout_zero_yields_event_loop(self, r):
+        """
+        timeout=0 polling must yield to the event loop when no data is
+        buffered, matching PubSub.run() behavior.
+        """
+        p = r.pubsub()
+        await p.subscribe("foo")
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        other_ran = asyncio.Event()
+
+        async def other_task():
+            other_ran.set()
+
+        task = asyncio.create_task(other_task())
+        for _ in range(10):
+            await p.get_message(timeout=0)
+        await task
+        assert other_ran.is_set()
+        await p.aclose()
+
+    @pytest.mark.asyncio
     async def test_get_message_timeout_none_blocks(self, r):
         """
         Test that get_message(timeout=None) blocks indefinitely.

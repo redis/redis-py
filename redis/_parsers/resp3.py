@@ -6,6 +6,7 @@ from ..typing import EncodableT
 from ..utils import SENTINEL
 from .base import (
     AsyncPushNotificationsParser,
+    BufferedResponseIncomplete,
     PushNotificationsParser,
     _AsyncRESPBase,
     _RESPBase,
@@ -175,7 +176,11 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
         return response
 
     async def read_response(
-        self, disable_decoding: bool = False, push_request: bool = False
+        self,
+        disable_decoding: bool = False,
+        push_request: bool = False,
+        *,
+        buffered_only: bool = False,
     ):
         if not self._connected:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
@@ -184,19 +189,30 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
             self._buffer += b"".join(self._chunks)
             self._chunks.clear()
         self._pos = 0
-        response = await self._read_response(
-            disable_decoding=disable_decoding, push_request=push_request
-        )
+        try:
+            response = await self._read_response(
+                disable_decoding=disable_decoding,
+                push_request=push_request,
+                buffered_only=buffered_only,
+            )
+        except BufferedResponseIncomplete:
+            if buffered_only:
+                return None
+            raise
         # Successfully parsing a response allows us to clear our parsing buffer
         self._clear()
         return response
 
     async def _read_response(
-        self, disable_decoding: bool = False, push_request: bool = False
+        self,
+        disable_decoding: bool = False,
+        push_request: bool = False,
+        *,
+        buffered_only: bool = False,
     ) -> Union[EncodableT, ResponseError, None]:
         if not self._stream or not self.encoder:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-        raw = await self._readline()
+        raw = await self._readline(buffered_only=buffered_only)
         response: Any
         byte, response = raw[:1], raw[1:]
 
@@ -206,7 +222,7 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
         # server returned an error
         if byte in (b"-", b"!"):
             if byte == b"!":
-                response = await self._read(int(response))
+                response = await self._read(int(response), buffered_only=buffered_only)
             response = response.decode("utf-8", errors="replace")
             error = self.parse_error(response)
             # if the error is a ConnectionError, raise immediately so the user
@@ -236,14 +252,21 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
             return response == b"t"
         # bulk response
         elif byte == b"$":
-            response = await self._read(int(response))
+            response = await self._read(int(response), buffered_only=buffered_only)
         # verbatim string response
         elif byte == b"=":
-            response = (await self._read(int(response)))[4:]
+            response = (await self._read(int(response), buffered_only=buffered_only))[
+                4:
+            ]
         # array response
         elif byte == b"*":
             response = [
-                (await self._read_response(disable_decoding=disable_decoding))
+                (
+                    await self._read_response(
+                        disable_decoding=disable_decoding,
+                        buffered_only=buffered_only,
+                    )
+                )
                 for _ in range(int(response))
             ]
         # set response
@@ -251,7 +274,12 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
             # redis can return unhashable types (like dict) in a set,
             # so we always convert to a list, to have predictable return types
             response = [
-                (await self._read_response(disable_decoding=disable_decoding))
+                (
+                    await self._read_response(
+                        disable_decoding=disable_decoding,
+                        buffered_only=buffered_only,
+                    )
+                )
                 for _ in range(int(response))
             ]
         # map response
@@ -261,9 +289,14 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
             # became defined to be left-right in version 3.8
             resp_dict = {}
             for _ in range(int(response)):
-                key = await self._read_response(disable_decoding=disable_decoding)
+                key = await self._read_response(
+                    disable_decoding=disable_decoding,
+                    buffered_only=buffered_only,
+                )
                 resp_dict[key] = await self._read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
+                    disable_decoding=disable_decoding,
+                    push_request=push_request,
+                    buffered_only=buffered_only,
                 )
             response = resp_dict
         # push response
@@ -271,7 +304,9 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
             response = [
                 (
                     await self._read_response(
-                        disable_decoding=disable_decoding, push_request=push_request
+                        disable_decoding=disable_decoding,
+                        push_request=push_request,
+                        buffered_only=buffered_only,
                     )
                 )
                 for _ in range(int(response))
@@ -279,7 +314,9 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
             response = await self.handle_push_response(response)
             if not push_request:
                 return await self._read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
+                    disable_decoding=disable_decoding,
+                    push_request=push_request,
+                    buffered_only=buffered_only,
                 )
             else:
                 return response

@@ -1168,6 +1168,15 @@ class Monitor:
             yield await self.next_command()
 
 
+async def _await_connection_can_read(conn: "Connection", timeout: float = 0) -> bool:
+    """Call ``can_read`` on a connection, tolerating legacy no-arg overrides."""
+    can_read = conn.can_read
+    try:
+        return await can_read(timeout=timeout)
+    except TypeError:
+        return await can_read()
+
+
 class PubSub:
     """
     PubSub provides publish, subscribe and listen support to Redis channels.
@@ -1477,14 +1486,24 @@ class PubSub:
         # removed. That swap is a breaking change to the
         # Connection.read_response signature so it must wait for a
         # major release.
-        read_timeout = math.inf if block else timeout
-        response = await self._execute(
-            conn,
-            conn.read_response,
-            timeout=read_timeout,
-            disconnect_on_error=False,
-            push_request=True,
-        )
+        async def try_read():
+            if not block:
+                if not await _await_connection_can_read(conn, timeout):
+                    if timeout == 0:
+                        # Match PubSub.run(): yield so other tasks make progress
+                        # when polling with timeout=0 and no buffered data.
+                        await asyncio.sleep(0)
+                    return None
+                read_timeout = timeout
+            else:
+                read_timeout = math.inf
+            return await conn.read_response(
+                timeout=read_timeout,
+                disconnect_on_error=False,
+                push_request=True,
+            )
+
+        response = await self._execute(conn, try_read)
 
         if conn.health_check_interval and response in self.health_check_response:
             # ignore the health check message as user might not expect it

@@ -68,6 +68,9 @@ class DummyAsyncStream:
         self._buffer.clear()
         return data
 
+    async def _wait_for_data(self, _):
+        return None
+
 
 def make_async_hiredis_parser(
     stream, response=NOT_ENOUGH_DATA, decoded_response=None, has_data=False
@@ -182,6 +185,16 @@ async def test_async_hiredis_can_read_leaves_decoding_to_read_response():
     assert await parser.read_response() == raw.decode()
 
 
+async def test_async_hiredis_read_response_buffered_only_returns_none_incomplete():
+    stream = DummyAsyncStream()
+    parser = make_async_hiredis_parser(
+        stream, response=NOT_ENOUGH_DATA, has_data=True
+    )
+
+    assert await parser.read_response(buffered_only=True) is None
+    assert stream.read_called is False
+
+
 @pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
 async def test_async_resp_can_read_detects_stream_buffer(parser_class):
     stream = DummyAsyncStream(buffer=b"+OK\r\n")
@@ -219,6 +232,37 @@ async def test_async_resp_can_read_prefers_buffered_data_over_eof(parser_class):
     parser._buffer = b"+OK\r\n"
 
     assert await parser.can_read() is True
+    assert stream.read_called is False
+
+
+@pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
+async def test_async_resp_read_response_buffered_only_returns_none_incomplete(
+    parser_class,
+):
+    stream = DummyAsyncStream()
+    parser = parser_class(socket_read_size=65536)
+    parser._connected = True
+    parser._stream = stream
+    parser._buffer = b"$10\r\n"
+    parser._pos = 0
+    parser.encoder = mock.Mock()
+    parser.encoder.decode.side_effect = lambda value: value
+
+    assert await parser.read_response(buffered_only=True) is None
+    assert stream.read_called is False
+
+
+@pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
+async def test_async_connection_can_read_eof_after_wait_raises(parser_class):
+    stream = DummyAsyncStream(eof=True)
+    parser = parser_class(socket_read_size=65536)
+    parser._connected = True
+    parser._stream = stream
+    conn = Connection()
+    conn._parser = parser
+
+    with pytest.raises(ConnectionError):
+        await conn.can_read(timeout=0.1)
     assert stream.read_called is False
 
 

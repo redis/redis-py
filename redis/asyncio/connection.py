@@ -1322,21 +1322,33 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
     @deprecated_function(
         version="8.0.0", reason="Use can_read() instead", name="can_read_destructive"
     )
-    async def can_read_destructive(self) -> bool:
+    async def can_read_destructive(self, timeout: float = 0) -> bool:
         """Check the socket to see if there's data loaded in the buffer."""
-        try:
-            return await self._parser.can_read()
-        except OSError as e:
-            await self.disconnect(nowait=True)
-            host_error = self._host_error()
-            raise ConnectionError(f"Error while reading from {host_error}: {e.args}")
+        return await self.can_read(timeout=timeout)
 
-    async def can_read(self) -> bool:
-        """Check the socket to see if there's data loaded in the buffer."""
+    async def can_read(self, timeout: float = 0) -> bool:
+        """Check the socket to see if there's data loaded in the buffer.
+
+        When ``timeout`` is ``0``, return immediately if no data is buffered.
+        When ``timeout`` is positive, wait up to that many seconds for data
+        to become readable without entering ``asyncio.timeout(0)``, which can
+        corrupt the event loop's callback heap under concurrent PubSub polling
+        (#3748).
+        """
         # TODO: Rename this API; it detects pending data or dirty/closed
         # connection state, not only whether application data can be read.
         try:
+            if await self._parser.can_read():
+                return True
+            if timeout == 0:
+                return False
+            stream = self._parser._stream
+            if stream is None:
+                return False
+            await asyncio.wait_for(stream._wait_for_data("read"), timeout=timeout)
             return await self._parser.can_read()
+        except asyncio.TimeoutError:
+            return False
         except OSError as e:
             await self.disconnect(nowait=True)
             host_error = self._host_error()
@@ -1381,7 +1393,15 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             read_timeout = timeout if timeout is not None else self.socket_timeout
         host_error = self._host_error()
         try:
-            if read_timeout is not None:
+            if read_timeout == 0:
+                if not await self.can_read(timeout=0):
+                    return None
+                response = await self._read_response_from_parser(
+                    disable_decoding=disable_decoding,
+                    push_request=push_request,
+                    buffered_only=True,
+                )
+            elif read_timeout is not None:
                 timeout_context = async_timeout(read_timeout)
                 if timeout is None:
                     async with timeout_context as active_timeout:
@@ -1436,13 +1456,22 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         return response
 
     async def _read_response_from_parser(
-        self, disable_decoding: bool = False, push_request: bool | None = False
+        self,
+        disable_decoding: bool = False,
+        push_request: bool | None = False,
+        *,
+        buffered_only: bool = False,
     ):
         if check_protocol_version(self.protocol, 3):
             return await self._parser.read_response(
-                disable_decoding=disable_decoding, push_request=push_request
+                disable_decoding=disable_decoding,
+                push_request=push_request,
+                buffered_only=buffered_only,
             )
-        return await self._parser.read_response(disable_decoding=disable_decoding)
+        return await self._parser.read_response(
+            disable_decoding=disable_decoding,
+            buffered_only=buffered_only,
+        )
 
     def pack_command(self, *args: EncodableT) -> List[bytes]:
         """Pack a series of arguments into the Redis protocol"""
