@@ -68,6 +68,7 @@ from redis.event import (
 from redis.exceptions import (
     AskError,
     AuthenticationError,
+    AuthorizationError,
     ClusterDownError,
     ClusterError,
     ConnectionError,
@@ -78,6 +79,7 @@ from redis.exceptions import (
     MaxConnectionsError,
     MovedError,
     RedisClusterException,
+    RedisClusterUnreachableError,
     RedisError,
     ResponseError,
     SlotNotCoveredError,
@@ -1925,11 +1927,17 @@ class RedisCluster(
                 raise
             except (ConnectionError, TimeoutError) as e:
                 if is_debug_log_enabled():
-                    socket_address = self._extracts_socket_address(connection)
-                    args_log_str = truncate_text(" ".join(map(safe_str, args)))
+                    connection_details = (
+                        connection.extract_connection_details()
+                        if connection
+                        else "no connection"
+                    )
+                    # Log only the command name - argument values can carry
+                    # secrets or user data.
+                    args_log_str = safe_str(args[0])
                     logger.debug(
                         f"{type(e).__name__} received for command {args_log_str}, on node {target_node.name}, "
-                        f"and connection: {connection} using local socket address: {socket_address}, error: {e}"
+                        f"and connection: {connection}, {connection_details}, error: {e}"
                     )
                 # this is used to report the metrics based on host and port info
                 e.connection = connection if connection else target_node
@@ -1968,11 +1976,17 @@ class RedisCluster(
                 raise e
             except MovedError as e:
                 if is_debug_log_enabled():
-                    socket_address = self._extracts_socket_address(connection)
-                    args_log_str = truncate_text(" ".join(map(safe_str, args)))
+                    connection_details = (
+                        connection.extract_connection_details()
+                        if connection
+                        else "no connection"
+                    )
+                    # Log only the command name - argument values can carry
+                    # secrets or user data.
+                    args_log_str = safe_str(args[0])
                     logger.debug(
                         f"MOVED error received for command {args_log_str}, on node {target_node.name}, "
-                        f"and connection: {connection} using local socket address: {socket_address}, error: {e}"
+                        f"and connection: {connection}, {connection_details}, error: {e}"
                     )
                 # First, we will try to patch the slots/nodes cache with the
                 # redirected node output and try again. If MovedError exceeds
@@ -2006,11 +2020,17 @@ class RedisCluster(
                 )
             except TryAgainError as e:
                 if is_debug_log_enabled():
-                    socket_address = self._extracts_socket_address(connection)
-                    args_log_str = truncate_text(" ".join(map(safe_str, args)))
+                    connection_details = (
+                        connection.extract_connection_details()
+                        if connection
+                        else "no connection"
+                    )
+                    # Log only the command name - argument values can carry
+                    # secrets or user data.
+                    args_log_str = safe_str(args[0])
                     logger.debug(
                         f"TRYAGAIN error received for command {args_log_str}, on node {target_node.name}, "
-                        f"and connection: {connection} using local socket address: {socket_address}"
+                        f"and connection: {connection}, {connection_details}"
                     )
                 if ttl < self.RedisClusterRequestTTL / 2:
                     time.sleep(0.05)
@@ -2027,11 +2047,17 @@ class RedisCluster(
                 )
             except AskError as e:
                 if is_debug_log_enabled():
-                    socket_address = self._extracts_socket_address(connection)
-                    args_log_str = truncate_text(" ".join(map(safe_str, args)))
+                    connection_details = (
+                        connection.extract_connection_details()
+                        if connection
+                        else "no connection"
+                    )
+                    # Log only the command name - argument values can carry
+                    # secrets or user data.
+                    args_log_str = safe_str(args[0])
                     logger.debug(
                         f"ASK error received for command {args_log_str}, on node {target_node.name}, "
-                        f"and connection: {connection} using local socket address: {socket_address}, error: {e}"
+                        f"and connection: {connection}, {connection_details}, error: {e}"
                     )
                 redirect_addr = get_node_name(host=e.host, port=e.port)
                 asking = True
@@ -2157,20 +2183,6 @@ class RedisCluster(
             retry_attempts=retry_attempts if retry_attempts is not None else 0,
             is_internal=is_internal,
         )
-
-    def _extracts_socket_address(
-        self, connection: Optional[Connection]
-    ) -> Optional[int]:
-        if connection is None:
-            return None
-        try:
-            socket_address = (
-                connection._sock.getsockname() if connection._sock else None
-            )
-            socket_address = socket_address[1] if socket_address else None
-        except (AttributeError, OSError):
-            pass
-        return socket_address
 
     def close(self) -> None:
         try:
@@ -2801,6 +2813,11 @@ class NodesManager:
                         else:
                             startup_node.redis_connection = r
                     try:
+                        if is_debug_log_enabled():
+                            logger.debug(
+                                "Topology refresh: querying CLUSTER SLOTS on "
+                                f"{startup_node.name}"
+                            )
                         # Make sure cluster mode is enabled on this node
                         cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
                         if disconnect_startup_nodes_pools:
@@ -2819,6 +2836,11 @@ class NodesManager:
                 except Exception as e:
                     # Try the next startup node.
                     # The exception is saved and raised only if we have no more nodes.
+                    if is_debug_log_enabled():
+                        logger.debug(
+                            "Topology refresh: CLUSTER SLOTS failed on "
+                            f"{startup_node.name}: {type(e).__name__}: {e}"
+                        )
                     exception = e
                     continue
 
@@ -2880,12 +2902,34 @@ class NodesManager:
                                     )
 
                 fully_covered = self.check_slots_coverage(tmp_slots)
+                if is_debug_log_enabled():
+                    logger.debug(
+                        f"Topology refresh: CLUSTER SLOTS from {startup_node.name} "
+                        f"reported nodes {sorted(tmp_nodes_cache)}; "
+                        f"slots fully covered: {fully_covered}"
+                    )
                 if fully_covered:
                     # Don't need to continue to the next startup node if all
                     # slots are covered
                     break
 
             if not startup_nodes_reachable:
+                # The unreachable subtype is reserved for connectivity failures:
+                # MultiDB registers it as retryable, so a deterministic
+                # server/configuration error (e.g. cluster mode disabled or
+                # invalid credentials - AuthenticationError and
+                # AuthorizationError subclass ConnectionError but cannot be
+                # repaired by a failover) must keep surfacing as a plain
+                # RedisClusterException.
+                if isinstance(
+                    exception, (ConnectionError, TimeoutError, OSError)
+                ) and not isinstance(
+                    exception, (AuthenticationError, AuthorizationError)
+                ):
+                    raise RedisClusterUnreachableError(
+                        f"Redis Cluster cannot be connected. Please provide at least "
+                        f"one reachable node: {str(exception)}"
+                    ) from exception
                 raise RedisClusterException(
                     f"Redis Cluster cannot be connected. Please provide at least "
                     f"one reachable node: {str(exception)}"

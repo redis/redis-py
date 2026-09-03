@@ -1,5 +1,6 @@
 import copy
 import functools
+import logging
 import os
 import socket
 import sys
@@ -124,6 +125,32 @@ if HIREDIS_AVAILABLE:
     DefaultParser = _HiredisParser
 else:
     DefaultParser = _RESP2Parser
+
+logger = logging.getLogger(__name__)
+
+
+def add_debug_log_for_connection_failure(
+    connection: "AbstractConnection",
+    error: BaseException,
+    operation: str,
+) -> None:
+    """
+    Render the connection's live state on a failure that is about to close it.
+
+    Must be called *before* ``disconnect()``. ``extract_connection_details()``
+    reads the resolved ip, local port and armed read timeout off the socket, so
+    once the socket is gone it can only report ``not connected`` - which hides
+    exactly the state needed to explain the failure. In particular it is what
+    tells apart a read that ran under the original timeout from one that ran
+    under a relaxed maintenance timeout.
+    """
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            f"{type(error).__name__} while {operation}, "
+            f"with connection: {connection}, "
+            f"details: {connection.extract_connection_details()}, "
+            f"error: {error}",
+        )
 
 
 class HiredisRespSerializer:
@@ -709,9 +736,6 @@ class MaintNotificationsAbstractConnection:
                 and maint_notifications_config.enabled == "auto"
             ):
                 # Log warning but don't fail the connection
-                import logging
-
-                logger = logging.getLogger(__name__)
                 logger.debug(f"Failed to enable maintenance notifications: {e}")
             else:
                 raise
@@ -747,8 +771,10 @@ class MaintNotificationsAbstractConnection:
             conn_socket = self._get_socket()
             if conn_socket is not None:
                 peer_addr = conn_socket.getpeername()
-                if peer_addr and len(peer_addr) >= 1:
-                    # For TCP sockets, peer_addr is typically (host, port) tuple
+                # For TCP sockets, peer_addr is typically a (host, port) tuple.
+                # AF_UNIX sockets report a path string instead, and indexing it
+                # would yield the first character of the path.
+                if isinstance(peer_addr, tuple) and peer_addr:
                     # Return just the host part
                     return peer_addr[0]
         except (AttributeError, OSError):
@@ -821,12 +847,22 @@ class MaintNotificationsAbstractConnection:
             # will lead to a deadlock
             if conn_socket.gettimeout() != 0:
                 conn_socket.settimeout(timeout)
+            # Deliberately outside the guard above. The parser caches this value
+            # to restore after a per-call timeout override, so while a can_read
+            # probe holds the socket at 0 the cache *is* the pending restore
+            # value: writing it is how the new timeout gets armed without
+            # flipping the socket back to blocking mid-read. Skipping it here
+            # instead would let the probe restore the pre-relaxation timeout and
+            # lose a maintenance relaxation for the life of the connection.
             self.update_parser_timeout(timeout)
 
     def update_parser_timeout(self, timeout: Optional[float] = None):
         parser = self._get_parser()
         if parser and parser._buffer:
-            if isinstance(parser, _RESP3Parser) and timeout:
+            # Both parsers cache this value to restore after a per-call timeout
+            # override, so both must receive exactly what was armed on the
+            # socket - including None, which means "block indefinitely".
+            if isinstance(parser, _RESP3Parser):
                 parser._buffer.socket_timeout = timeout
             elif isinstance(parser, _HiredisParser):
                 parser._socket_timeout = timeout
@@ -1425,10 +1461,12 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 command = [command]
             for item in command:
                 self._sock.sendall(item)
-        except socket.timeout:
+        except socket.timeout as e:
+            add_debug_log_for_connection_failure(self, e, "writing command")
             self.disconnect()
             raise TimeoutError("Timeout writing to socket")
         except OSError as e:
+            add_debug_log_for_connection_failure(self, e, "writing command")
             self.disconnect()
             if len(e.args) == 1:
                 errno, errmsg = "UNKNOWN", e.args[0]
@@ -1436,11 +1474,12 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 errno = e.args[0]
                 errmsg = e.args[1]
             raise ConnectionError(f"Error {errno} while writing to socket. {errmsg}.")
-        except BaseException:
+        except BaseException as e:
             # BaseExceptions can be raised when a socket send operation is not
             # finished, e.g. due to a timeout.  Ideally, a caller could then re-try
             # to send un-sent data. However, the send_packed_command() API
             # does not support it so there is no point in keeping the connection open.
+            add_debug_log_for_connection_failure(self, e, "writing command")
             self.disconnect()
             raise
 
@@ -1491,19 +1530,31 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 response = self._parser.read_response(
                     disable_decoding=disable_decoding, timeout=timeout
                 )
-        except socket.timeout:
+        except socket.timeout as e:
             if disconnect_on_error:
+                add_debug_log_for_connection_failure(self, e, "reading response")
+                self.disconnect()
+            raise TimeoutError(f"Timeout reading from {host_error}")
+        except TimeoutError as e:
+            # The parsers raise redis.exceptions.TimeoutError, which is not an
+            # OSError, so without this branch it would fall through to
+            # BaseException and keep the parser's undecorated message. Re-raise
+            # it with the host, matching what the async stack already reports.
+            if disconnect_on_error:
+                add_debug_log_for_connection_failure(self, e, "reading response")
                 self.disconnect()
             raise TimeoutError(f"Timeout reading from {host_error}")
         except OSError as e:
             if disconnect_on_error:
+                add_debug_log_for_connection_failure(self, e, "reading response")
                 self.disconnect()
             raise ConnectionError(f"Error while reading from {host_error} : {e.args}")
-        except BaseException:
+        except BaseException as e:
             # Also by default close in case of BaseException.  A lot of code
             # relies on this behaviour when doing Command/Response pairs.
             # See #1128.
             if disconnect_on_error:
+                add_debug_log_for_connection_failure(self, e, "reading response")
                 self.disconnect()
             raise
 
@@ -1595,16 +1646,48 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         self._socket_connect_timeout = value
 
     def extract_connection_details(self) -> str:
-        socket_address = None
+        """
+        Render the connection's identity, maintenance state and effective timeouts.
+
+        This is what the debug logs use to explain a failed or timed out command:
+
+        - ``host`` vs ``orig host`` says whether the connection still points at the
+          node being moved away from, or has already been repointed at the new one.
+        - ``state`` says whether maintenance handling touched this connection at
+          all, so an unaffected node's connections are distinguishable.
+        - ``socket_timeout`` vs ``active read timeout`` says which timeout the read
+          actually ran under. They diverge for a command that was already in flight
+          when the relaxed timeout was applied.
+        """
         if self._sock is None:
             return "not connected"
+
+        socket_address = None
+        active_read_timeout = None
         try:
-            socket_address = self._sock.getsockname() if self._sock else None
-            socket_address = socket_address[1] if socket_address else None
+            socket_name = self._sock.getsockname()
+            # AF_UNIX sockets report a path string rather than a (host, port) tuple
+            if isinstance(socket_name, tuple) and len(socket_name) > 1:
+                socket_address = socket_name[1]
+            # The timeout armed on the socket is what a blocking read is really
+            # using, which can lag self.socket_timeout for an in-flight command.
+            active_read_timeout = self._sock.gettimeout()
         except (AttributeError, OSError):
             pass
 
-        return f"connected to ip {self.get_resolved_ip()}, local socket port: {socket_address}"
+        state = getattr(self.maintenance_state, "value", self.maintenance_state)
+        return (
+            f"connected to ip {self.get_resolved_ip()}, "
+            f"local socket port: {socket_address}, "
+            f"host: {self._host_error()} "
+            f"(orig: {getattr(self, 'orig_host_address', None)}), "
+            f"state: {state}, "
+            f"socket_timeout: {self.socket_timeout} "
+            f"(orig: {getattr(self, 'orig_socket_timeout', None)}), "
+            f"active read timeout: {active_read_timeout}, "
+            f"should_reconnect: {self.should_reconnect()}, "
+            f"notification_hash: {self.maintenance_notification_hash}"
+        )
 
 
 class Connection(AbstractConnection):
@@ -2132,7 +2215,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._conn._connect()
 
     def _host_error(self):
-        self._conn._host_error()
+        return self._conn._host_error()
 
     def _enable_tracking_callback(self, conn: ConnectionInterface) -> None:
         conn.send_command("CLIENT", "TRACKING", "ON")
@@ -2828,6 +2911,11 @@ class MaintNotificationsAbstractConnectionPool:
                     raise ValueError(
                         "Either maint_notifications_pool_handler or oss_cluster_maint_notifications_handler must be set"
                     )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Marking active connection for reconnect after config update "
+                        f"config update: {conn}, {conn.extract_connection_details()}"
+                    )
                 conn.mark_for_reconnect()
 
     def _should_update_connection(
@@ -2986,11 +3074,17 @@ class MaintNotificationsAbstractConnectionPool:
 
         :param moving_address_src: The address of the node that is being moved.
         """
+        debug = logger.isEnabledFor(logging.DEBUG)
         with self._get_pool_lock():
             for conn in self._get_in_use_connections():
                 if self._should_update_connection(
                     conn, "connected_address", moving_address_src
                 ):
+                    if debug:
+                        logger.debug(
+                            f"Marking active connection for reconnect: {conn}, "
+                            f"{conn.extract_connection_details()}"
+                        )
                     conn.mark_for_reconnect()
 
     def disconnect_free_connections(
@@ -3003,11 +3097,17 @@ class MaintNotificationsAbstractConnectionPool:
 
         :param moving_address_src: The address of the node that is being moved.
         """
+        debug = logger.isEnabledFor(logging.DEBUG)
         with self._get_pool_lock():
             for conn in self._get_free_connections():
                 if self._should_update_connection(
                     conn, "connected_address", moving_address_src
                 ):
+                    if debug:
+                        logger.debug(
+                            f"Disconnecting free connection: {conn}, "
+                            f"{conn.extract_connection_details()}"
+                        )
                     conn.disconnect()
 
 
@@ -3523,6 +3623,11 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
             if self.owns_connection(connection):
                 if connection.should_reconnect():
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            "Disconnecting released connection marked for reconnect: "
+                            f"{connection}, {connection.extract_connection_details()}"
+                        )
                     connection.disconnect()
                 self._available_connections.append(connection)
                 self._event_dispatcher.dispatch(
@@ -3963,6 +4068,11 @@ class BlockingConnectionPool(ConnectionPool):
                 )
                 return
             if connection.should_reconnect():
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Disconnecting released connection marked for reconnect: "
+                        f"{connection}, {connection.extract_connection_details()}"
+                    )
                 connection.disconnect()
             # Put the connection back into the pool.
             pool_name = get_pool_name(self)
