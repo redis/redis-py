@@ -97,9 +97,11 @@ def trigger_network_failure_action(
 
 
 class TestActiveActive:
-    def teardown_method(self, method):
-        # Timeout so the cluster could recover from network failure.
-        sleep(10)
+    # No teardown wait for the cluster to recover from the injected network failure: the
+    # r_multi_db fixture polls the endpoints until they answer before building the next
+    # test's client, which is the condition a blind sleep was approximating. Every test
+    # here only advances once the fault injector reports its action complete, so nothing
+    # is left in flight for the poll to race.
 
     @pytest.mark.parametrize(
         "r_multi_db",
