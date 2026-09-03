@@ -4377,6 +4377,76 @@ class TestClusterPipeline:
             pipe.evalsha(sha, 0)
             assert await pipe.execute() == [42, 42]
 
+    async def test_transaction_releases_connection_when_slot_owner_changes(
+        self,
+    ) -> None:
+        """
+        If the slot map changes while a transaction holds a connection (without
+        this pipeline seeing MOVED), the next acquisition must release the old
+        connection to its real owner and take one from the new node. reset()
+        must also release via find_connection_owner, not a stale
+        _transaction_node reference (#4253).
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            original_node = r.get_node(host=default_host, port=7000)
+            new_node = r.get_node(host=default_host, port=7001)
+            assert original_node is not None and new_node is not None
+            assert original_node.name != new_node.name
+
+            def _seed_owned_connection(node: ClusterNode) -> Connection:
+                while node._free:
+                    node._free.pop()
+                conn = mock.AsyncMock(spec=Connection)
+                conn.host = node.host
+                conn.port = node.port
+                conn.db = 0
+                conn.is_connected = True
+                conn.should_reconnect.return_value = False
+                node._connections.append(conn)
+                node._free.append(conn)
+                return conn
+
+            original_conn = _seed_owned_connection(original_node)
+            new_conn = _seed_owned_connection(new_node)
+
+            slot = 0
+            r.nodes_manager.slots_cache[slot] = [original_node]
+
+            pipe = r.pipeline(transaction=True)
+            strategy = pipe._execution_strategy
+            # Simulate a mid-WATCH hold without talking to Redis
+            strategy._pipeline_slots = {slot}
+            strategy._watching = True
+            strategy._transaction_node = original_node
+            strategy._transaction_connection = original_node.acquire_connection()
+            assert strategy._transaction_connection is original_conn
+            assert original_conn not in original_node._free
+
+            # Concurrent topology refresh retargets the slot
+            r.nodes_manager.slots_cache[slot] = [new_node]
+
+            node, conn = strategy._get_client_and_connection_for_transaction()
+
+            assert node is new_node
+            assert strategy._transaction_node is new_node
+            assert conn is new_conn
+            assert conn is strategy._transaction_connection
+            assert conn is not original_conn
+            assert new_node.owns_connection(conn)
+            assert original_conn in original_node._free
+
+            # Prove reset() uses find_connection_owner even if _transaction_node
+            # still points at the previous owner.
+            strategy._watching = False
+            strategy._transaction_node = original_node
+            await pipe.reset()
+            assert strategy._transaction_connection is None
+            assert new_conn in new_node._free
+            assert new_conn not in original_node._free
+        finally:
+            await r.aclose()
+
     async def test_empty_stack(self, r: RedisCluster) -> None:
         """If a pipeline is executed with no commands it should return a empty list."""
         p = r.pipeline()

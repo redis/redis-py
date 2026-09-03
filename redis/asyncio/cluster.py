@@ -1782,6 +1782,10 @@ class ClusterNode:
             connection.reset_should_reconnect()
         self._free.append(connection)
 
+    def owns_connection(self, connection: Connection) -> bool:
+        """Return True if this node created and still tracks ``connection``."""
+        return connection in self._connections
+
     async def _disconnect_and_release(self, connection: Connection) -> None:
         try:
             await connection.disconnect()
@@ -2069,6 +2073,17 @@ class NodesManager:
             raise DataError(
                 "get_node requires one of the following: 1. node name 2. host and port"
             )
+
+    def find_connection_owner(self, connection: Connection) -> Optional["ClusterNode"]:
+        """
+        Return the ClusterNode that owns ``connection``, matched by host/port.
+
+        Used when releasing a transaction connection after a topology change so
+        the connection is returned to its real owner rather than the currently
+        resolved slot node.
+        """
+        node_name = get_node_name(connection.host, connection.port)
+        return self.nodes_cache.get(node_name)
 
     def set_nodes(
         self,
@@ -3173,20 +3188,33 @@ class TransactionStrategy(AbstractStrategy):
         altered as long as the watch commands for those keys were sent over the same
         connection. So once we start watching a key, we fetch a connection to the
         node that owns that slot and reuse it.
+
+        If the slot map changed while a connection is held (e.g. concurrent MOVED
+        refresh), release the previous connection to its real owner and acquire
+        a new one from the newly resolved node — matching sync TransactionStrategy.
         """
         if not self._pipeline_slots:
             raise RedisClusterException(
                 "At least a command with a key is needed to identify a node"
             )
 
-        node: ClusterNode = self._pipe.cluster_client.nodes_manager.get_node_from_slot(
+        nodes_manager = self._pipe.cluster_client.nodes_manager
+        node: ClusterNode = nodes_manager.get_node_from_slot(
             list(self._pipeline_slots)[0], False
         )
         self._transaction_node = node
 
+        if self._transaction_connection:
+            if not node.owns_connection(self._transaction_connection):
+                previous_node = nodes_manager.find_connection_owner(
+                    self._transaction_connection
+                )
+                if previous_node:
+                    previous_node.release(self._transaction_connection)
+                self._transaction_connection = None
+
         if not self._transaction_connection:
-            connection: Connection = self._transaction_node.acquire_connection()
-            self._transaction_connection = connection
+            self._transaction_connection = self._transaction_node.acquire_connection()
 
         return self._transaction_node, self._transaction_connection
 
@@ -3355,10 +3383,14 @@ class TransactionStrategy(AbstractStrategy):
             type(error) in self.SLOT_REDIRECT_ERRORS
             or type(error) in self.CONNECTION_ERRORS
         ):
-            if self._transaction_connection and self._transaction_node:
-                # Disconnect and release back to pool
+            if self._transaction_connection:
+                # Disconnect and release back to the connection's real owner
                 await self._transaction_connection.disconnect()
-                self._transaction_node.release(self._transaction_connection)
+                node = self._pipe.cluster_client.nodes_manager.find_connection_owner(
+                    self._transaction_connection
+                )
+                if node:
+                    node.release(self._transaction_connection)
                 self._transaction_connection = None
 
             self._pipe.cluster_client.reinitialize_counter += 1
@@ -3546,6 +3578,7 @@ class TransactionStrategy(AbstractStrategy):
 
     async def reset(self):
         self._command_queue = []
+        nodes_manager = self._pipe.cluster_client.nodes_manager
 
         try:
             # make sure to reset the connection state in the event that we
@@ -3569,21 +3602,33 @@ class TransactionStrategy(AbstractStrategy):
                     raise
                 else:
                     # On the happy path, honor lazy reconnect before release.
-                    await self._transaction_node.disconnect_if_needed(
+                    owner = nodes_manager.find_connection_owner(
                         self._transaction_connection
                     )
+                    if owner:
+                        await owner.disconnect_if_needed(self._transaction_connection)
+                    elif self._transaction_node:
+                        await self._transaction_node.disconnect_if_needed(
+                            self._transaction_connection
+                        )
         finally:
-            # Always return the connection to the node's free queue, even on
-            # cancellation, so cancelled resets do not leak pooled
-            # connections. Detach the reference before releasing so the
-            # strategy never holds a pointer to a returned connection.
-            # ClusterNode.release is synchronous, so no shield is required.
-            if self._transaction_connection and self._transaction_node:
+            # Always return the connection to its real owner's free queue,
+            # even on cancellation, so cancelled resets do not leak pooled
+            # connections. Resolve the owner explicitly: self._transaction_node
+            # may already point at a different node after a topology change.
+            # Detach the reference before releasing so the strategy never holds
+            # a pointer to a returned connection. ClusterNode.release is
+            # synchronous, so no shield is required.
+            if self._transaction_connection:
                 connection, self._transaction_connection = (
                     self._transaction_connection,
                     None,
                 )
-                self._transaction_node.release(connection)
+                owner = nodes_manager.find_connection_owner(connection)
+                if owner:
+                    owner.release(connection)
+                elif self._transaction_node:
+                    self._transaction_node.release(connection)
             # clean up the other instance attributes
             self._transaction_connection = None
             self._transaction_node = None
