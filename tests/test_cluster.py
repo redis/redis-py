@@ -32,6 +32,7 @@ from redis.cluster import (
     get_node_name,
 )
 from redis.cache import CacheConfig
+from redis.commands.cluster import ClusterMultiKeyCommands
 from redis.commands.core import HotkeysMetricsTypes
 from redis.commands.metadata import (
     CommandMetadata,
@@ -3139,6 +3140,25 @@ class TestStaticMetadataRouting:
             get_node.assert_any_call(
                 rc.nodes_manager, 200, True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS
             )
+
+    @pytest.mark.fixed_client
+    def test_custom_host_class_without_strategy_executes_split_slots(self):
+        class ThirdPartyCluster(ClusterMultiKeyCommands):
+            def __init__(self, rc):
+                self.encoder = rc.encoder
+                self.nodes_manager = rc.nodes_manager
+                self._rc = rc
+
+            def pipeline(self):
+                return self._rc.pipeline()
+
+        rc = get_mocked_redis_client(host=default_host, port=7000)
+        custom_client = ThirdPartyCluster(rc)
+        pipe = Mock()
+        pipe.execute.return_value = ["OK", "OK"]
+        with patch.object(custom_client, "pipeline", return_value=pipe):
+            result = custom_client.mset_nonatomic({"a": "1", "b": "2"})
+            assert result == ["OK", "OK"]
 
     @pytest.mark.fixed_client
     def test_every_node_client_gets_the_same_resolver(self):

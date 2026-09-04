@@ -32,6 +32,7 @@ from redis.cluster import (
     LoadBalancingStrategy,
     get_node_name,
 )
+from redis.commands.cluster import AsyncClusterMultiKeyCommands
 from redis.commands.core import HotkeysMetricsTypes
 from redis.commands.metadata import AsyncDynamicMetadataResolver, RequestPolicy
 from redis.commands.policies import AsyncStaticPolicyResolver
@@ -2956,6 +2957,27 @@ class TestStaticMetadataRouting:
             get_node.assert_any_call(
                 rc.nodes_manager, 200, True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS
             )
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_custom_host_class_without_strategy_executes_split_slots(self) -> None:
+        class ThirdPartyAsyncCluster(AsyncClusterMultiKeyCommands):
+            def __init__(self, rc):
+                self.encoder = rc.encoder
+                self.nodes_manager = rc.nodes_manager
+                self._rc = rc
+                self._initialize = False
+
+            def pipeline(self):
+                return self._rc.pipeline()
+
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+        custom_client = ThirdPartyAsyncCluster(rc)
+        pipe = Mock()
+        pipe.execute = mock.AsyncMock(return_value=["OK", "OK"])
+        with patch.object(custom_client, "pipeline", return_value=pipe):
+            result = await custom_client.mset_nonatomic({"a": "1", "b": "2"})
+            assert result == ["OK", "OK"]
         await rc.aclose()
 
     @pytest.mark.fixed_client

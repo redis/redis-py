@@ -187,6 +187,9 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
     A class containing commands that handle more than one key
     """
 
+    read_from_replicas: bool = False
+    load_balancing_strategy: Any = None
+
     def _partition_keys_by_slot(self, keys: Iterable[KeyT]) -> Dict[int, List[KeyT]]:
         """Split keys into a dictionary that maps a slot to a list of keys."""
 
