@@ -902,15 +902,18 @@ def _parse_client_info_fields(value):
     fields = {}
     last_key = None
     for token in value.split(" "):
-        if not token:
-            # Collapse runs of whitespace so a double space between pairs does
-            # not leave a trailing space glued onto the previous value.
-            continue
         if "=" in token:
             key, val = token.split("=", 1)
             fields[key] = val
             last_key = key
         elif last_key is not None:
+            # A token without ``=`` continues the previous value, since a
+            # Unix-socket path may contain spaces. Empty tokens (from two or
+            # more consecutive spaces in the path) are reattached the same
+            # way, so a run of spaces round-trips verbatim instead of being
+            # collapsed. Tokens before the first ``key=`` (``last_key is
+            # None``, i.e. a leading space or an empty/whitespace-only blob)
+            # are dropped, yielding an empty dict rather than raising.
             fields[last_key] += " " + token
     return fields
 

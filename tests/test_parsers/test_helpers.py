@@ -136,9 +136,12 @@ def test_parse_client_list_shares_guard():
     # also protects CLIENT LIST. A line whose first token has no "=" (only
     # possible with malformed input) is skipped instead of raising KeyError.
     assert parse_client_list("junk id=3") == [{"id": "3"}]
-    # A double space between pairs must not glue a trailing space onto the
-    # previous value.
-    assert parse_client_list("id=1  name=foo") == [{"id": "1", "name": "foo"}]
+    # Consecutive spaces inside a value round-trip verbatim: a unix-socket
+    # path can contain two or more spaces in a row, and CLIENT LIST on master
+    # preserves them, so the shared tokenizer must not collapse them.
+    assert parse_client_list("id=1 addr=/tmp/a  b/r.sock:0 fd=9") == [
+        {"id": "1", "addr": "/tmp/a  b/r.sock:0", "fd": "9"}
+    ]
 
 
 @pytest.mark.fixed_client
