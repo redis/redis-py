@@ -237,6 +237,42 @@ async def test_async_resp_read_response_raises_after_disconnect(parser_class):
 
 
 @pytest.mark.parametrize(
+    "parser_class",
+    [_AsyncRESP2Parser, _AsyncRESP3Parser, _AsyncHiredisParser],
+    ids=["AsyncRESP2Parser", "AsyncRESP3Parser", "AsyncHiredisParser"],
+)
+async def test_async_parser_read_guards_report_a_never_connected_parser(parser_class):
+    # The read guards consult _connected, which used to be assigned only by
+    # on_connect() / on_disconnect(). A parser that has never connected - the
+    # one a fresh Connection owns before connect() - therefore raised
+    # AttributeError from those guards instead of the retryable ConnectionError,
+    # so no retry or failover layer acted on it. can_read() raises OSError,
+    # which Connection.can_read() converts to ConnectionError.
+    if parser_class is _AsyncHiredisParser and not HIREDIS_AVAILABLE:
+        pytest.skip("Hiredis not available")
+
+    parser = parser_class(socket_read_size=65536)
+
+    assert parser._connected is False
+    with pytest.raises(ConnectionError):
+        await parser.read_response()
+    with pytest.raises(OSError):
+        await parser.can_read()
+
+
+async def test_connection_read_guards_report_a_never_connected_connection():
+    # End-to-end counterpart: the AttributeError also sailed past
+    # Connection.can_read()'s ``except OSError``, so neither the ConnectionError
+    # conversion nor the disconnect() it performs happened.
+    conn = Connection()
+
+    with pytest.raises(ConnectionError):
+        await conn.read_response()
+    with pytest.raises(ConnectionError):
+        await conn.can_read()
+
+
+@pytest.mark.parametrize(
     ("protocol", "parser_class", "expected_parser_class"),
     [
         (None, _AsyncRESP2Parser, _AsyncRESP3Parser),

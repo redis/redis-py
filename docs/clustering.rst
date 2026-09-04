@@ -190,6 +190,11 @@ the channel name in the request to find its keyslot 2. Selecting a node
 that handles the keyslot: If read_from_replicas is set to true or
 load_balancing_strategy is provided, a replica can be selected.
 
+For sharded pubsub, the client instead keeps each shard channel on the node
+that currently owns its slot and re-routes it when the topology changes; see
+the sharded pubsub section of :doc:`advanced_features` for that behavior and
+what it means for the errors ``get_sharded_message()`` raises.
+
 Known PubSub Limitations
 ------------------------
 

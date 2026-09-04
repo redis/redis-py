@@ -554,6 +554,24 @@ Similarly, the same process can be used to acquire sharded pubsub messages, that
     >>> # assume someone sends a message along the channel via a publish
     >>> message = p.get_sharded_message(target_node=second_node)
 
+The client keeps shard subscriptions attached to the node that currently owns
+their slot, so a slot migration or a lost node needs no handling in application
+code. When a poll on one node fails, or a node replies ``MOVED`` because it no
+longer owns the slot, the client re-routes the affected shard channels to their
+new owner and keeps polling the remaining nodes.
+
+**Important**: this affects what ``get_sharded_message()`` raises.
+
+- A connection failure on a single node is no longer surfaced while other nodes
+  can still deliver. ``get_sharded_message()`` returns the messages those nodes
+  hold, and raises only when every node polled in the pass failed.
+- A ``MOVED`` reply is handled internally and no longer raised. The channels the
+  former owner no longer serves are re-subscribed on the new owner.
+- Code that caught an exception from ``get_sharded_message()`` only to tear the
+  subscription down and re-subscribe is no longer needed.
+- ``get_sharded_message(target_node=...)`` is unchanged: a caller that names a
+  single node still gets its connection errors raised.
+
 
 Monitor
 ~~~~~~~

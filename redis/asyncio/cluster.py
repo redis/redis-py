@@ -9,6 +9,7 @@ import warnings
 import weakref
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from contextlib import nullcontext
 from copy import copy
 from itertools import chain
 from types import MethodType
@@ -1761,6 +1762,16 @@ class ClusterNode:
         The connection will auto-reconnect on next use.
         """
         if connection.should_reconnect():
+            # Render the connection before disconnecting: extract_connection_details()
+            # reads the local port and the in-flight read deadline off the transport, so
+            # after disconnect() it can only report "not connected". This line is what
+            # records the maintenance state and relaxed timeout at the moment they are
+            # discarded, so a maintenance-driven recycle is attributable in the logs.
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "Disconnecting acquired connection marked for reconnect: "
+                    f"{connection}, {connection.extract_connection_details()}"
+                )
             await connection.disconnect()
 
     def release(self, connection: Connection) -> None:
@@ -1772,6 +1783,14 @@ class ClusterNode:
         """
         if connection.should_reconnect():
             if connection.is_connected:
+                # Logged here rather than in _disconnect_and_release: that runs as a
+                # task after the fact, by which point extract_connection_details()
+                # may already have lost the transport it reads from.
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Disconnecting released connection marked for reconnect: "
+                        f"{connection}, {connection.extract_connection_details()}"
+                    )
                 task = asyncio.create_task(self._disconnect_and_release(connection))
                 self._background_tasks.add(task)
                 task.add_done_callback(self._background_tasks.discard)
@@ -3744,6 +3763,23 @@ class ClusterPubSubSlotsCacheListener(AsyncEventListenerInterface):
             )
 
 
+# How long a per-node sharded-pubsub connection is skipped by the round robin
+# after a failed poll. PubSub._execute reconnects and retries through the
+# connection's own Retry, so one poll on an unreachable node can cost its whole
+# retry budget rather than the timeout the caller asked for; a cool-off keeps
+# the single reader from spending every pass on that node while its healthy
+# siblings hold undelivered messages.
+SHARD_POLL_COOL_OFF_SECONDS = 1.0
+
+# How often a failed sharded-pubsub poll may trigger a slots-cache refresh.
+# Reconciliation is otherwise purely event-driven, and a node that has left the
+# deployment answers ECONNREFUSED rather than MOVED - so without this the reader
+# would cool off against the departed node forever and the shard channels pinned
+# to it would never move to their new owner. Throttled because the refresh costs
+# a CLUSTER SLOTS round trip and a failing node fails every poll.
+SHARD_TOPOLOGY_REPAIR_INTERVAL_SECONDS = 5.0
+
+
 class ClusterPubSub(PubSub):
     """
     Async cluster implementation for pub/sub.
@@ -3795,6 +3831,19 @@ class ClusterPubSub(PubSub):
         # route sunsubscribe calls and reconcile subscriptions after slot
         # migration / failover.
         self._shard_channel_to_node: Dict[Any, str] = {}
+        # Per-node poll cool-off deadlines (monotonic). Weak-keyed so a
+        # per-node pubsub dropped from node_pubsub_mapping takes its entry with
+        # it instead of leaking one per migration.
+        self._poll_cool_off: "weakref.WeakKeyDictionary[PubSub, float]" = (
+            weakref.WeakKeyDictionary()
+        )
+        # Node names whose last poll failed to connect. Read by
+        # _migrate_shard_channel to skip a wire SUNSUBSCRIBE that cannot
+        # succeed, and cleared as soon as a poll on that node works again.
+        self._unreachable_nodes: Set[str] = set()
+        # Monotonic deadline before which a failed poll must not trigger
+        # another slots-cache refresh. 0.0 means "never refreshed".
+        self._next_topology_repair: float = 0.0
         # Dedicated lock for shard-subscription bookkeeping. Distinct from
         # PubSub.self._lock (which serializes wire I/O on the cluster-level
         # connection used by aclose / send_command / regular subscribe) so
@@ -3803,6 +3852,11 @@ class ClusterPubSub(PubSub):
         self._shard_state_lock: asyncio.Lock = asyncio.Lock()
         # Background tasks created by on_slots_changed; kept to prevent GC.
         self._reconcile_tasks: Set[asyncio.Task] = set()
+        # Background NodesManager.initialize() tasks created by
+        # _schedule_topology_repair; kept to prevent GC, and kept apart from
+        # _reconcile_tasks because aclose() cancels that set and this work is
+        # not ours to cancel - see _schedule_topology_repair.
+        self._topology_repair_tasks: Set[asyncio.Task] = set()
         self._pubsubs_generator = self._pubsubs_generator()
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -3906,6 +3960,7 @@ class ClusterPubSub(PubSub):
             pubsub._resubscribe_shard_channels = MethodType(
                 ClusterPubSub._resubscribe_shard_channels, pubsub
             )
+            self._pubsub_io_lock(pubsub)
             self.node_pubsub_mapping[node.name] = pubsub
             return pubsub
 
@@ -3915,28 +3970,416 @@ class ClusterPubSub(PubSub):
                 return name
         return None
 
+    @staticmethod
+    def _pubsub_io_lock(pubsub: PubSub) -> asyncio.Lock:
+        """Return the per-node pubsub's wire I/O lock, creating it on first use.
+
+        A per-node ``PubSub`` is read by whichever task polls
+        ``get_sharded_message`` and written by the reconciliation task
+        (``_migrate_shard_channel``) and by any caller of ``ssubscribe`` /
+        ``sunsubscribe``. ``PubSub`` guards writes with its own ``_lock``
+        (``PubSub.execute_command``) but reads take no lock at all, so without
+        this the reader can be awaiting ``read_response`` while another task's
+        ``_execute`` disconnects and reconnects the same socket underneath it -
+        which loses the reply to the handshake and surfaces as a read timeout
+        followed by a broken connection.
+
+        Kept on the pubsub rather than in a dict keyed by node name so it
+        travels with the object through ``node_pubsub_mapping`` and cannot go
+        stale when a per-node pubsub is dropped and recreated.
+        """
+        lock = getattr(pubsub, "_shard_io_lock", None)
+        if lock is None:
+            lock = asyncio.Lock()
+            pubsub._shard_io_lock = lock
+        return lock
+
+    @staticmethod
+    def _detach_shard_channel(pubsub: PubSub, channel: Any) -> None:
+        """Forget a shard channel on a per-node pubsub without a wire round trip.
+
+        ``PubSub.sunsubscribe`` only records the intent in
+        ``pending_unsubscribe_shard_channels``; the channel leaves
+        ``shard_channels`` when the server confirmation is read. So if the
+        ``SUNSUBSCRIBE`` never reaches the server, ``on_connect`` clears the
+        pending set and replays ``SSUBSCRIBE`` for the channel - on the node it
+        is being migrated away from, on every reconnect. Once the caller has
+        decided the channel belongs to a different node, the local intent is
+        the only truth left, so drop it here.
+
+        Unlike the sync counterpart there is no ``subscribed_event`` to clear
+        once the last subscription is gone: the async ``PubSub`` has no such
+        event, and its ``subscribed`` is a plain property derived from the
+        subscription dicts - including the ``shard_channels`` entry just
+        dropped here.
+
+        Nor is the per-node I/O lock taken, as in the sync counterpart - and
+        here it is not even needed for correctness: this runs to completion
+        without an ``await``, so the event loop already makes it atomic against
+        ``handle_message``'s unsubscribe bookkeeping. Should an ``await`` ever
+        land in this body, that bookkeeping still discards rather than removes
+        (see ``PubSub.handle_message``), so a racing detach cannot make it raise
+        ``KeyError`` into a poll no caller catches.
+        """
+        pubsub.shard_channels.pop(channel, None)
+        pubsub.pending_unsubscribe_shard_channels.discard(channel)
+
+    async def _drop_node_pubsub(self, name: str, pubsub: PubSub) -> None:
+        """Retire a per-node pubsub and drop it from ``node_pubsub_mapping``.
+
+        Callers hold ``_shard_state_lock``, the lock that every mutation of
+        that mapping observes. ``aclose()`` runs under the per-node I/O lock so
+        the socket is not torn down beneath a concurrent bounded poll parked in
+        ``parse_response``, and its errors are swallowed: retiring one node's
+        pubsub must not abort the caller's pass.
+
+        Every caller must leave nothing subscribed on ``pubsub`` (or have lost
+        the node itself). An empty per-node pubsub left in the mapping keeps a
+        live connection with nothing subscribed on it, so ``_poll_node_pubsub``
+        passes its ``connection is None`` guard and blocks reading a socket no
+        message can arrive on - for the whole timeout of every pass, and until
+        the connection is torn down when the caller passed ``timeout=None``.
+
+        Popping it from the mapping is not enough to keep it out of a poll; the
+        rebind below is what stops the round robin from handing it out.
+        """
+        try:
+            async with self._pubsub_io_lock(pubsub):
+                await pubsub.aclose()
+        except Exception:
+            pass
+        self.node_pubsub_mapping.pop(name, None)
+        self._unreachable_nodes.discard(name)
+        # Same snapshot reason ``aclose()`` recreates this: ``_pubsubs_generator``
+        # captures node_pubsub_mapping.values() into a local list inside
+        # ``yield from``, which the pop above does not reach - so a generator
+        # suspended mid-yield-from would still hand the object we just retired
+        # to the next poll. That cannot stall the reader the way it can in the
+        # sync stack (there is no subscription wait to park on, and
+        # ``_poll_node_pubsub``'s ``connection is None`` guard skips it), but it
+        # still spends one of the pass's ``range(len(node_pubsub_mapping))``
+        # slots on a dead entry - so a healthy sibling loses its turn until the
+        # captured snapshot drains. ``type(self)`` bypasses the instance-level
+        # self-shadow established at __init__. Costs nothing: constructing a
+        # generator runs no frame, so the per-node collection loop in
+        # reinitialize_shard_subscriptions can rebind once per dropped node.
+        self._pubsubs_generator = type(self)._pubsubs_generator(  # type: ignore[method-assign]
+            self
+        )
+
     async def _sharded_message_generator(
         self, timeout: float = 0.0
     ) -> Tuple[Optional[PubSub], Optional[Dict[str, Any]]]:
         """Generate messages from shard channels across all nodes."""
+        first_error: Optional[BaseException] = None
+        polled = 0
+        failed = 0
+        next_ready: Optional[float] = None
         for _ in range(len(self.node_pubsub_mapping)):
             pubsub = next(self._pubsubs_generator)
-            # Don't pass ignore_subscribe_messages here - let get_sharded_message
-            # handle the filtering after processing subscription state changes
-            message = await pubsub.get_message(
-                ignore_subscribe_messages=False, timeout=timeout
-            )
+            if pubsub is None:
+                # node_pubsub_mapping was emptied between the len() above and
+                # here; nothing left to poll in this pass.
+                break
+            if self._poll_cool_off:
+                deadline = self._poll_cool_off.get(pubsub, 0.0)
+                if time.monotonic() < deadline:
+                    # In cool-off after a failed poll: skip it so the reader
+                    # spends this pass on the nodes that can still deliver.
+                    if next_ready is None or deadline < next_ready:
+                        next_ready = deadline
+                    continue
+            polled += 1
+            try:
+                message = await self._poll_node_pubsub(pubsub, timeout)
+            except MovedError as e:
+                # Handled, not failed: _handle_moved_on_read re-routes the
+                # offending channels and schedules reconciliation, so the next
+                # pass recovers. Re-raising a MovedError out of a pubsub read
+                # would only hand the caller an error it cannot act on. Still
+                # cool off: if the slots cache cannot be corrected the repair
+                # would otherwise re-run on every poll.
+                self._poll_cool_off[pubsub] = (
+                    time.monotonic() + SHARD_POLL_COOL_OFF_SECONDS
+                )
+                await self._handle_moved_on_read(pubsub, e)
+                continue
+            except (ConnectionError, TimeoutError, OSError) as e:
+                # One unhealthy node must not starve its healthy siblings. A
+                # single reader serves every per-node pubsub, so aborting the
+                # pass here stops delivery cluster-wide for as long as this one
+                # node stays unreachable - even though the slots it no longer
+                # serves are the only ones affected. Keep polling the rest and
+                # surface an error only if nothing in the pass worked, the same
+                # made-progress rule reinitialize_shard_subscriptions applies.
+                failed += 1
+                if first_error is None:
+                    first_error = e
+                # Cool off before polling this one again. PubSub._execute
+                # reconnects and then retries through the connection's own
+                # Retry, so a single "bounded" poll on an unreachable node can
+                # cost its whole retry budget - far longer than the timeout the
+                # caller asked for. Without a cool-off the reader goes straight
+                # back to that node on the next pass and pays it again, which
+                # is what turns one sick node into a cluster-wide delivery
+                # stall.
+                self._poll_cool_off[pubsub] = (
+                    time.monotonic() + SHARD_POLL_COOL_OFF_SECONDS
+                )
+                # Mutated without _shard_state_lock, mirroring the sync stack:
+                # this is an advisory hint for _migrate_shard_channel's fast
+                # path, and both misread directions are handled there and
+                # self-heal - a stale entry only skips a SUNSUBSCRIBE to a dead
+                # node, a missing one only pays a reconnect before the same
+                # local forget.
+                node_name = self._find_node_name_for_pubsub(pubsub)
+                if node_name is not None:
+                    self._unreachable_nodes.add(node_name)
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "sharded pubsub poll failed on %s: %s: %s",
+                        node_name,
+                        type(e).__name__,
+                        e,
+                    )
+                # A node that has left the deployment never answers MOVED, so
+                # this branch is the only signal that its shard channels may
+                # need a new owner. Ask for a slots-cache refresh; its dispatch
+                # reaches on_slots_changed and reconciles.
+                self._schedule_topology_repair()
+                continue
+            # Emptiness check first: this is the per-message hot path, and the
+            # weakref lookup a WeakKeyDictionary pop needs is pure overhead
+            # while no node is in cool-off, which is the normal case.
+            if self._poll_cool_off:
+                self._poll_cool_off.pop(pubsub, None)
+            if self._unreachable_nodes:
+                node_name = self._find_node_name_for_pubsub(pubsub)
+                if node_name is not None:
+                    self._unreachable_nodes.discard(node_name)
             if message is not None:
                 return pubsub, message
+        if first_error is not None and failed == polled:
+            raise first_error
+        if polled == 0 and next_ready is not None:
+            await self._wait_out_cool_off(next_ready, timeout)
         return None, None
 
-    def _pubsubs_generator(self) -> Generator[PubSub, None, None]:
-        """Generator that yields PubSub instances in round-robin fashion."""
+    @staticmethod
+    async def _wait_out_cool_off(next_ready: float, timeout: Optional[float]) -> None:
+        """Wait out a pass in which every node was skipped for cool-off.
+
+        Such a pass does no wire read at all, so returning straight away
+        ignores the timeout the caller asked to block for - and a reader loop
+        on ``get_sharded_message`` polls back immediately, spinning until the
+        cool-off expires instead of blocking. Sleep instead: until the
+        earliest cool-off is over, never longer than the caller's timeout, and
+        not at all for a non-blocking poll.
+        """
+        if timeout is not None and timeout <= 0:
+            return
+        delay = next_ready - time.monotonic()
+        if delay <= 0:
+            return
+        if timeout is not None:
+            delay = min(delay, timeout)
+        await asyncio.sleep(delay)
+
+    def _poll_io_lock(self, pubsub: PubSub, timeout: Optional[float]):
+        """Guard a per-node poll against concurrent writers on the same socket.
+
+        ``timeout=None`` makes ``_poll_node_pubsub``'s read wait indefinitely,
+        so holding the lock across it would block reconciliation for as long as
+        no message arrives. Such a caller drives the pubsub itself and gets the
+        pre-existing unguarded behaviour; every bounded poll - which is what
+        ``ClusterPubSub``'s own callers use - is serialized.
+        """
+        if timeout is None:
+            return nullcontext()
+        return self._pubsub_io_lock(pubsub)
+
+    async def _poll_node_pubsub(
+        self, pubsub: PubSub, timeout: Optional[float]
+    ) -> Optional[Dict[str, Any]]:
+        """Read one message from a per-node pubsub, dispatching outside the lock.
+
+        Splits ``PubSub.get_message`` so the per-node I/O lock covers the wire
+        read only. ``handle_message`` awaits a subscribed channel's user
+        handler inline, and a handler is free to await ``ssubscribe`` /
+        ``sunsubscribe`` on this ``ClusterPubSub`` - which takes
+        ``_shard_state_lock`` and then the same I/O lock. ``asyncio.Lock`` is
+        not reentrant, so holding the I/O lock across the handler hangs the
+        reader task permanently and silently on the re-acquire; even a
+        task-reentrant lock would still deadlock against the reconciliation
+        task, which holds ``_shard_state_lock`` and awaits that I/O lock.
+
+        The two halves of ``handle_message`` are mutually exclusive:
+        ``UNSUBSCRIBE_MESSAGE_TYPES`` does subscription bookkeeping and never
+        reaches a handler, ``PUBLISH_MESSAGE_TYPES`` only dispatches. So
+        bookkeeping stays inside the lock - it mutates the very
+        ``shard_channels`` / ``pending_unsubscribe_shard_channels`` that
+        ``ssubscribe`` / ``sunsubscribe`` mutate under this lock - and only the
+        dispatch moves out. The cost is a narrow race: a reconciliation pass
+        that detaches the channel between the read and the dispatch makes the
+        handler lookup miss, so the message is returned to the caller instead
+        of dispatched. That is the same in-flight-during-unsubscribe race
+        ``PubSub`` itself has, and closing it would mean duplicating
+        ``handle_message``'s dispatch here.
+
+        The async ``PubSub`` has no ``subscribed_event`` for the sync
+        counterpart's subscription wait to mirror, but the connectionless state
+        that wait guards against still has to be handled: a per-node pubsub
+        enters ``node_pubsub_mapping`` before its first ``SSUBSCRIBE``
+        (``_get_node_pubsub``) and is left connectionless by ``aclose()`` (the
+        GC in ``reinitialize_shard_subscriptions``), while ``parse_response``
+        raises ``RuntimeError`` on a ``None`` connection - which neither poll
+        site catches. ``_pubsubs_generator`` yields from a snapshot of the
+        mapping, so it can hand out a pubsub the GC has just dropped. Checking
+        under the I/O lock rather than before it closes that window for every
+        bounded poll, because the GC ``aclose()``s under the same lock.
+        """
+        async with self._poll_io_lock(pubsub, timeout):
+            if pubsub.connection is None:
+                # Not connected yet, or closed by a concurrent teardown.
+                # Reading would raise RuntimeError; skip this node instead.
+                return None
+            response = await pubsub.parse_response(
+                block=(timeout is None), timeout=timeout
+            )
+            # get_message's truthiness test, not "is None": a health check
+            # reply filtered out by parse_response, or an empty bulk, is "no
+            # message" rather than a message to parse.
+            if not response:
+                return None
+            if not self._is_publish_response(response):
+                # Don't pass ignore_subscribe_messages here - let
+                # get_sharded_message handle the filtering after processing
+                # subscription state changes
+                return await pubsub.handle_message(
+                    response, ignore_subscribe_messages=False
+                )
+        return await pubsub.handle_message(response, ignore_subscribe_messages=False)
+
+    @staticmethod
+    def _is_publish_response(response: Any) -> bool:
+        """Whether a raw pubsub reply can make ``handle_message`` dispatch.
+
+        ``handle_message`` awaits a user handler only for
+        ``PUBLISH_MESSAGE_TYPES``; every other reply either does subscription
+        bookkeeping (``UNSUBSCRIBE_MESSAGE_TYPES``) or is a pong, and the two
+        branches are mutually exclusive. A non-sequence reply is the bare-PING
+        shape ``handle_message`` rewrites into a pong, so it cannot dispatch
+        either.
+        """
+        if not isinstance(response, (list, tuple)):
+            return False
+        return str_if_bytes(response[0]) in PubSub.PUBLISH_MESSAGE_TYPES
+
+    def _schedule_topology_repair(self) -> None:
+        """Ask for a slots-cache refresh after a poll could not reach a node.
+
+        ``reinitialize_shard_subscriptions`` only ever runs from a slots-cache
+        change notification, and a node that has been rebooted or taken out of
+        the deployment answers ``ECONNREFUSED`` rather than ``MOVED`` - so the
+        read path itself has to ask, or the shard channels pinned to that node
+        stay there for the lifetime of the pubsub.
+
+        ``NodesManager.initialize`` serializes concurrent callers, drops nodes
+        that have left the topology and dispatches
+        ``AsyncAfterSlotsCacheRefreshEvent``, which reaches
+        ``on_slots_changed``; run it as a task so a bounded poll does not pay
+        for a ``CLUSTER SLOTS`` round trip, and throttle it because a node that
+        is down fails every poll.
+        """
+        if not self.shard_channels:
+            return
+        now = time.monotonic()
+        if now < self._next_topology_repair:
+            return
+        self._next_topology_repair = now + SHARD_TOPOLOGY_REPAIR_INTERVAL_SECONDS
+        # Not tracked in _reconcile_tasks: that set is cancelled by aclose(),
+        # and ``initialize`` refreshes the slots cache of the whole cluster
+        # client, which every other command on it reads - closing one pubsub
+        # must not abort a refresh in flight, leaving the shared cache stale
+        # until some later MOVED or failed poll asks again. The sync
+        # counterpart has the same property for free: ``reset()`` retires the
+        # reconciliation executor with ``cancel_futures=True``, which drops
+        # queued work but lets a running ``initialize`` finish.
+        task = asyncio.create_task(self.cluster.nodes_manager.initialize())
+        self._topology_repair_tasks.add(task)
+        task.add_done_callback(self._topology_repair_tasks.discard)
+        task.add_done_callback(self._log_reconcile_task_exception)
+
+    async def _handle_moved_on_read(self, pubsub: PubSub, error: MovedError) -> None:
+        """Re-route shard channels pinned to a node that lost their slot.
+
+        ``PubSub.on_connect`` replays ``SSUBSCRIBE`` to the node its connection
+        is bound to, so after a slot migration that node answers ``MOVED``.
+        ``MovedError`` is not in ``Retry.supported_errors`` and no other code on
+        the read path refreshes the slots cache, so a shard channel left on a
+        former owner could never recover. Drop the offending channels from this
+        pubsub so the replay stops, forget their recorded owner so
+        ``reinitialize_shard_subscriptions`` does not short-circuit on an
+        already-advanced reverse index, then apply the redirect and reconcile.
+        """
+        node_name = self._find_node_name_for_pubsub(pubsub)
+        logger.debug(
+            "sharded pubsub: %s no longer owns slot %s; re-routing its shard channels",
+            node_name,
+            error.slot_id,
+        )
+        async with self._shard_state_lock:
+            for channel in list(pubsub.shard_channels):
+                if key_slot(self.encoder.encode(channel)) != error.slot_id:
+                    continue
+                self._detach_shard_channel(pubsub, channel)
+                if self._shard_channel_to_node.get(channel) == node_name:
+                    del self._shard_channel_to_node[channel]
+            # The detach above can leave this pubsub with nothing subscribed -
+            # a node that lost its only slot answers MOVED for every channel it
+            # held. Retire it here rather than leave it in the mapping for a
+            # collector elsewhere: no SUNSUBSCRIBE confirmation will arrive for
+            # a channel forgotten locally, so get_sharded_message's collector
+            # cannot reach it, and the reconciliation pass scheduled below only
+            # GCs it once its task gets to run - a whole poll cool-off later,
+            # at best, while a poll that reaches the empty pubsub first blocks
+            # on a socket no message can arrive on (see _drop_node_pubsub).
+            if node_name is not None and not pubsub.subscribed:
+                await self._drop_node_pubsub(node_name, pubsub)
+        # move_slot applies the redirect to the slots cache and dispatches
+        # AsyncAfterSlotsCacheRefreshEvent, which reaches on_slots_changed. Call
+        # on_slots_changed unconditionally too: move_slot skips the dispatch on
+        # a circular MOVED, and a duplicate reconciliation pass is a no-op.
+        # move_slot indexes slots_cache by the redirected slot, so an
+        # as-yet-uncovered slot raises: log and still reconcile rather than let
+        # a repair attempt break a pubsub read.
+        try:
+            await self.cluster.nodes_manager.move_slot(error)
+        except Exception as exc:
+            logger.debug(
+                "sharded pubsub: could not apply the redirect for slot %s: %s: %s",
+                error.slot_id,
+                type(exc).__name__,
+                exc,
+            )
+        await self.on_slots_changed()
+
+    def _pubsubs_generator(self) -> Generator[Optional[PubSub], None, None]:
+        """Generator that yields PubSub instances in round-robin fashion.
+
+        Never returns: a generator that returns is exhausted for good and only
+        ``reset`` recreates this one, so a momentarily empty
+        ``node_pubsub_mapping`` - reconciliation drops a per-node pubsub before
+        creating its replacement - would stop the round robin permanently.
+        Yields ``None`` for an empty mapping instead, which lets the caller skip
+        the slot without this loop spinning on an empty list.
+        """
         while True:
             current_nodes = list(self.node_pubsub_mapping.values())
             if not current_nodes:
-                return  # Avoid infinite loop when no subscriptions exist
-            yield from current_nodes
+                yield None
+            else:
+                yield from current_nodes
 
     async def get_sharded_message(
         self,
@@ -3945,7 +4388,19 @@ class ClusterPubSub(PubSub):
         target_node: Optional["ClusterNode"] = None,
     ) -> Optional[Dict[str, Any]]:
         """
-        Get a message from shard channels.
+        Get the next sharded pubsub message, or ``None`` if none is available.
+
+        Polls the per-node connections in round robin unless ``target_node`` is
+        given, and keeps shard channels attached to the node that currently
+        owns their slot: a failed poll cools that node off and asks for a
+        slots-cache refresh, and a ``MOVED`` reply re-routes the affected
+        channels to their new owner. Neither reaches the caller. A connection
+        failure is surfaced only when every node polled in the pass failed, so
+        one unreachable node does not stop delivery from its healthy siblings.
+
+        ``target_node`` opts out of that shielding: a caller that names a
+        single node has no sibling to protect, so connection errors propagate.
+        A ``MOVED`` reply is still handled rather than raised.
 
         :param ignore_subscribe_messages: Whether to ignore subscribe messages
         :param timeout: Timeout for message retrieval
@@ -3956,11 +4411,23 @@ class ClusterPubSub(PubSub):
         if target_node:
             pubsub = self.node_pubsub_mapping.get(target_node.name)
             if pubsub:
-                # Don't pass ignore_subscribe_messages here - let get_sharded_message
-                # handle the filtering after processing subscription state changes
-                message = await pubsub.get_message(
-                    ignore_subscribe_messages=False, timeout=timeout
-                )
+                try:
+                    message = await self._poll_node_pubsub(pubsub, timeout)
+                except MovedError as e:
+                    # Same handling as the round-robin path: the caller cannot
+                    # act on a MovedError raised out of a pubsub read, and the
+                    # channels this node no longer owns have to be re-routed or
+                    # they never recover. Cool off too, so a slots cache that
+                    # cannot be corrected does not re-run the repair on every
+                    # poll. Unlike that path, connectivity errors still
+                    # propagate: they are swallowed there only to keep one sick
+                    # node from starving its healthy siblings, and a caller that
+                    # named a single node has no sibling to protect.
+                    self._poll_cool_off[pubsub] = (
+                        time.monotonic() + SHARD_POLL_COOL_OFF_SECONDS
+                    )
+                    await self._handle_moved_on_read(pubsub, e)
+                    message = None
             else:
                 message = None
         else:
@@ -3973,9 +4440,9 @@ class ClusterPubSub(PubSub):
         # competing with the reconciliation task for _shard_state_lock.
         if str_if_bytes(message["type"]) == "sunsubscribe":
             # Serialize state mutation against reinitialize_shard_subscriptions
-            # (background task). The blocking get_message above intentionally
-            # runs outside the lock so reconciliation is not stalled by long
-            # polls.
+            # (background task). The blocking _poll_node_pubsub above
+            # intentionally runs outside the lock so reconciliation is not
+            # stalled by long polls.
             async with self._shard_state_lock:
                 if message["channel"] in self.pending_unsubscribe_shard_channels:
                     # User-initiated sunsubscribe: drop from cluster-level tracking.
@@ -3996,11 +4463,7 @@ class ClusterPubSub(PubSub):
                 if pubsub is not None and not pubsub.subscribed:
                     name = self._find_node_name_for_pubsub(pubsub)
                     if name is not None:
-                        try:
-                            await pubsub.aclose()
-                        except Exception:
-                            pass
-                        self.node_pubsub_mapping.pop(name, None)
+                        await self._drop_node_pubsub(name, pubsub)
 
         # Only suppress subscribe/unsubscribe messages, not data messages (smessage)
         if str_if_bytes(message["type"]) in ("ssubscribe", "sunsubscribe"):
@@ -4049,10 +4512,11 @@ class ClusterPubSub(PubSub):
                     )
                     continue
                 pubsub = self._get_node_pubsub(node)
-                if handler:
-                    await pubsub.ssubscribe(Subscription(s_channel, handler))
-                else:
-                    await pubsub.ssubscribe(s_channel)
+                async with self._pubsub_io_lock(pubsub):
+                    if handler:
+                        await pubsub.ssubscribe(Subscription(s_channel, handler))
+                    else:
+                        await pubsub.ssubscribe(s_channel)
                 self.shard_channels.update(pubsub.shard_channels)
                 self._shard_channel_to_node[normalized_key] = node.name
                 self.pending_unsubscribe_shard_channels.difference_update(
@@ -4093,7 +4557,8 @@ class ClusterPubSub(PubSub):
                     if not node or node.name not in self.node_pubsub_mapping:
                         continue
                     pubsub = self.node_pubsub_mapping[node.name]
-                await pubsub.sunsubscribe(s_channel)
+                async with self._pubsub_io_lock(pubsub):
+                    await pubsub.sunsubscribe(s_channel)
                 self.pending_unsubscribe_shard_channels.update(
                     pubsub.pending_unsubscribe_shard_channels
                 )
@@ -4126,7 +4591,17 @@ class ClusterPubSub(PubSub):
                     continue
                 old_name = self._shard_channel_to_node.get(channel)
                 if old_name == new_node.name:
-                    continue
+                    owner = self.node_pubsub_mapping.get(new_node.name)
+                    if owner is not None and channel in owner.shard_channels:
+                        continue
+                    # The reverse index names this node but the subscription is
+                    # not there. _migrate_shard_channel detaches from the old
+                    # owner before it advances the index, so a pass that failed
+                    # to attach leaves the channel subscribed nowhere - and once
+                    # ownership moves back, this short-circuit would skip it for
+                    # the lifetime of the pubsub. Re-attach instead of trusting
+                    # the index; there is nothing to sunsubscribe from.
+                    old_name = None
                 try:
                     await self._migrate_shard_channel(
                         channel, handler, old_name, new_node
@@ -4152,11 +4627,7 @@ class ClusterPubSub(PubSub):
             # subscription so their connections are released.
             for name, pubsub in list(self.node_pubsub_mapping.items()):
                 if not pubsub.subscribed:
-                    try:
-                        await pubsub.aclose()
-                    except Exception:
-                        pass
-                    self.node_pubsub_mapping.pop(name, None)
+                    await self._drop_node_pubsub(name, pubsub)
         if uncovered:
             # Surface the uncovered channels so the caller (and observer
             # notification path) knows reconciliation was incomplete. All
@@ -4175,6 +4646,42 @@ class ClusterPubSub(PubSub):
             # WARNINGs above preserve the full forensic detail.
             raise first_migrate_error
 
+    async def _forget_shard_channel_on_old_node(
+        self, old_pubsub: PubSub, channel: Any, old_name: str
+    ) -> None:
+        """Drop a migrating shard channel from a node we could not tell about it.
+
+        Forget the channel locally: the caller advances the reverse index to the
+        new owner, so reconciliation will never revisit this channel, while
+        ``on_connect`` would keep replaying ``SSUBSCRIBE`` for it to this very
+        node on every reconnect - the server would answer ``MOVED`` and the
+        subscription would never work again.
+        """
+        self._detach_shard_channel(old_pubsub, channel)
+        # Drop the per-node pubsub when either the old node has left the cluster
+        # topology - no reconnect target, so the round-robin generator must stop
+        # yielding a dead one, and any sibling subscription it still holds
+        # recovers through ``PubSub._execute``'s reconnect and ``on_connect``
+        # replay - or the detach above left it with nothing subscribed.
+        #
+        # The empty case cannot be deferred to a collector elsewhere, because
+        # neither of the other two can reach it. ``get_sharded_message``'s
+        # unsubscribe branch needs a ``SUNSUBSCRIBE`` confirmation, and none will
+        # arrive for a channel this method forgot locally - that is the whole
+        # reason it is forgotten. ``reinitialize_shard_subscriptions``'s
+        # end-of-pass GC only runs for the reconciliation caller, while
+        # ``ssubscribe``'s lazy re-route reaches here without it. An empty pubsub
+        # left in the mapping keeps a live connection with nothing subscribed on
+        # it, so ``_poll_node_pubsub`` passes its ``connection is None`` guard and
+        # blocks reading a socket no message can arrive on: forever when the
+        # caller passed ``timeout=None``, and for the whole timeout of every pass
+        # otherwise, before a single healthy node is read.
+        if (
+            self.cluster.get_node(node_name=old_name) is None
+            or not old_pubsub.subscribed
+        ):
+            await self._drop_node_pubsub(old_name, old_pubsub)
+
     async def _migrate_shard_channel(
         self,
         channel: Any,
@@ -4186,39 +4693,38 @@ class ClusterPubSub(PubSub):
         # already be unreachable during migration / failover.
         if old_name and old_name in self.node_pubsub_mapping:
             old_pubsub = self.node_pubsub_mapping[old_name]
-            try:
-                await old_pubsub.sunsubscribe(channel)
-            except (ConnectionError, TimeoutError, OSError):
-                # redis-py's Connection has already called ``disconnect()``
-                # before raising (see Connection.read_response /
-                # send_packed_command with ``disconnect_on_error=True``),
-                # so ``old_pubsub``'s dedicated socket is gone. Two cases:
-                #
-                # 1. The old node is no longer in the cluster topology
-                #    (e.g. removed by failover / topology refresh): no
-                #    reconnect target exists, so ``old_pubsub.subscribed``
-                #    would stay True forever and the end-of-pass GC block
-                #    would skip it. Drop it eagerly so the round-robin
-                #    generator does not keep yielding a dead pubsub that
-                #    produces periodic errors from ``get_sharded_message``.
-                # 2. The old node is still known (transiently slow /
-                #    unreachable): ``PubSub._execute`` auto-reconnects and
-                #    ``on_connect`` re-subscribes to remaining channels,
-                #    so other subscriptions on the same pubsub recover
-                #    naturally. Leave it alone.
-                if self.cluster.get_node(node_name=old_name) is None:
-                    try:
-                        await old_pubsub.aclose()
-                    except Exception:
-                        pass
-                    self.node_pubsub_mapping.pop(old_name, None)
+            if old_name in self._unreachable_nodes:
+                # The reader has just failed to reach this node, so a
+                # ``SUNSUBSCRIBE`` cannot arrive. Skip it: the attempt would pay
+                # a full reconnect (and the client's whole retry budget) behind
+                # the reader on the same per-node io lock, all while this pass
+                # holds ``_shard_state_lock`` - which is what turns one departed
+                # node into a migration slow enough to look like a permanent
+                # delivery stall.
+                await self._forget_shard_channel_on_old_node(
+                    old_pubsub, channel, old_name
+                )
+            else:
+                try:
+                    async with self._pubsub_io_lock(old_pubsub):
+                        await old_pubsub.sunsubscribe(channel)
+                except (ConnectionError, TimeoutError, OSError):
+                    # redis-py's Connection has already called ``disconnect()``
+                    # before raising (see Connection.read_response /
+                    # send_packed_command with ``disconnect_on_error=True``), so
+                    # ``old_pubsub``'s dedicated socket is gone and the
+                    # ``SUNSUBSCRIBE`` never reached the server.
+                    await self._forget_shard_channel_on_old_node(
+                        old_pubsub, channel, old_name
+                    )
         # Attach to the new per-node pubsub, preserving the handler. Decode to
         # a text key only when we must pass it as a kwarg (handler present).
         new_pubsub = self._get_node_pubsub(new_node)
-        if handler:
-            await new_pubsub.ssubscribe(Subscription(channel, handler))
-        else:
-            await new_pubsub.ssubscribe(channel)
+        async with self._pubsub_io_lock(new_pubsub):
+            if handler:
+                await new_pubsub.ssubscribe(Subscription(channel, handler))
+            else:
+                await new_pubsub.ssubscribe(channel)
         self.shard_channels.update(new_pubsub.shard_channels)
         normalized_key = next(iter(self._normalize_keys({channel: None})))
         self._shard_channel_to_node[normalized_key] = new_node.name
@@ -4280,6 +4786,11 @@ class ClusterPubSub(PubSub):
         # reentrant, gathering while holding it would deadlock. Awaiting
         # each task with suppressed CancelledError also avoids unhandled-
         # exception warnings if the task was created but not yet scheduled.
+        # _topology_repair_tasks is deliberately left alone: it holds
+        # NodesManager.initialize() calls that refresh the whole client's
+        # slots cache, which is not this pubsub's to abort (see
+        # _schedule_topology_repair). The set keeps them referenced until
+        # they finish and discard themselves.
         if self._reconcile_tasks:
             tasks = list(self._reconcile_tasks)
             for task in tasks:
@@ -4296,13 +4807,24 @@ class ClusterPubSub(PubSub):
         # below, silently dropping subscription intent.
         async with self._shard_state_lock:
             self._reconcile_tasks.clear()
-            # Close all shard pubsub instances first
+            # Close all shard pubsub instances first, under the per-node I/O
+            # lock so the socket is not torn down beneath a concurrent bounded
+            # poll parked in parse_response. A bounded poll holds the lock only
+            # for its timeout, and an unbounded one holds nullcontext() (see
+            # _poll_io_lock), so teardown never waits indefinitely here.
             for pubsub in self.node_pubsub_mapping.values():
-                await pubsub.aclose()
+                async with self._pubsub_io_lock(pubsub):
+                    await pubsub.aclose()
             # Drop the now-dead per-node pubsubs from the mapping so the
             # round-robin in _pubsubs_generator / _sharded_message_generator
             # cannot yield them between teardown and re-subscription.
             self.node_pubsub_mapping.clear()
+            self._unreachable_nodes.clear()
+            # Drop the throttle window too: a reused pubsub that keeps a
+            # deadline armed before the teardown would skip the first repair
+            # after resubscribing, delaying the move of its shard channels
+            # off a node that is already gone.
+            self._next_topology_repair = 0.0
             # _pubsubs_generator captures node_pubsub_mapping.values() into
             # a local list inside ``yield from``; clearing the mapping does
             # not reach references already held by that captured snapshot,
@@ -4355,11 +4877,22 @@ class ClusterPubSub(PubSub):
         command = args[0].upper() if args else ""
         if command in ("SSUBSCRIBE", "SUNSUBSCRIBE", "SPUBLISH"):
             if len(args) > 1:
+                # ssubscribe / sunsubscribe own both the per-node I/O lock and
+                # the shard_channels / _shard_channel_to_node bookkeeping, so
+                # delegate to them instead of dispatching raw. A raw dispatch
+                # writes the socket unguarded against a concurrent poll and
+                # records nothing, leaving the channel invisible to the reader
+                # loop and to on_connect's replay.
+                if command == "SSUBSCRIBE":
+                    return await self.ssubscribe(*args[1:])
+                if command == "SUNSUBSCRIBE":
+                    return await self.sunsubscribe(*args[1:])
                 channel = args[1]
                 node = self.cluster.get_node_from_key(channel)
                 if node:
                     pubsub = self._get_node_pubsub(node)
-                    return await pubsub.execute_command(*args, **kwargs)
+                    async with self._pubsub_io_lock(pubsub):
+                        return await pubsub.execute_command(*args, **kwargs)
 
         # For other commands, use the set node or lazily discover one
         if self.connection is None:

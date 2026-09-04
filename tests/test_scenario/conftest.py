@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+from time import monotonic, sleep
 from typing import Any, Generator, Optional
 from urllib.parse import urlparse
 
@@ -33,6 +34,68 @@ CLIENT_TIMEOUT = 5
 
 DEFAULT_ENDPOINT_NAME = "m-standard"
 DEFAULT_OSS_API_ENDPOINT_NAME = "maint-notifications-oss-api"
+
+# Bounded budget for the Active-Active readiness wait below. Long enough to outlast the
+# recovery of a network failure a preceding test injected, short enough that a genuinely
+# dead endpoint fails the run instead of hanging it.
+MULTI_DB_READY_TIMEOUT = 60
+MULTI_DB_READY_INTERVAL = 1
+
+
+def wait_for_databases_reachable(client_class, urls, client_kwargs):
+    """Block until every Active-Active database answers PING.
+
+    The Active-Active tests share one environment and each of them injects a network
+    failure into it, so a test can start while the failure the previous one injected is
+    still healing. ``MultiDBClient`` evaluates its initial health check once, and under
+    the default ``ALL_AVAILABLE`` policy raises ``InitialHealthCheckFailedError`` if any
+    database is unreachable at that moment - so without this wait a test fails on the
+    previous test's fault instead of on anything it exercises itself.
+
+    A plain ``PING`` is the gate rather than a faithful replay of ``PingHealthCheck``:
+    the failure these tests inject takes out a whole cluster, so gross reachability is
+    the signal, and the client still runs its own health check afterwards.
+    """
+    deadline = monotonic() + MULTI_DB_READY_TIMEOUT
+
+    while True:
+        unreachable = {}
+
+        for url in urls:
+            error = _ping_error(client_class, url, client_kwargs)
+
+            if error is not None:
+                unreachable[url] = error
+
+        if not unreachable:
+            return
+
+        if monotonic() >= deadline:
+            pytest.fail(
+                f"Active-Active databases still unreachable after "
+                f"{MULTI_DB_READY_TIMEOUT}s: {unreachable}"
+            )
+
+        logging.info("Waiting for Active-Active databases: %s", unreachable)
+        sleep(MULTI_DB_READY_INTERVAL)
+
+
+def _ping_error(client_class, url, client_kwargs):
+    """Return None if the database answers PING, else a description of the failure."""
+    client = None
+
+    try:
+        client = client_class.from_url(url, **client_kwargs)
+        return None if client.ping() else "PING returned a falsy response"
+    except Exception as error:
+        return repr(error)
+    finally:
+        if client is not None:
+            # A throwaway probe client - its pool must not outlive the check.
+            try:
+                client.close()
+            except Exception:
+                pass
 
 
 class CheckActiveDatabaseChangedListener(EventListenerInterface):
@@ -213,6 +276,14 @@ def r_multi_db(
         health_check_interval=health_check_interval,
         event_dispatcher=event_dispatcher,
         health_check_delay=health_check_delay,
+    )
+
+    # Before the client exists, so the initial health check it runs on first use is not
+    # evaluated against a database still recovering from the previous test's fault.
+    wait_for_databases_reachable(
+        client_class,
+        endpoint_config["endpoints"][:2],
+        {"username": username, "password": password},
     )
 
     client = MultiDBClient(config)
