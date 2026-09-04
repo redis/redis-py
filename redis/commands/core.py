@@ -3149,7 +3149,7 @@ class BasicKeyCommands(CommandsProtocol):
         # To align with digest, we want to return bytes if decode_responses is False.
         # The following works because of Python's mixin-based client class hierarchy.
         if not encoder.decode_responses:
-            local_digest = encoder.encode(local_digest)
+            local_digest = local_digest.encode("ascii")
 
         return local_digest
 

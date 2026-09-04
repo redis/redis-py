@@ -1003,7 +1003,10 @@ class RedisCluster(
             if node_flag in self._command_flags_mapping:
                 request_policy = self._command_flags_mapping[node_flag]
         elif request_policy is None:
-            command_flag = self.command_flags.get(command.upper())
+            full_command = command.upper()
+            if args and f"{command} {args[0]}".upper() in self.command_flags:
+                full_command = f"{command} {args[0]}".upper()
+            command_flag = self.command_flags.get(full_command)
             if command_flag in self._command_flags_mapping:
                 request_policy = self._command_flags_mapping[command_flag]
 
@@ -1027,7 +1030,7 @@ class RedisCluster(
         return nodes
 
     async def _determine_slot(self, command: str, *args: Any) -> int:
-        if self.command_flags.get(command) == SLOT_ID:
+        if self.command_flags.get(command.upper()) == SLOT_ID:
             # The command contains the slot ID
             return int(args[0])
 
@@ -1178,6 +1181,10 @@ class RedisCluster(
         command_policies = await self._policy_resolver.resolve(args[0].lower())
 
         if not command_policies and not target_nodes_specified:
+            command = args[0].upper()
+            if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
+                command = f"{args[0]} {args[1]}".upper()
+
             command_flag = self.command_flags.get(command)
             if not command_flag:
                 # Fallback to default policy
@@ -2991,7 +2998,14 @@ class PipelineStrategy(AbstractStrategy):
                     command_policies = _DEFAULT_KEYLESS_METADATA
             else:
                 if not command_policies:
-                    command_flag = client.command_flags.get(cmd.args[0])
+                    command = cmd.args[0].upper()
+                    if (
+                        len(cmd.args) >= 2
+                        and f"{cmd.args[0]} {cmd.args[1]}".upper() in client.command_flags
+                    ):
+                        command = f"{cmd.args[0]} {cmd.args[1]}".upper()
+
+                    command_flag = client.command_flags.get(command)
                     if not command_flag:
                         # Fallback to default policy
                         if not client.get_default_node():

@@ -2926,6 +2926,22 @@ class TestStaticMetadataRouting:
         await rc.aclose()
 
     @pytest.mark.fixed_client
+    async def test_command_subcommands_case_insensitive_routing(self) -> None:
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+        default_node = rc.get_default_node()
+
+        nodes = await rc._determine_nodes("command", "count", request_policy=None)
+        assert nodes == [default_node]
+
+        with mock.patch.object(
+            ClusterNode, "execute_command", new=mock.AsyncMock(return_value=100)
+        ) as exec_mock:
+            res = await rc.execute_command("command", "count")
+            assert res == 100
+            exec_mock.assert_called_once_with("command", "count", asking=False)
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
     async def test_determine_nodes_raises_exception_when_no_policy_resolved(self) -> None:
         rc = await get_mocked_redis_client(host=default_host, port=7000)
         with pytest.raises(RedisClusterException, match="No targets were found"):
