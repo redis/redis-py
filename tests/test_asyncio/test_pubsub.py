@@ -2944,6 +2944,41 @@ class TestClusterPubSubSlotMigration:
             for rec in caplog.records
         )
 
+    async def test_drop_node_pubsub_recreates_pubsubs_generator(self):
+        """
+        Regression: only ``aclose()`` rebound ``_pubsubs_generator``, but a
+        single-node drop has the same exposure - the generator captures
+        ``node_pubsub_mapping.values()`` into a local list inside ``yield
+        from``, which ``_drop_node_pubsub``'s pop does not reach. So the round
+        robin kept handing the retired per-node pubsub to the next poll.
+
+        It cannot stall the reader here the way it can in the sync stack, where
+        the prelude's subscription wait parks on it: ``_poll_node_pubsub``'s
+        ``connection is None`` guard skips it. But the pass only runs
+        ``range(len(node_pubsub_mapping))`` iterations, so spending one of them
+        on a dead entry costs a healthy sibling its turn.
+        """
+        pubsub = self._make_cluster_pubsub()
+        pubsub._pubsubs_generator = ClusterPubSub._pubsubs_generator(pubsub)
+        ps_a = self._make_stateful_node_pubsub({b"foo": None})
+        ps_b = self._make_stateful_node_pubsub({b"bar": None})
+        pubsub.node_pubsub_mapping = {
+            "127.0.0.1:7000": ps_a,
+            "127.0.0.1:7001": ps_b,
+        }
+        # Advance into yield-from so the generator's frame holds a captured
+        # list referencing both per-node pubsubs.
+        assert next(pubsub._pubsubs_generator) is ps_a
+        old_generator = pubsub._pubsubs_generator
+
+        async with pubsub._shard_state_lock:
+            await pubsub._drop_node_pubsub("127.0.0.1:7000", ps_a)
+
+        assert pubsub._pubsubs_generator is not old_generator
+        # The fresh generator must not drain the old captured list first.
+        assert next(pubsub._pubsubs_generator) is ps_b
+        assert next(pubsub._pubsubs_generator) is ps_b
+
     def _make_stateful_node_pubsub(self, shard_channels=None):
         """A per-node pubsub whose ``subscribed`` follows its channels.
 

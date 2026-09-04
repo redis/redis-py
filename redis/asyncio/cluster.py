@@ -4039,6 +4039,9 @@ class ClusterPubSub(PubSub):
         passes its ``connection is None`` guard and blocks reading a socket no
         message can arrive on - for the whole timeout of every pass, and until
         the connection is torn down when the caller passed ``timeout=None``.
+
+        Popping it from the mapping is not enough to keep it out of a poll; the
+        rebind below is what stops the round robin from handing it out.
         """
         try:
             async with self._pubsub_io_lock(pubsub):
@@ -4047,6 +4050,22 @@ class ClusterPubSub(PubSub):
             pass
         self.node_pubsub_mapping.pop(name, None)
         self._unreachable_nodes.discard(name)
+        # Same snapshot reason ``aclose()`` recreates this: ``_pubsubs_generator``
+        # captures node_pubsub_mapping.values() into a local list inside
+        # ``yield from``, which the pop above does not reach - so a generator
+        # suspended mid-yield-from would still hand the object we just retired
+        # to the next poll. That cannot stall the reader the way it can in the
+        # sync stack (there is no subscription wait to park on, and
+        # ``_poll_node_pubsub``'s ``connection is None`` guard skips it), but it
+        # still spends one of the pass's ``range(len(node_pubsub_mapping))``
+        # slots on a dead entry - so a healthy sibling loses its turn until the
+        # captured snapshot drains. ``type(self)`` bypasses the instance-level
+        # self-shadow established at __init__. Costs nothing: constructing a
+        # generator runs no frame, so the per-node collection loop in
+        # reinitialize_shard_subscriptions can rebind once per dropped node.
+        self._pubsubs_generator = type(self)._pubsubs_generator(  # type: ignore[method-assign]
+            self
+        )
 
     async def _sharded_message_generator(
         self, timeout: float = 0.0
