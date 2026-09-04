@@ -62,6 +62,9 @@ class Lock:
         if ARGV[3] == "0" then
             newttl = ARGV[2] + expiration
         end
+        if tonumber(newttl) <= 0 then
+            return 1
+        end
         redis.call('pexpire', KEYS[1], newttl)
         return 1
     """
@@ -75,7 +78,9 @@ class Lock:
         if not token or token ~= ARGV[1] then
             return 0
         end
-        redis.call('pexpire', KEYS[1], ARGV[2])
+        if tonumber(ARGV[2]) > 0 then
+            redis.call('pexpire', KEYS[1], ARGV[2])
+        end
         return 1
     """
 
@@ -310,6 +315,9 @@ class Lock:
         ``replace_ttl`` if False (the default), add `additional_time` to
         the lock's existing ttl. If True, replace the lock's ttl with
         `additional_time`.
+
+        When the resulting TTL is non-positive for a lock with an expiry, the
+        current expiry is left unchanged and ``True`` is returned.
         """
         if self.local.token is None:
             raise LockError("Cannot extend an unlocked lock")
@@ -332,6 +340,9 @@ class Lock:
     def reacquire(self) -> Awaitable[Literal[True]]:
         """
         Resets a TTL of an already acquired lock back to a timeout value.
+
+        When the resulting TTL is non-positive, the current expiry is left
+        unchanged and ``True`` is returned.
         """
         if self.local.token is None:
             raise LockError("Cannot reacquire an unlocked lock")
