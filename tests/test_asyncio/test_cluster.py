@@ -2966,7 +2966,7 @@ class TestStaticMetadataRouting:
         with mock.patch.object(
             type(rc),
             "get_random_primary_or_all_nodes",
-            return_value=selected_node,
+            new=mock.AsyncMock(return_value=selected_node),
         ) as select_node:
             nodes = await rc._determine_nodes(
                 "dbsize", request_policy=RequestPolicy.DEFAULT_KEYLESS

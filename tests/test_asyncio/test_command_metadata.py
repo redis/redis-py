@@ -192,7 +192,7 @@ class TestWithheldRoutingPolicies:
         static_resolver = AsyncStaticMetadataResolver()
         table_core = _STATIC_COMMAND_METADATA["core"]
 
-        for flag_cmd in RedisCluster.command_flags:
+        for flag_cmd in RedisCluster.COMMAND_FLAGS:
             base_cmd = flag_cmd.split()[0].lower()
             if base_cmd in table_core:
                 metadata = await static_resolver.resolve(base_cmd)

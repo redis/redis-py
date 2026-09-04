@@ -520,7 +520,7 @@ class TestWithheldRoutingPolicies:
         static_resolver = StaticMetadataResolver()
         table_core = _STATIC_COMMAND_METADATA["core"]
 
-        for flag_cmd in RedisCluster.command_flags:
+        for flag_cmd in RedisCluster.COMMAND_FLAGS:
             # For container commands like "COMMAND COUNT" or "SLOWLOG GET", the primary command name
             # in the metadata table is the first token (e.g. "command", "slowlog").
             base_cmd = flag_cmd.split()[0].lower()

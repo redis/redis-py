@@ -647,9 +647,7 @@ class RedisCluster(
         self._policies_callback_mapping: dict[
             Union[RequestPolicy, ResponsePolicy], Callable
         ] = {
-            RequestPolicy.DEFAULT_KEYLESS: (
-                self._get_random_primary_or_all_nodes_for_command
-            ),
+            RequestPolicy.DEFAULT_KEYLESS: self.get_random_primary_or_all_nodes,
             RequestPolicy.DEFAULT_KEYED: self.get_nodes_from_slot,
             RequestPolicy.DEFAULT_NODE: lambda: [self.get_default_node()],
             RequestPolicy.ALL_SHARDS: self.get_primaries,
@@ -885,32 +883,12 @@ class RedisCluster(
 
         return slot_cache[node_idx]
 
-    def get_random_primary_or_all_nodes(self, command_name):
+    async def get_random_primary_or_all_nodes(
+        self, command_name: str
+    ) -> "ClusterNode":
         """
         Returns random primary or all nodes depends on READONLY mode.
         """
-        replica_safe = False
-        if hasattr(self._metadata_resolver, "_replica_safe"):
-            replica_safe = self._metadata_resolver._replica_safe.get(
-                command_name.lower(), False
-            )
-        if self.read_from_replicas and replica_safe:
-            return self.get_random_node()
-
-        return self.get_random_primary_node()
-
-    async def _get_random_primary_or_all_nodes_for_command(self, command_name):
-        """
-        Internal async version of get_random_primary_or_all_nodes that awaits metadata.
-        """
-        # Preserve the public node-selection extension point. The built-in implementation
-        # cannot await metadata, but a subclass override must still control command routing.
-        if (
-            type(self).get_random_primary_or_all_nodes
-            is not RedisCluster.get_random_primary_or_all_nodes
-        ):
-            return self.get_random_primary_or_all_nodes(command_name)
-
         replica_safe = (
             self.read_from_replicas or self.load_balancing_strategy is not None
         ) and await self._is_replica_safe(command_name)
@@ -1039,7 +1017,7 @@ class RedisCluster(
         if request_policy == RequestPolicy.DEFAULT_KEYED:
             nodes = await policy_callback(command, *args)
         elif request_policy == RequestPolicy.DEFAULT_KEYLESS:
-            nodes = [await policy_callback(command)]
+            nodes = [await self.get_random_primary_or_all_nodes(command)]
         else:
             nodes = policy_callback()
 

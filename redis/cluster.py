@@ -1123,7 +1123,9 @@ class RedisCluster(
         """
         Returns random primary or all nodes depends on READONLY mode.
         """
-        if self.read_from_replicas and self._is_replica_safe(command_name):
+        if (
+            self.read_from_replicas or self.load_balancing_strategy is not None
+        ) and self._is_replica_safe(command_name):
             return self.get_random_node()
 
         return self.get_random_primary_node()
