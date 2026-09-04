@@ -168,6 +168,135 @@ class TestCache:
                 "cache": DefaultCache(CacheConfig(max_size=5)),
                 "single_connection_client": False,
             },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_zrank_zrevrank_are_cacheable(self, r, r2):
+        # ZRANK and ZREVRANK are in the cache allow list but used to pass no
+        # `keys`, so client-side caching raised
+        # ValueError("Cannot create cache key."). They must be cacheable under
+        # the whole key and invalidated when the sorted set changes.
+        cache = r.get_cache()
+        r.delete("myzset")
+        r.zadd("myzset", {"a": 1, "b": 2, "c": 3})
+        # populate the local cache (no ValueError)
+        assert r.zrank("myzset", "b") == 1
+        assert r.zrevrank("myzset", "b") == 1
+        assert (
+            cache.get(
+                CacheKey(
+                    command="ZRANK",
+                    redis_keys=("myzset",),
+                    redis_args=("ZRANK", "myzset", "b"),
+                )
+            )
+            is not None
+        )
+        assert (
+            cache.get(
+                CacheKey(
+                    command="ZREVRANK",
+                    redis_keys=("myzset",),
+                    redis_args=("ZREVRANK", "myzset", "b"),
+                )
+            )
+            is not None
+        )
+        # change the sorted set from a second client (causes invalidation)
+        r2.zadd("myzset", {"aa": 0})
+        # Add a small delay to allow invalidation to be processed
+        time.sleep(0.1)
+        # rank of "b" shifts from 1 to 2 after inserting a lower-scored member
+        assert r.zrank("myzset", "b") == 2
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": True,
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": False,
+            },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_xpending_range_is_cacheable(self, r):
+        # XPENDING is on the allow list, but xpending_range passed no `keys`,
+        # so client-side caching raised ValueError("Cannot create cache key.").
+        cache = r.get_cache()
+        stream, group = "stream", "group"
+        r.delete(stream)
+        r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+        # must not raise, and the result must be cached under the stream key
+        assert r.xpending_range(stream, group, min="-", max="+", count=5) == []
+        assert (
+            cache.get(
+                CacheKey(
+                    command="XPENDING",
+                    redis_keys=(stream,),
+                    redis_args=("XPENDING", stream, group, "-", "+", 5),
+                )
+            )
+            is not None
+        )
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": True,
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": False,
+            },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_sort_ro_is_cacheable(self, r, r2):
+        # sort_ro delegated to sort() and sent SORT, so SORT_RO (on the allow
+        # list) was never actually cached. It now sends SORT_RO with the key.
+        cache = r.get_cache()
+        r.delete("mylist")
+        r.rpush("mylist", "3", "1", "2")
+        assert r.sort_ro("mylist") == [b"1", b"2", b"3"]
+        assert (
+            cache.get(
+                CacheKey(
+                    command="SORT_RO",
+                    redis_keys=("mylist",),
+                    redis_args=("SORT_RO", "mylist"),
+                )
+            )
+            is not None
+        )
+        # mutate from a second client -> invalidation
+        r2.rpush("mylist", "0")
+        time.sleep(0.1)
+        assert r.sort_ro("mylist") == [b"0", b"1", b"2", b"3"]
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": True,
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": False,
+            },
             {
                 "cache": DefaultCache(CacheConfig(max_size=5)),
                 "single_connection_client": False,
