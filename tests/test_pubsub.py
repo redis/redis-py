@@ -3780,6 +3780,153 @@ class TestClusterPubSubSlotMigration:
         pubsub.node_pubsub_mapping["127.0.0.1:7002"] = fresh_ps
         assert next(pubsub._pubsubs_generator) is fresh_ps
 
+    def test_drop_node_pubsub_recreates_pubsubs_generator(self):
+        """
+        Regression: only ``reset()`` rebound ``_pubsubs_generator``, but a
+        single-node drop has the same exposure - the generator captures
+        ``node_pubsub_mapping.values()`` into a local list inside ``yield
+        from``, which ``_drop_node_pubsub``'s pop does not reach. So the round
+        robin kept handing the retired per-node pubsub to the next poll.
+        """
+        pubsub = self._make_cluster_pubsub()
+        pubsub._pubsubs_generator = ClusterPubSub._pubsubs_generator(pubsub)
+        ps_a = self._make_stateful_node_pubsub({b"foo": None})
+        ps_b = self._make_stateful_node_pubsub({b"bar": None})
+        pubsub.node_pubsub_mapping = {
+            "127.0.0.1:7000": ps_a,
+            "127.0.0.1:7001": ps_b,
+        }
+        # Advance into yield-from so the generator's frame holds a captured
+        # list referencing both per-node pubsubs.
+        assert next(pubsub._pubsubs_generator) is ps_a
+        old_generator = pubsub._pubsubs_generator
+
+        with pubsub._shard_state_lock:
+            pubsub._drop_node_pubsub("127.0.0.1:7000", ps_a)
+
+        assert pubsub._pubsubs_generator is not old_generator
+        # The fresh generator must not drain the old captured list first.
+        assert next(pubsub._pubsubs_generator) is ps_b
+        assert next(pubsub._pubsubs_generator) is ps_b
+
+    def test_unbounded_poll_bails_out_of_a_dropped_pubsub(self):
+        """
+        Regression: ``_poll_node_pubsub``'s prelude waited on
+        ``subscribed_event`` uninterrupted. A per-node pubsub
+        ``_drop_node_pubsub`` retired has that event cleared and is never
+        resubscribed, so a reader still holding the object - handed it by a
+        ``_pubsubs_generator`` snapshot taken before the drop, or by a
+        ``target_node`` lookup that raced it - parked for good, and the healthy
+        siblings in that pass were never read.
+        """
+        pubsub = self._make_cluster_pubsub()
+        dropped = self._make_stateful_node_pubsub({b"foo": None})
+        pubsub.node_pubsub_mapping["127.0.0.1:7000"] = dropped
+
+        with pubsub._shard_state_lock:
+            pubsub._drop_node_pubsub("127.0.0.1:7000", dropped)
+
+        # The retirement stays honest: ``subscribed`` is ``subscribed_event``
+        # in the sync stack, so the bail-out cannot be spelled by setting it.
+        assert not dropped.subscribed
+
+        with mock.patch("redis.cluster.SHARD_SUBSCRIBE_WAIT_TICK_SECONDS", 0.01):
+            start = time.monotonic()
+            assert pubsub._poll_node_pubsub(dropped, None) is None
+        assert time.monotonic() - start < 1.0
+
+    def test_unbounded_poll_skips_a_dropped_pubsub_and_reads_its_sibling(self):
+        """
+        The pass must survive being handed a retired pubsub, not just avoid
+        parking on it: the round robin serves every per-node pubsub from one
+        reader, so stalling on the corpse withholds the siblings' messages.
+
+        Restoring the pre-drop generator models the window the rebind in
+        ``_drop_node_pubsub`` cannot close - a reader that had already read
+        ``self._pubsubs_generator`` when the worker thread rebound it.
+        """
+        pubsub = self._make_cluster_pubsub()
+        silent = self._make_node_pubsub({b"quiet": None})
+        dropped = self._make_stateful_node_pubsub({b"foo": None})
+        live = self._make_node_pubsub({b"bar": None})
+        live.get_message.return_value = {
+            "type": "smessage",
+            "channel": b"bar",
+            "data": b"hi",
+        }
+        pubsub.node_pubsub_mapping = {
+            "127.0.0.1:7000": silent,
+            "127.0.0.1:7001": dropped,
+            "127.0.0.1:7002": live,
+        }
+        pubsub._pubsubs_generator = ClusterPubSub._pubsubs_generator(pubsub)
+        # Advance into yield-from, leaving ``dropped`` unconsumed in the
+        # captured snapshot so the next poll is handed it after the drop.
+        assert next(pubsub._pubsubs_generator) is silent
+        stale_generator = pubsub._pubsubs_generator
+
+        with pubsub._shard_state_lock:
+            pubsub._drop_node_pubsub("127.0.0.1:7001", dropped)
+        pubsub._pubsubs_generator = stale_generator
+
+        with mock.patch("redis.cluster.SHARD_SUBSCRIBE_WAIT_TICK_SECONDS", 0.01):
+            message = pubsub.get_sharded_message(timeout=None)
+
+        assert message is not None
+        assert message["channel"] == b"bar"
+
+    def test_unbounded_poll_waits_for_a_pubsub_still_in_the_mapping(self):
+        """
+        The bail-out must key off retirement, not off ``subscribed``:
+        ``_get_node_pubsub`` registers a per-node pubsub before its caller's
+        first ``ssubscribe``, and an unbounded poll that landed in between has
+        to keep waiting for that subscription rather than skip the node.
+        """
+        pubsub = self._make_cluster_pubsub()
+        node_ps = self._make_stateful_node_pubsub()
+        pubsub.node_pubsub_mapping["127.0.0.1:7000"] = node_ps
+        assert not node_ps.subscribed
+        smessage = {"type": "smessage", "channel": b"foo", "data": b"hi"}
+        node_ps.parse_response = lambda block=True, timeout=0.0: [
+            b"smessage",
+            b"foo",
+            b"hi",
+        ]
+        node_ps.handle_message = (
+            lambda response, ignore_subscribe_messages=False: smessage
+        )
+        subscriber = threading.Thread(
+            target=lambda: (time.sleep(0.05), node_ps.ssubscribe(b"foo")),
+            daemon=True,
+        )
+
+        with mock.patch("redis.cluster.SHARD_SUBSCRIBE_WAIT_TICK_SECONDS", 0.01):
+            subscriber.start()
+            message = pubsub._poll_node_pubsub(node_ps, None)
+        subscriber.join(timeout=5)
+
+        # Waited out the ticks and then read, rather than skipping the node.
+        assert node_ps.subscribed
+        assert message == smessage
+
+    def test_bounded_poll_waits_once_for_the_callers_timeout(self):
+        """
+        The interruptible wait must not change the bounded contract: one wait
+        of the caller's timeout, then "no message available". A bounded poll
+        recovers on the next pass by re-snapshotting, so it neither ticks nor
+        pays the mapping lookup.
+        """
+        pubsub = self._make_cluster_pubsub()
+        node_ps = self._make_stateful_node_pubsub()
+        pubsub.node_pubsub_mapping["127.0.0.1:7000"] = node_ps
+
+        with mock.patch.object(
+            node_ps.subscribed_event, "wait", return_value=False
+        ) as wait:
+            assert pubsub._poll_node_pubsub(node_ps, 0.05) is None
+
+        wait.assert_called_once_with(0.05)
+
     def _make_stateful_node_pubsub(self, shard_channels=None):
         """A per-node pubsub whose ``subscribed`` follows its channels.
 

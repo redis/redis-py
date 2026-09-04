@@ -3114,6 +3114,14 @@ class ClusterPubSubSlotsCacheListener(EventListenerInterface):
 # siblings hold undelivered messages.
 SHARD_POLL_COOL_OFF_SECONDS = 1.0
 
+# How long an unbounded sharded-pubsub poll waits for a not-yet-subscribed
+# per-node pubsub before re-checking that the pubsub is still in
+# node_pubsub_mapping. A retired one is never resubscribed and its
+# subscribed_event is never set again, so an uninterrupted wait would park the
+# single reader for good and stop delivery from every healthy sibling too.
+# Only a poll that would otherwise block indefinitely ticks at all.
+SHARD_SUBSCRIBE_WAIT_TICK_SECONDS = 1.0
+
 # How often a failed sharded-pubsub poll may trigger a slots-cache refresh.
 # Reconciliation is otherwise purely event-driven, and a node that has left the
 # deployment answers ECONNREFUSED rather than MOVED - so without this the reader
@@ -3379,7 +3387,12 @@ class ClusterPubSub(PubSub):
             return pubsub
 
     def _find_node_name_for_pubsub(self, pubsub):
-        for node_name, node_pubsub in self.node_pubsub_mapping.items():
+        # Snapshot the items: every caller but one runs without
+        # _shard_state_lock, so iterating the mapping directly would raise
+        # "dictionary changed size during iteration" whenever a concurrent
+        # migration adds or retires a per-node pubsub - which is exactly when
+        # these lookups happen. list() of a dict view is atomic under the GIL.
+        for node_name, node_pubsub in list(self.node_pubsub_mapping.items()):
             if node_pubsub is pubsub:
                 return node_name
         return None
@@ -3455,11 +3468,17 @@ class ClusterPubSub(PubSub):
 
         Every caller must leave nothing subscribed on ``pubsub`` (or have lost
         the node itself). An empty per-node pubsub left in the mapping is what
-        ``_poll_node_pubsub`` parks on: its ``subscribed_event`` is cleared, so
-        the prelude waits for the whole timeout of every pass - forever when the
-        caller passed ``timeout=None``, since the ``reset()`` below only clears
-        that event again and no message can arrive on a subscription that is
-        gone.
+        ``_poll_node_pubsub`` stalls on: its ``subscribed_event`` is cleared, so
+        the prelude waits out the whole timeout of every pass - indefinitely when
+        the caller passed ``timeout=None``, since the ``reset()`` below only
+        clears that event again and no message can arrive on a subscription that
+        is gone.
+
+        Popping it from the mapping is also what makes the retirement
+        *observable*: that prelude gives up on an unbounded wait once the pubsub
+        it was handed is no longer mapped, which is the only thing standing
+        between a reader that held the object across this call and a permanent
+        park. The rebind below keeps it from being handed out to begin with.
         """
         try:
             with self._pubsub_io_lock(pubsub):
@@ -3468,6 +3487,15 @@ class ClusterPubSub(PubSub):
             pass
         self.node_pubsub_mapping.pop(name, None)
         self._unreachable_nodes.discard(name)
+        # Same snapshot reason ``reset()`` recreates this: ``_pubsubs_generator``
+        # captures node_pubsub_mapping.values() into a local list inside
+        # ``yield from``, which the pop above does not reach - so a generator
+        # suspended mid-yield-from would still hand the object we just retired
+        # to the next poll. ``type(self)`` bypasses the instance-level
+        # self-shadow established at __init__. Costs nothing: constructing a
+        # generator runs no frame, so the per-node collection loop in
+        # reinitialize_shard_subscriptions can rebind once per dropped node.
+        self._pubsubs_generator = type(self)._pubsubs_generator(self)
 
     def _sharded_message_generator(self, timeout=0.0):
         first_error: Optional[BaseException] = None
@@ -3637,16 +3665,35 @@ class ClusterPubSub(PubSub):
         # under it stalls the very subscribe being waited for.
         if not pubsub.subscribed:
             start_time = time.monotonic()
-            if pubsub.subscribed_event.wait(timeout) is True:
-                # The connection was subscribed during the timeout time frame.
-                # The timeout should be adjusted based on the time spent
-                # waiting for the subscription.
-                if timeout is not None:
-                    timeout = max(0.0, timeout - (time.monotonic() - start_time))
+            # An unbounded caller must not wait on this event uninterrupted.
+            # _drop_node_pubsub retires a per-node pubsub whose event is cleared
+            # and will never be set again - it is never resubscribed - and the
+            # reader can be holding that object across the drop: the round robin
+            # yields from a _pubsubs_generator snapshot the drop's pop does not
+            # reach, and get_sharded_message's target_node lookup takes no lock.
+            # So wake up periodically and re-check the mapping rather than park
+            # the single reader for good, which would withhold the messages of
+            # every healthy sibling in the pass too.
+            if timeout is None:
+                wait_for = SHARD_SUBSCRIBE_WAIT_TICK_SECONDS
             else:
-                # The connection isn't subscribed to any channels or patterns,
-                # so no messages are available
-                return None
+                wait_for = timeout
+            while not pubsub.subscribed_event.wait(wait_for):
+                if timeout is not None:
+                    # The connection isn't subscribed to any channels or
+                    # patterns, so no messages are available
+                    return None
+                if self._find_node_name_for_pubsub(pubsub) is None:
+                    # Retired by a concurrent drop while we held it. Nothing can
+                    # arrive on a subscription that is gone; let the pass move on
+                    # to the nodes that can still deliver.
+                    return None
+            # The connection was subscribed during the timeout time frame.
+            # The timeout should be adjusted based on the time spent
+            # waiting for the subscription. Only the bounded case needs it: an
+            # unbounded wait leaves ``timeout`` at None for the read below.
+            if timeout is not None:
+                timeout = max(0.0, timeout - (time.monotonic() - start_time))
         with self._poll_io_lock(pubsub, timeout):
             # Re-check now that no writer can be mid-flight: the prelude above
             # can pass and the GC then close this pubsub while holding this very
