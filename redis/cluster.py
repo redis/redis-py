@@ -3803,6 +3803,26 @@ class ClusterPubSub(PubSub):
     def get_sharded_message(
         self, ignore_subscribe_messages=False, timeout=0.0, target_node=None
     ):
+        """
+        Get the next sharded pubsub message, or ``None`` if none is available.
+
+        Polls the per-node connections in round robin unless ``target_node`` is
+        given, and keeps shard channels attached to the node that currently
+        owns their slot: a failed poll cools that node off and asks for a
+        slots-cache refresh, and a ``MOVED`` reply re-routes the affected
+        channels to their new owner. Neither reaches the caller. A connection
+        failure is surfaced only when every node polled in the pass failed, so
+        one unreachable node does not stop delivery from its healthy siblings.
+
+        ``target_node`` opts out of that shielding: a caller that names a
+        single node has no sibling to protect, so connection errors propagate.
+        A ``MOVED`` reply is still handled rather than raised.
+
+        :param ignore_subscribe_messages: Whether to ignore subscribe messages
+        :param timeout: Timeout for message retrieval
+        :param target_node: Specific node to get message from
+        :return: Message dictionary or None
+        """
         if target_node:
             # Use .get(): migration-driven cleanup in the sunsubscribe branch
             # below and reset() both remove entries from node_pubsub_mapping,

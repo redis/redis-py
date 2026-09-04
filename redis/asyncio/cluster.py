@@ -3932,10 +3932,6 @@ class ClusterPubSub(PubSub):
         """
         return self.node
 
-    async def _ensure_cluster_initialized(self) -> None:
-        if getattr(self.cluster, "_initialize", False) is True:
-            await self.cluster.initialize()
-
     async def _resubscribe_shard_channels(self) -> None:
         # A single node can own multiple slot ranges, so a batched
         # ``SSUBSCRIBE`` covering every tracked channel would be rejected by
@@ -4373,7 +4369,19 @@ class ClusterPubSub(PubSub):
         target_node: Optional["ClusterNode"] = None,
     ) -> Optional[Dict[str, Any]]:
         """
-        Get a message from shard channels.
+        Get the next sharded pubsub message, or ``None`` if none is available.
+
+        Polls the per-node connections in round robin unless ``target_node`` is
+        given, and keeps shard channels attached to the node that currently
+        owns their slot: a failed poll cools that node off and asks for a
+        slots-cache refresh, and a ``MOVED`` reply re-routes the affected
+        channels to their new owner. Neither reaches the caller. A connection
+        failure is surfaced only when every node polled in the pass failed, so
+        one unreachable node does not stop delivery from its healthy siblings.
+
+        ``target_node`` opts out of that shielding: a caller that names a
+        single node has no sibling to protect, so connection errors propagate.
+        A ``MOVED`` reply is still handled rather than raised.
 
         :param ignore_subscribe_messages: Whether to ignore subscribe messages
         :param timeout: Timeout for message retrieval
@@ -4454,7 +4462,6 @@ class ClusterPubSub(PubSub):
         :param kwargs: Channel names with handlers
         """
         s_channels = parse_pubsub_subscriptions(args, kwargs)
-        await self._ensure_cluster_initialized()
 
         if not s_channels:
             return
@@ -4503,8 +4510,6 @@ class ClusterPubSub(PubSub):
 
         :param args: Channel names to unsubscribe from. If empty, unsubscribe from all.
         """
-        await self._ensure_cluster_initialized()
-
         if args:
             args = list_or_args(args[0], args[1:])
         else:

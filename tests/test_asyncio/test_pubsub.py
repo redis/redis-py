@@ -2538,6 +2538,7 @@ class TestClusterPubSubSlotMigration:
 
         new_ps.ssubscribe.assert_not_awaited()
         assert channel in pubsub.pending_unsubscribe_shard_channels
+
     async def test_reinitialize_reattaches_when_owner_lost_the_subscription(self):
         """
         A pass that detached from the old owner and then failed to attach leaves
