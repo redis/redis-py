@@ -55,7 +55,9 @@ from .socket import SERVER_CLOSED_CONNECTION_ERROR, SocketBuffer
 # - RecursionError: deeply nested aggregate replies exhaust the stack in the
 #   pure-Python parsers. #4144 turns this into InvalidResponse at a bounded
 #   depth; until then, catching it here is what stops the loop.
-UNRECOVERABLE_PARSE_ERRORS = (InvalidResponse, UnicodeDecodeError, RecursionError)
+# - ValueError: malformed numeric frames (e.g., `:abc\r\n`) where int(response)
+#   fails when parsing integer, bulk length, or aggregate length fields.
+UNRECOVERABLE_PARSE_ERRORS = (InvalidResponse, UnicodeDecodeError, RecursionError, ValueError)
 
 MODULE_LOAD_ERROR = "Error loading the extension. Please check the server logs."
 NO_SUCH_MODULE_ERROR = "Error unloading module: no such module with that name"
