@@ -82,6 +82,7 @@ from redis.exceptions import (
     AuthenticationWrongNumberOfArgsError,
     ConnectionError,
     DataError,
+    InvalidResponse,
     MaxConnectionsError,
     RedisError,
     ResponseError,
@@ -1422,7 +1423,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             # Also by default close in case of BaseException.  A lot of code
             # relies on this behaviour when doing Command/Response pairs.
             # See #1128.
-            if disconnect_on_error:
+            if disconnect_on_error or isinstance(e, InvalidResponse):
                 add_debug_log_for_connection_failure(self, e, "reading response")
                 await self.disconnect(nowait=True)
             raise
