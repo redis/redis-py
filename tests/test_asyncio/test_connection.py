@@ -581,6 +581,22 @@ async def test_connect_timeout_error_without_retry():
     assert conn._connect.call_count == 1
 
 
+async def test_connection_invalid_response_disconnects_when_disconnect_disabled():
+    conn = Connection()
+    with (
+        mock.patch.object(
+            conn._parser,
+            "read_response",
+            new=mock.AsyncMock(side_effect=InvalidResponse("invalid response")),
+        ),
+        mock.patch.object(conn, "disconnect", new=mock.AsyncMock()) as disconnect,
+    ):
+        with pytest.raises(InvalidResponse):
+            await conn.read_response(disconnect_on_error=False)
+
+    disconnect.assert_awaited_once_with(nowait=True)
+
+
 @pytest.mark.onlynoncluster
 async def test_connection_parse_response_resume(r: redis.Redis):
     """

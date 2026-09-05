@@ -104,6 +104,22 @@ def test_invalid_response(r):
             parser.read_response()
 
 
+def test_connection_invalid_response_disconnects_when_disconnect_disabled():
+    conn = Connection()
+    with (
+        mock.patch.object(
+            conn._parser,
+            "read_response",
+            side_effect=InvalidResponse("invalid response"),
+        ),
+        mock.patch.object(conn, "disconnect") as disconnect,
+    ):
+        with pytest.raises(InvalidResponse):
+            conn.read_response(disconnect_on_error=False)
+
+    disconnect.assert_called_once_with()
+
+
 def test_hiredis_can_read_detects_reader_data():
     parser = make_hiredis_parser(response=b"OK", has_data=True)
 
