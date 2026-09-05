@@ -1087,6 +1087,8 @@ _DONT_CACHE_WRITE_KEYED = replace(_WRITE_KEYED, is_dont_cache=True)
 # carried - ``bf.*``, ``cf.*``, ``cms.*``, ``topk.*``, ``tdigest.*``, the vectorset reads
 # - plus core reads such as ``pfcount``. A command absent from the table fails closed, so the uncovered
 # Provenance: Generated against Redis 8.6-rc1 with all bundled modules loaded,
+# commands are simply treated as not cacheable.
+# Provenance: Generated against Redis 8.10.0 with all bundled modules loaded,
 # with the core entries also compared against 7.4.2 to ensure the minimum
 # supported version does not disagree on the fields that decide cacheability.
 #
