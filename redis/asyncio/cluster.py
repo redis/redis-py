@@ -82,12 +82,14 @@ from redis.cluster import (
     parse_cluster_shards_with_str_keys,
     parse_cluster_slots,
 )
-from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
+from redis.commands import AsyncRedisClusterCommands
 from redis.commands.helpers import list_or_args, parse_pubsub_subscriptions
 from redis.commands.metadata import (
     _DEFAULT_KEYED_METADATA,
     _DEFAULT_KEYLESS_METADATA,
     _METADATA_BY_REQUEST_POLICY,
+    AsyncMetadataResolver,
+    AsyncStaticMetadataResolver,
     CommandMetadata,
     CommandPolicies,
     RequestPolicy,
@@ -277,6 +279,10 @@ class RedisCluster(
         | Enable read from replicas in READONLY mode and defines the load balancing
           strategy that will be used for cluster node selection.
           The data read from replicas is eventually consistent with the data in primary nodes.
+    :param metadata_resolver:
+        | Optional :class:`~.AsyncMetadataResolver` instance used to map command names
+          to replica-safe routing rules. If not provided, an AsyncStaticMetadataResolver
+          is used by default.
     :param dynamic_startup_nodes:
         | Set the RedisCluster's startup nodes to all the discovered nodes.
           If true (default value), the cluster's discovered nodes will be used to
@@ -468,6 +474,7 @@ class RedisCluster(
         event_dispatcher: EventDispatcher | None = None,
         policy_resolver: AsyncPolicyResolver | None = None,
         maint_notifications_config: MaintNotificationsConfig | None = None,
+        metadata_resolver: AsyncMetadataResolver | None = None,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -640,9 +647,7 @@ class RedisCluster(
         self._policies_callback_mapping: dict[
             Union[RequestPolicy, ResponsePolicy], Callable
         ] = {
-            RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [
-                self.get_random_primary_or_all_nodes(command_name)
-            ],
+            RequestPolicy.DEFAULT_KEYLESS: self.get_random_primary_or_all_nodes,
             RequestPolicy.DEFAULT_KEYED: self.get_nodes_from_slot,
             RequestPolicy.DEFAULT_NODE: lambda: [self.get_default_node()],
             RequestPolicy.ALL_SHARDS: self.get_primaries,
@@ -657,8 +662,16 @@ class RedisCluster(
         # resolver and the memos it accumulates are released with the client. The async
         # ClusterPipeline holds the client and reads this attribute, so a pipeline routes by
         # whatever the client routes by without any propagation of its own.
+        if metadata_resolver is None:
+            self._metadata_resolver: AsyncMetadataResolver = (
+                AsyncStaticMetadataResolver()
+            )
+        else:
+            self._metadata_resolver = metadata_resolver
         if policy_resolver is None:
-            self._policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver()
+            self._policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver(
+                metadata_resolver=self._metadata_resolver
+            )
         else:
             self._policy_resolver = policy_resolver
         self.commands_parser = AsyncCommandsParser()
@@ -870,14 +883,22 @@ class RedisCluster(
 
         return slot_cache[node_idx]
 
-    def get_random_primary_or_all_nodes(self, command_name):
+    async def get_random_primary_or_all_nodes(
+        self, command_name: str
+    ) -> "ClusterNode":
         """
         Returns random primary or all nodes depends on READONLY mode.
         """
-        if self.read_from_replicas and command_name in READ_COMMANDS:
+        replica_safe = (
+            self.read_from_replicas or self.load_balancing_strategy is not None
+        ) and await self._is_replica_safe(command_name)
+        if replica_safe:
             return self.get_random_node()
 
         return self.get_random_primary_node()
+
+    async def _is_replica_safe(self, command_name: str) -> bool:
+        return await self._metadata_resolver.is_replica_safe(command_name)
 
     def get_random_primary_node(self) -> "ClusterNode":
         """
@@ -890,11 +911,14 @@ class RedisCluster(
         Returns a list of nodes that hold the specified keys' slots.
         """
         # get the node that holds the key's slot
+        replica_safe = (
+            self.read_from_replicas or self.load_balancing_strategy is not None
+        ) and await self._is_replica_safe(command)
         return [
             self.nodes_manager.get_node_from_slot(
                 await self._determine_slot(command, *args),
-                self.read_from_replicas and command in READ_COMMANDS,
-                self.load_balancing_strategy if command in READ_COMMANDS else None,
+                replica_safe,
+                self.load_balancing_strategy if replica_safe else None,
             )
         ]
 
@@ -970,24 +994,33 @@ class RedisCluster(
         self,
         command: str,
         *args: Any,
-        request_policy: RequestPolicy,
+        request_policy: Optional[RequestPolicy] = None,
         node_flag: Optional[str] = None,
     ) -> List["ClusterNode"]:
         # Determine which nodes should be executed the command on.
         # Returns a list of target nodes.
-        if not node_flag:
-            # get the nodes group for this command if it was predefined
-            node_flag = self.command_flags.get(command)
+        if node_flag and self._is_node_flag(node_flag):
+            if node_flag in self._command_flags_mapping:
+                request_policy = self._command_flags_mapping[node_flag]
+        elif request_policy is None:
+            full_command = command.upper()
+            if args and f"{command} {args[0]}".upper() in self.command_flags:
+                full_command = f"{command} {args[0]}".upper()
+            command_flag = self.command_flags.get(full_command)
+            if command_flag in self._command_flags_mapping:
+                request_policy = self._command_flags_mapping[command_flag]
 
-        if node_flag in self._command_flags_mapping:
-            request_policy = self._command_flags_mapping[node_flag]
+        if request_policy is None:
+            raise RedisClusterException(
+                f"No targets were found to execute {command} command on"
+            )
 
         policy_callback = self._policies_callback_mapping[request_policy]
 
         if request_policy == RequestPolicy.DEFAULT_KEYED:
             nodes = await policy_callback(command, *args)
         elif request_policy == RequestPolicy.DEFAULT_KEYLESS:
-            nodes = policy_callback(command)
+            nodes = [await self.get_random_primary_or_all_nodes(command)]
         else:
             nodes = policy_callback()
 
@@ -997,7 +1030,7 @@ class RedisCluster(
         return nodes
 
     async def _determine_slot(self, command: str, *args: Any) -> int:
-        if self.command_flags.get(command) == SLOT_ID:
+        if self.command_flags.get(command.upper()) == SLOT_ID:
             # The command contains the slot ID
             return int(args[0])
 
@@ -1148,6 +1181,10 @@ class RedisCluster(
         command_policies = await self._policy_resolver.resolve(args[0].lower())
 
         if not command_policies and not target_nodes_specified:
+            command = args[0].upper()
+            if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
+                command = f"{args[0]} {args[1]}".upper()
+
             command_flag = self.command_flags.get(command)
             if not command_flag:
                 # Fallback to default policy
@@ -1287,12 +1324,14 @@ class RedisCluster(
                     # MOVED occurred and the slots cache was updated,
                     # refresh the target node
                     slot = await self._determine_slot(*args)
+                    replica_safe = (
+                        self.read_from_replicas
+                        or self.load_balancing_strategy is not None
+                    ) and await self._is_replica_safe(args[0])
                     target_node = self.nodes_manager.get_node_from_slot(
                         slot,
-                        self.read_from_replicas and args[0] in READ_COMMANDS,
-                        self.load_balancing_strategy
-                        if args[0] in READ_COMMANDS
-                        else None,
+                        replica_safe,
+                        self.load_balancing_strategy if replica_safe else None,
                     )
                     moved = False
 
@@ -2959,7 +2998,14 @@ class PipelineStrategy(AbstractStrategy):
                     command_policies = _DEFAULT_KEYLESS_METADATA
             else:
                 if not command_policies:
-                    command_flag = client.command_flags.get(cmd.args[0])
+                    command = cmd.args[0].upper()
+                    if (
+                        len(cmd.args) >= 2
+                        and f"{cmd.args[0]} {cmd.args[1]}".upper() in client.command_flags
+                    ):
+                        command = f"{cmd.args[0]} {cmd.args[1]}".upper()
+
+                    command_flag = client.command_flags.get(command)
                     if not command_flag:
                         # Fallback to default policy
                         if not client.get_default_node():

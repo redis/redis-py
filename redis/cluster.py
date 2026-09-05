@@ -37,7 +37,7 @@ from redis._parsers.helpers import parse_scan
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.cache import CacheConfig, CacheFactory, CacheFactoryInterface, CacheInterface
 from redis.client import EMPTY_RESPONSE, CaseInsensitiveDict, PubSub, Redis
-from redis.commands import READ_COMMANDS, RedisClusterCommands
+from redis.commands import RedisClusterCommands
 from redis.commands.helpers import list_or_args, parse_pubsub_subscriptions
 from redis.commands.metadata import (
     _DEFAULT_KEYED_METADATA,
@@ -1037,8 +1037,7 @@ class RedisCluster(
         # arguments overlap. Resolved by precedence rather than by rejecting the
         # combination, because a user migrating from one to the other will legitimately pass
         # both: an explicit ``policy_resolver`` - the extension point that shipped in 7.1.0
-        # - keeps deciding routing, and otherwise routing is derived from the metadata
-        # resolver, so one object serves routing and cache eligibility alike.
+        # - keeps deciding routing, and otherwise routing is derived from the metadata resolver.
         if policy_resolver is None:
             self._policy_resolver: PolicyResolver = StaticPolicyResolver(
                 metadata_resolver=self._metadata_resolver
@@ -1124,10 +1123,15 @@ class RedisCluster(
         """
         Returns random primary or all nodes depends on READONLY mode.
         """
-        if self.read_from_replicas and command_name in READ_COMMANDS:
+        if (
+            self.read_from_replicas or self.load_balancing_strategy is not None
+        ) and self._is_replica_safe(command_name):
             return self.get_random_node()
 
         return self.get_random_primary_node()
+
+    def _is_replica_safe(self, command_name: str) -> bool:
+        return self._metadata_resolver.is_replica_safe(command_name)
 
     def get_nodes(self):
         return list(self.nodes_manager.nodes_cache.values())
@@ -1164,10 +1168,13 @@ class RedisCluster(
         """
         # get the node that holds the key's slot
         slot = self.determine_slot(*args)
+        replica_safe = (
+            self.read_from_replicas or self.load_balancing_strategy is not None
+        ) and self._is_replica_safe(command)
         node = self.nodes_manager.get_node_from_slot(
             slot,
-            self.read_from_replicas and command in READ_COMMANDS,
-            self.load_balancing_strategy if command in READ_COMMANDS else None,
+            replica_safe,
+            self.load_balancing_strategy if replica_safe else None,
         )
         return [node]
 
@@ -1412,7 +1419,7 @@ class RedisCluster(
         self.cluster_response_callbacks[command] = callback
 
     def _determine_nodes(
-        self, *args, request_policy: RequestPolicy, **kwargs
+        self, *args, request_policy: Optional[RequestPolicy] = None, **kwargs
     ) -> List["ClusterNode"]:
         """
         Determines a nodes the command should be executed on.
@@ -1422,15 +1429,21 @@ class RedisCluster(
             command = f"{args[0]} {args[1]}".upper()
 
         nodes_flag = kwargs.pop("nodes_flag", None)
-        if nodes_flag is not None:
+        if nodes_flag and self._is_nodes_flag(nodes_flag):
             # nodes flag passed by the user
             command_flag = nodes_flag
-        else:
+            if command_flag in self._command_flags_mapping:
+                request_policy = self._command_flags_mapping[command_flag]
+        elif request_policy is None:
             # get the nodes group for this command if it was predefined
             command_flag = self.command_flags.get(command)
+            if command_flag in self._command_flags_mapping:
+                request_policy = self._command_flags_mapping[command_flag]
 
-        if command_flag in self._command_flags_mapping:
-            request_policy = self._command_flags_mapping[command_flag]
+        if request_policy is None:
+            raise RedisClusterException(
+                f"No targets were found to execute {args} command on"
+            )
 
         policy_callback = self._policies_callback_mapping[request_policy]
 
@@ -1833,12 +1846,14 @@ class RedisCluster(
                     # MOVED occurred and the slots cache was updated,
                     # refresh the target node
                     slot = self.determine_slot(*args)
+                    replica_safe = (
+                        self.read_from_replicas
+                        or self.load_balancing_strategy is not None
+                    ) and self._is_replica_safe(command)
                     target_node = self.nodes_manager.get_node_from_slot(
                         slot,
-                        self.read_from_replicas and command in READ_COMMANDS,
-                        self.load_balancing_strategy
-                        if command in READ_COMMANDS
-                        else None,
+                        replica_safe,
+                        self.load_balancing_strategy if replica_safe else None,
                     )
                     moved = False
 
@@ -4676,7 +4691,7 @@ class PipelineStrategy(AbstractStrategy):
         return nodes
 
     def _determine_nodes(
-        self, *args, request_policy: RequestPolicy, **kwargs
+        self, *args, request_policy: Optional[RequestPolicy] = None, **kwargs
     ) -> List["ClusterNode"]:
         # Determine which nodes should be executed the command on.
         # Returns a list of target nodes.
@@ -4688,15 +4703,21 @@ class PipelineStrategy(AbstractStrategy):
             command = f"{args[0]} {args[1]}".upper()
 
         nodes_flag = kwargs.pop("nodes_flag", None)
-        if nodes_flag is not None:
+        if nodes_flag and self._is_nodes_flag(nodes_flag):
             # nodes flag passed by the user
             command_flag = nodes_flag
-        else:
+            if command_flag in self._pipe._command_flags_mapping:
+                request_policy = self._pipe._command_flags_mapping[command_flag]
+        elif request_policy is None:
             # get the nodes group for this command if it was predefined
             command_flag = self._pipe.command_flags.get(command)
+            if command_flag in self._pipe._command_flags_mapping:
+                request_policy = self._pipe._command_flags_mapping[command_flag]
 
-        if command_flag in self._pipe._command_flags_mapping:
-            request_policy = self._pipe._command_flags_mapping[command_flag]
+        if request_policy is None:
+            raise RedisClusterException(
+                f"No targets were found to execute {args} command on"
+            )
 
         policy_callback = self._pipe._policies_callback_mapping[request_policy]
 

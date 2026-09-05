@@ -171,7 +171,7 @@ node's client. On the Cluster client it also supersedes ``policy_resolver``: giv
 ``CacheConfig.DEFAULT_ALLOW_LIST`` is deprecated and no longer consulted.
 
 Client-side caching is not yet implemented in the async clients, so
-``redis.asyncio.Redis`` and ``redis.asyncio.RedisCluster`` take no ``metadata_resolver``
-argument.
+``redis.asyncio.Redis`` takes no ``metadata_resolver`` argument. However,
+``redis.asyncio.RedisCluster`` accepts ``metadata_resolver`` for dynamic replica routing.
 
 More comprehensive documentation soon will be available at the `Redis documentation site <https://redis.io/docs/latest/>`_.

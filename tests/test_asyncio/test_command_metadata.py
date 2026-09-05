@@ -4,6 +4,7 @@ import pytest
 import pytest_asyncio
 
 from redis._parsers import AsyncCommandsParser
+from redis.asyncio.cluster import RedisCluster
 from redis.commands.metadata import (
     _MEMO_MAX_ENTRIES,
     _STATIC_COMMAND_METADATA,
@@ -30,6 +31,7 @@ from tests.test_command_metadata import (
     KEYED_POLICIES,
     LIVE_CACHEABILITY_DIVERGENCE,
     STATIC_TABLE_SERVER_VERSION,
+    WITHHELD_KEYLESS_READS,
     WITHHELD_ROUTING_COMMANDS,
     cacheability_fields,
     command_flags,
@@ -153,6 +155,76 @@ class TestWithheldRoutingPolicies:
         ).has_nondeterministic_output is True
         for name in ("eval_ro", "evalsha_ro", "fcall_ro"):
             assert (await static_resolver.resolve(name)).is_script_runner is True, name
+
+    async def test_keyless_reads_withhold_routing_and_are_replica_safe(self):
+        static_resolver = AsyncStaticMetadataResolver()
+        for name in WITHHELD_KEYLESS_READS:
+            metadata = await static_resolver.resolve(name)
+
+            assert metadata is not None, name
+            assert metadata.request_policy is None, name
+            assert metadata.response_policy is None, name
+            assert metadata.is_readonly is True, name
+            assert metadata.has_key_argument is False, name
+            assert metadata.has_complete_metadata is True, name
+            assert await static_resolver.is_cacheable(name) is False, name
+            assert await static_resolver.is_replica_safe(name) is True, name
+
+    async def test_command_withholds_routing_and_is_not_replica_safe(self):
+        static_resolver = AsyncStaticMetadataResolver()
+        metadata = await static_resolver.resolve("command")
+
+        assert metadata is not None
+        assert metadata.request_policy is None
+        assert metadata.response_policy is None
+        assert metadata.is_readonly is False
+        assert metadata.has_key_argument is False
+        assert metadata.has_complete_metadata is True
+        assert await static_resolver.is_cacheable("command") is False
+        assert await static_resolver.is_replica_safe("command") is False
+
+    async def test_all_static_entries_in_cluster_command_flags_withhold_routing(self):
+        """
+        Verify that every command appearing in RedisCluster.command_flags that is present
+        in _STATIC_COMMAND_METADATA has its routing view withheld (request_policy=None and
+        response_policy=None).
+        """
+        static_resolver = AsyncStaticMetadataResolver()
+        table_core = _STATIC_COMMAND_METADATA["core"]
+
+        for flag_cmd in RedisCluster.COMMAND_FLAGS:
+            base_cmd = flag_cmd.split()[0].lower()
+            if base_cmd in table_core:
+                metadata = await static_resolver.resolve(base_cmd)
+                assert metadata is not None
+                assert (
+                    metadata.request_policy is None
+                ), f"Command '{base_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold request_policy in _STATIC_COMMAND_METADATA"
+                assert (
+                    metadata.response_policy is None
+                ), f"Command '{base_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold response_policy in _STATIC_COMMAND_METADATA"
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "ft.aggregate",
+            "ft.spellcheck",
+            "ft.tagvals",
+            "ft.syndump",
+            "ft.dictdump",
+            "ft.explaincli",
+            "ts.get",
+            "ts.range",
+            "ts.revrange",
+            "sort_ro",
+            "georadius_ro",
+            "georadiusbymember_ro",
+            "substr",
+        ],
+    )
+    async def test_newly_replica_eligible_commands_are_replica_safe(self, cmd):
+        resolver = AsyncStaticMetadataResolver()
+        assert await resolver.is_replica_safe(cmd) is True
 
     async def test_the_ineligible_records_decide_ahead_of_a_live_layer(self):
         """
@@ -510,6 +582,48 @@ class TestAsyncBaseMetadataResolver:
         # absence above - which is what keeps them out when a live layer sits behind.
         assert await static_resolver.is_cacheable("touch") is False
         assert await static_resolver.is_cacheable("eval_ro") is False
+
+    async def test_custom_metadata_decides_replica_safety_for_known_module_reads(self):
+        resolver = AsyncDynamicMetadataResolver(
+            {
+                "ts": {"get": CACHEABLE_KEYED},
+                "ft": {"aggregate": CACHEABLE_KEYED},
+            }
+        )
+
+        assert await resolver.is_replica_safe("ts.get") is True
+        assert await resolver.is_replica_safe("ft.aggregate") is True
+
+    async def test_touch_remains_replica_unsafe_despite_readonly_metadata(self):
+        resolver = AsyncDynamicMetadataResolver({"core": {"touch": CACHEABLE_KEYED}})
+
+        assert await resolver.is_replica_safe("touch") is False
+
+    async def test_static_resolver_decides_replica_safety(self):
+        resolver = AsyncStaticMetadataResolver()
+
+        # Replica safe commands
+        assert await resolver.is_replica_safe("get") is True
+        assert await resolver.is_replica_safe("GET") is True
+        assert await resolver.is_replica_safe("dbsize") is True
+        assert await resolver.is_replica_safe("ttl") is True
+        assert await resolver.is_replica_safe("eval_ro") is True
+        assert await resolver.is_replica_safe("xread") is True
+        assert await resolver.is_replica_safe("json.get") is True
+        assert await resolver.is_replica_safe("ft.search") is True
+
+        # Replica unsafe commands
+        assert await resolver.is_replica_safe("set") is False
+        assert await resolver.is_replica_safe("SET") is False
+        assert await resolver.is_replica_safe("touch") is False
+        assert await resolver.is_replica_safe("TOUCH") is False
+        assert await resolver.is_replica_safe("hset") is False
+        assert await resolver.is_replica_safe("ft.create") is False
+
+        # Non-string or unknown commands
+        assert await resolver.is_replica_safe(None) is False
+        assert await resolver.is_replica_safe(123) is False
+        assert await resolver.is_replica_safe("nosuchcommand") is False
 
     async def test_is_cacheable_fails_closed_for_an_unresolvable_name(self):
         """

@@ -22,6 +22,7 @@ from redis._parsers.helpers import (
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
 from redis.commands.core import (
+    HAS_XXHASH,
     ArrayAggregateOperations,
     ArrayPredicateCombinator,
     ArrayPredicateType,
@@ -2228,6 +2229,18 @@ class TestRedisCommands:
         assert res_local is not None
         assert len(res_local) == 16
         assert res_server == res_local
+
+    @pytest.mark.skipif(not HAS_XXHASH, reason="xxhash is not installed")
+    def test_local_digest_non_utf8_encoding_bytes(self):
+        from redis import Redis
+
+        client = Redis(encoding="utf-16", decode_responses=False)
+        val = "hello"
+        res = client.digest_local(val)
+        assert isinstance(res, bytes)
+        assert len(res) == 16
+        # Must decode cleanly as 16 ASCII hex bytes without UTF-16 BOM or multi-byte width
+        assert res.decode("ascii").isalnum()
 
     @skip_if_server_version_lt("8.3.224")
     def test_pipeline_digest(self, r):

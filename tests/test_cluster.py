@@ -32,8 +32,10 @@ from redis.cluster import (
     get_node_name,
 )
 from redis.cache import CacheConfig
+from redis.commands.cluster import ClusterMultiKeyCommands
 from redis.commands.core import HotkeysMetricsTypes
 from redis.commands.metadata import (
+    CommandMetadata,
     DynamicMetadataResolver,
     RequestPolicy,
     StaticMetadataResolver,
@@ -67,7 +69,7 @@ from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
 from redis.retry import Retry
 from redis.utils import str_if_bytes
-from tests.test_command_metadata import slot_routed_static_commands
+from tests.test_command_metadata import CACHEABLE_KEYED, slot_routed_static_commands
 from tests.test_pubsub import wait_for_message
 
 from .conftest import (
@@ -2983,6 +2985,180 @@ class TestStaticMetadataRouting:
         assert rc._metadata_resolver is metadata_resolver
         # Not derived from the metadata resolver, which is the point of the precedence rule.
         assert rc._policy_resolver._metadata_resolver is not metadata_resolver
+
+    @pytest.mark.fixed_client
+    def test_metadata_resolver_decides_replica_routing_with_explicit_policy_resolver(
+        self,
+    ):
+        metadata_resolver = DynamicMetadataResolver(
+            {"core": {"set": CACHEABLE_KEYED}}
+        )
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            read_from_replicas=True,
+            policy_resolver=StaticPolicyResolver(),
+            metadata_resolver=metadata_resolver,
+        )
+
+        with (
+            patch.object(rc, "determine_slot", return_value=0),
+            patch.object(
+                type(rc.nodes_manager), "get_node_from_slot", autospec=True
+            ) as get_node,
+        ):
+            rc.get_nodes_from_slot("set", "set", "key", "value")
+
+        get_node.assert_called_once_with(rc.nodes_manager, 0, True, None)
+
+    @pytest.mark.fixed_client
+    def test_split_multi_key_routing_respects_metadata_resolver(self):
+        metadata_resolver = DynamicMetadataResolver(
+            {"core": {"mset": CACHEABLE_KEYED}}
+        )
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            read_from_replicas=True,
+            policy_resolver=StaticPolicyResolver(),
+            metadata_resolver=metadata_resolver,
+        )
+        pipe = Mock()
+        pipe.execute.return_value = [True]
+
+        with (
+            patch.object(rc, "pipeline", return_value=pipe),
+            patch.object(
+                type(rc.nodes_manager), "get_node_from_slot", autospec=True
+            ) as get_node,
+        ):
+            rc.mset_nonatomic({"key": "value"})
+
+        slot = key_slot(rc.encoder.encode("key"))
+        get_node.assert_called_once_with(rc.nodes_manager, slot, True, None)
+
+    @pytest.mark.fixed_client
+    def test_mixin_default_is_replica_safe_emits_deprecation_warning(self):
+        from redis.commands.cluster import RedisClusterCommands
+
+        class StandaloneClusterCommands(RedisClusterCommands):
+            pass
+
+        instance = StandaloneClusterCommands()
+        with pytest.deprecated_call():
+            assert instance._is_replica_safe("GET") is True
+        with pytest.deprecated_call():
+            assert instance._is_replica_safe("SET") is False
+
+    @pytest.mark.fixed_client
+    def test_cluster_scan_routes_to_all_primaries_by_default(self):
+        rc = get_mocked_redis_client(host=default_host, port=7000)
+        primaries = rc.get_primaries()
+        assert len(primaries) > 1
+
+        nodes = rc._determine_nodes("scan", request_policy=None)
+        assert set(nodes) == set(primaries)
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("command", ["dbsize", "keys", "randomkey"])
+    def test_default_node_commands_route_to_default_node_by_default(self, command):
+        rc = get_mocked_redis_client(host=default_host, port=7000)
+        default_node = rc.get_default_node()
+
+        nodes = rc._determine_nodes(command, request_policy=None)
+        assert nodes == [default_node]
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("empty_targets", [[], {}])
+    def test_empty_target_nodes_does_not_raise_and_falls_back(self, empty_targets):
+        rc = get_mocked_redis_client(host=default_host, port=7000)
+        default_node = rc.get_default_node()
+
+        nodes = rc._determine_nodes("dbsize", request_policy=None, nodes_flag=empty_targets)
+        assert nodes == [default_node]
+
+    @pytest.mark.fixed_client
+    def test_command_subcommands_route_to_default_node(self):
+        rc = get_mocked_redis_client(host=default_host, port=7000)
+        default_node = rc.get_default_node()
+
+        nodes = rc._determine_nodes("COMMAND", "COUNT", request_policy=None)
+        assert nodes == [default_node]
+
+    @pytest.mark.fixed_client
+    def test_determine_nodes_raises_exception_when_no_policy_resolved(self):
+        rc = get_mocked_redis_client(host=default_host, port=7000)
+        with pytest.raises(RedisClusterException, match="No targets were found"):
+            rc._determine_nodes("UNRECOGNIZED_COMMAND", request_policy=None)
+
+        with rc.pipeline() as pipe:
+            with pytest.raises(RedisClusterException, match="No targets were found"):
+                pipe._determine_nodes("UNRECOGNIZED_COMMAND", request_policy=None)
+
+    @pytest.mark.fixed_client
+    def test_pipeline_determine_nodes_honors_resolved_metadata_policy(self):
+        resolver = DynamicMetadataResolver(
+            {"core": {"dbsize": CommandMetadata(request_policy=RequestPolicy.DEFAULT_KEYLESS)}}
+        )
+        rc = get_mocked_redis_client(
+            host=default_host, port=7000, metadata_resolver=resolver
+        )
+        selected_node = rc.get_primaries()[0]
+
+        with rc.pipeline() as pipe:
+            with patch.object(
+                pipe, "get_random_primary_or_all_nodes", return_value=selected_node
+            ) as select_node:
+                nodes = pipe._determine_nodes(
+                    "dbsize", request_policy=RequestPolicy.DEFAULT_KEYLESS
+                )
+            assert nodes == [selected_node]
+            select_node.assert_called_once_with("dbsize")
+
+    @pytest.mark.fixed_client
+    def test_split_command_routing_applies_load_balancing_strategy(self):
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            load_balancing_strategy=LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+        )
+        pipe = Mock()
+        pipe.execute.return_value = [True, True]
+        with (
+            patch.object(rc._metadata_resolver, "is_replica_safe", return_value=True),
+            patch.object(rc, "pipeline", return_value=pipe),
+            patch.object(
+                type(rc.nodes_manager), "get_node_from_slot", autospec=True
+            ) as get_node,
+        ):
+            slots_to_args = {100: ["a", "1"], 200: ["b", "2"]}
+            rc._execute_pipeline_by_slot("MSET", slots_to_args)
+
+            get_node.assert_any_call(
+                rc.nodes_manager, 100, True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS
+            )
+            get_node.assert_any_call(
+                rc.nodes_manager, 200, True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS
+            )
+
+    @pytest.mark.fixed_client
+    def test_custom_host_class_without_strategy_executes_split_slots(self):
+        class ThirdPartyCluster(ClusterMultiKeyCommands):
+            def __init__(self, rc):
+                self.encoder = rc.encoder
+                self.nodes_manager = rc.nodes_manager
+                self._rc = rc
+
+            def pipeline(self):
+                return self._rc.pipeline()
+
+        rc = get_mocked_redis_client(host=default_host, port=7000)
+        custom_client = ThirdPartyCluster(rc)
+        pipe = Mock()
+        pipe.execute.return_value = ["OK", "OK"]
+        with patch.object(custom_client, "pipeline", return_value=pipe):
+            result = custom_client.mset_nonatomic({"a": "1", "b": "2"})
+            assert result == ["OK", "OK"]
 
     @pytest.mark.fixed_client
     def test_every_node_client_gets_the_same_resolver(self):

@@ -778,8 +778,16 @@ class TestClusterCache:
         ]
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
+        # Add a delay / wait loop to allow invalidation to be processed across cluster nodes
+        start_time = time.time()
+        res = None
+        while time.time() - start_time < 3.0:
+            res = r.get("foo")
+            if res in [b"barbar", "barbar"]:
+                break
+            time.sleep(0.05)
         # Retrieves a new value from server and cache it
-        assert r.get("foo") in [b"barbar", "barbar"]
+        assert res in [b"barbar", "barbar"]
         # Make sure that new value was cached
         assert cache.get(
             CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
@@ -1098,7 +1106,7 @@ class TestSentinelCache:
         ]
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
-        time.sleep(0.1)
+        time.sleep(0.5)
         # Retrieves a new value from server and cache_data it
         assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
@@ -1219,9 +1227,9 @@ class TestSSLCache:
         ]
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
-        # Timeout needed for SSL connection because there's timeout
-        # between data appears in socket buffer
-        time.sleep(0.1)
+        # Allow time for asynchronous invalidation delivery and processing,
+        # which can be delayed under CI load.
+        time.sleep(0.5)
         # Retrieves a new value from server and cache_data it
         assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached

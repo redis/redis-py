@@ -10,6 +10,7 @@ from redis._parsers.commands import (
     _build_policy_records,
 )
 from redis.cache import CacheConfig
+from redis.cluster import RedisCluster
 from redis.commands.metadata import (
     _DEFAULT_KEYED_METADATA,
     _DEFAULT_KEYLESS_METADATA,
@@ -62,7 +63,9 @@ KEYED_POLICIES = (RequestPolicy.DEFAULT_KEYED, ResponsePolicy.DEFAULT_KEYED)
 # rather than command by command, because a table edit that gives any of them a routing policy
 # sends it to an arbitrary node instead of the one holding its keys.
 WITHHELD_ROUTING_COMMANDS = (
+    "sdiffcard",
     "sintercard",
+    "sunioncard",
     "xread",
     "zdiff",
     "zinter",
@@ -94,10 +97,21 @@ LIVE_CACHEABILITY_DIVERGENCE = {
     "vrandmember": "has_nondeterministic_output",
 }
 
+# Keyless readonly commands whose routing policies are withheld so the cluster client routes
+# them via COMMAND_FLAGS (e.g. DEFAULT_NODE or PRIMARIES).
+WITHHELD_KEYLESS_READS = (
+    "dbsize",
+    "keys",
+    "randomkey",
+    "scan",
+)
+
 # Every entry of the static table whose routing view is None.
 ALL_WITHHELD_ROUTING_COMMANDS = (
     *WITHHELD_ROUTING_COMMANDS,
     *INELIGIBLE_RECORD_COMMANDS,
+    *WITHHELD_KEYLESS_READS,
+    "command",
 )
 
 
@@ -195,16 +209,19 @@ def slot_routed_static_commands() -> Iterator[str]:
     """
     The names of every static-table entry the cluster client must route by its keys.
 
-    That is the entries recorded ``DEFAULT_KEYED`` plus the entries that withhold their routing
-    policies: the first route by slot directly, the second send the client down its own slot
-    resolution, and both must land on the node holding the key. Derived from the table so the
+    That is the entries recorded ``DEFAULT_KEYED`` plus the keyed entries that withhold their
+    routing policies: the first route by slot directly, the second send the client down its own
+    slot resolution, and both must land on the node holding the key. Derived from the table so the
     routing tests in ``tests/test_cluster.py`` and its async mirror cannot drift from it.
     """
     for _, _, name in static_table_names():
         module, command = _split_command_name(name)
-        request_policy = _STATIC_COMMAND_METADATA[module][command].request_policy
+        metadata = _STATIC_COMMAND_METADATA[module][command]
 
-        if request_policy is None or request_policy is RequestPolicy.DEFAULT_KEYED:
+        if (
+            metadata.request_policy is None
+            or metadata.request_policy is RequestPolicy.DEFAULT_KEYED
+        ) and metadata.has_key_argument:
             yield name
 
 
@@ -462,6 +479,82 @@ class TestWithheldRoutingPolicies:
         )
         for name in ("eval_ro", "evalsha_ro", "fcall_ro"):
             assert static_resolver.resolve(name).is_script_runner is True, name
+
+    def test_keyless_reads_withhold_routing_and_are_replica_safe(self):
+        static_resolver = StaticMetadataResolver()
+        for name in WITHHELD_KEYLESS_READS:
+            metadata = static_resolver.resolve(name)
+
+            assert metadata is not None, name
+            assert metadata.request_policy is None, name
+            assert metadata.response_policy is None, name
+            assert metadata.is_readonly is True, name
+            assert metadata.has_key_argument is False, name
+            assert metadata.has_complete_metadata is True, name
+            assert static_resolver.is_cacheable(name) is False, name
+            assert static_resolver.is_replica_safe(name) is True, name
+
+    def test_command_withholds_routing_and_is_not_replica_safe(self):
+        static_resolver = StaticMetadataResolver()
+        metadata = static_resolver.resolve("command")
+
+        assert metadata is not None
+        assert metadata.request_policy is None
+        assert metadata.response_policy is None
+        assert metadata.is_readonly is False
+        assert metadata.has_key_argument is False
+        assert metadata.has_complete_metadata is True
+        assert static_resolver.is_cacheable("command") is False
+        assert static_resolver.is_replica_safe("command") is False
+
+    def test_all_static_entries_in_cluster_command_flags_withhold_routing(self):
+        """
+        Verify that every command appearing in RedisCluster.command_flags that is present
+        in _STATIC_COMMAND_METADATA has its routing view withheld (request_policy=None and
+        response_policy=None).
+
+        _determine_nodes gives precedence to resolved metadata request_policy over COMMAND_FLAGS,
+        so any static table record for a COMMAND_FLAGS command must withhold its routing policies
+        to ensure the legacy COMMAND_FLAGS routing (e.g. DEFAULT_NODE, PRIMARIES) is consulted.
+        """
+        static_resolver = StaticMetadataResolver()
+        table_core = _STATIC_COMMAND_METADATA["core"]
+
+        for flag_cmd in RedisCluster.COMMAND_FLAGS:
+            # For container commands like "COMMAND COUNT" or "SLOWLOG GET", the primary command name
+            # in the metadata table is the first token (e.g. "command", "slowlog").
+            base_cmd = flag_cmd.split()[0].lower()
+            if base_cmd in table_core:
+                metadata = static_resolver.resolve(base_cmd)
+                assert metadata is not None
+                assert (
+                    metadata.request_policy is None
+                ), f"Command '{base_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold request_policy in _STATIC_COMMAND_METADATA"
+                assert (
+                    metadata.response_policy is None
+                ), f"Command '{base_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold response_policy in _STATIC_COMMAND_METADATA"
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "ft.aggregate",
+            "ft.spellcheck",
+            "ft.tagvals",
+            "ft.syndump",
+            "ft.dictdump",
+            "ft.explaincli",
+            "ts.get",
+            "ts.range",
+            "ts.revrange",
+            "sort_ro",
+            "georadius_ro",
+            "georadiusbymember_ro",
+            "substr",
+        ],
+    )
+    def test_newly_replica_eligible_commands_are_replica_safe(self, cmd):
+        resolver = StaticMetadataResolver()
+        assert resolver.is_replica_safe(cmd) is True
 
     def test_the_ineligible_records_decide_ahead_of_a_live_layer(self):
         """
@@ -955,6 +1048,48 @@ class TestBaseMetadataResolver:
         assert static_resolver.is_cacheable("touch") is False
         assert static_resolver.is_cacheable("eval_ro") is False
 
+    def test_custom_metadata_decides_replica_safety_for_known_module_reads(self):
+        resolver = DynamicMetadataResolver(
+            {
+                "ts": {"get": CACHEABLE_KEYED},
+                "ft": {"aggregate": CACHEABLE_KEYED},
+            }
+        )
+
+        assert resolver.is_replica_safe("ts.get") is True
+        assert resolver.is_replica_safe("ft.aggregate") is True
+
+    def test_touch_remains_replica_unsafe_despite_readonly_metadata(self):
+        resolver = DynamicMetadataResolver({"core": {"touch": CACHEABLE_KEYED}})
+
+        assert resolver.is_replica_safe("touch") is False
+
+    def test_static_resolver_decides_replica_safety(self):
+        resolver = StaticMetadataResolver()
+
+        # Replica safe commands
+        assert resolver.is_replica_safe("get") is True
+        assert resolver.is_replica_safe("GET") is True
+        assert resolver.is_replica_safe("dbsize") is True
+        assert resolver.is_replica_safe("ttl") is True
+        assert resolver.is_replica_safe("eval_ro") is True
+        assert resolver.is_replica_safe("xread") is True
+        assert resolver.is_replica_safe("json.get") is True
+        assert resolver.is_replica_safe("ft.search") is True
+
+        # Replica unsafe commands
+        assert resolver.is_replica_safe("set") is False
+        assert resolver.is_replica_safe("SET") is False
+        assert resolver.is_replica_safe("touch") is False
+        assert resolver.is_replica_safe("TOUCH") is False
+        assert resolver.is_replica_safe("hset") is False
+        assert resolver.is_replica_safe("ft.create") is False
+
+        # Non-string or unknown commands
+        assert resolver.is_replica_safe(None) is False
+        assert resolver.is_replica_safe(123) is False
+        assert resolver.is_replica_safe("nosuchcommand") is False
+
     def test_the_default_eligible_set_differs_from_the_legacy_allow_list_by_exactly_this(
         self,
     ):
@@ -974,9 +1109,19 @@ class TestBaseMetadataResolver:
         }
         allow_list = set(CacheConfig.DEFAULT_ALLOW_LIST)
 
-        # Newly eligible: two suggestion-dictionary reads the allow-list never carried. Both
-        # arrive without a key list, so they are inert until their methods pass ``keys=``.
-        assert eligible - allow_list == {"FT.SUGGET", "FT.SUGLEN"}
+        # Newly eligible: suggestion-dictionary reads and newly added core/module reads
+        # the legacy allow-list never carried.
+        assert eligible - allow_list == {
+            "DIGEST",
+            "EXPIRETIME",
+            "FT.SUGGET",
+            "FT.SUGLEN",
+            "HEXPIRETIME",
+            "HPEXPIRETIME",
+            "PEXPIRETIME",
+            "SDIFFCARD",
+            "SUNIONCARD",
+        }
         # No longer eligible, and all three server-confirmed defects in the allow-list.
         assert allow_list - eligible == {"XPENDING", "TS.INFO", "XREAD"}
 
