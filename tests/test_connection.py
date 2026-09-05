@@ -2275,3 +2275,63 @@ class TestDeeplyNestedReplyInvalidatesConnection:
 
         assert conn.read_response(**self.PUBSUB_KWARGS) == [[[[]]]]
         assert conn.is_connected is True
+
+@pytest.mark.parametrize(
+    "parser_class",
+    [_RESP2Parser],
+    ids=["RESP2Parser"],
+)
+class TestMalformedNumericFrameInvalidatesConnection:
+    """Malformed numeric frames (non-numeric integers, bulk lengths, or array
+    lengths such as `:abc\r\n`, `$xyz\r\n`, `*abc\r\n`) raise ValueError when
+    int(response) is called. Before the fix, these stayed queued with
+    disconnect_on_error=False, causing infinite retries on the same frame.
+    See #4291.
+    """
+
+    PUBSUB_KWARGS = dict(disconnect_on_error=False, push_request=True)
+
+    def test_malformed_integer_frame_disconnects(self, parser_class):
+        """Malformed integer frame `:abc\r\n` raises ValueError."""
+        conn = _connection_with_stream(b":abc\r\n+SECOND\r\n", parser_class)
+
+        with pytest.raises(ValueError):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        assert conn.is_connected is False
+
+    def test_malformed_bulk_length_disconnects(self, parser_class):
+        """Malformed bulk string length `$xyz\r\n` raises ValueError."""
+        conn = _connection_with_stream(b"$xyz\r\n+SECOND\r\n", parser_class)
+
+        with pytest.raises(ValueError):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        assert conn.is_connected is False
+
+    def test_malformed_array_length_disconnects(self, parser_class):
+        """Malformed array length `*abc\r\n` raises ValueError."""
+        conn = _connection_with_stream(b"*abc\r\n+SECOND\r\n", parser_class)
+
+        with pytest.raises(ValueError):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        assert conn.is_connected is False
+
+    def test_next_read_is_clean_after_malformed_integer(self, parser_class, monkeypatch):
+        """Reconnect after malformed integer frame serves new stream cleanly."""
+        conn = _connection_with_stream(b":abc\r\n+SECOND\r\n", parser_class)
+        _reconnect_with(conn, monkeypatch, b"+RECOVERED\r\n")
+
+        with pytest.raises(ValueError):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        conn.connect()
+        assert conn.read_response(**self.PUBSUB_KWARGS) == b"RECOVERED"
+
+    def test_valid_integer_frame_leaves_connection_up(self, parser_class):
+        """Valid integer frames must not trigger the new predicate."""
+        conn = _connection_with_stream(b":42\r\n", parser_class)
+
+        assert conn.read_response(**self.PUBSUB_KWARGS) == 42
+        assert conn.is_connected is True

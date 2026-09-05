@@ -1205,3 +1205,78 @@ async def test_binary_pubsub_payload_invalidates_connection(parser_class):
     )
 
     await conn.disconnect()
+
+
+@pytest.mark.parametrize(
+    "parser_class",
+    [_AsyncRESP2Parser],
+    ids=["AsyncRESP2Parser"],
+)
+class TestAsyncMalformedNumericFrameInvalidatesConnection:
+    """Async version: malformed numeric frames raise ValueError and must drop
+    the connection even with disconnect_on_error=False. The async parser
+    re-parses via self._pos = 0, so undecodable bytes stay queued on retry
+    unless the connection is invalidated.
+    """
+
+    @pytest.mark.asyncio
+    async def test_malformed_integer_frame_disconnects(self, parser_class):
+        """Malformed integer frame `:abc\r\n` raises ValueError."""
+        conn = Connection(protocol=2, parser_class=parser_class)
+        _attach_stream(conn, b":abc\r\n+SECOND\r\n")
+
+        with pytest.raises(ValueError):
+            await conn.read_response(disconnect_on_error=False, push_request=True)
+
+        assert conn.is_connected is False
+        await conn.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_malformed_bulk_length_disconnects(self, parser_class):
+        """Malformed bulk string length `$xyz\r\n` raises ValueError."""
+        conn = Connection(protocol=2, parser_class=parser_class)
+        _attach_stream(conn, b"$xyz\r\n+SECOND\r\n")
+
+        with pytest.raises(ValueError):
+            await conn.read_response(disconnect_on_error=False, push_request=True)
+
+        assert conn.is_connected is False
+        await conn.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_malformed_array_length_disconnects(self, parser_class):
+        """Malformed array length `*abc\r\n` raises ValueError."""
+        conn = Connection(protocol=2, parser_class=parser_class)
+        _attach_stream(conn, b"*abc\r\n+SECOND\r\n")
+
+        with pytest.raises(ValueError):
+            await conn.read_response(disconnect_on_error=False, push_request=True)
+
+        assert conn.is_connected is False
+        await conn.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_next_read_is_clean_after_malformed_integer(self, parser_class):
+        """Reconnect after malformed integer frame serves new stream cleanly."""
+        conn = Connection(protocol=2, parser_class=parser_class)
+        _attach_stream(conn, b":abc\r\n")
+
+        with pytest.raises(ValueError):
+            await conn.read_response(disconnect_on_error=False, push_request=True)
+
+        # Reconnect with fresh stream
+        _attach_stream(conn, b"+RECOVERED\r\n")
+        result = await conn.read_response(disconnect_on_error=False, push_request=True)
+        assert result == b"RECOVERED"
+        await conn.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_valid_integer_frame_leaves_connection_up(self, parser_class):
+        """Valid integer frames must not trigger the new predicate."""
+        conn = Connection(protocol=2, parser_class=parser_class)
+        _attach_stream(conn, b":42\r\n")
+
+        result = await conn.read_response(disconnect_on_error=False, push_request=True)
+        assert result == 42
+        assert conn.is_connected is True
+        await conn.disconnect()
