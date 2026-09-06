@@ -2028,12 +2028,25 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                     result=CSCResult.MISS,
                 )
 
-        response = self._conn.read_response(
-            disable_decoding=disable_decoding,
-            timeout=timeout,
-            disconnect_on_error=disconnect_on_error,
-            push_request=push_request,
-        )
+        try:
+            response = self._conn.read_response(
+                disable_decoding=disable_decoding,
+                timeout=timeout,
+                disconnect_on_error=disconnect_on_error,
+                push_request=push_request,
+            )
+        except BaseException:
+            # The placeholder send_command staked out is only ever resolved by the read
+            # that just failed, so it has to go with it. Left behind, it stays in the
+            # pool-wide cache until an invalidation or a disconnect clears it, and every
+            # later call of the same command and key finds an entry, skips the network,
+            # then reads a reply nobody asked for - a WRONGTYPE or a NOPERM on one call
+            # desynchronizes the connection for the rest of its life.
+            with self._cache_lock:
+                if self._current_command_cache_key is not None:
+                    self._cache.delete_by_cache_keys([self._current_command_cache_key])
+                    self._current_command_cache_key = None
+            raise
 
         with self._cache_lock:
             # Prevent not-allowed command from caching.
