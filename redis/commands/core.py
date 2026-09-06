@@ -2121,6 +2121,13 @@ class ManagementCommands(CommandsProtocol):
             args.append("FORCE")
         if abort:
             args.append("ABORT")
+        if not abort:
+            # the server closing the connection is the expected outcome of a
+            # non-aborted shutdown, so there's nothing to gain from retrying
+            # through the backoff schedule first
+            from redis.client import SKIP_RETRY
+
+            kwargs[SKIP_RETRY] = True
         try:
             self.execute_command(*args, **kwargs)
         except ConnectionError:
@@ -2476,6 +2483,13 @@ class AsyncManagementCommands(ManagementCommands):
             args.append("FORCE")
         if abort:
             args.append("ABORT")
+        if not abort:
+            # the server closing the connection is the expected outcome of a
+            # non-aborted shutdown, so there's nothing to gain from retrying
+            # through the backoff schedule first
+            from redis.client import SKIP_RETRY
+
+            kwargs[SKIP_RETRY] = True
         try:
             await self.execute_command(*args, **kwargs)
         except ConnectionError:

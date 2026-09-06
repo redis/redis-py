@@ -8466,6 +8466,29 @@ class TestRedisCommands:
         r.execute_command("SHUTDOWN", "ABORT")
         r.execute_command.assert_called_with("SHUTDOWN", "ABORT")
 
+    def test_shutdown_skips_retry_backoff(self, r: redis.Redis):
+        """A client-initiated SHUTDOWN expects the server to drop the
+        connection, so it shouldn't sit through the retry backoff schedule
+        before reporting that expected ConnectionError."""
+        from redis.client import SKIP_RETRY
+
+        r.execute_command = mock.MagicMock(side_effect=redis.ConnectionError())
+        r.shutdown()
+        args, kwargs = r.execute_command.call_args
+        assert args[0] == "SHUTDOWN"
+        assert kwargs.get(SKIP_RETRY) is True
+
+    def test_shutdown_abort_does_not_skip_retry(self, r: redis.Redis):
+        """ABORT cancels an in-progress shutdown, so the connection isn't
+        expected to drop and normal retry behavior should still apply."""
+        from redis.client import SKIP_RETRY
+
+        r.execute_command = mock.MagicMock(side_effect=redis.ConnectionError())
+        r.shutdown(abort=True)
+        args, kwargs = r.execute_command.call_args
+        assert args == ("SHUTDOWN", "ABORT")
+        assert SKIP_RETRY not in kwargs
+
     @pytest.mark.replica
     @pytest.mark.xfail(strict=False)
     @skip_if_server_version_lt("2.8.0")

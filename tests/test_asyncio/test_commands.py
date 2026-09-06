@@ -20,7 +20,7 @@ from redis._parsers.helpers import (
     get_response_callbacks,
     parse_info,
 )
-from redis.client import EMPTY_RESPONSE, NEVER_DECODE
+from redis.client import EMPTY_RESPONSE, NEVER_DECODE, SKIP_RETRY
 from redis.commands.core import (
     ArrayAggregateOperations,
     ArrayPredicateCombinator,
@@ -1541,6 +1541,25 @@ class TestRedisCommands:
         await r.restore("a", ttl, dumped, absttl=True)
         assert await r.get("a") == b"foo"
         assert 0 < await r.ttl("a") <= 61
+
+    async def test_shutdown_skips_retry_backoff(self, r: redis.Redis):
+        """A client-initiated SHUTDOWN expects the server to drop the
+        connection, so it shouldn't sit through the retry backoff schedule
+        before reporting that expected ConnectionError."""
+        r.execute_command = AsyncMock(side_effect=exceptions.ConnectionError())
+        await r.shutdown()
+        args, kwargs = r.execute_command.call_args
+        assert args[0] == "SHUTDOWN"
+        assert kwargs.get(SKIP_RETRY) is True
+
+    async def test_shutdown_abort_does_not_skip_retry(self, r: redis.Redis):
+        """ABORT cancels an in-progress shutdown, so the connection isn't
+        expected to drop and normal retry behavior should still apply."""
+        r.execute_command = AsyncMock(side_effect=exceptions.ConnectionError())
+        await r.shutdown(abort=True)
+        args, kwargs = r.execute_command.call_args
+        assert args == ("SHUTDOWN", "ABORT")
+        assert SKIP_RETRY not in kwargs
 
     async def test_exists(self, r: redis.Redis):
         assert await r.exists("a") == 0

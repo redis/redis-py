@@ -58,6 +58,7 @@ from redis.backoff import ExponentialWithJitterBackoff
 from redis.client import (
     EMPTY_RESPONSE,
     NEVER_DECODE,
+    SKIP_RETRY,
     AbstractRedis,
     CaseInsensitiveDict,
 )
@@ -956,6 +957,7 @@ class Redis(
         pool = self.connection_pool
         command_name = args[0]
         conn = self.connection or await pool.get_connection()
+        skip_retry = options.pop(SKIP_RETRY, False)
 
         # Start timing for observability
         start_time = time.monotonic()
@@ -979,6 +981,7 @@ class Redis(
                     conn, command_name, *args, **options
                 ),
                 failure_callback,
+                is_retryable=(lambda error: False) if skip_retry else None,
                 with_failure_count=True,
             )
 

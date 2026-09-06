@@ -109,6 +109,11 @@ EMPTY_RESPONSE = "EMPTY_RESPONSE"
 # some responses (ie. dump) are binary, and just meant to never be decoded
 NEVER_DECODE = "NEVER_DECODE"
 
+# a handful of commands (ie. shutdown) expect the connection to drop and
+# treat that as a normal outcome, so retrying through backoff first only
+# delays reporting the expected result
+SKIP_RETRY = "SKIP_RETRY"
+
 
 logger = logging.getLogger(__name__)
 
@@ -907,6 +912,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         pool = self.connection_pool
         command_name = args[0]
         conn = self.connection or pool.get_connection()
+        skip_retry = options.pop(SKIP_RETRY, False)
 
         # Start timing for observability
         start_time = time.monotonic()
@@ -927,6 +933,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                     conn, command_name, *args, **options
                 ),
                 failure_callback,
+                is_retryable=(lambda error: False) if skip_retry else None,
                 with_failure_count=True,
             )
 
