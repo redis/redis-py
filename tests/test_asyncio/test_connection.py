@@ -1213,7 +1213,7 @@ async def test_binary_pubsub_payload_invalidates_connection(parser_class):
     ids=["AsyncRESP2Parser"],
 )
 class TestAsyncMalformedNumericFrameInvalidatesConnection:
-    """Async version: malformed numeric frames raise ValueError and must drop
+    """Async version: malformed numeric frames raise InvalidResponse and must drop
     the connection even with disconnect_on_error=False. The async parser
     re-parses via self._pos = 0, so undecodable bytes stay queued on retry
     unless the connection is invalidated.
@@ -1221,11 +1221,11 @@ class TestAsyncMalformedNumericFrameInvalidatesConnection:
 
     @pytest.mark.asyncio
     async def test_malformed_integer_frame_disconnects(self, parser_class):
-        """Malformed integer frame `:abc\r\n` raises ValueError."""
+        """Malformed integer frame `:abc\r\n` raises InvalidResponse."""
         conn = Connection(protocol=2, parser_class=parser_class)
         _attach_stream(conn, b":abc\r\n+SECOND\r\n")
 
-        with pytest.raises(ValueError):
+        with pytest.raises(InvalidResponse):
             await conn.read_response(disconnect_on_error=False, push_request=True)
 
         assert conn.is_connected is False
@@ -1233,11 +1233,11 @@ class TestAsyncMalformedNumericFrameInvalidatesConnection:
 
     @pytest.mark.asyncio
     async def test_malformed_bulk_length_disconnects(self, parser_class):
-        """Malformed bulk string length `$xyz\r\n` raises ValueError."""
+        """Malformed bulk string length `$xyz\r\n` raises InvalidResponse."""
         conn = Connection(protocol=2, parser_class=parser_class)
         _attach_stream(conn, b"$xyz\r\n+SECOND\r\n")
 
-        with pytest.raises(ValueError):
+        with pytest.raises(InvalidResponse):
             await conn.read_response(disconnect_on_error=False, push_request=True)
 
         assert conn.is_connected is False
@@ -1245,11 +1245,11 @@ class TestAsyncMalformedNumericFrameInvalidatesConnection:
 
     @pytest.mark.asyncio
     async def test_malformed_array_length_disconnects(self, parser_class):
-        """Malformed array length `*abc\r\n` raises ValueError."""
+        """Malformed array length `*abc\r\n` raises InvalidResponse."""
         conn = Connection(protocol=2, parser_class=parser_class)
         _attach_stream(conn, b"*abc\r\n+SECOND\r\n")
 
-        with pytest.raises(ValueError):
+        with pytest.raises(InvalidResponse):
             await conn.read_response(disconnect_on_error=False, push_request=True)
 
         assert conn.is_connected is False
@@ -1261,7 +1261,7 @@ class TestAsyncMalformedNumericFrameInvalidatesConnection:
         conn = Connection(protocol=2, parser_class=parser_class)
         _attach_stream(conn, b":abc\r\n")
 
-        with pytest.raises(ValueError):
+        with pytest.raises(InvalidResponse):
             await conn.read_response(disconnect_on_error=False, push_request=True)
 
         # Reconnect with fresh stream

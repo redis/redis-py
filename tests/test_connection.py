@@ -2276,6 +2276,7 @@ class TestDeeplyNestedReplyInvalidatesConnection:
         assert conn.read_response(**self.PUBSUB_KWARGS) == [[[[]]]]
         assert conn.is_connected is True
 
+
 @pytest.mark.parametrize(
     "parser_class",
     [_RESP2Parser],
@@ -2283,8 +2284,8 @@ class TestDeeplyNestedReplyInvalidatesConnection:
 )
 class TestMalformedNumericFrameInvalidatesConnection:
     """Malformed numeric frames (non-numeric integers, bulk lengths, or array
-    lengths such as `:abc\r\n`, `$xyz\r\n`, `*abc\r\n`) raise ValueError when
-    int(response) is called. Before the fix, these stayed queued with
+    lengths such as `:abc\r\n`, `$xyz\r\n`, `*abc\r\n`) are protocol errors, so the
+    parser raises InvalidResponse. Before the fix, these stayed queued with
     disconnect_on_error=False, causing infinite retries on the same frame.
     See #4291.
     """
@@ -2292,38 +2293,40 @@ class TestMalformedNumericFrameInvalidatesConnection:
     PUBSUB_KWARGS = dict(disconnect_on_error=False, push_request=True)
 
     def test_malformed_integer_frame_disconnects(self, parser_class):
-        """Malformed integer frame `:abc\r\n` raises ValueError."""
+        """Malformed integer frame `:abc\r\n` raises InvalidResponse."""
         conn = _connection_with_stream(b":abc\r\n+SECOND\r\n", parser_class)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(InvalidResponse):
             conn.read_response(**self.PUBSUB_KWARGS)
 
         assert conn.is_connected is False
 
     def test_malformed_bulk_length_disconnects(self, parser_class):
-        """Malformed bulk string length `$xyz\r\n` raises ValueError."""
+        """Malformed bulk string length `$xyz\r\n` raises InvalidResponse."""
         conn = _connection_with_stream(b"$xyz\r\n+SECOND\r\n", parser_class)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(InvalidResponse):
             conn.read_response(**self.PUBSUB_KWARGS)
 
         assert conn.is_connected is False
 
     def test_malformed_array_length_disconnects(self, parser_class):
-        """Malformed array length `*abc\r\n` raises ValueError."""
+        """Malformed array length `*abc\r\n` raises InvalidResponse."""
         conn = _connection_with_stream(b"*abc\r\n+SECOND\r\n", parser_class)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(InvalidResponse):
             conn.read_response(**self.PUBSUB_KWARGS)
 
         assert conn.is_connected is False
 
-    def test_next_read_is_clean_after_malformed_integer(self, parser_class, monkeypatch):
+    def test_next_read_is_clean_after_malformed_integer(
+        self, parser_class, monkeypatch
+    ):
         """Reconnect after malformed integer frame serves new stream cleanly."""
         conn = _connection_with_stream(b":abc\r\n+SECOND\r\n", parser_class)
         _reconnect_with(conn, monkeypatch, b"+RECOVERED\r\n")
 
-        with pytest.raises(ValueError):
+        with pytest.raises(InvalidResponse):
             conn.read_response(**self.PUBSUB_KWARGS)
 
         conn.connect()
@@ -2335,3 +2338,29 @@ class TestMalformedNumericFrameInvalidatesConnection:
 
         assert conn.read_response(**self.PUBSUB_KWARGS) == 42
         assert conn.is_connected is True
+
+
+@pytest.mark.skipif(not HIREDIS_AVAILABLE, reason="hiredis is not installed")
+class TestPushHandlerValueErrorKeepsConnection:
+    """A ValueError raised by the *push handler* is not a framing error: hiredis
+    has already consumed the whole push frame before the handler runs. With
+    disconnect_on_error=False the connection must stay up and the next queued
+    frame must remain readable. Guards against widening
+    UNRECOVERABLE_PARSE_ERRORS to plain ValueError.
+    """
+
+    def test_push_handler_value_error_does_not_disconnect(self):
+        conn = Connection(protocol=3, parser_class=_HiredisParser)
+        conn._sock = _CannedSocket(b">2\r\n$7\r\nmessage\r\n$5\r\nhello\r\n+SECOND\r\n")
+        conn._parser.on_connect(conn)
+
+        def boom(response):
+            raise ValueError("handler bug")
+
+        conn._parser.pubsub_push_handler_func = boom
+
+        with pytest.raises(ValueError, match="handler bug"):
+            conn.read_response(disconnect_on_error=False, push_request=True)
+
+        assert conn.is_connected is True
+        assert conn.read_response(disconnect_on_error=False) == b"SECOND"
