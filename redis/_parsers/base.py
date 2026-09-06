@@ -55,9 +55,29 @@ from .socket import SERVER_CLOSED_CONNECTION_ERROR, SocketBuffer
 # - RecursionError: deeply nested aggregate replies exhaust the stack in the
 #   pure-Python parsers. #4144 turns this into InvalidResponse at a bounded
 #   depth; until then, catching it here is what stops the loop.
-# - ValueError: malformed numeric frames (e.g., `:abc\r\n`) where int(response)
-#   fails when parsing integer, bulk length, or aggregate length fields.
-UNRECOVERABLE_PARSE_ERRORS = (InvalidResponse, UnicodeDecodeError, RecursionError, ValueError)
+#
+# Malformed numeric frames (`:abc\r\n`, `$xyz\r\n`, `*abc\r\n`) are converted to
+# InvalidResponse by the pure-Python parsers (_parse_int/_parse_float below), so
+# they land here too. Plain ValueError is deliberately NOT in this tuple: a
+# user push handler may raise it after the frame was fully consumed, and that
+# must not tear down a healthy connection.
+UNRECOVERABLE_PARSE_ERRORS = (InvalidResponse, UnicodeDecodeError, RecursionError)
+
+
+def _parse_int(value: bytes, raw: bytes) -> int:
+    """int() for a RESP numeric field; a non-numeric field is a protocol error."""
+    try:
+        return int(value)
+    except ValueError:
+        raise InvalidResponse(f"Protocol Error: {raw!r}") from None
+
+
+def _parse_float(value: bytes, raw: bytes) -> float:
+    try:
+        return float(value)
+    except ValueError:
+        raise InvalidResponse(f"Protocol Error: {raw!r}") from None
+
 
 MODULE_LOAD_ERROR = "Error loading the extension. Please check the server logs."
 NO_SUCH_MODULE_ERROR = "Error unloading module: no such module with that name"
