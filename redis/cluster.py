@@ -1511,7 +1511,7 @@ class RedisCluster(
         Raises:
             RedisClusterException: If the cluster has no default node to resolve
                 the keys against, which is the case before the slots cache is
-                first populated and after the client is closed.
+                first populated.
         """
         default_node = self.get_default_node()
         if default_node is None:
@@ -2185,6 +2185,7 @@ class RedisCluster(
         )
 
     def close(self) -> None:
+        """Release connections, allowing subsequent commands to reconnect."""
         try:
             with self._lock:
                 if self.nodes_manager:
@@ -2974,7 +2975,7 @@ class NodesManager:
 
     def close(self) -> None:
         with self._lock:
-            self.default_node = None
+            # Preserve routing information so the disconnected pools can be reused.
             nodes = tuple(self.nodes_cache.values())
         for node in nodes:
             if node.redis_connection:

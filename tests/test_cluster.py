@@ -366,6 +366,35 @@ class TestRedisClusterObj:
     Tests for the RedisCluster class
     """
 
+    @pytest.mark.parametrize("use_pipeline", [False, True])
+    def test_reuse_after_close(self, r, use_pipeline):
+        node = r.get_default_node()
+        kwargs = r.get_connection_kwargs().copy()
+        kwargs.pop("db", None)
+        kwargs.pop("redis_connect_func", None)
+        with RedisCluster(host=node.host, port=node.port, **kwargs) as client:
+            client.set("foo", b"value")
+            assert client.get("foo") == b"value"
+
+            for _ in range(2):
+                connections = [
+                    connection
+                    for node in client.get_nodes()
+                    for connection in node.redis_connection.connection_pool._available_connections
+                ]
+                assert any(connection._sock is not None for connection in connections)
+
+                client.close()
+                client.close()
+                assert all(connection._sock is None for connection in connections)
+
+                if use_pipeline:
+                    with client.pipeline(transaction=False) as pipe:
+                        assert pipe.get("foo").execute() == [b"value"]
+                else:
+                    assert client.get("foo") == b"value"
+                assert len(client.time()) == 2
+
     def test_host_port_startup_node(self):
         """
         Test that it is possible to use host & port arguments as startup node
@@ -3128,7 +3157,7 @@ class TestSlotResolutionWithoutADefaultNode:
     ``_get_command_keys`` resolves keys through the default node, and the static metadata table
     answers most keyed reads directly, so ``_internal_execute_command`` no longer passes through
     the fallback that used to substitute keyless routing when the default node was missing.
-    ``NodesManager.close`` clears the default node, so this is reachable on a closed client.
+    This can happen before the slots cache is first populated.
 
     The keys are unknown rather than absent, so the error has to say so: reporting a missing key
     for ``GET foo`` sends the caller looking for a key they did supply.
@@ -3140,7 +3169,7 @@ class TestSlotResolutionWithoutADefaultNode:
     @staticmethod
     def _cluster_without_a_default_node():
         rc = get_mocked_redis_client(host=default_host, port=7000)
-        # What ``NodesManager.close`` leaves behind, without closing the connections.
+        # Simulate an incomplete topology without closing the connections.
         rc.nodes_manager.default_node = None
         return rc
 
@@ -3163,6 +3192,53 @@ class TestSlotResolutionWithoutADefaultNode:
         # determine_slot rather than through the fallback that guards the default node.
         with pytest.raises(RedisClusterException, match="no default node"):
             rc.execute_command("GET", "foo")
+
+
+class TestClusterClose:
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("use_pipeline", [False, True])
+    def test_keyed_commands_after_close(self, use_pipeline):
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+
+        for _ in range(2):
+            rc.close()
+            mock_all_nodes_resp(rc, b"value")
+            if use_pipeline:
+                with rc.pipeline(transaction=False) as pipe:
+                    assert pipe.get("foo").execute() == [b"value"]
+            else:
+                assert rc.get("foo") == b"value"
+
+    @pytest.mark.fixed_client
+    def test_default_node_commands_after_close(self):
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        default_node = rc.get_primaries()[1]
+        rc.set_default_node(default_node)
+
+        rc.close()
+        mock_all_nodes_resp(rc, [b"1", b"2"])
+
+        assert rc.time() == (1, 2)
+        default_node.redis_connection.connection.send_command.assert_called_once_with(
+            "TIME"
+        )
+
+    @pytest.mark.fixed_client
+    def test_close_disconnects_all_node_pools(self):
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        connections = []
+        for node in rc.get_nodes():
+            connection = Mock(spec=Connection)
+            node.redis_connection.connection_pool._available_connections.append(
+                connection
+            )
+            connections.append(connection)
+
+        rc.close()
+        rc.close()
+
+        for connection in connections:
+            assert connection.disconnect.call_count == 2
 
 
 class TestNodesManager:
