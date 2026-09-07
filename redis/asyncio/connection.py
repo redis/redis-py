@@ -1936,10 +1936,20 @@ def parse_url(url: str) -> ConnectKwargs:
         # If there's a path argument, use it as the db argument if a
         # querystring value wasn't specified
         if parsed.path and "db" not in kwargs:
-            try:
-                kwargs["db"] = int(unquote(parsed.path).replace("/", ""))
-            except (AttributeError, ValueError):
-                pass
+            # Only the leading separator belongs to the URL syntax. Removing
+            # every slash instead ran the segments together, so
+            # "redis://host/3/4/5" selected db 345 rather than being rejected.
+            db = unquote(parsed.path).removeprefix("/")
+            if db:
+                try:
+                    kwargs["db"] = int(db)
+                except ValueError:
+                    # The same value spelled as a query argument already
+                    # raises here. Swallowing it left the client on db 0,
+                    # so a typo silently talked to the wrong database.
+                    raise ValueError(
+                        "Invalid value for 'db' in connection URL."
+                    ) from None
 
         if parsed.scheme == "rediss":
             kwargs["connection_class"] = SSLConnection

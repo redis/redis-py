@@ -467,6 +467,27 @@ class TestConnectionPoolURLParsing:
         assert pool.connection_class == redis.Connection
         assert_kwargs_subset(pool.connection_kwargs, {"host": "localhost", "db": 2})
 
+    def test_db_in_path_with_extra_segments_is_rejected(self):
+        # The separators used to be stripped rather than split on, so this
+        # ran the digits together and quietly selected db 345.
+        with pytest.raises(ValueError, match="Invalid value for 'db'"):
+            redis.ConnectionPool.from_url("redis://localhost/3/4/5")
+
+    def test_db_in_path_that_is_not_a_number_is_rejected(self):
+        # The same value spelled as a query argument has always raised. In the
+        # path it was swallowed, leaving the client connected to db 0.
+        with pytest.raises(ValueError, match="Invalid value for 'db'"):
+            redis.ConnectionPool.from_url("redis://localhost/abc")
+
+    def test_db_in_path_and_in_querystring_raise_alike(self):
+        for url in ("redis://localhost/abc", "redis://localhost?db=abc"):
+            with pytest.raises(ValueError, match="Invalid value for 'db'"):
+                redis.ConnectionPool.from_url(url)
+
+    def test_empty_path_leaves_db_unset(self):
+        pool = redis.ConnectionPool.from_url("redis://localhost/", db=1)
+        assert_kwargs_subset(pool.connection_kwargs, {"host": "localhost", "db": 1})
+
     def test_db_in_querystring(self):
         pool = redis.ConnectionPool.from_url("redis://localhost/2?db=3", db=1)
         assert pool.connection_class == redis.Connection
