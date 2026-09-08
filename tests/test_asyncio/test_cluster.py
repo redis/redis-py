@@ -3935,6 +3935,11 @@ class TestClusterNodeConnectionHandling:
             def should_reconnect(self) -> bool:
                 return True
 
+            def extract_connection_details(self) -> str:
+                # release() renders the connection into its debug log before
+                # scheduling the disconnect, so the double must expose this.
+                return "fake connection details"
+
             async def disconnect(self) -> None:
                 raise RuntimeError("simulated disconnect failure")
 
@@ -5751,6 +5756,62 @@ class TestClusterPubSub:
             assert received_messages[0]["type"] == "smessage"
             assert received_messages[0]["channel"] == channel.encode()
             assert received_messages[0]["data"] == b"test message"
+        finally:
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_handler_may_ssubscribe_from_inside_the_handler(self, r):
+        """
+        A message handler is awaited inside get_sharded_message, so an
+        ssubscribe from inside it re-acquires the per-node I/O lock.
+        asyncio.Lock is not reentrant, so this used to hang the reader task
+        permanently and silently; wait_for keeps a regression from hanging CI.
+        """
+        first = "handler-resub-a:{0}"
+        second = "handler-resub-b:{0}"
+        pubsub = r.pubsub()
+        resubscribed = asyncio.Event()
+
+        async def handler(message):
+            if not resubscribed.is_set():
+                await pubsub.ssubscribe(second)
+                resubscribed.set()
+
+        async def wait_for_ssubscribe_ack(s_channel):
+            # ssubscribe only writes the command, it does not wait for the
+            # server's confirmation, and spublish travels on a separate
+            # connection. Publishing before the confirmation has been read can
+            # therefore reach the node first and report zero receivers, so wait
+            # for the ack before asserting on the delivery count.
+            async with async_timeout(10):
+                while True:
+                    message = await pubsub.get_sharded_message(timeout=0.05)
+                    if (
+                        message is not None
+                        and str_if_bytes(message["type"]) == "ssubscribe"
+                        and message["channel"] == s_channel.encode()
+                    ):
+                        return
+
+        try:
+            await pubsub.ssubscribe(**{first: handler})
+            await wait_for_ssubscribe_ack(first)
+
+            assert await r.spublish(first, "go") == 1
+            async with async_timeout(10):
+                while not resubscribed.is_set():
+                    await pubsub.get_sharded_message(timeout=0.05)
+            assert resubscribed.is_set()
+
+            await wait_for_ssubscribe_ack(second)
+            assert await r.spublish(second, "hi") == 1
+            delivered = []
+            async with async_timeout(10):
+                while not delivered:
+                    msg = await pubsub.get_sharded_message(timeout=0.05)
+                    if msg is not None and msg["type"] == "smessage":
+                        delivered.append(msg)
+            assert delivered[0]["channel"] == second.encode()
         finally:
             await pubsub.aclose()
 

@@ -3719,6 +3719,63 @@ class TestNodesManager:
             assert len(nm.slots_cache) > 0
 
     @pytest.mark.fixed_client
+    def test_reentrant_initialize_is_skipped(self):
+        """
+        A re-entrant initialize call on the thread that is already refreshing
+        the topology must be skipped instead of running a nested refresh.
+
+        This is the shape produced by an SMIGRATED push notification that
+        arrives on the CLUSTER SLOTS response and is handled inline on the
+        refreshing thread: the maintenance handler calls initialize() again on
+        that same thread. A nested refresh would reset() and swap the caches
+        underneath the outer call, which then overwrites them with its own
+        older snapshot.
+        """
+        initialization_count = {"count": 0}
+        reentrant_calls = {"count": 0}
+        # The NodesManager constructor runs its own initialize; only re-enter
+        # once the instance exists and the counters have been reset.
+        armed = {"on": False}
+
+        with patch.object(Redis, "execute_command") as execute_command_mock:
+
+            def execute_command(*_args, **_kwargs):
+                if _args[0] == "CLUSTER SLOTS":
+                    initialization_count["count"] += 1
+                    # Re-enter initialize on this same thread, exactly once, the
+                    # way an inline push notification handler would.
+                    if armed["on"] and reentrant_calls["count"] == 0:
+                        reentrant_calls["count"] += 1
+                        nm.initialize()
+                    return default_cluster_slots
+                else:
+                    return execute_command_mock(*_args, **_kwargs)
+
+            execute_command_mock.side_effect = execute_command
+
+            nm = NodesManager(
+                startup_nodes=[ClusterNode(host=default_host, port=default_port)],
+                from_url=False,
+                require_full_coverage=False,
+                dynamic_startup_nodes=True,
+            )
+
+            initialization_count["count"] = 0
+            armed["on"] = True
+
+            nm.initialize()
+
+            # The re-entrant call must not have issued a second CLUSTER SLOTS.
+            assert reentrant_calls["count"] == 1
+            assert initialization_count["count"] == 1
+
+            # The outer refresh published a consistent topology and released
+            # ownership, so a later call is not affected by the guard.
+            assert len(nm.nodes_cache) > 0
+            assert len(nm.slots_cache) > 0
+            assert nm._initializing_thread_id is None
+
+    @pytest.mark.fixed_client
     def test_concurrent_slot_moves(self):
         # ensure multiple concurrently moved slots are processed correctly,
         # eg: not dropping updates

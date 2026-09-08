@@ -384,6 +384,13 @@ class AsyncOSSMaintNotificationsHandler:
     re-entrant arrival never tries to re-acquire the lock on this call stack.
     The cheap _in_progress/_processed dedup that gates that scheduling runs
     without the lock — those sets are only mutated from the single event loop.
+
+    For the same reason the sync handler's lock-ordering rule (acquire
+    NodesManager._initialization_lock before the handler's _lock) does not apply
+    here: because the handling never runs inline on the call stack that is inside
+    initialize(), no task ever holds NodesManager._initialize_lock while waiting
+    for this _lock, so the two can be acquired in this order safely. The
+    divergence from the sync handler is deliberate, not drift.
     """
 
     def __init__(
