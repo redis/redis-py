@@ -15,6 +15,7 @@ from redis.commands.metadata import (
     _DEFAULT_KEYED_METADATA,
     _DEFAULT_KEYLESS_METADATA,
     _MEMO_MAX_ENTRIES,
+    _is_replica_safe,
     _METADATA_BY_REQUEST_POLICY,
     _STATIC_COMMAND_METADATA,
     PolicyRecords,
@@ -527,12 +528,12 @@ class TestWithheldRoutingPolicies:
             if base_cmd in table_core:
                 metadata = static_resolver.resolve(base_cmd)
                 assert metadata is not None
-                assert (
-                    metadata.request_policy is None
-                ), f"Command '{base_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold request_policy in _STATIC_COMMAND_METADATA"
-                assert (
-                    metadata.response_policy is None
-                ), f"Command '{base_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold response_policy in _STATIC_COMMAND_METADATA"
+                assert metadata.request_policy is None, (
+                    f"Command '{base_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold request_policy in _STATIC_COMMAND_METADATA"
+                )
+                assert metadata.response_policy is None, (
+                    f"Command '{base_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold response_policy in _STATIC_COMMAND_METADATA"
+                )
 
     @pytest.mark.parametrize(
         "cmd",
@@ -1063,6 +1064,20 @@ class TestBaseMetadataResolver:
         resolver = DynamicMetadataResolver({"core": {"touch": CACHEABLE_KEYED}})
 
         assert resolver.is_replica_safe("touch") is False
+
+    def test_the_replica_unsafe_commands_are_seeded_into_the_memo(self):
+        """
+        Seeding the memo at construction is the whole mechanism, so pin it: the entry is in
+        place before any command is looked up, which is what lets these answer from the same
+        single dict lookup as every other command with no per-call test of their own. The
+        record TOUCH would otherwise resolve to reports it readonly, so the seed is the only
+        thing keeping it off a replica.
+        """
+        resolver = DynamicMetadataResolver({"core": {"touch": CACHEABLE_KEYED}})
+
+        assert resolver._replica_safe == {"touch": False}
+        assert _is_replica_safe(resolver.resolve("touch")) is True
+        assert resolver.is_replica_safe("TOUCH") is False
 
     def test_static_resolver_decides_replica_safety(self):
         resolver = StaticMetadataResolver()

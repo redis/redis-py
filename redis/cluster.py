@@ -817,7 +817,11 @@ class RedisCluster(
             This is the narrow routing view of `metadata_resolver`, which supersedes it:
             prefer `metadata_resolver`, which serves routing and every other
             command-metadata consumer from one object. When both are given this one still
-            decides routing, so that its 7.1.0 behaviour does not move.
+            decides which nodes a command targets, so that its 7.1.0 behaviour does not
+            move. It does not decide anything the routing view cannot express: replica
+            safety and client-side-cache eligibility keep coming from `metadata_resolver`,
+            because a `CommandPolicies` record carries no `is_readonly` flag to answer them
+            with.
         :param metadata_resolver:
             Serves the command metadata this client reads - see
             `redis.commands.metadata.MetadataResolver`. Routing is derived from it, and it
@@ -1020,7 +1024,7 @@ class RedisCluster(
             Union[RequestPolicy, ResponsePolicy], Callable
         ] = {
             RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [
-                self.get_random_primary_or_all_nodes(command_name)
+                self.get_keyless_target_node(command_name)
             ],
             RequestPolicy.DEFAULT_KEYED: lambda command,
             *args: self.get_nodes_from_slot(command, *args),
@@ -1039,7 +1043,14 @@ class RedisCluster(
         # arguments overlap. Resolved by precedence rather than by rejecting the
         # combination, because a user migrating from one to the other will legitimately pass
         # both: an explicit ``policy_resolver`` - the extension point that shipped in 7.1.0
-        # - keeps deciding routing, and otherwise routing is derived from the metadata resolver.
+        # - keeps deciding which nodes a command targets, and otherwise those policies are
+        # derived from the metadata resolver.
+        #
+        # The precedence covers the routing view only. Replica safety and cache eligibility
+        # are read from ``_metadata_resolver`` either way, because the projection a policy
+        # resolver serves drops the flags they are decided from - a ``CommandPolicies``
+        # record has no ``is_readonly``. So "ignores metadata_resolver" below means for the
+        # target-node decision, not for the record as a whole.
         if policy_resolver is None:
             self._policy_resolver: PolicyResolver = StaticPolicyResolver(
                 metadata_resolver=self._metadata_resolver
@@ -1048,8 +1059,10 @@ class RedisCluster(
             self._policy_resolver = policy_resolver
             if metadata_resolver is not None:
                 logger.debug(
-                    "Both policy_resolver and metadata_resolver were given; routing "
-                    "resolves through policy_resolver and ignores metadata_resolver."
+                    "Both policy_resolver and metadata_resolver were given; the nodes a "
+                    "command targets resolve through policy_resolver and ignore "
+                    "metadata_resolver. Replica safety and client-side-cache eligibility "
+                    "still resolve through metadata_resolver."
                 )
         self.commands_parser = CommandsParser(self)
 
@@ -1121,16 +1134,33 @@ class RedisCluster(
     def get_random_node(self):
         return random.choice(list(self.nodes_manager.nodes_cache.values()))
 
-    def get_random_primary_or_all_nodes(self, command_name):
+    def get_keyless_target_node(self, command_name: str) -> "ClusterNode":
         """
-        Returns random primary or all nodes depends on READONLY mode.
+        Returns the node a keyless command is routed to: a random node when replica reads
+        are enabled and the command is safe to serve from a replica, a random primary
+        otherwise.
         """
-        if (
+        replica_safe = (
             self.read_from_replicas or self.load_balancing_strategy is not None
-        ) and self._is_replica_safe(command_name):
+        ) and self._is_replica_safe(command_name)
+        if replica_safe:
             return self.get_random_node()
 
         return self.get_random_primary_node()
+
+    @deprecated_function(
+        version="8.2.0",
+        reason="Use get_keyless_target_node() instead.",
+    )
+    def get_random_primary_or_all_nodes(self, command_name: str) -> "ClusterNode":
+        """
+        Returns random primary or all nodes depends on READONLY mode.
+
+        Deprecated alias of :meth:`get_keyless_target_node`. Kept so the name that has
+        been public since 7.1.0 keeps working; it answers from the metadata resolver just
+        as the new name does.
+        """
+        return self.get_keyless_target_node(command_name)
 
     def _is_replica_safe(self, command_name: str) -> bool:
         return self._metadata_resolver.is_replica_safe(command_name)
@@ -1420,11 +1450,65 @@ class RedisCluster(
         """Set a custom Response Callback"""
         self.cluster_response_callbacks[command] = callback
 
+    def _resolve_command_policies(
+        self, *args, target_nodes_specified: bool = False
+    ) -> Tuple[str, Union[CommandPolicies, CommandMetadata]]:
+        """
+        Resolves the policies a command routes and aggregates by.
+
+        Returns the name the policies were decided by along with the record, because the
+        name a command is known by is not always ``args[0]``: a container command is
+        keyed by both of its words, and the flag tables are keyed in upper case.
+
+        First choice is the policy resolver. When it does not know the command, the
+        fallbacks are the command's ``COMMAND_FLAGS`` entry and then whether the command
+        carries a key.
+        """
+        if target_nodes_specified:
+            # The caller named its targets, so nothing is routed from here - and the
+            # command's own aggregation must not apply either. A response policy resolved
+            # for the whole cluster (``ONE_SUCCEEDED``, an ``AGG_*``) would short-circuit
+            # the loop over the nodes the caller picked, or fold their replies into one.
+            # Answer with the record that aggregates nothing, and skip the resolver: with
+            # the targets given, neither of its answers is used.
+            return args[0], _DEFAULT_KEYLESS_METADATA
+
+        policies = self._policy_resolver.resolve(args[0].lower())
+        if policies:
+            return args[0], policies
+
+        command = args[0].upper()
+        if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
+            command = f"{args[0]} {args[1]}".upper()
+
+        command_flag = self.command_flags.get(command)
+        if command_flag:
+            if command_flag in self._command_flags_mapping:
+                return command, _METADATA_BY_REQUEST_POLICY[
+                    self._command_flags_mapping[command_flag]
+                ]
+            return command, _DEFAULT_KEYLESS_METADATA
+
+        # Unflagged and unresolved, so the command routes by its key. Without a default
+        # node the topology is not known yet and there is no slot to route by.
+        if not self.get_default_node():
+            return command, _DEFAULT_KEYLESS_METADATA
+
+        slot = self.determine_slot(*args)
+        if slot is None:
+            return command, _DEFAULT_KEYLESS_METADATA
+
+        return command, _DEFAULT_KEYED_METADATA
+
     def _determine_nodes(
         self, *args, request_policy: Optional[RequestPolicy] = None, **kwargs
     ) -> List["ClusterNode"]:
         """
         Determines a nodes the command should be executed on.
+
+        The caller resolves the command's own policy - see
+        ``_resolve_command_policies`` - so the only decision left here is an explicit
+        nodes flag, which overrides it.
         """
         command = args[0].upper()
         if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
@@ -1433,14 +1517,8 @@ class RedisCluster(
         nodes_flag = kwargs.pop("nodes_flag", None)
         if nodes_flag and self._is_nodes_flag(nodes_flag):
             # nodes flag passed by the user
-            command_flag = nodes_flag
-            if command_flag in self._command_flags_mapping:
-                request_policy = self._command_flags_mapping[command_flag]
-        elif request_policy is None:
-            # get the nodes group for this command if it was predefined
-            command_flag = self.command_flags.get(command)
-            if command_flag in self._command_flags_mapping:
-                request_policy = self._command_flags_mapping[command_flag]
+            if nodes_flag in self._command_flags_mapping:
+                request_policy = self._command_flags_mapping[nodes_flag]
 
         if request_policy is None:
             raise RedisClusterException(
@@ -1553,11 +1631,19 @@ class RedisCluster(
             all map to the same key slot; or, when the keys have to be resolved
             through ``_get_command_keys``, if the cluster has no default node to
             resolve them against.
+
+        Returns the slot as an ``int``, which is what the declared return type has always
+        promised and what the slot map is keyed by. A command carrying its slot as an
+        argument - the ``SLOT_ID`` group - is therefore cast rather than returned verbatim,
+        so a caller that spelled the slot as a string gets a usable slot instead of a
+        ``KeyError`` from ``get_node_from_slot``.
         """
         command = args[0]
-        if self.command_flags.get(command) == SLOT_ID:
-            # The command contains the slot ID
-            return args[1]
+        if self.command_flags.get(command.upper()) == SLOT_ID:
+            # The command contains the slot ID. The flag table is keyed in upper case, so
+            # the lookup is normalized - a raw ``execute_command("cluster countkeysinslot",
+            # ...)`` names the same command as the spelling the command method sends.
+            return int(args[1])
 
         # Get the keys in the command
 
@@ -1667,39 +1753,13 @@ class RedisCluster(
         is_default_node = False
         target_nodes = None
         passed_targets = kwargs.pop("target_nodes", None)
-        command_policies = self._policy_resolver.resolve(args[0].lower())
-
         if passed_targets is not None and not self._is_nodes_flag(passed_targets):
             target_nodes = self._parse_target_nodes(passed_targets)
             target_nodes_specified = True
 
-        if not command_policies and not target_nodes_specified:
-            command = args[0].upper()
-            if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
-                command = f"{args[0]} {args[1]}".upper()
-
-            # We only could resolve key properties if command is not
-            # in a list of pre-defined request policies
-            command_flag = self.command_flags.get(command)
-            if not command_flag:
-                # Fallback to default policy
-                if not self.get_default_node():
-                    slot = None
-                else:
-                    slot = self.determine_slot(*args)
-                if slot is None:
-                    command_policies = _DEFAULT_KEYLESS_METADATA
-                else:
-                    command_policies = _DEFAULT_KEYED_METADATA
-            else:
-                if command_flag in self._command_flags_mapping:
-                    command_policies = _METADATA_BY_REQUEST_POLICY[
-                        self._command_flags_mapping[command_flag]
-                    ]
-                else:
-                    command_policies = _DEFAULT_KEYLESS_METADATA
-        elif not command_policies and target_nodes_specified:
-            command_policies = _DEFAULT_KEYLESS_METADATA
+        command, command_policies = self._resolve_command_policies(
+            *args, target_nodes_specified=target_nodes_specified
+        )
 
         # If an error that allows retrying was thrown, the nodes and slots
         # cache were reinitialized. We will retry executing the command with
@@ -1744,8 +1804,13 @@ class RedisCluster(
                         break
 
                 # Return the processed result
+                # ``command``, not ``args[0]``: the result callbacks are keyed by the name
+                # the policies were decided by, so a container command passed as two words
+                # - ``execute_command("command", "count")`` - is dispatched as the command
+                # that was actually routed. Telemetry deliberately does not follow; see the
+                # note on the metric in the retry branch below.
                 return self._process_result(
-                    args[0],
+                    command,
                     res,
                     response_policy=command_policies.response_policy,
                     **kwargs,
@@ -1761,6 +1826,11 @@ class RedisCluster(
                     failure_count += 1
 
                     if hasattr(e, "connection"):
+                        # ``args[0]``, not the resolved ``command``: every other metric in
+                        # this class - including the per-command one ``_execute_command``
+                        # records on success - names the command the caller spelled. Using
+                        # the routed name only here would report one command under two
+                        # names depending on whether it was retried.
                         self._record_command_metric(
                             command_name=args[0],
                             duration_seconds=time.monotonic() - start_time,
@@ -4442,7 +4512,7 @@ class ClusterPipeline(RedisCluster):
             Union[RequestPolicy, ResponsePolicy], Callable
         ] = {
             RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [
-                self.get_random_primary_or_all_nodes(command_name)
+                self.get_keyless_target_node(command_name)
             ],
             RequestPolicy.DEFAULT_KEYED: lambda command,
             *args: self.get_nodes_from_slot(command, *args),
@@ -5355,17 +5425,14 @@ class PipelineStrategy(AbstractStrategy):
         ):
             command = f"{args[0]} {args[1]}".upper()
 
+        # The caller resolves the command's own policy - see
+        # ``RedisCluster._resolve_command_policies`` - so the only decision left here is
+        # an explicit nodes flag, which overrides it.
         nodes_flag = kwargs.pop("nodes_flag", None)
         if nodes_flag and self._is_nodes_flag(nodes_flag):
             # nodes flag passed by the user
-            command_flag = nodes_flag
-            if command_flag in self._pipe._command_flags_mapping:
-                request_policy = self._pipe._command_flags_mapping[command_flag]
-        elif request_policy is None:
-            # get the nodes group for this command if it was predefined
-            command_flag = self._pipe.command_flags.get(command)
-            if command_flag in self._pipe._command_flags_mapping:
-                request_policy = self._pipe._command_flags_mapping[command_flag]
+            if nodes_flag in self._pipe._command_flags_mapping:
+                request_policy = self._pipe._command_flags_mapping[nodes_flag]
 
         if request_policy is None:
             raise RedisClusterException(

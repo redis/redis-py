@@ -278,7 +278,14 @@ _MEMO_MAX_ENTRIES = 4096
 # changes key idle-time state even though Redis reports it readonly, so it must continue to
 # reach a primary. Keep this exception narrow: caller-supplied metadata remains authoritative
 # for ordinary core and module reads.
-_REPLICA_UNSAFE_COMMANDS = frozenset({"TOUCH"})
+#
+# Loaded into every resolver's ``_replica_safe`` memo at construction, which is the whole
+# mechanism: the entry is in place before any command is looked up, so these answer from the
+# same single dict lookup as every other command and ``is_replica_safe`` needs no test of its
+# own. Nothing clears or evicts from that memo - the cap only declines to add - so a seeded
+# entry cannot be lost. Names are lower case, the form command names are keyed by throughout
+# this module.
+_REPLICA_UNSAFE_COMMANDS = frozenset({"touch"})
 
 
 class MetadataResolver(ABC):
@@ -468,7 +475,7 @@ class BaseMetadataResolver(MetadataResolver):
         self._policies: dict[str, CommandPolicies | None] = {}
         self._cacheable: dict[str, bool] = {}
         self._replica_safe: dict[str, bool] = {
-            cmd.lower(): False for cmd in _REPLICA_UNSAFE_COMMANDS
+            cmd: False for cmd in _REPLICA_UNSAFE_COMMANDS
         }
 
     def resolve(self, command_name: str) -> CommandMetadata | None:
@@ -595,7 +602,7 @@ class AsyncBaseMetadataResolver(AsyncMetadataResolver):
         self._policies: dict[str, CommandPolicies | None] = {}
         self._cacheable: dict[str, bool] = {}
         self._replica_safe: dict[str, bool] = {
-            cmd.lower(): False for cmd in _REPLICA_UNSAFE_COMMANDS
+            cmd: False for cmd in _REPLICA_UNSAFE_COMMANDS
         }
 
     async def resolve(self, command_name: str) -> CommandMetadata | None:
@@ -949,20 +956,64 @@ def _load_commands_metadata_cache(
 # frozen record is safe to share.
 #
 # Only the routing policies are known for a command the client had to fall back on, so
-# everything else keeps its fail-closed default and none of these reports as cacheable.
-_DEFAULT_KEYLESS_METADATA = CommandMetadata()
+# every other field is recorded at its fail-closed value and none of these reports as
+# cacheable. Spelled out rather than left to the dataclass defaults, for the reason given
+# on the shared table shapes below.
+_DEFAULT_KEYLESS_METADATA = CommandMetadata(
+    request_policy=RequestPolicy.DEFAULT_KEYLESS,
+    response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+    is_readonly=False,
+    is_blocking=False,
+    has_key_argument=False,
+    has_nondeterministic_output=False,
+    is_script_runner=False,
+    is_dont_cache=False,
+    has_complete_metadata=False,
+)
 _DEFAULT_KEYED_METADATA = CommandMetadata(
     request_policy=RequestPolicy.DEFAULT_KEYED,
     response_policy=ResponsePolicy.DEFAULT_KEYED,
+    is_readonly=False,
+    is_blocking=False,
+    has_key_argument=False,
+    has_nondeterministic_output=False,
+    is_script_runner=False,
+    is_dont_cache=False,
+    has_complete_metadata=False,
 )
 
 # Same, for the node-flag fallback, which resolves a request policy and leaves the response
 # policy at its keyless default.
 _METADATA_BY_REQUEST_POLICY: Mapping[RequestPolicy, CommandMetadata] = MappingProxyType(
-    {policy: CommandMetadata(request_policy=policy) for policy in RequestPolicy}
+    {
+        policy: CommandMetadata(
+            request_policy=policy,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+            is_readonly=False,
+            is_blocking=False,
+            has_key_argument=False,
+            has_nondeterministic_output=False,
+            is_script_runner=False,
+            is_dont_cache=False,
+            has_complete_metadata=False,
+        )
+        for policy in RequestPolicy
+    }
 )
 
 
+# Every record in this module spells out all nine fields, including the ones that happen to
+# equal the dataclass default. The nine are not interchangeable: seven of them
+# (``is_readonly``, ``is_blocking``, ``has_key_argument``, ``has_nondeterministic_output``,
+# ``is_script_runner``, ``is_dont_cache``, ``has_complete_metadata``) are the inputs to
+# ``_is_client_side_cacheable``, so a shape that leaves one implicit lets a command added
+# for an unrelated reason - replica-safe read routing, say, which needs only ``is_readonly``
+# - become client-side cacheable as a side effect, with nothing in the diff saying so.
+# Listing every field makes each new entry state its own cacheability.
+#
+# Shapes derived with ``dataclasses.replace`` below inherit from a fully explicit base, so
+# they name only the field that differs and still leave nothing to a default.
+#
 # Record shared by every command the client-side cache may serve: readonly, takes a key
 # name argument, and reports nothing that forbids caching. Spelled out once because the
 # vast majority of the table below is one of these shapes.
@@ -970,7 +1021,11 @@ _CACHEABLE_KEYED = CommandMetadata(
     request_policy=RequestPolicy.DEFAULT_KEYED,
     response_policy=ResponsePolicy.DEFAULT_KEYED,
     is_readonly=True,
+    is_blocking=False,
     has_key_argument=True,
+    has_nondeterministic_output=False,
+    is_script_runner=False,
+    is_dont_cache=False,
     has_complete_metadata=True,
 )
 
@@ -990,7 +1045,11 @@ _CACHEABLE_MOVABLE_KEYS = CommandMetadata(
     request_policy=None,
     response_policy=None,
     is_readonly=True,
+    is_blocking=False,
     has_key_argument=True,
+    has_nondeterministic_output=False,
+    is_script_runner=False,
+    is_dont_cache=False,
     has_complete_metadata=True,
 )
 
@@ -1020,7 +1079,11 @@ _READONLY_KEYLESS = CommandMetadata(
     request_policy=RequestPolicy.DEFAULT_KEYLESS,
     response_policy=ResponsePolicy.DEFAULT_KEYLESS,
     is_readonly=True,
+    is_blocking=False,
     has_key_argument=False,
+    has_nondeterministic_output=False,
+    is_script_runner=False,
+    is_dont_cache=False,
     has_complete_metadata=True,
 )
 
@@ -1031,7 +1094,11 @@ _READONLY_KEYLESS_WITHHELD_ROUTING = CommandMetadata(
     request_policy=None,
     response_policy=None,
     is_readonly=True,
+    is_blocking=False,
     has_key_argument=False,
+    has_nondeterministic_output=False,
+    is_script_runner=False,
+    is_dont_cache=False,
     has_complete_metadata=True,
 )
 
@@ -1044,7 +1111,11 @@ _WRITE_KEYLESS = CommandMetadata(
     request_policy=RequestPolicy.DEFAULT_KEYLESS,
     response_policy=ResponsePolicy.DEFAULT_KEYLESS,
     is_readonly=False,
+    is_blocking=False,
     has_key_argument=False,
+    has_nondeterministic_output=False,
+    is_script_runner=False,
+    is_dont_cache=False,
     has_complete_metadata=True,
 )
 
@@ -1052,7 +1123,11 @@ _WRITE_KEYLESS_WITHHELD_ROUTING = CommandMetadata(
     request_policy=None,
     response_policy=None,
     is_readonly=False,
+    is_blocking=False,
     has_key_argument=False,
+    has_nondeterministic_output=False,
+    is_script_runner=False,
+    is_dont_cache=False,
     has_complete_metadata=True,
 )
 
@@ -1060,7 +1135,11 @@ _WRITE_KEYED = CommandMetadata(
     request_policy=RequestPolicy.DEFAULT_KEYED,
     response_policy=ResponsePolicy.DEFAULT_KEYED,
     is_readonly=False,
+    is_blocking=False,
     has_key_argument=True,
+    has_nondeterministic_output=False,
+    is_script_runner=False,
+    is_dont_cache=False,
     has_complete_metadata=True,
 )
 
@@ -1080,17 +1159,15 @@ _DONT_CACHE_WRITE_KEYED = replace(_WRITE_KEYED, is_dont_cache=True)
 #
 # Every entry below was validated against a live ``COMMAND`` reply from Redis 8.10.0 with
 # search, timeseries, ReJSON, bf and vectorset loaded (the ``redislabs/client-libs-test``
-# stack image).
-#
-# The table is not exhaustive: the server reports 127 cacheable commands and this covers
-# 80 of them. The uncovered ones are whole module surfaces the CSC allow-list never
-# carried - ``bf.*``, ``cf.*``, ``cms.*``, ``topk.*``, ``tdigest.*``, the vectorset reads
-# - plus core reads such as ``pfcount``. A command absent from the table fails closed, so the uncovered
-# Provenance: Generated against Redis 8.6-rc1 with all bundled modules loaded,
-# commands are simply treated as not cacheable.
-# Provenance: Generated against Redis 8.10.0 with all bundled modules loaded,
-# with the core entries also compared against 7.4.2 to ensure the minimum
+# stack image), with the core entries also compared against 7.4.2 to ensure the minimum
 # supported version does not disagree on the fields that decide cacheability.
+#
+# The table is not exhaustive: on 8.10.0 the server reports 127 cacheable commands and this
+# covers 80 of them. The count is version-qualified because it moves between releases - a
+# later server reports more. The uncovered ones are whole module surfaces the CSC allow-list
+# never carried - ``bf.*``, ``cf.*``, ``cms.*``, ``topk.*``, ``tdigest.*``, the vectorset
+# reads - plus core reads such as ``pfcount``. A command absent from the table fails closed,
+# so the uncovered commands are simply treated as not cacheable.
 #
 # Every command on the default allow-list of the 7.1.0 client-side cache is present.
 # So are all of their module counterparts, plus a selection of write commands.
@@ -1227,7 +1304,10 @@ _STATIC_COMMAND_METADATA: CommandMetadataRecordsCache = MappingProxyType(
                     request_policy=None,
                     response_policy=None,
                     is_readonly=True,
+                    is_blocking=False,
                     has_key_argument=True,
+                    has_nondeterministic_output=False,
+                    is_script_runner=False,
                     is_dont_cache=True,
                     has_complete_metadata=True,
                 ),
@@ -1248,8 +1328,11 @@ _STATIC_COMMAND_METADATA: CommandMetadataRecordsCache = MappingProxyType(
                     request_policy=None,
                     response_policy=None,
                     is_readonly=True,
+                    is_blocking=False,
                     has_key_argument=True,
                     has_nondeterministic_output=True,
+                    is_script_runner=False,
+                    is_dont_cache=False,
                     has_complete_metadata=True,
                 ),
                 "xlen": _CACHEABLE_KEYED,
@@ -1302,7 +1385,10 @@ _STATIC_COMMAND_METADATA: CommandMetadataRecordsCache = MappingProxyType(
                     request_policy=RequestPolicy.DEFAULT_KEYED,
                     response_policy=ResponsePolicy.DEFAULT_KEYED,
                     is_readonly=True,
+                    is_blocking=False,
                     has_key_argument=True,
+                    has_nondeterministic_output=False,
+                    is_script_runner=False,
                     is_dont_cache=True,
                     has_complete_metadata=True,
                 ),
@@ -1334,7 +1420,11 @@ _STATIC_COMMAND_METADATA: CommandMetadataRecordsCache = MappingProxyType(
                     request_policy=RequestPolicy.SPECIAL,
                     response_policy=ResponsePolicy.DEFAULT_KEYLESS,
                     is_readonly=True,
+                    is_blocking=False,
                     has_key_argument=False,
+                    has_nondeterministic_output=False,
+                    is_script_runner=False,
+                    is_dont_cache=False,
                     has_complete_metadata=True,
                 ),
                 "dictadd": _DONT_CACHE_WRITE_KEYLESS,

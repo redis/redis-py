@@ -7,6 +7,7 @@ from redis._parsers import AsyncCommandsParser
 from redis.asyncio.cluster import RedisCluster
 from redis.commands.metadata import (
     _MEMO_MAX_ENTRIES,
+    _is_replica_safe,
     _STATIC_COMMAND_METADATA,
     AsyncDynamicMetadataResolver,
     AsyncStaticMetadataResolver,
@@ -197,12 +198,12 @@ class TestWithheldRoutingPolicies:
             if base_cmd in table_core:
                 metadata = await static_resolver.resolve(base_cmd)
                 assert metadata is not None
-                assert (
-                    metadata.request_policy is None
-                ), f"Command '{base_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold request_policy in _STATIC_COMMAND_METADATA"
-                assert (
-                    metadata.response_policy is None
-                ), f"Command '{base_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold response_policy in _STATIC_COMMAND_METADATA"
+                assert metadata.request_policy is None, (
+                    f"Command '{base_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold request_policy in _STATIC_COMMAND_METADATA"
+                )
+                assert metadata.response_policy is None, (
+                    f"Command '{base_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold response_policy in _STATIC_COMMAND_METADATA"
+                )
 
     @pytest.mark.parametrize(
         "cmd",
@@ -598,6 +599,20 @@ class TestAsyncBaseMetadataResolver:
         resolver = AsyncDynamicMetadataResolver({"core": {"touch": CACHEABLE_KEYED}})
 
         assert await resolver.is_replica_safe("touch") is False
+
+    async def test_the_replica_unsafe_commands_are_seeded_into_the_memo(self):
+        """
+        Seeding the memo at construction is the whole mechanism, so pin it: the entry is in
+        place before any command is looked up, which is what lets these answer from the same
+        single dict lookup as every other command with no per-call test of their own. The
+        record TOUCH would otherwise resolve to reports it readonly, so the seed is the only
+        thing keeping it off a replica.
+        """
+        resolver = AsyncDynamicMetadataResolver({"core": {"touch": CACHEABLE_KEYED}})
+
+        assert resolver._replica_safe == {"touch": False}
+        assert _is_replica_safe(await resolver.resolve("touch")) is True
+        assert await resolver.is_replica_safe("TOUCH") is False
 
     async def test_static_resolver_decides_replica_safety(self):
         resolver = AsyncStaticMetadataResolver()
