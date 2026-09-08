@@ -173,8 +173,20 @@ class AsyncSearchTestsBase:
 
 
 class TestBaseSearchFunctionality(AsyncSearchTestsBase):
-    _SEARCH_TIMEOUT_DIM = 8192
-    _SEARCH_TIMEOUT_DOCS = 1500
+    # Shape of the index used by the on-timeout tests. The query these build
+    # runs ``KNN _SEARCH_TIMEOUT_DOCS``, and its cost is dominated by the size
+    # of the result set rather than by the vector arithmetic - at a fixed
+    # ``KNN 10`` the query takes ~1.6ms whatever the dimension, so the document
+    # count is what buys runtime and the dimension only buys memory.
+    #
+    # The runtime has to exceed the 1ms per-query timeout by a wide margin.
+    # ``search-on-timeout=fail`` is enforced by a timeout callback racing the
+    # thread running the query, so a query that only slightly overruns its
+    # timeout may still return full results - intended server behavior. Below
+    # roughly a 3x margin the error stops being raised at all; these values
+    # measure at ~890ms, i.e. a ~900x margin, in ~37MB.
+    _SEARCH_TIMEOUT_DIM = 256
+    _SEARCH_TIMEOUT_DOCS = 12000
 
     @pytest.mark.redismod
     async def test_client(self, decoded_r: redis.Redis):
