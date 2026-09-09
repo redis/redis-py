@@ -11,7 +11,7 @@ from typing import (
     Union,
 )
 
-from redis.exceptions import ConnectionError, RedisError, TimeoutError
+from redis.exceptions import ConnectionError, TimeoutError
 from redis.retry import AbstractRetry
 
 T = TypeVar("T")
@@ -20,14 +20,14 @@ if TYPE_CHECKING:
     from redis.backoff import AbstractBackoff
 
 
-class Retry(AbstractRetry[RedisError]):
+class Retry(AbstractRetry[Exception]):
     __hash__ = AbstractRetry.__hash__
 
     def __init__(
         self,
         backoff: "AbstractBackoff",
         retries: int,
-        supported_errors: Tuple[Type[RedisError], ...] = (
+        supported_errors: Tuple[Type[Exception], ...] = (
             ConnectionError,
             TimeoutError,
         ),
