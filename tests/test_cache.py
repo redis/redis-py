@@ -39,6 +39,26 @@ WRITE_KEYED = CommandMetadata(
 )
 
 
+def wait_for_invalidated_value(client, key, expected, timeout=3.0, interval=0.05):
+    """
+    Reads ``key`` until the client stops serving the value it cached before invalidation.
+
+    Server-assisted invalidation arrives on its own push message, so a read taken straight
+    after another client's write is a race. A fixed sleep answers that race badly in both
+    directions - too short and it flakes under CI load, long enough and every run pays for
+    it - and the delay differs by topology, being longest across cluster nodes. Polls to
+    the deadline and returns the last value read, so the caller's own assertion is what
+    reports the failure if the invalidation never lands.
+    """
+    deadline = time.monotonic() + timeout
+    value = client.get(key)
+    while value not in expected and time.monotonic() < deadline:
+        time.sleep(interval)
+        value = client.get(key)
+
+    return value
+
+
 @pytest.fixture()
 def r(request):
     cache = request.param.get("cache")
@@ -778,16 +798,11 @@ class TestClusterCache:
         ]
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
-        # Add a delay / wait loop to allow invalidation to be processed across cluster nodes
-        start_time = time.time()
-        res = None
-        while time.time() - start_time < 3.0:
-            res = r.get("foo")
-            if res in [b"barbar", "barbar"]:
-                break
-            time.sleep(0.05)
         # Retrieves a new value from server and cache it
-        assert res in [b"barbar", "barbar"]
+        assert wait_for_invalidated_value(r, "foo", (b"barbar", "barbar")) in [
+            b"barbar",
+            "barbar",
+        ]
         # Make sure that new value was cached
         assert cache.get(
             CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
@@ -1106,9 +1121,11 @@ class TestSentinelCache:
         ]
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
-        time.sleep(0.5)
         # Retrieves a new value from server and cache_data it
-        assert r.get("foo") in [b"barbar", "barbar"]
+        assert wait_for_invalidated_value(r, "foo", (b"barbar", "barbar")) in [
+            b"barbar",
+            "barbar",
+        ]
         # Make sure that new value was cached
         assert cache.get(
             CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
@@ -1227,11 +1244,11 @@ class TestSSLCache:
         ]
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
-        # Allow time for asynchronous invalidation delivery and processing,
-        # which can be delayed under CI load.
-        time.sleep(0.5)
         # Retrieves a new value from server and cache_data it
-        assert r.get("foo") in [b"barbar", "barbar"]
+        assert wait_for_invalidated_value(r, "foo", (b"barbar", "barbar")) in [
+            b"barbar",
+            "barbar",
+        ]
         # Make sure that new value was cached
         assert cache.get(
             CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))

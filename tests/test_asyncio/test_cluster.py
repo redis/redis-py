@@ -26,6 +26,7 @@ from redis.backoff import (
     NoBackoff,
 )
 from redis.cluster import (
+    _REPLICAS_ONLY_STRATEGIES,
     PIPELINE_BLOCKED_COMMANDS,
     PRIMARY,
     REPLICA,
@@ -3077,6 +3078,82 @@ class TestStaticMetadataRouting:
         await rc.aclose()
 
     @pytest.mark.fixed_client
+    @pytest.mark.parametrize("strategy", sorted(_REPLICAS_ONLY_STRATEGIES, key=str))
+    async def test_keyless_reads_honor_a_replicas_only_strategy(self, strategy) -> None:
+        """
+        A strategy that asks for replicas must not land a keyless read on a primary. Only
+        that much of the strategy applies: the rest of it is an index into one shard's node
+        list, and a keyless command has no shard, so the pick is uniform over the replicas.
+        """
+        rc = await get_mocked_redis_client(
+            host=default_host, port=7000, load_balancing_strategy=strategy
+        )
+        replicas = set(rc.get_replicas())
+        assert replicas
+
+        picked = {await rc.get_keyless_target_node("get") for _ in range(50)}
+
+        assert picked
+        assert picked <= replicas
+        assert not picked & set(rc.get_primaries())
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("strategy", sorted(_REPLICAS_ONLY_STRATEGIES, key=str))
+    async def test_keyless_reads_fall_back_when_the_cluster_has_no_replicas(
+        self, strategy
+    ) -> None:
+        """
+        A replicas-only strategy against a cluster that has none must still answer with a
+        node instead of raising out of an empty choice.
+        """
+        rc = await get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            load_balancing_strategy=strategy,
+            cluster_slots=[
+                [0, 8191, ["127.0.0.1", 7000, "node_0"]],
+                [8192, 16383, ["127.0.0.1", 7001, "node_1"]],
+            ],
+        )
+        primaries = set(rc.get_primaries())
+        assert not rc.get_replicas()
+
+        picked = {await rc.get_keyless_target_node("get") for _ in range(20)}
+
+        assert picked
+        assert picked <= primaries
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize(
+        "strategy",
+        [LoadBalancingStrategy.ROUND_ROBIN, LoadBalancingStrategy.RANDOM, None],
+    )
+    async def test_keyless_reads_keep_the_whole_node_set_otherwise(
+        self, strategy
+    ) -> None:
+        """
+        The two strategies that include the primary, and ``read_from_replicas`` on its own,
+        keep the answer this method has given since 7.1.0: any node.
+        """
+        rc = await get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            read_from_replicas=True,
+            load_balancing_strategy=strategy,
+        )
+        node = rc.get_primaries()[0]
+
+        with mock.patch.object(
+            type(rc), "get_random_node", return_value=node
+        ) as any_node:
+            assert await rc.get_keyless_target_node("get") is node
+
+        any_node.assert_called_once()
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
     async def test_slot_id_commands_route_by_slot_for_any_spelling(self) -> None:
         """
         The SLOT_ID flag lookup is normalized, so a raw lowercase spelling names the same
@@ -3108,6 +3185,29 @@ class TestStaticMetadataRouting:
             await rc.execute_command("command", "count")
 
         assert seen == ["COMMAND COUNT"]
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_the_routed_name_is_the_same_with_and_without_explicit_targets(
+        self,
+    ) -> None:
+        """
+        The routed name is decided before the explicit-targets branch, so one command
+        answers with one name either way. Without it the name kept the caller's spelling
+        on that branch alone, and DBSIZE's result callback - keyed, like every other, in
+        upper case - summed the replies for one of these two calls and not the other.
+        """
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+        seen = []
+        rc.result_callbacks["DBSIZE"] = lambda cmd, res, **kwargs: seen.append(cmd)
+
+        with mock.patch.object(
+            ClusterNode, "execute_command", new=mock.AsyncMock(return_value=7)
+        ):
+            await rc.execute_command("dbsize")
+            await rc.execute_command("dbsize", target_nodes=rc.get_primaries())
+
+        assert seen == ["DBSIZE", "DBSIZE"]
         await rc.aclose()
 
     @pytest.mark.fixed_client

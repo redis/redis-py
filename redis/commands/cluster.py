@@ -58,6 +58,7 @@ from .redismodules import AsyncRedisModuleCommands, RedisModuleCommands
 
 if TYPE_CHECKING:
     from redis.asyncio.cluster import TargetNodesT
+    from redis.cluster import LoadBalancingStrategy
 
 # DEPRECATED - no longer consulted by the default metadata routing, and it will be removed in a future release.
 #
@@ -187,8 +188,14 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
     A class containing commands that handle more than one key
     """
 
+    # Read-routing configuration, which the cluster clients all set on the instance. The
+    # defaults are here for a host class that mixes these commands in without one - see
+    # ``_is_replica_safe`` below, which is the same fallback for the same audience - so
+    # that ``_execute_pipeline_by_slot`` reads a value rather than raising
+    # ``AttributeError``. Typed under TYPE_CHECKING because ``redis.cluster`` imports this
+    # module.
     read_from_replicas: bool = False
-    load_balancing_strategy: Any = None
+    load_balancing_strategy: LoadBalancingStrategy | None = None
 
     def _partition_keys_by_slot(self, keys: Iterable[KeyT]) -> Dict[int, List[KeyT]]:
         """Split keys into a dictionary that maps a slot to a list of keys."""

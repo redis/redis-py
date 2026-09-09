@@ -68,6 +68,7 @@ from redis.auth.token import TokenInterface
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE, AbstractRedis
 from redis.cluster import (
+    _REPLICAS_ONLY_STRATEGIES,
     PIPELINE_BLOCKED_COMMANDS,
     PRIMARY,
     REPLICA,
@@ -965,11 +966,27 @@ class RedisCluster(
         Returns the node a keyless command is routed to: a random node when replica reads
         are enabled and the command is safe to serve from a replica, a random primary
         otherwise.
+
+        A replicas-only ``load_balancing_strategy`` is honored by picking from the replicas
+        alone, so a strategy that asks for replicas cannot land on a primary here. The
+        strategy is not applied any further than that: the rest of it is an index into one
+        shard's node list and a round-robin counter kept per primary name, and a keyless
+        command has no shard to index - so the pick is uniform over the eligible nodes.
+
+        Falls back to the whole node set when the cluster has no replicas to pick from,
+        which is every primary. That is also the answer for the two strategies that
+        include the primary, and for ``read_from_replicas`` on its own, which is what this
+        method has returned for a replica-safe command since 7.1.0.
         """
         replica_safe = (
             self.read_from_replicas or self.load_balancing_strategy is not None
         ) and await self._is_replica_safe(command_name)
         if replica_safe:
+            if self.load_balancing_strategy in _REPLICAS_ONLY_STRATEGIES:
+                replicas = self.get_replicas()
+                if replicas:
+                    return random.choice(replicas)
+
             return self.get_random_node()
 
         return self.get_random_primary_node()
@@ -1118,11 +1135,21 @@ class RedisCluster(
         that look the command up elsewhere - result callbacks, observability - use the
         returned name so they agree with the routing decision.
 
+        The name is normalized before any branch, so one command answers with one name
+        however it got here. The result callbacks are keyed in upper case, so a name that
+        kept the caller's spelling on only some paths would fire them on only some paths -
+        ``execute_command("dbsize")`` would be summed and ``execute_command("dbsize",
+        target_nodes=...)`` would not.
+
         First choice is the policy resolver. When it does not know the command, the
         fallbacks are, in order: nothing to route at all because the caller named its
         targets, the command's ``COMMAND_FLAGS`` entry, and finally whether the command
         carries a key.
         """
+        command = args[0].upper()
+        if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
+            command = f"{args[0]} {args[1]}".upper()
+
         if target_nodes_specified:
             # The caller named its targets, so nothing is routed from here - and the
             # command's own aggregation must not apply either. A response policy resolved
@@ -1130,15 +1157,11 @@ class RedisCluster(
             # the loop over the nodes the caller picked, or fold their replies into one.
             # Answer with the record that aggregates nothing, and skip the resolver: with
             # the targets given, neither of its answers is used.
-            return args[0], _DEFAULT_KEYLESS_METADATA
+            return command, _DEFAULT_KEYLESS_METADATA
 
         policies = await self._policy_resolver.resolve(args[0].lower())
         if policies:
-            return args[0], policies
-
-        command = args[0].upper()
-        if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
-            command = f"{args[0]} {args[1]}".upper()
+            return command, policies
 
         command_flag = self.command_flags.get(command)
         if command_flag:

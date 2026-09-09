@@ -20,6 +20,7 @@ from redis.backoff import (
     NoBackoff,
 )
 from redis.cluster import (
+    _REPLICAS_ONLY_STRATEGIES,
     PRIMARY,
     PIPELINE_BLOCKED_COMMANDS,
     REDIS_CLUSTER_HASH_SLOTS,
@@ -3173,6 +3174,90 @@ class TestStaticMetadataRouting:
         select_node.assert_called_once_with("dbsize")
 
     @pytest.mark.fixed_client
+    @pytest.mark.parametrize("strategy", sorted(_REPLICAS_ONLY_STRATEGIES, key=str))
+    def test_keyless_reads_honor_a_replicas_only_strategy(self, strategy):
+        """
+        A strategy that asks for replicas must not land a keyless read on a primary. Only
+        that much of the strategy applies: the rest of it is an index into one shard's node
+        list, and a keyless command has no shard, so the pick is uniform over the replicas.
+        """
+        rc = get_mocked_redis_client(
+            host=default_host, port=7000, load_balancing_strategy=strategy
+        )
+        replicas = set(rc.get_replicas())
+        assert replicas
+
+        picked = {rc.get_keyless_target_node("get") for _ in range(50)}
+
+        assert picked
+        assert picked <= replicas
+        assert not picked & set(rc.get_primaries())
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("strategy", sorted(_REPLICAS_ONLY_STRATEGIES, key=str))
+    def test_keyless_reads_fall_back_when_the_cluster_has_no_replicas(self, strategy):
+        """
+        A replicas-only strategy against a cluster that has none must still answer with a
+        node instead of raising out of an empty choice.
+        """
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            load_balancing_strategy=strategy,
+            cluster_slots=[
+                [0, 8191, ["127.0.0.1", 7000, "node_0"]],
+                [8192, 16383, ["127.0.0.1", 7001, "node_1"]],
+            ],
+        )
+        primaries = set(rc.get_primaries())
+        assert not rc.get_replicas()
+
+        picked = {rc.get_keyless_target_node("get") for _ in range(20)}
+
+        assert picked
+        assert picked <= primaries
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize(
+        "strategy",
+        [LoadBalancingStrategy.ROUND_ROBIN, LoadBalancingStrategy.RANDOM, None],
+    )
+    def test_keyless_reads_keep_the_whole_node_set_otherwise(self, strategy):
+        """
+        The two strategies that include the primary, and ``read_from_replicas`` on its own,
+        keep the answer this method has given since 7.1.0: any node.
+        """
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            read_from_replicas=True,
+            load_balancing_strategy=strategy,
+        )
+        node = rc.get_primaries()[0]
+
+        with patch.object(type(rc), "get_random_node", return_value=node) as any_node:
+            assert rc.get_keyless_target_node("get") is node
+
+        any_node.assert_called_once()
+
+    @pytest.mark.fixed_client
+    def test_every_load_balancing_strategy_is_classified(self):
+        """
+        The keyless path asks whether a strategy excludes the primary, and ``LoadBalancer``
+        derives the same thing separately as its ``replicas_only`` bit. A strategy added to
+        the enum and left out of the set here would silently be treated as including the
+        primary, so pin the classification of all of them.
+        """
+        assert _REPLICAS_ONLY_STRATEGIES == {
+            LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+            LoadBalancingStrategy.RANDOM_REPLICA,
+        }
+        assert set(LoadBalancingStrategy) - _REPLICAS_ONLY_STRATEGIES == {
+            LoadBalancingStrategy.ROUND_ROBIN,
+            LoadBalancingStrategy.RANDOM,
+        }
+
+    @pytest.mark.fixed_client
     def test_the_deprecated_selector_delegates_to_the_public_one(self):
         """
         The name that has been public since 7.1.0 keeps working and answers from the
@@ -3242,6 +3327,24 @@ class TestStaticMetadataRouting:
             rc.execute_command("command", "count")
 
         assert seen == ["COMMAND COUNT"]
+
+    @pytest.mark.fixed_client
+    def test_the_routed_name_is_the_same_with_and_without_explicit_targets(self):
+        """
+        The routed name is decided before the explicit-targets branch, so one command
+        answers with one name either way. Without it the name kept the caller's spelling
+        on that branch alone, and DBSIZE's result callback - keyed, like every other, in
+        upper case - summed the replies for one of these two calls and not the other.
+        """
+        rc = get_mocked_redis_client(host=default_host, port=7000)
+        seen = []
+        rc.result_callbacks["DBSIZE"] = lambda cmd, res, **kwargs: seen.append(cmd)
+
+        with patch.object(RedisCluster, "_execute_command", return_value=7):
+            rc.execute_command("dbsize")
+            rc.execute_command("dbsize", target_nodes=rc.get_primaries())
+
+        assert seen == ["DBSIZE", "DBSIZE"]
 
     @pytest.mark.fixed_client
     def test_split_command_routing_applies_load_balancing_strategy(self):
