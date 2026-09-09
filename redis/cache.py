@@ -217,6 +217,7 @@ class DefaultCache(CacheInterface):
     ) -> List[bool]:
         response = []
         keys_to_delete = []
+        seen = set()
 
         for redis_key in redis_keys:
             # Prepare both versions for lookup
@@ -230,7 +231,13 @@ class DefaultCache(CacheInterface):
                     pass  # Non-UTF-8 bytes, skip str version
 
             for cache_key in self._cache:
+                # A multi-key command (e.g. MGET foo bar) can be matched by more
+                # than one of the invalidated keys; collect each entry only once
+                # so it is not popped twice below, which raised KeyError.
+                if cache_key in seen:
+                    continue
                 if any(candidate in cache_key.redis_keys for candidate in candidates):
+                    seen.add(cache_key)
                     keys_to_delete.append(cache_key)
                     response.append(True)
 

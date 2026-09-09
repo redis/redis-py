@@ -1496,6 +1496,34 @@ class TestUnitDefaultCache:
         assert len(cache.collection) == 1
         assert cache.get(cache_key4).cache_value == b"bar3"
 
+    def test_delete_by_redis_keys_multikey_entry_matched_twice(self, mock_connection):
+        """A multi-key entry hit by several invalidated keys is removed once.
+
+        An invalidation push can list more than one key of the same cached
+        multi-key command (e.g. MGET foo bar). The entry must be collected and
+        deleted a single time; previously it was popped twice and raised
+        KeyError, crashing the invalidation callback.
+        """
+        cache = DefaultCache(CacheConfig(max_size=5))
+
+        cache_key = CacheKey(
+            command="MGET",
+            redis_keys=("foo", "bar"),
+            redis_args=("MGET", "foo", "bar"),
+        )
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=b"baz",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        # Both keys of the single entry are invalidated in one call.
+        assert cache.delete_by_redis_keys([b"foo", b"bar"]) == [True]
+        assert len(cache.collection) == 0
+
     def test_delete_by_redis_keys_with_non_utf8_bytes_key(self, mock_connection):
         """cache fails to invalidate entries when redis_keys contain non-UTF-8 bytes."""
         cache = DefaultCache(CacheConfig(max_size=5))
