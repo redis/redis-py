@@ -98,6 +98,24 @@ LIVE_CACHEABILITY_DIVERGENCE = {
     "vrandmember": "has_nondeterministic_output",
 }
 
+# What the static table makes client-side cacheable that the legacy
+# ``CacheConfig.DEFAULT_ALLOW_LIST`` never carried. One constant, because two tests pin this
+# delta - the default path and the live-chained path - and a table edit that updated only one
+# of them is exactly how they drifted apart before.
+NEWLY_ELIGIBLE_VS_LEGACY_ALLOW_LIST = frozenset(
+    {
+        "DIGEST",
+        "EXPIRETIME",
+        "FT.SUGGET",
+        "FT.SUGLEN",
+        "HEXPIRETIME",
+        "HPEXPIRETIME",
+        "PEXPIRETIME",
+        "SDIFFCARD",
+        "SUNIONCARD",
+    }
+)
+
 # Keyless readonly commands whose routing policies are withheld so the cluster client routes
 # them via COMMAND_FLAGS (e.g. DEFAULT_NODE or PRIMARIES).
 WITHHELD_KEYLESS_READS = (
@@ -1126,17 +1144,7 @@ class TestBaseMetadataResolver:
 
         # Newly eligible: suggestion-dictionary reads and newly added core/module reads
         # the legacy allow-list never carried.
-        assert eligible - allow_list == {
-            "DIGEST",
-            "EXPIRETIME",
-            "FT.SUGGET",
-            "FT.SUGLEN",
-            "HEXPIRETIME",
-            "HPEXPIRETIME",
-            "PEXPIRETIME",
-            "SDIFFCARD",
-            "SUNIONCARD",
-        }
+        assert eligible - allow_list == set(NEWLY_ELIGIBLE_VS_LEGACY_ALLOW_LIST)
         # No longer eligible, and all three server-confirmed defects in the allow-list.
         assert allow_list - eligible == {"XPENDING", "TS.INFO", "XREAD"}
 
@@ -1938,9 +1946,13 @@ class TestStaticMetadataAgainstServer:
         # Nothing the allow-list carried is dropped beyond the three the server itself reports
         # as not cacheable.
         assert allow_list - eligible == {"xpending", "ts.info", "xread"}
-        # Everything newly cacheable is a command the table does not carry, so the broadening
-        # is attributable to the fallback rather than to a table edit.
-        assert (eligible - allow_list) & table_names == {"ft.sugget", "ft.suglen"}
+        # Everything newly cacheable is either a command the table does not carry - so the
+        # broadening is attributable to the fallback rather than to a table edit - or one of
+        # the table's own additions over the legacy allow-list, which the default path pins
+        # separately.
+        assert (eligible - allow_list) & table_names == {
+            name.lower() for name in NEWLY_ELIGIBLE_VS_LEGACY_ALLOW_LIST
+        }
         # And it is exactly this large, so a server or module version that starts reporting a
         # command as cacheable when it should not be surfaces here rather than silently
         # broadening what an opt-in user caches. Measured against the pinned

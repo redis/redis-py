@@ -1106,6 +1106,15 @@ _READONLY_KEYLESS_WITHHELD_ROUTING = CommandMetadata(
 # for client-side caching.
 _NONDETERMINISTIC_KEYED = replace(_CACHEABLE_KEYED, has_nondeterministic_output=True)
 
+# Same tip on the keyless reads that withhold their routing. Carries no cacheability
+# consequence of its own - a keyless command is already ineligible for want of a key
+# argument - but the table records what the server reports, and both RANDOMKEY and SCAN are
+# tipped ``nondeterministic_output``: one returns an arbitrary key, the other an arbitrary
+# page of the keyspace.
+_NONDETERMINISTIC_KEYLESS_WITHHELD_ROUTING = replace(
+    _READONLY_KEYLESS_WITHHELD_ROUTING, has_nondeterministic_output=True
+)
+
 # Write commands. Rule 1 excludes them, so nothing else about them matters to the cache.
 _WRITE_KEYLESS = CommandMetadata(
     request_policy=RequestPolicy.DEFAULT_KEYLESS,
@@ -1261,10 +1270,10 @@ _STATIC_COMMAND_METADATA: CommandMetadataRecordsCache = MappingProxyType(
                 "mget": _CACHEABLE_KEYED,
                 "pexpiretime": _CACHEABLE_KEYED,
                 "pttl": _NONDETERMINISTIC_KEYED,
-                "randomkey": _READONLY_KEYLESS_WITHHELD_ROUTING,
+                "randomkey": _NONDETERMINISTIC_KEYLESS_WITHHELD_ROUTING,
                 # Readonly and keyless. Routing policies are withheld so the cluster client keeps
                 # routing SCAN to all primary nodes (PRIMARIES) rather than a single random node.
-                "scan": _READONLY_KEYLESS_WITHHELD_ROUTING,
+                "scan": _NONDETERMINISTIC_KEYLESS_WITHHELD_ROUTING,
                 "scard": _CACHEABLE_KEYED,
                 "sdiff": _CACHEABLE_KEYED,
                 "sdiffcard": _CACHEABLE_MOVABLE_KEYS,

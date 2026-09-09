@@ -179,13 +179,20 @@ def _run_coroutine_in_thread(coro: Coroutine[Any, Any, _T]) -> _T:
     re-raised to the caller, so the entry point fails the way it would have had the body
     run in place.
 
-    Only safe for a coroutine that touches nothing bound to the caller's loop. The private
-    loop cannot drive a future, task, connection or lock created on another one, and the
-    calling thread is blocked on ``join()`` for the whole run - so a body that awaits the
-    caller's loop waits on a loop that this helper has stopped, which hangs rather than
-    raising. That rules out anything that performs I/O over a pooled connection. Pass only
-    a body whose awaits are self-contained, and prefer restructuring the entry point to be
-    ``async`` over reaching for this.
+    .. warning::
+
+       **Deadlock hazard. Pass only a coroutine that touches nothing bound to the
+       caller's loop.** The ``thread.join()`` below blocks the calling thread for the
+       whole run, so when that thread is the one running an event loop, the loop stops
+       making progress for the duration. A body that then awaits anything owned by that
+       loop - a future, a task, a lock, or I/O over a pooled connection - is waiting on a
+       loop that is itself blocked on this very ``join()``. The result is a permanent
+       stall, not an exception: nothing times out and nothing is raised. Loop-bound
+       futures may instead fail with a cross-loop ``RuntimeError``, which is the luckier
+       outcome because at least it is visible.
+
+    Pass only a body whose awaits are self-contained, and prefer restructuring the entry
+    point to be ``async`` over reaching for this.
     """
     result: Any = None
     error: BaseException | None = None
@@ -200,6 +207,10 @@ def _run_coroutine_in_thread(coro: Coroutine[Any, Any, _T]) -> _T:
 
     thread = threading.Thread(target=runner)
     thread.start()
+    # Unconditional and untimed by design: the caller expects a value, so there is no
+    # partial result to return early with. If the caller's thread is running an event
+    # loop, that loop is blocked here, which is why the coroutine must never await
+    # anything owned by it. See the deadlock hazard in the docstring above.
     thread.join()
 
     if error is not None:
@@ -976,14 +987,29 @@ class RedisCluster(
         metadata resolver, which is awaitable, so the coroutine runs on its own event loop
         in a worker thread to keep this entry point synchronous.
 
+        .. warning::
+
+           **Do not extend this method, and do not call it from a running event loop.**
+           Keeping the 7.1.0 signature synchronous costs a thread bridge
+           (``_run_coroutine_in_thread``) that blocks the calling thread until the
+           resolver answers. Two rules follow, and breaking either one stalls the caller
+           permanently rather than raising:
+
+           1. **Override the right method.** A subclass that customizes keyless routing
+              must override :meth:`get_keyless_target_node`, the coroutine the client
+              actually awaits. Overriding this name changes nothing, because no code path
+              inside the client calls it.
+           2. **Keep a custom resolver synchronous in effect.** A caller-supplied
+              ``AsyncMetadataResolver`` must implement ``is_replica_safe`` as a
+              self-contained in-memory lookup. One that awaits work owned by the caller's
+              loop - I/O over a pooled connection, say - waits on a loop this bridge has
+              already blocked, and hangs.
+
         That bridge is what confines this method to the deprecation window. It is sound
-        for the resolvers the library ships, whose ``is_replica_safe`` is an in-memory
-        lookup with no suspension of its own, but a caller-supplied
-        ``AsyncMetadataResolver`` that awaits I/O - over a pooled connection, say - would
-        await the caller's loop from a thread that has blocked it, and hang. See
-        ``_run_coroutine_in_thread``. Nothing inside the client reaches this path: keyless
-        routing goes through :meth:`get_keyless_target_node`, which is awaited normally, so
-        the hazard is confined to callers of this deprecated name.
+        for the resolvers the library ships, whose ``is_replica_safe`` suspends on nothing,
+        and nothing inside the client reaches this path: keyless routing goes through
+        :meth:`get_keyless_target_node`, which is awaited normally. So the hazard is
+        confined to callers of this deprecated name.
         """
         return _run_coroutine_in_thread(self.get_keyless_target_node(command_name))
 
