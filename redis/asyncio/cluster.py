@@ -692,10 +692,21 @@ class RedisCluster(
             async with self._lock:
                 if self._initialize:
                     try:
+                        default_node = self.nodes_manager.default_node
                         await self.nodes_manager.initialize(
                             additional_startup_nodes_info=additional_startup_nodes_info,
                             last_failed_node_name=last_failed_node_name,
                         )
+                        # Reopening releases connections, not the caller's node
+                        # selection. Use the refreshed instance if it still exists.
+                        if (
+                            default_node is not None
+                            and default_node.name != last_failed_node_name
+                        ):
+                            self.nodes_manager.default_node = (
+                                self.nodes_manager.nodes_cache.get(default_node.name)
+                                or self.nodes_manager.default_node
+                            )
                         await self.commands_parser.initialize(
                             self.nodes_manager.default_node
                         )
@@ -707,7 +718,7 @@ class RedisCluster(
         return self
 
     async def aclose(self) -> None:
-        """Close all connections & client if initialized."""
+        """Release connections; later commands reconnect using the selected node if available."""
         if not self._initialize:
             if not self._lock:
                 self._lock = asyncio.Lock()
@@ -2475,7 +2486,7 @@ class NodesManager:
             )
 
     async def aclose(self, attr: str = "nodes_cache") -> None:
-        self.default_node = None
+        # Retain routing state, just as the synchronous close() does.
         await asyncio.gather(
             *(
                 asyncio.create_task(node.disconnect())

@@ -1029,6 +1029,71 @@ class TestRedisClusterObj:
         r.set_default_node(new_def_node)
         assert r.get_default_node() == new_def_node
 
+    @pytest.mark.onlycluster
+    async def test_default_node_commands_after_close(self, r: RedisCluster) -> None:
+        default_node = r.get_primaries()[1]
+        r.set_default_node(default_node)
+        for _ in range(2):
+            await r.aclose()
+            await r.aclose()
+            await r.initialize()
+            assert r.get_default_node().name == default_node.name
+            execute_command = ClusterNode.execute_command
+            selected_nodes = []
+
+            async def execute(node, *args, **kwargs):
+                if args == ("TIME",):
+                    selected_nodes.append(node.name)
+                return await execute_command(node, *args, **kwargs)
+
+            with mock.patch.object(ClusterNode, "execute_command", new=execute):
+                assert len(await r.time()) == 2
+            assert selected_nodes == [default_node.name]
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("failed_default", [False, True])
+    async def test_reopen_reselects_default_from_refreshed_nodes(
+        self, failed_default: bool
+    ) -> None:
+        cluster = await get_mocked_redis_client(host=default_host, port=default_port)
+        selected = cluster.get_primaries()[1]
+        cluster.set_default_node(selected)
+        replacement = ClusterNode(selected.host, selected.port, server_type=PRIMARY)
+        fallback = cluster.get_primaries()[0]
+
+        async def refresh(**kwargs):
+            cluster.nodes_manager.nodes_cache[selected.name] = replacement
+            cluster.nodes_manager.default_node = fallback
+
+        await cluster.aclose()
+        with mock.patch.object(NodesManager, "initialize", side_effect=refresh):
+            with mock.patch.object(AsyncCommandsParser, "initialize"):
+                await cluster.initialize(
+                    last_failed_node_name=selected.name if failed_default else None
+                )
+        assert cluster.get_default_node() is (
+            fallback if failed_default else replacement
+        )
+        await cluster.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_reopen_falls_back_when_selected_node_is_removed(self) -> None:
+        cluster = await get_mocked_redis_client(host=default_host, port=default_port)
+        selected = cluster.get_primaries()[1]
+        fallback = cluster.get_primaries()[0]
+        cluster.set_default_node(selected)
+
+        async def refresh(**kwargs):
+            cluster.nodes_manager.nodes_cache.pop(selected.name)
+            cluster.nodes_manager.default_node = fallback
+
+        await cluster.aclose()
+        with mock.patch.object(NodesManager, "initialize", side_effect=refresh):
+            with mock.patch.object(AsyncCommandsParser, "initialize"):
+                await cluster.initialize()
+        assert cluster.get_default_node() is fallback
+        await cluster.aclose()
+
     async def test_set_default_node_failure(self, r: RedisCluster) -> None:
         """
         test failed replacement of the default cluster node
