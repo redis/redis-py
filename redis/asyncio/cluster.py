@@ -4336,7 +4336,7 @@ class ClusterPubSub(PubSub):
         ``timeout=None`` makes ``_poll_node_pubsub``'s read wait indefinitely,
         so holding the lock across it would block reconciliation for as long as
         no message arrives. Such a caller drives the pubsub itself and gets the
-        pre-existing unguarded behaviour; every bounded poll - which is what
+        pre-existing unguarded behavior; every bounded poll - which is what
         ``ClusterPubSub``'s own callers use - is serialized.
         """
         if timeout is None:

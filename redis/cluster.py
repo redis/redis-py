@@ -817,7 +817,7 @@ class RedisCluster(
             This is the narrow routing view of `metadata_resolver`, which supersedes it:
             prefer `metadata_resolver`, which serves routing and every other
             command-metadata consumer from one object. When both are given this one still
-            decides which nodes a command targets, so that its 7.1.0 behaviour does not
+            decides which nodes a command targets, so that its 7.1.0 behavior does not
             move. It does not decide anything the routing view cannot express: replica
             safety and client-side-cache eligibility keep coming from `metadata_resolver`,
             because a `CommandPolicies` record carries no `is_readonly` flag to answer them
@@ -3704,7 +3704,7 @@ class ClusterPubSub(PubSub):
         ``timeout=None`` makes ``_poll_node_pubsub``'s read block indefinitely,
         so holding the lock across it would block reconciliation for as long as
         no message arrives. Such a caller drives the pubsub itself and gets the
-        pre-existing unguarded behaviour; every bounded poll - which is what
+        pre-existing unguarded behavior; every bounded poll - which is what
         ``PubSubWorkerThread`` and ``ClusterPubSub``'s own callers use - is
         serialized.
         """
