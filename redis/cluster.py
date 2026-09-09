@@ -1613,7 +1613,7 @@ class RedisCluster(
 
     def _get_command_keys(self, *args):
         """
-        Get the keys in the command. If the command has no keys in in, None is
+        Get the keys in the command. If the command has no keys in it, None is
         returned.
 
         NOTE: Due to a bug in redis<7.0, this function does not work properly
