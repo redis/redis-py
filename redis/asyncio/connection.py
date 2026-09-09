@@ -708,6 +708,12 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             else:
                 # deep-copy the Retry object as it is mutable
                 self.retry = copy.deepcopy(retry)
+        if retry is not None and not isinstance(retry, Retry):
+            raise TypeError(
+                f'retry must be a redis.asyncio.retry.Retry instance, '
+                f'got {type(retry).__name__}. The sync redis.retry.Retry '
+                f'silently disables retries when passed to an async client.'
+            )
             # Update the retry's supported errors with the specified errors
             self.retry.update_supported_errors(retry_on_error)
         else:
