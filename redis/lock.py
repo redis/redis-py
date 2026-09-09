@@ -348,6 +348,14 @@ class Lock:
         return self.do_reacquire()
 
     def do_reacquire(self) -> Literal[True]:
+        if self.timeout <= 0:
+            # PEXPIRE with 0 deletes the key entirely (Redis >= 7.0), so
+            # "reacquiring" would silently destroy the lock while reporting
+            # success to the caller.
+            raise LockError(
+                "Cannot reacquire a lock with a timeout of 0",
+                lock_name=self.name,
+            )
         timeout = int(self.timeout * 1000)
         if not bool(
             self.lua_reacquire(
