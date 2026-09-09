@@ -22,6 +22,7 @@ from redis._parsers.helpers import (
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
 from redis.commands.core import (
+    HAS_XXHASH,
     ArrayAggregateOperations,
     ArrayPredicateCombinator,
     ArrayPredicateType,
@@ -2228,6 +2229,34 @@ class TestRedisCommands:
         assert res_local is not None
         assert len(res_local) == 16
         assert res_server == res_local
+
+    @pytest.mark.skipif(not HAS_XXHASH, reason="xxhash is not installed")
+    def test_local_digest_encodes_with_the_client_encoding(self):
+        """
+        The client's ``encoding`` decides the bytes that are hashed, which is what makes a
+        local digest comparable with the server's: the server hashes what it stored, and
+        what it stored was encoded by this same encoder.
+        """
+        utf16_client = redis.Redis(encoding="utf-16", decode_responses=False)
+        utf8_client = redis.Redis(encoding="utf-8", decode_responses=False)
+        value = "hello"
+
+        utf16_digest = utf16_client.digest_local(value)
+        utf8_digest = utf8_client.digest_local(value)
+
+        # The digest is a hex string, so the bytes carry no BOM and no multi-byte width
+        # however the client encodes.
+        assert isinstance(utf16_digest, bytes)
+        assert len(utf16_digest) == 16
+        assert utf16_digest.decode("ascii").isalnum()
+
+        # Pre-encoded input passes through the encoder untouched, so hashing the utf-16
+        # bytes on a utf-8 client must land on the same digest as hashing the string on a
+        # utf-16 one. Both of these were the utf-8 digest before digest_local consulted
+        # the encoder, which is what makes them the assertions that pin the behavior.
+        assert utf16_digest != utf8_digest
+        assert utf16_digest == utf8_client.digest_local(value.encode("utf-16"))
+        assert utf8_digest == utf8_client.digest_local(value.encode("utf-8"))
 
     @skip_if_server_version_lt("8.3.224")
     def test_pipeline_digest(self, r):

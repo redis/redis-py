@@ -365,8 +365,9 @@ class CacheConfig(CacheConfigurationInterface):
     # config holds, so this list no longer describes what gets cached. It is kept as a public
     # attribute only so an external caller reading it keeps working; editing it changes
     # nothing. The effective set it is replaced by differs from it by ``+FT.SUGGET``,
-    # ``+FT.SUGLEN`` and ``-XPENDING``, ``-TS.INFO``, ``-XREAD`` - the three removals being
-    # commands the server itself reports as not cacheable.
+    # ``+FT.SUGLEN``, ``+DIGEST``, ``+EXPIRETIME``, ``+PEXPIRETIME``, ``+HEXPIRETIME``,
+    # ``+HPEXPIRETIME``, ``+SDIFFCARD``, ``+SUNIONCARD`` and ``-XPENDING``, ``-TS.INFO``,
+    # ``-XREAD`` - the three removals being commands the server itself reports as not cacheable.
     #
     # To change eligibility, edit ``redis.commands.metadata._STATIC_COMMAND_METADATA`` or pass
     # a ``metadata_resolver`` to the client. Nothing here.

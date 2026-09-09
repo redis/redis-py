@@ -3109,7 +3109,7 @@ class BasicKeyCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/expiretime
         """
-        return self.execute_command("EXPIRETIME", key)
+        return self.execute_command("EXPIRETIME", key, keys=[key])
 
     @experimental_method()
     def digest_local(self, value: bytes | str) -> bytes | str:
@@ -3124,8 +3124,8 @@ class BasicKeyCommands(CommandsProtocol):
 
         Arguments:
           - value: Union[bytes, str] - the value to compute the digest of.
-            If a string is provided, it will be encoded using UTF-8 before hashing,
-            which matches Redis's default encoding behavior.
+            If a string is provided, it will be encoded using the client's configured
+            encoding (default UTF-8) before hashing, which matches Redis's encoding behavior.
 
         Returns:
           - (str | bytes) the XXH3 digest of the value as a hex string (16 hex characters).
@@ -3140,12 +3140,16 @@ class BasicKeyCommands(CommandsProtocol):
                 "'pip install redis[xxhash]' to enable this feature."
             )
 
-        local_digest = xxhash.xxh3_64(value).hexdigest()
+        encoder = self.get_encoder()
+        encoded_value = encoder.encode(value)
+
+        # xxhash.xxh3_64 produces a 64-bit (16-hex character) hash
+        local_digest = xxhash.xxh3_64(encoded_value).hexdigest()
 
         # To align with digest, we want to return bytes if decode_responses is False.
         # The following works because of Python's mixin-based client class hierarchy.
-        if not self.get_encoder().decode_responses:
-            local_digest = local_digest.encode()
+        if not encoder.decode_responses:
+            local_digest = local_digest.encode("ascii")
 
         return local_digest
 
@@ -3183,7 +3187,7 @@ class BasicKeyCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/digest
         """
         # Bulk string response is already handled (bytes/str based on decode_responses)
-        return self.execute_command("DIGEST", name)
+        return self.execute_command("DIGEST", name, keys=[name])
 
     @overload
     def get(self: SyncClientProtocol, name: KeyT) -> bytes | str | None: ...
@@ -4086,7 +4090,7 @@ class BasicKeyCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/pexpiretime
         """
-        return self.execute_command("PEXPIRETIME", key)
+        return self.execute_command("PEXPIRETIME", key, keys=[key])
 
     @overload
     def psetex(
