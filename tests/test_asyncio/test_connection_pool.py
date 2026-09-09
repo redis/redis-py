@@ -655,6 +655,28 @@ class TestConnectionPoolURLParsing:
         pool = redis.ConnectionPool.from_url("redis://localhost/", db=1)
         assert_kwargs_subset(pool.connection_kwargs, {"host": "localhost", "db": 1})
 
+    def test_db_in_path_tolerates_a_trailing_separator(self):
+        # A trailing separator has always selected the db before it, and the
+        # rejections above must not come at the cost of that. The encoded and
+        # doubled spellings reach the same place once the path is unquoted.
+        for url in (
+            "redis://localhost/2/",
+            "redis://localhost//2",
+            "redis://localhost/2%2F",
+        ):
+            pool = redis.ConnectionPool.from_url(url)
+            assert_kwargs_subset(pool.connection_kwargs, {"host": "localhost", "db": 2})
+
+    def test_db_zero_in_path_tolerates_a_trailing_separator(self):
+        # db 0 is falsy, so it is the spelling most likely to be lost by a
+        # guard that tests the parsed value rather than the parsed text.
+        pool = redis.ConnectionPool.from_url("redis://localhost/0/", db=1)
+        assert_kwargs_subset(pool.connection_kwargs, {"host": "localhost", "db": 0})
+
+    def test_path_of_only_separators_leaves_db_unset(self):
+        pool = redis.ConnectionPool.from_url("redis://localhost///", db=1)
+        assert_kwargs_subset(pool.connection_kwargs, {"host": "localhost", "db": 1})
+
     def test_db_in_querystring(self):
         pool = redis.ConnectionPool.from_url("redis://localhost/2?db=3", db=1)
         assert pool.connection_class == redis.Connection

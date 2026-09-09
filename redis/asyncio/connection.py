@@ -1936,10 +1936,11 @@ def parse_url(url: str) -> ConnectKwargs:
         # If there's a path argument, use it as the db argument if a
         # querystring value wasn't specified
         if parsed.path and "db" not in kwargs:
-            # Only the leading separator belongs to the URL syntax. Removing
-            # every slash instead ran the segments together, so
+            # Strip the surrounding separators rather than removing every
+            # slash: removing them all ran the segments together, so
             # "redis://host/3/4/5" selected db 345 rather than being rejected.
-            db = unquote(parsed.path).removeprefix("/")
+            # Stripping keeps a trailing separator working, as it always has.
+            db = unquote(parsed.path).strip("/")
             if db:
                 try:
                     kwargs["db"] = int(db)
