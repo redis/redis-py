@@ -26,13 +26,22 @@ from redis.backoff import (
     NoBackoff,
 )
 from redis.cluster import (
+    _REPLICAS_ONLY_STRATEGIES,
     PIPELINE_BLOCKED_COMMANDS,
     PRIMARY,
     REPLICA,
     LoadBalancingStrategy,
     get_node_name,
 )
+from redis.commands.cluster import AsyncClusterMultiKeyCommands
 from redis.commands.core import HotkeysMetricsTypes
+from redis.commands.metadata import (
+    AsyncDynamicMetadataResolver,
+    CommandMetadata,
+    RequestPolicy,
+    ResponsePolicy,
+)
+from redis.commands.policies import AsyncStaticPolicyResolver
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.event import (
     AsyncAfterSlotsCacheRefreshEvent,
@@ -41,6 +50,7 @@ from redis.event import (
 )
 from redis.exceptions import (
     AskError,
+    AuthenticationError,
     ClusterDownError,
     ConnectionError,
     CrossSlotTransactionError,
@@ -49,11 +59,14 @@ from redis.exceptions import (
     MovedError,
     NoPermissionError,
     RedisClusterException,
+    RedisClusterUnreachableError,
     RedisError,
     ResponseError,
+    SlotNotCoveredError,
 )
 from redis.himport import HIMPORT_SET
 from redis.utils import str_if_bytes
+from tests.test_command_metadata import CACHEABLE_KEYED, slot_routed_static_commands
 from tests.conftest import (
     assert_resp_response,
     expects_resp2_shape,
@@ -2729,10 +2742,610 @@ class TestClusterRedisCommands:
             await r.hotkeys_stop()
 
 
+class TestStaticMetadataRouting:
+    """
+    Every command ``_STATIC_COMMAND_METADATA`` routes by its keys must reach the node holding
+    them.
+
+    The static table decides the routing of ~100 commands where the shipped 7.1.0 table decided
+    27, so every entry it gained is a command whose routing moved from the client's own slot
+    resolution into the table. A wrong entry is close to invisible in a functional test: MOVED
+    redirection still returns the right answer, at the cost of a round trip per call and a full
+    topology re-discovery every ``reinitialize_steps`` MOVEDs.
+
+    The ``movablekeys`` reads are the sharp case, and get their own test. Their keys live only in
+    the ``COMMAND`` key specifications, so ``first_key_pos`` is 0 and the derived policies come
+    out keyless; their records withhold the routing policies so the client keeps resolving them.
+
+    Key extraction itself is covered by ``tests/test_asyncio/test_command_parser.py``, so it is
+    stubbed here and these tests assert only the node the command is dispatched to.
+    """
+
+    MOVABLE_KEYS_READS = (
+        "sintercard",
+        "xread",
+        "zdiff",
+        "zinter",
+        "zintercard",
+        "zunion",
+    )
+
+    @staticmethod
+    async def _mocked_cluster() -> RedisCluster:
+        # The policy resolver is built here rather than reusing the import-time default
+        # instance, which every client in the process shares along with its memo.
+        return await get_mocked_redis_client(
+            host=default_host, port=7000, policy_resolver=AsyncStaticPolicyResolver()
+        )
+
+    @pytest.mark.fixed_client
+    async def test_the_shipped_default_is_this_resolver(self) -> None:
+        """The routing below is the default behaviour, not one this test opted into."""
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+
+        assert isinstance(rc._policy_resolver, AsyncStaticPolicyResolver)
+
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_the_default_resolver_is_built_per_client(self) -> None:
+        """
+        Each client owns its resolver, so the memos a resolver accumulates are released with
+        the client rather than retained for the life of the process. A default evaluated in
+        the signature would hand every client in the process the same object.
+        """
+        first = await get_mocked_redis_client(host=default_host, port=7000)
+        second = await get_mocked_redis_client(host=default_host, port=7000)
+
+        assert first._policy_resolver is not second._policy_resolver
+
+        await first.aclose()
+        await second.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_a_pipeline_routes_through_the_clients_resolver(self) -> None:
+        """
+        Sync parity: routing must not change just because the commands go through a pipeline.
+        The async pipeline holds the client and reads its resolver, so this needs no
+        propagation of its own - unlike the sync stack, where ``pipeline()`` has to pass it.
+        """
+        resolver = AsyncStaticPolicyResolver()
+        rc = await get_mocked_redis_client(
+            host=default_host, port=7000, policy_resolver=resolver
+        )
+
+        assert rc.pipeline().cluster_client._policy_resolver is resolver
+
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_metadata_resolver_decides_replica_routing_with_explicit_policy_resolver(
+        self,
+    ) -> None:
+        metadata_resolver = AsyncDynamicMetadataResolver(
+            {"core": {"set": CACHEABLE_KEYED}}
+        )
+        rc = await get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            read_from_replicas=True,
+            policy_resolver=AsyncStaticPolicyResolver(),
+            metadata_resolver=metadata_resolver,
+        )
+
+        with (
+            mock.patch.object(rc, "_determine_slot", return_value=0),
+            mock.patch.object(
+                type(rc.nodes_manager), "get_node_from_slot", autospec=True
+            ) as get_node,
+        ):
+            await rc.get_nodes_from_slot("set", "key", "value")
+
+        get_node.assert_called_once_with(rc.nodes_manager, 0, True, None)
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_split_multi_key_routing_respects_metadata_resolver(
+        self,
+    ) -> None:
+        metadata_resolver = AsyncDynamicMetadataResolver(
+            {"core": {"mset": CACHEABLE_KEYED}}
+        )
+        rc = await get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            read_from_replicas=True,
+            policy_resolver=AsyncStaticPolicyResolver(),
+            metadata_resolver=metadata_resolver,
+        )
+        pipe = mock.MagicMock()
+        pipe.execute = mock.AsyncMock(return_value=[True])
+
+        with (
+            mock.patch.object(rc, "pipeline", return_value=pipe),
+            mock.patch.object(
+                type(rc.nodes_manager), "get_node_from_slot", autospec=True
+            ) as get_node,
+        ):
+            await rc.mset_nonatomic({"key": "value"})
+
+        slot = key_slot(rc.encoder.encode("key"))
+        get_node.assert_called_once_with(rc.nodes_manager, slot, True, None)
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_mixin_default_is_replica_safe_emits_deprecation_warning(
+        self,
+    ) -> None:
+        from redis.commands.cluster import AsyncRedisClusterCommands
+
+        class StandaloneAsyncClusterCommands(AsyncRedisClusterCommands):
+            pass
+
+        instance = StandaloneAsyncClusterCommands()
+        with pytest.deprecated_call():
+            assert await instance._is_replica_safe("GET") is True
+        with pytest.deprecated_call():
+            assert await instance._is_replica_safe("SET") is False
+
+    @pytest.mark.fixed_client
+    async def test_cluster_scan_routes_to_all_primaries_by_default(self) -> None:
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+        primaries = rc.get_primaries()
+        assert len(primaries) > 1
+
+        _, policies = await rc._resolve_command_policies("scan")
+        nodes = await rc._determine_nodes(
+            "scan", request_policy=policies.request_policy
+        )
+        assert set(nodes) == set(primaries)
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("command", ["dbsize", "keys", "randomkey"])
+    async def test_default_node_commands_route_to_default_node_by_default(
+        self, command: str
+    ) -> None:
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+        default_node = rc.get_default_node()
+
+        _, policies = await rc._resolve_command_policies(command)
+        nodes = await rc._determine_nodes(
+            command, request_policy=policies.request_policy
+        )
+        assert nodes == [default_node]
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("empty_targets", [[], {}])
+    async def test_empty_target_nodes_does_not_raise_and_falls_back(
+        self, empty_targets: Any
+    ) -> None:
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+        default_node = rc.get_default_node()
+
+        _, policies = await rc._resolve_command_policies("dbsize")
+        nodes = await rc._determine_nodes(
+            "dbsize",
+            request_policy=policies.request_policy,
+            node_flag=empty_targets,
+        )
+        assert nodes == [default_node]
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_command_subcommands_route_to_default_node(self) -> None:
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+        default_node = rc.get_default_node()
+
+        _, policies = await rc._resolve_command_policies("COMMAND", "COUNT")
+        nodes = await rc._determine_nodes(
+            "COMMAND", "COUNT", request_policy=policies.request_policy
+        )
+        assert nodes == [default_node]
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_command_subcommands_case_insensitive_routing(self) -> None:
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+        default_node = rc.get_default_node()
+
+        _, policies = await rc._resolve_command_policies("command", "count")
+        nodes = await rc._determine_nodes(
+            "command", "count", request_policy=policies.request_policy
+        )
+        assert nodes == [default_node]
+
+        with mock.patch.object(
+            ClusterNode, "execute_command", new=mock.AsyncMock(return_value=100)
+        ) as exec_mock:
+            res = await rc.execute_command("command", "count")
+            assert res == 100
+            exec_mock.assert_called_once_with("command", "count", asking=False)
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_explicit_target_nodes_do_not_apply_the_commands_aggregation(
+        self,
+    ) -> None:
+        """
+        A response policy resolved for the whole cluster must not apply when the caller
+        named its targets. RANDOMKEY has no result callback, so the reply is handed to the
+        response-policy callback - which knows only the two defaults.
+        """
+        resolver = AsyncDynamicMetadataResolver(
+            {
+                "core": {
+                    "randomkey": CommandMetadata(
+                        request_policy=RequestPolicy.ALL_SHARDS,
+                        response_policy=ResponsePolicy.ONE_SUCCEEDED,
+                    )
+                }
+            }
+        )
+        rc = await get_mocked_redis_client(
+            host=default_host, port=7000, metadata_resolver=resolver
+        )
+        nodes = rc.get_primaries()
+        assert len(nodes) > 1
+
+        with mock.patch.object(
+            ClusterNode, "execute_command", new=mock.AsyncMock(return_value="k")
+        ) as execute:
+            result = await rc.execute_command("RANDOMKEY", target_nodes=nodes)
+
+        assert execute.call_count == len(nodes)
+        assert result == {node.name: "k" for node in nodes}
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_determine_nodes_raises_exception_when_no_policy_resolved(
+        self,
+    ) -> None:
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+        with pytest.raises(RedisClusterException, match="No targets were found"):
+            await rc._determine_nodes("UNRECOGNIZED_COMMAND", request_policy=None)
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_split_command_routing_applies_load_balancing_strategy(self) -> None:
+        rc = await get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            load_balancing_strategy=LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+        )
+        pipe = Mock()
+        pipe.execute = mock.AsyncMock(return_value=["OK", "OK"])
+        with (
+            mock.patch.object(
+                rc._metadata_resolver, "is_replica_safe", return_value=True
+            ),
+            mock.patch.object(rc, "pipeline", return_value=pipe),
+            mock.patch.object(
+                type(rc.nodes_manager), "get_node_from_slot", autospec=True
+            ) as get_node,
+        ):
+            slots_to_args = {100: ["a", "1"], 200: ["b", "2"]}
+            await rc._execute_pipeline_by_slot("MSET", slots_to_args)
+
+            get_node.assert_any_call(
+                rc.nodes_manager, 100, True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS
+            )
+            get_node.assert_any_call(
+                rc.nodes_manager, 200, True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS
+            )
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_custom_host_class_without_strategy_executes_split_slots(
+        self,
+    ) -> None:
+        class ThirdPartyAsyncCluster(AsyncClusterMultiKeyCommands):
+            def __init__(self, rc):
+                self.encoder = rc.encoder
+                self.nodes_manager = rc.nodes_manager
+                self._rc = rc
+                self._initialize = False
+
+            def pipeline(self):
+                return self._rc.pipeline()
+
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+        custom_client = ThirdPartyAsyncCluster(rc)
+        pipe = Mock()
+        pipe.execute = mock.AsyncMock(return_value=["OK", "OK"])
+        with patch.object(custom_client, "pipeline", return_value=pipe):
+            result = await custom_client.mset_nonatomic({"a": "1", "b": "2"})
+            assert result == ["OK", "OK"]
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_keyless_routing_honors_the_public_node_selector(self) -> None:
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+        selected_node = rc.get_primaries()[0]
+
+        with mock.patch.object(
+            type(rc),
+            "get_keyless_target_node",
+            new=mock.AsyncMock(return_value=selected_node),
+        ) as select_node:
+            nodes = await rc._determine_nodes(
+                "dbsize", request_policy=RequestPolicy.DEFAULT_KEYLESS
+            )
+
+        assert nodes == [selected_node]
+        select_node.assert_called_once_with("dbsize")
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("strategy", sorted(_REPLICAS_ONLY_STRATEGIES, key=str))
+    async def test_keyless_reads_honor_a_replicas_only_strategy(self, strategy) -> None:
+        """
+        A strategy that asks for replicas must not land a keyless read on a primary. Only
+        that much of the strategy applies: the rest of it is an index into one shard's node
+        list, and a keyless command has no shard, so the pick is uniform over the replicas.
+        """
+        rc = await get_mocked_redis_client(
+            host=default_host, port=7000, load_balancing_strategy=strategy
+        )
+        replicas = set(rc.get_replicas())
+        assert replicas
+
+        picked = {await rc.get_keyless_target_node("get") for _ in range(50)}
+
+        assert picked
+        assert picked <= replicas
+        assert not picked & set(rc.get_primaries())
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("strategy", sorted(_REPLICAS_ONLY_STRATEGIES, key=str))
+    async def test_keyless_reads_fall_back_when_the_cluster_has_no_replicas(
+        self, strategy
+    ) -> None:
+        """
+        A replicas-only strategy against a cluster that has none must still answer with a
+        node instead of raising out of an empty choice.
+        """
+        rc = await get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            load_balancing_strategy=strategy,
+            cluster_slots=[
+                [0, 8191, ["127.0.0.1", 7000, "node_0"]],
+                [8192, 16383, ["127.0.0.1", 7001, "node_1"]],
+            ],
+        )
+        primaries = set(rc.get_primaries())
+        assert not rc.get_replicas()
+
+        picked = {await rc.get_keyless_target_node("get") for _ in range(20)}
+
+        assert picked
+        assert picked <= primaries
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize(
+        "strategy",
+        [LoadBalancingStrategy.ROUND_ROBIN, LoadBalancingStrategy.RANDOM, None],
+    )
+    async def test_keyless_reads_keep_the_whole_node_set_otherwise(
+        self, strategy
+    ) -> None:
+        """
+        The two strategies that include the primary, and ``read_from_replicas`` on its own,
+        keep the answer this method has given since 7.1.0: any node.
+        """
+        rc = await get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            read_from_replicas=True,
+            load_balancing_strategy=strategy,
+        )
+        node = rc.get_primaries()[0]
+
+        with mock.patch.object(
+            type(rc), "get_random_node", return_value=node
+        ) as any_node:
+            assert await rc.get_keyless_target_node("get") is node
+
+        any_node.assert_called_once()
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_slot_id_commands_route_by_slot_for_any_spelling(self) -> None:
+        """
+        The SLOT_ID flag lookup is normalized, so a raw lowercase spelling names the same
+        command as the one the command method sends - and the slot comes back as the int
+        the slot map is keyed by, whichever way the caller spelled it.
+        """
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+
+        assert await rc._determine_slot("CLUSTER COUNTKEYSINSLOT", 42) == 42
+        assert await rc._determine_slot("cluster countkeysinslot", "42") == 42
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_container_command_is_dispatched_by_the_routed_name(self) -> None:
+        """
+        A container command passed as two words is dispatched by the name the policies were
+        decided by, so the result callback registered for it fires - and receives that name
+        rather than the caller's first word.
+        """
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+        seen = []
+        rc.result_callbacks["COMMAND COUNT"] = lambda cmd, res, **kwargs: seen.append(
+            cmd
+        )
+
+        with mock.patch.object(
+            ClusterNode, "execute_command", new=mock.AsyncMock(return_value=100)
+        ):
+            await rc.execute_command("command", "count")
+
+        assert seen == ["COMMAND COUNT"]
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_the_routed_name_is_the_same_with_and_without_explicit_targets(
+        self,
+    ) -> None:
+        """
+        The routed name is decided before the explicit-targets branch, so one command
+        answers with one name either way. Without it the name kept the caller's spelling
+        on that branch alone, and DBSIZE's result callback - keyed, like every other, in
+        upper case - summed the replies for one of these two calls and not the other.
+        """
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+        seen = []
+        rc.result_callbacks["DBSIZE"] = lambda cmd, res, **kwargs: seen.append(cmd)
+
+        with mock.patch.object(
+            ClusterNode, "execute_command", new=mock.AsyncMock(return_value=7)
+        ):
+            await rc.execute_command("dbsize")
+            await rc.execute_command("dbsize", target_nodes=rc.get_primaries())
+
+        assert seen == ["DBSIZE", "DBSIZE"]
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_the_deprecated_selector_stays_synchronous(self) -> None:
+        """
+        The signature it has carried since 7.1.0: called, not awaited, and answering with
+        a node rather than a coroutine - from inside a running event loop and from a plain
+        sync frame alike.
+        """
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+
+        with pytest.warns(DeprecationWarning, match="get_keyless_target_node"):
+            in_loop = rc.get_random_primary_or_all_nodes("get")
+
+        assert in_loop in rc.get_nodes()
+
+        with pytest.warns(DeprecationWarning):
+            off_loop = await asyncio.to_thread(
+                rc.get_random_primary_or_all_nodes, "get"
+            )
+
+        assert off_loop in rc.get_nodes()
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_the_deprecated_selector_answers_from_the_metadata_resolver(
+        self,
+    ) -> None:
+        """
+        Not from ``READ_COMMANDS``: GET is a member of it, so a resolver that does not report
+        the command replica safe is the only thing that can send this to a primary.
+        """
+        rc = await get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            read_from_replicas=True,
+            metadata_resolver=AsyncDynamicMetadataResolver({"core": {}}),
+        )
+
+        with (
+            mock.patch.object(type(rc), "get_random_node") as any_node,
+            pytest.warns(DeprecationWarning),
+        ):
+            node = rc.get_random_primary_or_all_nodes("get")
+
+        any_node.assert_not_called()
+        assert node in rc.get_primaries()
+        await rc.aclose()
+
+        rc = await get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            read_from_replicas=True,
+            metadata_resolver=AsyncDynamicMetadataResolver(
+                {"core": {"get": CACHEABLE_KEYED}}
+            ),
+        )
+        replica = rc.get_replicas()[0]
+
+        with (
+            mock.patch.object(
+                type(rc), "get_random_node", return_value=replica
+            ) as any_node,
+            pytest.warns(DeprecationWarning),
+        ):
+            assert rc.get_random_primary_or_all_nodes("get") is replica
+
+        any_node.assert_called_once()
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_the_movablekeys_reads_are_reported_unresolved(self) -> None:
+        """
+        The deterministic half of this: a withheld record makes the resolver answer None, which
+        is what sends the client to ``_determine_slot``. The dispatch assertion below can only
+        catch a wrong policy probabilistically, because keyless routing picks a random node.
+        """
+        rc = await self._mocked_cluster()
+
+        for command in self.MOVABLE_KEYS_READS:
+            assert await rc._policy_resolver.resolve(command) is None, command
+
+        # A keyed read that is not movablekeys still resolves, so the None above is the
+        # withheld record rather than a resolver that knows nothing.
+        resolved = await rc._policy_resolver.resolve("get")
+        assert resolved.request_policy == RequestPolicy.DEFAULT_KEYED
+
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_every_slot_routed_entry_is_dispatched_to_the_node_holding_its_key(
+        self,
+    ) -> None:
+        """
+        Every static-table entry that must route by its keys, not only the withheld ones.
+
+        The table answers ~100 commands where the shipped 7.1.0 table answered 27, so each one
+        is a command whose routing the table now decides. This walks the whole slot-routed set,
+        so an entry added or edited later is covered without touching this test.
+
+        Note what this alone cannot catch: the set is derived from the table, so an entry wrongly
+        recorded keyless drops out of it rather than failing here. That hole is closed by
+        ``TestWithheldRoutingPolicies.test_no_entry_that_takes_a_key_is_routed_keyless``, which
+        asserts the classification itself. The two are only airtight together.
+        """
+        rc = await self._mocked_cluster()
+        expected_node = rc.nodes_manager.get_node_from_slot(key_slot(b"{foo}a"))
+        commands = list(slot_routed_static_commands())
+
+        assert len(commands) > 70, "the slot-routed set looks truncated"
+
+        for command in commands:
+            with (
+                mock.patch.object(
+                    rc.commands_parser, "get_keys", return_value=["{foo}a"]
+                ),
+                mock.patch.object(
+                    RedisCluster, "_execute_command", return_value="OK"
+                ) as execute_command,
+            ):
+                await rc.execute_command(command, "{foo}a")
+
+            assert execute_command.call_count == 1, command
+            assert execute_command.call_args[0][0] is expected_node, command
+
+        await rc.aclose()
+
+
 class TestNodesManager:
     """
     Tests for the NodesManager class
     """
+
+    async def test_get_node_from_slot_with_missing_slot(self) -> None:
+        nodes_manager = NodesManager([], False, {})
+
+        with pytest.raises(SlotNotCoveredError):
+            nodes_manager.get_node_from_slot(42)
 
     @pytest.mark.onlycluster
     async def test_load_balancer(self, r: RedisCluster) -> None:
@@ -2973,6 +3586,58 @@ class TestNodesManager:
                 cluster_enabled=False,
             )
             await rc.aclose()
+        assert "Cluster mode is not enabled on this node" in str(e.value)
+
+    @pytest.mark.fixed_client
+    async def test_unreachable_error_is_reserved_for_connectivity_failures(
+        self,
+    ) -> None:
+        """
+        RedisClusterUnreachableError is raised when no startup node could be
+        contacted, but not when a node responded and rejected CLUSTER SLOTS:
+        MultiDB registers the unreachable subtype as retryable, so a
+        deterministic configuration error must keep surfacing as a plain
+        RedisClusterException. Authentication failures subclass ConnectionError
+        but cannot be repaired by a failover, so they stay plain as well.
+        """
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True
+        ) as execute_command:
+
+            async def mocked_execute_command(self, *args, **kwargs):
+                raise ConnectionError("mock connection error")
+
+            execute_command.side_effect = mocked_execute_command
+
+            with pytest.raises(RedisClusterUnreachableError) as e:
+                async with RedisCluster(startup_nodes=[ClusterNode("127.0.0.1", 7000)]):
+                    ...
+            assert "Redis Cluster cannot be connected" in str(e.value)
+
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True
+        ) as execute_command:
+
+            async def mocked_execute_command_auth(self, *args, **kwargs):
+                raise AuthenticationError("invalid password")
+
+            execute_command.side_effect = mocked_execute_command_auth
+
+            with pytest.raises(RedisClusterException) as e:
+                async with RedisCluster(startup_nodes=[ClusterNode("127.0.0.1", 7000)]):
+                    ...
+            assert not isinstance(e.value, RedisClusterUnreachableError)
+            assert "invalid password" in str(e.value)
+
+        with pytest.raises(RedisClusterException) as e:
+            rc = await get_mocked_redis_client(
+                cluster_slots_raise_error=True,
+                host=default_host,
+                port=default_port,
+                cluster_enabled=False,
+            )
+            await rc.aclose()
+        assert not isinstance(e.value, RedisClusterUnreachableError)
         assert "Cluster mode is not enabled on this node" in str(e.value)
 
     @pytest.mark.fixed_client
@@ -3736,6 +4401,11 @@ class TestClusterNodeConnectionHandling:
 
             def should_reconnect(self) -> bool:
                 return True
+
+            def extract_connection_details(self) -> str:
+                # release() renders the connection into its debug log before
+                # scheduling the disconnect, so the double must expose this.
+                return "fake connection details"
 
             async def disconnect(self) -> None:
                 raise RuntimeError("simulated disconnect failure")
@@ -5556,6 +6226,62 @@ class TestClusterPubSub:
         finally:
             await pubsub.aclose()
 
+    @skip_if_server_version_lt("7.0.0")
+    async def test_handler_may_ssubscribe_from_inside_the_handler(self, r):
+        """
+        A message handler is awaited inside get_sharded_message, so an
+        ssubscribe from inside it re-acquires the per-node I/O lock.
+        asyncio.Lock is not reentrant, so this used to hang the reader task
+        permanently and silently; wait_for keeps a regression from hanging CI.
+        """
+        first = "handler-resub-a:{0}"
+        second = "handler-resub-b:{0}"
+        pubsub = r.pubsub()
+        resubscribed = asyncio.Event()
+
+        async def handler(message):
+            if not resubscribed.is_set():
+                await pubsub.ssubscribe(second)
+                resubscribed.set()
+
+        async def wait_for_ssubscribe_ack(s_channel):
+            # ssubscribe only writes the command, it does not wait for the
+            # server's confirmation, and spublish travels on a separate
+            # connection. Publishing before the confirmation has been read can
+            # therefore reach the node first and report zero receivers, so wait
+            # for the ack before asserting on the delivery count.
+            async with async_timeout(10):
+                while True:
+                    message = await pubsub.get_sharded_message(timeout=0.05)
+                    if (
+                        message is not None
+                        and str_if_bytes(message["type"]) == "ssubscribe"
+                        and message["channel"] == s_channel.encode()
+                    ):
+                        return
+
+        try:
+            await pubsub.ssubscribe(**{first: handler})
+            await wait_for_ssubscribe_ack(first)
+
+            assert await r.spublish(first, "go") == 1
+            async with async_timeout(10):
+                while not resubscribed.is_set():
+                    await pubsub.get_sharded_message(timeout=0.05)
+            assert resubscribed.is_set()
+
+            await wait_for_ssubscribe_ack(second)
+            assert await r.spublish(second, "hi") == 1
+            delivered = []
+            async with async_timeout(10):
+                while not delivered:
+                    msg = await pubsub.get_sharded_message(timeout=0.05)
+                    if msg is not None and msg["type"] == "smessage":
+                        delivered.append(msg)
+            assert delivered[0]["channel"] == second.encode()
+        finally:
+            await pubsub.aclose()
+
 
 @pytest.mark.fixed_client
 class TestClusterPubSubWithMocks:
@@ -5598,6 +6324,38 @@ class TestClusterPubSubWithMocks:
 
         assert pubsub.node is None
         assert pubsub.connection_pool is None
+
+    async def test_subscribe_initializes_cluster(self) -> None:
+        client = await get_mocked_redis_client(host=default_host, port=default_port)
+        slots_cache = client.nodes_manager.slots_cache
+        client.nodes_manager.slots_cache = {}
+        client._initialize = True
+        client.initialize = mock.AsyncMock(
+            side_effect=lambda: client.nodes_manager.slots_cache.update(slots_cache)
+        )
+        pubsub = client.pubsub()
+
+        with mock.patch(
+            "redis.asyncio.client.PubSub.execute_command", new=mock.AsyncMock()
+        ):
+            await pubsub.subscribe("channel")
+
+        assert pubsub.node in client.get_nodes()
+
+    @pytest.mark.parametrize("method", ["ssubscribe", "sunsubscribe"])
+    async def test_empty_shard_command_does_not_initialize_cluster(
+        self, method
+    ) -> None:
+        cluster = Mock()
+        cluster._initialize = True
+        cluster.initialize = mock.AsyncMock()
+        cluster.read_from_replicas = False
+        cluster.load_balancing_strategy = None
+        pubsub = self._make_pubsub(cluster)
+
+        await getattr(pubsub, method)()
+
+        cluster.initialize.assert_not_awaited()
 
     async def test_get_node_pubsub_uses_adapter(self) -> None:
         """

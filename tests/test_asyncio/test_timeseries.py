@@ -1200,15 +1200,20 @@ async def test_query_labels_server_errors(decoded_r: redis.Redis):
 async def test_uncompressed(decoded_r: redis.Redis):
     await decoded_r.ts().create("compressed")
     await decoded_r.ts().create("uncompressed", uncompressed=True)
+    # Append the samples with a single TS.MADD instead of 2000 individual TS.ADD
+    # round trips, which are slow enough to hit the test timeout when the target
+    # deployment is remote.
+    samples = []
     for i in range(1000):
-        await decoded_r.ts().add("compressed", i, i)
-        await decoded_r.ts().add("uncompressed", i, i)
+        samples.append(("compressed", i, i))
+        samples.append(("uncompressed", i, i))
+    assert len(await decoded_r.ts().madd(samples)) == 2000
     compressed_info = await decoded_r.ts().info("compressed")
     uncompressed_info = await decoded_r.ts().info("uncompressed")
     if is_resp2_connection(decoded_r):
-        assert compressed_info.memory_usage != uncompressed_info.memory_usage
+        assert compressed_info.memory_usage < uncompressed_info.memory_usage
     else:
-        assert compressed_info["memoryUsage"] != uncompressed_info["memoryUsage"]
+        assert compressed_info["memoryUsage"] < uncompressed_info["memoryUsage"]
 
 
 @pytest.mark.redismod

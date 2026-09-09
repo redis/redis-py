@@ -16,7 +16,7 @@ from redis.asyncio.retry import Retry
 from redis.background import BackgroundScheduler
 from redis.backoff import NoBackoff
 from redis.commands import AsyncCoreCommands, AsyncRedisModuleCommands
-from redis.exceptions import DataError
+from redis.exceptions import DataError, RedisClusterUnreachableError
 from redis.multidb.circuit import CircuitBreaker
 from redis.multidb.circuit import State as CBState
 from redis.multidb.exception import (
@@ -64,7 +64,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         self._auto_fallback_interval = config.auto_fallback_interval
         self._event_dispatcher = config.event_dispatcher
         self._command_retry = config.command_retry
-        self._command_retry.update_supported_errors([ConnectionRefusedError])
+        self._command_retry.update_supported_errors(
+            [ConnectionRefusedError, RedisClusterUnreachableError]
+        )
         self.command_executor = DefaultCommandExecutor(
             failure_detectors=self._failure_detectors,
             databases=self._databases,

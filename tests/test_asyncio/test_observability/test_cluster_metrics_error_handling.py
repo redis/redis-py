@@ -369,7 +369,7 @@ class TestAsyncClusterMetricsRecordingDuringErrorHandling:
         In async cluster, the execute_command is called on target_node directly,
         so we use target_node's connection_kwargs for db lookup.
         """
-        from redis._parsers.commands import ResponsePolicy
+        from redis.commands.metadata import ResponsePolicy
 
         target_node = ClusterNode(
             host="192.168.50.10", port=7008, server_type="primary", db=3

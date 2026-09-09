@@ -170,18 +170,17 @@ class TestLock:
                 await asyncio.sleep(0.15)
 
     async def test_context_manager_not_raise_on_release_lock_error(self, r):
+        # No lock timeout here: the error under test is the LockError raised by the
+        # redundant release in __aexit__, not the LockNotOwnedError of an expired lock
+        # (covered by test_context_manager_not_raise_on_release_lock_not_owned_error).
         try:
-            async with self.get_lock(
-                r, "foo", timeout=0.1, raise_on_release_error=False
-            ) as lock:
+            async with self.get_lock(r, "foo", raise_on_release_error=False) as lock:
                 await lock.release()
         except LockError:
             pytest.fail("LockError should not have been raised")
 
         with pytest.raises(LockError):
-            async with self.get_lock(
-                r, "foo", timeout=0.1, raise_on_release_error=True
-            ) as lock:
+            async with self.get_lock(r, "foo", raise_on_release_error=True) as lock:
                 await lock.release()
 
     async def test_high_sleep_small_blocking_timeout(self, r, fake_lock_time):
@@ -211,6 +210,38 @@ class TestLock:
             await lock.release()
         # even though we errored, the token is still cleared
         assert lock.local.token is None
+
+    async def test_release_does_not_clear_another_acquirers_token(self, r, monkeypatch):
+        """
+        release() must only clear the token if it is still ours.
+
+        threading.local() is shared by every task on one event loop, so a Lock
+        shared between tasks can have another acquirer's token stored between
+        do_release() and the clear. Clearing unconditionally leaves that new
+        owner holding a lock it cannot release.
+        """
+        lock = self.get_lock(r, "foo")
+        await lock.acquire(blocking=False)
+
+        async def steal(expected_token):
+            lock.local.token = "another-acquirers-token"
+
+        monkeypatch.setattr(lock, "do_release", steal)
+        await lock.release()
+        assert lock.local.token == "another-acquirers-token"
+
+        async def steal_and_raise(expected_token):
+            lock.local.token = "another-acquirers-token"
+            raise LockNotOwnedError("Cannot release a lock that's no longer owned")
+
+        lock.local.token = "ours"
+        monkeypatch.setattr(lock, "do_release", steal_and_raise)
+        with pytest.raises(LockNotOwnedError):
+            await lock.release()
+        assert lock.local.token == "another-acquirers-token"
+
+        monkeypatch.undo()
+        await r.delete("foo")
 
     async def test_extend_lock(self, r):
         lock = self.get_lock(r, "foo", timeout=10)

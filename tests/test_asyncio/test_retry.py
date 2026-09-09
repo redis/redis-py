@@ -59,6 +59,21 @@ class TestConnectionConstructorWithRetry:
         assert isinstance(c.retry, Retry)
         assert c.retry._retries == retries
 
+    @pytest.mark.parametrize("Class", [Connection, UnixDomainSocketConnection])
+    def test_retry_on_error_does_not_mutate_caller_list(self, Class):
+        retry_on_error = [ValueError]
+        snapshot = list(retry_on_error)
+
+        # Two constructions must not grow or otherwise mutate the caller's list.
+        c1 = Class(retry_on_error=retry_on_error, retry_on_timeout=True)
+        c2 = Class(retry_on_error=retry_on_error, retry_on_timeout=True)
+
+        assert retry_on_error == snapshot
+        assert retry_on_error is not c1.retry_on_error
+        assert ValueError in c1.retry_on_error
+        assert TimeoutError in c1.retry_on_error
+        assert c1.retry_on_error == c2.retry_on_error
+
     @pytest.mark.parametrize("retries", range(10))
     @pytest.mark.parametrize("Class", [Connection, UnixDomainSocketConnection])
     def test_retry_with_retry_on_error(self, Class, retries: int):

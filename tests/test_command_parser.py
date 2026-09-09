@@ -1,6 +1,6 @@
 import pytest
 from redis._parsers import CommandsParser
-from redis._parsers.commands import RequestPolicy, ResponsePolicy
+from redis.commands.metadata import RequestPolicy, ResponsePolicy
 from tests.helpers import get_expected_command_policies
 
 from .conftest import (

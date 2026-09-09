@@ -8,8 +8,10 @@ import weakref
 from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager, nullcontext
 from copy import copy
 from enum import Enum
+from functools import partial
 from itertools import chain
 from types import MethodType
 from typing import (
@@ -33,13 +35,23 @@ if TYPE_CHECKING:
 from redis import _himport_exec
 from redis._defaults import DEFAULT_RETRY_BASE, DEFAULT_RETRY_CAP, DEFAULT_RETRY_COUNT
 from redis._parsers import CommandsParser, Encoder
-from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
 from redis._parsers.helpers import parse_scan
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.cache import CacheConfig, CacheFactory, CacheFactoryInterface, CacheInterface
 from redis.client import EMPTY_RESPONSE, CaseInsensitiveDict, PubSub, Redis
-from redis.commands import READ_COMMANDS, RedisClusterCommands
+from redis.commands import RedisClusterCommands
 from redis.commands.helpers import list_or_args, parse_pubsub_subscriptions
+from redis.commands.metadata import (
+    _DEFAULT_KEYED_METADATA,
+    _DEFAULT_KEYLESS_METADATA,
+    _METADATA_BY_REQUEST_POLICY,
+    CommandMetadata,
+    CommandPolicies,
+    MetadataResolver,
+    RequestPolicy,
+    ResponsePolicy,
+    StaticMetadataResolver,
+)
 from redis.commands.policies import PolicyResolver, StaticPolicyResolver
 from redis.connection import (
     Connection,
@@ -58,6 +70,7 @@ from redis.event import (
 from redis.exceptions import (
     AskError,
     AuthenticationError,
+    AuthorizationError,
     ClusterDownError,
     ClusterError,
     ConnectionError,
@@ -68,6 +81,7 @@ from redis.exceptions import (
     MaxConnectionsError,
     MovedError,
     RedisClusterException,
+    RedisClusterUnreachableError,
     RedisError,
     ResponseError,
     SlotNotCoveredError,
@@ -720,8 +734,9 @@ class RedisCluster(
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
-        policy_resolver: PolicyResolver = StaticPolicyResolver(),
+        policy_resolver: Optional[PolicyResolver] = None,
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+        metadata_resolver: Optional[MetadataResolver] = None,
         **kwargs,
     ):
         """
@@ -792,6 +807,44 @@ class RedisCluster(
             which the nodes _think_ they are, to addresses at which a client may
             reach them, such as when they sit behind a proxy.
 
+        :param policy_resolver:
+            Decides the request/response policies each command is routed by - see
+            `redis.commands.policies.PolicyResolver`. Defaults to a
+            `StaticPolicyResolver` built for this client, which resolves the command
+            metadata this library ships. A resolver built from a live `COMMAND` reply is a
+            snapshot of the server it was read from, so give each client its own rather
+            than sharing one across clients on different servers.
+            This is the narrow routing view of `metadata_resolver`, which supersedes it:
+            prefer `metadata_resolver`, which serves routing and every other
+            command-metadata consumer from one object. When both are given this one still
+            decides which nodes a command targets, so that its 7.1.0 behavior does not
+            move. It does not decide anything the routing view cannot express: replica
+            safety and client-side-cache eligibility keep coming from `metadata_resolver`,
+            because a `CommandPolicies` record carries no `is_readonly` flag to answer them
+            with.
+        :param metadata_resolver:
+            Serves the command metadata this client reads - see
+            `redis.commands.metadata.MetadataResolver`. Routing is derived from it, and it
+            is handed to every node's client, where it also decides which commands are
+            eligible for client-side caching. Defaults to a `StaticMetadataResolver` built
+            for this client, which resolves the command metadata this library ships; the
+            library never reads `COMMAND` on its own behalf for this, so the default adds no
+            round trips. Resolvers chain through `with_fallback`, first match wins, so one
+            placed in front of `StaticMetadataResolver` overrides the commands it carries
+            while the static records answer for everything else. To decide eligibility and
+            routing from the connected server, pass a `DynamicMetadataResolver` built from a
+            live `COMMAND` reply - use it with care, because reading that reply relies on a
+            class in the private `redis._parsers` package. Note that a server-derived resolver
+            decides routing here too, and two families of command route worse from the live
+            reply than from the shipped records. The server tips commands such as `EXISTS` and
+            `DEL` with the `multi_shard` request policy this client does not yet implement. And
+            the `movablekeys` reads - `ZINTER`, `ZUNION`, `ZDIFF`, `ZINTERCARD`, `SINTERCARD`,
+            `XREAD` - report their keys only in their key specs, so the live reply yields
+            keyless policies that send them to an arbitrary node rather than the one holding
+            their keys; the shipped records withhold those policies instead, which is what
+            leaves the client to resolve the keys through `COMMAND GETKEYS`. So pair such a
+            resolver with an explicit `policy_resolver=StaticPolicyResolver()` to keep routing
+            on the shipped records.
         :param maint_notifications_config:
             Configures the nodes connections to support maintenance notifications - see
             `redis.maint_notifications.MaintNotificationsConfig` for details.
@@ -917,6 +970,15 @@ class RedisCluster(
             self._event_dispatcher = event_dispatcher
         self.startup_nodes = startup_nodes
 
+        # Built here rather than defaulted in the signature, so that each client owns its
+        # resolver and the memos it accumulates are released with the client. The one object
+        # is shared with every node's client below, so a cluster resolves command metadata -
+        # routing and cache eligibility both - from a single source of truth.
+        if metadata_resolver is None:
+            self._metadata_resolver: MetadataResolver = StaticMetadataResolver()
+        else:
+            self._metadata_resolver = metadata_resolver
+
         self.nodes_manager = NodesManager(
             startup_nodes=startup_nodes,
             from_url=from_url,
@@ -925,6 +987,7 @@ class RedisCluster(
             address_remap=address_remap,
             cache=cache,
             cache_config=cache_config,
+            metadata_resolver=self._metadata_resolver,
             event_dispatcher=self._event_dispatcher,
             maint_notifications_config=maint_notifications_config,
             himport_registry=self._himport_registry,
@@ -961,7 +1024,7 @@ class RedisCluster(
             Union[RequestPolicy, ResponsePolicy], Callable
         ] = {
             RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [
-                self.get_random_primary_or_all_nodes(command_name)
+                self.get_keyless_target_node(command_name)
             ],
             RequestPolicy.DEFAULT_KEYED: lambda command,
             *args: self.get_nodes_from_slot(command, *args),
@@ -976,7 +1039,31 @@ class RedisCluster(
             ResponsePolicy.DEFAULT_KEYED: lambda res: res,
         }
 
-        self._policy_resolver = policy_resolver
+        # ``policy_resolver`` is the routing view of a metadata resolver, so the two
+        # arguments overlap. Resolved by precedence rather than by rejecting the
+        # combination, because a user migrating from one to the other will legitimately pass
+        # both: an explicit ``policy_resolver`` - the extension point that shipped in 7.1.0
+        # - keeps deciding which nodes a command targets, and otherwise those policies are
+        # derived from the metadata resolver.
+        #
+        # The precedence covers the routing view only. Replica safety and cache eligibility
+        # are read from ``_metadata_resolver`` either way, because the projection a policy
+        # resolver serves drops the flags they are decided from - a ``CommandPolicies``
+        # record has no ``is_readonly``. So "ignores metadata_resolver" below means for the
+        # target-node decision, not for the record as a whole.
+        if policy_resolver is None:
+            self._policy_resolver: PolicyResolver = StaticPolicyResolver(
+                metadata_resolver=self._metadata_resolver
+            )
+        else:
+            self._policy_resolver = policy_resolver
+            if metadata_resolver is not None:
+                logger.debug(
+                    "Both policy_resolver and metadata_resolver were given; the nodes a "
+                    "command targets resolve through policy_resolver and ignore "
+                    "metadata_resolver. Replica safety and client-side-cache eligibility "
+                    "still resolve through metadata_resolver."
+                )
         self.commands_parser = CommandsParser(self)
 
         # Node where FT.AGGREGATE command is executed.
@@ -1047,14 +1134,52 @@ class RedisCluster(
     def get_random_node(self):
         return random.choice(list(self.nodes_manager.nodes_cache.values()))
 
-    def get_random_primary_or_all_nodes(self, command_name):
+    def get_keyless_target_node(self, command_name: str) -> "ClusterNode":
         """
-        Returns random primary or all nodes depends on READONLY mode.
+        Returns the node a keyless command is routed to: a random node when replica reads
+        are enabled and the command is safe to serve from a replica, a random primary
+        otherwise.
+
+        A replicas-only ``load_balancing_strategy`` is honored by picking from the replicas
+        alone, so a strategy that asks for replicas cannot land on a primary here. The
+        strategy is not applied any further than that: the rest of it is an index into one
+        shard's node list and a round-robin counter kept per primary name, and a keyless
+        command has no shard to index - so the pick is uniform over the eligible nodes.
+
+        Falls back to the whole node set when the cluster has no replicas to pick from,
+        which is every primary. That is also the answer for the two strategies that
+        include the primary, and for ``read_from_replicas`` on its own, which is what this
+        method has returned for a replica-safe command since 7.1.0.
         """
-        if self.read_from_replicas and command_name in READ_COMMANDS:
+        replica_safe = (
+            self.read_from_replicas or self.load_balancing_strategy is not None
+        ) and self._is_replica_safe(command_name)
+        if replica_safe:
+            if self.load_balancing_strategy in _REPLICAS_ONLY_STRATEGIES:
+                replicas = self.get_replicas()
+                if replicas:
+                    return random.choice(replicas)
+
             return self.get_random_node()
 
         return self.get_random_primary_node()
+
+    @deprecated_function(
+        version="8.2.0",
+        reason="Use get_keyless_target_node() instead.",
+    )
+    def get_random_primary_or_all_nodes(self, command_name: str) -> "ClusterNode":
+        """
+        Returns random primary or all nodes depends on READONLY mode.
+
+        Deprecated alias of :meth:`get_keyless_target_node`. Kept so the name that has
+        been public since 7.1.0 keeps working; it answers from the metadata resolver just
+        as the new name does.
+        """
+        return self.get_keyless_target_node(command_name)
+
+    def _is_replica_safe(self, command_name: str) -> bool:
+        return self._metadata_resolver.is_replica_safe(command_name)
 
     def get_nodes(self):
         return list(self.nodes_manager.nodes_cache.values())
@@ -1091,10 +1216,13 @@ class RedisCluster(
         """
         # get the node that holds the key's slot
         slot = self.determine_slot(*args)
+        replica_safe = (
+            self.read_from_replicas or self.load_balancing_strategy is not None
+        ) and self._is_replica_safe(command)
         node = self.nodes_manager.get_node_from_slot(
             slot,
-            self.read_from_replicas and command in READ_COMMANDS,
-            self.load_balancing_strategy if command in READ_COMMANDS else None,
+            replica_safe,
+            self.load_balancing_strategy if replica_safe else None,
         )
         return [node]
 
@@ -1246,6 +1374,10 @@ class RedisCluster(
             retry=self.retry,
             lock=self._lock,
             transaction=transaction,
+            # Routing must not change just because the commands go through a pipeline, so the
+            # pipeline resolves through the same objects the client does.
+            policy_resolver=self._policy_resolver,
+            metadata_resolver=self._metadata_resolver,
             event_dispatcher=self._event_dispatcher,
         )
 
@@ -1334,26 +1466,86 @@ class RedisCluster(
         """Set a custom Response Callback"""
         self.cluster_response_callbacks[command] = callback
 
+    def _resolve_command_policies(
+        self, *args, target_nodes_specified: bool = False
+    ) -> Tuple[str, Union[CommandPolicies, CommandMetadata]]:
+        """
+        Resolves the policies a command routes and aggregates by.
+
+        Returns the name the policies were decided by along with the record, because the
+        name a command is known by is not always ``args[0]``: a container command is
+        keyed by both of its words, and the flag tables are keyed in upper case.
+
+        The name is normalized before any branch, so one command answers with one name
+        however it got here. The result callbacks are keyed in upper case, so a name that
+        kept the caller's spelling on only some paths would fire them on only some paths -
+        ``execute_command("dbsize")`` would be summed and ``execute_command("dbsize",
+        target_nodes=...)`` would not.
+
+        First choice is the policy resolver. When it does not know the command, the
+        fallbacks are the command's ``COMMAND_FLAGS`` entry and then whether the command
+        carries a key.
+        """
+        command = args[0].upper()
+        if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
+            command = f"{args[0]} {args[1]}".upper()
+
+        if target_nodes_specified:
+            # The caller named its targets, so nothing is routed from here - and the
+            # command's own aggregation must not apply either. A response policy resolved
+            # for the whole cluster (``ONE_SUCCEEDED``, an ``AGG_*``) would short-circuit
+            # the loop over the nodes the caller picked, or fold their replies into one.
+            # Answer with the record that aggregates nothing, and skip the resolver: with
+            # the targets given, neither of its answers is used.
+            return command, _DEFAULT_KEYLESS_METADATA
+
+        policies = self._policy_resolver.resolve(args[0].lower())
+        if policies:
+            return command, policies
+
+        command_flag = self.command_flags.get(command)
+        if command_flag:
+            if command_flag in self._command_flags_mapping:
+                return command, _METADATA_BY_REQUEST_POLICY[
+                    self._command_flags_mapping[command_flag]
+                ]
+            return command, _DEFAULT_KEYLESS_METADATA
+
+        # Unflagged and unresolved, so the command routes by its key. Without a default
+        # node the topology is not known yet and there is no slot to route by.
+        if not self.get_default_node():
+            return command, _DEFAULT_KEYLESS_METADATA
+
+        slot = self.determine_slot(*args)
+        if slot is None:
+            return command, _DEFAULT_KEYLESS_METADATA
+
+        return command, _DEFAULT_KEYED_METADATA
+
     def _determine_nodes(
-        self, *args, request_policy: RequestPolicy, **kwargs
+        self, *args, request_policy: Optional[RequestPolicy] = None, **kwargs
     ) -> List["ClusterNode"]:
         """
         Determines a nodes the command should be executed on.
+
+        The caller resolves the command's own policy - see
+        ``_resolve_command_policies`` - so the only decision left here is an explicit
+        nodes flag, which overrides it.
         """
         command = args[0].upper()
         if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
             command = f"{args[0]} {args[1]}".upper()
 
         nodes_flag = kwargs.pop("nodes_flag", None)
-        if nodes_flag is not None:
+        if nodes_flag and self._is_nodes_flag(nodes_flag):
             # nodes flag passed by the user
-            command_flag = nodes_flag
-        else:
-            # get the nodes group for this command if it was predefined
-            command_flag = self.command_flags.get(command)
+            if nodes_flag in self._command_flags_mapping:
+                request_policy = self._command_flags_mapping[nodes_flag]
 
-        if command_flag in self._command_flags_mapping:
-            request_policy = self._command_flags_mapping[command_flag]
+        if request_policy is None:
+            raise RedisClusterException(
+                f"No targets were found to execute {args} command on"
+            )
 
         policy_callback = self._policies_callback_mapping[request_policy]
 
@@ -1421,7 +1613,7 @@ class RedisCluster(
 
     def _get_command_keys(self, *args):
         """
-        Get the keys in the command. If the command has no keys in in, None is
+        Get the keys in the command. If the command has no keys in it, None is
         returned.
 
         NOTE: Due to a bug in redis<7.0, this function does not work properly
@@ -1430,9 +1622,27 @@ class RedisCluster(
          - fix: https://github.com/redis/redis/pull/9733
 
         So, don't use this function with EVAL or EVALSHA.
+
+        Raises:
+            RedisClusterException: If the cluster has no default node to resolve
+                the keys against, which is the case before the slots cache is
+                first populated and after the client is closed.
         """
-        redis_conn = self.get_default_node().redis_connection
-        return self.commands_parser.get_keys(redis_conn, *args)
+        default_node = self.get_default_node()
+        if default_node is None:
+            # The keys are unknown rather than absent: there is no node to resolve them
+            # against. Say that, rather than reporting a missing key the caller did
+            # supply, or raising AttributeError from in here.
+            #
+            # The async stack needs no counterpart: its parser holds the node it
+            # was initialized with and never reads the default node.
+            raise RedisClusterException(
+                "The cluster has no default node to resolve the keys of this "
+                "command against. The client may be closed, or not initialized "
+                f"yet.\nCommand: {args}"
+            )
+
+        return self.commands_parser.get_keys(default_node.redis_connection, *args)
 
     def determine_slot(self, *args) -> Optional[int]:
         """
@@ -1440,12 +1650,22 @@ class RedisCluster(
 
         Raises a RedisClusterException if there's a missing key and we can't
             determine what slots to map the command to; or, if the keys don't
-            all map to the same key slot.
+            all map to the same key slot; or, when the keys have to be resolved
+            through ``_get_command_keys``, if the cluster has no default node to
+            resolve them against.
+
+        Returns the slot as an ``int``, which is what the declared return type has always
+        promised and what the slot map is keyed by. A command carrying its slot as an
+        argument - the ``SLOT_ID`` group - is therefore cast rather than returned verbatim,
+        so a caller that spelled the slot as a string gets a usable slot instead of a
+        ``KeyError`` from ``get_node_from_slot``.
         """
         command = args[0]
-        if self.command_flags.get(command) == SLOT_ID:
-            # The command contains the slot ID
-            return args[1]
+        if self.command_flags.get(command.upper()) == SLOT_ID:
+            # The command contains the slot ID. The flag table is keyed in upper case, so
+            # the lookup is normalized - a raw ``execute_command("cluster countkeysinslot",
+            # ...)`` names the same command as the spelling the command method sends.
+            return int(args[1])
 
         # Get the keys in the command
 
@@ -1555,42 +1775,13 @@ class RedisCluster(
         is_default_node = False
         target_nodes = None
         passed_targets = kwargs.pop("target_nodes", None)
-        command_policies = self._policy_resolver.resolve(args[0].lower())
-
         if passed_targets is not None and not self._is_nodes_flag(passed_targets):
             target_nodes = self._parse_target_nodes(passed_targets)
             target_nodes_specified = True
 
-        if not command_policies and not target_nodes_specified:
-            command = args[0].upper()
-            if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
-                command = f"{args[0]} {args[1]}".upper()
-
-            # We only could resolve key properties if command is not
-            # in a list of pre-defined request policies
-            command_flag = self.command_flags.get(command)
-            if not command_flag:
-                # Fallback to default policy
-                if not self.get_default_node():
-                    slot = None
-                else:
-                    slot = self.determine_slot(*args)
-                if slot is None:
-                    command_policies = CommandPolicies()
-                else:
-                    command_policies = CommandPolicies(
-                        request_policy=RequestPolicy.DEFAULT_KEYED,
-                        response_policy=ResponsePolicy.DEFAULT_KEYED,
-                    )
-            else:
-                if command_flag in self._command_flags_mapping:
-                    command_policies = CommandPolicies(
-                        request_policy=self._command_flags_mapping[command_flag]
-                    )
-                else:
-                    command_policies = CommandPolicies()
-        elif not command_policies and target_nodes_specified:
-            command_policies = CommandPolicies()
+        command, command_policies = self._resolve_command_policies(
+            *args, target_nodes_specified=target_nodes_specified
+        )
 
         # If an error that allows retrying was thrown, the nodes and slots
         # cache were reinitialized. We will retry executing the command with
@@ -1635,8 +1826,13 @@ class RedisCluster(
                         break
 
                 # Return the processed result
+                # ``command``, not ``args[0]``: the result callbacks are keyed by the name
+                # the policies were decided by, so a container command passed as two words
+                # - ``execute_command("command", "count")`` - is dispatched as the command
+                # that was actually routed. Telemetry deliberately does not follow; see the
+                # note on the metric in the retry branch below.
                 return self._process_result(
-                    args[0],
+                    command,
                     res,
                     response_policy=command_policies.response_policy,
                     **kwargs,
@@ -1652,6 +1848,11 @@ class RedisCluster(
                     failure_count += 1
 
                     if hasattr(e, "connection"):
+                        # ``args[0]``, not the resolved ``command``: every other metric in
+                        # this class - including the per-command one ``_execute_command``
+                        # records on success - names the command the caller spelled. Using
+                        # the routed name only here would report one command under two
+                        # names depending on whether it was retried.
                         self._record_command_metric(
                             command_name=args[0],
                             duration_seconds=time.monotonic() - start_time,
@@ -1739,12 +1940,14 @@ class RedisCluster(
                     # MOVED occurred and the slots cache was updated,
                     # refresh the target node
                     slot = self.determine_slot(*args)
+                    replica_safe = (
+                        self.read_from_replicas
+                        or self.load_balancing_strategy is not None
+                    ) and self._is_replica_safe(command)
                     target_node = self.nodes_manager.get_node_from_slot(
                         slot,
-                        self.read_from_replicas and command in READ_COMMANDS,
-                        self.load_balancing_strategy
-                        if command in READ_COMMANDS
-                        else None,
+                        replica_safe,
+                        self.load_balancing_strategy if replica_safe else None,
                     )
                     moved = False
 
@@ -1833,11 +2036,17 @@ class RedisCluster(
                 raise
             except (ConnectionError, TimeoutError) as e:
                 if is_debug_log_enabled():
-                    socket_address = self._extracts_socket_address(connection)
-                    args_log_str = truncate_text(" ".join(map(safe_str, args)))
+                    connection_details = (
+                        connection.extract_connection_details()
+                        if connection
+                        else "no connection"
+                    )
+                    # Log only the command name - argument values can carry
+                    # secrets or user data.
+                    args_log_str = safe_str(args[0])
                     logger.debug(
                         f"{type(e).__name__} received for command {args_log_str}, on node {target_node.name}, "
-                        f"and connection: {connection} using local socket address: {socket_address}, error: {e}"
+                        f"and connection: {connection}, {connection_details}, error: {e}"
                     )
                 # this is used to report the metrics based on host and port info
                 e.connection = connection if connection else target_node
@@ -1876,11 +2085,17 @@ class RedisCluster(
                 raise e
             except MovedError as e:
                 if is_debug_log_enabled():
-                    socket_address = self._extracts_socket_address(connection)
-                    args_log_str = truncate_text(" ".join(map(safe_str, args)))
+                    connection_details = (
+                        connection.extract_connection_details()
+                        if connection
+                        else "no connection"
+                    )
+                    # Log only the command name - argument values can carry
+                    # secrets or user data.
+                    args_log_str = safe_str(args[0])
                     logger.debug(
                         f"MOVED error received for command {args_log_str}, on node {target_node.name}, "
-                        f"and connection: {connection} using local socket address: {socket_address}, error: {e}"
+                        f"and connection: {connection}, {connection_details}, error: {e}"
                     )
                 # First, we will try to patch the slots/nodes cache with the
                 # redirected node output and try again. If MovedError exceeds
@@ -1914,11 +2129,17 @@ class RedisCluster(
                 )
             except TryAgainError as e:
                 if is_debug_log_enabled():
-                    socket_address = self._extracts_socket_address(connection)
-                    args_log_str = truncate_text(" ".join(map(safe_str, args)))
+                    connection_details = (
+                        connection.extract_connection_details()
+                        if connection
+                        else "no connection"
+                    )
+                    # Log only the command name - argument values can carry
+                    # secrets or user data.
+                    args_log_str = safe_str(args[0])
                     logger.debug(
                         f"TRYAGAIN error received for command {args_log_str}, on node {target_node.name}, "
-                        f"and connection: {connection} using local socket address: {socket_address}"
+                        f"and connection: {connection}, {connection_details}"
                     )
                 if ttl < self.RedisClusterRequestTTL / 2:
                     time.sleep(0.05)
@@ -1935,11 +2156,17 @@ class RedisCluster(
                 )
             except AskError as e:
                 if is_debug_log_enabled():
-                    socket_address = self._extracts_socket_address(connection)
-                    args_log_str = truncate_text(" ".join(map(safe_str, args)))
+                    connection_details = (
+                        connection.extract_connection_details()
+                        if connection
+                        else "no connection"
+                    )
+                    # Log only the command name - argument values can carry
+                    # secrets or user data.
+                    args_log_str = safe_str(args[0])
                     logger.debug(
                         f"ASK error received for command {args_log_str}, on node {target_node.name}, "
-                        f"and connection: {connection} using local socket address: {socket_address}, error: {e}"
+                        f"and connection: {connection}, {connection_details}, error: {e}"
                     )
                 redirect_addr = get_node_name(host=e.host, port=e.port)
                 asking = True
@@ -2066,20 +2293,6 @@ class RedisCluster(
             is_internal=is_internal,
         )
 
-    def _extracts_socket_address(
-        self, connection: Optional[Connection]
-    ) -> Optional[int]:
-        if connection is None:
-            return None
-        try:
-            socket_address = (
-                connection._sock.getsockname() if connection._sock else None
-            )
-            socket_address = socket_address[1] if socket_address else None
-        except (AttributeError, OSError):
-            pass
-        return socket_address
-
     def close(self) -> None:
         try:
             with self._lock:
@@ -2176,6 +2389,19 @@ class LoadBalancingStrategy(Enum):
     RANDOM_REPLICA = "random_replica"
 
 
+# The strategies that exclude the primary. ``LoadBalancer`` derives the same thing per
+# strategy as the ``replicas_only`` bit it passes to its index helpers below, but it can
+# only express it as an index into one shard's node list. Named here so the keyless
+# routing path - which has no shard, and so no list to index - can ask the same question.
+# A strategy added to the enum has to be classified here too.
+_REPLICAS_ONLY_STRATEGIES = frozenset(
+    {
+        LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+        LoadBalancingStrategy.RANDOM_REPLICA,
+    }
+)
+
+
 class LoadBalancer:
     """
     Round-Robin Load Balancing
@@ -2245,6 +2471,7 @@ class NodesManager:
         event_dispatcher: Optional[EventDispatcher] = None,
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
         himport_registry: HImportRegistry | None = None,
+        metadata_resolver: Optional[MetadataResolver] = None,
         **kwargs,
     ):
         # Shared, cluster-wide HIMPORT registry object, injected onto every node's pool
@@ -2261,12 +2488,32 @@ class NodesManager:
         self._dynamic_startup_nodes = dynamic_startup_nodes
         self.connection_pool_class = connection_pool_class
         self.address_remap = address_remap
+        # Shared, cluster-wide metadata resolver, injected onto every node's client in
+        # create_redis_node for the same reason the cache and the HIMPORT registry are:
+        # every node must resolve command metadata - and therefore cache eligibility -
+        # through the one object the cluster client was configured with.
+        self._metadata_resolver = metadata_resolver
+
         self._cache: Optional[CacheInterface] = None
         if cache:
             self._cache = cache
         elif cache_factory is not None:
             self._cache = cache_factory.get_cache()
         elif cache_config is not None:
+            # Injected here, on a copy, rather than left to the node pools: the cluster hands
+            # every node the one cache built below, so each pool sees a ``cache=`` and would
+            # set the resolver on the configuration inside it - which is the caller's object,
+            # since ``CacheFactory`` holds it by reference. Copying keeps a ``CacheConfig``
+            # reused across clients from picking up whichever resolver was injected last,
+            # exactly as ``ConnectionPool.__init__`` does for the standalone client.
+            #
+            # Only this branch needs it. ``cache=`` and ``cache_factory=`` hand over a whole
+            # cache whose configuration the caller owns, and the node pools set the resolver
+            # on it in place - the same thing they do for a standalone client given one.
+            if metadata_resolver is not None and isinstance(cache_config, CacheConfig):
+                cache_config = copy(cache_config)
+                cache_config.set_metadata_resolver(metadata_resolver)
+
             self._cache = CacheFactory(cache_config).get_cache()
         self.connection_kwargs = kwargs
         self.read_load_balancer = LoadBalancer()
@@ -2280,7 +2527,20 @@ class NodesManager:
         # initialize holds _initialization_lock to dedup multiple calls to reinitialize;
         # note that if we hold both _lock and _initialization_lock, we _must_ acquire
         # _initialization_lock first (ie: to have a consistent order) to avoid deadlock.
+        #
+        # The same ordering rule extends to OSSMaintNotificationsHandler._lock, which
+        # is a third lock in this graph: initialize runs a CLUSTER SLOTS round trip
+        # while holding _initialization_lock, and the response can carry an SMIGRATED
+        # push that is handled inline on that thread and needs the handler's _lock. The
+        # full order is therefore
+        #     _initialization_lock -> OSSMaintNotificationsHandler._lock
+        #         -> NodesManager._lock / connection pool locks
+        # ie: a thread holding the handler's _lock must never wait for
+        # _initialization_lock.
         self._initialization_lock: threading.RLock = threading.RLock()
+        # Ident of the thread currently running initialize, or None. Written only
+        # under _initialization_lock; see the re-entrancy guard in initialize.
+        self._initializing_thread_id: Optional[int] = None
 
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -2521,6 +2781,7 @@ class NodesManager:
             kwargs.update({"host": host})
             kwargs.update({"port": port})
             kwargs.update({"cache": self._cache})
+            kwargs.update({"metadata_resolver": self._metadata_resolver})
             kwargs.update({"retry": node_retry_config})
             r = Redis(connection_pool=self.connection_pool_class(**kwargs))
         else:
@@ -2528,6 +2789,7 @@ class NodesManager:
                 host=host,
                 port=port,
                 cache=self._cache,
+                metadata_resolver=self._metadata_resolver,
                 retry=node_retry_config,
                 **kwargs,
             )
@@ -2570,6 +2832,20 @@ class NodesManager:
         with self._lock:
             return self._epoch
 
+    @contextmanager
+    def _initializing_on_this_thread(self):
+        """
+        Mark the calling thread as the one currently running ``initialize``.
+
+        Must be entered while holding ``_initialization_lock`` - that is what
+        makes the calling thread the only writer of ``_initializing_thread_id``.
+        """
+        self._initializing_thread_id = threading.get_ident()
+        try:
+            yield
+        finally:
+            self._initializing_thread_id = None
+
     def initialize(
         self,
         additional_startup_nodes_info: Optional[List[Tuple[str, int]]] = None,
@@ -2598,6 +2874,28 @@ class NodesManager:
             Name of the node that just failed and should be tried only after
             other startup and additional startup nodes during this refresh.
         """
+        if self._initializing_thread_id == threading.get_ident():
+            # Re-entrant call on the thread that is already refreshing the
+            # topology: a push notification (SMIGRATED) arrived on the CLUSTER
+            # SLOTS response below and was handled inline on this thread. The
+            # outer call is mid-refresh and will publish its own result, so
+            # running a nested refresh here would reset() and swap the caches
+            # underneath it, only for the outer call to overwrite them again
+            # with its older snapshot. Skip instead; the outer refresh reads the
+            # authoritative slot map anyway, and anything it still misses is
+            # recovered through MOVED redirection.
+            #
+            # Reading the attribute without the lock is safe: while this thread
+            # holds _initialization_lock it is the only writer, so a match can
+            # only ever mean "this thread set it". A stale ident belonging to
+            # another thread simply fails the comparison and falls through to
+            # the normal blocking acquire below.
+            if is_debug_log_enabled():
+                logger.debug(
+                    "Topology refresh: skipping re-entrant initialize on thread "
+                    f"{threading.get_ident()}"
+                )
+            return
         self.reset()
         tmp_nodes_cache = {}
         tmp_slots = {}
@@ -2610,7 +2908,7 @@ class NodesManager:
         if additional_startup_nodes_info is None:
             additional_startup_nodes_info = []
 
-        with self._initialization_lock:
+        with self._initialization_lock, self._initializing_on_this_thread():
             with self._lock:
                 if epoch != self._epoch:
                     # another thread has already re-initialized the nodes; don't
@@ -2686,6 +2984,11 @@ class NodesManager:
                         else:
                             startup_node.redis_connection = r
                     try:
+                        if is_debug_log_enabled():
+                            logger.debug(
+                                "Topology refresh: querying CLUSTER SLOTS on "
+                                f"{startup_node.name}"
+                            )
                         # Make sure cluster mode is enabled on this node
                         cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
                         if disconnect_startup_nodes_pools:
@@ -2704,6 +3007,11 @@ class NodesManager:
                 except Exception as e:
                     # Try the next startup node.
                     # The exception is saved and raised only if we have no more nodes.
+                    if is_debug_log_enabled():
+                        logger.debug(
+                            "Topology refresh: CLUSTER SLOTS failed on "
+                            f"{startup_node.name}: {type(e).__name__}: {e}"
+                        )
                     exception = e
                     continue
 
@@ -2765,12 +3073,34 @@ class NodesManager:
                                     )
 
                 fully_covered = self.check_slots_coverage(tmp_slots)
+                if is_debug_log_enabled():
+                    logger.debug(
+                        f"Topology refresh: CLUSTER SLOTS from {startup_node.name} "
+                        f"reported nodes {sorted(tmp_nodes_cache)}; "
+                        f"slots fully covered: {fully_covered}"
+                    )
                 if fully_covered:
                     # Don't need to continue to the next startup node if all
                     # slots are covered
                     break
 
             if not startup_nodes_reachable:
+                # The unreachable subtype is reserved for connectivity failures:
+                # MultiDB registers it as retryable, so a deterministic
+                # server/configuration error (e.g. cluster mode disabled or
+                # invalid credentials - AuthenticationError and
+                # AuthorizationError subclass ConnectionError but cannot be
+                # repaired by a failover) must keep surfacing as a plain
+                # RedisClusterException.
+                if isinstance(
+                    exception, (ConnectionError, TimeoutError, OSError)
+                ) and not isinstance(
+                    exception, (AuthenticationError, AuthorizationError)
+                ):
+                    raise RedisClusterUnreachableError(
+                        f"Redis Cluster cannot be connected. Please provide at least "
+                        f"one reachable node: {str(exception)}"
+                    ) from exception
                 raise RedisClusterException(
                     f"Redis Cluster cannot be connected. Please provide at least "
                     f"one reachable node: {str(exception)}"
@@ -2896,6 +3226,31 @@ class ClusterPubSubSlotsCacheListener(EventListenerInterface):
             )
 
 
+# How long a per-node sharded-pubsub connection is skipped by the round robin
+# after a failed poll. PubSub._execute reconnects and retries through the
+# connection's own Retry, so one poll on an unreachable node can cost its whole
+# retry budget rather than the timeout the caller asked for; a cool-off keeps
+# the single reader from spending every pass on that node while its healthy
+# siblings hold undelivered messages.
+SHARD_POLL_COOL_OFF_SECONDS = 1.0
+
+# How long an unbounded sharded-pubsub poll waits for a not-yet-subscribed
+# per-node pubsub before re-checking that the pubsub is still in
+# node_pubsub_mapping. A retired one is never resubscribed and its
+# subscribed_event is never set again, so an uninterrupted wait would park the
+# single reader for good and stop delivery from every healthy sibling too.
+# Only a poll that would otherwise block indefinitely ticks at all.
+SHARD_SUBSCRIBE_WAIT_TICK_SECONDS = 1.0
+
+# How often a failed sharded-pubsub poll may trigger a slots-cache refresh.
+# Reconciliation is otherwise purely event-driven, and a node that has left the
+# deployment answers ECONNREFUSED rather than MOVED - so without this the reader
+# would cool off against the departed node forever and the shard channels pinned
+# to it would never move to their new owner. Throttled because the refresh costs
+# a CLUSTER SLOTS round trip and a failing node fails every poll.
+SHARD_TOPOLOGY_REPAIR_INTERVAL_SECONDS = 5.0
+
+
 class ClusterPubSub(PubSub):
     """
     Wrapper for PubSub class.
@@ -2941,6 +3296,19 @@ class ClusterPubSub(PubSub):
         # route sunsubscribe calls and reconcile subscriptions after slot
         # migration / failover.
         self._shard_channel_to_node: dict = {}
+        # Per-node poll cool-off deadlines (monotonic). Weak-keyed so a
+        # per-node pubsub dropped from node_pubsub_mapping takes its entry with
+        # it instead of leaking one per migration.
+        self._poll_cool_off: "weakref.WeakKeyDictionary[PubSub, float]" = (
+            weakref.WeakKeyDictionary()
+        )
+        # Node names whose last poll failed to connect. Read by
+        # _migrate_shard_channel to skip a wire SUNSUBSCRIBE that cannot
+        # succeed, and cleared as soon as a poll on that node works again.
+        self._unreachable_nodes: Set[str] = set()
+        # Monotonic deadline before which a failed poll must not trigger
+        # another slots-cache refresh. 0.0 means "never refreshed".
+        self._next_topology_repair: float = 0.0
         # Dedicated lock for shard-subscription bookkeeping. Distinct from
         # PubSub.self._lock (which serializes wire I/O on the cluster-level
         # connection used by aclose / send_command / regular subscribe) so
@@ -2951,15 +3319,22 @@ class ClusterPubSub(PubSub):
         # the dispatch call site (mirrors async's asyncio.create_task model so
         # the thread that triggered MovedError / topology refresh is not
         # blocked on per-channel sunsubscribe / ssubscribe network I/O).
-        # Lazy-created on first on_slots_changed() to avoid a persistent
-        # worker thread for pubsubs that never see a slot migration.
-        # Initialized before super().__init__() because PubSub.__init__ calls
-        # self.reset(), which resolves to ClusterPubSub.reset() and reads
-        # these attributes.
+        #
+        # Installed by reset(), which PubSub.__init__ calls below, and replaced
+        # by every later reset() - so it is never None once construction has
+        # finished and the scheduling sites need no lock to create it. That
+        # matters: on_slots_changed runs inline on whichever thread refreshed
+        # the topology, which can be a thread that handled an SMIGRATED push and
+        # still holds OSSMaintNotificationsHandler._lock while a third thread
+        # waits for that handler lock holding a per-node pubsub I/O lock the
+        # reconciliation worker needs - so blocking there on _shard_state_lock
+        # closes a three-thread deadlock cycle.
+        #
+        # Constructing an executor starts no thread; ThreadPoolExecutor spawns
+        # its worker on the first submit(), so pubsubs that never see a slot
+        # migration never pay for one. Declared before super().__init__()
+        # because reset() reads it.
         self._reconcile_executor: Optional[ThreadPoolExecutor] = None
-        # In-flight reconciliation futures; tracked so reset() can cancel
-        # pending work and so exceptions surface via a done-callback.
-        self._reconcile_futures: Set[Future] = set()
         self._pubsubs_generator = self._pubsubs_generator()
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -3048,6 +3423,28 @@ class ClusterPubSub(PubSub):
         # legitimate message off the stack if the connection is already
         # subscribed to one or more channels
 
+        # For shard commands, route to appropriate node
+        command = args[0].upper() if args else ""
+        if command in ("SSUBSCRIBE", "SUNSUBSCRIBE", "SPUBLISH"):
+            if len(args) > 1:
+                # ssubscribe / sunsubscribe own both the per-node I/O lock and
+                # the shard_channels / _shard_channel_to_node bookkeeping, so
+                # delegate to them instead of dispatching raw. A raw dispatch
+                # writes the socket unguarded against a concurrent poll and
+                # records nothing, leaving the channel invisible to the reader
+                # loop and to on_connect's replay.
+                if command == "SSUBSCRIBE":
+                    return self.ssubscribe(*args[1:])
+                if command == "SUNSUBSCRIBE":
+                    return self.sunsubscribe(*args[1:])
+                channel = args[1]
+                node = self.cluster.get_node_from_key(channel)
+                if node:
+                    pubsub = self._get_node_pubsub(node)
+                    with self._pubsub_io_lock(pubsub):
+                        return pubsub.execute_command(*args)
+
+        # For other commands, use the set node or lazily discover one
         if self.connection is None:
             if self.connection_pool is None:
                 if len(args) > 1:
@@ -3105,37 +3502,494 @@ class ClusterPubSub(PubSub):
             pubsub._resubscribe_shard_channels = MethodType(
                 ClusterPubSub._resubscribe_shard_channels, pubsub
             )
+            self._pubsub_io_lock(pubsub)
             self.node_pubsub_mapping[node.name] = pubsub
             return pubsub
 
     def _find_node_name_for_pubsub(self, pubsub):
-        for node_name, node_pubsub in self.node_pubsub_mapping.items():
+        # Snapshot the items: every caller but one runs without
+        # _shard_state_lock, so iterating the mapping directly would raise
+        # "dictionary changed size during iteration" whenever a concurrent
+        # migration adds or retires a per-node pubsub - which is exactly when
+        # these lookups happen. list() of a dict view is atomic under the GIL.
+        for node_name, node_pubsub in list(self.node_pubsub_mapping.items()):
             if node_pubsub is pubsub:
                 return node_name
         return None
 
+    @staticmethod
+    def _pubsub_io_lock(pubsub) -> threading.RLock:
+        """Return the per-node pubsub's wire I/O lock, creating it on first use.
+
+        A per-node ``PubSub`` is read by whichever thread polls
+        ``get_sharded_message`` and written by the reconciliation worker
+        (``_migrate_shard_channel``) and by any caller of ``ssubscribe`` /
+        ``sunsubscribe``. ``PubSub`` guards writes with its own ``_lock``
+        (``PubSub.execute_command``) but reads take no lock at all, so without
+        this the reader can be inside ``read_response`` while another thread's
+        ``_execute`` disconnects and reconnects the same socket underneath it -
+        which loses the reply to the handshake and surfaces as a read timeout
+        followed by ``EBADF``.
+
+        Kept on the pubsub rather than in a dict keyed by node name so it
+        travels with the object through ``node_pubsub_mapping`` and cannot go
+        stale when a per-node pubsub is dropped and recreated.
+        """
+        lock = getattr(pubsub, "_shard_io_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            pubsub._shard_io_lock = lock
+        return lock
+
+    @staticmethod
+    def _detach_shard_channel(pubsub, channel) -> None:
+        """Forget a shard channel on a per-node pubsub without a wire round trip.
+
+        ``PubSub.sunsubscribe`` only records the intent in
+        ``pending_unsubscribe_shard_channels``; the channel leaves
+        ``shard_channels`` when the server confirmation is read. So if the
+        ``SUNSUBSCRIBE`` never reaches the server, ``on_connect`` clears the
+        pending set and replays ``SSUBSCRIBE`` for the channel - on the node it
+        is being migrated away from, on every reconnect. Once the caller has
+        decided the channel belongs to a different node, the local intent is
+        the only truth left, so drop it here.
+
+        Deliberately without the per-node I/O lock, unlike every other writer
+        on a per-node pubsub. ``_forget_shard_channel_on_old_node`` calls this
+        for a node the reader has just failed to reach, and a bounded poll holds
+        that lock across ``PubSub._execute``'s reconnect and its whole retry
+        budget - far longer than the timeout the poll was given. Waiting for it
+        here, while this pass holds ``_shard_state_lock``, is the migration
+        slow enough to look like a permanent delivery stall that the
+        ``_unreachable_nodes`` fast path exists to avoid.
+
+        Nothing needs the lock: each mutation below is individually atomic, and
+        every interleaving with ``handle_message``'s unsubscribe bookkeeping (the
+        only concurrent writer of the same state, and one that runs under that
+        lock) converges on the same end state - the channel gone from both the
+        subscription dict and the pending set. That bookkeeping discards rather
+        than removes precisely so this detach cannot make it raise ``KeyError``
+        into a poll no caller catches.
+        """
+        pubsub.shard_channels.pop(channel, None)
+        pubsub.pending_unsubscribe_shard_channels.discard(channel)
+        if not pubsub.channels and not pubsub.patterns and not pubsub.shard_channels:
+            pubsub.subscribed_event.clear()
+
+    def _drop_node_pubsub(self, name: str, pubsub) -> None:
+        """Retire a per-node pubsub and drop it from ``node_pubsub_mapping``.
+
+        Callers hold ``_shard_state_lock``, the lock that every mutation of
+        that mapping observes. ``reset()`` runs under the per-node I/O lock so
+        the socket is not torn down beneath a concurrent bounded poll parked in
+        ``parse_response``, and its errors are swallowed: retiring one node's
+        pubsub must not abort the caller's pass, and this also runs from the
+        ``__del__`` fallback path through ``reset()``.
+
+        Every caller must leave nothing subscribed on ``pubsub`` (or have lost
+        the node itself). An empty per-node pubsub left in the mapping is what
+        ``_poll_node_pubsub`` stalls on: its ``subscribed_event`` is cleared, so
+        the prelude waits out the whole timeout of every pass - indefinitely when
+        the caller passed ``timeout=None``, since the ``reset()`` below only
+        clears that event again and no message can arrive on a subscription that
+        is gone.
+
+        Popping it from the mapping is also what makes the retirement
+        *observable*: that prelude gives up on an unbounded wait once the pubsub
+        it was handed is no longer mapped, which is the only thing standing
+        between a reader that held the object across this call and a permanent
+        park. The rebind below keeps it from being handed out to begin with.
+        """
+        try:
+            with self._pubsub_io_lock(pubsub):
+                pubsub.reset()
+        except Exception:
+            pass
+        self.node_pubsub_mapping.pop(name, None)
+        self._unreachable_nodes.discard(name)
+        # Same snapshot reason ``reset()`` recreates this: ``_pubsubs_generator``
+        # captures node_pubsub_mapping.values() into a local list inside
+        # ``yield from``, which the pop above does not reach - so a generator
+        # suspended mid-yield-from would still hand the object we just retired
+        # to the next poll. ``type(self)`` bypasses the instance-level
+        # self-shadow established at __init__. Costs nothing: constructing a
+        # generator runs no frame, so the per-node collection loop in
+        # reinitialize_shard_subscriptions can rebind once per dropped node.
+        self._pubsubs_generator = type(self)._pubsubs_generator(self)
+
     def _sharded_message_generator(self, timeout=0.0):
+        first_error: Optional[BaseException] = None
+        polled = 0
+        failed = 0
+        next_ready: Optional[float] = None
         for _ in range(len(self.node_pubsub_mapping)):
             pubsub = next(self._pubsubs_generator)
-            # Don't pass ignore_subscribe_messages here - let get_sharded_message
-            # handle the filtering after processing subscription state changes
-            message = pubsub.get_message(
-                ignore_subscribe_messages=False, timeout=timeout
-            )
+            if pubsub is None:
+                # node_pubsub_mapping was emptied between the len() above and
+                # here; nothing left to poll in this pass.
+                break
+            if self._poll_cool_off:
+                deadline = self._poll_cool_off.get(pubsub, 0.0)
+                if time.monotonic() < deadline:
+                    # In cool-off after a failed poll: skip it so the reader
+                    # spends this pass on the nodes that can still deliver.
+                    if next_ready is None or deadline < next_ready:
+                        next_ready = deadline
+                    continue
+            polled += 1
+            try:
+                message = self._poll_node_pubsub(pubsub, timeout)
+            except MovedError as e:
+                # Handled, not failed: _handle_moved_on_read re-routes the
+                # offending channels and schedules reconciliation, so the next
+                # pass recovers. Re-raising a MovedError out of a pubsub read
+                # would only hand the caller an error it cannot act on. Still
+                # cool off: if the slots cache cannot be corrected the repair
+                # would otherwise re-run on every poll.
+                self._poll_cool_off[pubsub] = (
+                    time.monotonic() + SHARD_POLL_COOL_OFF_SECONDS
+                )
+                self._handle_moved_on_read(pubsub, e)
+                continue
+            except (ConnectionError, TimeoutError, OSError) as e:
+                # One unhealthy node must not starve its healthy siblings. A
+                # single reader serves every per-node pubsub, so aborting the
+                # pass here stops delivery cluster-wide for as long as this one
+                # node stays unreachable - even though the slots it no longer
+                # serves are the only ones affected. Keep polling the rest and
+                # surface an error only if nothing in the pass worked, the same
+                # made-progress rule reinitialize_shard_subscriptions applies.
+                failed += 1
+                if first_error is None:
+                    first_error = e
+                # Cool off before polling this one again. PubSub._execute
+                # reconnects and then retries through the connection's own
+                # Retry, so a single "bounded" poll on an unreachable node can
+                # cost its whole retry budget - far longer than the timeout the
+                # caller asked for. Without a cool-off the reader goes straight
+                # back to that node on the next pass and pays it again, which
+                # is what turns one sick node into a cluster-wide delivery
+                # stall.
+                self._poll_cool_off[pubsub] = (
+                    time.monotonic() + SHARD_POLL_COOL_OFF_SECONDS
+                )
+                # Deliberately outside _shard_state_lock: this is an advisory
+                # hint for _migrate_shard_channel's fast path, mutated with
+                # single atomic set operations, and both misread directions are
+                # handled there and self-heal - a stale entry only skips a
+                # SUNSUBSCRIBE to a dead node, a missing one only pays a
+                # reconnect before the same local forget.
+                node_name = self._find_node_name_for_pubsub(pubsub)
+                if node_name is not None:
+                    self._unreachable_nodes.add(node_name)
+                if is_debug_log_enabled():
+                    logger.debug(
+                        "sharded pubsub poll failed on %s: %s: %s",
+                        node_name,
+                        type(e).__name__,
+                        e,
+                    )
+                # A node that has left the deployment never answers MOVED, so
+                # this branch is the only signal that its shard channels may
+                # need a new owner. Ask for a slots-cache refresh; its dispatch
+                # reaches on_slots_changed and reconciles.
+                self._schedule_topology_repair()
+                continue
+            # Emptiness check first: this is the per-message hot path, and the
+            # weakref lookup a WeakKeyDictionary pop needs is pure overhead
+            # while no node is in cool-off, which is the normal case.
+            if self._poll_cool_off:
+                self._poll_cool_off.pop(pubsub, None)
+            if self._unreachable_nodes:
+                node_name = self._find_node_name_for_pubsub(pubsub)
+                if node_name is not None:
+                    self._unreachable_nodes.discard(node_name)
             if message is not None:
                 return pubsub, message
+        if first_error is not None and failed == polled:
+            raise first_error
+        if polled == 0 and next_ready is not None:
+            self._wait_out_cool_off(next_ready, timeout)
         return None, None
 
+    @staticmethod
+    def _wait_out_cool_off(next_ready: float, timeout) -> None:
+        """Wait out a pass in which every node was skipped for cool-off.
+
+        Such a pass does no wire read at all, so returning straight away
+        ignores the timeout the caller asked to block for - and a reader loop
+        (``PubSubWorkerThread.run`` with ``sharded_pubsub=True``, or a user
+        loop on ``get_sharded_message``) polls back immediately, spinning
+        until the cool-off expires instead of blocking. Sleep instead: until
+        the earliest cool-off is over, never longer than the caller's timeout,
+        and not at all for a non-blocking poll.
+        """
+        if timeout is not None and timeout <= 0:
+            return
+        delay = next_ready - time.monotonic()
+        if delay <= 0:
+            return
+        if timeout is not None:
+            delay = min(delay, timeout)
+        time.sleep(delay)
+
+    def _poll_io_lock(self, pubsub, timeout):
+        """Guard a per-node poll against concurrent writers on the same socket.
+
+        ``timeout=None`` makes ``_poll_node_pubsub``'s read block indefinitely,
+        so holding the lock across it would block reconciliation for as long as
+        no message arrives. Such a caller drives the pubsub itself and gets the
+        pre-existing unguarded behavior; every bounded poll - which is what
+        ``PubSubWorkerThread`` and ``ClusterPubSub``'s own callers use - is
+        serialized.
+        """
+        if timeout is None:
+            return nullcontext()
+        return self._pubsub_io_lock(pubsub)
+
+    def _poll_node_pubsub(self, pubsub, timeout):
+        """Read one message from a per-node pubsub, dispatching outside the lock.
+
+        Splits ``PubSub.get_message`` so the per-node I/O lock covers the wire
+        read only. ``handle_message`` invokes a subscribed channel's user
+        handler inline, and a handler is free to call ``ssubscribe`` /
+        ``sunsubscribe`` on this ``ClusterPubSub`` - which takes
+        ``_shard_state_lock`` and then the same I/O lock. Holding the I/O lock
+        across the handler therefore deadlocks against the reconciliation
+        worker, which holds ``_shard_state_lock`` and waits for that I/O lock:
+        an ABBA cycle between two threads that the ``RLock``'s self-reentrancy
+        cannot break. The async counterpart's non-reentrant ``asyncio.Lock``
+        hangs on the re-acquire alone, before any reconciliation is involved.
+
+        The two halves of ``handle_message`` are mutually exclusive:
+        ``UNSUBSCRIBE_MESSAGE_TYPES`` does subscription bookkeeping and never
+        reaches a handler, ``PUBLISH_MESSAGE_TYPES`` only dispatches. So
+        bookkeeping stays inside the lock - it mutates the very
+        ``shard_channels`` / ``pending_unsubscribe_shard_channels`` that
+        ``ssubscribe`` / ``sunsubscribe`` mutate under this lock - and only the
+        dispatch moves out. The cost is a narrow race: a reconciliation pass
+        that detaches the channel between the read and the dispatch makes the
+        handler lookup miss, so the message is returned to the caller instead
+        of dispatched. That is the same in-flight-during-unsubscribe race
+        ``PubSub`` itself has, and closing it would mean duplicating
+        ``handle_message``'s dispatch here.
+        """
+        # ``PubSub.get_message``'s prelude, which bypassing it would drop: a
+        # per-node pubsub enters node_pubsub_mapping before its first
+        # SSUBSCRIBE (_get_node_pubsub) and is left connectionless by reset()
+        # (the GC in reinitialize_shard_subscriptions), while parse_response
+        # raises RuntimeError on a None connection - which neither poll site
+        # catches. Deliberately kept outside the I/O lock, unlike the
+        # get_message call it replaces: waiting here is not wire I/O, and the
+        # ssubscribe that sets this event needs the I/O lock itself, so waiting
+        # under it stalls the very subscribe being waited for.
+        if not pubsub.subscribed:
+            start_time = time.monotonic()
+            # An unbounded caller must not wait on this event uninterrupted.
+            # _drop_node_pubsub retires a per-node pubsub whose event is cleared
+            # and will never be set again - it is never resubscribed - and the
+            # reader can be holding that object across the drop: the round robin
+            # yields from a _pubsubs_generator snapshot the drop's pop does not
+            # reach, and get_sharded_message's target_node lookup takes no lock.
+            # So wake up periodically and re-check the mapping rather than park
+            # the single reader for good, which would withhold the messages of
+            # every healthy sibling in the pass too.
+            if timeout is None:
+                wait_for = SHARD_SUBSCRIBE_WAIT_TICK_SECONDS
+            else:
+                wait_for = timeout
+            while not pubsub.subscribed_event.wait(wait_for):
+                if timeout is not None:
+                    # The connection isn't subscribed to any channels or
+                    # patterns, so no messages are available
+                    return None
+                if self._find_node_name_for_pubsub(pubsub) is None:
+                    # Retired by a concurrent drop while we held it. Nothing can
+                    # arrive on a subscription that is gone; let the pass move on
+                    # to the nodes that can still deliver.
+                    return None
+            # The connection was subscribed during the timeout time frame.
+            # The timeout should be adjusted based on the time spent
+            # waiting for the subscription. Only the bounded case needs it: an
+            # unbounded wait leaves ``timeout`` at None for the read below.
+            if timeout is not None:
+                timeout = max(0.0, timeout - (time.monotonic() - start_time))
+        with self._poll_io_lock(pubsub, timeout):
+            # Re-check now that no writer can be mid-flight: the prelude above
+            # can pass and the GC then close this pubsub while holding this very
+            # lock, which would leave parse_response with the None connection it
+            # raises RuntimeError on. Only the connection is re-checked, not
+            # ``subscribed``: a pubsub whose last channel was detached locally
+            # may still have an in-flight SUNSUBSCRIBE confirmation to read.
+            if pubsub.connection is None:
+                return None
+            response = pubsub.parse_response(block=(timeout is None), timeout=timeout)
+            # get_message's truthiness test, not "is None": a health check
+            # reply filtered out by parse_response, or an empty bulk, is "no
+            # message" rather than a message to parse.
+            if not response:
+                return None
+            if not self._is_publish_response(response):
+                # Don't pass ignore_subscribe_messages here - let
+                # get_sharded_message handle the filtering after processing
+                # subscription state changes
+                return pubsub.handle_message(response, ignore_subscribe_messages=False)
+        return pubsub.handle_message(response, ignore_subscribe_messages=False)
+
+    @staticmethod
+    def _is_publish_response(response) -> bool:
+        """Whether a raw pubsub reply can make ``handle_message`` dispatch.
+
+        ``handle_message`` invokes a user handler only for
+        ``PUBLISH_MESSAGE_TYPES``; every other reply either does subscription
+        bookkeeping (``UNSUBSCRIBE_MESSAGE_TYPES``) or is a pong, and the two
+        branches are mutually exclusive. A non-sequence reply is the bare-PING
+        shape ``handle_message`` rewrites into a pong, so it cannot dispatch
+        either.
+        """
+        if not isinstance(response, (list, tuple)):
+            return False
+        return str_if_bytes(response[0]) in PubSub.PUBLISH_MESSAGE_TYPES
+
+    def _schedule_topology_repair(self) -> None:
+        """Ask for a slots-cache refresh after a poll could not reach a node.
+
+        ``reinitialize_shard_subscriptions`` only ever runs from a slots-cache
+        change notification, and a node that has been rebooted or taken out of
+        the deployment answers ``ECONNREFUSED`` rather than ``MOVED`` - so the
+        read path itself has to ask, or the shard channels pinned to that node
+        stay there for the lifetime of the pubsub.
+
+        ``NodesManager.initialize`` serializes concurrent callers, drops nodes
+        that have left the topology and dispatches
+        ``AfterSlotsCacheRefreshEvent``, which reaches ``on_slots_changed``; run
+        it on the reconciliation worker so a bounded poll does not pay for a
+        ``CLUSTER SLOTS`` round trip, and throttle it because a node that is
+        down fails every poll.
+
+        ``disconnect_startup_nodes_pools=False``, unlike every other caller: the
+        default marks the in-use connections of the startup node that answered
+        ``CLUSTER SLOTS`` for reconnect and drops its idle ones, to clear a
+        ``READONLY`` state that may no longer apply. A per-node pubsub draws its
+        connection from that very pool, so on the default one unreachable shard
+        would recycle command and pubsub connections on a *healthy* node once
+        per throttle window - forcing a resubscribe and dropping in-flight
+        messages on a node that never failed. A fresh slot map is all this
+        repair asks for. The async counterpart has no such parameter and never
+        recycles those pools, so this is also the shape parity asks for.
+        """
+        if not self.shard_channels:
+            return
+        now = time.monotonic()
+        if now < self._next_topology_repair:
+            return
+        # Unsynchronized on purpose: the read path must not queue behind a
+        # reconciliation pass doing per-channel network I/O, because the
+        # cluster-wide delivery stall that would cause is the very thing this
+        # repair exists to end. Two readers racing the throttle window can both
+        # submit; the single-worker executor runs them sequentially, so the
+        # loser costs one redundant CLUSTER SLOTS round trip at most (the epoch
+        # check in NodesManager.initialize dedups only overlapping refreshes,
+        # not queued ones), bounded by the throttle window.
+        self._next_topology_repair = now + SHARD_TOPOLOGY_REPAIR_INTERVAL_SECONDS
+        self._submit_reconcile_work(
+            partial(
+                self.cluster.nodes_manager.initialize,
+                disconnect_startup_nodes_pools=False,
+            )
+        )
+
+    def _handle_moved_on_read(self, pubsub, error: MovedError) -> None:
+        """Re-route shard channels pinned to a node that lost their slot.
+
+        ``PubSub.on_connect`` replays ``SSUBSCRIBE`` to the node its connection
+        is bound to, so after a slot migration that node answers ``MOVED``.
+        ``MovedError`` is not in ``Retry.supported_errors`` and no other code on
+        the read path refreshes the slots cache, so a shard channel left on a
+        former owner could never recover. Drop the offending channels from this
+        pubsub so the replay stops, forget their recorded owner so
+        ``reinitialize_shard_subscriptions`` does not short-circuit on an
+        already-advanced reverse index, then apply the redirect and reconcile.
+        """
+        node_name = self._find_node_name_for_pubsub(pubsub)
+        logger.debug(
+            "sharded pubsub: %s no longer owns slot %s; re-routing its shard channels",
+            node_name,
+            error.slot_id,
+        )
+        with self._shard_state_lock:
+            for channel in list(pubsub.shard_channels):
+                if key_slot(self.encoder.encode(channel)) != error.slot_id:
+                    continue
+                self._detach_shard_channel(pubsub, channel)
+                if self._shard_channel_to_node.get(channel) == node_name:
+                    del self._shard_channel_to_node[channel]
+            # The detach above can leave this pubsub with nothing subscribed -
+            # a node that lost its only slot answers MOVED for every channel it
+            # held. Retire it here rather than leave it in the mapping for a
+            # collector elsewhere: no SUNSUBSCRIBE confirmation will arrive for
+            # a channel forgotten locally, so get_sharded_message's collector
+            # cannot reach it, and the reconciliation pass scheduled below only
+            # GCs it once the worker gets to run - a whole poll cool-off later,
+            # at best, while an unbounded poll that reaches the empty pubsub
+            # first parks on it for good (see _drop_node_pubsub).
+            if node_name is not None and not pubsub.subscribed:
+                self._drop_node_pubsub(node_name, pubsub)
+        # move_slot applies the redirect to the slots cache and dispatches
+        # AfterSlotsCacheRefreshEvent, which reaches on_slots_changed. Call
+        # on_slots_changed unconditionally too: move_slot skips the dispatch on
+        # a circular MOVED, and a duplicate reconciliation pass is a no-op.
+        # move_slot indexes slots_cache by the redirected slot, so an
+        # as-yet-uncovered slot raises: log and still reconcile rather than let
+        # a repair attempt break a pubsub read.
+        try:
+            self.cluster.nodes_manager.move_slot(error)
+        except Exception as exc:
+            logger.debug(
+                "sharded pubsub: could not apply the redirect for slot %s: %s: %s",
+                error.slot_id,
+                type(exc).__name__,
+                exc,
+            )
+        self.on_slots_changed()
+
     def _pubsubs_generator(self):
+        # Never return: a generator that returns is exhausted for good and only
+        # reset() recreates this one, so a momentarily empty
+        # node_pubsub_mapping - reconciliation drops a per-node pubsub before
+        # creating its replacement - would stop the round robin permanently.
+        # Yield None for an empty mapping instead, which lets the caller skip
+        # the slot without this loop spinning on an empty list.
         while True:
             current_nodes = list(self.node_pubsub_mapping.values())
             if not current_nodes:
-                return  # Avoid infinite loop when no subscriptions exist
-            yield from current_nodes
+                yield None
+            else:
+                yield from current_nodes
 
     def get_sharded_message(
         self, ignore_subscribe_messages=False, timeout=0.0, target_node=None
     ):
+        """
+        Get the next sharded pubsub message, or ``None`` if none is available.
+
+        Polls the per-node connections in round robin unless ``target_node`` is
+        given, and keeps shard channels attached to the node that currently
+        owns their slot: a failed poll cools that node off and asks for a
+        slots-cache refresh, and a ``MOVED`` reply re-routes the affected
+        channels to their new owner. Neither reaches the caller. A connection
+        failure is surfaced only when every node polled in the pass failed, so
+        one unreachable node does not stop delivery from its healthy siblings.
+
+        ``target_node`` opts out of that shielding: a caller that names a
+        single node has no sibling to protect, so connection errors propagate.
+        A ``MOVED`` reply is still handled rather than raised.
+
+        :param ignore_subscribe_messages: Whether to ignore subscribe messages
+        :param timeout: Timeout for message retrieval
+        :param target_node: Specific node to get message from
+        :return: Message dictionary or None
+        """
         if target_node:
             # Use .get(): migration-driven cleanup in the sunsubscribe branch
             # below and reset() both remove entries from node_pubsub_mapping,
@@ -3144,11 +3998,23 @@ class ClusterPubSub(PubSub):
             # KeyError. None pubsub falls through to "no message available".
             pubsub = self.node_pubsub_mapping.get(target_node.name)
             if pubsub is not None:
-                # Don't pass ignore_subscribe_messages here - let get_sharded_message
-                # handle the filtering after processing subscription state changes
-                message = pubsub.get_message(
-                    ignore_subscribe_messages=False, timeout=timeout
-                )
+                try:
+                    message = self._poll_node_pubsub(pubsub, timeout)
+                except MovedError as e:
+                    # Same handling as the round-robin path: the caller cannot
+                    # act on a MovedError raised out of a pubsub read, and the
+                    # channels this node no longer owns have to be re-routed or
+                    # they never recover. Cool off too, so a slots cache that
+                    # cannot be corrected does not re-run the repair on every
+                    # poll. Unlike that path, connectivity errors still
+                    # propagate: they are swallowed there only to keep one sick
+                    # node from starving its healthy siblings, and a caller that
+                    # named a single node has no sibling to protect.
+                    self._poll_cool_off[pubsub] = (
+                        time.monotonic() + SHARD_POLL_COOL_OFF_SECONDS
+                    )
+                    self._handle_moved_on_read(pubsub, e)
+                    message = None
             else:
                 message = None
         else:
@@ -3160,9 +4026,9 @@ class ClusterPubSub(PubSub):
         # competing with the reconciliation worker for _shard_state_lock.
         if str_if_bytes(message["type"]) == "sunsubscribe":
             # Serialize state mutation against reinitialize_shard_subscriptions
-            # (worker thread). The blocking get_message above intentionally
-            # runs outside the lock so reconciliation is not stalled by long
-            # polls.
+            # (worker thread). The blocking _poll_node_pubsub above
+            # intentionally runs outside the lock so reconciliation is not
+            # stalled by long polls.
             with self._shard_state_lock:
                 if message["channel"] in self.pending_unsubscribe_shard_channels:
                     # User-initiated sunsubscribe: drop from cluster-level tracking.
@@ -3183,11 +4049,7 @@ class ClusterPubSub(PubSub):
                 if pubsub is not None and not pubsub.subscribed:
                     name = self._find_node_name_for_pubsub(pubsub)
                     if name is not None:
-                        try:
-                            pubsub.reset()
-                        except Exception:
-                            pass
-                        self.node_pubsub_mapping.pop(name, None)
+                        self._drop_node_pubsub(name, pubsub)
                 # Mirror PubSub.handle_message: the empty-check belongs in the
                 # unsubscribe branch since that is the only path that can
                 # reduce shard_channels here.
@@ -3235,10 +4097,11 @@ class ClusterPubSub(PubSub):
                     )
                     continue
                 pubsub = self._get_node_pubsub(node)
-                if handler:
-                    pubsub.ssubscribe(Subscription(s_channel, handler))
-                else:
-                    pubsub.ssubscribe(s_channel)
+                with self._pubsub_io_lock(pubsub):
+                    if handler:
+                        pubsub.ssubscribe(Subscription(s_channel, handler))
+                    else:
+                        pubsub.ssubscribe(s_channel)
                 self.shard_channels.update(pubsub.shard_channels)
                 self._shard_channel_to_node[normalized_key] = node.name
                 self.pending_unsubscribe_shard_channels.difference_update(
@@ -3271,7 +4134,8 @@ class ClusterPubSub(PubSub):
                     if not node or node.name not in self.node_pubsub_mapping:
                         continue
                     p = self.node_pubsub_mapping[node.name]
-                p.sunsubscribe(s_channel)
+                with self._pubsub_io_lock(p):
+                    p.sunsubscribe(s_channel)
                 self.pending_unsubscribe_shard_channels.update(
                     p.pending_unsubscribe_shard_channels
                 )
@@ -3289,6 +4153,8 @@ class ClusterPubSub(PubSub):
         first_migrate_error: Optional[BaseException] = None
         with self._shard_state_lock:
             for channel, handler in list(self.shard_channels.items()):
+                if channel in self.pending_unsubscribe_shard_channels:
+                    continue
                 try:
                     new_node = self.cluster.get_node_from_key(channel)
                 except SlotNotCoveredError:
@@ -3302,7 +4168,17 @@ class ClusterPubSub(PubSub):
                     continue
                 old_name = self._shard_channel_to_node.get(channel)
                 if old_name == new_node.name:
-                    continue
+                    owner = self.node_pubsub_mapping.get(new_node.name)
+                    if owner is not None and channel in owner.shard_channels:
+                        continue
+                    # The reverse index names this node but the subscription is
+                    # not there. _migrate_shard_channel detaches from the old
+                    # owner before it advances the index, so a pass that failed
+                    # to attach leaves the channel subscribed nowhere - and once
+                    # ownership moves back, this short-circuit would skip it for
+                    # the lifetime of the pubsub. Re-attach instead of trusting
+                    # the index; there is nothing to sunsubscribe from.
+                    old_name = None
                 try:
                     self._migrate_shard_channel(channel, handler, old_name, new_node)
                     made_progress = True
@@ -3326,11 +4202,7 @@ class ClusterPubSub(PubSub):
             # subscription so their connections are released.
             for name, pubsub in list(self.node_pubsub_mapping.items()):
                 if not pubsub.subscribed:
-                    try:
-                        pubsub.reset()
-                    except Exception:
-                        pass
-                    self.node_pubsub_mapping.pop(name, None)
+                    self._drop_node_pubsub(name, pubsub)
         if uncovered:
             # Surface the uncovered channels so the caller (and observer
             # notification path) knows reconciliation was incomplete. All
@@ -3349,44 +4221,74 @@ class ClusterPubSub(PubSub):
             # WARNINGs above preserve the full forensic detail.
             raise first_migrate_error
 
+    def _forget_shard_channel_on_old_node(self, old_pubsub, channel, old_name):
+        """Drop a migrating shard channel from a node we could not tell about it.
+
+        Forget the channel locally: the caller advances the reverse index to the
+        new owner, so reconciliation will never revisit this channel, while
+        ``on_connect`` would keep replaying ``SSUBSCRIBE`` for it to this very
+        node on every reconnect - the server would answer ``MOVED`` and the
+        subscription would never work again.
+        """
+        self._detach_shard_channel(old_pubsub, channel)
+        # Drop the per-node pubsub when either the old node has left the cluster
+        # topology - no reconnect target, so the round-robin generator must stop
+        # yielding a dead one, and any sibling subscription it still holds
+        # recovers through ``PubSub._execute``'s reconnect and ``on_connect``
+        # replay - or the detach above left it with nothing subscribed.
+        #
+        # The empty case cannot be deferred to a collector elsewhere, because
+        # neither of the other two can reach it. ``get_sharded_message``'s
+        # unsubscribe branch needs a ``SUNSUBSCRIBE`` confirmation, and none will
+        # arrive for a channel this method forgot locally - that is the whole
+        # reason it is forgotten. ``reinitialize_shard_subscriptions``'s
+        # end-of-pass GC only runs for the reconciliation caller, while
+        # ``ssubscribe``'s lazy re-route reaches here without it. An empty pubsub
+        # left in the mapping has had its ``subscribed_event`` cleared by the
+        # detach, so ``_poll_node_pubsub`` waits on an event nothing will ever
+        # set: forever when the caller passed ``timeout=None``, and for the whole
+        # timeout of every pass otherwise, before a single healthy node is read.
+        if (
+            self.cluster.get_node(node_name=old_name) is None
+            or not old_pubsub.subscribed
+        ):
+            self._drop_node_pubsub(old_name, old_pubsub)
+
     def _migrate_shard_channel(self, channel, handler, old_name, new_node):
         # Detach from the old per-node pubsub, best-effort: the old node may
         # already be unreachable during migration / failover.
         if old_name and old_name in self.node_pubsub_mapping:
             old_pubsub = self.node_pubsub_mapping[old_name]
-            try:
-                old_pubsub.sunsubscribe(channel)
-            except (ConnectionError, TimeoutError, OSError):
-                # redis-py's Connection has already called ``disconnect()``
-                # before raising (see Connection.read_response /
-                # send_packed_command with ``disconnect_on_error=True``),
-                # so ``old_pubsub``'s dedicated socket is gone. Two cases:
-                #
-                # 1. The old node is no longer in the cluster topology
-                #    (e.g. removed by failover / topology refresh): no
-                #    reconnect target exists, so ``old_pubsub.subscribed``
-                #    would stay True forever and the end-of-pass GC block
-                #    would skip it. Drop it eagerly so the round-robin
-                #    generator does not keep yielding a dead pubsub that
-                #    produces periodic errors from ``get_sharded_message``.
-                # 2. The old node is still known (transiently slow /
-                #    unreachable): ``PubSub._execute`` auto-reconnects and
-                #    ``on_connect`` re-subscribes to remaining channels,
-                #    so other subscriptions on the same pubsub recover
-                #    naturally. Leave it alone.
-                if self.cluster.get_node(node_name=old_name) is None:
-                    try:
-                        old_pubsub.reset()
-                    except Exception:
-                        pass
-                    self.node_pubsub_mapping.pop(old_name, None)
+            if old_name in self._unreachable_nodes:
+                # The reader has just failed to reach this node, so a
+                # ``SUNSUBSCRIBE`` cannot arrive. Skip it: the attempt would pay
+                # a full reconnect (and the client's whole retry budget) behind
+                # the reader on the same per-node io lock, all while this pass
+                # holds ``_shard_state_lock`` - which is what turns one departed
+                # node into a migration slow enough to look like a permanent
+                # delivery stall.
+                self._forget_shard_channel_on_old_node(old_pubsub, channel, old_name)
+            else:
+                try:
+                    with self._pubsub_io_lock(old_pubsub):
+                        old_pubsub.sunsubscribe(channel)
+                except (ConnectionError, TimeoutError, OSError):
+                    # redis-py's Connection has already called ``disconnect()``
+                    # before raising (see Connection.read_response /
+                    # send_packed_command with ``disconnect_on_error=True``), so
+                    # ``old_pubsub``'s dedicated socket is gone and the
+                    # ``SUNSUBSCRIBE`` never reached the server.
+                    self._forget_shard_channel_on_old_node(
+                        old_pubsub, channel, old_name
+                    )
         # Attach to the new per-node pubsub, preserving the handler. Decode to
         # a text key only when we must pass it as a kwarg (handler present).
         new_pubsub = self._get_node_pubsub(new_node)
-        if handler:
-            new_pubsub.ssubscribe(Subscription(channel, handler))
-        else:
-            new_pubsub.ssubscribe(channel)
+        with self._pubsub_io_lock(new_pubsub):
+            if handler:
+                new_pubsub.ssubscribe(Subscription(channel, handler))
+            else:
+                new_pubsub.ssubscribe(channel)
         self.shard_channels.update(new_pubsub.shard_channels)
         normalized_key = next(iter(self._normalize_keys({channel: None})))
         self._shard_channel_to_node[normalized_key] = new_node.name
@@ -3407,38 +4309,43 @@ class ClusterPubSub(PubSub):
         # subscriptions to reconcile.
         if not self.shard_channels:
             return
-        # Serialize lazy executor creation and submission against concurrent
-        # on_slots_changed calls (EventDispatcher releases its lock before
-        # invoking listeners, so two MovedError-handling threads can land
-        # here at once) and against reset() which tears the executor down.
-        # Without this, two threads could each create a ThreadPoolExecutor
-        # and one would be orphaned (leaking its worker thread); a reset()
-        # interleaved between create and submit() could also raise
-        # RuntimeError("cannot schedule new futures after shutdown").
-        with self._shard_state_lock:
-            if self._reconcile_executor is None:
-                self._reconcile_executor = ThreadPoolExecutor(
-                    max_workers=1,
-                    thread_name_prefix="redis-cluster-pubsub-reconcile",
-                )
-            future = self._reconcile_executor.submit(
-                self.reinitialize_shard_subscriptions
-            )
-            self._reconcile_futures.add(future)
-        future.add_done_callback(self._discard_reconcile_future)
-        # Consume the future's exception (if any) so it is not silently lost.
-        # reinitialize_shard_subscriptions surfaces SlotNotCoveredError when
-        # a slot is still transiently uncovered; route it through the same
-        # logger channel as the async path for consistent observability.
-        future.add_done_callback(self._log_reconcile_future_exception)
+        # Takes no lock. This hook runs inline on whichever thread refreshed the
+        # topology - including a command or pubsub thread that handled an
+        # SMIGRATED push and still holds OSSMaintNotificationsHandler._lock.
+        # Waiting here for a reconciliation pass that is itself waiting for a
+        # per-node pubsub I/O lock held by a third thread blocked on that
+        # handler lock is a deadlock cycle. The async counterpart takes no lock
+        # here either (the event loop serializes it), so this is also the
+        # shape sync/async parity asks for.
+        self._submit_reconcile_work(self.reinitialize_shard_subscriptions)
 
-    def _discard_reconcile_future(self, future: "Future") -> None:
-        # Done-callback fires on the worker thread. Take _shard_state_lock so
-        # the discard observes the same mutual-exclusion discipline as the
-        # add() / clear() sites; without it the set mutation is correct only
-        # because of CPython's GIL and would race under free-threaded builds.
-        with self._shard_state_lock:
-            self._reconcile_futures.discard(future)
+    def _submit_reconcile_work(self, work: Callable[[], Any]) -> Optional["Future"]:
+        """Run ``work`` on the reconciliation worker, without taking a lock.
+
+        The executor is installed by ``reset()`` and never None afterwards, so
+        there is nothing to create here and no creation race to serialize - see
+        the ``_reconcile_executor`` comment in ``__init__`` for why the callers
+        must not block. Only ``reset()`` swaps it, and a submit that loses that
+        race raises ``RuntimeError``: read the attribute once so the swap cannot
+        be observed half-done, and treat the rejection as "nothing to do", which
+        it is - ``reset()`` has already dropped the shard channels this pass
+        would have reconciled.
+        """
+        executor = self._reconcile_executor
+        if executor is None:
+            # Defensive: reset() runs from PubSub.__init__, so by the time any
+            # caller can get here an executor is installed.
+            return None
+        try:
+            future = executor.submit(work)
+        except RuntimeError:
+            return None
+        # Consume the future's exception (if any) so it is not silently lost.
+        # reinitialize_shard_subscriptions surfaces SlotNotCoveredError when a
+        # slot is still transiently uncovered; route it through the same logger
+        # channel as the async path for consistent observability.
+        future.add_done_callback(self._log_reconcile_future_exception)
+        return future
 
     @staticmethod
     def _log_reconcile_future_exception(future: "Future") -> None:
@@ -3458,30 +4365,40 @@ class ClusterPubSub(PubSub):
         # node_pubsub_mapping under this lock. Without it, super().reset()
         # rebinds shard_channels and pending_unsubscribe_shard_channels in
         # parallel with a concurrent user-thread mutation, silently dropping
-        # subscription intent. cancel_futures drops queued reconciliation
-        # work; the currently-running task (if any) is already serialized
-        # against us by this same lock - shutdown(wait=False) avoids waiting
-        # on the worker thread's join, not on its critical section.
+        # subscription intent. The reconciliation executor is swapped out at the
+        # end of that critical section; see the comment there for why it goes
+        # last.
         with self._shard_state_lock:
-            if self._reconcile_executor is not None:
-                self._reconcile_executor.shutdown(wait=False, cancel_futures=True)
-                self._reconcile_executor = None
-            self._reconcile_futures.clear()
             # Tear down per-node pubsubs (parity with async aclose) so they
             # don't leak their dedicated connections and don't replay stale
             # shard_channels via PubSub.on_connect on a subsequent reconnect.
             # Errors are swallowed because reset() is also a fallback path
             # from __del__; we cannot let one buggy per-node pubsub mask the
             # rest of the teardown.
+            # The per-node I/O lock keeps the socket from being torn down
+            # beneath a concurrent bounded poll parked in parse_response. It is
+            # an RLock, so re-entry from this thread is fine; contention is with
+            # another thread's bounded poll and is bounded by that poll's
+            # timeout (an unbounded poll holds nullcontext() - see
+            # _poll_io_lock). reset() is also the __del__ fallback path, where
+            # the try below does not cover a blocking acquire - that boundedness
+            # is what makes taking the lock here safe.
             for pubsub in self.node_pubsub_mapping.values():
                 try:
-                    pubsub.reset()
+                    with self._pubsub_io_lock(pubsub):
+                        pubsub.reset()
                 except Exception:
                     pass
             # Drop the now-dead per-node pubsubs from the mapping so the
             # round-robin in _pubsubs_generator / _sharded_message_generator
             # cannot yield them between teardown and re-subscription.
             self.node_pubsub_mapping.clear()
+            self._unreachable_nodes.clear()
+            # Drop the throttle window too: a reused pubsub that keeps a
+            # deadline armed before the teardown would skip the first repair
+            # after resubscribing, delaying the move of its shard channels
+            # off a node that is already gone.
+            self._next_topology_repair = 0.0
             # _pubsubs_generator captures node_pubsub_mapping.values() into
             # a local list inside ``yield from``; clearing the mapping does
             # not reach references already held by that captured snapshot,
@@ -3493,6 +4410,23 @@ class ClusterPubSub(PubSub):
             self._pubsubs_generator = type(self)._pubsubs_generator(self)
             super().reset()
             self._shard_channel_to_node = {}
+            # Swap in a fresh reconciliation executor and retire the old one.
+            # Installing the replacement is what lets the scheduling sites stay
+            # lock-free (see __init__); it costs nothing until something is
+            # submitted, because a ThreadPoolExecutor spawns its worker on the
+            # first submit(). Done last, after super().reset() has emptied
+            # shard_channels, so a concurrent on_slots_changed either loses the
+            # swap and is rejected or finds nothing left to reconcile.
+            # cancel_futures drops queued reconciliation work; a pass already
+            # running is serialized against us by _shard_state_lock, and
+            # shutdown(wait=False) avoids waiting on the worker thread's join.
+            retired = self._reconcile_executor
+            self._reconcile_executor = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="redis-cluster-pubsub-reconcile",
+            )
+            if retired is not None:
+                retired.shutdown(wait=False, cancel_futures=True)
 
     def get_redis_connection(self):
         """
@@ -3551,8 +4485,9 @@ class ClusterPipeline(RedisCluster):
         retry: Optional[Retry] = None,
         lock=None,
         transaction=False,
-        policy_resolver: PolicyResolver = StaticPolicyResolver(),
+        policy_resolver: Optional[PolicyResolver] = None,
         event_dispatcher: Optional["EventDispatcher"] = None,
+        metadata_resolver: Optional[MetadataResolver] = None,
         **kwargs,
     ):
         """ """
@@ -3612,7 +4547,7 @@ class ClusterPipeline(RedisCluster):
             Union[RequestPolicy, ResponsePolicy], Callable
         ] = {
             RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [
-                self.get_random_primary_or_all_nodes(command_name)
+                self.get_keyless_target_node(command_name)
             ],
             RequestPolicy.DEFAULT_KEYED: lambda command,
             *args: self.get_nodes_from_slot(command, *args),
@@ -3627,7 +4562,21 @@ class ClusterPipeline(RedisCluster):
             ResponsePolicy.DEFAULT_KEYED: lambda res: res,
         }
 
-        self._policy_resolver = policy_resolver
+        # ``RedisCluster.pipeline`` passes the client's own resolvers, so a pipeline routes by
+        # whatever the client routes by. Only a pipeline built directly, without either, falls
+        # back to the static default. Precedence between the two mirrors ``RedisCluster`` -
+        # see the note there.
+        if metadata_resolver is None:
+            self._metadata_resolver: MetadataResolver = StaticMetadataResolver()
+        else:
+            self._metadata_resolver = metadata_resolver
+
+        if policy_resolver is None:
+            self._policy_resolver: PolicyResolver = StaticPolicyResolver(
+                metadata_resolver=self._metadata_resolver
+            )
+        else:
+            self._policy_resolver = policy_resolver
 
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -3868,7 +4817,10 @@ class PipelineCommand:
         self.result = None
         self.node = None
         self.asking = False
-        self.command_policies: Optional[CommandPolicies] = None
+        # Either record type: a policy resolver serves ``CommandPolicies``, while the
+        # fallbacks below reuse the shared ``CommandMetadata`` defaults. Only the two routing
+        # policies, which both carry, are ever read.
+        self.command_policies: Optional[Union[CommandPolicies, CommandMetadata]] = None
 
 
 class NodeCommands:
@@ -4258,7 +5210,7 @@ class PipelineStrategy(AbstractStrategy):
                     target_nodes = self._parse_target_nodes(passed_targets)
 
                     if not command_policies:
-                        command_policies = CommandPolicies()
+                        command_policies = _DEFAULT_KEYLESS_METADATA
                 else:
                     if not command_policies:
                         command = c.args[0].upper()
@@ -4278,31 +5230,23 @@ class PipelineStrategy(AbstractStrategy):
                             # <7 breaks on COMMAND GETKEYS when numkeys is 0.
                             # Other unflagged commands keep the keyless fallback.
                             if command in ("EVAL", "EVALSHA"):
-                                command_policies = CommandPolicies(
-                                    request_policy=RequestPolicy.DEFAULT_KEYED,
-                                    response_policy=ResponsePolicy.DEFAULT_KEYED,
-                                )
+                                command_policies = _DEFAULT_KEYED_METADATA
                             else:
                                 if not self._pipe.get_default_node():
                                     keys = None
                                 else:
                                     keys = self._pipe._get_command_keys(*c.args)
                                 if not keys or len(keys) == 0:
-                                    command_policies = CommandPolicies()
+                                    command_policies = _DEFAULT_KEYLESS_METADATA
                                 else:
-                                    command_policies = CommandPolicies(
-                                        request_policy=RequestPolicy.DEFAULT_KEYED,
-                                        response_policy=ResponsePolicy.DEFAULT_KEYED,
-                                    )
+                                    command_policies = _DEFAULT_KEYED_METADATA
                         else:
                             if command_flag in self._pipe._command_flags_mapping:
-                                command_policies = CommandPolicies(
-                                    request_policy=self._pipe._command_flags_mapping[
-                                        command_flag
-                                    ]
-                                )
+                                command_policies = _METADATA_BY_REQUEST_POLICY[
+                                    self._pipe._command_flags_mapping[command_flag]
+                                ]
                             else:
-                                command_policies = CommandPolicies()
+                                command_policies = _DEFAULT_KEYLESS_METADATA
 
                     target_nodes = self._determine_nodes(
                         *c.args,
@@ -4505,7 +5449,7 @@ class PipelineStrategy(AbstractStrategy):
         return nodes
 
     def _determine_nodes(
-        self, *args, request_policy: RequestPolicy, **kwargs
+        self, *args, request_policy: Optional[RequestPolicy] = None, **kwargs
     ) -> List["ClusterNode"]:
         # Determine which nodes should be executed the command on.
         # Returns a list of target nodes.
@@ -4516,16 +5460,19 @@ class PipelineStrategy(AbstractStrategy):
         ):
             command = f"{args[0]} {args[1]}".upper()
 
+        # The caller resolves the command's own policy - see
+        # ``RedisCluster._resolve_command_policies`` - so the only decision left here is
+        # an explicit nodes flag, which overrides it.
         nodes_flag = kwargs.pop("nodes_flag", None)
-        if nodes_flag is not None:
+        if nodes_flag and self._is_nodes_flag(nodes_flag):
             # nodes flag passed by the user
-            command_flag = nodes_flag
-        else:
-            # get the nodes group for this command if it was predefined
-            command_flag = self._pipe.command_flags.get(command)
+            if nodes_flag in self._pipe._command_flags_mapping:
+                request_policy = self._pipe._command_flags_mapping[nodes_flag]
 
-        if command_flag in self._pipe._command_flags_mapping:
-            request_policy = self._pipe._command_flags_mapping[command_flag]
+        if request_policy is None:
+            raise RedisClusterException(
+                f"No targets were found to execute {args} command on"
+            )
 
         policy_callback = self._pipe._policies_callback_mapping[request_policy]
 

@@ -1,7 +1,7 @@
 import pytest
 
 from redis._parsers import AsyncCommandsParser
-from redis._parsers.commands import RequestPolicy, ResponsePolicy
+from redis.commands.metadata import RequestPolicy, ResponsePolicy
 from tests.conftest import skip_if_server_version_gte, skip_if_server_version_lt
 from tests.helpers import get_expected_command_policies
 

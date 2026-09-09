@@ -2,7 +2,7 @@ import logging
 from time import sleep
 from typing import Callable
 
-from redis._parsers.commands import RequestPolicy, ResponsePolicy
+from redis.commands.metadata import RequestPolicy, ResponsePolicy
 
 
 def wait_for_condition(

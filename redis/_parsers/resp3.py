@@ -150,6 +150,11 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
             if push_request:
                 return response
 
+            # `timeout` has to be forwarded here too: it is the caller's bound
+            # for this read, and dropping it would silently fall back to the
+            # connection's socket_timeout for the rest of the response just
+            # because a push message happened to interleave. The hiredis parser
+            # already forwards it on the same continuation.
             return self._read_response(
                 disable_decoding=disable_decoding,
                 push_request=push_request,
@@ -181,6 +186,8 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
         push_request: bool = False,
         timeout: Union[float, object] = SENTINEL,
     ):
+        if not self._connected:
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         self._pos = 0
         response = await self._read_response(
             disable_decoding=disable_decoding,
