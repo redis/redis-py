@@ -187,6 +187,7 @@ reinitialization
 replicaof
 repo
 resharding
+resolver's
 resolvers
 runtime
 sedrik

@@ -68,6 +68,7 @@ from redis.auth.token import TokenInterface
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE, AbstractRedis
 from redis.cluster import (
+    _REPLICAS_ONLY_STRATEGIES,
     PIPELINE_BLOCKED_COMMANDS,
     PRIMARY,
     REPLICA,
@@ -83,12 +84,14 @@ from redis.cluster import (
     parse_cluster_shards_with_str_keys,
     parse_cluster_slots,
 )
-from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
+from redis.commands import AsyncRedisClusterCommands
 from redis.commands.helpers import list_or_args, parse_pubsub_subscriptions
 from redis.commands.metadata import (
     _DEFAULT_KEYED_METADATA,
     _DEFAULT_KEYLESS_METADATA,
     _METADATA_BY_REQUEST_POLICY,
+    AsyncMetadataResolver,
+    AsyncStaticMetadataResolver,
     CommandMetadata,
     CommandPolicies,
     RequestPolicy,
@@ -162,6 +165,59 @@ logger = logging.getLogger(__name__)
 TargetNodesT = TypeVar(
     "TargetNodesT", str, "ClusterNode", List["ClusterNode"], Dict[Any, "ClusterNode"]
 )
+
+_T = TypeVar("_T")
+
+
+def _run_coroutine_in_thread(coro: Coroutine[Any, Any, _T]) -> _T:
+    """
+    Runs ``coro`` to completion on a private event loop in a worker thread.
+
+    The bridge for the places where a synchronous entry point has to drive an awaitable
+    body. The caller may already be running an event loop, which rules out both awaiting
+    the coroutine and running it here with ``asyncio.run``, so it gets a loop of its own
+    and the calling thread blocks until it finishes. Whatever the coroutine raised is
+    re-raised to the caller, so the entry point fails the way it would have had the body
+    run in place.
+
+    .. warning::
+
+       **Deadlock hazard. Pass only a coroutine that touches nothing bound to the
+       caller's loop.** The ``thread.join()`` below blocks the calling thread for the
+       whole run, so when that thread is the one running an event loop, the loop stops
+       making progress for the duration. A body that then awaits anything owned by that
+       loop - a future, a task, a lock, or I/O over a pooled connection - is waiting on a
+       loop that is itself blocked on this very ``join()``. The result is a permanent
+       stall, not an exception: nothing times out and nothing is raised. Loop-bound
+       futures may instead fail with a cross-loop ``RuntimeError``, which is the luckier
+       outcome because at least it is visible.
+
+    Pass only a body whose awaits are self-contained, and prefer restructuring the entry
+    point to be ``async`` over reaching for this.
+    """
+    result: Any = None
+    error: BaseException | None = None
+
+    def runner() -> None:
+        nonlocal result
+        nonlocal error
+        try:
+            result = asyncio.run(coro)
+        except BaseException as e:
+            error = e
+
+    thread = threading.Thread(target=runner)
+    thread.start()
+    # Unconditional and untimed by design: the caller expects a value, so there is no
+    # partial result to return early with. If the caller's thread is running an event
+    # loop, that loop is blocked here, which is why the coroutine must never await
+    # anything owned by it. See the deadlock hazard in the docstring above.
+    thread.join()
+
+    if error is not None:
+        raise error
+
+    return result
 
 
 class AsyncMaintNotificationsAbstractRedisCluster:
@@ -278,6 +334,12 @@ class RedisCluster(
         | Enable read from replicas in READONLY mode and defines the load balancing
           strategy that will be used for cluster node selection.
           The data read from replicas is eventually consistent with the data in primary nodes.
+    :param metadata_resolver:
+        | Optional :class:`~.AsyncMetadataResolver` instance used to map command names
+          to replica-safe routing rules. If not provided, an AsyncStaticMetadataResolver
+          is used by default. The routing view of it is derived into the default
+          ``policy_resolver``; an explicit ``policy_resolver`` supersedes that view, but
+          replica safety keeps resolving through this argument either way.
     :param dynamic_startup_nodes:
         | Set the RedisCluster's startup nodes to all the discovered nodes.
           If true (default value), the cluster's discovered nodes will be used to
@@ -469,6 +531,7 @@ class RedisCluster(
         event_dispatcher: EventDispatcher | None = None,
         policy_resolver: AsyncPolicyResolver | None = None,
         maint_notifications_config: MaintNotificationsConfig | None = None,
+        metadata_resolver: AsyncMetadataResolver | None = None,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -641,9 +704,9 @@ class RedisCluster(
         self._policies_callback_mapping: dict[
             Union[RequestPolicy, ResponsePolicy], Callable
         ] = {
-            RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [
-                self.get_random_primary_or_all_nodes(command_name)
-            ],
+            RequestPolicy.DEFAULT_KEYLESS: lambda command_name: (
+                self.get_keyless_target_node(command_name)
+            ),
             RequestPolicy.DEFAULT_KEYED: self.get_nodes_from_slot,
             RequestPolicy.DEFAULT_NODE: lambda: [self.get_default_node()],
             RequestPolicy.ALL_SHARDS: self.get_primaries,
@@ -658,10 +721,37 @@ class RedisCluster(
         # resolver and the memos it accumulates are released with the client. The async
         # ClusterPipeline holds the client and reads this attribute, so a pipeline routes by
         # whatever the client routes by without any propagation of its own.
+        if metadata_resolver is None:
+            self._metadata_resolver: AsyncMetadataResolver = (
+                AsyncStaticMetadataResolver()
+            )
+        else:
+            self._metadata_resolver = metadata_resolver
+
+        # ``policy_resolver`` is the routing view of a metadata resolver, so the two
+        # arguments overlap. Resolved by precedence rather than by rejecting the
+        # combination, because a user migrating from one to the other will legitimately pass
+        # both: an explicit ``policy_resolver`` - the extension point that shipped in 7.1.0
+        # - keeps deciding which nodes a command targets, and otherwise those policies are
+        # derived from the metadata resolver.
+        #
+        # The precedence covers the routing view only. Replica safety is read from
+        # ``_metadata_resolver`` either way, because the projection a policy resolver serves
+        # drops the flag it is decided from - a ``CommandPolicies`` record has no
+        # ``is_readonly``. Mirrors the sync stack, including the log below.
         if policy_resolver is None:
-            self._policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver()
+            self._policy_resolver: AsyncPolicyResolver = AsyncStaticPolicyResolver(
+                metadata_resolver=self._metadata_resolver
+            )
         else:
             self._policy_resolver = policy_resolver
+            if metadata_resolver is not None:
+                logger.debug(
+                    "Both policy_resolver and metadata_resolver were given; the nodes a "
+                    "command targets resolve through policy_resolver and ignore "
+                    "metadata_resolver. Replica safety still resolves through "
+                    "metadata_resolver."
+                )
         self.commands_parser = AsyncCommandsParser()
         self._aggregate_nodes = None
         self.node_flags = self.__class__.NODE_FLAGS.copy()
@@ -871,14 +961,77 @@ class RedisCluster(
 
         return slot_cache[node_idx]
 
-    def get_random_primary_or_all_nodes(self, command_name):
+    async def get_keyless_target_node(self, command_name: str) -> "ClusterNode":
         """
-        Returns random primary or all nodes depends on READONLY mode.
+        Returns the node a keyless command is routed to: a random node when replica reads
+        are enabled and the command is safe to serve from a replica, a random primary
+        otherwise.
+
+        A replicas-only ``load_balancing_strategy`` is honored by picking from the replicas
+        alone, so a strategy that asks for replicas cannot land on a primary here. The
+        strategy is not applied any further than that: the rest of it is an index into one
+        shard's node list and a round-robin counter kept per primary name, and a keyless
+        command has no shard to index - so the pick is uniform over the eligible nodes.
+
+        Falls back to the whole node set when the cluster has no replicas to pick from,
+        which is every primary. That is also the answer for the two strategies that
+        include the primary, and for ``read_from_replicas`` on its own, which is what this
+        method has returned for a replica-safe command since 7.1.0.
         """
-        if self.read_from_replicas and command_name in READ_COMMANDS:
+        replica_safe = (
+            self.read_from_replicas or self.load_balancing_strategy is not None
+        ) and await self._is_replica_safe(command_name)
+        if replica_safe:
+            if self.load_balancing_strategy in _REPLICAS_ONLY_STRATEGIES:
+                replicas = self.get_replicas()
+                if replicas:
+                    return random.choice(replicas)
+
             return self.get_random_node()
 
         return self.get_random_primary_node()
+
+    @deprecated_function(
+        version="8.2.0",
+        reason="Use get_keyless_target_node() instead.",
+    )
+    def get_random_primary_or_all_nodes(self, command_name: str) -> "ClusterNode":
+        """
+        Returns random primary or all nodes depends on READONLY mode.
+
+        Deprecated wrapper over :meth:`get_keyless_target_node`, kept so the name that
+        has been public since 7.1.0 keeps working. Replica safety is resolved through the
+        metadata resolver, which is awaitable, so the coroutine runs on its own event loop
+        in a worker thread to keep this entry point synchronous.
+
+        .. warning::
+
+           **Do not extend this method, and do not call it from a running event loop.**
+           Keeping the 7.1.0 signature synchronous costs a thread bridge
+           (``_run_coroutine_in_thread``) that blocks the calling thread until the
+           resolver answers. Two rules follow, and breaking either one stalls the caller
+           permanently rather than raising:
+
+           1. **Override the right method.** A subclass that customizes keyless routing
+              must override :meth:`get_keyless_target_node`, the coroutine the client
+              actually awaits. Overriding this name changes nothing, because no code path
+              inside the client calls it.
+           2. **Keep a custom resolver synchronous in effect.** A caller-supplied
+              ``AsyncMetadataResolver`` must implement ``is_replica_safe`` as a
+              self-contained in-memory lookup. One that awaits work owned by the caller's
+              loop - I/O over a pooled connection, say - waits on a loop this bridge has
+              already blocked, and hangs.
+
+        That bridge is what confines this method to the deprecation window. It is sound
+        for the resolvers the library ships, whose ``is_replica_safe`` suspends on nothing,
+        and nothing inside the client reaches this path: keyless routing goes through
+        :meth:`get_keyless_target_node`, which is awaited normally. So the hazard is
+        confined to callers of this deprecated name.
+        """
+        return _run_coroutine_in_thread(self.get_keyless_target_node(command_name))
+
+    async def _is_replica_safe(self, command_name: str) -> bool:
+        return await self._metadata_resolver.is_replica_safe(command_name)
 
     def get_random_primary_node(self) -> "ClusterNode":
         """
@@ -891,11 +1044,14 @@ class RedisCluster(
         Returns a list of nodes that hold the specified keys' slots.
         """
         # get the node that holds the key's slot
+        replica_safe = (
+            self.read_from_replicas or self.load_balancing_strategy is not None
+        ) and await self._is_replica_safe(command)
         return [
             self.nodes_manager.get_node_from_slot(
                 await self._determine_slot(command, *args),
-                self.read_from_replicas and command in READ_COMMANDS,
-                self.load_balancing_strategy if command in READ_COMMANDS else None,
+                replica_safe,
+                self.load_balancing_strategy if replica_safe else None,
             )
         ]
 
@@ -967,28 +1123,92 @@ class RedisCluster(
         """Set a custom response callback."""
         self.response_callbacks[command] = callback
 
+    async def _resolve_command_policies(
+        self, *args: Any, target_nodes_specified: bool = False
+    ) -> Tuple[str, Union[CommandPolicies, CommandMetadata]]:
+        """
+        Resolves the policies a command routes and aggregates by.
+
+        Returns the name the policies were decided by along with the record, because the
+        name a command is known by is not always ``args[0]``: a container command is
+        keyed by both of its words, and the flag tables are keyed in upper case. Callers
+        that look the command up elsewhere - result callbacks, observability - use the
+        returned name so they agree with the routing decision.
+
+        The name is normalized before any branch, so one command answers with one name
+        however it got here. The result callbacks are keyed in upper case, so a name that
+        kept the caller's spelling on only some paths would fire them on only some paths -
+        ``execute_command("dbsize")`` would be summed and ``execute_command("dbsize",
+        target_nodes=...)`` would not.
+
+        First choice is the policy resolver. When it does not know the command, the
+        fallbacks are, in order: nothing to route at all because the caller named its
+        targets, the command's ``COMMAND_FLAGS`` entry, and finally whether the command
+        carries a key.
+        """
+        command = args[0].upper()
+        if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
+            command = f"{args[0]} {args[1]}".upper()
+
+        if target_nodes_specified:
+            # The caller named its targets, so nothing is routed from here - and the
+            # command's own aggregation must not apply either. A response policy resolved
+            # for the whole cluster (``ONE_SUCCEEDED``, an ``AGG_*``) would short-circuit
+            # the loop over the nodes the caller picked, or fold their replies into one.
+            # Answer with the record that aggregates nothing, and skip the resolver: with
+            # the targets given, neither of its answers is used.
+            return command, _DEFAULT_KEYLESS_METADATA
+
+        policies = await self._policy_resolver.resolve(args[0].lower())
+        if policies:
+            return command, policies
+
+        command_flag = self.command_flags.get(command)
+        if command_flag:
+            if command_flag in self._command_flags_mapping:
+                return command, _METADATA_BY_REQUEST_POLICY[
+                    self._command_flags_mapping[command_flag]
+                ]
+            return command, _DEFAULT_KEYLESS_METADATA
+
+        # Unflagged and unresolved, so the command routes by its key. Without a default
+        # node the topology is not known yet and there is no slot to route by.
+        if not self.get_default_node():
+            return command, _DEFAULT_KEYLESS_METADATA
+
+        slot = await self._determine_slot(*args)
+        if slot is None:
+            return command, _DEFAULT_KEYLESS_METADATA
+
+        return command, _DEFAULT_KEYED_METADATA
+
     async def _determine_nodes(
         self,
         command: str,
         *args: Any,
-        request_policy: RequestPolicy,
+        request_policy: Optional[RequestPolicy] = None,
         node_flag: Optional[str] = None,
     ) -> List["ClusterNode"]:
         # Determine which nodes should be executed the command on.
         # Returns a list of target nodes.
-        if not node_flag:
-            # get the nodes group for this command if it was predefined
-            node_flag = self.command_flags.get(command)
+        # The caller resolves the command's own policy - see
+        # ``_resolve_command_policies`` - so the only decision left here is an explicit
+        # node flag, which overrides it.
+        if node_flag and self._is_node_flag(node_flag):
+            if node_flag in self._command_flags_mapping:
+                request_policy = self._command_flags_mapping[node_flag]
 
-        if node_flag in self._command_flags_mapping:
-            request_policy = self._command_flags_mapping[node_flag]
+        if request_policy is None:
+            raise RedisClusterException(
+                f"No targets were found to execute {command} command on"
+            )
 
         policy_callback = self._policies_callback_mapping[request_policy]
 
         if request_policy == RequestPolicy.DEFAULT_KEYED:
             nodes = await policy_callback(command, *args)
         elif request_policy == RequestPolicy.DEFAULT_KEYLESS:
-            nodes = policy_callback(command)
+            nodes = [await policy_callback(command)]
         else:
             nodes = policy_callback()
 
@@ -998,7 +1218,7 @@ class RedisCluster(
         return nodes
 
     async def _determine_slot(self, command: str, *args: Any) -> int:
-        if self.command_flags.get(command) == SLOT_ID:
+        if self.command_flags.get(command.upper()) == SLOT_ID:
             # The command contains the slot ID
             return int(args[0])
 
@@ -1135,7 +1355,6 @@ class RedisCluster(
         :raises RedisClusterException: if target_nodes is not provided & the command
             can't be mapped to a slot
         """
-        command = args[0]
         target_nodes = []
         target_nodes_specified = False
         retry_attempts = self.retry.get_retries()
@@ -1146,29 +1365,9 @@ class RedisCluster(
             target_nodes_specified = True
             retry_attempts = 0
 
-        command_policies = await self._policy_resolver.resolve(args[0].lower())
-
-        if not command_policies and not target_nodes_specified:
-            command_flag = self.command_flags.get(command)
-            if not command_flag:
-                # Fallback to default policy
-                if not self.get_default_node():
-                    slot = None
-                else:
-                    slot = await self._determine_slot(*args)
-                if slot is None:
-                    command_policies = _DEFAULT_KEYLESS_METADATA
-                else:
-                    command_policies = _DEFAULT_KEYED_METADATA
-            else:
-                if command_flag in self._command_flags_mapping:
-                    command_policies = _METADATA_BY_REQUEST_POLICY[
-                        self._command_flags_mapping[command_flag]
-                    ]
-                else:
-                    command_policies = _DEFAULT_KEYLESS_METADATA
-        elif not command_policies and target_nodes_specified:
-            command_policies = _DEFAULT_KEYLESS_METADATA
+        command, command_policies = await self._resolve_command_policies(
+            *args, target_nodes_specified=target_nodes_specified
+        )
 
         # Add one for the first execution
         execute_attempts = 1 + retry_attempts
@@ -1237,8 +1436,13 @@ class RedisCluster(
                     last_failed_node_name = getattr(e, "last_failed_node_name", None)
 
                     if hasattr(e, "connection"):
+                        # ``args[0]``, not the resolved ``command``: every other metric in
+                        # this class - including the per-command one ``_execute_command``
+                        # records on success - names the command the caller spelled. Using
+                        # the routed name only here would report one command under two
+                        # names depending on whether it was retried.
                         await self._record_command_metric(
-                            command_name=command,
+                            command_name=args[0],
                             duration_seconds=time.monotonic() - start_time,
                             connection=e.connection,
                             error=e,
@@ -1288,12 +1492,14 @@ class RedisCluster(
                     # MOVED occurred and the slots cache was updated,
                     # refresh the target node
                     slot = await self._determine_slot(*args)
+                    replica_safe = (
+                        self.read_from_replicas
+                        or self.load_balancing_strategy is not None
+                    ) and await self._is_replica_safe(args[0])
                     target_node = self.nodes_manager.get_node_from_slot(
                         slot,
-                        self.read_from_replicas and args[0] in READ_COMMANDS,
-                        self.load_balancing_strategy
-                        if args[0] in READ_COMMANDS
-                        else None,
+                        replica_safe,
+                        self.load_balancing_strategy if replica_safe else None,
                     )
                     moved = False
 
@@ -2967,36 +3173,16 @@ class PipelineStrategy(AbstractStrategy):
         nodes = {}
         for cmd in todo:
             passed_targets = cmd.kwargs.pop("target_nodes", None)
-            command_policies = await client._policy_resolver.resolve(
-                cmd.args[0].lower()
+            target_nodes_specified = bool(passed_targets) and not client._is_node_flag(
+                passed_targets
+            )
+            _, command_policies = await client._resolve_command_policies(
+                *cmd.args, target_nodes_specified=target_nodes_specified
             )
 
-            if passed_targets and not client._is_node_flag(passed_targets):
+            if target_nodes_specified:
                 target_nodes = client._parse_target_nodes(passed_targets)
-
-                if not command_policies:
-                    command_policies = _DEFAULT_KEYLESS_METADATA
             else:
-                if not command_policies:
-                    command_flag = client.command_flags.get(cmd.args[0])
-                    if not command_flag:
-                        # Fallback to default policy
-                        if not client.get_default_node():
-                            slot = None
-                        else:
-                            slot = await client._determine_slot(*cmd.args)
-                        if slot is None:
-                            command_policies = _DEFAULT_KEYLESS_METADATA
-                        else:
-                            command_policies = _DEFAULT_KEYED_METADATA
-                    else:
-                        if command_flag in client._command_flags_mapping:
-                            command_policies = _METADATA_BY_REQUEST_POLICY[
-                                client._command_flags_mapping[command_flag]
-                            ]
-                        else:
-                            command_policies = _DEFAULT_KEYLESS_METADATA
-
                 target_nodes = await client._determine_nodes(
                     *cmd.args,
                     request_policy=command_policies.request_policy,
@@ -3209,25 +3395,7 @@ class TransactionStrategy(AbstractStrategy):
 
     def execute_command(self, *args: Union[KeyT, EncodableT], **kwargs: Any) -> "Any":
         # Given the limitation of ClusterPipeline sync API, we have to run it in thread.
-        response = None
-        error = None
-
-        def runner():
-            nonlocal response
-            nonlocal error
-            try:
-                response = asyncio.run(self._execute_command(*args, **kwargs))
-            except Exception as e:
-                error = e
-
-        thread = threading.Thread(target=runner)
-        thread.start()
-        thread.join()
-
-        if error:
-            raise error
-
-        return response
+        return _run_coroutine_in_thread(self._execute_command(*args, **kwargs))
 
     async def _execute_command(
         self, *args: Union[KeyT, EncodableT], **kwargs: Any
@@ -4191,7 +4359,7 @@ class ClusterPubSub(PubSub):
         ``timeout=None`` makes ``_poll_node_pubsub``'s read wait indefinitely,
         so holding the lock across it would block reconciliation for as long as
         no message arrives. Such a caller drives the pubsub itself and gets the
-        pre-existing unguarded behaviour; every bounded poll - which is what
+        pre-existing unguarded behavior; every bounded poll - which is what
         ``ClusterPubSub``'s own callers use - is serialized.
         """
         if timeout is None:
