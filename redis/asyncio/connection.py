@@ -76,6 +76,7 @@ from redis.asyncio.observability.recorder import (
 )
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
+from redis.connection import HiredisRespSerializer
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import (
     AuthenticationError,
@@ -723,6 +724,11 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
         self._buffer_cutoff = 6000
         self._re_auth_token: Optional[TokenInterface] = None
+        self._command_packer = (
+            HiredisRespSerializer(self._pack_command_python, self.encoder.encode)
+            if HIREDIS_AVAILABLE
+            else None
+        )
         self._should_reconnect = False
 
         try:
@@ -1445,6 +1451,11 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         return await self._parser.read_response(disable_decoding=disable_decoding)
 
     def pack_command(self, *args: EncodableT) -> List[bytes]:
+        if self._command_packer is not None:
+            return self._command_packer.pack(*args)
+        return self._pack_command_python(*args)
+
+    def _pack_command_python(self, *args: EncodableT) -> List[bytes]:
         """Pack a series of arguments into the Redis protocol"""
         output = []
         # the client might have included 1 or more literal arguments in
