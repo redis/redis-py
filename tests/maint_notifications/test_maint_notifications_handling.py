@@ -434,6 +434,8 @@ class TestMaintenanceNotificationsBase:
         enable_cache=False,
         max_connections=10,
         maint_notifications_config=None,
+        client_name=None,
+        db=0,
     ):
         """Helper method to create a pool and Redis client with maintenance notifications configuration.
 
@@ -456,12 +458,16 @@ class TestMaintenanceNotificationsBase:
         if enable_cache:
             pool_kwargs = {"cache_config": CacheConfig()}
 
+        if client_name is not None:
+            pool_kwargs["client_name"] = client_name
+
         test_pool = pool_class(
             connection_class=connection_class,
             host=DEFAULT_ADDRESS.split(":")[0],
             port=int(DEFAULT_ADDRESS.split(":")[1]),
             max_connections=max_connections,
             protocol=3,  # Required for maintenance notifications
+            db=db,
             maint_notifications_config=config,
             **pool_kwargs,
         )
@@ -531,6 +537,49 @@ class TestMaintenanceNotificationsHandshake(TestMaintenanceNotificationsBase):
                 # for internal-ip
                 test_redis_client.set("hello", "world")
 
+        finally:
+            test_redis_client.close()
+
+    def test_handshake_pipelines_full_tail_with_client_name_and_db(self):
+        """The whole handshake tail -- CLIENT MAINT_NOTIFICATIONS, SETNAME, both
+        SETINFO commands and SELECT -- is pipelined (all sent, then the replies read
+        back in send order).
+
+        Uses enabled="auto" with an internal-ip endpoint so the server rejects
+        MAINT_NOTIFICATIONS and its error reply is swallowed *mid-tail*. Because the
+        maint command is first, a following command only succeeds if the swallow
+        consumed exactly one reply and the remaining SETNAME/SETINFO/SELECT replies
+        stayed aligned -- this is the reply/command-ordering contract the whole
+        optimization depends on.
+        """
+        maint_notifications_config = MaintNotificationsConfig(
+            enabled="auto", endpoint_type=EndpointType.INTERNAL_IP
+        )
+        test_redis_client = self._get_client(
+            ConnectionPool,
+            maint_notifications_config=maint_notifications_config,
+            client_name="myclient",
+            db=5,
+        )
+        try:
+            # Post-handshake commands succeed -> replies stayed aligned even though
+            # the swallowed MAINT_NOTIFICATIONS error sits first in the tail.
+            assert test_redis_client.set("hello", "world") is True
+            assert test_redis_client.get("hello") == b"world"
+
+            # HELLO first (its own round-trip), then the tail commands in send order.
+            handshake_sock = next(
+                s for s in self.mock_sockets if any(b"HELLO" in w for w in s.sent_data)
+            )
+            wire = b"".join(handshake_sock.sent_data)
+            assert (
+                wire.index(b"HELLO")
+                < wire.index(b"MAINT_NOTIFICATIONS")
+                < wire.index(b"SETNAME")
+                < wire.index(b"LIB-NAME")
+                < wire.index(b"LIB-VER")
+                < wire.index(b"SELECT")
+            )
         finally:
             test_redis_client.close()
 

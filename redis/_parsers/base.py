@@ -172,11 +172,17 @@ class _RESPBase(BaseParser):
 class AsyncBaseParser(BaseParser):
     """Base parsing class for the python-backed async parser"""
 
-    __slots__ = "_stream", "_read_size"
+    __slots__ = "_stream", "_read_size", "_connected"
 
     def __init__(self, socket_read_size: int):
         self._stream: Optional[StreamReader] = None
         self._read_size = socket_read_size
+        # Initialized here, not only in on_connect() / on_disconnect(): the
+        # read guards in can_read() and the subclasses' read_response() consult
+        # this flag to turn a read on a dead connection into a retryable
+        # ConnectionError. A parser that has never connected would otherwise
+        # raise AttributeError from those guards, which no retry layer acts on.
+        self._connected: bool = False
 
     @deprecated_function(
         version="8.0.0", reason="Use can_read() instead", name="can_read_destructive"

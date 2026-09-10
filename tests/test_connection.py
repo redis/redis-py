@@ -1,15 +1,16 @@
 import copy
+import gc
 import os
 import platform
 import select
 import selectors
 import socket
 import ssl
-import sys
 import threading
 import time
 import types
-from errno import ECONNREFUSED, EWOULDBLOCK
+import weakref
+from errno import EBADF, ECONNREFUSED, EWOULDBLOCK
 from typing import Any
 from unittest import mock
 from unittest.mock import call, patch, MagicMock, Mock
@@ -467,6 +468,37 @@ def test_hiredis_read_from_socket_raises_connection_error_when_disconnected(
         parser.read_from_socket()
 
 
+@pytest.mark.parametrize("cleared_attr", ["_reader", "_sock"])
+def test_hiredis_can_read_raises_connection_error_when_disconnected(cleared_attr):
+    # a disconnect from another thread (e.g. the multi-database health check
+    # taking a database out of service) clears _sock and _reader while a pub/sub
+    # thread sits in can_read(). registering None with poll() raises TypeError,
+    # which no retry layer acts on, so the reading thread dies instead of
+    # reconnecting. can_read() must report the gone connection the same
+    # retryable way read_from_socket() does.
+    parser = make_hiredis_parser(has_data=False)
+    setattr(parser, cleared_attr, None)
+
+    with pytest.raises(ConnectionError, match="Connection closed by server"):
+        parser.can_read(timeout=0)
+
+
+@pytest.mark.skipif(
+    not hasattr(select, "poll"), reason="select.poll not available on this platform"
+)
+def test_hiredis_can_read_raises_connection_error_when_socket_already_closed():
+    # same race one step later: the socket object survives the concurrent
+    # disconnect but its file descriptor is already closed, so poll() cannot
+    # register it and raises ValueError.
+    parser = make_hiredis_parser(has_data=False)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.close()
+    parser._sock = sock
+
+    with pytest.raises(ConnectionError, match="Connection closed by server"):
+        parser.can_read(timeout=0)
+
+
 def test_hiredis_read_response_uses_local_reader_if_disconnected_mid_read():
     # regression for #4003: if _reader is cleared by a concurrent disconnect
     # after read_from_socket() returns, the in-flight read must still complete
@@ -483,6 +515,24 @@ def test_hiredis_read_response_uses_local_reader_if_disconnected_mid_read():
     assert parser.read_response() == b"OK"
 
 
+def test_hiredis_read_reports_concurrent_close_when_timeout_restore_fails():
+    # a concurrent disconnect() closes the socket as well as clearing the parser
+    # state, so restoring the per-call timeout in the finally raises EBADF. an
+    # exception from finally replaces the one being propagated, which would drop
+    # the ConnectionError the retry and failover layers act on.
+    parser = make_hiredis_parser()
+
+    def close_then_report_eof(_):
+        # only the restore fails; arming the per-call timeout already succeeded.
+        parser._sock.settimeout.side_effect = OSError(EBADF, "Bad file descriptor")
+        return 0
+
+    parser._sock.recv_into.side_effect = close_then_report_eof
+
+    with pytest.raises(ConnectionError, match="Connection closed by server"):
+        parser.read_from_socket(timeout=1)
+
+
 def test_socket_buffer_timeout_zero_maps_would_block_to_timeout():
     sock = Mock()
     sock.recv.side_effect = BlockingIOError(
@@ -492,6 +542,113 @@ def test_socket_buffer_timeout_zero_maps_would_block_to_timeout():
 
     with pytest.raises(TimeoutError):
         socket_buffer.readline(timeout=0)
+
+
+def test_socket_buffer_read_after_close_raises_connection_error():
+    """
+    A read on a closed buffer reports a gone connection.
+
+    ``close()`` runs on whichever thread tears the connection down - the
+    multi-database client closes connections from its health check thread - so a
+    command thread can reach these reads after it. ConnectionError is what the retry
+    and failover layers act on; ``ValueError: I/O operation on closed file`` escapes
+    them and surfaces at the caller of the command.
+    """
+    socket_buffer = SocketBuffer(Mock(), socket_read_size=65536, socket_timeout=None)
+    socket_buffer.close()
+
+    with pytest.raises(ConnectionError):
+        socket_buffer.readline()
+
+    with pytest.raises(ConnectionError):
+        socket_buffer.read(1)
+
+    with pytest.raises(ConnectionError):
+        socket_buffer.get_pos()
+
+    with pytest.raises(ConnectionError):
+        socket_buffer.unread_bytes()
+
+
+def test_socket_buffer_read_reports_concurrent_close_as_connection_error():
+    """
+    A close that lands while the read is blocked in recv reports a gone connection.
+
+    This is the window the test above cannot cover: the buffer is open when the read
+    starts and closed by the time the data comes back.
+    """
+    sock = Mock()
+    socket_buffer = SocketBuffer(sock, socket_read_size=65536, socket_timeout=None)
+
+    def close_then_answer(_):
+        socket_buffer.close()
+        return b"+OK\r\n"
+
+    sock.recv.side_effect = close_then_answer
+
+    with pytest.raises(ConnectionError):
+        socket_buffer.readline()
+
+
+def test_socket_buffer_reports_concurrent_close_when_timeout_restore_fails():
+    """
+    A per-call timeout that can no longer be restored does not hide the close.
+
+    ``disconnect()`` closes the socket as well as the buffer, so restoring the
+    timeout in the read's ``finally`` raises EBADF. An exception from ``finally``
+    replaces the one being propagated, which would drop the ConnectionError the
+    retry and failover layers act on.
+    """
+    sock = Mock()
+    socket_buffer = SocketBuffer(sock, socket_read_size=65536, socket_timeout=None)
+
+    def close_then_report_eof(_):
+        # Only the restore fails; arming the per-call timeout already succeeded.
+        socket_buffer.close()
+        sock.settimeout.side_effect = OSError(EBADF, "Bad file descriptor")
+        return b""
+
+    sock.recv.side_effect = close_then_report_eof
+
+    with pytest.raises(ConnectionError, match="Connection closed by server"):
+        socket_buffer.readline(timeout=1)
+
+
+def test_socket_buffer_cleanup_after_close_does_not_raise():
+    """
+    ``purge`` and ``rewind`` stay best effort on a closed buffer.
+
+    Both run after a read has already produced its outcome - a parsed response for
+    purge, an exception being unwound for rewind - so a connection closed underneath
+    them has nothing left to do and nothing to report.
+    """
+    socket_buffer = SocketBuffer(Mock(), socket_read_size=65536, socket_timeout=None)
+    socket_buffer.close()
+
+    socket_buffer.purge()
+    socket_buffer.rewind(0)
+
+
+def test_socket_buffer_purge_survives_a_close_landing_mid_purge():
+    """
+    ``purge`` stays best effort when the close lands inside it.
+
+    This is the window the test above cannot cover: the buffer is open when purge
+    reads the unread length and gone by the time it truncates. ``close()`` drops the
+    buffer to None, so an unguarded truncate raised AttributeError - which escapes
+    purge's best effort wrapper and replaces an already parsed response.
+    """
+    socket_buffer = SocketBuffer(Mock(), socket_read_size=65536, socket_timeout=None)
+    unread_bytes = socket_buffer.unread_bytes
+
+    def close_then_report():
+        unread = unread_bytes()
+        socket_buffer.close()
+        return unread
+
+    socket_buffer.unread_bytes = close_then_report
+
+    socket_buffer.purge()
 
 
 @skip_if_server_version_lt("4.0.0")
@@ -585,6 +742,10 @@ class TestConnection:
         The exception's traceback references the frame, so a retained local
         would form a cycle only reclaimable by the GC.
         The finally clause in _connect breaks it by clearing the local.
+
+        The exception escapes to the caller here, so it cannot be asserted
+        dead; the frame is what has to be checked. See the sibling test for
+        the reclamation property, which does not depend on the local's name.
         """
         conn = Connection(host="localhost", port=6379)
         addr_info = (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 6379))
@@ -605,41 +766,64 @@ class TestConnection:
                 connect_frame = tb.tb_frame
             tb = tb.tb_next
         assert connect_frame is not None
-        assert connect_frame.f_locals.get("err") is None
+        # `is None` alone also holds when no such local exists, so assert the
+        # name is present before asserting its value.
+        assert "err" in connect_frame.f_locals
+        assert connect_frame.f_locals["err"] is None
 
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Immediate reclamation is a refcounting property",
+    )
     def test_connect_breaks_reference_cycle_when_a_later_address_succeeds(self):
         """
         When an address fails but a later one connects, _connect must not
         return while still holding the caught exception.
-        The exception's traceback references the frame, so a retained local
-        would form a cycle only reclaimable by the GC.
         """
+
+        class WeakReferenceableOSError(OSError):
+            """OSError itself cannot be weak-referenced."""
+
         conn = Connection(host="localhost", port=6379)
         addr_infos = [
             (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 6379)),
             (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.2", 6379)),
         ]
 
-        # _connect calls getaddrinfo, so hook that as a way to peek the caller
-        connect_frames = []
+        # Raise from a factory so the test itself never holds a strong
+        # reference; the weakref is the only handle on the failure.
+        raised_ref = []
 
-        def capturing_getaddrinfo(*args, **kwargs):
-            connect_frames.append(sys._getframe(1))
-            return addr_infos
+        def fail_to_connect(*args, **kwargs):
+            err = WeakReferenceableOSError("refused")
+            raised_ref.append(weakref.ref(err))
+            try:
+                raise err
+            finally:
+                # Clear this frame's local too, or the traceback keeps the
+                # exception alive here and the assertion measures the test
+                # rather than _connect.
+                err = None
 
         failing_sock, working_sock = MagicMock(), MagicMock()
-        failing_sock.connect.side_effect = OSError("refused")
+        failing_sock.connect.side_effect = fail_to_connect
 
-        with (
-            patch.object(socket, "getaddrinfo", capturing_getaddrinfo),
-            patch.object(socket, "socket", side_effect=[failing_sock, working_sock]),
-        ):
-            assert conn._connect() is working_sock
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            with (
+                patch.object(socket, "getaddrinfo", return_value=addr_infos),
+                patch.object(
+                    socket, "socket", side_effect=[failing_sock, working_sock]
+                ),
+            ):
+                assert conn._connect() is working_sock
 
-        # Error should be cleared in the connect frame
-        assert len(connect_frames) == 1
-        (connect_frame,) = connect_frames
-        assert connect_frame.f_locals.get("err") is None
+            (ref,) = raised_ref
+            assert ref() is None
+        finally:
+            if gc_was_enabled:
+                gc.enable()
 
     @pytest.mark.parametrize(
         "connection_kwargs",
@@ -1976,3 +2160,65 @@ class TestBlockingConnectionPoolGetConnectionCount:
         assert used_count == 0
 
         pool.disconnect()
+
+
+def test_parse_url_retry_on_error_resolves_exception_names():
+    kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
+    assert kw["retry_on_error"] == [ConnectionError]
+
+
+def test_parse_url_retry_on_error_comma_separated():
+    kw = parse_url(
+        "redis://localhost:6379/?retry_on_error=ConnectionError,TimeoutError"
+    )
+    assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
+
+
+def test_parse_url_retry_on_error_bracket_list():
+    kw = parse_url(
+        "redis://localhost:6379/?retry_on_error=[ConnectionError,TimeoutError]"
+    )
+    assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
+
+
+def test_parse_url_retry_on_error_blank_entry():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?retry_on_error=,")
+    assert str(exc_info.value) == (
+        "Invalid value for 'retry_on_error' in connection URL."
+    )
+
+
+def test_parse_url_invalid_db_keeps_stable_message():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?db=not-an-int")
+    assert str(exc_info.value) == "Invalid value for 'db' in connection URL."
+
+
+def test_parse_url_retry_on_error_unknown_name():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?retry_on_error=NotARealError")
+    assert str(exc_info.value) == (
+        "Invalid value for 'retry_on_error' in connection URL."
+    )
+
+
+def test_parse_url_retry_on_error_usable_in_retry():
+    kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
+    conn = Connection(**kw)
+    assert ConnectionError in conn.retry._supported_errors
+    assert all(
+        isinstance(err, type) and issubclass(err, Exception)
+        for err in conn.retry._supported_errors
+    )
+
+    calls = 0
+
+    def do():
+        nonlocal calls
+        calls += 1
+        raise ConnectionError("simulated network drop")
+
+    with pytest.raises(ConnectionError):
+        conn.retry.call_with_retry(do=do, fail=lambda e: None)
+    assert calls == 2

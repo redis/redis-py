@@ -22,6 +22,7 @@ from redis._parsers.helpers import (
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
 from redis.commands.core import (
+    HAS_XXHASH,
     ArrayAggregateOperations,
     ArrayPredicateCombinator,
     ArrayPredicateType,
@@ -1296,6 +1297,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_start_basic(self, r):
         """Test basic HOTKEYS START command with CPU metric"""
         # Reset any previous session
@@ -1310,6 +1312,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_start_with_all_metrics(self, r):
         """Test HOTKEYS START with both CPU and NET metrics"""
         try:
@@ -1324,6 +1327,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_start_with_duration(self, r):
         """Test HOTKEYS START with duration parameter"""
         try:
@@ -1338,6 +1342,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_start_with_sample_ratio(self, r):
         """Test HOTKEYS START with sample ratio"""
         try:
@@ -1352,6 +1357,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_start_fail__on_noncluster_setup_with_slots(self, r):
         """Test HOTKEYS START with specific hash slots"""
         try:
@@ -1367,6 +1373,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_start_with_all_parameters(self, r):
         """Test HOTKEYS START with all optional parameters"""
         try:
@@ -1384,6 +1391,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_stop(self, r):
         """Test HOTKEYS STOP command"""
         try:
@@ -1400,6 +1408,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_reset(self, r):
         """Test HOTKEYS RESET command"""
         try:
@@ -1441,6 +1450,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_get_ongoing_session(self, r):
         """Test HOTKEYS GET during an ongoing collection session"""
         try:
@@ -1473,6 +1483,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_get_terminated_session(self, r):
         """Test HOTKEYS GET after stopping a collection session"""
         try:
@@ -1503,6 +1514,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_get_all_fields(self, r):
         """Test HOTKEYS GET returns all documented fields"""
         try:
@@ -1554,6 +1566,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     def test_hotkeys_get_all_fields_decoded(self, decoded_r: redis.Redis):
         """Test HOTKEYS GET returns all documented fields"""
         try:
@@ -2226,6 +2239,34 @@ class TestRedisCommands:
         assert res_local is not None
         assert len(res_local) == 16
         assert res_server == res_local
+
+    @pytest.mark.skipif(not HAS_XXHASH, reason="xxhash is not installed")
+    def test_local_digest_encodes_with_the_client_encoding(self):
+        """
+        The client's ``encoding`` decides the bytes that are hashed, which is what makes a
+        local digest comparable with the server's: the server hashes what it stored, and
+        what it stored was encoded by this same encoder.
+        """
+        utf16_client = redis.Redis(encoding="utf-16", decode_responses=False)
+        utf8_client = redis.Redis(encoding="utf-8", decode_responses=False)
+        value = "hello"
+
+        utf16_digest = utf16_client.digest_local(value)
+        utf8_digest = utf8_client.digest_local(value)
+
+        # The digest is a hex string, so the bytes carry no BOM and no multi-byte width
+        # however the client encodes.
+        assert isinstance(utf16_digest, bytes)
+        assert len(utf16_digest) == 16
+        assert utf16_digest.decode("ascii").isalnum()
+
+        # Pre-encoded input passes through the encoder untouched, so hashing the utf-16
+        # bytes on a utf-8 client must land on the same digest as hashing the string on a
+        # utf-16 one. Both of these were the utf-8 digest before digest_local consulted
+        # the encoder, which is what makes them the assertions that pin the behavior.
+        assert utf16_digest != utf8_digest
+        assert utf16_digest == utf8_client.digest_local(value.encode("utf-16"))
+        assert utf8_digest == utf8_client.digest_local(value.encode("utf-8"))
 
     @skip_if_server_version_lt("8.3.224")
     def test_pipeline_digest(self, r):

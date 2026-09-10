@@ -1,4 +1,6 @@
 import copy
+import functools
+import logging
 import os
 import socket
 import sys
@@ -34,6 +36,7 @@ from redis.cache import (
 )
 from redis.commands.metadata import MetadataResolver
 
+from . import exceptions as redis_exceptions
 from ._defaults import (
     DEFAULT_SOCKET_CONNECT_TIMEOUT,
     DEFAULT_SOCKET_READ_SIZE,
@@ -122,6 +125,32 @@ if HIREDIS_AVAILABLE:
     DefaultParser = _HiredisParser
 else:
     DefaultParser = _RESP2Parser
+
+logger = logging.getLogger(__name__)
+
+
+def add_debug_log_for_connection_failure(
+    connection: "AbstractConnection",
+    error: BaseException,
+    operation: str,
+) -> None:
+    """
+    Render the connection's live state on a failure that is about to close it.
+
+    Must be called *before* ``disconnect()``. ``extract_connection_details()``
+    reads the resolved ip, local port and armed read timeout off the socket, so
+    once the socket is gone it can only report ``not connected`` - which hides
+    exactly the state needed to explain the failure. In particular it is what
+    tells apart a read that ran under the original timeout from one that ran
+    under a relaxed maintenance timeout.
+    """
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            f"{type(error).__name__} while {operation}, "
+            f"with connection: {connection}, "
+            f"details: {connection.extract_connection_details()}, "
+            f"error: {error}",
+        )
 
 
 class HiredisRespSerializer:
@@ -612,21 +641,24 @@ class MaintNotificationsAbstractConnection:
                 oss_cluster_maint_notifications_handler.config
             )
 
-    def activate_maint_notifications_handling_if_enabled(self, check_health=True):
-        # Send maintenance notifications handshake if RESP3 is active
+    def _should_enable_maint_notifications(self) -> bool:
+        # Maintenance notifications are sent only if RESP3 is active
         # and maintenance notifications are enabled
-        # and we have a host to determine the endpoint type from
-        # When the maint_notifications_config enabled mode is "auto",
-        # we just log a warning if the handshake fails
-        # When the mode is enabled=True, we raise an exception in case of failure
+        # and we have a host to determine the endpoint type from.
         host = getattr(self, "host", None)
-        if (
+        return bool(
             check_protocol_version(self.get_protocol(), 3)
             and self.maint_notifications_config
             and self.maint_notifications_config.enabled
             and self._maint_notifications_connection_handler
             and host is not None
-        ):
+        )
+
+    def activate_maint_notifications_handling_if_enabled(self, check_health=True):
+        # When the maint_notifications_config enabled mode is "auto",
+        # we just log a warning if the handshake fails
+        # When the mode is enabled=True, we raise an exception in case of failure
+        if self._should_enable_maint_notifications():
             self._enable_maintenance_notifications(
                 maint_notifications_config=self.maint_notifications_config,
                 check_health=check_health,
@@ -635,40 +667,91 @@ class MaintNotificationsAbstractConnection:
     def _enable_maintenance_notifications(
         self, maint_notifications_config: MaintNotificationsConfig, check_health=True
     ):
+        # Kept for callers that enable maintenance notifications outside of the
+        # connection handshake. During on_connect the send and the response
+        # handling are split (see _send_maint_notifications_command /
+        # _handle_maint_notifications_response) so the reply can be pipelined
+        # with the rest of the handshake.
+        self._send_maint_notifications_command(
+            maint_notifications_config, check_health=check_health
+        )
+        self._handle_maint_notifications_response(maint_notifications_config)
+
+    def _maint_notifications_command_args(
+        self, maint_notifications_config: MaintNotificationsConfig
+    ):
+        host = getattr(self, "host", None)
+        if host is None:
+            raise ValueError(
+                "Cannot enable maintenance notifications for connection"
+                " object that doesn't have a host attribute."
+            )
+        endpoint_type = maint_notifications_config.get_endpoint_type(host, self)
+        return (
+            "CLIENT",
+            "MAINT_NOTIFICATIONS",
+            "ON",
+            "moving-endpoint-type",
+            endpoint_type.value,
+        )
+
+    def _send_maint_notifications_command(
+        self, maint_notifications_config: MaintNotificationsConfig, check_health=True
+    ):
+        self.send_command(
+            *self._maint_notifications_command_args(maint_notifications_config),
+            check_health=check_health,
+        )
+
+    def _add_maint_notifications_to_handshake(self, deferred_reads, check_health=True):
+        # If maintenance notifications are enabled for this connection, send the
+        # CLIENT MAINT_NOTIFICATIONS command with the rest of the handshake tail and
+        # defer reading its reply (appended to deferred_reads), rather than paying its
+        # own round-trip. When enabled == "auto" a failure is logged and swallowed;
+        # when enabled is True it raises.
+        if not self._should_enable_maint_notifications():
+            return
+        maint_notifications_config = self.maint_notifications_config
+        self._send_maint_notifications_command(
+            maint_notifications_config, check_health=check_health
+        )
+        deferred_reads.append(
+            lambda: self._handle_maint_notifications_response(
+                maint_notifications_config
+            )
+        )
+
+    def _handle_maint_notifications_response(
+        self, maint_notifications_config: MaintNotificationsConfig
+    ):
         try:
-            host = getattr(self, "host", None)
-            if host is None:
-                raise ValueError(
-                    "Cannot enable maintenance notifications for connection"
-                    " object that doesn't have a host attribute."
+            response = self.read_response()
+            if not response or str_if_bytes(response) != "OK":
+                raise ResponseError(
+                    "The server doesn't support maintenance notifications"
                 )
-            else:
-                endpoint_type = maint_notifications_config.get_endpoint_type(host, self)
-                self.send_command(
-                    "CLIENT",
-                    "MAINT_NOTIFICATIONS",
-                    "ON",
-                    "moving-endpoint-type",
-                    endpoint_type.value,
-                    check_health=check_health,
-                )
-                response = self.read_response()
-                if not response or str_if_bytes(response) != "OK":
-                    raise ResponseError(
-                        "The server doesn't support maintenance notifications"
-                    )
         except Exception as e:
             if (
                 isinstance(e, ResponseError)
                 and maint_notifications_config.enabled == "auto"
             ):
                 # Log warning but don't fail the connection
-                import logging
-
-                logger = logging.getLogger(__name__)
                 logger.debug(f"Failed to enable maintenance notifications: {e}")
             else:
                 raise
+
+    def _read_ok_or_raise(self, error_message):
+        # Read one handshake reply and require it to be "OK".
+        if str_if_bytes(self.read_response()) != "OK":
+            raise ConnectionError(error_message)
+
+    def _read_optional_setinfo(self):
+        # Read one CLIENT SETINFO reply. Older servers may not support the command,
+        # so a ResponseError is swallowed instead of failing the connection.
+        try:
+            self.read_response()
+        except ResponseError:
+            pass
 
     def get_resolved_ip(self) -> Optional[str]:
         """
@@ -688,8 +771,10 @@ class MaintNotificationsAbstractConnection:
             conn_socket = self._get_socket()
             if conn_socket is not None:
                 peer_addr = conn_socket.getpeername()
-                if peer_addr and len(peer_addr) >= 1:
-                    # For TCP sockets, peer_addr is typically (host, port) tuple
+                # For TCP sockets, peer_addr is typically a (host, port) tuple.
+                # AF_UNIX sockets report a path string instead, and indexing it
+                # would yield the first character of the path.
+                if isinstance(peer_addr, tuple) and peer_addr:
                     # Return just the host part
                     return peer_addr[0]
         except (AttributeError, OSError):
@@ -762,12 +847,22 @@ class MaintNotificationsAbstractConnection:
             # will lead to a deadlock
             if conn_socket.gettimeout() != 0:
                 conn_socket.settimeout(timeout)
+            # Deliberately outside the guard above. The parser caches this value
+            # to restore after a per-call timeout override, so while a can_read
+            # probe holds the socket at 0 the cache *is* the pending restore
+            # value: writing it is how the new timeout gets armed without
+            # flipping the socket back to blocking mid-read. Skipping it here
+            # instead would let the probe restore the pre-relaxation timeout and
+            # lose a maintenance relaxation for the life of the connection.
             self.update_parser_timeout(timeout)
 
     def update_parser_timeout(self, timeout: Optional[float] = None):
         parser = self._get_parser()
         if parser and parser._buffer:
-            if isinstance(parser, _RESP3Parser) and timeout:
+            # Both parsers cache this value to restore after a per-call timeout
+            # override, so both must receive exactly what was armed on the
+            # socket - including None, which means "block indefinitely".
+            if isinstance(parser, _RESP3Parser):
                 parser._buffer.socket_timeout = timeout
             elif isinstance(parser, _HiredisParser):
                 parser._socket_timeout = timeout
@@ -1192,54 +1287,71 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             ):
                 raise ConnectionError("Invalid RESP version")
 
-        # Activate maintenance notifications for this connection
-        # if enabled in the configuration
-        # This is a no-op if maintenance notifications are not enabled
-        self.activate_maint_notifications_handling_if_enabled(check_health=check_health)
+        # The tail of the handshake (optional CLIENT MAINT_NOTIFICATIONS, then
+        # CLIENT SETNAME / SETINFO / SELECT) does not affect control flow -- the replies
+        # are only validated or discarded. So we optimize the flow: send every command
+        # first (without blocking on a reply between them), then read the replies back in
+        # send order. All requests are on the wire before we block on the first read, so
+        # the whole tail costs a single round-trip instead of one per command. AUTH/HELLO
+        # stays a separate round-trip above because its reply drives the RESP2->RESP3
+        # parser upgrade, the pre-6.0 AUTH retry, and proto validation.
+        #
+        # deferred_reads holds one zero-arg handler per command sent below; each reads
+        # exactly one reply (in send order) and validates it. Per-command check_health
+        # reproduces the original behavior: at most one health PING/PONG fires before the
+        # first tail command (only when no HELLO/AUTH ran, e.g. RESP2 no-auth), and it is
+        # self-contained so it never desyncs the deferred replies.
+        #
+        # TODO: apply the same optimization to the async handshake in
+        # redis/asyncio/connection.py, where not all tail commands are handled this way
+        # yet (e.g. maintenance notifications are still issued separately there).
+        deferred_reads = []
+
+        # Maintenance notifications (RESP3-only, opt-in) go first when enabled, so their
+        # reply is read together with the rest of the tail.
+        self._add_maint_notifications_to_handshake(deferred_reads, check_health)
 
         # if a client_name is given, set it
         if self.client_name:
             self.send_command(
+                "CLIENT", "SETNAME", self.client_name, check_health=check_health
+            )
+            deferred_reads.append(
+                functools.partial(self._read_ok_or_raise, "Error setting client name")
+            )
+
+        # Set the library name and version from driver_info. Older servers may not
+        # support CLIENT SETINFO, so any ResponseError to these replies is swallowed.
+        if self.driver_info and self.driver_info.formatted_name:
+            self.send_command(
                 "CLIENT",
-                "SETNAME",
-                self.client_name,
+                "SETINFO",
+                "LIB-NAME",
+                self.driver_info.formatted_name,
                 check_health=check_health,
             )
-            if str_if_bytes(self.read_response()) != "OK":
-                raise ConnectionError("Error setting client name")
+            deferred_reads.append(self._read_optional_setinfo)
 
-        # Set the library name and version from driver_info
-        try:
-            if self.driver_info and self.driver_info.formatted_name:
-                self.send_command(
-                    "CLIENT",
-                    "SETINFO",
-                    "LIB-NAME",
-                    self.driver_info.formatted_name,
-                    check_health=check_health,
-                )
-                self.read_response()
-        except ResponseError:
-            pass
-
-        try:
-            if self.driver_info and self.driver_info.lib_version:
-                self.send_command(
-                    "CLIENT",
-                    "SETINFO",
-                    "LIB-VER",
-                    self.driver_info.lib_version,
-                    check_health=check_health,
-                )
-                self.read_response()
-        except ResponseError:
-            pass
+        if self.driver_info and self.driver_info.lib_version:
+            self.send_command(
+                "CLIENT",
+                "SETINFO",
+                "LIB-VER",
+                self.driver_info.lib_version,
+                check_health=check_health,
+            )
+            deferred_reads.append(self._read_optional_setinfo)
 
         # if a database is specified, switch to it
         if self.db:
             self.send_command("SELECT", self.db, check_health=check_health)
-            if str_if_bytes(self.read_response()) != "OK":
-                raise ConnectionError("Invalid Database")
+            deferred_reads.append(
+                functools.partial(self._read_ok_or_raise, "Invalid Database")
+            )
+
+        # Read the deferred replies in the order the commands were sent.
+        for read_and_validate_response in deferred_reads:
+            read_and_validate_response()
 
     def disconnect(self, *args, **kwargs):
         "Disconnects from the Redis server"
@@ -1349,10 +1461,12 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 command = [command]
             for item in command:
                 self._sock.sendall(item)
-        except socket.timeout:
+        except socket.timeout as e:
+            add_debug_log_for_connection_failure(self, e, "writing command")
             self.disconnect()
             raise TimeoutError("Timeout writing to socket")
         except OSError as e:
+            add_debug_log_for_connection_failure(self, e, "writing command")
             self.disconnect()
             if len(e.args) == 1:
                 errno, errmsg = "UNKNOWN", e.args[0]
@@ -1360,11 +1474,12 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 errno = e.args[0]
                 errmsg = e.args[1]
             raise ConnectionError(f"Error {errno} while writing to socket. {errmsg}.")
-        except BaseException:
+        except BaseException as e:
             # BaseExceptions can be raised when a socket send operation is not
             # finished, e.g. due to a timeout.  Ideally, a caller could then re-try
             # to send un-sent data. However, the send_packed_command() API
             # does not support it so there is no point in keeping the connection open.
+            add_debug_log_for_connection_failure(self, e, "writing command")
             self.disconnect()
             raise
 
@@ -1415,19 +1530,31 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 response = self._parser.read_response(
                     disable_decoding=disable_decoding, timeout=timeout
                 )
-        except socket.timeout:
+        except socket.timeout as e:
             if disconnect_on_error:
+                add_debug_log_for_connection_failure(self, e, "reading response")
+                self.disconnect()
+            raise TimeoutError(f"Timeout reading from {host_error}")
+        except TimeoutError as e:
+            # The parsers raise redis.exceptions.TimeoutError, which is not an
+            # OSError, so without this branch it would fall through to
+            # BaseException and keep the parser's undecorated message. Re-raise
+            # it with the host, matching what the async stack already reports.
+            if disconnect_on_error:
+                add_debug_log_for_connection_failure(self, e, "reading response")
                 self.disconnect()
             raise TimeoutError(f"Timeout reading from {host_error}")
         except OSError as e:
             if disconnect_on_error:
+                add_debug_log_for_connection_failure(self, e, "reading response")
                 self.disconnect()
             raise ConnectionError(f"Error while reading from {host_error} : {e.args}")
-        except BaseException:
+        except BaseException as e:
             # Also by default close in case of BaseException.  A lot of code
             # relies on this behaviour when doing Command/Response pairs.
             # See #1128.
             if disconnect_on_error:
+                add_debug_log_for_connection_failure(self, e, "reading response")
                 self.disconnect()
             raise
 
@@ -1519,16 +1646,48 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         self._socket_connect_timeout = value
 
     def extract_connection_details(self) -> str:
-        socket_address = None
+        """
+        Render the connection's identity, maintenance state and effective timeouts.
+
+        This is what the debug logs use to explain a failed or timed out command:
+
+        - ``host`` vs ``orig host`` says whether the connection still points at the
+          node being moved away from, or has already been repointed at the new one.
+        - ``state`` says whether maintenance handling touched this connection at
+          all, so an unaffected node's connections are distinguishable.
+        - ``socket_timeout`` vs ``active read timeout`` says which timeout the read
+          actually ran under. They diverge for a command that was already in flight
+          when the relaxed timeout was applied.
+        """
         if self._sock is None:
             return "not connected"
+
+        socket_address = None
+        active_read_timeout = None
         try:
-            socket_address = self._sock.getsockname() if self._sock else None
-            socket_address = socket_address[1] if socket_address else None
+            socket_name = self._sock.getsockname()
+            # AF_UNIX sockets report a path string rather than a (host, port) tuple
+            if isinstance(socket_name, tuple) and len(socket_name) > 1:
+                socket_address = socket_name[1]
+            # The timeout armed on the socket is what a blocking read is really
+            # using, which can lag self.socket_timeout for an in-flight command.
+            active_read_timeout = self._sock.gettimeout()
         except (AttributeError, OSError):
             pass
 
-        return f"connected to ip {self.get_resolved_ip()}, local socket port: {socket_address}"
+        state = getattr(self.maintenance_state, "value", self.maintenance_state)
+        return (
+            f"connected to ip {self.get_resolved_ip()}, "
+            f"local socket port: {socket_address}, "
+            f"host: {self._host_error()} "
+            f"(orig: {getattr(self, 'orig_host_address', None)}), "
+            f"state: {state}, "
+            f"socket_timeout: {self.socket_timeout} "
+            f"(orig: {getattr(self, 'orig_socket_timeout', None)}), "
+            f"active read timeout: {active_read_timeout}, "
+            f"should_reconnect: {self.should_reconnect()}, "
+            f"notification_hash: {self.maintenance_notification_hash}"
+        )
 
 
 class Connection(AbstractConnection):
@@ -2056,7 +2215,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._conn._connect()
 
     def _host_error(self):
-        self._conn._host_error()
+        return self._conn._host_error()
 
     def _enable_tracking_callback(self, conn: ConnectionInterface) -> None:
         conn.send_command("CLIENT", "TRACKING", "ON")
@@ -2334,6 +2493,21 @@ def parse_ssl_verify_flags(value):
     return verify_flags
 
 
+def parse_retry_on_error(value):
+    # exception class names are passed as a comma-separated list,
+    # e.g. ConnectionError,TimeoutError
+    retry_on_error = []
+    for name in value.replace("[", "").replace("]", "").split(","):
+        name = name.strip()
+        if not name:
+            raise ValueError("Empty retry_on_error entry")
+        exc = getattr(redis_exceptions, name, None)
+        if not (isinstance(exc, type) and issubclass(exc, Exception)):
+            raise ValueError(f"Unknown redis exception {name!r}")
+        retry_on_error.append(exc)
+    return retry_on_error
+
+
 URL_QUERY_ARGUMENT_PARSERS = {
     "db": int,
     "socket_timeout": float,
@@ -2341,7 +2515,7 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "socket_read_size": int,
     "socket_keepalive": to_bool,
     "retry_on_timeout": to_bool,
-    "retry_on_error": list,
+    "retry_on_error": parse_retry_on_error,
     "max_connections": int,
     "health_check_interval": int,
     "ssl_check_hostname": to_bool,
@@ -2737,6 +2911,11 @@ class MaintNotificationsAbstractConnectionPool:
                     raise ValueError(
                         "Either maint_notifications_pool_handler or oss_cluster_maint_notifications_handler must be set"
                     )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Marking active connection for reconnect after config update "
+                        f"config update: {conn}, {conn.extract_connection_details()}"
+                    )
                 conn.mark_for_reconnect()
 
     def _should_update_connection(
@@ -2895,11 +3074,17 @@ class MaintNotificationsAbstractConnectionPool:
 
         :param moving_address_src: The address of the node that is being moved.
         """
+        debug = logger.isEnabledFor(logging.DEBUG)
         with self._get_pool_lock():
             for conn in self._get_in_use_connections():
                 if self._should_update_connection(
                     conn, "connected_address", moving_address_src
                 ):
+                    if debug:
+                        logger.debug(
+                            f"Marking active connection for reconnect: {conn}, "
+                            f"{conn.extract_connection_details()}"
+                        )
                     conn.mark_for_reconnect()
 
     def disconnect_free_connections(
@@ -2912,11 +3097,17 @@ class MaintNotificationsAbstractConnectionPool:
 
         :param moving_address_src: The address of the node that is being moved.
         """
+        debug = logger.isEnabledFor(logging.DEBUG)
         with self._get_pool_lock():
             for conn in self._get_free_connections():
                 if self._should_update_connection(
                     conn, "connected_address", moving_address_src
                 ):
+                    if debug:
+                        logger.debug(
+                            f"Disconnecting free connection: {conn}, "
+                            f"{conn.extract_connection_details()}"
+                        )
                     conn.disconnect()
 
 
@@ -3432,6 +3623,11 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
             if self.owns_connection(connection):
                 if connection.should_reconnect():
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            "Disconnecting released connection marked for reconnect: "
+                            f"{connection}, {connection.extract_connection_details()}"
+                        )
                     connection.disconnect()
                 self._available_connections.append(connection)
                 self._event_dispatcher.dispatch(
@@ -3872,6 +4068,11 @@ class BlockingConnectionPool(ConnectionPool):
                 )
                 return
             if connection.should_reconnect():
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Disconnecting released connection marked for reconnect: "
+                        f"{connection}, {connection.extract_connection_details()}"
+                    )
                 connection.disconnect()
             # Put the connection back into the pool.
             pool_name = get_pool_name(self)
