@@ -543,6 +543,16 @@ class TestRedisCommands:
             "redis_py_test",
         )
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    async def test_client_info_name_with_equals(self, r: redis.Redis):
+        # A client name may contain "=", which the "key=value" CLIENT INFO
+        # format made easy to mis-split. Check the name survives the round trip
+        # through the real server rather than only the unit-tested parser.
+        await r.client_setname("test=name")
+        info = await r.client_info()
+        assert info["name"] == "test=name"
+
     @skip_if_server_version_lt("7.2.0")
     async def test_client_setinfo(self, r: redis.Redis):
         from redis.utils import get_lib_version
