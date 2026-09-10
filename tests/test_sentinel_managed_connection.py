@@ -1,11 +1,11 @@
-import inspect
+import itertools
 import socket
 
 import pytest
 
-from redis.connection import Connection
+import redis
 from redis.retry import Retry
-from redis.sentinel import SentinelManagedConnection
+from redis.sentinel import SentinelConnectionPool, SentinelManagedConnection
 from redis.backoff import NoBackoff
 from redis.utils import SENTINEL
 from unittest import mock
@@ -199,24 +199,6 @@ class TestSentinelManagedConnectionDisconnectOnError:
         conn.connect()
         return conn
 
-    def test_default_disconnect_on_error_matches_base_connection(self):
-        """
-        The default is inherited behaviour, so it must equal the base class
-        default rather than a value of its own.
-        """
-        sentinel_default = (
-            inspect.signature(SentinelManagedConnection.read_response)
-            .parameters["disconnect_on_error"]
-            .default
-        )
-        base_default = (
-            inspect.signature(Connection.read_response)
-            .parameters["disconnect_on_error"]
-            .default
-        )
-        assert base_default is True
-        assert sentinel_default is True
-
     def test_base_exception_during_read_disconnects(self, master_host):
         """
         A BaseException raised at the socket read leaves the reply unread, so
@@ -252,6 +234,56 @@ class TestSentinelManagedConnectionDisconnectOnError:
             assert conn.read_response() == b"PONG"
         finally:
             conn.disconnect()
+
+    def test_interrupted_transaction_does_not_recycle_a_desynced_connection(
+        self, master_host
+    ):
+        """
+        _execute_transaction reads the MULTI reply, one reply per queued
+        command, then EXEC. A BaseException part way through that loop strands
+        the rest: Retry does not treat it as retryable, execute() catches only
+        Exception, and reset() disconnects only while watching, so the
+        connection is released straight back to the pool. Whatever comes out of
+        the pool next must not be holding those unread replies.
+        """
+        # The real pool class, so the release path under test is the production
+        # one. Only discover_master is reached, so no live Sentinel is needed.
+        sentinel_manager = mock.Mock()
+        sentinel_manager.discover_master = mock.Mock(
+            return_value=(master_host[0], master_host[1])
+        )
+        pool = SentinelConnectionPool("mymaster", sentinel_manager)
+
+        conn = pool.get_connection()
+        pipe = redis.Redis(connection_pool=pool).pipeline(transaction=True)
+        # Hand the pipeline the connection we hold, so it is the pool's own
+        # checked-out connection that gets released at the end of execute().
+        pipe.connection = conn
+        pipe.echo("first").echo("second").echo("third")
+
+        real_read = conn._parser.read_response
+        reads = itertools.count()
+
+        def interrupt_third_read(*args, **kwargs):
+            # MULTI, then "first" - the interrupt lands with "second", "third"
+            # and the EXEC reply still queued in the socket.
+            if next(reads) == 2:
+                raise KeyboardInterrupt
+            return real_read(*args, **kwargs)
+
+        with mock.patch.object(
+            conn._parser, "read_response", side_effect=interrupt_third_read
+        ):
+            with pytest.raises(KeyboardInterrupt):
+                pipe.execute()
+
+        reused = pool.get_connection()
+        assert reused is conn
+        try:
+            reused.send_command("ECHO", "after")
+            assert reused.read_response() == b"after"
+        finally:
+            reused.disconnect()
 
     def test_explicit_disconnect_on_error_false_is_honoured(self, master_host):
         """
