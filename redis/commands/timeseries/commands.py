@@ -2097,6 +2097,13 @@ class TimeSeriesCommands:
         params: list[EncodableT], min_value: int | None, max_value: int | None
     ):
         """Append FILTER_BY_VALUE property to params."""
+        # FILTER_BY_VALUE is all-or-nothing: one bound alone cannot be sent.
+        if (min_value is None) != (max_value is None):
+            raise DataError(
+                "filter_by_min_value and filter_by_max_value must be set together; "
+                "the FILTER_BY_VALUE group is all-or-nothing."
+            )
+
         if min_value is not None and max_value is not None:
             params.extend(["FILTER_BY_VALUE", min_value, max_value])
 

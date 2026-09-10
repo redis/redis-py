@@ -351,12 +351,22 @@ class TestLock:
             with self.get_lock(r, "foo", timeout=10, blocking=False):
                 r.set("foo", "a")
 
+    def test_lock_not_owned_error_gives_correct_lock_name(self, r):
+        lock = self.get_lock(r, "foo", timeout=10)
+        assert lock.acquire(blocking=False)
+        r.set("foo", "a")
+        with pytest.raises(LockNotOwnedError) as excinfo:
+            lock.extend(10)
+        assert excinfo.value.lock_name == "foo"
+
     def test_lock_error_gives_correct_lock_name(self, r):
         r.set("foo", "bar")
         with pytest.raises(LockError) as excinfo:
             with self.get_lock(r, "foo", blocking_timeout=0.1):
                 pass
-            assert excinfo.value.lock_name == "foo"
+        # Outside the pytest.raises block: the lock raises on __enter__, so an
+        # assertion inside it is never reached.
+        assert excinfo.value.lock_name == "foo"
 
 
 class TestLockClassSelection:
