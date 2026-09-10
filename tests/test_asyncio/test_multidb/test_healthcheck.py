@@ -700,7 +700,7 @@ class TestLagAwareHealthCheck:
 
         with pytest.raises(HttpError, match="busy") as e:
             await hc.check_health(db, mock_hc_client)
-            assert e.status == 503
+        assert e.value.status == 503
 
         # Ensure both calls were attempted
         assert mock_http.get.call_count == 2

@@ -1013,12 +1013,16 @@ class TestRedisClusterObj:
                 raise error("mocked error")
 
             execute_command.side_effect = raise_error
+            # Without this the attribute is a MagicMock, so the comparison below
+            # is never an integer comparison.
+            execute_command.failed_calls = 0
 
             rc = await get_mocked_redis_client(host=default_host, port=default_port)
 
             with pytest.raises(error):
                 await rc.get("bar")
-                assert execute_command.failed_calls == rc.cluster_error_retry_attempts
+            # retry counts retries, so the first attempt is one more.
+            assert execute_command.failed_calls == rc.retry.get_retries() + 1
 
             await rc.aclose()
 

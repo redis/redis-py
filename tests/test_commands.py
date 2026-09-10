@@ -8420,11 +8420,11 @@ class TestRedisCommands:
     def test_module(self, stack_r):
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
             stack_r.module_load("/some/fake/path")
-            assert "Error loading the extension." in str(excinfo.value)
+        assert "Error loading the extension." in str(excinfo.value)
 
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
             stack_r.module_load("/some/fake/path", "arg1", "arg2", "arg3", "arg4")
-            assert "Error loading the extension." in str(excinfo.value)
+        assert "Error loading the extension." in str(excinfo.value)
 
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
@@ -8433,13 +8433,13 @@ class TestRedisCommands:
     def test_module_loadex(self, stack_r: redis.Redis):
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
             stack_r.module_loadex("/some/fake/path")
-            assert "Error loading the extension." in str(excinfo.value)
+        assert "Error loading the extension." in str(excinfo.value)
 
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
             stack_r.module_loadex(
                 "/some/fake/path", ["name", "value"], ["arg1", "arg2"]
             )
-            assert "Error loading the extension." in str(excinfo.value)
+        assert "Error loading the extension." in str(excinfo.value)
 
     @skip_if_server_version_lt("2.6.0")
     def test_restore(self, r):
