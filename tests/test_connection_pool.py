@@ -71,6 +71,24 @@ class DummyConnection:
         pass
 
 
+class ConstructionFailure(Exception):
+    """Raised by ``failing_connection_class`` instead of building a connection."""
+
+
+def failing_connection_class(failures):
+    """A ``DummyConnection`` whose constructor raises the first ``failures`` times."""
+    remaining = [failures]
+
+    class FailingConnection(DummyConnection):
+        def __init__(self, **kwargs):
+            if remaining[0] > 0:
+                remaining[0] -= 1
+                raise ConstructionFailure("could not build a connection")
+            super().__init__(**kwargs)
+
+    return FailingConnection
+
+
 class TestConnectionPool:
     def get_pool(
         self,
@@ -144,6 +162,20 @@ class TestConnectionPool:
         pool = self.get_pool(max_connections=2, connection_class=DummyConnection)
         pool.get_connection()
         pool.get_connection()
+        with pytest.raises(redis.MaxConnectionsError):
+            pool.get_connection()
+
+    def test_capacity_survives_failed_connection_creation(self):
+        pool = self.get_pool(
+            max_connections=2, connection_class=failing_connection_class(2)
+        )
+        for _ in range(2):
+            with pytest.raises(ConstructionFailure):
+                pool.get_connection()
+
+        c1 = pool.get_connection()
+        c2 = pool.get_connection()
+        assert c1 != c2
         with pytest.raises(redis.MaxConnectionsError):
             pool.get_connection()
 
@@ -252,6 +284,22 @@ class TestBlockingConnectionPool:
         c1 = pool.get_connection()
         c2 = pool.get_connection()
         assert c1 != c2
+
+    def test_capacity_survives_failed_connection_creation(self):
+        pool = redis.BlockingConnectionPool(
+            connection_class=failing_connection_class(2),
+            max_connections=2,
+            timeout=0.1,
+        )
+        for _ in range(2):
+            with pytest.raises(ConstructionFailure):
+                pool.get_connection()
+
+        c1 = pool.get_connection()
+        c2 = pool.get_connection()
+        assert c1 != c2
+        with pytest.raises(redis.ConnectionError):
+            pool.get_connection()
 
     def test_connection_pool_blocks_until_timeout(self, master_host):
         "When out of connections, block for timeout seconds, then raise"
