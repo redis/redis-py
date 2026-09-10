@@ -1,9 +1,11 @@
+import itertools
 import socket
 
 import pytest
 
+import redis
 from redis.retry import Retry
-from redis.sentinel import SentinelManagedConnection
+from redis.sentinel import SentinelConnectionPool, SentinelManagedConnection
 from redis.backoff import NoBackoff
 from redis.utils import SENTINEL
 from unittest import mock
@@ -65,7 +67,7 @@ class TestSentinelManagedConnectionReadResponseTimeout:
             mock_read_response.assert_called_once_with(
                 disable_decoding=False,
                 timeout=0.5,
-                disconnect_on_error=False,
+                disconnect_on_error=True,
                 push_request=False,
             )
 
@@ -90,7 +92,7 @@ class TestSentinelManagedConnectionReadResponseTimeout:
             mock_read_response.assert_called_once_with(
                 disable_decoding=False,
                 timeout=SENTINEL,
-                disconnect_on_error=False,
+                disconnect_on_error=True,
                 push_request=False,
             )
 
@@ -115,7 +117,7 @@ class TestSentinelManagedConnectionReadResponseTimeout:
             mock_read_response.assert_called_once_with(
                 disable_decoding=False,
                 timeout=None,
-                disconnect_on_error=False,
+                disconnect_on_error=True,
                 push_request=False,
             )
 
@@ -140,7 +142,7 @@ class TestSentinelManagedConnectionReadResponseTimeout:
             mock_read_response.assert_called_once_with(
                 disable_decoding=False,
                 timeout=0,
-                disconnect_on_error=False,
+                disconnect_on_error=True,
                 push_request=False,
             )
 
@@ -173,3 +175,129 @@ class TestSentinelManagedConnectionReadResponseTimeout:
                 disconnect_on_error=True,
                 push_request=True,
             )
+
+
+@pytest.mark.fixed_client
+class TestSentinelManagedConnectionDisconnectOnError:
+    """
+    Tests for the disconnect-on-error behaviour of
+    SentinelManagedConnection.read_response().
+
+    These assert on the socket state and on the next reply rather than on the
+    arguments forwarded to the base class, so they observe what the flag
+    actually does.
+    """
+
+    def _connect(self, master_host):
+        connection_pool = mock.Mock()
+        connection_pool.get_master_address = mock.Mock(
+            return_value=(master_host[0], master_host[1])
+        )
+        connection_pool.is_master = True
+        connection_pool.check_connection = False
+        conn = SentinelManagedConnection(connection_pool=connection_pool)
+        conn.connect()
+        return conn
+
+    def test_base_exception_during_read_disconnects(self, master_host):
+        """
+        A BaseException raised at the socket read leaves the reply unread, so
+        the connection must be closed instead of being reused. See #1128.
+        """
+        conn = self._connect(master_host)
+        try:
+            conn.send_command("PING")
+            with mock.patch.object(
+                conn._parser, "read_response", side_effect=KeyboardInterrupt
+            ):
+                with pytest.raises(KeyboardInterrupt):
+                    conn.read_response()
+            assert conn._sock is None
+        finally:
+            conn.disconnect()
+
+    def test_reply_after_interrupted_read_is_not_stale(self, master_host):
+        """
+        The next command on a reused connection must get its own reply, not the
+        reply left in the socket buffer by the interrupted one.
+        """
+        conn = self._connect(master_host)
+        try:
+            conn.send_command("ECHO", "interrupted")
+            with mock.patch.object(
+                conn._parser, "read_response", side_effect=KeyboardInterrupt
+            ):
+                with pytest.raises(KeyboardInterrupt):
+                    conn.read_response()
+
+            conn.send_command("PING")
+            assert conn.read_response() == b"PONG"
+        finally:
+            conn.disconnect()
+
+    def test_interrupted_transaction_does_not_recycle_a_desynced_connection(
+        self, master_host
+    ):
+        """
+        _execute_transaction reads the MULTI reply, one reply per queued
+        command, then EXEC. A BaseException part way through that loop strands
+        the rest: Retry does not treat it as retryable, execute() catches only
+        Exception, and reset() disconnects only while watching, so the
+        connection is released straight back to the pool. Whatever comes out of
+        the pool next must not be holding those unread replies.
+        """
+        # The real pool class, so the release path under test is the production
+        # one. Only discover_master is reached, so no live Sentinel is needed.
+        sentinel_manager = mock.Mock()
+        sentinel_manager.discover_master = mock.Mock(
+            return_value=(master_host[0], master_host[1])
+        )
+        pool = SentinelConnectionPool("mymaster", sentinel_manager)
+
+        conn = pool.get_connection()
+        pipe = redis.Redis(connection_pool=pool).pipeline(transaction=True)
+        # Hand the pipeline the connection we hold, so it is the pool's own
+        # checked-out connection that gets released at the end of execute().
+        pipe.connection = conn
+        pipe.echo("first").echo("second").echo("third")
+
+        real_read = conn._parser.read_response
+        reads = itertools.count()
+
+        def interrupt_third_read(*args, **kwargs):
+            # MULTI, then "first" - the interrupt lands with "second", "third"
+            # and the EXEC reply still queued in the socket.
+            if next(reads) == 2:
+                raise KeyboardInterrupt
+            return real_read(*args, **kwargs)
+
+        with mock.patch.object(
+            conn._parser, "read_response", side_effect=interrupt_third_read
+        ):
+            with pytest.raises(KeyboardInterrupt):
+                pipe.execute()
+
+        reused = pool.get_connection()
+        assert reused is conn
+        try:
+            reused.send_command("ECHO", "after")
+            assert reused.read_response() == b"after"
+        finally:
+            reused.disconnect()
+
+    def test_explicit_disconnect_on_error_false_is_honoured(self, master_host):
+        """
+        PubSub reads pass disconnect_on_error=False on purpose; an explicit
+        False must still keep the connection open.
+        """
+        conn = self._connect(master_host)
+        try:
+            conn.send_command("PING")
+            with mock.patch.object(
+                conn._parser, "read_response", side_effect=KeyboardInterrupt
+            ):
+                with pytest.raises(KeyboardInterrupt):
+                    conn.read_response(disconnect_on_error=False)
+            assert conn._sock is not None
+        finally:
+            conn.disconnect()
