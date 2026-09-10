@@ -197,8 +197,20 @@ class SearchTestsBase:
 
 
 class TestBaseSearchFunctionality(SearchTestsBase):
-    _SEARCH_TIMEOUT_DIM = 8192
-    _SEARCH_TIMEOUT_DOCS = 1500
+    # Shape of the index used by the on-timeout tests. The query these build
+    # runs ``KNN _SEARCH_TIMEOUT_DOCS``, and its cost is dominated by the size
+    # of the result set rather than by the vector arithmetic - at a fixed
+    # ``KNN 10`` the query takes ~1.6ms whatever the dimension, so the document
+    # count is what buys runtime and the dimension only buys memory.
+    #
+    # The runtime has to exceed the 1ms per-query timeout by a wide margin.
+    # ``search-on-timeout=fail`` is enforced by a timeout callback racing the
+    # thread running the query, so a query that only slightly overruns its
+    # timeout may still return full results - intended server behavior. Below
+    # roughly a 3x margin the error stops being raised at all; these values
+    # measure at ~890ms, i.e. a ~900x margin, in ~37MB.
+    _SEARCH_TIMEOUT_DIM = 256
+    _SEARCH_TIMEOUT_DOCS = 12000
 
     @pytest.mark.redismod
     # FT.DEL is not available on Redis Enterprise's search module.
@@ -1601,17 +1613,23 @@ class TestBaseSearchFunctionality(SearchTestsBase):
         client.hset("hset:1", "txt", "a")
         client.hset("hset:2", "txt", "b")
         client.hset("hset:3", "txt", "c")
+        # Keep searching until the expiration window of hset:2 has passed. The
+        # loop is bounded by elapsed time rather than by a fixed iteration count,
+        # so it covers the same window without depending on how long a single
+        # search round trip takes.
         if expects_resp2_shape(client) or expects_unified_shape(client):
             assert 3 == client.ft().search(Query("*")).total
             client.pexpire("hset:2", 300)
-            for _ in range(500):
+            deadline = time.monotonic() + 0.5
+            while time.monotonic() < deadline:
                 client.ft().search(Query("*")).docs[1]
             time.sleep(1)
             assert 2 == client.ft().search(Query("*")).total
         elif expects_resp3_shape(client):
             assert 3 == client.ft().search(Query("*"))["total_results"]
             client.pexpire("hset:2", 300)
-            for _ in range(500):
+            deadline = time.monotonic() + 0.5
+            while time.monotonic() < deadline:
                 client.ft().search(Query("*"))["results"][1]
             time.sleep(1)
             assert 2 == client.ft().search(Query("*"))["total_results"]
@@ -6292,9 +6310,12 @@ class TestHybridSearch(SearchTestsBase):
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
+        # MAXIDLE is expressed in milliseconds, and the two cursors created here
+        # are read over two further round trips. Keep the idle window wide enough
+        # to survive that when the target deployment is remote.
         res = client.ft().hybrid_search(
             query=hybrid_query,
-            cursor=HybridCursorQuery(count=5, max_idle=100),
+            cursor=HybridCursorQuery(count=5, max_idle=10000),
             params_substitution={
                 "vec": np.array([1, 2, 7, 6], dtype=np.float32).tobytes()
             },

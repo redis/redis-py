@@ -1,5 +1,7 @@
 import asyncio
+import logging
 import os
+from time import monotonic
 from typing import Any, AsyncGenerator, Optional
 from urllib.parse import urlparse
 
@@ -20,6 +22,8 @@ from redis.maint_notifications import EndpointType, MaintNotificationsConfig
 from redis.multidb.failure_detector import DEFAULT_MIN_NUM_FAILURES
 from tests.test_scenario.conftest import (
     CLIENT_TIMEOUT,
+    MULTI_DB_READY_INTERVAL,
+    MULTI_DB_READY_TIMEOUT,
     RELAXED_TIMEOUT,
     _prepare_ssl_certificates,
     extract_cluster_fqdn,
@@ -30,6 +34,54 @@ from tests.test_asyncio.test_scenario.async_fault_injector_client import (
     AsyncProxyServerFaultInjector,
     AsyncREFaultInjector,
 )
+
+
+async def wait_for_databases_reachable(client_class, urls, client_kwargs):
+    """Block until every Active-Active database answers PING.
+
+    Async mirror of ``tests.test_scenario.conftest.wait_for_databases_reachable``; see
+    that docstring for why the wait exists and why a plain ``PING`` is the gate.
+    """
+    deadline = monotonic() + MULTI_DB_READY_TIMEOUT
+
+    while True:
+        unreachable = {}
+
+        for url in urls:
+            error = await _ping_error(client_class, url, client_kwargs)
+
+            if error is not None:
+                unreachable[url] = error
+
+        if not unreachable:
+            return
+
+        if monotonic() >= deadline:
+            pytest.fail(
+                f"Active-Active databases still unreachable after "
+                f"{MULTI_DB_READY_TIMEOUT}s: {unreachable}"
+            )
+
+        logging.info("Waiting for Active-Active databases: %s", unreachable)
+        await asyncio.sleep(MULTI_DB_READY_INTERVAL)
+
+
+async def _ping_error(client_class, url, client_kwargs):
+    """Return None if the database answers PING, else a description of the failure."""
+    client = None
+
+    try:
+        client = client_class.from_url(url, **client_kwargs)
+        return None if await client.ping() else "PING returned a falsy response"
+    except Exception as error:
+        return repr(error)
+    finally:
+        if client is not None:
+            # A throwaway probe client - its pool must not outlive the check.
+            try:
+                await client.aclose()
+            except Exception:
+                pass
 
 
 class CheckActiveDatabaseChangedListener(AsyncEventListenerInterface):
@@ -278,6 +330,14 @@ async def r_multi_db(
         event_dispatcher=event_dispatcher,
     )
 
+    # Before the client exists, so the initial health check it runs on first use is not
+    # evaluated against a database still recovering from the previous test's fault.
+    await wait_for_databases_reachable(
+        client_class,
+        endpoint_config["endpoints"][:2],
+        {"username": username, "password": password},
+    )
+
     client = MultiDBClient(config)
 
     async def teardown():
@@ -287,8 +347,6 @@ async def r_multi_db(
             client.command_executor.active_database.client, Redis
         ):
             await client.command_executor.active_database.client.connection_pool.disconnect()
-
-        await asyncio.sleep(10)
 
     yield client, listener, endpoint_config
     await teardown()

@@ -603,19 +603,10 @@ def add_debug_log_for_notification(
     notification: Union[str, MaintenanceNotification],
 ):
     if logger.isEnabledFor(logging.DEBUG):
-        socket_address = None
-        try:
-            socket_address = (
-                connection._sock.getsockname() if connection._sock else None
-            )
-            socket_address = socket_address[1] if socket_address else None
-        except (AttributeError, OSError):
-            pass
-
         logger.debug(
             f"Handling maintenance notification: {notification}, "
-            f"with connection: {connection}, connected to ip {connection.get_resolved_ip()}, "
-            f"local socket port: {socket_address}",
+            f"with connection: {connection}, "
+            f"{connection.extract_connection_details() if connection else 'no connection'}",
         )
 
 
@@ -650,7 +641,8 @@ class MaintNotificationsConfig:
             proactive_reconnect (bool): Whether to proactively reconnect when a node is replaced.
                 Defaults to True.
             relaxed_timeout (Number): The relaxed timeout to use for the connection during maintenance.
-                If -1 is provided - the relaxed timeout is disabled. Defaults to 20.
+                If -1 is provided - the relaxed timeout is disabled. If None is provided - the
+                affected operations become blocking. Defaults to 10.
             endpoint_type (Optional[EndpointType]): Override for the endpoint type to use in CLIENT MAINT_NOTIFICATIONS.
                 If None, the endpoint type will be automatically determined based on the host and TLS configuration.
                 Defaults to None.
@@ -1151,6 +1143,28 @@ class OSSMaintNotificationsHandler:
                 # we execute a CLUSTER SLOTS command that can use a different connection
                 # that has also has the notification and we don't want to
                 # process the same notification twice
+                #
+                # This cheap pre-check runs under _lock alone, before the
+                # topology refresh lock below. The server delivers the same
+                # SMIGRATED on every connection, so the vast majority of
+                # arrivals land here; making them wait for an in-flight CLUSTER
+                # SLOTS round trip just to discard a notification would stall
+                # arbitrary command threads inside read_response.
+                return
+
+        # Lock order: _initialization_lock BEFORE _lock. initialize() below runs a
+        # CLUSTER SLOTS round trip while holding _initialization_lock, and the
+        # response can carry another SMIGRATED push that is handled inline on that
+        # thread and needs _lock - so a thread holding _lock must never wait for
+        # _initialization_lock. See the _initialization_lock comment in
+        # NodesManager.__init__ for the full ordering rule.
+        with self.cluster_client.nodes_manager._initialization_lock, self._lock:
+            if (
+                notification in self._in_progress
+                or notification in self._processed_notifications
+            ):
+                # Re-check now that both locks are held: another thread may have
+                # handled the notification while we waited for the refresh lock.
                 return
 
             if logger.isEnabledFor(logging.DEBUG):

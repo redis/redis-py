@@ -629,6 +629,26 @@ def test_read_block(client):
 
 
 @pytest.mark.redismod
+def test_range_filter_by_value_requires_both_bounds(client):
+    client.ts().add(1, 100, 1)
+    client.ts().add(1, 200, 5)
+
+    for cmd in (client.ts().range, client.ts().revrange):
+        with pytest.raises(
+            redis.exceptions.DataError,
+            match="filter_by_min_value and filter_by_max_value must be set together",
+        ):
+            cmd(1, 0, 500, filter_by_min_value=1)
+        with pytest.raises(
+            redis.exceptions.DataError,
+            match="filter_by_min_value and filter_by_max_value must be set together",
+        ):
+            cmd(1, 0, 500, filter_by_max_value=5)
+        # Both bounds still emit FILTER_BY_VALUE and filter server-side.
+        assert 1 == len(cmd(1, 0, 500, filter_by_min_value=1, filter_by_max_value=1))
+
+
+@pytest.mark.redismod
 @skip_if_server_version_lt("8.9.0")
 def test_read_block_min_count_requires_milliseconds(client):
     # BLOCK is all-or-nothing: min_count without milliseconds is invalid usage.
@@ -1387,9 +1407,14 @@ def test_pipeline(client):
 def test_uncompressed(client):
     client.ts().create("compressed")
     client.ts().create("uncompressed", uncompressed=True)
+    # Append the samples with a single TS.MADD instead of 2000 individual TS.ADD
+    # round trips, which are slow enough to hit the test timeout when the target
+    # deployment is remote.
+    samples = []
     for i in range(1000):
-        client.ts().add("compressed", i, i)
-        client.ts().add("uncompressed", i, i)
+        samples.append(("compressed", i, i))
+        samples.append(("uncompressed", i, i))
+    assert len(client.ts().madd(samples)) == 2000
     compressed_info = client.ts().info("compressed")
     uncompressed_info = client.ts().info("uncompressed")
     if is_resp2_connection(client):
