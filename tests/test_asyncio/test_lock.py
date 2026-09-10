@@ -316,6 +316,21 @@ class TestLock:
         with pytest.raises(LockNotOwnedError):
             await lock.reacquire()
 
+    async def test_lock_error_gives_correct_lock_name(self, r):
+        await r.set("foo", "bar")
+        with pytest.raises(LockError) as excinfo:
+            async with self.get_lock(r, "foo", blocking_timeout=0.1):
+                pass
+        assert excinfo.value.lock_name == "foo"
+
+    async def test_lock_not_owned_error_gives_correct_lock_name(self, r):
+        lock = self.get_lock(r, "foo", timeout=10)
+        assert await lock.acquire(blocking=False)
+        await r.set("foo", "a")
+        with pytest.raises(LockNotOwnedError) as excinfo:
+            await lock.extend(10)
+        assert excinfo.value.lock_name == "foo"
+
     async def test_release_cancellation_preserves_lock_state(self, r):
         """
         Test that cancelling release() doesn't leave lock in inconsistent state.

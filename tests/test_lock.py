@@ -357,7 +357,9 @@ class TestLock:
         with pytest.raises(LockError) as excinfo:
             with self.get_lock(r, "foo", blocking_timeout=0.1):
                 pass
-            assert excinfo.value.lock_name == "foo"
+        # Outside the pytest.raises block: the lock raises on __enter__, so an
+        # assertion inside it is never reached.
+        assert excinfo.value.lock_name == "foo"
 
 
 class TestLockClassSelection:
