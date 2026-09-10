@@ -324,7 +324,7 @@ class AsyncMaintNotificationsConnectionHandler:
         if isinstance(notification, OSSNodeMigratingNotification):
             # add the notification id to the set of processed start maint notifications
             # this is used to skip the unrelaxing of the timeouts if we have received more than
-            # one start notification before the the final end notification
+            # one start notification before the final end notification
             self.connection.add_maint_start_notification(notification.id)
 
         maint_notification = _get_maintenance_notification_name(notification)
