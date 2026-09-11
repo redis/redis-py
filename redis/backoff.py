@@ -6,6 +6,16 @@ DEFAULT_CAP = 0.512
 # Minimum backoff between each retry in seconds
 DEFAULT_BASE = 0.008
 
+# ``2**failures`` is an arbitrary precision int, and converting one beyond the
+# float range to a float raises OverflowError. Every strategy below caps the
+# result, so doubling past this point cannot change the outcome.
+_MAX_DOUBLINGS = 1023
+
+
+def _exponential(base: float, failures: int) -> float:
+    """Return ``base * 2**failures`` without overflowing for large ``failures``."""
+    return base * 2 ** min(failures, _MAX_DOUBLINGS)
+
 
 class AbstractBackoff(ABC):
     """Backoff interface"""
@@ -72,7 +82,7 @@ class ExponentialBackoff(AbstractBackoff):
         return self._base == other._base and self._cap == other._cap
 
     def compute(self, failures: int) -> float:
-        return min(self._cap, self._base * 2**failures)
+        return min(self._cap, _exponential(self._base, failures))
 
 
 class FullJitterBackoff(AbstractBackoff):
@@ -96,7 +106,7 @@ class FullJitterBackoff(AbstractBackoff):
         return self._base == other._base and self._cap == other._cap
 
     def compute(self, failures: int) -> float:
-        return random.uniform(0, min(self._cap, self._base * 2**failures))
+        return random.uniform(0, min(self._cap, _exponential(self._base, failures)))
 
 
 class EqualJitterBackoff(AbstractBackoff):
@@ -120,7 +130,7 @@ class EqualJitterBackoff(AbstractBackoff):
         return self._base == other._base and self._cap == other._cap
 
     def compute(self, failures: int) -> float:
-        temp = min(self._cap, self._base * 2**failures) / 2
+        temp = min(self._cap, _exponential(self._base, failures)) / 2
         return temp + random.uniform(0, temp)
 
 
@@ -176,7 +186,7 @@ class ExponentialWithJitterBackoff(AbstractBackoff):
         return self._base == other._base and self._cap == other._cap
 
     def compute(self, failures: int) -> float:
-        return min(self._cap, random.random() * self._base * 2**failures)
+        return min(self._cap, random.random() * _exponential(self._base, failures))
 
 
 def default_backoff():
