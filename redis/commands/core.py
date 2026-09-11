@@ -3613,7 +3613,9 @@ class BasicKeyCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/blmove
         """
         params = [first_list, second_list, src, dest, timeout]
-        return self.execute_command("BLMOVE", *params)
+        return self.execute_command(
+            "BLMOVE", *params, _blocking_timeout=timeout
+        )
 
     @overload
     def lmovem(
@@ -4863,7 +4865,9 @@ class ListCommands(CommandsProtocol):
             timeout = 0
         keys = list_or_args(keys, None)
         keys.append(timeout)
-        return self.execute_command("BLPOP", *keys)
+        return self.execute_command(
+            "BLPOP", *keys, _blocking_timeout=timeout
+        )
 
     @overload
     def brpop(
@@ -4894,7 +4898,9 @@ class ListCommands(CommandsProtocol):
             timeout = 0
         keys = list_or_args(keys, None)
         keys.append(timeout)
-        return self.execute_command("BRPOP", *keys)
+        return self.execute_command(
+            "BRPOP", *keys, _blocking_timeout=timeout
+        )
 
     @overload
     def brpoplpush(
@@ -4921,7 +4927,9 @@ class ListCommands(CommandsProtocol):
         """
         if timeout is None:
             timeout = 0
-        return self.execute_command("BRPOPLPUSH", src, dst, timeout)
+        return self.execute_command(
+            "BRPOPLPUSH", src, dst, timeout, _blocking_timeout=timeout
+        )
 
     @overload
     def blmpop(
@@ -4962,7 +4970,9 @@ class ListCommands(CommandsProtocol):
         """
         cmd_args = [timeout, numkeys, *args, direction, "COUNT", count]
 
-        return self.execute_command("BLMPOP", *cmd_args)
+        return self.execute_command(
+            "BLMPOP", *cmd_args, _blocking_timeout=timeout
+        )
 
     @overload
     def lmpop(
