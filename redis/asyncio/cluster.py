@@ -1593,6 +1593,9 @@ class RedisCluster(
                     and self.reinitialize_counter % self.reinitialize_steps == 0
                 ):
                     await self.aclose()
+                    await self.initialize(
+                        additional_startup_nodes_info=[(e.host, e.port)]
+                    )
                     # Reset the counter
                     self.reinitialize_counter = 0
                 else:
