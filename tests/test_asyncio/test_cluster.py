@@ -333,6 +333,65 @@ async def moved_redirection_helper(
             assert fetched_node.server_type == PRIMARY
 
 
+class TestMovedReinitialization:
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("reinitialize_steps", [0, 1, 3])
+    async def test_moved_refreshes_topology_before_retry(self, reinitialize_steps):
+        r = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            reinitialize_steps=reinitialize_steps,
+        )
+        key = "foo"
+        slot = r.keyslot(key)
+        refreshes = []
+        command_nodes = []
+
+        async def execute_command(node, command, *args, **kwargs):
+            if command == "CLUSTER SLOTS":
+                refreshes.append(node.name)
+                return cluster_slots
+            assert command == "GET"
+            command_nodes.append(node.port)
+            if node.port != owner_port:
+                raise MovedError(f"{slot} {default_host}:{owner_port}")
+            return b"value"
+
+        async with aclosing(r):
+            with (
+                mock.patch.object(
+                    ClusterNode,
+                    "execute_command",
+                    autospec=True,
+                    side_effect=execute_command,
+                ),
+                mock.patch.object(AsyncCommandsParser, "initialize", autospec=True),
+            ):
+                # Move the key back and forth, crossing the refresh threshold twice.
+                for moved_count in range(1, 7):
+                    owner_port = 7000 if moved_count % 2 else 7001
+                    other_port = 7001 if owner_port == 7000 else 7000
+                    cluster_slots = [
+                        [0, 8191, [default_host, other_port, "other"]],
+                        [8192, 16383, [default_host, owner_port, "owner"]],
+                    ]
+
+                    assert await r.get(key) == b"value"
+                    assert command_nodes[-2:] == [other_port, owner_port]
+                    assert len(command_nodes) == moved_count * 2
+                    assert r.get_node_from_key(key).port == owner_port
+                    assert r._initialize is False
+                    expected_refreshes = (
+                        moved_count // reinitialize_steps if reinitialize_steps else 0
+                    )
+                    assert len(refreshes) == expected_refreshes
+                    assert r.reinitialize_counter == (
+                        moved_count % reinitialize_steps
+                        if reinitialize_steps
+                        else moved_count
+                    )
+
+
 @pytest.mark.onlycluster
 class TestRedisClusterObj:
     """
