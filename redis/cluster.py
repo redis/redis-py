@@ -10,19 +10,24 @@ from collections import OrderedDict, defaultdict
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext
 from copy import copy
+from dataclasses import dataclass
 from enum import Enum
 from functools import partial
 from itertools import chain
+from math import exp
+from random import sample as random_sample
 from types import MethodType
 from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
+    Collection,
     Dict,
     Iterable,
     List,
     Literal,
     Optional,
+    Sequence,
     Set,
     Tuple,
     Type,
@@ -1930,9 +1935,18 @@ class RedisCluster(
 
         # Start timing for observability
         start_time = time.monotonic()
+        latency_balancing = (
+            getattr(self, "load_balancing_strategy", None)
+            == LoadBalancingStrategy.LATENCY_BASED
+        )
+        latency_sampling = latency_balancing and self._is_replica_safe(command)
 
         while ttl > 0:
             ttl -= 1
+            latency_attempt = None
+            latency_started_at = None
+            latency_sample = None
+            asking_attempt = asking
             try:
                 if asking:
                     target_node = self.get_node(node_name=redirect_addr)
@@ -1950,6 +1964,15 @@ class RedisCluster(
                         self.load_balancing_strategy if replica_safe else None,
                     )
                     moved = False
+
+                if latency_balancing:
+                    latency_attempt = (
+                        self.nodes_manager.read_load_balancer.start_request(
+                            target_node.name
+                        )
+                    )
+                    if latency_sampling and not asking_attempt:
+                        latency_started_at = time.monotonic()
 
                 redis_node = self.get_redis_connection(target_node)
                 connection = get_connection(redis_node)
@@ -2002,6 +2025,9 @@ class RedisCluster(
                         response = self.cluster_response_callbacks[command](
                             response, **kwargs
                         )
+
+                if latency_started_at is not None:
+                    latency_sample = time.monotonic() - latency_started_at
 
                 self._record_command_metric(
                     command_name=command,
@@ -2233,6 +2259,10 @@ class RedisCluster(
                 )
                 raise e
             finally:
+                if latency_attempt is not None:
+                    self.nodes_manager.read_load_balancer.finish_request(
+                        latency_attempt, latency_sample
+                    )
                 if connection is not None:
                     redis_node.connection_pool.release(connection)
 
@@ -2387,6 +2417,29 @@ class LoadBalancingStrategy(Enum):
     ROUND_ROBIN_REPLICAS = "round_robin_replicas"
     RANDOM = "random"
     RANDOM_REPLICA = "random_replica"
+    LATENCY_BASED = "latency_based"
+
+
+_LATENCY_EWMA_ALPHA = 0.2
+_LATENCY_BASELINE_ALPHA = 0.05
+_LATENCY_DECAY_SECONDS = 10.0
+_LATENCY_EVIDENCE_TTL_SECONDS = 3 * _LATENCY_DECAY_SECONDS
+_INITIAL_LATENCY_SECONDS = 0.001
+
+
+@dataclass(frozen=True, slots=True)
+class _LatencyAttempt:
+    node_name: str
+    generation: int
+
+
+@dataclass(slots=True)
+class _NodeLatencyState:
+    generation: int
+    in_flight: int = 0
+    ewma: float | None = None
+    peak: float | None = None
+    observed_at: float | None = None
 
 
 # The strategies that exclude the primary. ``LoadBalancer`` derives the same thing per
@@ -2404,21 +2457,38 @@ _REPLICAS_ONLY_STRATEGIES = frozenset(
 
 class LoadBalancer:
     """
-    Round-Robin Load Balancing
+    Select nodes according to a configured load-balancing strategy.
     """
 
     def __init__(self, start_index: int = 0) -> None:
         self.primary_to_idx: dict[str, int] = {}
         self.start_index: int = start_index
         self._lock: threading.Lock = threading.Lock()
+        self._latency_state: dict[str, _NodeLatencyState] = {}
+        self._next_generation = 0
+        self._baseline = _INITIAL_LATENCY_SECONDS
+        self._clock = time.monotonic
 
     def get_server_index(
         self,
         primary: str,
         list_size: int,
         load_balancing_strategy: LoadBalancingStrategy = LoadBalancingStrategy.ROUND_ROBIN,
+        nodes: Sequence["ClusterNode"] | None = None,
     ) -> int:
-        if load_balancing_strategy == LoadBalancingStrategy.RANDOM_REPLICA:
+        if load_balancing_strategy == LoadBalancingStrategy.LATENCY_BASED:
+            if nodes is None or len(nodes) != list_size:
+                raise ValueError("nodes are required for latency-based load balancing")
+            candidate_indices = random_sample(range(list_size), min(2, list_size))
+            now = self._clock()
+            with self._lock:
+                return min(
+                    candidate_indices,
+                    key=lambda index: self._latency_score_unlocked(
+                        nodes[index].name, now
+                    ),
+                )
+        elif load_balancing_strategy == LoadBalancingStrategy.RANDOM_REPLICA:
             return self._get_random_server_index(
                 list_size,
                 replicas_only=True,
@@ -2434,6 +2504,79 @@ class LoadBalancer:
                 list_size,
                 load_balancing_strategy == LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
             )
+
+    def start_request(self, node_name: str) -> _LatencyAttempt:
+        with self._lock:
+            state = self._latency_state.get(node_name)
+            if state is None:
+                self._next_generation += 1
+                state = _NodeLatencyState(generation=self._next_generation)
+                self._latency_state[node_name] = state
+            state.in_flight += 1
+            return _LatencyAttempt(node_name, state.generation)
+
+    def finish_request(
+        self,
+        attempt: _LatencyAttempt,
+        latency_seconds: float | None = None,
+    ) -> None:
+        now = self._clock()
+        with self._lock:
+            state = self._latency_state.get(attempt.node_name)
+            if state is None or state.generation != attempt.generation:
+                return
+            state.in_flight = max(0, state.in_flight - 1)
+            if latency_seconds is not None:
+                self._observe_unlocked(state, max(0.0, latency_seconds), now)
+
+    def reconcile(self, active_node_names: Collection[str]) -> None:
+        active = set(active_node_names)
+        with self._lock:
+            for node_name in tuple(self._latency_state):
+                if node_name not in active:
+                    del self._latency_state[node_name]
+
+    def _observe_unlocked(
+        self, state: _NodeLatencyState, latency_seconds: float, now: float
+    ) -> None:
+        aged_ewma, aged_peak = self._aged_estimates_unlocked(state, now)
+        state.ewma = (
+            _LATENCY_EWMA_ALPHA * latency_seconds
+            + (1 - _LATENCY_EWMA_ALPHA) * aged_ewma
+        )
+        state.peak = max(latency_seconds, state.ewma, aged_peak)
+        state.observed_at = now
+
+        self._baseline = (
+            _LATENCY_BASELINE_ALPHA * state.ewma
+            + (1 - _LATENCY_BASELINE_ALPHA) * self._baseline
+        )
+
+    def _aged_estimates_unlocked(
+        self, state: _NodeLatencyState, now: float
+    ) -> tuple[float, float]:
+        baseline = self._baseline
+        if state.ewma is None or state.peak is None or state.observed_at is None:
+            return baseline, baseline
+        age = max(0.0, now - state.observed_at)
+        if age >= _LATENCY_EVIDENCE_TTL_SECONDS:
+            return baseline, baseline
+        weight = exp(-age / _LATENCY_DECAY_SECONDS)
+        aged_ewma = baseline + (state.ewma - baseline) * weight
+        aged_peak = aged_ewma + max(0.0, state.peak - state.ewma) * weight
+        return aged_ewma, aged_peak
+
+    def _latency_score(self, node_name: str) -> float:
+        now = self._clock()
+        with self._lock:
+            return self._latency_score_unlocked(node_name, now)
+
+    def _latency_score_unlocked(self, node_name: str, now: float) -> float:
+        state = self._latency_state.get(node_name)
+        if state is None:
+            return self._baseline
+        _, peak = self._aged_estimates_unlocked(state, now)
+        return peak * (state.in_flight + 1)
 
     def reset(self) -> None:
         with self._lock:
@@ -2670,7 +2813,10 @@ class NodesManager:
                 # get the server index using the strategy defined in load_balancing_strategy
                 primary_name = self.slots_cache[slot][0].name
                 node_idx = self.read_load_balancer.get_server_index(
-                    primary_name, len(self.slots_cache[slot]), load_balancing_strategy
+                    primary_name,
+                    len(self.slots_cache[slot]),
+                    load_balancing_strategy,
+                    nodes=self.slots_cache[slot],
                 )
             elif (
                 server_type is None
@@ -3128,6 +3274,7 @@ class NodesManager:
                 if self._dynamic_startup_nodes:
                     # Populate the startup nodes with all discovered nodes
                     self.startup_nodes = tmp_nodes_cache
+                self.read_load_balancer.reconcile(self.nodes_cache)
                 # Increment the epoch to signal that initialization has completed
                 self._epoch += 1
             # Dispatch so listeners (e.g. ClusterPubSub) can reconcile per-node
@@ -5192,6 +5339,7 @@ class PipelineStrategy(AbstractStrategy):
         node_objs: dict = {}
         nodes_written = 0
         nodes_read = 0
+        latency_attempts = None
 
         try:
             # as we move through each command that still needs to be processed,
@@ -5315,6 +5463,15 @@ class PipelineStrategy(AbstractStrategy):
             # Start timing for observability
             start_time = time.monotonic()
 
+            if (
+                self._pipe.load_balancing_strategy
+                == LoadBalancingStrategy.LATENCY_BASED
+            ):
+                latency_attempts = [
+                    self._nodes_manager.read_load_balancer.start_request(node_name)
+                    for node_name in nodes
+                ]
+
             node_commands = nodes.values()
             for n in node_commands:
                 nodes_written += 1
@@ -5340,6 +5497,11 @@ class PipelineStrategy(AbstractStrategy):
                 )
                 nodes_read += 1
         finally:
+            if latency_attempts is not None:
+                for latency_attempt in latency_attempts:
+                    self._nodes_manager.read_load_balancer.finish_request(
+                        latency_attempt
+                    )
             # release all the redis connections we allocated earlier
             # back into the connection pool.
             # if the connection is dirty (that is: we've written
@@ -5660,7 +5822,26 @@ class TransactionStrategy(AbstractStrategy):
         )
 
     def _get_connection_and_send_command(self, *args, **options):
-        redis_node, connection = self._get_client_and_connection_for_transaction()
+        latency_attempt = None
+        if (
+            self._pipe.load_balancing_strategy == LoadBalancingStrategy.LATENCY_BASED
+            and self._pipeline_slots
+        ):
+            node = self._nodes_manager.get_node_from_slot(
+                next(iter(self._pipeline_slots)), False
+            )
+            latency_attempt = self._nodes_manager.read_load_balancer.start_request(
+                node.name
+            )
+            try:
+                redis_node, connection = (
+                    self._get_client_and_connection_for_transaction()
+                )
+            except BaseException:
+                self._nodes_manager.read_load_balancer.finish_request(latency_attempt)
+                raise
+        else:
+            redis_node, connection = self._get_client_and_connection_for_transaction()
 
         # Start timing for observability
         start_time = time.monotonic()
@@ -5692,6 +5873,9 @@ class TransactionStrategy(AbstractStrategy):
                 error=e,
             )
             raise
+        finally:
+            if latency_attempt is not None:
+                self._nodes_manager.read_load_balancer.finish_request(latency_attempt)
 
     def _send_command_parse_response(
         self, conn, redis_node: Redis, command_name, *args, **options
@@ -5799,8 +5983,29 @@ class TransactionStrategy(AbstractStrategy):
     def _execute_transaction_with_retries(
         self, stack: List["PipelineCommand"], raise_on_error: bool
     ):
+        def execute_transaction():
+            latency_attempt = None
+            if (
+                self._pipe.load_balancing_strategy
+                == LoadBalancingStrategy.LATENCY_BASED
+                and len(self._pipeline_slots) == 1
+            ):
+                node = self._nodes_manager.get_node_from_slot(
+                    next(iter(self._pipeline_slots)), False
+                )
+                latency_attempt = self._nodes_manager.read_load_balancer.start_request(
+                    node.name
+                )
+            try:
+                return self._execute_transaction(stack, raise_on_error)
+            finally:
+                if latency_attempt is not None:
+                    self._nodes_manager.read_load_balancer.finish_request(
+                        latency_attempt
+                    )
+
         return self._retry.call_with_retry(
-            lambda: self._execute_transaction(stack, raise_on_error),
+            execute_transaction,
             lambda error, failure_count: self._reinitialize_on_error(
                 error, failure_count
             ),

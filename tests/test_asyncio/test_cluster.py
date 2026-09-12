@@ -30,6 +30,7 @@ from redis.cluster import (
     PIPELINE_BLOCKED_COMMANDS,
     PRIMARY,
     REPLICA,
+    LoadBalancer,
     LoadBalancingStrategy,
     get_node_name,
 )
@@ -63,6 +64,8 @@ from redis.exceptions import (
     RedisError,
     ResponseError,
     SlotNotCoveredError,
+    TimeoutError,
+    TryAgainError,
 )
 from redis.himport import HIMPORT_SET
 from redis.utils import str_if_bytes
@@ -90,6 +93,377 @@ default_cluster_slots = [
     [0, 8191, ["127.0.0.1", 7000, "node_0"], ["127.0.0.1", 7003, "node_3"]],
     [8192, 16383, ["127.0.0.1", 7001, "node_1"], ["127.0.0.1", 7002, "node_2"]],
 ]
+
+
+class TestLatencyBasedCommandTracking:
+    @staticmethod
+    def client(load_balancer):
+        client = object.__new__(RedisCluster)
+        client.RedisClusterRequestTTL = 1
+        client.load_balancing_strategy = LoadBalancingStrategy.LATENCY_BASED
+        client.nodes_manager = mock.Mock(read_load_balancer=load_balancer)
+        client._metadata_resolver = AsyncDynamicMetadataResolver(
+            {"core": {"get": CACHEABLE_KEYED}, "custom": {"read": CACHEABLE_KEYED}}
+        )
+        client._record_command_metric = mock.AsyncMock()
+        client._record_error_metric = mock.AsyncMock()
+        return client
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "command,response,records_latency",
+        [
+            ("GET", b"value", True),
+            ("CUSTOM.READ", b"value", True),
+            ("SET", b"OK", False),
+        ],
+    )
+    async def test_success_releases_request_and_only_reads_record_latency(
+        self, command, response, records_latency
+    ):
+        node = ClusterNode("127.0.0.1", 7000)
+        load_balancer = LoadBalancer()
+        client = self.client(load_balancer)
+
+        with mock.patch.object(
+            ClusterNode, "execute_command", mock.AsyncMock(return_value=response)
+        ):
+            assert await client._execute_command(node, command, "key") == response
+
+        state = load_balancer._latency_state[node.name]
+        assert state.in_flight == 0
+        assert (state.ewma is not None) is records_latency
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "error", [ResponseError("failure"), asyncio.CancelledError()]
+    )
+    async def test_failure_releases_request_without_recording_latency(self, error):
+        node = ClusterNode("127.0.0.1", 7000)
+        load_balancer = LoadBalancer()
+        client = self.client(load_balancer)
+
+        with mock.patch.object(
+            ClusterNode, "execute_command", mock.AsyncMock(side_effect=error)
+        ):
+            with pytest.raises(type(error)):
+                await client._execute_command(node, "GET", "key")
+
+        state = load_balancer._latency_state[node.name]
+        assert state.in_flight == 0
+        assert state.ewma is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "error",
+        [
+            AuthenticationError("failure"),
+            MaxConnectionsError("failure"),
+            ConnectionError("failure"),
+            TimeoutError("failure"),
+            ClusterDownError("failure"),
+            SlotNotCoveredError("failure"),
+        ],
+    )
+    async def test_other_failures_release_without_recording_latency(self, error):
+        node = ClusterNode("127.0.0.1", 7000)
+        load_balancer = LoadBalancer()
+        client = self.client(load_balancer)
+        client.aclose = mock.AsyncMock()
+
+        with (
+            mock.patch.object(
+                ClusterNode, "execute_command", mock.AsyncMock(side_effect=error)
+            ),
+            mock.patch("redis.asyncio.cluster.asyncio.sleep", mock.AsyncMock()),
+        ):
+            with pytest.raises(type(error)):
+                await client._execute_command(node, "GET", "key")
+
+        state = load_balancer._latency_state[node.name]
+        assert state.in_flight == 0
+        assert state.ewma is None
+
+    @pytest.mark.asyncio
+    async def test_moved_retry_records_only_the_final_target(self):
+        source = ClusterNode("127.0.0.1", 7000)
+        target = ClusterNode("127.0.0.1", 7001)
+        load_balancer = LoadBalancer()
+        client = self.client(load_balancer)
+        client.RedisClusterRequestTTL = 2
+        client.reinitialize_counter = 0
+        client.reinitialize_steps = 0
+        client.read_from_replicas = True
+        client._determine_slot = mock.AsyncMock(return_value=0)
+        client.nodes_manager.move_slot = mock.AsyncMock()
+        client.nodes_manager.get_node_from_slot.return_value = target
+
+        with mock.patch.object(
+            ClusterNode,
+            "execute_command",
+            mock.AsyncMock(side_effect=[MovedError("0 127.0.0.1:7001"), b"value"]),
+        ):
+            assert await client._execute_command(source, "GET", "key") == b"value"
+
+        assert load_balancer._latency_state[source.name].ewma is None
+        assert load_balancer._latency_state[target.name].ewma is not None
+        assert all(
+            state.in_flight == 0 for state in load_balancer._latency_state.values()
+        )
+
+    @pytest.mark.asyncio
+    async def test_ask_retry_does_not_record_migration_latency(self):
+        source = ClusterNode("127.0.0.1", 7000)
+        target = ClusterNode("127.0.0.1", 7001)
+        load_balancer = LoadBalancer()
+        client = self.client(load_balancer)
+        client.RedisClusterRequestTTL = 2
+        client.get_node = mock.Mock(return_value=target)
+
+        with mock.patch.object(
+            ClusterNode,
+            "execute_command",
+            mock.AsyncMock(side_effect=[AskError("0 127.0.0.1:7001"), b"OK", b"value"]),
+        ):
+            assert await client._execute_command(source, "GET", "key") == b"value"
+
+        assert all(
+            state.in_flight == 0 and state.ewma is None
+            for state in load_balancer._latency_state.values()
+        )
+
+    @pytest.mark.asyncio
+    async def test_tryagain_retry_records_only_the_successful_attempt(self):
+        node = ClusterNode("127.0.0.1", 7000)
+        load_balancer = LoadBalancer()
+        client = self.client(load_balancer)
+        client.RedisClusterRequestTTL = 2
+
+        with mock.patch.object(
+            ClusterNode,
+            "execute_command",
+            mock.AsyncMock(side_effect=[TryAgainError("retry"), b"value"]),
+        ):
+            assert await client._execute_command(node, "GET", "key") == b"value"
+
+        state = load_balancer._latency_state[node.name]
+        assert state.in_flight == 0
+        assert state.ewma is not None
+
+    @pytest.mark.asyncio
+    async def test_pipeline_tracks_in_flight_without_recording_batch_latency(self):
+        client = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+        )
+
+        async def execute_pipeline(node, commands):
+            for command in commands:
+                command.result = b"value"
+            return False
+
+        pipeline = client.pipeline()
+        pipeline.get("foo")
+        with mock.patch.object(ClusterNode, "execute_pipeline", execute_pipeline):
+            assert await pipeline.execute() == [b"value"]
+
+        states = client.nodes_manager.read_load_balancer._latency_state.values()
+        assert states
+        assert all(state.in_flight == 0 for state in states)
+        assert all(state.ewma is None for state in states)
+
+    @pytest.mark.asyncio
+    async def test_pipeline_releases_each_node_when_its_task_finishes(self):
+        client = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+        )
+        waiting_started = asyncio.Event()
+        release_waiting = asyncio.Event()
+        waiting_finished = asyncio.Event()
+        waiting_node = client.get_node(default_host, 7000)
+        failing_node = client.get_node(default_host, 7001)
+
+        async def execute_pipeline(node, commands):
+            if node is waiting_node:
+                waiting_started.set()
+                await release_waiting.wait()
+                waiting_finished.set()
+                return False
+            await waiting_started.wait()
+            raise RuntimeError("failed node")
+
+        pipeline = client.pipeline()
+        pipeline.execute_command("GET", "bar", target_nodes=waiting_node)
+        pipeline.execute_command("GET", "foo", target_nodes=failing_node)
+        with mock.patch.object(ClusterNode, "execute_pipeline", execute_pipeline):
+            with pytest.raises(RuntimeError, match="failed node"):
+                await pipeline.execute()
+
+            state = client.nodes_manager.read_load_balancer._latency_state[
+                waiting_node.name
+            ]
+            assert state.in_flight == 1
+
+            release_waiting.set()
+            await waiting_finished.wait()
+            assert state.in_flight == 0
+            assert state.ewma is None
+
+    @pytest.mark.asyncio
+    async def test_transaction_tracks_one_in_flight_batch_without_latency(self):
+        client = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+        )
+        pipeline = client.pipeline(transaction=True)
+        strategy = pipeline._execution_strategy
+        strategy._pipeline_slots = {0}
+        node = client.nodes_manager.get_node_from_slot(0, False)
+
+        async def execute_transaction(*_args):
+            state = client.nodes_manager.read_load_balancer._latency_state[node.name]
+            assert state.in_flight == 1
+            return []
+
+        with mock.patch.object(
+            strategy, "_execute_transaction", side_effect=execute_transaction
+        ):
+            assert await strategy._execute_transaction_with_retries([], True) == []
+
+        state = client.nodes_manager.read_load_balancer._latency_state[node.name]
+        assert state.in_flight == 0
+        assert state.ewma is None
+
+    @pytest.mark.asyncio
+    async def test_immediate_transaction_command_tracks_in_flight_without_latency(self):
+        client = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+        )
+        strategy = client.pipeline(transaction=True)._execution_strategy
+
+        with pytest.raises(
+            RedisClusterException,
+            match="At least a command with a key is needed to identify a node",
+        ):
+            await strategy._get_connection_and_send_command("UNWATCH")
+        assert not client.nodes_manager.read_load_balancer._latency_state
+
+        strategy._pipeline_slots = {0}
+        node = client.nodes_manager.get_node_from_slot(0, False)
+        connection = mock.AsyncMock(host=node.host, port=node.port, db=0)
+
+        async def send_command(*_args, **_kwargs):
+            state = client.nodes_manager.read_load_balancer._latency_state[node.name]
+            assert state.in_flight == 1
+            return b"OK"
+
+        with (
+            mock.patch.object(
+                strategy,
+                "_get_client_and_connection_for_transaction",
+                return_value=(node, connection),
+            ),
+            mock.patch.object(
+                strategy, "_send_command_parse_response", side_effect=send_command
+            ),
+            mock.patch.object(ClusterNode, "disconnect_if_needed", mock.AsyncMock()),
+            mock.patch(
+                "redis.asyncio.cluster.record_operation_duration", mock.AsyncMock()
+            ),
+        ):
+            assert (
+                await strategy._get_connection_and_send_command("WATCH", "key") == b"OK"
+            )
+
+        state = client.nodes_manager.read_load_balancer._latency_state[node.name]
+        assert state.in_flight == 0
+        assert state.ewma is None
+
+        client.nodes_manager.read_load_balancer.reconcile(set())
+        with mock.patch.object(
+            strategy,
+            "_get_client_and_connection_for_transaction",
+            side_effect=asyncio.CancelledError(),
+        ):
+            with pytest.raises(asyncio.CancelledError):
+                await strategy._get_connection_and_send_command("WATCH", "key")
+
+        state = client.nodes_manager.read_load_balancer._latency_state[node.name]
+        assert state.in_flight == 0
+        assert state.ewma is None
+
+    @pytest.mark.asyncio
+    async def test_topology_refresh_preserves_survivors_and_failed_refresh_preserves_all(
+        self,
+    ):
+        client = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+        )
+        manager = client.nodes_manager
+        survivor = next(iter(manager.nodes_cache))
+        departed = "127.0.0.1:7999"
+        for node_name in (survivor, departed):
+            attempt = manager.read_load_balancer.start_request(node_name)
+            manager.read_load_balancer.finish_request(attempt, 0.005)
+        generation = manager.read_load_balancer._latency_state[survivor].generation
+
+        with mock.patch.object(
+            ClusterNode,
+            "execute_command",
+            mock.AsyncMock(side_effect=ConnectionError("offline")),
+        ):
+            with pytest.raises(RedisClusterUnreachableError):
+                await manager.initialize()
+
+        assert set(manager.read_load_balancer._latency_state) == {survivor, departed}
+        assert (
+            manager.read_load_balancer._latency_state[survivor].generation == generation
+        )
+
+        with mock.patch.object(
+            ClusterNode,
+            "execute_command",
+            mock.AsyncMock(return_value=default_cluster_slots),
+        ):
+            await manager.initialize()
+
+        assert (
+            manager.read_load_balancer._latency_state[survivor].generation == generation
+        )
+        assert departed not in manager.read_load_balancer._latency_state
+
+
+def test_async_nodes_manager_passes_slot_nodes_to_latency_selection():
+    nodes = [
+        ClusterNode("127.0.0.1", 7000, PRIMARY),
+        ClusterNode("127.0.0.1", 7001, REPLICA),
+        ClusterNode("127.0.0.1", 7002, REPLICA),
+    ]
+    manager = object.__new__(NodesManager)
+    manager.slots_cache = {0: nodes}
+    manager.read_load_balancer = LoadBalancer()
+
+    for node, latency in zip(nodes, (0.020, 0.010, 0.005)):
+        attempt = manager.read_load_balancer.start_request(node.name)
+        manager.read_load_balancer.finish_request(attempt, latency)
+
+    with mock.patch("redis.cluster.random_sample", return_value=[0, 2]):
+        assert (
+            manager.get_node_from_slot(
+                0,
+                read_from_replicas=True,
+                load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+            )
+            is nodes[2]
+        )
 
 
 class NodeProxy:
@@ -1214,6 +1588,7 @@ class TestClusterRedisCommands:
             LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
             LoadBalancingStrategy.RANDOM,
             LoadBalancingStrategy.RANDOM_REPLICA,
+            LoadBalancingStrategy.LATENCY_BASED,
         ],
     )
     async def test_get_and_set_with_load_balanced_client(

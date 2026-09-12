@@ -1472,10 +1472,19 @@ class RedisCluster(
         ttl = self.RedisClusterRequestTTL
         command = args[0]
         start_time = time.monotonic()
+        latency_balancing = (
+            getattr(self, "load_balancing_strategy", None)
+            == LoadBalancingStrategy.LATENCY_BASED
+        )
+        latency_sampling = latency_balancing and await self._is_replica_safe(command)
 
         while ttl > 0:
             ttl -= 1
             ask_himport = False
+            latency_attempt = None
+            latency_started_at = None
+            latency_sample = None
+            asking_attempt = asking
             try:
                 if asking:
                     target_node = self.get_node(node_name=redirect_addr)
@@ -1503,9 +1512,20 @@ class RedisCluster(
                     )
                     moved = False
 
+                if latency_balancing:
+                    latency_attempt = (
+                        self.nodes_manager.read_load_balancer.start_request(
+                            target_node.name
+                        )
+                    )
+                    if latency_sampling and not asking_attempt:
+                        latency_started_at = time.monotonic()
+
                 response = await target_node.execute_command(
                     *args, asking=ask_himport, **kwargs
                 )
+                if latency_started_at is not None:
+                    latency_sample = time.monotonic() - latency_started_at
                 await self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
@@ -1652,6 +1672,11 @@ class RedisCluster(
                     error=e,
                 )
                 raise
+            finally:
+                if latency_attempt is not None:
+                    self.nodes_manager.read_load_balancer.finish_request(
+                        latency_attempt, latency_sample
+                    )
 
         e = ClusterError("TTL exhausted.")
         e.connection = target_node
@@ -2439,7 +2464,10 @@ class NodesManager:
                 # get the server index using the strategy defined in load_balancing_strategy
                 primary_name = self.slots_cache[slot][0].name
                 node_idx = self.read_load_balancer.get_server_index(
-                    primary_name, len(self.slots_cache[slot]), load_balancing_strategy
+                    primary_name,
+                    len(self.slots_cache[slot]),
+                    load_balancing_strategy,
+                    nodes=self.slots_cache[slot],
                 )
                 return self.slots_cache[slot][node_idx]
             return self.slots_cache[slot][0]
@@ -2683,6 +2711,7 @@ class NodesManager:
 
             # Set the default node
             self.default_node = self.get_nodes_by_server_type(PRIMARY)[0]
+            self.read_load_balancer.reconcile(self.nodes_cache)
             self._epoch += 1
         # Dispatch so listeners (e.g. ClusterPubSub) can reconcile per-node
         # state after slot ownership may have changed. A listener must not
@@ -3203,12 +3232,29 @@ class PipelineStrategy(AbstractStrategy):
         # Start timing for observability
         start_time = time.monotonic()
 
-        errors = await asyncio.gather(
-            *(
-                asyncio.create_task(node[0].execute_pipeline(node[1]))
-                for node in nodes.values()
+        if client.load_balancing_strategy == LoadBalancingStrategy.LATENCY_BASED:
+            load_balancer = client.nodes_manager.read_load_balancer
+
+            async def execute_node(node_name, node, commands):
+                attempt = load_balancer.start_request(node_name)
+                try:
+                    return await node.execute_pipeline(commands)
+                finally:
+                    load_balancer.finish_request(attempt)
+
+            errors = await asyncio.gather(
+                *(
+                    asyncio.create_task(execute_node(node_name, node, commands))
+                    for node_name, (node, commands) in nodes.items()
+                )
             )
-        )
+        else:
+            errors = await asyncio.gather(
+                *(
+                    asyncio.create_task(node[0].execute_pipeline(node[1]))
+                    for node in nodes.values()
+                )
+            )
 
         # Record operation duration for each node
         for node_name, (node, commands) in nodes.items():
@@ -3447,10 +3493,31 @@ class TransactionStrategy(AbstractStrategy):
         )
 
     async def _get_connection_and_send_command(self, *args, **options):
-        redis_node, connection = self._get_client_and_connection_for_transaction()
-        # Only disconnect if not watching - disconnecting would lose WATCH state
-        if not self._watching:
-            await redis_node.disconnect_if_needed(connection)
+        latency_attempt = None
+        if (
+            self._pipe.cluster_client.load_balancing_strategy
+            == LoadBalancingStrategy.LATENCY_BASED
+            and self._pipeline_slots
+        ):
+            nodes_manager = self._pipe.cluster_client.nodes_manager
+            node = nodes_manager.get_node_from_slot(
+                next(iter(self._pipeline_slots)), False
+            )
+            latency_attempt = nodes_manager.read_load_balancer.start_request(node.name)
+            try:
+                redis_node, connection = (
+                    self._get_client_and_connection_for_transaction()
+                )
+                # Only disconnect if not watching - disconnecting would lose WATCH state
+                if not self._watching:
+                    await redis_node.disconnect_if_needed(connection)
+            except BaseException:
+                nodes_manager.read_load_balancer.finish_request(latency_attempt)
+                raise
+        else:
+            redis_node, connection = self._get_client_and_connection_for_transaction()
+            if not self._watching:
+                await redis_node.disconnect_if_needed(connection)
 
         # Start timing for observability
         start_time = time.monotonic()
@@ -3480,6 +3547,9 @@ class TransactionStrategy(AbstractStrategy):
                 error=e,
             )
             raise
+        finally:
+            if latency_attempt is not None:
+                nodes_manager.read_load_balancer.finish_request(latency_attempt)
 
     async def _send_command_parse_response(
         self,
@@ -3597,8 +3667,28 @@ class TransactionStrategy(AbstractStrategy):
     async def _execute_transaction_with_retries(
         self, stack: List["PipelineCommand"], raise_on_error: bool
     ):
+        async def execute_transaction():
+            latency_attempt = None
+            if (
+                self._pipe.cluster_client.load_balancing_strategy
+                == LoadBalancingStrategy.LATENCY_BASED
+                and len(self._pipeline_slots) == 1
+            ):
+                nodes_manager = self._pipe.cluster_client.nodes_manager
+                node = nodes_manager.get_node_from_slot(
+                    next(iter(self._pipeline_slots)), False
+                )
+                latency_attempt = nodes_manager.read_load_balancer.start_request(
+                    node.name
+                )
+            try:
+                return await self._execute_transaction(stack, raise_on_error)
+            finally:
+                if latency_attempt is not None:
+                    nodes_manager.read_load_balancer.finish_request(latency_attempt)
+
         return await self._retry.call_with_retry(
-            lambda: self._execute_transaction(stack, raise_on_error),
+            execute_transaction,
             lambda error, failure_count: self._reinitialize_on_error(
                 error, failure_count
             ),
