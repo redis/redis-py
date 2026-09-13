@@ -1261,8 +1261,17 @@ async def test_binary_pubsub_payload_invalidates_connection(parser_class):
 
 @pytest.mark.parametrize(
     "parser_class",
-    [_AsyncRESP2Parser],
-    ids=["AsyncRESP2Parser"],
+    [
+        _AsyncRESP2Parser,
+        _AsyncRESP3Parser,
+        pytest.param(
+            _AsyncHiredisParser,
+            marks=pytest.mark.skipif(
+                not HIREDIS_AVAILABLE, reason="hiredis is not installed"
+            ),
+        ),
+    ],
+    ids=["AsyncRESP2Parser", "AsyncRESP3Parser", "AsyncHiredisParser"],
 )
 class TestAsyncMalformedNumericFrameInvalidatesConnection:
     """Async version: malformed numeric frames raise InvalidResponse and must drop
