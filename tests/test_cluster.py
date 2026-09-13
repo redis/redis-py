@@ -492,6 +492,41 @@ class TestLatencyBasedCommandTracking:
         assert all(state.in_flight == 0 for state in states)
         assert all(state.ewma is None for state in states)
 
+    def test_pipeline_releases_each_node_after_its_read_finishes(self):
+        client = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+        )
+        first_node = client.get_node(default_host, 7000)
+        second_node = client.get_node(default_host, 7001)
+        connections = {
+            first_node.redis_connection: Mock(host=first_node.host, port=7000, db=0),
+            second_node.redis_connection: Mock(host=second_node.host, port=7001, db=0),
+        }
+
+        def write_without_network(self):
+            for command in self.commands:
+                command.result = None
+
+        def read_response(node_commands):
+            states = client.nodes_manager.read_load_balancer._latency_state
+            if node_commands.connection.port == second_node.port:
+                assert states[first_node.name].in_flight == 0
+                assert states[second_node.name].in_flight == 1
+            for command in node_commands.commands:
+                command.result = b"value"
+
+        pipeline = client.pipeline()
+        pipeline.execute_command("GET", "first", target_nodes=first_node)
+        pipeline.execute_command("GET", "second", target_nodes=second_node)
+        with (
+            patch.object(NodeCommands, "write", write_without_network),
+            patch.object(NodeCommands, "read", read_response),
+            patch("redis.cluster.get_connection", side_effect=connections.__getitem__),
+        ):
+            assert pipeline.execute() == [b"value", b"value"]
+
     def test_transaction_tracks_one_in_flight_batch_without_latency(self):
         client = get_mocked_redis_client(
             host=default_host,
@@ -3722,6 +3757,30 @@ class TestStaticMetadataRouting:
             assert rc.get_keyless_target_node("get") is node
 
         any_node.assert_called_once()
+
+    @pytest.mark.fixed_client
+    def test_keyless_latency_routing_scores_all_eligible_nodes(self):
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+        )
+        nodes = rc.get_nodes()
+        selected_index = len(nodes) - 1
+
+        with patch.object(
+            rc.nodes_manager.read_load_balancer,
+            "get_server_index",
+            return_value=selected_index,
+        ) as select_index:
+            assert rc.get_keyless_target_node("FT.SEARCH") is nodes[selected_index]
+
+        select_index.assert_called_once_with(
+            "",
+            len(nodes),
+            LoadBalancingStrategy.LATENCY_BASED,
+            nodes=nodes,
+        )
 
     @pytest.mark.fixed_client
     def test_every_load_balancing_strategy_is_classified(self):

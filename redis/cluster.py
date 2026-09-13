@@ -1146,10 +1146,9 @@ class RedisCluster(
         otherwise.
 
         A replicas-only ``load_balancing_strategy`` is honored by picking from the replicas
-        alone, so a strategy that asks for replicas cannot land on a primary here. The
-        strategy is not applied any further than that: the rest of it is an index into one
-        shard's node list and a round-robin counter kept per primary name, and a keyless
-        command has no shard to index - so the pick is uniform over the eligible nodes.
+        alone, so a strategy that asks for replicas cannot land on a primary here.
+        ``LATENCY_BASED`` scores all eligible nodes because it does not require a shard.
+        Other strategies pick uniformly because their state is scoped to a shard.
 
         Falls back to the whole node set when the cluster has no replicas to pick from,
         which is every primary. That is also the answer for the two strategies that
@@ -1164,6 +1163,16 @@ class RedisCluster(
                 replicas = self.get_replicas()
                 if replicas:
                     return random.choice(replicas)
+
+            if self.load_balancing_strategy == LoadBalancingStrategy.LATENCY_BASED:
+                eligible_nodes = self.get_nodes()
+                index = self.nodes_manager.read_load_balancer.get_server_index(
+                    "",
+                    len(eligible_nodes),
+                    self.load_balancing_strategy,
+                    nodes=eligible_nodes,
+                )
+                return eligible_nodes[index]
 
             return self.get_random_node()
 
@@ -5467,18 +5476,24 @@ class PipelineStrategy(AbstractStrategy):
                 self._pipe.load_balancing_strategy
                 == LoadBalancingStrategy.LATENCY_BASED
             ):
-                latency_attempts = [
-                    self._nodes_manager.read_load_balancer.start_request(node_name)
+                latency_attempts = {
+                    node_name: self._nodes_manager.read_load_balancer.start_request(
+                        node_name
+                    )
                     for node_name in nodes
-                ]
+                }
 
             node_commands = nodes.values()
             for n in node_commands:
                 nodes_written += 1
                 n.write()
 
-            for n in node_commands:
+            for node_name, n in nodes.items():
                 n.read()
+                if latency_attempts is not None:
+                    self._nodes_manager.read_load_balancer.finish_request(
+                        latency_attempts.pop(node_name)
+                    )
 
                 # Find the first error in this node's commands, if any
                 node_error = None
@@ -5498,7 +5513,7 @@ class PipelineStrategy(AbstractStrategy):
                 nodes_read += 1
         finally:
             if latency_attempts is not None:
-                for latency_attempt in latency_attempts:
+                for latency_attempt in latency_attempts.values():
                     self._nodes_manager.read_load_balancer.finish_request(
                         latency_attempt
                     )

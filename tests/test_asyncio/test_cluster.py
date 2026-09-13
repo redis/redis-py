@@ -3529,6 +3529,33 @@ class TestStaticMetadataRouting:
         await rc.aclose()
 
     @pytest.mark.fixed_client
+    async def test_keyless_latency_routing_scores_all_eligible_nodes(self) -> None:
+        rc = await get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+        )
+        nodes = rc.get_nodes()
+        selected_index = len(nodes) - 1
+
+        with mock.patch.object(
+            rc.nodes_manager.read_load_balancer,
+            "get_server_index",
+            return_value=selected_index,
+        ) as select_index:
+            assert (
+                await rc.get_keyless_target_node("FT.SEARCH") is nodes[selected_index]
+            )
+
+        select_index.assert_called_once_with(
+            "",
+            len(nodes),
+            LoadBalancingStrategy.LATENCY_BASED,
+            nodes=nodes,
+        )
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
     async def test_slot_id_commands_route_by_slot_for_any_spelling(self) -> None:
         """
         The SLOT_ID flag lookup is normalized, so a raw lowercase spelling names the same
