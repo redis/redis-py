@@ -27,7 +27,9 @@ from redis.cluster import (
     REPLICA,
     ClusterNode,
     ClusterPipeline,
+    LoadBalancer,
     LoadBalancingStrategy,
+    NodeCommands,
     NodesManager,
     RedisCluster,
     get_node_name,
@@ -57,13 +59,16 @@ from redis.exceptions import (
     ConnectionError,
     CrossSlotTransactionError,
     DataError,
+    MaxConnectionsError,
     MovedError,
     NoPermissionError,
     RedisClusterException,
     RedisClusterUnreachableError,
     RedisError,
     ResponseError,
+    SlotNotCoveredError,
     TimeoutError,
+    TryAgainError,
 )
 from redis.himport import HIMPORT_SET
 from redis.observability import recorder
@@ -91,6 +96,518 @@ default_cluster_slots = [
     [0, 8191, ["127.0.0.1", 7000, "node_0"], ["127.0.0.1", 7003, "node_3"]],
     [8192, 16383, ["127.0.0.1", 7001, "node_1"], ["127.0.0.1", 7002, "node_2"]],
 ]
+
+
+class TestLatencyBasedLoadBalancer:
+    @staticmethod
+    def nodes():
+        return [
+            ClusterNode("127.0.0.1", 7000, PRIMARY),
+            ClusterNode("127.0.0.1", 7001, REPLICA),
+            ClusterNode("127.0.0.1", 7002, REPLICA),
+        ]
+
+    def test_selects_lower_score_from_two_sampled_nodes(self):
+        nodes = self.nodes()
+        load_balancer = LoadBalancer()
+
+        for node, latency in zip(nodes, (0.001, 0.020, 0.010)):
+            attempt = load_balancer.start_request(node.name)
+            load_balancer.finish_request(attempt, latency)
+
+        with patch("redis.cluster.random_sample", return_value=[1, 2]):
+            assert (
+                load_balancer.get_server_index(
+                    nodes[0].name,
+                    len(nodes),
+                    LoadBalancingStrategy.LATENCY_BASED,
+                    nodes=nodes,
+                )
+                == 2
+            )
+
+    def test_equal_scores_follow_randomized_sample_order(self):
+        nodes = self.nodes()
+        load_balancer = LoadBalancer()
+
+        with patch("redis.cluster.random_sample", return_value=[2, 1]):
+            assert (
+                load_balancer.get_server_index(
+                    nodes[0].name,
+                    len(nodes),
+                    LoadBalancingStrategy.LATENCY_BASED,
+                    nodes=nodes,
+                )
+                == 2
+            )
+
+    @pytest.mark.parametrize(
+        "strategy",
+        [
+            LoadBalancingStrategy.ROUND_ROBIN,
+            LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+            LoadBalancingStrategy.RANDOM,
+            LoadBalancingStrategy.RANDOM_REPLICA,
+        ],
+    )
+    def test_existing_strategies_do_not_touch_latency_state(self, strategy):
+        load_balancer = LoadBalancer()
+        load_balancer._clock = Mock(
+            side_effect=AssertionError("existing strategy read the latency clock")
+        )
+
+        index = load_balancer.get_server_index("primary", 3, strategy)
+
+        assert 0 <= index < 3
+        assert load_balancer._latency_state == {}
+
+    def test_in_flight_work_increases_score(self):
+        nodes = self.nodes()[:2]
+        load_balancer = LoadBalancer()
+
+        for node in nodes:
+            attempt = load_balancer.start_request(node.name)
+            load_balancer.finish_request(attempt, 0.010)
+
+        active = load_balancer.start_request(nodes[0].name)
+        with patch("redis.cluster.random_sample", return_value=[0, 1]):
+            assert (
+                load_balancer.get_server_index(
+                    nodes[0].name,
+                    len(nodes),
+                    LoadBalancingStrategy.LATENCY_BASED,
+                    nodes=nodes,
+                )
+                == 1
+            )
+
+        load_balancer.finish_request(active)
+
+    def test_cold_node_uses_baseline_instead_of_zero(self):
+        nodes = self.nodes()[:2]
+        load_balancer = LoadBalancer()
+        attempt = load_balancer.start_request(nodes[0].name)
+        load_balancer.finish_request(attempt, 0.010)
+
+        assert load_balancer._latency_score(nodes[1].name) == pytest.approx(
+            load_balancer._baseline
+        )
+
+    def test_peak_and_ewma_decay_toward_baseline_without_traffic(self):
+        nodes = self.nodes()[:2]
+        load_balancer = LoadBalancer()
+        now = 0.0
+        load_balancer._clock = lambda: now
+
+        healthy = load_balancer.start_request(nodes[0].name)
+        load_balancer.finish_request(healthy, 0.005)
+        slow = load_balancer.start_request(nodes[1].name)
+        load_balancer.finish_request(slow, 0.100)
+        initial_score = load_balancer._latency_score(nodes[1].name)
+
+        now = 40.0
+        aged_score = load_balancer._latency_score(nodes[1].name)
+
+        assert aged_score < initial_score
+        assert aged_score == load_balancer._baseline
+
+    def test_baseline_moves_slowly_from_node_ewma(self):
+        node = self.nodes()[0]
+        load_balancer = LoadBalancer()
+
+        first = load_balancer.start_request(node.name)
+        load_balancer.finish_request(first, 0.005)
+        assert load_balancer._latency_state[node.name].ewma == pytest.approx(0.0018)
+        assert load_balancer._baseline == pytest.approx(0.00104)
+
+        spike = load_balancer.start_request(node.name)
+        load_balancer.finish_request(spike, 0.100)
+
+        assert load_balancer._latency_state[node.name].ewma == pytest.approx(0.02144)
+        assert load_balancer._latency_state[node.name].peak == pytest.approx(0.100)
+        assert load_balancer._baseline == pytest.approx(0.00206)
+
+    def test_stale_attempt_cannot_mutate_recreated_node_state(self):
+        node = self.nodes()[0]
+        load_balancer = LoadBalancer()
+        stale = load_balancer.start_request(node.name)
+
+        load_balancer.reconcile(set())
+        current = load_balancer.start_request(node.name)
+        load_balancer.finish_request(stale, 0.100)
+
+        state = load_balancer._latency_state[node.name]
+        assert state.generation == current.generation
+        assert state.in_flight == 1
+        assert state.ewma is None
+
+        load_balancer.finish_request(current, 0.005)
+
+    def test_reconcile_preserves_active_nodes_and_prunes_removed_nodes(self):
+        nodes = self.nodes()[:2]
+        load_balancer = LoadBalancer()
+        for node in nodes:
+            attempt = load_balancer.start_request(node.name)
+            load_balancer.finish_request(attempt, 0.005)
+
+        generation = load_balancer._latency_state[nodes[0].name].generation
+        load_balancer.reconcile({nodes[0].name})
+
+        assert load_balancer._latency_state[nodes[0].name].generation == generation
+        assert nodes[1].name not in load_balancer._latency_state
+
+    def test_nodes_manager_passes_slot_nodes_to_latency_selection(self):
+        nodes = self.nodes()
+        manager = object.__new__(NodesManager)
+        manager._lock = threading.RLock()
+        manager._require_full_coverage = True
+        manager.slots_cache = {0: nodes}
+        manager.read_load_balancer = LoadBalancer()
+
+        for node, latency in zip(nodes, (0.020, 0.010, 0.005)):
+            attempt = manager.read_load_balancer.start_request(node.name)
+            manager.read_load_balancer.finish_request(attempt, latency)
+
+        with patch("redis.cluster.random_sample", return_value=[0, 2]):
+            assert (
+                manager.get_node_from_slot(
+                    0,
+                    read_from_replicas=True,
+                    load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+                )
+                is nodes[2]
+            )
+
+
+class TestLatencyBasedCommandTracking:
+    @staticmethod
+    def client(load_balancer):
+        redis_node = Mock()
+        redis_node.connection_pool.release = Mock()
+        connection = Mock()
+        client = object.__new__(RedisCluster)
+        client.RedisClusterRequestTTL = 1
+        client.load_balancing_strategy = LoadBalancingStrategy.LATENCY_BASED
+        client.nodes_manager = Mock(read_load_balancer=load_balancer)
+        client.cluster_response_callbacks = {}
+        client.get_redis_connection = Mock(return_value=redis_node)
+        client._record_command_metric = Mock()
+        client._record_error_metric = Mock()
+        client.reinitialize_counter = 0
+        client.reinitialize_steps = 0
+        client.read_from_replicas = True
+        client._metadata_resolver = DynamicMetadataResolver(
+            {"core": {"get": CACHEABLE_KEYED}, "custom": {"read": CACHEABLE_KEYED}}
+        )
+        return client, redis_node, connection
+
+    @pytest.mark.parametrize(
+        "command,response,records_latency",
+        [
+            ("GET", b"value", True),
+            ("CUSTOM.READ", b"value", True),
+            ("SET", b"OK", False),
+        ],
+    )
+    def test_success_releases_request_and_only_reads_record_latency(
+        self, command, response, records_latency
+    ):
+        node = ClusterNode("127.0.0.1", 7000)
+        load_balancer = LoadBalancer()
+        client, redis_node, connection = self.client(load_balancer)
+        redis_node.parse_response.return_value = response
+
+        with patch("redis.cluster.get_connection", return_value=connection):
+            assert client._execute_command(node, command, "key") == response
+
+        state = load_balancer._latency_state[node.name]
+        assert state.in_flight == 0
+        assert (state.ewma is not None) is records_latency
+
+    def test_response_error_releases_request_without_recording_latency(self):
+        node = ClusterNode("127.0.0.1", 7000)
+        load_balancer = LoadBalancer()
+        client, redis_node, connection = self.client(load_balancer)
+        redis_node.parse_response.side_effect = ResponseError("failure")
+
+        with (
+            patch("redis.cluster.get_connection", return_value=connection),
+            pytest.raises(ResponseError, match="failure"),
+        ):
+            client._execute_command(node, "GET", "key")
+
+        state = load_balancer._latency_state[node.name]
+        assert state.in_flight == 0
+        assert state.ewma is None
+
+    def test_topology_refresh_preserves_survivors_and_failed_refresh_preserves_all(
+        self,
+    ):
+        client = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+        )
+        manager = client.nodes_manager
+        survivor = next(iter(manager.nodes_cache))
+        departed = "127.0.0.1:7999"
+        for node_name in (survivor, departed):
+            attempt = manager.read_load_balancer.start_request(node_name)
+            manager.read_load_balancer.finish_request(attempt, 0.005)
+        generation = manager.read_load_balancer._latency_state[survivor].generation
+
+        with (
+            patch.object(
+                Redis, "execute_command", side_effect=ConnectionError("offline")
+            ),
+            pytest.raises(RedisClusterUnreachableError),
+        ):
+            manager.initialize(disconnect_startup_nodes_pools=False)
+
+        assert set(manager.read_load_balancer._latency_state) == {survivor, departed}
+        assert (
+            manager.read_load_balancer._latency_state[survivor].generation == generation
+        )
+
+        with patch.object(Redis, "execute_command", return_value=default_cluster_slots):
+            manager.initialize(disconnect_startup_nodes_pools=False)
+
+        assert (
+            manager.read_load_balancer._latency_state[survivor].generation == generation
+        )
+        assert departed not in manager.read_load_balancer._latency_state
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            AuthenticationError("failure"),
+            MaxConnectionsError("failure"),
+            ConnectionError("failure"),
+            TimeoutError("failure"),
+            ClusterDownError("failure"),
+            SlotNotCoveredError("failure"),
+        ],
+    )
+    def test_other_failures_release_without_recording_latency(self, error):
+        node = ClusterNode("127.0.0.1", 7000)
+        load_balancer = LoadBalancer()
+        client, redis_node, connection = self.client(load_balancer)
+        redis_node.parse_response.side_effect = error
+
+        with (
+            patch("redis.cluster.get_connection", return_value=connection),
+            patch("redis.cluster.time.sleep"),
+            pytest.raises(type(error)),
+        ):
+            client._execute_command(node, "GET", "key")
+
+        state = load_balancer._latency_state[node.name]
+        assert state.in_flight == 0
+        assert state.ewma is None
+
+    def test_moved_retry_records_only_the_final_target(self):
+        source = ClusterNode("127.0.0.1", 7000)
+        target = ClusterNode("127.0.0.1", 7001)
+        load_balancer = LoadBalancer()
+        client, redis_node, connection = self.client(load_balancer)
+        client.RedisClusterRequestTTL = 2
+        client.determine_slot = Mock(return_value=0)
+        client.nodes_manager.get_node_from_slot.return_value = target
+        redis_node.parse_response.side_effect = [
+            MovedError("0 127.0.0.1:7001"),
+            b"value",
+        ]
+
+        with patch("redis.cluster.get_connection", return_value=connection):
+            assert client._execute_command(source, "GET", "key") == b"value"
+
+        assert load_balancer._latency_state[source.name].ewma is None
+        assert load_balancer._latency_state[target.name].ewma is not None
+        assert all(
+            state.in_flight == 0 for state in load_balancer._latency_state.values()
+        )
+
+    def test_ask_retry_does_not_record_migration_latency(self):
+        source = ClusterNode("127.0.0.1", 7000)
+        target = ClusterNode("127.0.0.1", 7001)
+        load_balancer = LoadBalancer()
+        client, redis_node, connection = self.client(load_balancer)
+        client.RedisClusterRequestTTL = 2
+        client.get_node = Mock(return_value=target)
+        redis_node.parse_response.side_effect = [
+            AskError("0 127.0.0.1:7001"),
+            b"OK",
+            b"value",
+        ]
+
+        with patch("redis.cluster.get_connection", return_value=connection):
+            assert client._execute_command(source, "GET", "key") == b"value"
+
+        assert all(
+            state.in_flight == 0 and state.ewma is None
+            for state in load_balancer._latency_state.values()
+        )
+
+    def test_tryagain_retry_records_only_the_successful_attempt(self):
+        node = ClusterNode("127.0.0.1", 7000)
+        load_balancer = LoadBalancer()
+        client, redis_node, connection = self.client(load_balancer)
+        client.RedisClusterRequestTTL = 2
+        redis_node.parse_response.side_effect = [TryAgainError("retry"), b"value"]
+
+        with patch("redis.cluster.get_connection", return_value=connection):
+            assert client._execute_command(node, "GET", "key") == b"value"
+
+        state = load_balancer._latency_state[node.name]
+        assert state.in_flight == 0
+        assert state.ewma is not None
+
+    def test_pipeline_tracks_in_flight_without_recording_batch_latency(self):
+        client = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+        )
+
+        def write_without_network(self):
+            for command in self.commands:
+                command.result = None
+
+        def read_response(self):
+            for command in self.commands:
+                command.result = b"value"
+
+        pipeline = client.pipeline()
+        pipeline.get("foo")
+        connection = Mock(host=default_host, port=default_port, db=0)
+        with (
+            patch.object(NodeCommands, "write", write_without_network),
+            patch.object(NodeCommands, "read", read_response),
+            patch("redis.cluster.get_connection", return_value=connection),
+        ):
+            assert pipeline.execute() == [b"value"]
+
+        states = client.nodes_manager.read_load_balancer._latency_state.values()
+        assert states
+        assert all(state.in_flight == 0 for state in states)
+        assert all(state.ewma is None for state in states)
+
+    def test_pipeline_releases_each_node_after_its_read_finishes(self):
+        client = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+        )
+        first_node = client.get_node(default_host, 7000)
+        second_node = client.get_node(default_host, 7001)
+        connections = {
+            first_node.redis_connection: Mock(host=first_node.host, port=7000, db=0),
+            second_node.redis_connection: Mock(host=second_node.host, port=7001, db=0),
+        }
+
+        def write_without_network(self):
+            for command in self.commands:
+                command.result = None
+
+        def read_response(node_commands):
+            states = client.nodes_manager.read_load_balancer._latency_state
+            if node_commands.connection.port == second_node.port:
+                assert states[first_node.name].in_flight == 0
+                assert states[second_node.name].in_flight == 1
+            for command in node_commands.commands:
+                command.result = b"value"
+
+        pipeline = client.pipeline()
+        pipeline.execute_command("GET", "first", target_nodes=first_node)
+        pipeline.execute_command("GET", "second", target_nodes=second_node)
+        with (
+            patch.object(NodeCommands, "write", write_without_network),
+            patch.object(NodeCommands, "read", read_response),
+            patch("redis.cluster.get_connection", side_effect=connections.__getitem__),
+        ):
+            assert pipeline.execute() == [b"value", b"value"]
+
+    def test_transaction_tracks_one_in_flight_batch_without_latency(self):
+        client = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+        )
+        pipeline = client.pipeline(transaction=True)
+        strategy = pipeline._execution_strategy
+        strategy._pipeline_slots = {0}
+        node = client.nodes_manager.get_node_from_slot(0, False)
+
+        def execute_transaction(*_args):
+            state = client.nodes_manager.read_load_balancer._latency_state[node.name]
+            assert state.in_flight == 1
+            return []
+
+        with patch.object(
+            strategy, "_execute_transaction", side_effect=execute_transaction
+        ):
+            assert strategy._execute_transaction_with_retries([], True) == []
+
+        state = client.nodes_manager.read_load_balancer._latency_state[node.name]
+        assert state.in_flight == 0
+        assert state.ewma is None
+
+    def test_immediate_transaction_command_tracks_in_flight_without_latency(self):
+        client = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+        )
+        strategy = client.pipeline(transaction=True)._execution_strategy
+
+        with pytest.raises(
+            RedisClusterException,
+            match="At least a command with a key is needed to identify a node",
+        ):
+            strategy._get_connection_and_send_command("UNWATCH")
+        assert not client.nodes_manager.read_load_balancer._latency_state
+
+        strategy._pipeline_slots = {0}
+        node = client.nodes_manager.get_node_from_slot(0, False)
+        redis_node = Mock()
+        connection = Mock(host=node.host, port=node.port, db=0)
+
+        def send_command(*_args, **_kwargs):
+            state = client.nodes_manager.read_load_balancer._latency_state[node.name]
+            assert state.in_flight == 1
+            return b"OK"
+
+        with (
+            patch.object(
+                strategy,
+                "_get_client_and_connection_for_transaction",
+                return_value=(redis_node, connection),
+            ),
+            patch.object(
+                strategy, "_send_command_parse_response", side_effect=send_command
+            ),
+            patch("redis.cluster.record_operation_duration"),
+        ):
+            assert strategy._get_connection_and_send_command("WATCH", "key") == b"OK"
+
+        state = client.nodes_manager.read_load_balancer._latency_state[node.name]
+        assert state.in_flight == 0
+        assert state.ewma is None
+
+        client.nodes_manager.read_load_balancer.reconcile(set())
+        with (
+            patch.object(
+                strategy,
+                "_get_client_and_connection_for_transaction",
+                side_effect=ConnectionError("offline"),
+            ),
+            pytest.raises(ConnectionError, match="offline"),
+        ):
+            strategy._get_connection_and_send_command("WATCH", "key")
+
+        state = client.nodes_manager.read_load_balancer._latency_state[node.name]
+        assert state.in_flight == 0
+        assert state.ewma is None
 
 
 class ProxyRequestHandler(socketserver.BaseRequestHandler):
@@ -1206,6 +1723,7 @@ class TestClusterRedisCommands:
             LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
             LoadBalancingStrategy.RANDOM,
             LoadBalancingStrategy.RANDOM_REPLICA,
+            LoadBalancingStrategy.LATENCY_BASED,
         ],
     )
     def test_get_and_set_with_load_balanced_client(
@@ -3241,6 +3759,30 @@ class TestStaticMetadataRouting:
         any_node.assert_called_once()
 
     @pytest.mark.fixed_client
+    def test_keyless_latency_routing_scores_all_eligible_nodes(self):
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=7000,
+            load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+        )
+        nodes = rc.get_nodes()
+        selected_index = len(nodes) - 1
+
+        with patch.object(
+            rc.nodes_manager.read_load_balancer,
+            "get_server_index",
+            return_value=selected_index,
+        ) as select_index:
+            assert rc.get_keyless_target_node("FT.SEARCH") is nodes[selected_index]
+
+        select_index.assert_called_once_with(
+            "",
+            len(nodes),
+            LoadBalancingStrategy.LATENCY_BASED,
+            nodes=nodes,
+        )
+
+    @pytest.mark.fixed_client
     def test_every_load_balancing_strategy_is_classified(self):
         """
         The keyless path asks whether a strategy excludes the primary, and ``LoadBalancer``
@@ -3253,6 +3795,7 @@ class TestStaticMetadataRouting:
             LoadBalancingStrategy.RANDOM_REPLICA,
         }
         assert set(LoadBalancingStrategy) - _REPLICAS_ONLY_STRATEGIES == {
+            LoadBalancingStrategy.LATENCY_BASED,
             LoadBalancingStrategy.ROUND_ROBIN,
             LoadBalancingStrategy.RANDOM,
         }
