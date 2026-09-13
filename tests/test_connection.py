@@ -2435,8 +2435,17 @@ class TestDeeplyNestedReplyInvalidatesConnection:
 
 @pytest.mark.parametrize(
     "parser_class",
-    [_RESP2Parser],
-    ids=["RESP2Parser"],
+    [
+        _RESP2Parser,
+        _RESP3Parser,
+        pytest.param(
+            _HiredisParser,
+            marks=pytest.mark.skipif(
+                not HIREDIS_AVAILABLE, reason="hiredis is not installed"
+            ),
+        ),
+    ],
+    ids=["RESP2Parser", "RESP3Parser", "HiredisParser"],
 )
 class TestMalformedNumericFrameInvalidatesConnection:
     """Malformed numeric frames (non-numeric integers, bulk lengths, or array
