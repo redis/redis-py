@@ -333,6 +333,39 @@ async def moved_redirection_helper(
             assert fetched_node.server_type == PRIMARY
 
 
+@pytest.mark.fixed_client
+@pytest.mark.parametrize(
+    ("url", "expected_port"),
+    [
+        ("redis://localhost", 6379),
+        ("redis://localhost:6380", 6380),
+        ("redis://localhost:0", 0),
+    ],
+)
+async def test_from_url_preserves_startup_node_port(
+    url: str, expected_port: int
+) -> None:
+    cluster = RedisCluster.from_url(url)
+
+    assert len(cluster.startup_nodes) == 1
+    assert cluster.startup_nodes[0].port == expected_port
+
+    await cluster.aclose()
+
+
+@pytest.mark.fixed_client
+def test_from_url_requires_startup_node_host() -> None:
+    with pytest.raises(RedisClusterException, match="requires at least one node"):
+        RedisCluster.from_url("redis://:0")
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize("port", [None, "", False, 0.0])
+def test_constructor_rejects_other_falsy_ports(port: Any) -> None:
+    with pytest.raises(RedisClusterException, match="requires at least one node"):
+        RedisCluster(host="localhost", port=port)
+
+
 @pytest.mark.onlycluster
 class TestRedisClusterObj:
     """

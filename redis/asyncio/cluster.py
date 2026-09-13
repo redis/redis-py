@@ -543,7 +543,8 @@ class RedisCluster(
                 "Unix domain socket is not supported in cluster mode"
             )
 
-        if (not host or not port) and not startup_nodes:
+        port_is_provided = bool(port) or type(port) is int
+        if (not host or not port_is_provided) and not startup_nodes:
             raise RedisClusterException(
                 "RedisCluster requires at least one node to discover the cluster.\n"
                 "Please provide one of the following or use RedisCluster.from_url:\n"
@@ -663,7 +664,7 @@ class RedisCluster(
             startup_nodes = passed_nodes
         else:
             startup_nodes = []
-        if host and port:
+        if host and port_is_provided:
             startup_nodes.append(ClusterNode(host, port, **self.connection_kwargs))
 
         if event_dispatcher is None:
