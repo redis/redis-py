@@ -47,9 +47,20 @@ def test_backoff_survives_a_long_outage(backoff_class) -> None:
 
 
 @pytest.mark.fixed_client
-def test_exponential_backoff_is_unchanged_below_the_clamp() -> None:
-    """Clamping the exponent must not alter any reachable delay."""
+def test_exponential_backoff_is_unchanged_for_finite_delays() -> None:
+    """Avoiding the overflow must not alter any delay that fits in a float."""
     bo = ExponentialBackoff(cap=1e9, base=0.008)
 
     for failures in range(0, 60):
         assert bo.compute(failures) == min(1e9, 0.008 * 2**failures)
+
+
+@pytest.mark.fixed_client
+def test_exponential_backoff_keeps_growing_past_1023_failures() -> None:
+    """A tiny base still grows toward the cap once `2**failures` leaves the
+    float range, rather than stopping at whatever 1023 doublings reached.
+    """
+    bo = ExponentialBackoff(cap=0.512, base=1e-310)
+
+    assert bo.compute(1023) < bo.compute(1024) < bo.compute(1028) < 0.512
+    assert bo.compute(1029) == 0.512

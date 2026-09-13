@@ -1,3 +1,4 @@
+import math
 import random
 from abc import ABC, abstractmethod
 
@@ -6,15 +7,19 @@ DEFAULT_CAP = 0.512
 # Minimum backoff between each retry in seconds
 DEFAULT_BASE = 0.008
 
-# ``2**failures`` is an arbitrary precision int, and converting one beyond the
-# float range to a float raises OverflowError. Every strategy below caps the
-# result, so doubling past this point cannot change the outcome.
-_MAX_DOUBLINGS = 1023
-
 
 def _exponential(base: float, failures: int) -> float:
-    """Return ``base * 2**failures`` without overflowing for large ``failures``."""
-    return base * 2 ** min(failures, _MAX_DOUBLINGS)
+    """Return ``base * 2**failures``, or infinity once that overflows a float.
+
+    ``2**failures`` is an arbitrary precision int, and multiplying a float by one
+    beyond the float range raises OverflowError even when the product would fit.
+    ``ldexp`` scales the base directly, so it only overflows when the result
+    itself does, and every strategy below caps an infinite delay.
+    """
+    try:
+        return math.ldexp(base, failures)
+    except OverflowError:
+        return math.inf
 
 
 class AbstractBackoff(ABC):
