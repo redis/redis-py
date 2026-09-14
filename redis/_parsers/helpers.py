@@ -938,9 +938,21 @@ def _client_list_iter(response):
     unavoidable given how RESP bulk-string framing (and hiredis) works -
     so this only trims the per-record dict/string overhead, not the raw
     reply size.
+
+    Line boundaries are scanned for lazily (rather than via ``splitlines()``)
+    so the generator never materializes a list of all lines either - that
+    list would otherwise be held for the generator's whole lifetime, right
+    alongside the decoded reply, defeating the point of iterating.
     """
-    for c in str_if_bytes(response).splitlines():
-        client_dict = _parse_client_info_fields(c)
+    text = str_if_bytes(response)
+    end = len(text)
+    start = 0
+    while start < end:
+        newline = text.find("\n", start)
+        if newline == -1:
+            newline = end
+        client_dict = _parse_client_info_fields(text[start:newline])
+        start = newline + 1
         if client_dict:
             yield client_dict
 
