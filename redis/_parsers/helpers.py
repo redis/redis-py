@@ -945,6 +945,12 @@ def _client_list_iter(response):
     alongside the decoded reply, defeating the point of iterating.
     """
     text = str_if_bytes(response)
+    # With decode_responses=False, str_if_bytes decodes a full copy of the
+    # reply. response is a parameter of this generator, so it stays alive
+    # in this frame for as long as the generator does; drop it once decoded
+    # so the original buffer doesn't sit alongside the decoded one for the
+    # whole iteration.
+    response = None
     end = len(text)
     start = 0
     while start < end:
