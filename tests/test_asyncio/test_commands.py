@@ -505,6 +505,12 @@ class TestRedisCommands:
         assert isinstance(clients[0], dict)
         assert "addr" in clients[0]
 
+    @pytest.mark.onlynoncluster
+    async def test_client_list_iter(self, r: redis.Redis):
+        clients = list(await r.client_list_iter())
+        assert isinstance(clients[0], dict)
+        assert "addr" in clients[0]
+
     @skip_if_server_version_lt("5.0.0")
     async def test_client_list_type(self, r: redis.Redis):
         with pytest.raises(exceptions.RedisError):
