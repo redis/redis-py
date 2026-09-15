@@ -281,6 +281,50 @@ class TestLatencyBasedCommandTracking:
         assert all(state.ewma is None for state in states)
 
     @pytest.mark.asyncio
+    async def test_pipeline_reserves_while_grouping_and_cleans_up_failure(self):
+        client = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+        )
+        first_node = client.get_node(default_host, 7000)
+        second_node = client.get_node(default_host, 7001)
+        load_balancer = client.nodes_manager.read_load_balancer
+        calls = 0
+
+        async def determine_nodes(*_args, **_kwargs):
+            nonlocal calls
+            calls += 1
+            states = load_balancer._latency_state
+            if calls == 1:
+                return [first_node]
+            if calls == 2:
+                first_state = states.get(first_node.name)
+                return [
+                    second_node
+                    if first_state is not None and first_state.in_flight == 1
+                    else first_node
+                ]
+            assert states[first_node.name].in_flight == 1
+            assert states[second_node.name].in_flight == 1
+            raise RuntimeError("grouping failed")
+
+        pipeline = client.pipeline()
+        pipeline.get("first")
+        pipeline.get("second")
+        pipeline.get("third")
+        with (
+            mock.patch.object(client, "_determine_nodes", side_effect=determine_nodes),
+            pytest.raises(RuntimeError, match="grouping failed"),
+        ):
+            await pipeline.execute()
+
+        assert all(
+            state.in_flight == 0 and state.ewma is None
+            for state in load_balancer._latency_state.values()
+        )
+
+    @pytest.mark.asyncio
     async def test_pipeline_releases_each_node_when_its_task_finishes(self):
         client = await get_mocked_redis_client(
             host=default_host,

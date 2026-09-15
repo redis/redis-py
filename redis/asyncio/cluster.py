@@ -3219,47 +3219,63 @@ class PipelineStrategy(AbstractStrategy):
         ]
 
         nodes = {}
-        for cmd in todo:
-            passed_targets = cmd.kwargs.pop("target_nodes", None)
-            target_nodes_specified = bool(passed_targets) and not client._is_node_flag(
-                passed_targets
-            )
-            _, command_policies = await client._resolve_command_policies(
-                *cmd.args, target_nodes_specified=target_nodes_specified
-            )
-
-            if target_nodes_specified:
-                target_nodes = client._parse_target_nodes(passed_targets)
-            else:
-                target_nodes = await client._determine_nodes(
-                    *cmd.args,
-                    request_policy=command_policies.request_policy,
-                    node_flag=passed_targets,
+        load_balancer = (
+            client.nodes_manager.read_load_balancer
+            if client.load_balancing_strategy == LoadBalancingStrategy.LATENCY_BASED
+            else None
+        )
+        latency_attempts = {} if load_balancer is not None else None
+        try:
+            for cmd in todo:
+                passed_targets = cmd.kwargs.pop("target_nodes", None)
+                target_nodes_specified = bool(
+                    passed_targets
+                ) and not client._is_node_flag(passed_targets)
+                _, command_policies = await client._resolve_command_policies(
+                    *cmd.args, target_nodes_specified=target_nodes_specified
                 )
-                if not target_nodes:
-                    raise RedisClusterException(
-                        f"No targets were found to execute {cmd.args} command on"
+
+                if target_nodes_specified:
+                    target_nodes = client._parse_target_nodes(passed_targets)
+                else:
+                    target_nodes = await client._determine_nodes(
+                        *cmd.args,
+                        request_policy=command_policies.request_policy,
+                        node_flag=passed_targets,
                     )
-            cmd.command_policies = command_policies
-            if len(target_nodes) > 1:
-                raise RedisClusterException(f"Too many targets for command {cmd.args}")
-            node = target_nodes[0]
-            if node.name not in nodes:
-                nodes[node.name] = (node, [])
-            nodes[node.name][1].append(cmd)
+                    if not target_nodes:
+                        raise RedisClusterException(
+                            f"No targets were found to execute {cmd.args} command on"
+                        )
+                cmd.command_policies = command_policies
+                if len(target_nodes) > 1:
+                    raise RedisClusterException(
+                        f"Too many targets for command {cmd.args}"
+                    )
+                node = target_nodes[0]
+                if node.name not in nodes:
+                    if latency_attempts is not None:
+                        latency_attempts[node.name] = load_balancer.start_request(
+                            node.name
+                        )
+                    nodes[node.name] = (node, [])
+                nodes[node.name][1].append(cmd)
+        except BaseException:
+            if latency_attempts is not None:
+                for attempt in latency_attempts.values():
+                    load_balancer.finish_request(attempt)
+            raise
 
         # Start timing for observability
         start_time = time.monotonic()
 
-        if client.load_balancing_strategy == LoadBalancingStrategy.LATENCY_BASED:
-            load_balancer = client.nodes_manager.read_load_balancer
+        if load_balancer is not None:
 
             async def execute_node(node_name, node, commands):
-                attempt = load_balancer.start_request(node_name)
                 try:
                     return await node.execute_pipeline(commands)
                 finally:
-                    load_balancer.finish_request(attempt)
+                    load_balancer.finish_request(latency_attempts[node_name])
 
             errors = await asyncio.gather(
                 *(
