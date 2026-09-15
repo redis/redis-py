@@ -297,20 +297,27 @@ class TestLatencyBasedCommandTracking:
         client.reinitialize_steps = 0
         client.read_from_replicas = True
         client._metadata_resolver = DynamicMetadataResolver(
-            {"core": {"get": CACHEABLE_KEYED}, "custom": {"read": CACHEABLE_KEYED}}
+            {
+                "core": {
+                    "get": CACHEABLE_KEYED,
+                    "xread": CommandMetadata(is_readonly=True, is_blocking=True),
+                },
+                "custom": {"read": CACHEABLE_KEYED},
+            }
         )
         return client, redis_node, connection
 
     @pytest.mark.parametrize(
-        "command,response,records_latency",
+        "command,args,response,records_latency",
         [
-            ("GET", b"value", True),
-            ("CUSTOM.READ", b"value", True),
-            ("SET", b"OK", False),
+            ("GET", ("key",), b"value", True),
+            ("CUSTOM.READ", ("key",), b"value", True),
+            ("XREAD", ("BLOCK", 1000, "STREAMS", "key", "$"), [], False),
+            ("SET", ("key",), b"OK", False),
         ],
     )
     def test_success_releases_request_and_only_reads_record_latency(
-        self, command, response, records_latency
+        self, command, args, response, records_latency
     ):
         node = ClusterNode("127.0.0.1", 7000)
         load_balancer = LoadBalancer()
@@ -318,7 +325,7 @@ class TestLatencyBasedCommandTracking:
         redis_node.parse_response.return_value = response
 
         with patch("redis.cluster.get_connection", return_value=connection):
-            assert client._execute_command(node, command, "key") == response
+            assert client._execute_command(node, command, *args) == response
 
         state = load_balancer._latency_state[node.name]
         assert state.in_flight == 0
@@ -526,6 +533,33 @@ class TestLatencyBasedCommandTracking:
             patch("redis.cluster.get_connection", side_effect=connections.__getitem__),
         ):
             assert pipeline.execute() == [b"value", b"value"]
+
+    def test_pipeline_tracks_connection_acquisition_and_cleans_up_failure(self):
+        client = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+        )
+        node = client.get_node(default_host, 7000)
+        pipeline = client.pipeline()
+        pipeline.execute_command("GET", "key", target_nodes=node)
+        strategy = pipeline._execution_strategy
+
+        def fail_acquisition(_redis_node):
+            state = client.nodes_manager.read_load_balancer._latency_state[node.name]
+            assert state.in_flight == 1
+            raise ConnectionError("unavailable")
+
+        with (
+            patch("redis.cluster.get_connection", side_effect=fail_acquisition),
+            patch.object(client.nodes_manager, "initialize"),
+            pytest.raises(ConnectionError, match="unavailable"),
+        ):
+            strategy._send_cluster_commands(strategy._command_queue)
+
+        state = client.nodes_manager.read_load_balancer._latency_state[node.name]
+        assert state.in_flight == 0
+        assert state.ewma is None
 
     def test_transaction_tracks_one_in_flight_batch_without_latency(self):
         client = get_mocked_redis_client(

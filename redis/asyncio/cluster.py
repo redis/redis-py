@@ -1485,7 +1485,17 @@ class RedisCluster(
             getattr(self, "load_balancing_strategy", None)
             == LoadBalancingStrategy.LATENCY_BASED
         )
-        latency_sampling = latency_balancing and await self._is_replica_safe(command)
+        replica_safe_for_sampling = latency_balancing and await self._is_replica_safe(
+            command
+        )
+        latency_metadata = (
+            await self._metadata_resolver.resolve(command)
+            if replica_safe_for_sampling
+            else None
+        )
+        latency_sampling = replica_safe_for_sampling and (
+            latency_metadata is None or not latency_metadata.is_blocking
+        )
 
         while ttl > 0:
             ttl -= 1

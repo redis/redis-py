@@ -103,7 +103,13 @@ class TestLatencyBasedCommandTracking:
         client.load_balancing_strategy = LoadBalancingStrategy.LATENCY_BASED
         client.nodes_manager = mock.Mock(read_load_balancer=load_balancer)
         client._metadata_resolver = AsyncDynamicMetadataResolver(
-            {"core": {"get": CACHEABLE_KEYED}, "custom": {"read": CACHEABLE_KEYED}}
+            {
+                "core": {
+                    "get": CACHEABLE_KEYED,
+                    "xread": CommandMetadata(is_readonly=True, is_blocking=True),
+                },
+                "custom": {"read": CACHEABLE_KEYED},
+            }
         )
         client._record_command_metric = mock.AsyncMock()
         client._record_error_metric = mock.AsyncMock()
@@ -111,15 +117,16 @@ class TestLatencyBasedCommandTracking:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "command,response,records_latency",
+        "command,args,response,records_latency",
         [
-            ("GET", b"value", True),
-            ("CUSTOM.READ", b"value", True),
-            ("SET", b"OK", False),
+            ("GET", ("key",), b"value", True),
+            ("CUSTOM.READ", ("key",), b"value", True),
+            ("XREAD", ("BLOCK", 1000, "STREAMS", "key", "$"), [], False),
+            ("SET", ("key",), b"OK", False),
         ],
     )
     async def test_success_releases_request_and_only_reads_record_latency(
-        self, command, response, records_latency
+        self, command, args, response, records_latency
     ):
         node = ClusterNode("127.0.0.1", 7000)
         load_balancer = LoadBalancer()
@@ -128,7 +135,7 @@ class TestLatencyBasedCommandTracking:
         with mock.patch.object(
             ClusterNode, "execute_command", mock.AsyncMock(return_value=response)
         ):
-            assert await client._execute_command(node, command, "key") == response
+            assert await client._execute_command(node, command, *args) == response
 
         state = load_balancer._latency_state[node.name]
         assert state.in_flight == 0

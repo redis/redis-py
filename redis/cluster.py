@@ -1948,7 +1948,15 @@ class RedisCluster(
             getattr(self, "load_balancing_strategy", None)
             == LoadBalancingStrategy.LATENCY_BASED
         )
-        latency_sampling = latency_balancing and self._is_replica_safe(command)
+        replica_safe_for_sampling = latency_balancing and self._is_replica_safe(command)
+        latency_metadata = (
+            self._metadata_resolver.resolve(command)
+            if replica_safe_for_sampling
+            else None
+        )
+        latency_sampling = replica_safe_for_sampling and (
+            latency_metadata is None or not latency_metadata.is_blocking
+        )
 
         while ttl > 0:
             ttl -= 1
@@ -5348,7 +5356,11 @@ class PipelineStrategy(AbstractStrategy):
         node_objs: dict = {}
         nodes_written = 0
         nodes_read = 0
-        latency_attempts = None
+        latency_attempts = (
+            {}
+            if self._pipe.load_balancing_strategy == LoadBalancingStrategy.LATENCY_BASED
+            else None
+        )
 
         try:
             # as we move through each command that still needs to be processed,
@@ -5429,6 +5441,12 @@ class PipelineStrategy(AbstractStrategy):
                 # we can build a list of commands for each node.
                 node_name = node.name
                 if node_name not in nodes:
+                    if latency_attempts is not None:
+                        latency_attempts[node_name] = (
+                            self._nodes_manager.read_load_balancer.start_request(
+                                node_name
+                            )
+                        )
                     redis_node = self._pipe.get_redis_connection(node)
                     try:
                         connection = get_connection(redis_node)
@@ -5471,17 +5489,6 @@ class PipelineStrategy(AbstractStrategy):
 
             # Start timing for observability
             start_time = time.monotonic()
-
-            if (
-                self._pipe.load_balancing_strategy
-                == LoadBalancingStrategy.LATENCY_BASED
-            ):
-                latency_attempts = {
-                    node_name: self._nodes_manager.read_load_balancer.start_request(
-                        node_name
-                    )
-                    for node_name in nodes
-                }
 
             node_commands = nodes.values()
             for n in node_commands:

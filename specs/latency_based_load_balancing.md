@@ -17,11 +17,11 @@ and `ROUND_ROBIN`. Existing strategies remain unchanged.
 Each node stores a generation, in-flight count, ordinary EWMA, peak EWMA, and
 last-observation time. The load balancer also stores a slow cluster baseline.
 
-Only successful reads update latency. All commands update in-flight load while
-the strategy is active, so writes make a busy primary less attractive without
-mixing write latency into the read estimator. Failures, redirects, timeouts,
-cancellation, and pipeline batches release in-flight state without recording a
-latency sample.
+Only successful non-blocking reads update latency. All commands update in-flight
+load while the strategy is active, so writes and blocking reads make a busy node
+less attractive without mixing their latency into the read estimator. Failures,
+redirects, timeouts, cancellation, and pipeline batches release in-flight state
+without recording a latency sample.
 
 For successful latency `r`, node EWMA alpha `0.2`, baseline alpha `0.05`, elapsed
 time `dt`, and decay period `10s`:
@@ -64,12 +64,13 @@ client-observed boundary.
 
 ## Pipelines
 
-Each grouped node batch counts as one in-flight operation while executing but
-does not update latency. A transactional pipeline likewise counts as one
-in-flight operation on its owning node, and immediate watched commands use one
-attempt apiece. Batch duration is not comparable across different command
-counts or sync pipeline ordering. Commands retried individually use the normal
-lifecycle and may record a successful read sample.
+Each grouped node batch counts as one in-flight operation from connection
+acquisition through completion but does not update latency. A transactional
+pipeline likewise counts as one in-flight operation on its owning node, and
+immediate watched commands use one attempt apiece. Batch duration is not
+comparable across different command counts or sync pipeline ordering. Commands
+retried individually use the normal lifecycle and may record a successful read
+sample.
 
 ## Tradeoffs
 
