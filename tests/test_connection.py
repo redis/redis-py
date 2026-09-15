@@ -47,7 +47,13 @@ from redis.credentials import UsernamePasswordCredentialProvider
 from redis.event import (
     EventDispatcher,
 )
-from redis.exceptions import ConnectionError, InvalidResponse, RedisError, TimeoutError
+from redis.exceptions import (
+    ConnectionError,
+    InvalidResponse,
+    RedisError,
+    ResponseError,
+    TimeoutError,
+)
 from redis.observability.attributes import (
     DB_CLIENT_CONNECTION_POOL_NAME,
     DB_CLIENT_CONNECTION_STATE,
@@ -1431,6 +1437,50 @@ class TestUnitCacheProxyConnection:
         # ...and nothing new was stored, because there is no key to store it under.
         assert cache.size == 1
         assert cache.get(stale_key).cache_value == b"bar"
+
+    def test_failed_read_clears_the_in_progress_cache_entry(self, mock_connection):
+        """
+        A cacheable command whose read fails must not leave its placeholder behind.
+
+        ``send_command`` stakes out an IN_PROGRESS entry that only a successful
+        ``read_response`` resolves. When the read raised - a WRONGTYPE reply for a key of
+        another type, a NOPERM under a restricted ACL - that entry stayed in the pool-wide
+        cache, and every later call of the same command and key found an entry, skipped the
+        network, then read a reply that was never requested.
+        """
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection._event_dispatcher = EventDispatcher()
+        mock_connection.can_read.return_value = False
+
+        cache = DefaultCache(CacheConfig(max_size=10))
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+
+        mock_connection.read_response.side_effect = ResponseError(
+            "WRONGTYPE Operation against a key holding the wrong kind of value"
+        )
+        proxy_connection.send_command("GET", "foo", keys=["foo"])
+        with pytest.raises(ResponseError):
+            proxy_connection.read_response()
+
+        # The error reaches the caller unchanged, and nothing is left behind to serve a
+        # later command or to store a reply under.
+        assert cache.size == 0
+        assert proxy_connection._current_command_cache_key is None
+
+        # So the same command still reaches the server, and gets the server's reply.
+        mock_connection.read_response.side_effect = None
+        mock_connection.read_response.return_value = b"bar"
+        mock_connection.send_command.reset_mock()
+
+        proxy_connection.send_command("GET", "foo", keys=["foo"])
+        mock_connection.send_command.assert_called_once_with("GET", "foo", keys=["foo"])
+        assert proxy_connection.read_response() == b"bar"
 
     def test_himport_prepared_is_reassignable_through_proxy(self):
         # Regression: `_himport_prepared` must have a setter that delegates to the
