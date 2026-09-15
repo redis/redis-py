@@ -8,10 +8,15 @@ of the design most likely to have off-by-one bugs.
 
 import threading
 import time
-import tracemalloc
 import weakref
 
 import pytest
+
+# tracemalloc requires a CPython-specific memory allocator hook
+# (_tracemalloc) that PyPy does not provide - imported lazily, only by
+# the two tests that actually need it (via pytest.importorskip), rather
+# than unconditionally at module level, so a PyPy run skips just those
+# two tests instead of failing to collect this entire file.
 
 from redis._parsers.hiredis import _HiredisParser
 from redis._parsers.helpers import parse_client_list_line
@@ -155,6 +160,7 @@ def test_read_bulk_lines_bounds_memory():
     never actually zero), and stop() would prematurely end tracing for
     every later test in the session.
     """
+    tracemalloc = pytest.importorskip("tracemalloc")
     num_clients = 20_000
     reply, _, _ = make_reply(num_clients)
     socket_read_size = 4096
@@ -203,6 +209,8 @@ def test_read_bulk_lines_stays_linear_time_with_tiny_chunks():
     # bytes - would fail it) rather than just re-asserting correctness,
     # since the bug was purely about HOW LONG this takes, not WHAT it
     # returns.
+    tracemalloc = pytest.importorskip("tracemalloc")
+
     class _OneByteAtATimeSocket:
         def __init__(self, data):
             self._data = data
@@ -990,9 +998,35 @@ def test_client_list_iter_owners_registration_is_thread_safe():
 
     errors = []
 
+    class _FreshConnectionPerCallPool:
+        """Unlike _FakePool (which deliberately always returns the SAME
+        tracked connection object, so other tests can assert on its
+        specific state), this hands out a genuinely fresh, independent
+        connection per get_connection() call - matching how a real
+        ConnectionPool actually behaves: it never hands the same live
+        connection to two concurrent callers. Needed here specifically:
+        this test intentionally races many concurrent client_list_iter()
+        calls, and _FakePool's single shared connection - a plain,
+        non-thread-safe test double, never meant to be hit from several
+        threads at once - was found (via a CI segfault under coverage.py's
+        thread-tracing) to crash for that reason alone, unrelated to what
+        this test actually intends to exercise (the _client_list_iter_
+        owners WeakSet's own registration/snapshot thread-safety)."""
+
+        def get_connection(self, *args, **kwargs):
+            return _FakeConnection([b"id=0 addr=x:1"])
+
+        def release(self, conn):
+            pass
+
+        def disconnect(self, inuse_connections=True):
+            pass
+
+        def close(self):
+            pass
+
     def make_client():
-        conn = _FakeConnection([b"id=0 addr=x:1"])
-        pool = _FakePool(conn)
+        pool = _FreshConnectionPerCallPool()
         r = redis.Redis.from_url("redis://localhost:6379/0")
         r.connection_pool = pool
         return r
