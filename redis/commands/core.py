@@ -3,6 +3,8 @@ from __future__ import annotations
 import datetime
 import hashlib
 import inspect
+import threading
+import weakref
 
 # Try to import the xxhash library as an optional dependency
 try:
@@ -99,12 +101,336 @@ from redis.utils import (
     str_if_bytes,
 )
 
+from .._parsers.helpers import parse_client_list_line
 from ..observability.attributes import PubSubDirection
 from ..observability.recorder import (
     record_pubsub_message,
     record_streaming_lag_from_response,
 )
 from .helpers import at_most_one_value_set, list_or_args
+
+
+def _client_list_args(_type, client_id):
+    args = []
+    if not isinstance(client_id, list):
+        raise DataError("client_id must be a list")
+    if _type is not None and client_id:
+        # redis-server itself rejects CLIENT LIST TYPE ... ID ... with a
+        # plain "syntax error" - it only ever accepts one filter or the
+        # other, never both together (verified live). Raising a clear,
+        # actionable DataError here instead of letting that cryptic
+        # syntax error surface from the server.
+        raise DataError(
+            "CLIENT LIST does not support combining _type and client_id "
+            "filters - use one or the other, not both"
+        )
+    if _type is not None:
+        client_types = ("normal", "master", "replica", "pubsub")
+        if str(_type).lower() not in client_types:
+            raise DataError(f"CLIENT LIST _type must be one of {client_types!r}")
+        args.append(b"TYPE")
+        args.append(_type)
+    if client_id:
+        # Each id is its own separate RESP argument on the wire (CLIENT
+        # LIST ID id1 id2 id3) - joining them into a single space-
+        # separated string instead (the previous behavior, pre-dating
+        # this refactor and shared identically by the original
+        # client_list()) sends that joined string as ONE argument,
+        # which redis-server rejects outright ("Invalid client ID") for
+        # anything but a single id. Verified live against a real
+        # server: CLIENT LIST ID "1 2" fails; CLIENT LIST ID 1 2
+        # succeeds.
+        args.append(b"ID")
+        args.extend(_client_id_to_str(i) for i in client_id)
+    return args
+
+
+def _client_id_to_str(client_id):
+    # client_id is typed EncodableT (bytes, memoryview, str, int, or
+    # float) - str() on a bytes/memoryview/bytearray value gives its
+    # Python repr (e.g. "b'123'"), not its decoded text, corrupting the
+    # id actually sent to the server. Decode those explicitly instead.
+    if isinstance(client_id, (bytes, bytearray, memoryview)):
+        try:
+            return bytes(client_id).decode()
+        except UnicodeDecodeError:
+            # a client id is always just a numeric string in practice -
+            # non-utf8-decodable bytes are already a malformed input;
+            # raise a clean, actionable DataError instead of a raw,
+            # confusing UnicodeDecodeError.
+            raise DataError(f"client_id {client_id!r} is not valid utf-8")
+    # str() on a float appends a trailing ".0" (e.g. "42.0") that the
+    # server rejects as an invalid client id even when it represents the
+    # same whole-number id str(int(...)) would produce correctly.
+    if isinstance(client_id, float) and client_id.is_integer():
+        return str(int(client_id))
+    return str(client_id)
+
+
+_GENERATOR_ALREADY_EXECUTING = "generator already executing"
+
+# Guards both creating/populating a Redis client's _client_list_iter_owners
+# WeakSet (client_list_iter(), below) and snapshotting it for iteration
+# (Redis.close(), redis/client.py) - without this, two threads' first-ever
+# concurrent client_list_iter() calls on the same client could race the
+# lazy "create the WeakSet if missing" check-then-act, silently losing one
+# iterator's registration; and/or a concurrent add() during close()'s
+# `list(owners)` could raise "RuntimeError: Set changed size during
+# iteration" and abort close() entirely, before it releases anything. A
+# single module-level lock (rather than a per-instance one, which would
+# have the exact same lazy-creation race); only ever held briefly around
+# in-memory bookkeeping, NEVER across a blocking call like
+# pool.get_connection() - see client_list_iter()'s own comment on why
+# that matters. An RLock, not a plain Lock: while held here (by any
+# thread), an ordinary allocation can trigger CPython's cyclic garbage
+# collector, which - since PEP 442 - runs finalizers (__del__)
+# synchronously on that SAME thread for any unrelated, cycle-collected
+# object it finds; if that happens to be some OTHER Redis instance whose
+# __del__ calls close(), which also takes this lock, a plain Lock would
+# deadlock (the same thread blocking on a lock it already holds). RLock
+# lets that same-thread re-entry through immediately while still
+# excluding other threads, eliminating that deadlock.
+#
+# Known, accepted limitation of that same reentrancy: it restores
+# correctness (no deadlock) but not the "never held across a blocking
+# call" property for the REENTRANT call specifically. If the GC-
+# triggered close() described above reaches one of ITS OWN blocking
+# calls (connection_pool.release()/disconnect(), deliberately placed
+# outside this method's own local `with` blocks - see Redis.close()),
+# that call still runs while the ORIGINAL, outer `with` block up the
+# same thread's call stack has not yet exited, so this lock (an RLock's
+# hold count, not a per-block scope) is still held for its duration -
+# stalling any other thread's close()/client_list_iter() call for as
+# long as that nested, unrelated instance's blocking call takes. This
+# requires a Redis instance to be part of a reference cycle (ordinary
+# non-cyclic instances are freed by plain refcounting, never touching
+# the cyclic GC or this path at all) collected at the precise moment
+# another thread already holds this lock - narrow enough to accept
+# rather than engineer around, given the added complexity (e.g.
+# deferring all GC-triggered close() work off-thread) a full fix would
+# require for a Redis client, which is not a common candidate for
+# reference cycles in the first place.
+_client_list_iter_owners_lock = threading.RLock()
+
+
+class _ClientListIterBusy(RuntimeError):
+    """
+    Raised by _ClientListIter.close()/next() specifically (and only) when
+    another thread is genuinely still executing this same iterator right
+    now. A dedicated type (rather than a plain RuntimeError, or matching
+    on message text between modules) so Redis.close() (redis/client.py)
+    can distinguish this exact condition from any other RuntimeError a
+    generator's cleanup might legitimately raise for an unrelated reason
+    - and thus decide correctly whether it is still safe to release the
+    connection to the pool. Still a RuntimeError, so existing code that
+    catches RuntimeError for this method keeps working.
+    """
+
+
+class _ClientListIter:
+    """
+    Iterator returned by client_list_iter(). Wraps the underlying
+    streaming generator so the checked-out connection is released
+    exactly once, even if the caller never begins iterating at all - a
+    bare generator's own try/finally body never runs in that case,
+    since CPython only enters a generator function's frame on its first
+    next() call (closing or dropping an unstarted generator runs zero
+    of its body).
+
+    Every instance is registered (weakly, in client_list_iter()) in its
+    owning Redis client's self._client_list_iter_owners set - consulted
+    by Redis.close() (redis/client.py) so it closes each live iterator a
+    client has created through this one code path, in EITHER
+    single_connection_client mode (where self.connection IS this
+    instance's connection) or the default pooled mode, rather than
+    independently disconnecting a connection itself, which would leave
+    this iterator's own generator still alive and unclosed to
+    (redundantly, and unsafely once the connection is reused by someone
+    else) disconnect it AGAIN whenever it is eventually
+    garbage-collected. Weak so that outliving connections/clients (the
+    common case) don't in turn keep an iterator artificially alive.
+
+    That registration link is deliberately one-directional, though: the
+    OWNER_CLIENT constructor argument below is a plain STRONG reference
+    the other way, from this iterator back to the Redis client that
+    created it - needed because Redis.close() runs unconditionally from
+    Redis.__del__, and without this, an entirely ordinary-looking
+    one-liner like `rows = list(redis.Redis(...).client_list_iter())`
+    would silently return an empty result: the temporary Redis object's
+    refcount would hit zero the instant client_list_iter() returns
+    (before the caller ever calls next()), CPython would run __del__ ->
+    close() immediately, and close() would close and release this very
+    iterator having never been started - all before the caller's list()
+    call even begins consuming it. Holding a strong reference to the
+    client for as long as THIS iterator is referenced keeps the client
+    alive for exactly as long as it's needed, with no cycle (the
+    client's own reference to this iterator, above, is weak).
+
+    Not thread-safe to iterate from more than one thread, but close()
+    from a different thread than the one currently blocked in next() (a
+    watchdog/cancellation pattern, including via Redis.close() as above)
+    is specifically guarded against: it would otherwise get "generator
+    already executing" from the still-running generator and, ignoring
+    that, release the connection back to the pool anyway - handing a
+    connection that's still being actively read to an unrelated caller
+    from the pool. In that specific case, close() raises RuntimeError
+    and leaves the connection checked out (not released to the pool) -
+    a deliberate choice, since a caller sharing a single_connection_client
+    connection across threads while also concurrently closing it is
+    already outside this feature's supported usage, and failing safe by
+    never handing out a still-live connection matters more here than
+    reclaiming it for reuse.
+    """
+
+    def __init__(self, pool, conn, from_pool, gen, owner_client):
+        self._pool = pool
+        self._conn = conn
+        self._from_pool = from_pool
+        self._gen = gen
+        self._owner_client = owner_client
+        self._closed = False
+        self._close_lock = threading.Lock()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        try:
+            return next(self._gen)
+        except ValueError as e:
+            # next(self._gen) racing this specific, CPython-internal
+            # error text (not any other ValueError a line might
+            # legitimately raise from inside the generator) means
+            # another thread is concurrently inside this same
+            # generator's frame right now - either via its own next()
+            # call (this iterator is unsupported to use from more than
+            # one thread at all - see class docstring), or via a
+            # concurrent close() unwinding it (the specifically
+            # supported watchdog/cancellation pattern). Either way, this
+            # call cannot proceed; matching the exact message (not a
+            # substring) makes detecting that an atomic, ground-truth
+            # signal - no separate, later state check (which could race
+            # against further progress made by that other thread) is
+            # needed.
+            if str(e) == _GENERATOR_ALREADY_EXECUTING:
+                try:
+                    self.close()
+                except _ClientListIterBusy:
+                    # close() independently detected the same
+                    # still-running condition and already raised its own
+                    # version of this - swallow it so the message below
+                    # (deliberately worded to not assume which of the two
+                    # scenarios above actually happened) is what the
+                    # caller sees instead.
+                    pass
+                raise _ClientListIterBusy(
+                    "client_list_iter() is being used concurrently by "
+                    "another thread - either racing this next() call "
+                    "directly, or closing this iterator while this call "
+                    "was in flight; neither is supported"
+                ) from None
+            self.close()
+            raise
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self):
+        with self._close_lock:
+            if self._closed:
+                return
+            try:
+                self._gen.close()
+            except ValueError as e:
+                if str(e) == _GENERATOR_ALREADY_EXECUTING:
+                    # a next() call is genuinely still running this same
+                    # generator right now in another thread - the
+                    # connection is still in active use. Do not mark
+                    # closed or release it; a caller may retry once that
+                    # in-flight next() call returns.
+                    raise _ClientListIterBusy(
+                        "client_list_iter() cannot be closed while "
+                        "another thread is still iterating it; retry "
+                        "once that in-flight call returns"
+                    ) from None
+                # any other ValueError: the generator did terminate, it
+                # just failed doing so - still release, to avoid
+                # stranding the connection outside the pool forever.
+                self._mark_released()
+                raise
+            except BaseException:
+                # any other error, of any type: the generator did
+                # terminate, it just failed doing so - still release, to
+                # avoid stranding the connection outside the pool forever.
+                self._mark_released()
+                raise
+            else:
+                self._mark_released()
+
+    def _mark_released(self):
+        self._closed = True
+        if self._from_pool:
+            self._pool.release(self._conn)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self.close()
+
+    def __del__(self):
+        self.close()
+
+
+def _client_list_iter_gen(conn, args):
+    conn.send_command("CLIENT LIST", *args)
+    # Matches client_list()'s actual decoding behavior exactly, which is
+    # NOT simply "always hardcoded utf-8/replace":
+    #   - decode_responses=True: Connection.read_response() already
+    #     decodes the raw reply with the connection's real
+    #     encoder.encoding/encoding_errors before parse_client_list() ever
+    #     sees it; parse_client_list()'s own str_if_bytes() call is then a
+    #     no-op passthrough on the already-decoded str. So client_list()
+    #     DOES honor a non-default encoding in this (the common) mode.
+    #   - decode_responses=False: the reply reaches parse_client_list()
+    #     as raw bytes, and its str_if_bytes() call force-decodes with a
+    #     hardcoded utf-8/"replace" policy regardless of the configured
+    #     encoding (a pre-existing quirk of str_if_bytes(), unrelated to
+    #     this patch).
+    # client_list_iter() bypasses the normal RESP decode step entirely
+    # (see read_response_lines_streaming), so it must replicate both
+    # branches itself to match client_list()'s output for the same
+    # connection and raw reply, rather than always using one or the other.
+    encoder = conn.encoder
+    if encoder.decode_responses:
+        encoding, encoding_errors = encoder.encoding, encoder.encoding_errors
+    else:
+        encoding, encoding_errors = "utf-8", "replace"
+    #
+    # A plain `for line in inner:` loop, unlike `yield from inner`, does
+    # NOT propagate close()/GeneratorExit to `inner` on abandonment - and
+    # `yield from` alone can't be used here since each line must be
+    # transformed before being yielded. Closing `inner` explicitly in a
+    # finally covers abandonment, normal exhaustion, and an exception
+    # raised while parsing a line, in all cases.
+    inner = conn.read_response_lines_streaming()
+    try:
+        for line in inner:
+            # Matches parse_client_list()'s own filtering (which drops
+            # any line whose parsed dict comes back empty, e.g. a blank
+            # or malformed one - see _parse_client_info_fields() in
+            # redis/_parsers/helpers.py) rather than yielding an empty
+            # dict for it - otherwise client_list_iter() would surface
+            # a record client_list() silently omits for the identical
+            # reply.
+            client_dict = parse_client_list_line(
+                line, encoding=encoding, encoding_errors=encoding_errors
+            )
+            if client_dict:
+                yield client_dict
+    finally:
+        inner.close()
+
 
 if TYPE_CHECKING:
     import redis.asyncio.client
@@ -849,19 +1175,194 @@ class ManagementCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/client-list
         """
-        args = []
-        if _type is not None:
-            client_types = ("normal", "master", "replica", "pubsub")
-            if str(_type).lower() not in client_types:
-                raise DataError(f"CLIENT LIST _type must be one of {client_types!r}")
-            args.append(b"TYPE")
-            args.append(_type)
-        if not isinstance(client_id, list):
-            raise DataError("client_id must be a list")
-        if client_id:
-            args.append(b"ID")
-            args += client_id
+        args = _client_list_args(_type, client_id)
         return self.execute_command("CLIENT LIST", *args, **kwargs)
+
+    def client_list_iter(
+        self,
+        _type: Union[str, None] = None,
+        client_id: List[EncodableT] = [],
+        **kwargs,
+    ):
+        """
+        Like client_list(), but streams and parses the CLIENT LIST reply
+        incrementally as bytes arrive off the socket, instead of reading
+        the entire reply into memory before parsing it. Yields one dict
+        per connected client.
+
+        Peak memory use for this call is bounded by the socket read
+        chunk size (see SocketBuffer.read_bulk_lines), independent of how
+        many clients are connected - unlike client_list(), which must
+        hold the whole reply (and then the whole parsed list) in memory
+        at once. This matters for servers with a very large number of
+        connections.
+
+        The connection used for this call is held for as long as the
+        caller keeps iterating - unlike scan_iter()/hscan_iter() and
+        friends, which check a connection out and back in per batch. For
+        a client created with single_connection_client=True, issuing ANY
+        other command on the same client (e.g. r.ping()) while this is
+        mid-stream reads leftover CLIENT LIST bytes as that command's
+        reply, corrupting it - this reproduces single-threaded, on
+        purpose or by accident, not just under concurrent multi-threaded
+        use. Fully drain the iterator (or close() it) before issuing
+        another command on the same client, and do not share it across
+        threads. Custom parsing registered via
+        set_response_callback("CLIENT LIST", ...) is not honored - lines
+        are always parsed with the built-in per-client parser.
+
+        The returned iterator releases its connection back to the pool
+        when closed, exhausted, or garbage-collected - but on CPython,
+        garbage collection can be deferred by a reference cycle (e.g. a
+        caught exception whose traceback keeps this frame alive), so
+        prefer closing it deterministically with a `with` block instead
+        of relying on that:
+            with r.client_list_iter() as it:
+                for client in it:
+                    ...
+
+        Unlike execute_command()'s normal path, sending the command and
+        reading each line is NOT wrapped in retry.call_with_retry() - a
+        transient failure while streaming is not automatically retried
+        the way client_list() and other ordinary commands are.
+
+        Closing the returned iterator from a different thread than the
+        one actively iterating it is guarded against directly-conflicting
+        concurrent execution (raises RuntimeError rather than releasing a
+        connection still in use) - but closing it from another thread
+        while it is merely suspended between lines (not actively
+        executing) succeeds silently, and the original consumer's next
+        next() call then simply raises the ordinary StopIteration it
+        would get from natural exhaustion, with nothing to distinguish
+        the two. A cancellation pattern relying on this should track
+        cancellation separately rather than inferring it from
+        StopIteration.
+
+        PROTOTYPE - only supported on connections using the pure-Python
+        RESP parser (i.e. without the optional `hiredis` package
+        installed/active); raises NotImplementedError otherwise, in
+        which case client_list() should be used instead. Not supported
+        from within a Pipeline or on a cluster client - both raise
+        NotImplementedError immediately, before anything is sent.
+
+        :param _type: optional. one of the client types (normal, master,
+         replica, pubsub)
+        :param client_id: optional. a list of client ids
+
+        For more information see https://redis.io/commands/client-list
+        """
+        # Validated and guarded eagerly (this is a plain function, not a
+        # generator, and it acquires+checks the connection here too) so
+        # mistakes surface at call time, not on first iteration - unlike a
+        # `def ...: yield ...` body, which would only run once the caller
+        # starts consuming it.
+        if hasattr(self, "command_stack"):
+            raise NotImplementedError(
+                "client_list_iter() is not supported from within a "
+                "Pipeline; use client_list() instead."
+            )
+        if not hasattr(self, "connection_pool"):
+            raise NotImplementedError(
+                "client_list_iter() is not supported on this client (for "
+                "example RedisCluster); use client_list() instead."
+            )
+        if kwargs:
+            # client_list() forwards **kwargs to execute_command(), where
+            # cluster-routing keywords like target_nodes are consumed
+            # transparently - but client_list_iter() bypasses execute_
+            # command() entirely (it manages its own connection), so
+            # there's nothing to forward them to. Accepting and rejecting
+            # them here explicitly (a clean NotImplementedError, matching
+            # the guard clauses above) rather than not accepting them at
+            # all avoids a raw, confusing TypeError for the exact same
+            # "not supported" cases those guards already cover.
+            raise NotImplementedError(
+                "client_list_iter() does not support additional keyword "
+                f"arguments ({', '.join(sorted(kwargs))}); use "
+                "client_list() instead."
+            )
+        args = _client_list_args(_type, client_id)
+        pool = self.connection_pool
+        # For single_connection_client mode specifically, the READ of
+        # self.connection itself - not just what happens after it - must
+        # be inside _client_list_iter_owners_lock: Redis.close() (redis/
+        # client.py) uses this SAME lock around its OWN handling of
+        # self.connection, so unless our read is inside it too, close()
+        # can run its entire check-and-release to completion in the gap
+        # between us reading self.connection and us reaching this lock,
+        # releasing the connection our (stale, already-captured) `conn`
+        # variable still refers to - not merely a narrow theoretical
+        # gap, but one previously reproduced causing real cross-thread
+        # socket corruption for this exact mode. An earlier version of
+        # this method read self.connection just before this lock instead
+        # of inside it, which looked equivalent but was not - the read
+        # itself has to be the first statement inside this block.
+        with _client_list_iter_owners_lock:
+            conn = self.connection
+            if conn is not None:
+                # single_connection_client mode: `conn` is already an
+                # established connection - nothing below does any I/O,
+                # so the entire span from the read above through
+                # registering the resulting iterator is one atomic,
+                # lock-protected, non-blocking sequence.
+                if not conn.can_stream_lines():
+                    raise NotImplementedError(
+                        "client_list_iter() requires a connection using "
+                        "the pure-Python RESP parser; this connection is "
+                        "using a hiredis-backed parser. Use client_list() "
+                        "instead."
+                    )
+                it = _ClientListIter(
+                    pool, conn, False, _client_list_iter_gen(conn, args), self
+                )
+                owners = getattr(self, "_client_list_iter_owners", None)
+                if owners is None:
+                    owners = weakref.WeakSet()
+                    self._client_list_iter_owners = owners
+                owners.add(it)
+                return it
+
+        # Default pooled mode: pool.get_connection() is deliberately
+        # called OUTSIDE _client_list_iter_owners_lock - it can block for
+        # real, on a slow connect/TLS handshake, or on a
+        # BlockingConnectionPool waiting up to its own configured timeout
+        # (or forever, with no timeout) for a free connection.
+        # _client_list_iter_owners_lock is a single process-wide lock
+        # also taken by every Redis instance's close() (redis/client.py)
+        # - holding it across a blocking call here would stall EVERY
+        # unrelated Redis client's close() in the whole process for that
+        # same duration, which is a real, previously-confirmed regression
+        # far worse than the narrow residual gap accepted below.
+        #
+        # That residual gap (between get_connection() returning and this
+        # connection being registered) is real but, for a connection just
+        # freshly checked out of the pool (not yet referenced by any
+        # other code), it can only be affected by close()'s separate
+        # auto_close_connection_pool sweep disconnecting it while it's
+        # still "in use" but not yet registered - which is the exact same
+        # pre-existing hazard auto_close_connection_pool already poses to
+        # ANY ordinary, unrelated command's connection mid-flight on a
+        # shared pool (nothing new introduced by this feature), not the
+        # cross-thread live-socket corruption the single_connection_
+        # client branch above must (and does) fully close.
+        conn = pool.get_connection("CLIENT LIST")
+        if not conn.can_stream_lines():
+            pool.release(conn)
+            raise NotImplementedError(
+                "client_list_iter() requires a connection using the "
+                "pure-Python RESP parser; this connection is using a "
+                "hiredis-backed parser. Use client_list() instead."
+            )
+        with _client_list_iter_owners_lock:
+            it = _ClientListIter(
+                pool, conn, True, _client_list_iter_gen(conn, args), self
+            )
+            owners = getattr(self, "_client_list_iter_owners", None)
+            if owners is None:
+                owners = weakref.WeakSet()
+                self._client_list_iter_owners = owners
+            owners.add(it)
+        return it
 
     @overload
     def client_getname(self: SyncClientProtocol, **kwargs) -> bytes | str | None: ...
@@ -2434,6 +2935,29 @@ class ManagementCommands(CommandsProtocol):
 
 
 class AsyncManagementCommands(ManagementCommands):
+    def client_list_iter(
+        self,
+        _type: Union[str, None] = None,
+        client_id: List[EncodableT] = [],
+        **kwargs,
+    ) -> None:
+        """
+        Not implemented for the async client - client_list_iter()'s
+        streaming implementation is built directly on the sync
+        Connection's blocking-socket internals (SocketBuffer.read_bulk_lines,
+        Connection.read_response_lines_streaming), which have no
+        asyncio.StreamReader-based counterpart yet. Use client_list()
+        instead, or client_list_iter() on the sync client.
+
+        :param _type: optional. one of the client types (normal, master,
+         replica, pubsub)
+        :param client_id: optional. a list of client ids
+        """
+        raise NotImplementedError(
+            "client_list_iter() is not implemented for the async client; "
+            "use client_list() instead."
+        )
+
     async def command_info(self, **kwargs) -> None:
         return super().command_info(**kwargs)
 

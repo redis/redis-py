@@ -32,7 +32,7 @@ from redis.commands.core import (
 from redis.commands.json.path import Path
 from redis.commands.search.field import TextField
 from redis.commands.search.query import Query
-from redis.utils import safe_str
+from redis.utils import HIREDIS_AVAILABLE, safe_str
 from tests.test_utils import redis_server_time
 
 from .conftest import (
@@ -661,6 +661,157 @@ class TestRedisCommands:
         assert "addr" in clients[0]
 
     @pytest.mark.onlynoncluster
+    def test_client_list_iter(self, r):
+        if HIREDIS_AVAILABLE:
+            # client_list_iter() is a PROTOTYPE that only supports the
+            # pure-Python parser; with hiredis active it must cleanly
+            # decline rather than attempt to stream.
+            with pytest.raises(NotImplementedError):
+                r.client_list_iter()
+            return
+        from_iter = sorted(int(c["id"]) for c in r.client_list_iter())
+        from_list = sorted(int(c["id"]) for c in r.client_list())
+        assert from_iter == from_list
+        assert from_iter  # at least this connection itself
+
+    @pytest.mark.onlynoncluster
+    def test_client_list_iter_decode_responses(self, decoded_r):
+        # exercises the decode_responses=True path end to end against a
+        # real server, confirming client_list_iter()/client_list() stay
+        # in parity for ordinary (ASCII) field content in that mode.
+        # This does NOT, on its own, prove client_list_iter() wires
+        # through the connection's REAL (possibly non-default) encoding/
+        # encoding_errors correctly - default UTF-8 content looks
+        # identical whether that wiring is correct or hardcoded; see
+        # test_client_list_iter_matches_client_list_decoding_for_custom_
+        # encoding (tests/test_streaming_client_list.py) for that,
+        # using a deliberately non-default encoding and a non-ASCII byte.
+        if HIREDIS_AVAILABLE:
+            pytest.skip("client_list_iter() requires the pure-Python parser")
+        from_iter = sorted(int(c["id"]) for c in decoded_r.client_list_iter())
+        from_list = sorted(int(c["id"]) for c in decoded_r.client_list())
+        assert from_iter == from_list
+        assert from_iter
+
+    @pytest.mark.onlynoncluster
+    def test_client_list_iter_types(self, r):
+        if HIREDIS_AVAILABLE:
+            pytest.skip("client_list_iter() requires the pure-Python parser")
+        # verifying the server-side filtering itself is out of scope
+        # here (that's Redis's own behavior, not this feature's) - what
+        # IS under this feature's control is that client_list_iter()
+        # forwards the _type filter faithfully, getting the exact same
+        # result set client_list() gets for the identical filter. A
+        # prior version of this test only asserted isinstance(clients,
+        # list), which is trivially true since clients is already
+        # list(...) - it never actually exercised whether the filter
+        # took effect at all.
+        for client_type in ["normal", "master", "pubsub"]:
+            from_iter = sorted(
+                int(c["id"]) for c in r.client_list_iter(_type=client_type)
+            )
+            from_list = sorted(int(c["id"]) for c in r.client_list(_type=client_type))
+            assert from_iter == from_list
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    def test_client_list_iter_client_id(self, r, request):
+        if HIREDIS_AVAILABLE:
+            pytest.skip("client_list_iter() requires the pure-Python parser")
+        clients = r.client_list()
+        single = list(r.client_list_iter(client_id=[clients[0]["id"]]))
+        assert len(single) == 1
+        assert "addr" in single[0]
+
+        # A genuine MULTI-id filter - a round-25 review found and fixed a
+        # real, pre-existing bug (shared identically by client_list())
+        # that made this always fail against a real server:
+        # _client_list_args() used to join multiple ids into a single
+        # space-separated argument, which redis-server rejects outright.
+        other1 = _get_client(redis.Redis, request, flushdb=False)
+        other2 = _get_client(redis.Redis, request, flushdb=False)
+        _get_client(redis.Redis, request, flushdb=False)  # an id NOT filtered for
+        target_ids = [str(other1.client_id()), str(other2.client_id())]
+        multi = list(r.client_list_iter(client_id=target_ids))
+        assert {c["id"] for c in multi} == set(target_ids)
+
+    @pytest.mark.onlynoncluster
+    def test_client_list_iter_validates_eagerly(self, r):
+        # a bad argument must raise before any iteration is attempted, not
+        # once the caller starts consuming the returned generator
+        with pytest.raises(exceptions.DataError):
+            r.client_list_iter(_type="not a client type")
+
+    @pytest.mark.onlynoncluster
+    def test_client_list_iter_pipeline_not_supported(self, r):
+        with r.pipeline() as pipe:
+            with pytest.raises(NotImplementedError):
+                pipe.client_list_iter()
+
+    @pytest.mark.onlynoncluster
+    def test_client_list_iter_single_connection_client_close_is_pool_safe(
+        self, request
+    ):
+        # single_connection_client=True: self.connection is the exact
+        # connection a live client_list_iter() reads from. close()
+        # (explicit, or via __del__/gc when nothing references this
+        # client anymore) must disconnect that connection before
+        # releasing it to the shared pool - otherwise a still-in-use
+        # socket could be handed to an unrelated caller of the same
+        # pool who then reads leftover CLIENT LIST bytes as their own
+        # command's reply.
+        #
+        # No HIREDIS_AVAILABLE skip needed here (unlike other
+        # client_list_iter() tests): this test builds its own
+        # ConnectionPool with parser_class=_RESP2Parser explicitly, so it
+        # always exercises the pure-Python parser regardless of whether
+        # hiredis happens to be importable in the test environment.
+        from redis._parsers import _RESP2Parser
+
+        pool = redis.ConnectionPool.from_url(
+            request.config.option.redis_url, parser_class=_RESP2Parser
+        )
+        r = redis.Redis(connection_pool=pool, single_connection_client=True)
+        conn = r.connection
+
+        it = r.client_list_iter()
+        next(it)
+        r.close()
+
+        assert conn._sock is None  # disconnected, not left live-in-use
+
+        other = redis.Redis(connection_pool=pool)
+        assert other.ping() is True  # gets a clean connection, not garbage
+        other.close()
+        pool.disconnect()
+
+    @pytest.mark.onlynoncluster
+    def test_client_list_iter_pooled_mode_close_is_pool_safe(self, request):
+        # the far more common default (pooled, non single_connection_
+        # client) case: self.connection stays None, and the connection
+        # client_list_iter() streams from is checked out via
+        # connection_pool.get_connection() instead - close() abandoning
+        # a partially-consumed iterator in this mode must still leave
+        # the connection cleanly reusable by an unrelated caller of the
+        # same pool, not handed out live-in-use or corrupted.
+        from redis._parsers import _RESP2Parser
+
+        pool = redis.ConnectionPool.from_url(
+            request.config.option.redis_url, parser_class=_RESP2Parser
+        )
+        r = redis.Redis(connection_pool=pool)
+        assert r.connection is None  # confirms pooled mode is actually used
+
+        it = r.client_list_iter()
+        next(it)
+        r.close()  # abandons the partially-consumed iterator
+
+        other = redis.Redis(connection_pool=pool)
+        assert other.ping() is True  # gets a clean connection, not garbage
+        other.close()
+        pool.disconnect()
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
     def test_client_info(self, r):
         info = r.client_info()
@@ -698,9 +849,9 @@ class TestRedisCommands:
     @skip_if_redis_enterprise()
     def test_client_list_client_id(self, r, request):
         clients = r.client_list()
-        clients = r.client_list(client_id=[clients[0]["id"]])
-        assert len(clients) == 1
-        assert "addr" in clients[0]
+        single = r.client_list(client_id=[clients[0]["id"]])
+        assert len(single) == 1
+        assert "addr" in single[0]
 
         # testing multiple client ids
         client_list = list()

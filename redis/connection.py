@@ -44,6 +44,8 @@ from ._defaults import (
     get_default_socket_keepalive_options,
 )
 from ._parsers import BaseParser, Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
+from ._parsers.resp3 import _INVALIDATION_MESSAGE
+from ._parsers.socket import SERVER_CLOSED_CONNECTION_ERROR
 from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
@@ -55,6 +57,7 @@ from .exceptions import (
     ChildDeadlockedError,
     ConnectionError,
     DataError,
+    InvalidResponse,
     MaxConnectionsError,
     RedisError,
     ResponseError,
@@ -1567,6 +1570,178 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             finally:
                 del response  # avoid creating ref cycles
         return response
+
+    def can_stream_lines(self):
+        """
+        Whether this connection's active parser supports
+        read_response_lines_streaming() - true for the pure-Python
+        RESP2/RESP3 parsers, false for a hiredis-backed parser (hiredis's
+        incremental reader has no API for handing back a partially parsed
+        reply).
+        """
+        return isinstance(self._parser, (_RESP2Parser, _RESP3Parser))
+
+    def read_response_lines_streaming(self, disconnect_on_error=True):
+        """
+        Read a single top-level RESP reply that is expected to be a bulk
+        string of newline-delimited records, and stream it back line by
+        line instead of buffering the entire reply in memory. Intended
+        for large line-oriented replies such as CLIENT LIST.
+
+        Only supported on connections using the pure-Python RESP2/RESP3
+        parser; raises NotImplementedError when a hiredis-backed parser is
+        active. Callers should check can_stream_lines() themselves BEFORE
+        sending the command, since this check can only be enforced here
+        once the generator is first iterated - by then the command may
+        already be in flight.
+
+        RESP3 out-of-band push frames (client-side caching invalidations,
+        RESP3 pubsub) that arrive ahead of the real reply are consumed and
+        dispatched to the connection's push handlers, then skipped over -
+        closely following _RESP3Parser._read_response()'s behavior, except
+        that an invalidation push arriving with no invalidation handler
+        registered is silently dropped here rather than raising
+        AttributeError as the non-streaming parser does for the same
+        misconfiguration.
+
+        Not thread-safe: a second thread issuing ANY command on this same
+        Connection while a generator from this method is still being
+        consumed will read whatever bytes are left over from that partial
+        read, corrupting both callers' results.
+
+        With the default disconnect_on_error=True, the caller MUST fully
+        exhaust the returned generator (or accept that the connection will
+        be disconnected) before issuing another command on this connection
+        - abandoning it mid-stream leaves unread bytes on the socket that
+        would corrupt the next reply. Passing disconnect_on_error=False
+        keeps that same requirement but leaves disconnecting on abandonment
+        up to the caller instead of doing it automatically.
+
+        Prefer draining this generator inside a try/finally that calls its
+        close() explicitly, rather than relying on it going out of scope,
+        so cleanup does not depend on prompt garbage collection:
+            it = conn.read_response_lines_streaming()
+            try:
+                for line in it:
+                    ...
+            finally:
+                it.close()
+        """
+        parser = self._parser
+        if not isinstance(parser, (_RESP2Parser, _RESP3Parser)):
+            raise NotImplementedError(
+                "read_response_lines_streaming() requires the pure-Python "
+                "RESP parser; this connection is using a hiredis-backed "
+                "parser, which cannot hand back a partially parsed reply."
+            )
+        host_error = self._host_error()
+        buffer = parser._buffer
+        application_error = None
+        try:
+            while True:
+                raw = buffer.readline()
+                if not raw:
+                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+                byte, header = raw[:1], raw[1:]
+                if byte == b"!" and isinstance(parser, _RESP3Parser):
+                    # RESP3 blob error: header is a length prefix, the
+                    # actual error text follows as a bounded bulk read -
+                    # mirrors _RESP3Parser._read_response()'s "!" handling.
+                    header = buffer.read(int(header))
+                    byte = b"-"
+                if byte == b"-":
+                    error = parser.parse_error(header.decode("utf-8", errors="replace"))
+                    # a ConnectionError means the connection itself is bad;
+                    # raise immediately so the except clauses below
+                    # disconnect it, same as read_response(). An ordinary
+                    # application error (e.g. NOPERM) leaves the connection
+                    # perfectly usable, so it must NOT trigger a disconnect
+                    # - stash it and raise once we're past the try/except.
+                    if isinstance(error, ConnectionError):
+                        raise error
+                    application_error = error
+                    break
+                if byte == b"$" and header == b"-1":
+                    buffer.purge()
+                    return
+                if byte == b"_" and isinstance(parser, _RESP3Parser):
+                    # RESP3's canonical null type - _RESP3Parser._read_
+                    # response() returns None for this, same as this
+                    # method's own handling of the RESP2/RESP3-shared
+                    # "$-1" null bulk string above (no lines to yield).
+                    buffer.purge()
+                    return
+                if byte == b"$":
+                    length = int(header)
+                    if length < 0:
+                        raise InvalidResponse(f"Protocol Error: {raw!r}")
+                    yield from buffer.read_bulk_lines(length)
+                    buffer.purge()
+                    return
+                if byte == b"=" and isinstance(parser, _RESP3Parser):
+                    # RESP3 verbatim string: a real redis-server actually
+                    # replies to CLIENT LIST this way under RESP3 (not as a
+                    # plain bulk string). A 4-byte type tag (e.g. "txt:")
+                    # precedes the content - discard it, then stream the
+                    # rest exactly like a bulk string. Mirrors
+                    # _RESP3Parser._read_response()'s "=" handling, which
+                    # does buffer.read(length)[4:].
+                    length = int(header)
+                    if length < 4:
+                        raise InvalidResponse(f"Protocol Error: {raw!r}")
+                    buffer._consume(4)
+                    yield from buffer.read_bulk_lines(length - 4)
+                    buffer.purge()
+                    return
+                if byte == b">" and isinstance(parser, _RESP3Parser):
+                    # an out-of-band push frame (e.g. a client-side caching
+                    # invalidation, or RESP3 pubsub) interleaved ahead of
+                    # the real reply. These are small, so fully parsing one
+                    # via the parser's own recursive reader is fine - only
+                    # the eventual bulk-string CLIENT LIST reply itself
+                    # needs the streaming path.
+                    push = [
+                        parser._read_response(disable_decoding=False)
+                        for _ in range(int(header))
+                    ]
+                    handler = parser.pubsub_push_handler_func
+                    if push and push[0] in _INVALIDATION_MESSAGE:
+                        handler = getattr(
+                            parser, "invalidation_push_handler_func", None
+                        )
+                    if handler is not None:
+                        handler(push)
+                    buffer.purge()
+                    continue
+                raise InvalidResponse(f"Protocol Error: {raw!r}")
+        except GeneratorExit:
+            if disconnect_on_error:
+                self.disconnect()
+            raise
+        except TimeoutError:
+            # SocketBuffer's own read methods (readline/read/_recv_capped/
+            # _consume) already convert a raw socket.timeout into this
+            # (redis.exceptions.TimeoutError) before it can reach here -
+            # catch that converted type directly, not socket.timeout
+            # itself (which never actually propagates this far), so this
+            # branch actually runs and reports the host:port rather than
+            # falling through to the generic "except BaseException"
+            # below with SocketBuffer's own less specific message.
+            if disconnect_on_error:
+                self.disconnect()
+            raise TimeoutError(f"Timeout reading from {host_error}") from None
+        except OSError as e:
+            if disconnect_on_error:
+                self.disconnect()
+            raise ConnectionError(f"Error while reading from {host_error}: {e.args}")
+        except BaseException:
+            if disconnect_on_error:
+                self.disconnect()
+            raise
+        # raised outside the try/except above so an ordinary application
+        # error does not disconnect a perfectly healthy connection
+        buffer.purge()
+        raise application_error
 
     def pack_command(self, *args):
         """Pack a series of arguments into the Redis protocol"""

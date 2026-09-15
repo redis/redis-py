@@ -918,10 +918,39 @@ def _parse_client_info_fields(value):
     return fields
 
 
+def parse_client_list_line(
+    line, encoding="utf-8", encoding_errors="replace", **options
+):
+    # Defaults match str_if_bytes()'s hardcoded utf-8/"replace" policy (the
+    # decode_responses=False case for parse_client_list(), see that
+    # function). client_list_iter() passes the connection's real
+    # encoding/encoding_errors explicitly when decode_responses=True, to
+    # match parse_client_list()'s behavior in that mode too - see
+    # _client_list_iter_gen() in redis/commands/core.py.
+    if isinstance(line, (bytes, bytearray, memoryview)):
+        line = bytes(line).decode(encoding, encoding_errors)
+    if line.endswith("\r"):
+        line = line[:-1]
+    # Delegates to the same tokenizer client_list() uses (handles a value
+    # containing '=', and a Unix-socket addr/laddr path containing spaces)
+    # rather than a plain line.split(" ") - keeping the two APIs' parsing
+    # identical for the same underlying reply.
+    return _parse_client_info_fields(line)
+
+
 def parse_client_list(response, **options):
+    # Split strictly on the wire's actual "\n" record separator, matching
+    # the streaming client_list_iter() path (SocketBuffer.read_bulk_lines),
+    # rather than str.splitlines() - which also treats \v, \f, \x1c-\x1e,
+    # NEL and other unicode line separators as boundaries. A field value
+    # containing one of those would otherwise be parsed differently by
+    # client_list() and client_list_iter() for the same server reply.
+    lines = str_if_bytes(response).split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
     clients = []
-    for c in str_if_bytes(response).splitlines():
-        client_dict = _parse_client_info_fields(c)
+    for c in lines:
+        client_dict = parse_client_list_line(c, **options)
         if client_dict:
             clients.append(client_dict)
     return clients

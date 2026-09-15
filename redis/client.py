@@ -39,7 +39,7 @@ from redis.commands import (
     SentinelCommands,
     list_or_args,
 )
-from redis.commands.core import Script
+from redis.commands.core import Script, _client_list_iter_owners_lock
 from redis.commands.helpers import parse_pubsub_subscriptions, pubsub_subscription_args
 from redis.commands.metadata import MetadataResolver
 from redis.connection import (
@@ -819,13 +819,273 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         if not hasattr(self, "connection"):
             return
 
-        conn = self.connection
-        if conn:
-            self.connection = None
-            self.connection_pool.release(conn)
+        # All of the client_list_iter()-specific protection below is
+        # scoped to THIS instance's own _client_list_iter_owners - it
+        # has no visibility into client_list_iter() calls made through a
+        # DIFFERENT Redis instance that happens to share the same
+        # connection_pool object. auto_close_connection_pool tearing down
+        # a pool out from under an unrelated instance still actively
+        # using it is a pre-existing hazard of sharing a pool across
+        # instances at all (identical for any other long-running
+        # command, e.g. BLPOP) - nothing here claims to solve that.
+
+        # Every client_list_iter() generator this client has ever
+        # created (in EITHER single_connection_client mode, where it
+        # reads self.connection directly, OR the default pooled mode,
+        # where it checks out its own connection via
+        # connection_pool.get_connection() and self.connection stays
+        # None) is tracked in self._client_list_iter_owners so close()
+        # can attempt to close all of them - not just one tied to
+        # self.connection - and so this protection survives close()
+        # being called more than once. A WeakSet: an iterator that's
+        # already been closed/exhausted/GC'd drops out on its own,
+        # without needing explicit bookkeeping here.
+        #
+        # Pooled-mode iterators are handled here, in an early,
+        # best-effort pass, OUTSIDE any lock (owner.close() can do real
+        # - if normally fast - work, e.g. socket teardown): each one's
+        # own _mark_released() (see _ClientListIter, redis/commands/
+        # core.py) already knows how and when to release its OWN
+        # connection back to the pool correctly regardless of exactly
+        # when this pass runs relative to anything else, so this
+        # doesn't need to be atomic with the rest of close().
+        # Whether any owner raises _ClientListIterBusy here is NOT
+        # tracked into a running still_in_use flag - the final decision
+        # below (auto_close_connection_pool's fresh scan) supersedes it
+        # with a strictly more current answer regardless, so keeping a
+        # second, partial tally here would only be dead, misleading
+        # bookkeeping.
+        with _client_list_iter_owners_lock:
+            owners = getattr(self, "_client_list_iter_owners", None)
+            owners_snapshot = list(owners) if owners else []
+        for owner in owners_snapshot:
+            try:
+                owner.close()
+            except Exception:
+                # includes _ClientListIterBusy (a genuinely busy owner is
+                # simply left open - see the final scan below, which is
+                # what actually determines still_in_use).
+                pass
+
+        # self.connection (single_connection_client mode) is handled
+        # entirely separately and atomically: read it, find its OWN
+        # current owner (if any) via a FRESH lookup - not the stale
+        # snapshot above, which a new client_list_iter() call could
+        # have registered into in the meantime - close THAT specific
+        # owner right here, and decide whether to release, all under
+        # ONE continuous lock hold. This closes what an earlier version
+        # of this method (which used the SAME early snapshot for both
+        # the busy-check and the later release decision) did not: a
+        # brand-new client_list_iter() call whose entire read-self.
+        # connection-and-register sequence completed inside the gap
+        # between that snapshot and this decision was invisible to it,
+        # so it would release a connection a live iterator already
+        # owned. Closing one already-identified iterator here is
+        # bounded work (either it succeeds quickly, raises
+        # _ClientListIterBusy quickly, or does one quick disconnect()
+        # socket-teardown syscall) - unlike pool.get_connection(), which
+        # can block for a genuinely unbounded time - so holding the
+        # lock across it does not reintroduce the cross-client-
+        # blocking regression a prior round found from doing that.
+        # Only the READ of self.connection and the fresh owner lookup it
+        # depends on are done under the lock - NOT owner.close() itself.
+        # A prior version of this block held the lock across owner.
+        # close() too, on the theory that closing one already-identified
+        # iterator is always bounded, fast work; that is normally true,
+        # but owner.close() can still legitimately block for real (e.g.
+        # on its own per-instance lock, if another thread is
+        # concurrently closing the SAME iterator right now and that
+        # cleanup happens to be slow) - reproduced directly, stalling an
+        # UNRELATED client's close() call on this same process-wide lock
+        # for the full duration. Splitting the read+lookup from the
+        # actual close() call, the same way the early pass above already
+        # does for pooled-mode owners, avoids that regression while
+        # keeping the specific atomicity that matters: a client_list_
+        # iter() call's read-through-registration is still indivisible
+        # under this same lock, so the lookup below always sees either
+        # the full result of such a call or none of it, never a partial
+        # one.
+        with _client_list_iter_owners_lock:
+            conn = self.connection
+            matching_owners = []
+            if conn is not None:
+                owners = getattr(self, "_client_list_iter_owners", None)
+                for candidate in list(owners) if owners else []:
+                    if candidate._conn is conn:
+                        matching_owners.append(candidate)
+
+        # ALL owners tied to this connection are considered, not just the
+        # first match - a round-20 review found that breaking on the
+        # first match was wrong: single_connection_client mode allows
+        # client_list_iter() to be called more than once sequentially on
+        # the same self.connection, and a caller that keeps a reference
+        # to an earlier, already-fully-drained call (ordinary code, not
+        # exotic misuse) keeps that stale, already-closed _ClientListIter
+        # alive in the same WeakSet as a LATER, genuinely still-busy one
+        # wrapping the identical connection. WeakSet iteration order is
+        # unspecified, so breaking on the first `_conn is conn` match
+        # could pick the stale, already-closed one - `not owner._closed`
+        # would then be False, owner.close() (the only thing that can
+        # ever detect and report a genuinely busy iterator) would never
+        # be called on the live one, conn_busy would incorrectly stay
+        # False, and close() would release/disconnect a connection still
+        # actively being read by another thread. Reproduced directly:
+        # with two _ClientListIter instances (one closed, one busy) both
+        # wrapping the same connection, breaking on the first match
+        # picked the closed one in roughly 60-75% of runs (ordinary
+        # WeakSet/hash iteration-order variance, not a contrived
+        # scenario) and each time released/disconnected the connection
+        # while the busy one's thread was still confirmed alive and
+        # mid-read. Whether any of these raises _ClientListIterBusy is
+        # NOT tracked into a running flag - the release decision below
+        # does its own fresh, authoritative busy scan instead of relying
+        # on what this loop happened to observe (see that block's own
+        # comment for why: a second owner could register on the same
+        # connection strictly after this loop runs but before that
+        # scan).
+        for owner in matching_owners:
+            if owner._closed:
+                # `owner._closed` (a plain, GIL-protected bool read, not
+                # itself lock-protected - only ever used here as an
+                # optimization, never as the sole correctness guarantee)
+                # skips a redundant close() call when the early, unlocked
+                # pass above already closed this exact owner (true
+                # whenever this is single_connection_client mode, since
+                # that owner is registered in the very same set that
+                # pass already walked). A stale False read here (the
+                # owner closing concurrently right now) just means we
+                # call close() one more time than strictly necessary,
+                # which _ClientListIter.close() already handles safely
+                # and cheaply either way.
+                continue
+            try:
+                owner.close()
+            except Exception:
+                # includes _ClientListIterBusy - simply leaves that
+                # owner open; the release decision below will see it.
+                pass
+
+        if conn is not None:
+            with _client_list_iter_owners_lock:
+                # Re-check self.connection is still `conn` (not already
+                # nulled by a concurrent close() call on this same
+                # instance) before acting - whichever such call gets
+                # here first does the release; any other sees self.
+                # connection no longer matches and does nothing further,
+                # never double-releasing the same connection.
+                #
+                # The busy check here is a FRESH scan, not a reuse of
+                # `conn_busy` computed above - a round-20 review found
+                # that reusing it left a TOCTOU open: a client_list_
+                # iter() call that registers a brand-new owner on this
+                # exact connection in the unlocked gap between the
+                # lookup block above (matching_owners) and this block
+                # (e.g. while an earlier owner's own unlocked close()
+                # call is still running) would never appear in
+                # `matching_owners`, so `conn_busy` would stay stale and
+                # wrong. Re-scanning here, under the same lock
+                # client_list_iter() registers under, means any such
+                # registration either fully completes before this scan
+                # (and is seen) or blocks on this same lock until this
+                # scan (and the release decision made while still
+                # holding it) is done. Only READING each candidate's
+                # `_closed` flag here, not calling close() on it - a
+                # brand-new owner found this way hasn't done anything
+                # yet that needs interrupting; the point is solely to
+                # not release a connection it's about to use.
+                owners = getattr(self, "_client_list_iter_owners", None)
+                still_busy = any(
+                    candidate._conn is conn and not candidate._closed
+                    for candidate in (list(owners) if owners else [])
+                )
+                if self.connection is conn and not still_busy:
+                    # self.connection is deliberately left set (NOT
+                    # nulled to None) when still_busy - so that a LATER
+                    # close() call (the retry the _ClientListIterBusy
+                    # message itself recommends, once the in-flight
+                    # read finishes) can still find and release this
+                    # same connection. Nulling it out regardless of
+                    # still_busy would otherwise permanently orphan it
+                    # in the pool's in-use bookkeeping.
+                    self.connection = None
+                    release_now = True
+                else:
+                    release_now = False
+            # connection_pool.release() itself is deliberately called
+            # OUTSIDE the lock, unlike an earlier version of this block -
+            # a round-20 review found release() can genuinely block for
+            # real (ConnectionPool._checkpid() can wait up to 5s on a
+            # fork-race lock, or release() calls connection.disconnect(),
+            # a real socket-teardown syscall, whenever owns_connection()
+            # is False post-fork) - the exact same class of hazard this
+            # method's connection_pool.disconnect() call below was
+            # already fixed to avoid. Self.connection was already nulled
+            # under the lock above (the step that actually prevents a
+            # double-release, not holding the lock across release()
+            # itself), so at most one thread can ever have decided
+            # release_now = True for this exact `conn`.
+            if release_now:
+                self.connection_pool.release(conn)
 
         if self.auto_close_connection_pool:
-            self.connection_pool.close()
+            # Only the still-in-use SNAPSHOT is taken under the lock -
+            # connection_pool.disconnect() itself is deliberately called
+            # OUTSIDE it, unlike an earlier version of this block. That
+            # version held the global _client_list_iter_owners_lock
+            # across disconnect() unconditionally, on the theory that
+            # local socket-teardown work is always "bounded" and so
+            # safe to lock across, the same way closing one already-
+            # identified client_list_iter() owner is. That reasoning
+            # doesn't transfer: disconnect() iterates and tears down
+            # EVERY connection in THIS instance's own pool, which can be
+            # arbitrarily large or slow (many sockets, a peer that's
+            # slow to acknowledge shutdown(), SO_LINGER, etc.) - and
+            # since this lock is process-wide, not scoped to this
+            # instance or its pool, holding it here stalled close() on
+            # every OTHER, completely unrelated Redis client in the
+            # process for however long this one disconnect() call took,
+            # even for clients that never touched client_list_iter() at
+            # all. Reproduced directly: a slow disconnect() on one
+            # client's pool measurably blocked a second, unrelated
+            # client's close() (separate instance, separate pool) for
+            # the same duration.
+            #
+            # Releasing the lock before calling disconnect() reopens a
+            # narrow, self-contained gap instead: a client_list_iter()
+            # call on THIS SAME instance that completes its entire read-
+            # through-registration strictly between this snapshot and
+            # the disconnect() call below is not seen by this check.
+            # That gap is accepted rather than closed, the same way the
+            # comment on client_list_iter()'s own pool.get_connection()
+            # call already accepts an analogous gap there - the
+            # alternative (holding this lock across a real teardown
+            # call) is the strictly worse, process-wide hazard just
+            # described, and this narrow one only ever affects a caller
+            # racing client_list_iter() against close() on the very same
+            # instance, not any other client in the process.
+            with _client_list_iter_owners_lock:
+                owners = getattr(self, "_client_list_iter_owners", None)
+                still_in_use = any(
+                    not candidate._closed
+                    for candidate in (list(owners) if owners else [])
+                )
+            if still_in_use:
+                # Do not let this disconnect a connection that's still
+                # genuinely in use elsewhere - only touch connections
+                # that are actually idle in the pool in that case.
+                try:
+                    self.connection_pool.disconnect(inuse_connections=False)
+                except TypeError:
+                    # this connection_pool implementation (e.g.
+                    # BlockingConnectionPool) doesn't support selectively
+                    # sparing in-use connections - skip this cleanup pass
+                    # entirely rather than risk disconnecting the one we
+                    # just determined is still genuinely in use.
+                    pass
+            else:
+                # Preserve the exact prior call for the overwhelmingly
+                # common case with no in-flight streaming read.
+                self.connection_pool.close()
 
     def _send_command_parse_response(self, conn, command_name, *args, **options):
         """
