@@ -1775,7 +1775,7 @@ class RedisCluster(
         is_default_node = False
         target_nodes = None
         passed_targets = kwargs.pop("target_nodes", None)
-        if passed_targets is not None and not self._is_nodes_flag(passed_targets):
+        if passed_targets and not self._is_nodes_flag(passed_targets):
             target_nodes = self._parse_target_nodes(passed_targets)
             target_nodes_specified = True
 

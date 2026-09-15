@@ -2934,6 +2934,25 @@ class TestStaticMetadataRouting:
         await rc.aclose()
 
     @pytest.mark.fixed_client
+    @pytest.mark.parametrize("empty_targets", [[], {}, ""])
+    async def test_execute_command_empty_target_nodes_falls_back(
+        self, empty_targets: Any
+    ) -> None:
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+        default_node = rc.get_default_node()
+
+        with mock.patch.object(
+            RedisCluster,
+            "_execute_command",
+            new=mock.AsyncMock(return_value=100),
+        ) as execute:
+            result = await rc.execute_command("DBSIZE", target_nodes=empty_targets)
+
+        assert result == 100
+        execute.assert_awaited_once_with(default_node, "DBSIZE")
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
     async def test_command_subcommands_route_to_default_node(self) -> None:
         rc = await get_mocked_redis_client(host=default_host, port=7000)
         default_node = rc.get_default_node()
