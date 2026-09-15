@@ -1042,6 +1042,17 @@ def test_client_list_iter_owners_registration_is_thread_safe():
                 it.close()
             except Exception as e:  # pragma: no cover - failure path
                 errors.append(e)
+            # Yields the GIL every iteration. Without this, a CI runner
+            # with few CPU cores (plus whatever OTHER background threads
+            # earlier tests in the same session left running - e.g. this
+            # project's own async token-refresh/maintenance-notification
+            # threads) can let these tight, non-blocking loops starve the
+            # MAIN thread's plain `time.sleep(0.3)` below of the GIL for
+            # tens of seconds, tripping pytest-timeout's global watchdog
+            # even though nothing is actually deadlocked - reproduced
+            # directly in CI (a full multi-thread stack dump showing the
+            # main thread simply still waiting inside that sleep call).
+            time.sleep(0)
 
     def closer():
         while not stop.is_set():
@@ -1049,15 +1060,28 @@ def test_client_list_iter_owners_registration_is_thread_safe():
                 r.close()
             except Exception as e:  # pragma: no cover - failure path
                 errors.append(e)
+            time.sleep(0)
 
-    threads = [threading.Thread(target=creator) for _ in range(6)]
+    # 3 creators (not 6) and a shorter window - enough concurrency to
+    # exercise the WeakSet registration/snapshot race this test targets,
+    # while keeping total thread/GIL pressure low enough to stay fast
+    # and reliable on a constrained CI runner (see the comment above).
+    threads = [threading.Thread(target=creator) for _ in range(3)]
     threads.append(threading.Thread(target=closer))
     for t in threads:
         t.start()
-    time.sleep(0.5)
+    time.sleep(0.3)
     stop.set()
+    # A bounded join, not an unbounded one: if something genuinely does
+    # hang, this fails fast with a clear assertion instead of relying on
+    # pytest-timeout's global 30s watchdog to explode the whole process.
     for t in threads:
-        t.join()
+        t.join(timeout=10)
+    still_running = [t for t in threads if t.is_alive()]
+    assert not still_running, (
+        f"{len(still_running)} thread(s) did not finish within 10s of "
+        "stop.set() being called - a real hang, not just slowness"
+    )
 
     assert errors == []
 
