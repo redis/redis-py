@@ -11,6 +11,7 @@ from redis.asyncio.connection import (
     Connection,
     ConnectionPool,
     UnixDomainSocketConnection,
+    async_timeout,
 )
 from redis.asyncio.maint_notifications import (
     AsyncMaintNotificationsConnectionHandler,
@@ -1646,9 +1647,17 @@ async def test_read_response_reschedules_active_socket_timeout():
     connection = Connection(socket_timeout=0.01)
 
     class RelaxingParser:
-        async def read_response(self, disable_decoding=False, push_request=False):
-            connection.update_current_socket_timeout(0.2)
-            await asyncio.sleep(0.05)
+        def __init__(self):
+            self._active_read_timeout = None
+
+        async def read_response(
+            self, disable_decoding=False, push_request=False, timeout=None
+        ):
+            async with async_timeout(timeout) as active:
+                self._active_read_timeout = active
+                connection.update_current_socket_timeout(0.2)
+                await asyncio.sleep(0.05)
+                self._active_read_timeout = None
             return b"OK"
 
     connection._parser = RelaxingParser()
@@ -1662,9 +1671,17 @@ async def test_read_response_reschedules_active_socket_timeout_to_blocking():
     connection = Connection(socket_timeout=0.01)
 
     class RelaxingParser:
-        async def read_response(self, disable_decoding=False, push_request=False):
-            connection.update_current_socket_timeout(None)
-            await asyncio.sleep(0.05)
+        def __init__(self):
+            self._active_read_timeout = None
+
+        async def read_response(
+            self, disable_decoding=False, push_request=False, timeout=None
+        ):
+            async with async_timeout(timeout) as active:
+                self._active_read_timeout = active
+                connection.update_current_socket_timeout(None)
+                await asyncio.sleep(0.05)
+                self._active_read_timeout = None
             return b"OK"
 
     connection._parser = RelaxingParser()
