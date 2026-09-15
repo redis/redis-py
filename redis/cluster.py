@@ -4804,6 +4804,13 @@ for command in PIPELINE_BLOCKED_COMMANDS:
 
     setattr(ClusterPipeline, command, block_pipeline_command(command))
 
+# client_list_iter has no wire command of its own to add to
+# PIPELINE_BLOCKED_COMMANDS - it sends CLIENT LIST, blocked above under its
+# own name - so block it explicitly here too, or it would fall through to
+# the inherited implementation and queue CLIENT LIST like a real pipelined
+# command instead of raising.
+setattr(ClusterPipeline, "client_list_iter", block_pipeline_command("client_list_iter"))
+
 
 class PipelineCommand:
     """ """
