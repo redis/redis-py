@@ -1345,7 +1345,7 @@ class ManagementCommands(CommandsProtocol):
         # shared pool (nothing new introduced by this feature), not the
         # cross-thread live-socket corruption the single_connection_
         # client branch above must (and does) fully close.
-        conn = pool.get_connection("CLIENT LIST")
+        conn = pool.get_connection()
         if not conn.can_stream_lines():
             pool.release(conn)
             raise NotImplementedError(

@@ -44,7 +44,7 @@ from ._defaults import (
     get_default_socket_keepalive_options,
 )
 from ._parsers import BaseParser, Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
-from ._parsers.resp3 import _INVALIDATION_MESSAGE
+from ._parsers.base import _INVALIDATION_MESSAGE
 from ._parsers.socket import SERVER_CLOSED_CONNECTION_ERROR
 from .auth.token import TokenInterface
 from .backoff import NoBackoff
@@ -1705,7 +1705,18 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                         for _ in range(int(header))
                     ]
                     handler = parser.pubsub_push_handler_func
-                    if push and push[0] in _INVALIDATION_MESSAGE:
+                    msg_type = push[0] if push else None
+                    if isinstance(msg_type, bytes):
+                        msg_type = msg_type.decode()
+                    # Mirrors BaseParser.handle_push_response()'s own
+                    # normalize-then-compare-by-equality pattern -
+                    # _INVALIDATION_MESSAGE is a single string, not (as an
+                    # earlier version of this code, and of that method,
+                    # assumed) a list covering both a bytes and a str
+                    # form; membership-testing a string with `in` checks
+                    # for a SUBSTRING match, not equality, which would
+                    # have silently misfired here.
+                    if msg_type == _INVALIDATION_MESSAGE:
                         handler = getattr(
                             parser, "invalidation_push_handler_func", None
                         )

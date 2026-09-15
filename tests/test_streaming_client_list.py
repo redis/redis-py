@@ -142,6 +142,18 @@ def test_read_bulk_lines_bounds_memory():
     socket recv() calls that never touch that buffer, so a regression
     reintroducing full-reply buffering into `pending` would leave
     unread_bytes() near zero throughout and pass unnoticed.
+
+    Measures the DELTA against a baseline taken just before the loop,
+    not tracemalloc's absolute traced-memory total - conftest.py's own
+    session-scoped, autouse `enable_tracemalloc` fixture already calls
+    tracemalloc.start() for the whole test session, so by the time this
+    test runs, `get_traced_memory()` already reflects everything traced
+    across every EARLIER test in the same session, not just this one.
+    Calling tracemalloc.start()/stop() again here, as an earlier version
+    of this test did, is itself wrong twice over: start() while already
+    tracing does not reset the accumulated totals (so the "baseline" was
+    never actually zero), and stop() would prematurely end tracing for
+    every later test in the session.
     """
     num_clients = 20_000
     reply, _, _ = make_reply(num_clients)
@@ -152,14 +164,12 @@ def test_read_bulk_lines_bounds_memory():
     header = buffer.readline()
     length = int(header[1:])
 
-    tracemalloc.start()
-    try:
-        peak_current = 0
-        for _ in buffer.read_bulk_lines(length):
-            current, _ = tracemalloc.get_traced_memory()
-            peak_current = max(peak_current, current)
-    finally:
-        tracemalloc.stop()
+    baseline, _ = tracemalloc.get_traced_memory()
+    peak_delta = 0
+    for _ in buffer.read_bulk_lines(length):
+        current, _ = tracemalloc.get_traced_memory()
+        peak_delta = max(peak_delta, current - baseline)
+    peak_current = peak_delta
 
     # peak traced allocation must stay a small multiple of socket_read_size,
     # nowhere near the full multi-hundred-KB reply size
@@ -211,9 +221,25 @@ def test_read_bulk_lines_stays_linear_time_with_tiny_chunks():
     buffer = SocketBuffer(sock, socket_read_size=1, socket_timeout=1)
     buffer.MAX_UNTERMINATED_LINE_SIZE = len(content) + 10
 
-    start = time.monotonic()
-    lines = list(buffer.read_bulk_lines(len(payload)))
-    elapsed = time.monotonic() - start
+    # conftest.py's own session-scoped, autouse `enable_tracemalloc`
+    # fixture leaves tracemalloc running for the whole test session -
+    # its PER-ALLOCATION overhead alone, applied 1.5 million times here,
+    # dominates the measurement (confirmed directly: ~9-12s under
+    # tracemalloc vs ~1s without it for the exact same call), swamping
+    # the very algorithmic difference this test exists to detect.
+    # Suspending tracing for just this timing-critical section (and
+    # restoring it in the `finally`, for whatever later test in the
+    # session might still want it) measures the real cost instead.
+    was_tracing = tracemalloc.is_tracing()
+    if was_tracing:
+        tracemalloc.stop()
+    try:
+        start = time.monotonic()
+        lines = list(buffer.read_bulk_lines(len(payload)))
+        elapsed = time.monotonic() - start
+    finally:
+        if was_tracing:
+            tracemalloc.start()
 
     assert lines == [content]
     # Calibrated directly against both versions at this exact size: the
@@ -696,6 +722,13 @@ class _FakePool:
             targets += list(self._in_use)
         for conn in targets:
             conn.disconnect()
+
+    def close(self):
+        # matches the real ConnectionPool.close(), which is just a thin
+        # wrapper: "def close(self): self.disconnect()" - Redis.close()
+        # calls this (not disconnect() directly) for its plain,
+        # nothing-still-in-use case.
+        self.disconnect()
 
 
 class _SlowGetConnectionPool(_FakePool):
@@ -2286,11 +2319,15 @@ def test_client_list_iter_close_releases_even_if_cleanup_raises_unrelated_error(
     assert pool.available == [conn]  # released despite the unrelated raise
 
 
-def test_client_list_iter_releases_when_a_line_fails_to_parse():
-    # a malformed record (no '=') makes parse_client_list_line() raise
-    # partway through iteration - _client_list_iter_gen()'s
-    # `finally: inner.close()` and _ClientListIter's own cleanup exist
-    # specifically to still release the connection in this case.
+def test_client_list_iter_skips_line_with_no_equals_sign():
+    # a line with no '=' at all (last_key stays None the whole way
+    # through _parse_client_info_fields(), redis/_parsers/helpers.py)
+    # is silently dropped - the same graceful handling as a blank line
+    # (see test_client_list_iter_skips_blank_line_matching_client_list)
+    # - not a parse-time exception. An earlier version of this test
+    # predates that tokenizer and expected a ValueError here; verified
+    # directly that _parse_client_info_fields() has no raising code path
+    # at all for any string input.
     import redis
 
     conn = _FakeConnection([b"id=0 addr=x:1", b"this-has-no-equals-sign"])
@@ -2298,35 +2335,60 @@ def test_client_list_iter_releases_when_a_line_fails_to_parse():
     r = redis.Redis.from_url("redis://localhost:6379/0")
     r.connection_pool = pool
 
+    rows = list(r.client_list_iter())
+    assert rows == [{"id": "0", "addr": "x:1"}]
+    assert pool.available == [conn]  # released, not leaked
+
+
+def test_client_list_iter_releases_when_a_line_fails_to_decode():
+    # a genuine parse-time exception (here: a byte sequence that is
+    # invalid for the connection's configured, strict encoding) made
+    # partway through iteration still releases the connection -
+    # _client_list_iter_gen()'s `finally: inner.close()` and
+    # _ClientListIter's own cleanup exist specifically for this case.
+    import redis
+    from redis._parsers.encoders import Encoder
+
+    conn = _FakeConnection([b"id=0 addr=x:1", b"id=1 name=caf\xe9"])
+    conn.encoder = Encoder(
+        encoding="utf-8", encoding_errors="strict", decode_responses=True
+    )
+    pool = _FakePool(conn)
+    r = redis.Redis.from_url("redis://localhost:6379/0")
+    r.connection_pool = pool
+
     it = r.client_list_iter()
-    next(it)  # the first, well-formed line
-    with pytest.raises(ValueError):
-        next(it)  # the malformed second line
+    next(it)  # the first, well-formed, valid-utf8 line
+    with pytest.raises(UnicodeDecodeError):
+        next(it)  # the second line's value is not valid utf-8
     assert conn.disconnected is True  # inner streaming generator was closed
     assert pool.available == [conn]  # released, not leaked
 
 
-def test_client_list_iter_raises_on_blank_line_matching_client_list():
-    # client_list_iter() must not silently skip an embedded blank line -
-    # parse_client_list() (client_list()'s own callback) raises ValueError
-    # on the exact same malformed input, so both should behave the same.
+def test_client_list_iter_skips_blank_line_matching_client_list():
+    # client_list_iter() must handle an embedded blank line the exact same
+    # way parse_client_list() (client_list()'s own callback) does: both
+    # now delegate to _parse_client_info_fields() (redis/_parsers/
+    # helpers.py), which returns an empty dict for a blank/malformed line
+    # rather than raising - and both silently DROP that empty dict rather
+    # than surfacing it, so the two APIs return the identical record set
+    # for the same underlying reply.
     import redis
 
     from redis._parsers.helpers import parse_client_list
 
-    with pytest.raises(ValueError):
-        parse_client_list(b"id=0 addr=x:1\n\nid=1 addr=x:2\n")
+    assert parse_client_list(b"id=0 addr=x:1\n\nid=1 addr=x:2\n") == [
+        {"id": "0", "addr": "x:1"},
+        {"id": "1", "addr": "x:2"},
+    ]
 
     conn = _FakeConnection([b"id=0 addr=x:1", b"", b"id=1 addr=x:2"])
     pool = _FakePool(conn)
     r = redis.Redis.from_url("redis://localhost:6379/0")
     r.connection_pool = pool
 
-    it = r.client_list_iter()
-    next(it)
-    with pytest.raises(ValueError):
-        next(it)
-    assert conn.disconnected is True  # inner streaming generator was closed
+    rows = list(r.client_list_iter())
+    assert rows == [{"id": "0", "addr": "x:1"}, {"id": "1", "addr": "x:2"}]
     assert pool.available == [conn]  # released, not leaked
 
 
