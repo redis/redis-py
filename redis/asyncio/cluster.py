@@ -2482,12 +2482,19 @@ class NodesManager:
             if len(self.slots_cache[slot]) > 1 and load_balancing_strategy:
                 # get the server index using the strategy defined in load_balancing_strategy
                 primary_name = self.slots_cache[slot][0].name
-                node_idx = self.read_load_balancer.get_server_index(
-                    primary_name,
-                    len(self.slots_cache[slot]),
-                    load_balancing_strategy,
-                    nodes=self.slots_cache[slot],
-                )
+                if load_balancing_strategy == LoadBalancingStrategy.LATENCY_BASED:
+                    node_idx = self.read_load_balancer.get_server_index(
+                        primary_name,
+                        len(self.slots_cache[slot]),
+                        load_balancing_strategy,
+                        nodes=self.slots_cache[slot],
+                    )
+                else:
+                    node_idx = self.read_load_balancer.get_server_index(
+                        primary_name,
+                        len(self.slots_cache[slot]),
+                        load_balancing_strategy,
+                    )
                 return self.slots_cache[slot][node_idx]
             return self.slots_cache[slot][0]
         except (IndexError, KeyError, TypeError):

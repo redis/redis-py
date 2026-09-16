@@ -4154,6 +4154,27 @@ class TestNodesManager:
     Tests for the NodesManager class
     """
 
+    @pytest.mark.fixed_client
+    def test_existing_strategy_supports_legacy_load_balancer_override(self):
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        nodes = rc.nodes_manager.slots_cache[0]
+        legacy_load_balancer = Mock()
+        legacy_load_balancer.get_server_index.side_effect = (
+            lambda _primary, _size, _strategy: 1
+        )
+        rc.nodes_manager.read_load_balancer = legacy_load_balancer
+
+        selected = rc.nodes_manager.get_node_from_slot(
+            0, load_balancing_strategy=LoadBalancingStrategy.ROUND_ROBIN
+        )
+
+        assert selected is nodes[1]
+        legacy_load_balancer.get_server_index.assert_called_once_with(
+            nodes[0].name,
+            len(nodes),
+            LoadBalancingStrategy.ROUND_ROBIN,
+        )
+
     @pytest.mark.onlycluster
     def test_load_balancer(self, r):
         n_manager = r.nodes_manager
