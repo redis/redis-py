@@ -29,7 +29,6 @@ from typing import (
     Set,
     Tuple,
     Type,
-    TypeVar,
     Union,
 )
 
@@ -162,14 +161,10 @@ else:
 
 logger = logging.getLogger(__name__)
 
-TargetNodesT = TypeVar(
-    "TargetNodesT", str, "ClusterNode", List["ClusterNode"], Dict[Any, "ClusterNode"]
-)
-
-_T = TypeVar("_T")
 
 
-def _run_coroutine_in_thread(coro: Coroutine[Any, Any, _T]) -> _T:
+
+def _run_coroutine_in_thread[_T](coro: Coroutine[Any, Any, _T]) -> _T:
     """
     Runs ``coro`` to completion on a private event loop in a worker thread.
 

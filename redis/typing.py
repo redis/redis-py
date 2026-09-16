@@ -10,7 +10,6 @@ from typing import (
     Mapping,
     Protocol,
     Type,
-    TypeVar,
     Union,
 )
 
@@ -138,14 +137,10 @@ StralgoResponse = str | int | LCSResult
 # Mapping[_StringLikeT, X] from accepting arguments of type Dict[str, X]. Using
 # a TypeVar instead of a Union allows mappings with any of the permitted types
 # to be passed. Care is needed if there is more than one such mapping in a
-# type signature because they will all be required to be the same key type.
-AnyKeyT = TypeVar("AnyKeyT", bytes, str, memoryview)
-AnyFieldT = TypeVar("AnyFieldT", bytes, str, memoryview)
 
 ExceptionMappingT = Mapping[str, Union[Type[Exception], Mapping[str, Type[Exception]]]]
 
 ChannelT = _StringLikeT
-AnyChannelT = TypeVar("AnyChannelT", bytes, str, memoryview)
 PubSubHandler = Callable[[dict[str, Any]], Any]
 
 

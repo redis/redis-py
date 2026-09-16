@@ -7,14 +7,12 @@ from typing import (
     Optional,
     Tuple,
     Type,
-    TypeVar,
     Union,
 )
 
 from redis.exceptions import ConnectionError, TimeoutError
 from redis.retry import AbstractRetry
 
-T = TypeVar("T")
 
 if TYPE_CHECKING:
     from redis.backoff import AbstractBackoff
@@ -44,7 +42,7 @@ class Retry(AbstractRetry[Exception]):
             and set(self._supported_errors) == set(other._supported_errors)
         )
 
-    async def call_with_retry(
+    async def call_with_retry[T](
         self,
         do: Callable[[], Awaitable[T]],
         fail: Union[

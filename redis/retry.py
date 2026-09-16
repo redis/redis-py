@@ -16,7 +16,6 @@ from typing import (
 
 from redis.exceptions import ConnectionError, TimeoutError
 
-T = TypeVar("T")
 E = TypeVar("E", bound=Exception, covariant=True)
 
 if TYPE_CHECKING:
@@ -98,7 +97,7 @@ class Retry(AbstractRetry[Exception]):
             and set(self._supported_errors) == set(other._supported_errors)
         )
 
-    def call_with_retry(
+    def call_with_retry[T](
         self,
         do: Callable[[], T],
         fail: Union[Callable[[Exception], Any], Callable[[Exception, int], Any]],

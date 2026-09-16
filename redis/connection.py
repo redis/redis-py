@@ -19,7 +19,6 @@ from typing import (
     Literal,
     Optional,
     Type,
-    TypeVar,
     Union,
 )
 from urllib.parse import parse_qs, unquote, urlparse
@@ -2587,7 +2586,6 @@ def parse_url(url):
     return kwargs
 
 
-_CP = TypeVar("_CP", bound="ConnectionPool")
 
 
 class ConnectionPoolInterface(ABC):
@@ -3141,7 +3139,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
     """
 
     @classmethod
-    def from_url(cls: Type[_CP], url: str, **kwargs) -> _CP:
+    def from_url[_CP: 'ConnectionPool'](cls: Type[_CP], url: str, **kwargs) -> _CP:
         """
         Return a connection pool configured from the given URL.
 
@@ -3691,7 +3689,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         """Close the pool, disconnecting all connections"""
         self.disconnect()
 
-    def __enter__(self: _CP) -> _CP:
+    def __enter__[_CP: 'ConnectionPool'](self: _CP) -> _CP:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:

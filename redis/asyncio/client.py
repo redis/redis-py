@@ -25,7 +25,6 @@ from typing import (
     Tuple,
     Type,
     TypedDict,
-    TypeVar,
     Union,
     cast,
 )
@@ -116,10 +115,6 @@ else:
     VerifyMode = None
     VerifyFlags = None
 
-_KeyT = TypeVar("_KeyT", bound=KeyT)
-_ArgT = TypeVar("_ArgT", KeyT, EncodableT)
-_RedisT = TypeVar("_RedisT", bound="Redis")
-_NormalizeKeysT = TypeVar("_NormalizeKeysT", bound=Mapping[ChannelT, object])
 if TYPE_CHECKING:
     from redis.asyncio.keyspace_notifications import AsyncKeyspaceNotifications
     from redis.commands.core import Script
@@ -552,7 +547,7 @@ class Redis(
     def __await__(self):
         return self.initialize().__await__()
 
-    async def initialize(self: _RedisT) -> _RedisT:
+    async def initialize[_RedisT: 'Redis'](self: _RedisT) -> _RedisT:
         if self.single_connection_client:
             async with self._single_conn_lock:
                 if self.connection is None:
@@ -784,7 +779,7 @@ class Redis(
             connection_pool=self.connection_pool, single_connection_client=True
         )
 
-    async def __aenter__(self: _RedisT) -> _RedisT:
+    async def __aenter__[_RedisT: 'Redis'](self: _RedisT) -> _RedisT:
         """
         Async context manager entry. Increments a usage counter so that the
         connection pool is only closed (via aclose()) when no context is using
@@ -1507,7 +1502,7 @@ class PubSub:
                 "PING", self.HEALTH_CHECK_MESSAGE, check_health=False
             )
 
-    def _normalize_keys(self, data: _NormalizeKeysT) -> _NormalizeKeysT:
+    def _normalize_keys[_NormalizeKeysT: Mapping[ChannelT, object]](self, data: _NormalizeKeysT) -> _NormalizeKeysT:
         """
         normalize channel/pattern names to be either bytes or strings
         based on whether responses are automatically decoded. this saves us
@@ -1866,7 +1861,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         self.scripts: Set[Script] = set()
         self.explicit_transaction = False
 
-    async def __aenter__(self: _RedisT) -> _RedisT:
+    async def __aenter__[_RedisT: 'Redis'](self: _RedisT) -> _RedisT:
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):

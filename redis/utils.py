@@ -6,7 +6,7 @@ import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Union
 
 from redis.exceptions import DataError
 from redis.typing import AbsExpiryT, EncodableT, ExpiryT
@@ -188,7 +188,6 @@ def warn_deprecated_arg_usage(
     warnings.warn(msg, category=DeprecationWarning, stacklevel=stacklevel)
 
 
-C = TypeVar("C", bound=Callable)
 
 
 def _get_filterable_args(
@@ -208,7 +207,7 @@ def _get_filterable_args(
     return filterable_args
 
 
-def deprecated_args(
+def deprecated_args[C: Callable](
     args_to_warn: Optional[List[str]] = None,
     allowed_args: Optional[List[str]] = None,
     reason: str = "",
@@ -442,7 +441,7 @@ def warn_experimental(name, stacklevel=2):
     warnings.warn(msg, category=UserWarning, stacklevel=stacklevel)
 
 
-def experimental_method() -> Callable[[C], C]:
+def experimental_method[C: Callable]() -> Callable[[C], C]:
     """
     Decorator to mark a function as experimental.
     """
@@ -482,7 +481,7 @@ def warn_experimental_arg_usage(
     warnings.warn(msg, category=UserWarning, stacklevel=stacklevel)
 
 
-def experimental_args(
+def experimental_args[C: Callable](
     args_to_warn: Optional[List[str]] = None,
 ) -> Callable[[C], C]:
     """

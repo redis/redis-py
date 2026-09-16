@@ -26,7 +26,6 @@ from typing import (
     Tuple,
     Type,
     TypedDict,
-    TypeVar,
     Union,
 )
 from urllib.parse import ParseResult, parse_qs, unquote, urlparse
@@ -1947,7 +1946,6 @@ def parse_url(url: str) -> ConnectKwargs:
     return kwargs
 
 
-_CP = TypeVar("_CP", bound="ConnectionPool")
 
 
 class ConnectionPoolInterface(ABC):
@@ -2723,7 +2721,7 @@ class ConnectionPool(
     """
 
     @classmethod
-    def from_url(cls: Type[_CP], url: str, **kwargs) -> _CP:
+    def from_url[_CP: 'ConnectionPool'](cls: Type[_CP], url: str, **kwargs) -> _CP:
         """
         Return a connection pool configured from the given URL.
 
@@ -3108,7 +3106,7 @@ class ConnectionPool(
         await self._on_close()
         await self.disconnect()
 
-    async def __aenter__(self: _CP) -> _CP:
+    async def __aenter__[_CP: 'ConnectionPool'](self: _CP) -> _CP:
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback) -> None:

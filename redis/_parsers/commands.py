@@ -8,7 +8,6 @@ from typing import (
     Optional,
     Set,
     Tuple,
-    TypeVar,
     Union,
 )
 
@@ -28,8 +27,6 @@ if TYPE_CHECKING:
 
 # The record type ``_build_command_records`` builds per command: policies or full metadata.
 # Constrained to the two, rather than left open, so a ``to_record`` that builds anything else
-# is a type error at the call site.
-_RecordT = TypeVar("_RecordT", CommandPolicies, CommandMetadata)
 
 # Re-exported for backwards compatibility: these types used to be defined here and are
 # now owned by ``redis.commands.metadata``. Import them from their new home instead.
@@ -564,7 +561,7 @@ def _apply_policy_tips(policy_pair: List[Any], data: Any) -> None:
                 )
 
 
-def _build_command_records(
+def _build_command_records[_RecordT: (CommandPolicies, CommandMetadata)](
     commands: Dict[str, Any],
     to_record: Callable[[Dict[str, Any], RequestPolicy, ResponsePolicy], _RecordT],
 ) -> Dict[str, Dict[str, _RecordT]]:
