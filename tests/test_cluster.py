@@ -3088,7 +3088,9 @@ class TestStaticMetadataRouting:
         rc = get_mocked_redis_client(host=default_host, port=7000)
         default_node = rc.get_default_node()
 
-        with patch.object(RedisCluster, "_execute_command", return_value=100) as execute:
+        with patch.object(
+            RedisCluster, "_execute_command", return_value=100
+        ) as execute:
             result = rc.execute_command("DBSIZE", target_nodes=empty_targets)
 
         assert result == 100
