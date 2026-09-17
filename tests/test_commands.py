@@ -661,6 +661,12 @@ class TestRedisCommands:
         assert "addr" in clients[0]
 
     @pytest.mark.onlynoncluster
+    def test_client_list_iter(self, r):
+        clients = list(r.client_list_iter())
+        assert isinstance(clients[0], dict)
+        assert "addr" in clients[0]
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
     def test_client_info(self, r):
         info = r.client_info()
