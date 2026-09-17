@@ -905,7 +905,7 @@ class RedisCluster(
             # No startup node was provided
             raise RedisClusterException(
                 "RedisCluster requires at least one node to discover the "
-                "cluster. Please provide one of the followings:\n"
+                "cluster. Please provide one of the following:\n"
                 "1. host and port, for example:\n"
                 " RedisCluster(host='localhost', port=6379)\n"
                 "2. list of startup nodes, for example:\n"
