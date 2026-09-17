@@ -1930,7 +1930,7 @@ def parse_url(url: str) -> ConnectKwargs:
     else:  # implied:  parsed.scheme in ("redis", "rediss")
         if parsed.hostname:
             kwargs["host"] = unquote(parsed.hostname)
-        if parsed.port:
+        if parsed.port is not None:
             kwargs["port"] = int(parsed.port)
 
         # If there's a path argument, use it as the db argument if a
