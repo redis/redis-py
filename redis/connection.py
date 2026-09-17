@@ -2570,7 +2570,7 @@ def parse_url(url):
     else:  # implied:  url.scheme in ("redis", "rediss"):
         if url.hostname:
             kwargs["host"] = unquote(url.hostname)
-        if url.port:
+        if url.port is not None:
             kwargs["port"] = int(url.port)
 
         # If there's a path argument, use it as the db argument if a

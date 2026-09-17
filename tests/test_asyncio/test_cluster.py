@@ -333,6 +333,39 @@ async def moved_redirection_helper(
             assert fetched_node.server_type == PRIMARY
 
 
+@pytest.mark.fixed_client
+@pytest.mark.parametrize(
+    ("url", "expected_port"),
+    [
+        ("redis://localhost", 6379),
+        ("redis://localhost:6380", 6380),
+        ("redis://localhost:0", 0),
+    ],
+)
+async def test_from_url_preserves_startup_node_port(
+    url: str, expected_port: int
+) -> None:
+    cluster = RedisCluster.from_url(url)
+
+    assert len(cluster.startup_nodes) == 1
+    assert cluster.startup_nodes[0].port == expected_port
+
+    await cluster.aclose()
+
+
+@pytest.mark.fixed_client
+def test_from_url_requires_startup_node_host() -> None:
+    with pytest.raises(RedisClusterException, match="requires at least one node"):
+        RedisCluster.from_url("redis://:0")
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize("port", [None, "", False, 0.0])
+def test_constructor_rejects_other_falsy_ports(port: Any) -> None:
+    with pytest.raises(RedisClusterException, match="requires at least one node"):
+        RedisCluster(host="localhost", port=port)
+
+
 @pytest.mark.onlycluster
 class TestRedisClusterObj:
     """
@@ -4696,6 +4729,23 @@ class TestClusterPipeline:
                 f"ERROR: Calling pipelined function {command} is blocked "
                 "when running redis in cluster mode..."
             )
+
+    async def test_client_list_iter_blocked_on_cluster_pipeline(self) -> None:
+        """
+        client_list_iter sends the same CLIENT LIST command as client_list,
+        which PIPELINE_BLOCKED_COMMANDS blocks on ClusterPipeline.
+        client_list_iter has no wire-command entry of its own to add there,
+        so it must be blocked explicitly too, or it would fall through to
+        the inherited implementation and queue CLIENT LIST like a real
+        pipelined command instead of raising.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            pipe = r.pipeline()
+            with pytest.raises(RedisClusterException):
+                pipe.client_list_iter()
+        finally:
+            await r.aclose()
 
     async def test_evalsha_not_blocked_on_cluster_pipeline(self) -> None:
         """EVALSHA must be usable on async ClusterPipeline (see #2914)."""

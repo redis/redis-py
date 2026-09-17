@@ -2195,6 +2195,22 @@ def test_parse_url_invalid_db_keeps_stable_message():
     assert str(exc_info.value) == "Invalid value for 'db' in connection URL."
 
 
+@pytest.mark.parametrize(
+    ("url", "expected_port"),
+    (
+        ("redis://localhost", None),
+        ("redis://localhost:6380", 6380),
+        ("redis://localhost:0", 0),
+    ),
+)
+def test_connection_pool_from_url_preserves_explicit_port(url, expected_port):
+    kwargs = parse_url(url)
+    pool = ConnectionPool.from_url(url)
+
+    assert kwargs.get("port") == expected_port
+    assert pool.connection_kwargs.get("port") == expected_port
+
+
 def test_parse_url_retry_on_error_unknown_name():
     with pytest.raises(ValueError) as exc_info:
         parse_url("redis://localhost:6379/?retry_on_error=NotARealError")

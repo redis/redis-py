@@ -4722,6 +4722,24 @@ class TestClusterPubSubObject:
 
 
 @pytest.mark.onlycluster
+def test_client_list_iter_blocked_on_cluster_pipeline():
+    """
+    client_list_iter sends the same CLIENT LIST command as client_list, which
+    PIPELINE_BLOCKED_COMMANDS blocks on ClusterPipeline. client_list_iter has
+    no wire-command entry of its own to add there, so it must be blocked
+    explicitly too, or it would fall through to the inherited implementation
+    and queue CLIENT LIST like a real pipelined command instead of raising.
+    """
+    r = get_mocked_redis_client(host=default_host, port=default_port)
+    try:
+        pipe = r.pipeline()
+        with pytest.raises(RedisClusterException):
+            pipe.client_list_iter()
+    finally:
+        r.close()
+
+
+@pytest.mark.onlycluster
 def test_evalsha_not_in_pipeline_blocked_commands():
     """EVALSHA must be usable in ClusterPipeline (see #2914)."""
     assert "EVALSHA" not in PIPELINE_BLOCKED_COMMANDS
