@@ -2238,3 +2238,21 @@ def test_parse_url_retry_on_error_usable_in_retry():
     with pytest.raises(ConnectionError):
         conn.retry.call_with_retry(do=do, fail=lambda e: None)
     assert calls == 2
+
+
+@pytest.mark.parametrize("port", [True, False, 1.5, "6379", None])
+def test_connection_rejects_bool_port(port):
+    """bool subclasses int; port=True must not become privileged port 1."""
+    with pytest.raises(TypeError, match="port must be an integer"):
+        redis.Connection(port=port)
+
+
+@pytest.mark.parametrize("port", [-1, 65536, 99999])
+def test_connection_rejects_out_of_range_port(port):
+    with pytest.raises(ValueError, match="port must be in 0..65535"):
+        redis.Connection(port=port)
+
+
+def test_connection_allows_ephemeral_port_zero():
+    c = redis.Connection(port=0)
+    assert c.port == 0
