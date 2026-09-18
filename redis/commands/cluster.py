@@ -1552,7 +1552,7 @@ class RedisClusterCommands(
     target specific nodes. By default, if target_nodes is not specified, the
     command will be executed on the default cluster node.
 
-    :param :target_nodes: type can be one of the followings:
+    :param target_nodes: type can be one of the following:
         - nodes flag: ALL_NODES, PRIMARIES, REPLICAS, RANDOM
         - 'ClusterNode'
         - 'list(ClusterNodes)'
@@ -1583,7 +1583,7 @@ class AsyncRedisClusterCommands(
     target specific nodes. By default, if target_nodes is not specified, the
     command will be executed on the default cluster node.
 
-    :param :target_nodes: type can be one of the followings:
+    :param target_nodes: type can be one of the following:
         - nodes flag: ALL_NODES, PRIMARIES, REPLICAS, RANDOM
         - 'ClusterNode'
         - 'list(ClusterNodes)'
