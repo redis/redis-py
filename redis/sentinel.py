@@ -222,6 +222,10 @@ class SentinelConnectionPool(ConnectionPool):
 
 
 class Sentinel(SentinelCommands):
+    # How many subsequent discovery calls keep a sentinel that just failed
+    # at the end of the try order before it gets another chance.
+    FAILED_SENTINEL_QUARANTINE = 8
+
     """
     Redis Sentinel cluster client
 
@@ -273,6 +277,47 @@ class Sentinel(SentinelCommands):
         self.min_other_sentinels = min_other_sentinels
         self.connection_kwargs = connection_kwargs
         self._force_master_ip = force_master_ip
+        # Sentinel clients that failed during a discovery call, mapped to the
+        # number of later discovery calls that keep trying them last. A dead
+        # sentinel therefore does not cost a connect timeout on every
+        # discovery call, but it is retried periodically and rejoins the
+        # rotation once it answers again.
+        self._failed_sentinels = {}
+
+    def _discovery_order(self):
+        if not self._failed_sentinels:
+            return self.sentinels
+        healthy = []
+        quarantined = []
+        for sentinel in self.sentinels:
+            remaining = self._failed_sentinels.get(sentinel)
+            if remaining is None:
+                healthy.append(sentinel)
+            elif remaining > 1:
+                self._failed_sentinels[sentinel] = remaining - 1
+                quarantined.append(sentinel)
+            else:
+                del self._failed_sentinels[sentinel]
+                healthy.append(sentinel)
+        return healthy + quarantined
+
+    def _promote_answering_sentinel(self, sentinel):
+        self._failed_sentinels.pop(sentinel, None)
+        if sentinel is self.sentinels[0]:
+            if not self._failed_sentinels:
+                # Every sentinel is healthy, so rotate this one to the end
+                # of the list: repeated discovery calls then spread the load
+                # across all sentinel nodes instead of always starting from
+                # the same one.
+                self.sentinels.append(self.sentinels.pop(0))
+        else:
+            # This call had to look past the head of the list, so make this
+            # sentinel the first one tried on the next call.
+            for i, s in enumerate(self.sentinels):
+                if s is sentinel:
+                    del self.sentinels[i]
+                    break
+            self.sentinels.insert(0, sentinel)
 
     def execute_command(self, *args, **kwargs):
         """
@@ -357,19 +402,16 @@ class Sentinel(SentinelCommands):
         master is found.
         """
         collected_errors = list()
-        for sentinel_no, sentinel in enumerate(self.sentinels):
+        for sentinel in self._discovery_order():
             try:
                 masters = sentinel.sentinel_masters()
             except (ConnectionError, TimeoutError) as e:
                 collected_errors.append(f"{sentinel} - {e!r}")
+                self._failed_sentinels[sentinel] = self.FAILED_SENTINEL_QUARANTINE
                 continue
             state = masters.get(service_name)
             if state and self.check_master_state(state, service_name):
-                # Put this sentinel at the top of the list
-                self.sentinels[0], self.sentinels[sentinel_no] = (
-                    sentinel,
-                    self.sentinels[0],
-                )
+                self._promote_answering_sentinel(sentinel)
 
                 ip = (
                     self._force_master_ip
@@ -402,13 +444,15 @@ class Sentinel(SentinelCommands):
 
     def discover_slaves(self, service_name):
         "Returns a list of alive slaves for service ``service_name``"
-        for sentinel in self.sentinels:
+        for sentinel in self._discovery_order():
             try:
                 slaves = sentinel.sentinel_slaves(service_name)
             except (ConnectionError, ResponseError, TimeoutError):
+                self._failed_sentinels[sentinel] = self.FAILED_SENTINEL_QUARANTINE
                 continue
             slaves = self.filter_slaves(slaves)
             if slaves:
+                self._promote_answering_sentinel(sentinel)
                 return slaves
         return []
 

@@ -124,6 +124,37 @@ async def test_discover_master(sentinel, master_ip):
 
 
 @pytest.mark.onlynoncluster
+async def test_discover_master_rotates_over_healthy_sentinels(
+    cluster, sentinel, master_ip
+):
+    served = []
+    for _ in range(6):
+        assert await sentinel.discover_master("mymaster") == (master_ip, 6379)
+        # after each call the sentinel that just answered is at the head
+        served.append(sentinel.sentinels[0].id)
+    assert set(served) == {("foo", 26379), ("bar", 26379)}
+
+
+@pytest.mark.onlynoncluster
+async def test_discover_master_keeps_failed_sentinel_last(cluster, sentinel, master_ip):
+    await sentinel.discover_master("mymaster")
+    cluster.nodes_down.add(("bar", 26379))
+    for _ in range(3):
+        assert await sentinel.discover_master("mymaster") == (master_ip, 6379)
+        # 'foo' answers every call: the failed sentinel is not retried at
+        # the head of the list
+        assert sentinel.sentinels[0].id == ("foo", 26379)
+    cluster.nodes_down.clear()
+    # the failed sentinel is retried after a bounded number of calls and
+    # rejoins the rotation once it answers again
+    served = set()
+    for _ in range(sentinel.FAILED_SENTINEL_QUARANTINE + 2):
+        assert await sentinel.discover_master("mymaster") == (master_ip, 6379)
+        served.add(sentinel.sentinels[0].id)
+    assert served == {("foo", 26379), ("bar", 26379)}
+
+
+@pytest.mark.onlynoncluster
 async def test_discover_master_error(sentinel):
     with pytest.raises(MasterNotFoundError):
         await sentinel.discover_master("xxx")
