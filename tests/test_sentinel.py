@@ -1,5 +1,7 @@
 import os
 import socket
+import sys
+import threading
 from unittest import mock
 
 import pytest
@@ -153,6 +155,52 @@ def test_discover_master_keeps_failed_sentinel_last(cluster, sentinel, master_ip
         assert sentinel.discover_master("mymaster") == (master_ip, 6379)
         served.add(sentinel.sentinels[0].id)
     assert served == {("foo", 26379), ("bar", 26379)}
+
+
+@pytest.mark.onlynoncluster
+def test_discover_master_order_permutes_never_dups(cluster, sentinel, master_ip):
+    orders = set()
+    for _ in range(10):
+        assert sentinel.discover_master("mymaster") == (master_ip, 6379)
+        ids = tuple(s.id for s in sentinel.sentinels)
+        # every order is a permutation of the configured sentinels: no
+        # duplicates, nothing lost
+        assert sorted(ids) == [("bar", 26379), ("foo", 26379)]
+        orders.add(ids)
+    # both orders are actually exercised
+    assert len(orders) == 2
+
+
+@pytest.mark.onlynoncluster
+def test_discover_master_rotates_concurrently(cluster, sentinel, master_ip):
+    # Concurrent discovery calls must not duplicate or drop sentinels.
+    barrier = threading.Barrier(2)
+    errors = []
+
+    def worker():
+        try:
+            for _ in range(20):
+                assert sentinel.discover_master("mymaster") == (master_ip, 6379)
+                ids = [s.id for s in sentinel.sentinels]
+                assert len(ids) == len(set(ids)), f"duplicate sentinels: {ids}"
+                assert set(ids) == {("foo", 26379), ("bar", 26379)}
+                barrier.wait(timeout=5)
+        except Exception as e:  # pragma: no cover - failure reporting
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    # force frequent thread switches so the interleaving is exercised
+    switch_interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+    finally:
+        sys.setswitchinterval(switch_interval)
+    assert not any(t.is_alive() for t in threads), "workers did not finish"
+    assert not errors
 
 
 @pytest.mark.onlynoncluster

@@ -1,3 +1,4 @@
+import asyncio
 import socket
 from unittest import mock
 
@@ -29,6 +30,9 @@ class SentinelTestClient:
     async def sentinel_masters(self):
         self.cluster.connection_error_if_down(self)
         self.cluster.timeout_if_down(self)
+        # real sentinel I/O suspends the call mid-discovery; yield so that
+        # concurrent discover_master() sequences can interleave
+        await asyncio.sleep(0)
         return {self.cluster.service_name: self.cluster.master}
 
     async def sentinel_slaves(self, master_name):
@@ -152,6 +156,41 @@ async def test_discover_master_keeps_failed_sentinel_last(cluster, sentinel, mas
         assert await sentinel.discover_master("mymaster") == (master_ip, 6379)
         served.add(sentinel.sentinels[0].id)
     assert served == {("foo", 26379), ("bar", 26379)}
+
+
+@pytest.mark.onlynoncluster
+async def test_discover_master_order_permutes_never_dups(cluster, sentinel, master_ip):
+    orders = set()
+    for _ in range(10):
+        assert await sentinel.discover_master("mymaster") == (master_ip, 6379)
+        ids = tuple(s.id for s in sentinel.sentinels)
+        # every order is a permutation invariant: no duplicates, nothing lost
+        assert sorted(ids) == [("bar", 26379), ("foo", 26379)]
+        orders.add(ids)
+    # both orders are actually exercised
+    assert len(orders) == 2
+
+
+@pytest.mark.onlynoncluster
+async def test_discover_master_rotates_concurrently(cluster, sentinel, master_ip):
+    # Two interleaved discovery sequences must not duplicate or drop
+    # sentinels while they reorder the rotation.
+    errors = []
+
+    async def worker():
+        try:
+            for _ in range(25):
+                assert await sentinel.discover_master("mymaster") == (master_ip, 6379)
+                ids = [s.id for s in sentinel.sentinels]
+                assert len(ids) == len(set(ids)), f"duplicate sentinels: {ids}"
+                assert set(ids) == {("foo", 26379), ("bar", 26379)}
+                # yield to the other worker so the sequences interleave
+                await asyncio.sleep(0)
+        except Exception as e:  # pragma: no cover - failure reporting
+            errors.append(e)
+
+    await asyncio.gather(worker(), worker())
+    assert not errors
 
 
 @pytest.mark.onlynoncluster

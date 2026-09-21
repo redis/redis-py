@@ -285,11 +285,16 @@ class Sentinel(SentinelCommands):
         self._failed_sentinels = {}
 
     def _discovery_order(self):
+        # Iterate over a snapshot: a concurrent discovery call may rebind
+        # self.sentinels (see _promote_answering_sentinel) while this loop
+        # is still running, and iterating a list another call is mutating
+        # could skip or repeat a sentinel.
+        sentinels = list(self.sentinels)
         if not self._failed_sentinels:
-            return self.sentinels
+            return sentinels
         healthy = []
         quarantined = []
-        for sentinel in self.sentinels:
+        for sentinel in sentinels:
             remaining = self._failed_sentinels.get(sentinel)
             if remaining is None:
                 healthy.append(sentinel)
@@ -303,21 +308,23 @@ class Sentinel(SentinelCommands):
 
     def _promote_answering_sentinel(self, sentinel):
         self._failed_sentinels.pop(sentinel, None)
-        if sentinel is self.sentinels[0]:
-            if not self._failed_sentinels:
-                # Every sentinel is healthy, so rotate this one to the end
-                # of the list: repeated discovery calls then spread the load
-                # across all sentinel nodes instead of always starting from
-                # the same one.
-                self.sentinels.append(self.sentinels.pop(0))
+        # Build the next order as a new list and rebind self.sentinels in a
+        # single step: rebinding (instead of in-place pop/append/insert) is
+        # what keeps a concurrent discovery call - which iterates a snapshot
+        # of the old list - from seeing duplicates or losing a sentinel.
+        # - Every sentinel healthy and the head answered: rotate the head to
+        #   the end, so repeated discovery calls spread the load evenly
+        #   across all sentinel nodes instead of always starting from the
+        #   same one.
+        # - A non-head sentinel answered: promote it to the head, preserving
+        #   the pre-existing failover fast path of trying it first on the
+        #   next call.
+        next_order = [s for s in self.sentinels if s is not sentinel]
+        if sentinel is self.sentinels[0] and not self._failed_sentinels:
+            next_order.append(sentinel)
         else:
-            # This call had to look past the head of the list, so make this
-            # sentinel the first one tried on the next call.
-            for i, s in enumerate(self.sentinels):
-                if s is sentinel:
-                    del self.sentinels[i]
-                    break
-            self.sentinels.insert(0, sentinel)
+            next_order.insert(0, sentinel)
+        self.sentinels = next_order
 
     def execute_command(self, *args, **kwargs):
         """
