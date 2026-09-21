@@ -1718,11 +1718,17 @@ class Connection(AbstractConnection):
             avoid setting additional TCP keepalive options.
         """
         self._host = host
-        # bool subclasses int; port=True would become privileged port 1
-        if isinstance(port, bool) or not isinstance(port, int):
-            raise TypeError(
-                f"port must be an integer, not {type(port).__name__}"
-            )
+        # bool subclasses int; port=True would become privileged port 1.
+        # Numeric strings stay valid. Callers still pass "6379".
+        if isinstance(port, bool):
+            raise TypeError("port must be an integer, not bool")
+        if isinstance(port, str):
+            try:
+                port = int(port)
+            except ValueError:
+                raise TypeError("port must be an integer, not str") from None
+        elif not isinstance(port, int):
+            raise TypeError(f"port must be an integer, not {type(port).__name__}")
         if not 0 <= port <= 65535:
             raise ValueError(f"port must be in 0..65535, got {port}")
         self.port = port
