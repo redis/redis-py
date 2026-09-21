@@ -919,12 +919,48 @@ def _parse_client_info_fields(value):
 
 
 def parse_client_list(response, **options):
+    if options.pop("as_iter", False):
+        return _client_list_iter(response)
     clients = []
     for c in str_if_bytes(response).splitlines():
         client_dict = _parse_client_info_fields(c)
         if client_dict:
             clients.append(client_dict)
     return clients
+
+
+def _client_list_iter(response):
+    """
+    Yield one CLIENT LIST record at a time instead of building the full
+    ``list[dict]`` up front, so a caller processing records one at a time
+    doesn't need all of them held in memory simultaneously. The full reply
+    is still buffered off the socket before this runs - that part is
+    unavoidable given how RESP bulk-string framing (and hiredis) works -
+    so this only trims the per-record dict/string overhead, not the raw
+    reply size.
+
+    Line boundaries are scanned for lazily (rather than via ``splitlines()``)
+    so the generator never materializes a list of all lines either - that
+    list would otherwise be held for the generator's whole lifetime, right
+    alongside the decoded reply, defeating the point of iterating.
+    """
+    text = str_if_bytes(response)
+    # With decode_responses=False, str_if_bytes decodes a full copy of the
+    # reply. response is a parameter of this generator, so it stays alive
+    # in this frame for as long as the generator does; drop it once decoded
+    # so the original buffer doesn't sit alongside the decoded one for the
+    # whole iteration.
+    response = None
+    end = len(text)
+    start = 0
+    while start < end:
+        newline = text.find("\n", start)
+        if newline == -1:
+            newline = end
+        client_dict = _parse_client_info_fields(text[start:newline])
+        start = newline + 1
+        if client_dict:
+            yield client_dict
 
 
 def parse_config_get(response, **options):

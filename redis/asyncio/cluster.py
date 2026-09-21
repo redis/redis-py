@@ -543,7 +543,8 @@ class RedisCluster(
                 "Unix domain socket is not supported in cluster mode"
             )
 
-        if (not host or not port) and not startup_nodes:
+        port_is_provided = bool(port) or type(port) is int
+        if (not host or not port_is_provided) and not startup_nodes:
             raise RedisClusterException(
                 "RedisCluster requires at least one node to discover the cluster.\n"
                 "Please provide one of the following or use RedisCluster.from_url:\n"
@@ -663,7 +664,7 @@ class RedisCluster(
             startup_nodes = passed_nodes
         else:
             startup_nodes = []
-        if host and port:
+        if host and port_is_provided:
             startup_nodes.append(ClusterNode(host, port, **self.connection_kwargs))
 
         if event_dispatcher is None:
@@ -1360,7 +1361,13 @@ class RedisCluster(
         retry_attempts = self.retry.get_retries()
 
         passed_targets = kwargs.pop("target_nodes", None)
-        if passed_targets and not self._is_node_flag(passed_targets):
+        if (
+            passed_targets is not None
+            and not self._is_node_flag(passed_targets)
+            and not (
+                isinstance(passed_targets, (list, dict, str)) and not passed_targets
+            )
+        ):
             target_nodes = self._parse_target_nodes(passed_targets)
             target_nodes_specified = True
             retry_attempts = 0
@@ -2924,6 +2931,13 @@ for command in PIPELINE_BLOCKED_COMMANDS:
         continue
 
     setattr(ClusterPipeline, command, block_pipeline_command(command))
+
+# client_list_iter has no wire command of its own to add to
+# PIPELINE_BLOCKED_COMMANDS - it sends CLIENT LIST, blocked above under its
+# own name - so block it explicitly here too, or it would fall through to
+# the inherited implementation and queue CLIENT LIST like a real pipelined
+# command instead of raising.
+setattr(ClusterPipeline, "client_list_iter", block_pipeline_command("client_list_iter"))
 
 
 class PipelineCommand:
