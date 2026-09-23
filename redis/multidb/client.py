@@ -327,7 +327,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         if not self.initialized:
             self.initialize()
 
-        return self.command_executor.execute_transaction(func, *watches, *options)
+        return self.command_executor.execute_transaction(func, *watches, **options)
 
     def pubsub(self, **kwargs):
         """

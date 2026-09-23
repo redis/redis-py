@@ -3,6 +3,7 @@ import datetime
 import re
 import threading
 import time
+import warnings
 from asyncio import CancelledError
 from string import ascii_letters
 from unittest import mock
@@ -71,6 +72,18 @@ def get_stream_message(client, stream, message_id):
     response = client.xrange(stream, min=message_id, max=message_id)
     assert len(response) == 1
     return response[0]
+
+
+def test_server_deprecated_commands_do_not_emit_python_warnings():
+    client = redis.Redis()
+    with patch.object(client, "execute_command", return_value=True) as execute_command:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            assert client.setex("a", 60, "1")
+            assert client.hmset("a", {"field": "value"})
+
+    execute_command.assert_any_call("SETEX", "a", 60, "1")
+    execute_command.assert_any_call("HMSET", "a", "field", "value")
 
 
 # RESPONSE CALLBACKS
@@ -5657,8 +5670,7 @@ class TestRedisCommands:
 
     def test_hmset(self, r):
         h = {b"a": b"1", b"b": b"2", b"c": b"3"}
-        with pytest.warns(DeprecationWarning):
-            assert r.hmset("a", h)
+        assert r.hmset("a", h)
         assert r.hgetall("a") == h
 
     def test_hsetnx(self, r):
