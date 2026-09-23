@@ -7,6 +7,7 @@ import binascii
 import datetime
 import re
 import sys
+import warnings
 from string import ascii_letters
 from unittest.mock import AsyncMock, patch
 
@@ -56,6 +57,25 @@ else:
 REDIS_6_VERSION = "5.9.0"
 
 ClientT = redis.Redis | redis.RedisCluster
+
+
+@pytest.mark.asyncio
+async def test_server_deprecated_commands_do_not_emit_python_warnings():
+    client = redis.Redis()
+    try:
+        with patch.object(
+            client, "execute_command", new_callable=AsyncMock
+        ) as execute_command:
+            execute_command.return_value = True
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", DeprecationWarning)
+                assert await client.setex("a", 60, "1")
+                assert await client.hmset("a", {"field": "value"})
+
+            execute_command.assert_any_await("SETEX", "a", 60, "1")
+            execute_command.assert_any_await("HMSET", "a", "field", "value")
+    finally:
+        await client.aclose()
 
 
 @pytest_asyncio.fixture()
@@ -4305,8 +4325,7 @@ class TestRedisCommands:
 
     async def test_hmset(self, r: redis.Redis):
         h = {b"a": b"1", b"b": b"2", b"c": b"3"}
-        with pytest.warns(DeprecationWarning):
-            assert await r.hmset("a", h)
+        assert await r.hmset("a", h)
         assert await r.hgetall("a") == h
 
     async def test_hsetnx(self, r: redis.Redis):

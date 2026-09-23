@@ -905,7 +905,7 @@ class RedisCluster(
             # No startup node was provided
             raise RedisClusterException(
                 "RedisCluster requires at least one node to discover the "
-                "cluster. Please provide one of the followings:\n"
+                "cluster. Please provide one of the following:\n"
                 "1. host and port, for example:\n"
                 " RedisCluster(host='localhost', port=6379)\n"
                 "2. list of startup nodes, for example:\n"
@@ -1775,7 +1775,13 @@ class RedisCluster(
         is_default_node = False
         target_nodes = None
         passed_targets = kwargs.pop("target_nodes", None)
-        if passed_targets is not None and not self._is_nodes_flag(passed_targets):
+        if (
+            passed_targets is not None
+            and not self._is_nodes_flag(passed_targets)
+            and not (
+                isinstance(passed_targets, (list, dict, str)) and not passed_targets
+            )
+        ):
             target_nodes = self._parse_target_nodes(passed_targets)
             target_nodes_specified = True
 

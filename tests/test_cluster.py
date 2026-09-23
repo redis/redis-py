@@ -3083,6 +3083,28 @@ class TestStaticMetadataRouting:
         assert nodes == [default_node]
 
     @pytest.mark.fixed_client
+    @pytest.mark.parametrize("empty_targets", [[], {}, ""])
+    def test_execute_command_empty_target_nodes_falls_back(self, empty_targets):
+        rc = get_mocked_redis_client(host=default_host, port=7000)
+        default_node = rc.get_default_node()
+
+        with patch.object(
+            RedisCluster, "_execute_command", return_value=100
+        ) as execute:
+            result = rc.execute_command("DBSIZE", target_nodes=empty_targets)
+
+        assert result == 100
+        execute.assert_called_once_with(default_node, "DBSIZE")
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("invalid_targets", [False, 0, (), b""])
+    def test_execute_command_rejects_invalid_empty_target_nodes(self, invalid_targets):
+        rc = get_mocked_redis_client(host=default_host, port=7000)
+
+        with pytest.raises(TypeError, match="target_nodes type"):
+            rc.execute_command("DBSIZE", target_nodes=invalid_targets)
+
+    @pytest.mark.fixed_client
     def test_command_subcommands_route_to_default_node(self):
         rc = get_mocked_redis_client(host=default_host, port=7000)
         default_node = rc.get_default_node()

@@ -92,7 +92,6 @@ from redis.typing import (
     ZSetRangeResponse,
 )
 from redis.utils import (
-    deprecated_function,
     experimental_args,
     experimental_method,
     extract_expire_flags,
@@ -4544,11 +4543,6 @@ class BasicKeyCommands(CommandsProtocol):
         self: AsyncClientProtocol, name: KeyT, time: ExpiryT, value: EncodableT
     ) -> Awaitable[bool]: ...
 
-    @deprecated_function(
-        version="2.6.12",
-        reason="Use 'set' instead.",
-        name="setex",
-    )
     def setex(
         self, name: KeyT, time: ExpiryT, value: EncodableT
     ) -> bool | Awaitable[bool]:
@@ -4557,8 +4551,9 @@ class BasicKeyCommands(CommandsProtocol):
         seconds. ``time`` can be represented by an integer or a Python
         timedelta object.
 
-        As per Redis 2.6.12, SETEX is considered deprecated.
-        Please use SET with EX parameter in new code.
+        Redis has deprecated SETEX since version 2.6.12. The command remains
+        available for compatibility. Please use SET with the EX parameter in
+        new code.
 
         For more information, see https://redis.io/commands/setex
         """
@@ -10223,17 +10218,15 @@ class HashCommands(CommandsProtocol):
         mapping: Mapping[FieldT, EncodableT],
     ) -> Awaitable[bool]: ...
 
-    @deprecated_function(
-        version="4.0.0",
-        reason="Use 'hset' instead.",
-        name="hmset",
-    )
     def hmset(
         self, name: KeyT, mapping: Mapping[FieldT, EncodableT]
     ) -> bool | Awaitable[bool]:
         """
         Set key to value within hash ``name`` for each corresponding
         key and value from the ``mapping`` dict.
+
+        Redis has deprecated HMSET since version 4.0.0. The command remains
+        available for compatibility. Please use HSET in new code.
 
         For more information, see https://redis.io/commands/hmset
         """
