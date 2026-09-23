@@ -391,6 +391,7 @@ class TestMovedReinitialization:
                         else moved_count
                     )
 
+
 @pytest.mark.fixed_client
 @pytest.mark.parametrize(
     ("url", "expected_port"),
