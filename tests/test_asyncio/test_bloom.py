@@ -270,6 +270,40 @@ async def test_cms_merge(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
+@skip_ifmodversion_lt("8.11.0", "bf")
+async def test_cms_cell_size(decoded_r: redis.Redis):
+    for cell_size in (1, 2, 4, 8):
+        assert await decoded_r.cms().initbydim(
+            f"cell_dim{cell_size}", 1000, 5, cell_size=cell_size
+        )
+        assert (
+            cell_size
+            == (await decoded_r.cms().info(f"cell_dim{cell_size}"))["cell_size"]
+        )
+        assert await decoded_r.cms().initbyprob(
+            f"cell_prob{cell_size}", 0.01, 0.01, cell_size=cell_size
+        )
+        assert (
+            cell_size
+            == (await decoded_r.cms().info(f"cell_prob{cell_size}"))["cell_size"]
+        )
+
+    # the server uses 4-byte counters when CELL_SIZE is omitted
+    assert await decoded_r.cms().initbydim("cell_default", 1000, 5)
+    info = await decoded_r.cms().info("cell_default")
+    assert 1000 == info["width"]
+    assert 5 == info["depth"]
+    assert 0 == info["count"]
+    assert 4 == info["cell_size"]
+
+    # only 1, 2, 4 and 8 are valid cell sizes
+    with pytest.raises(redis.ResponseError):
+        await decoded_r.cms().initbydim("cell_bad", 1000, 5, cell_size=3)
+    with pytest.raises(redis.ResponseError):
+        await decoded_r.cms().initbyprob("cell_bad", 0.01, 0.01, cell_size=16)
+
+
+@pytest.mark.redismod
 async def test_topk(decoded_r: redis.Redis):
     # test list with empty buckets
     assert await decoded_r.topk().reserve("topk", 3, 50, 4, 0.9)
