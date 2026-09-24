@@ -3316,6 +3316,9 @@ class BasicKeyCommands(CommandsProtocol):
 
         ``px`` sets an expire flag on key ``name`` for ``px`` milliseconds.
 
+        ``ex`` and ``px`` also accept digit-only strings, such as ``"60"``
+        and ``"500"``, respectively.
+
         ``exat`` sets an expire flag on key ``name`` for ``ex`` seconds,
         specified in unix time.
 
@@ -3526,6 +3529,9 @@ class BasicKeyCommands(CommandsProtocol):
         Otherwise, out-of-bounds results are rejected, leaving the value and
         TTL unchanged and returning the current value and zero as the actual
         increment.
+
+        ``ex`` and ``px`` accept digit-only strings for seconds and milliseconds,
+        respectively, in addition to integers and timedeltas.
 
         ``enx`` applies the expiration only when the key does not already
         have an expiration, and requires ``ex``, ``px``, ``exat``, or ``pxat``.
@@ -3913,6 +3919,9 @@ class BasicKeyCommands(CommandsProtocol):
         ``ex`` sets an expire flag on the keys in ``mapping`` for ``ex`` seconds.
 
         ``px`` sets an expire flag on the keys in ``mapping`` for ``px`` milliseconds.
+
+        ``ex`` and ``px`` also accept digit-only strings, such as ``"60"``
+        and ``"500"``, respectively.
 
         ``exat`` sets an expire flag on the keys in ``mapping`` for ``exat`` seconds,
             specified in unix time.
@@ -4411,6 +4420,9 @@ class BasicKeyCommands(CommandsProtocol):
         ``ex`` sets an expire flag on key ``name`` for ``ex`` seconds.
 
         ``px`` sets an expire flag on key ``name`` for ``px`` milliseconds.
+
+        ``ex`` and ``px`` also accept digit-only strings, such as ``"60"``
+        and ``"500"``, respectively.
 
         ``nx`` if set to True, set the value at key ``name`` to ``value`` only
             if it does not exist.
@@ -9905,6 +9917,9 @@ class HashCommands(CommandsProtocol):
 
         ``px`` sets an expire flag on ``keys`` for ``px`` milliseconds.
 
+        ``ex`` and ``px`` also accept digit-only strings, such as ``"60"``
+        and ``"500"``, respectively.
+
         ``exat`` sets an expire flag on ``keys`` for ``ex`` seconds,
         specified in unix time.
 
@@ -10126,6 +10141,9 @@ class HashCommands(CommandsProtocol):
         ``ex`` sets an expire flag on ``keys`` for ``ex`` seconds.
 
         ``px`` sets an expire flag on ``keys`` for ``px`` milliseconds.
+
+        ``ex`` and ``px`` also accept digit-only strings, such as ``"60"``
+        and ``"500"``, respectively.
 
         ``exat`` sets an expire flag on ``keys`` for ``ex`` seconds,
             specified in unix time.
