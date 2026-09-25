@@ -102,6 +102,12 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         # Close health check connection pools
         await self._health_check_policy.close()
 
+        # Release resources held by the health checks themselves
+        await asyncio.gather(
+            *(health_check.close() for health_check in self._health_checks),
+            return_exceptions=True,
+        )
+
         # Close database client
         if self.command_executor.active_database:
             await self.command_executor.active_database.client.aclose()
