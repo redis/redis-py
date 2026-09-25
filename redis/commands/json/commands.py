@@ -704,10 +704,12 @@ class JSONCommands:
             for file in files:
                 file_path = os.path.join(root, file)
                 try:
-                    # TODO: rsplit(".") splits on all dots, mishandling paths
-                    # with dots in directories (e.g. /data/v1.2/file.json).
-                    # Should be rsplit(".", 1) — fix in a separate PR.
-                    file_name = file_path.rsplit(".")[0]
+                    # Strip only the extension of the final path component.
+                    # os.path.splitext handles a dot in a directory (v1.2), a
+                    # file with no extension, and dotfiles, none of which
+                    # rsplit(".", 1) gets right, e.g. /data/v1.2/file.json ->
+                    # /data/v1.2/file and /data/v1.2/README -> /data/v1.2/README.
+                    file_name = os.path.splitext(file_path)[0]
                     self.set_file(
                         file_name,
                         json_path,
