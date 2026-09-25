@@ -237,13 +237,20 @@ def _parse_length_prefixed_subkeys(s: bytes | str) -> list[str]:
     subkeys: list[str] = []
     pos = 0
     while pos < len(raw):
-        colon = raw.index(b":", pos)
+        colon = raw.find(b":", pos)
+        if colon < 0 or not raw[pos:colon].isdigit():
+            raise ValueError("Invalid subkey length prefix")
         length = int(raw[pos:colon])
         start = colon + 1
-        subkeys.append(raw[start : start + length].decode("utf-8", "replace"))
-        pos = start + length
-        if pos < len(raw) and raw[pos] == ord(","):
-            pos += 1  # skip comma separator
+        end = start + length
+        if end > len(raw):
+            raise ValueError("Truncated subkey")
+        subkeys.append(raw[start:end].decode("utf-8", "replace"))
+        pos = end
+        if pos < len(raw):
+            if raw[pos] != ord(",") or pos + 1 == len(raw):
+                raise ValueError("Invalid subkey separator")
+            pos += 1
     return subkeys
 
 
@@ -375,7 +382,10 @@ class KeyNotification:
         channel = safe_str(channel)
         data = safe_str(data)
 
-        return cls._parse(channel, data, key_prefix, raw_data=raw_data)
+        try:
+            return cls._parse(channel, data, key_prefix, raw_data=raw_data)
+        except ValueError:
+            return None
 
     @classmethod
     def _parse(
@@ -473,9 +483,12 @@ class KeyNotification:
             colon_idx = raw.index(b":")
             key_len = int(raw[:colon_idx])
             key_start = colon_idx + 1
+            separator = key_start + key_len
+            if key_len < 0 or separator >= len(raw) or raw[separator] != ord("|"):
+                raise ValueError("Invalid subkeyevent key separator")
             key = raw[key_start : key_start + key_len].decode("utf-8", "replace")
             # After key, expect '|' then subkeys
-            subkeys_start = key_start + key_len + 1  # +1 for '|'
+            subkeys_start = separator + 1
             subkeys = _parse_length_prefixed_subkeys(raw[subkeys_start:])
 
             if key_prefix:
