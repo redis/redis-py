@@ -25,6 +25,7 @@ from ..exceptions import (
     ConnectionError,
     ExecAbortError,
     ExternalAuthProviderError,
+    InvalidResponse,
     MasterDownError,
     ModuleError,
     MovedError,
@@ -39,6 +40,44 @@ from ..exceptions import (
 from ..typing import EncodableT
 from .encoders import Encoder
 from .socket import SERVER_CLOSED_CONNECTION_ERROR, SocketBuffer
+
+# Errors a parser can raise from the middle of a reply, after the read cursor
+# has already advanced past bytes the parser cannot re-interpret. The resume
+# machinery from #2510/#2695 rewinds so an *interrupted* read can be re-parsed
+# from the start; it cannot help here, because re-parsing the same bytes just
+# reproduces the same failure. Connection.read_response drops the connection on
+# these regardless of disconnect_on_error, or the caller loops forever (#4291).
+#
+# - InvalidResponse: unknown reply type byte, or hiredis' own nesting limit.
+# - UnicodeDecodeError: Encoder.decode at the tail of _read_response, reached
+#   only after the payload has been consumed (decode_responses=True subscriber
+#   receiving a binary PUBLISH payload).
+# - RecursionError: deeply nested aggregate replies exhaust the stack in the
+#   pure-Python parsers. #4144 turns this into InvalidResponse at a bounded
+#   depth; until then, catching it here is what stops the loop.
+#
+# Malformed numeric frames (`:abc\r\n`, `$xyz\r\n`, `*abc\r\n`) are converted to
+# InvalidResponse by the pure-Python parsers (_parse_int/_parse_float below), so
+# they land here too. Plain ValueError is deliberately NOT in this tuple: a
+# user push handler may raise it after the frame was fully consumed, and that
+# must not tear down a healthy connection.
+UNRECOVERABLE_PARSE_ERRORS = (InvalidResponse, UnicodeDecodeError, RecursionError)
+
+
+def _parse_int(value: bytes, raw: bytes) -> int:
+    """int() for a RESP numeric field; a non-numeric field is a protocol error."""
+    try:
+        return int(value)
+    except ValueError:
+        raise InvalidResponse(f"Protocol Error: {raw!r}") from None
+
+
+def _parse_float(value: bytes, raw: bytes) -> float:
+    try:
+        return float(value)
+    except ValueError:
+        raise InvalidResponse(f"Protocol Error: {raw!r}") from None
+
 
 MODULE_LOAD_ERROR = "Error loading the extension. Please check the server logs."
 NO_SUCH_MODULE_ERROR = "Error unloading module: no such module with that name"
