@@ -191,7 +191,7 @@ class ExponentialWithJitterBackoff(AbstractBackoff):
         return self._base == other._base and self._cap == other._cap
 
     def compute(self, failures: int) -> float:
-        return min(self._cap, random.random() * _exponential(self._base, failures))
+        return min(self._cap, _exponential(random.random() * self._base, failures))
 
 
 def default_backoff():

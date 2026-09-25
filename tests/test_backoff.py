@@ -25,6 +25,17 @@ def test_exponential_with_jitter_backoff(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 @pytest.mark.fixed_client
+def test_exponential_with_jitter_backoff_keeps_zero_jitter_after_overflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("random.random", lambda: 0.0)
+
+    bo = ExponentialWithJitterBackoff(cap=3.0, base=0.1)
+
+    assert bo.compute(5000) == 0.0
+
+
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "backoff_class",
     [
