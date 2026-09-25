@@ -4,6 +4,7 @@ import os
 import random
 import time
 from io import TextIOWrapper
+from unittest import mock
 
 import numpy as np
 import pytest
@@ -4824,6 +4825,30 @@ class TestHybridSearch(SearchTestsBase):
     # warnings. 6000 docs keeps the query comfortably above the 1ms limit so
     # the timeout reliably triggers across hardware.
     _HYBRID_TIMEOUT_DOCS = 6000
+
+    def test_hybrid_search_forwards_zero_timeout(self):
+        # TIMEOUT 0 means "no timeout" and is a value the server accepts for
+        # FT.HYBRID, so it must reach the wire. Guarding the argument with a
+        # truthiness test made timeout=0 indistinguishable from timeout=None,
+        # which silently downgrades the query to the server's search-timeout
+        # default instead of running it unlimited. Query.get_args() already
+        # emits TIMEOUT 0 (see test_query_timeout); this keeps FT.HYBRID
+        # consistent with it. Runs without a server.
+        hybrid_query = HybridQuery(
+            HybridSearchQuery("foo"),
+            HybridVsimQuery(vector_field_name="@embedding", vector_data="$vec"),
+        )
+        ft = redis.Redis().ft("idx")
+
+        def wire_args(timeout):
+            with mock.patch.object(ft, "execute_command", return_value={}) as m:
+                ft.hybrid_search(query=hybrid_query, timeout=timeout)
+                return list(m.call_args[0])
+
+        assert wire_args(5000)[-2:] == ["TIMEOUT", 5000]
+        assert wire_args(0)[-2:] == ["TIMEOUT", 0]
+        # None stays the "argument not set" sentinel.
+        assert "TIMEOUT" not in wire_args(None)
 
     def _create_hybrid_search_index(self, client, dim=4):
         client.ft().create_index(
