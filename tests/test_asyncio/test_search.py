@@ -4,6 +4,7 @@ import os
 import asyncio
 from io import TextIOWrapper
 import random
+from unittest import mock
 
 import numpy as np
 import pytest
@@ -2942,6 +2943,28 @@ class TestHybridSearch(AsyncSearchTestsBase):
     # warnings. 6000 docs keeps the query comfortably above the 1ms limit so
     # the timeout reliably triggers across hardware.
     _HYBRID_TIMEOUT_DOCS = 6000
+
+    async def test_hybrid_search_forwards_zero_timeout(self):
+        # Async mirror of the sync test with the same name; AGENTS.md requires
+        # the two stacks to stay aligned. TIMEOUT 0 means "no timeout" and must
+        # reach the wire instead of being dropped like an unset argument.
+        hybrid_query = HybridQuery(
+            HybridSearchQuery("foo"),
+            HybridVsimQuery(vector_field_name="@embedding", vector_data="$vec"),
+        )
+        ft = redis.Redis().ft("idx")
+
+        async def wire_args(timeout):
+            with mock.patch.object(
+                ft, "execute_command", mock.AsyncMock(return_value={})
+            ) as m:
+                await ft.hybrid_search(query=hybrid_query, timeout=timeout)
+                return list(m.call_args[0])
+
+        assert (await wire_args(5000))[-2:] == ["TIMEOUT", 5000]
+        assert (await wire_args(0))[-2:] == ["TIMEOUT", 0]
+        # None stays the "argument not set" sentinel.
+        assert "TIMEOUT" not in await wire_args(None)
 
     async def _create_hybrid_search_index(self, decoded_r: redis.Redis, dim=4):
         await decoded_r.ft().create_index(

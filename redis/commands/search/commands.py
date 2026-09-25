@@ -1388,7 +1388,7 @@ class SearchCommands:
             options["post_processing"] = post_processing
         if params_substitution:
             pieces.extend(self.get_params_args(params_substitution))
-        if timeout:
+        if timeout is not None:
             pieces.extend(("TIMEOUT", timeout))
         if cursor:
             options["cursor"] = True
@@ -1927,7 +1927,7 @@ class AsyncSearchCommands(SearchCommands):
             options["post_processing"] = post_processing
         if params_substitution:
             pieces.extend(self.get_params_args(params_substitution))
-        if timeout:
+        if timeout is not None:
             pieces.extend(("TIMEOUT", timeout))
         if cursor:
             options["cursor"] = True
