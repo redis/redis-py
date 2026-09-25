@@ -64,8 +64,11 @@ def from_url(url: str, **kwargs: Any) -> "Redis":
 @contextmanager
 def pipeline(redis_obj):
     p = redis_obj.pipeline()
-    yield p
-    p.execute()
+    try:
+        yield p
+        p.execute()
+    finally:
+        p.reset()
 
 
 def str_if_bytes(value: Union[str, bytes]) -> str:
