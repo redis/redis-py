@@ -288,6 +288,12 @@ class TestExtractExpireFlags:
         with pytest.raises(DataError):
             extract_expire_flags(px="not-a-number")
 
+    @pytest.mark.parametrize("option", ["ex", "px"])
+    def test_non_decimal_digit_string_raises_data_error(self, option):
+        # Superscript two passes isdigit() but cannot be parsed by int().
+        with pytest.raises(DataError):
+            extract_expire_flags(**{option: "\u00b2"})
+
     def test_exat_as_int(self):
         assert extract_expire_flags(exat=1700000000) == ["EXAT", 1700000000]
 
