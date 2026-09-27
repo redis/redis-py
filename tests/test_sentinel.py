@@ -158,6 +158,26 @@ def test_discover_master_keeps_failed_sentinel_last(cluster, sentinel, master_ip
 
 
 @pytest.mark.onlynoncluster
+def test_discover_master_rotates_over_healthy_sentinels_during_partial_outage(
+    cluster, master_ip
+):
+    # With one sentinel down and two healthy, discovery traffic must keep
+    # alternating between the two healthy nodes instead of pinning to
+    # whichever of them answered first.
+    cluster.nodes_down.add(("foo", 26379))
+    sentinel = Sentinel([("foo", 26379), ("first", 26379), ("second", 26379)])
+    served = []
+    for _ in range(8):
+        assert sentinel.discover_master("mymaster") == (master_ip, 6379)
+        served.append(sentinel.sentinels[0].id)
+    # quarantine expires every FAILED_SENTINEL_QUARANTINE calls, so 'foo'
+    # is retried at most once inside this loop and cannot stay at the head
+    assert served.count(("first", 26379)) >= 3
+    assert served.count(("second", 26379)) >= 3
+    assert served.count(("foo", 26379)) <= 1
+
+
+@pytest.mark.onlynoncluster
 def test_discover_master_order_permutes_never_dups(cluster, sentinel, master_ip):
     orders = set()
     for _ in range(10):
