@@ -43,6 +43,20 @@ def parse_vemb_result(response, **options):
         return result
 
 
+def parse_vemb_result_unified(response, **options):
+    """
+    Handle VEMB result for unified responses.
+
+    RESP3 returns the vector components as doubles, while the RESP2 parsing
+    above returns components with integral values as ints. Return floats so
+    the result is the same on both protocols.
+    """
+    result = parse_vemb_result(response, **options)
+    if isinstance(result, list):
+        return [float(value) for value in result]
+    return result
+
+
 def parse_vlinks_result(response, **options):
     """
     Handle VLINKS result since the command can be returning different result
