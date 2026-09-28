@@ -51,10 +51,9 @@ def parse_vemb_result_unified(response, **options):
     above returns components with integral values as ints. Return floats so
     the result is the same on both protocols.
     """
-    result = parse_vemb_result(response, **options)
-    if isinstance(result, list):
-        return [float(value) for value in result]
-    return result
+    if response is None or options.get(CallbacksOptions.RAW.value):
+        return parse_vemb_result(response, **options)
+    return [float(value) for value in response]
 
 
 def parse_vlinks_result(response, **options):
