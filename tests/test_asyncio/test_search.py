@@ -2945,9 +2945,9 @@ class TestHybridSearch(AsyncSearchTestsBase):
     _HYBRID_TIMEOUT_DOCS = 6000
 
     async def test_hybrid_search_forwards_zero_timeout(self):
-        # Async mirror of the sync test with the same name; AGENTS.md requires
-        # the two stacks to stay aligned. TIMEOUT 0 means "no timeout" and must
-        # reach the wire instead of being dropped like an unset argument.
+        # Async mirror of the sync test with the same name. TIMEOUT 0 means
+        # "no timeout" and must reach the wire instead of being dropped like
+        # an unset argument.
         hybrid_query = HybridQuery(
             HybridSearchQuery("foo"),
             HybridVsimQuery(vector_field_name="@embedding", vector_data="$vec"),
