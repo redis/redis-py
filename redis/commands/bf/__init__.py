@@ -93,6 +93,12 @@ class AbstractBloom:
         if bucket_size is not None:
             params.extend(["BUCKETSIZE", bucket_size])
 
+    @staticmethod
+    def append_cell_size(params, cell_size):
+        """Append CELL_SIZE to params."""
+        if cell_size is not None:
+            params.extend(["CELL_SIZE", cell_size])
+
 
 class _CMSBloomBase(CMSCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
