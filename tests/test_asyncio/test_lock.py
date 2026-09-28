@@ -170,18 +170,17 @@ class TestLock:
                 await asyncio.sleep(0.15)
 
     async def test_context_manager_not_raise_on_release_lock_error(self, r):
+        # No lock timeout here: the error under test is the LockError raised by the
+        # redundant release in __aexit__, not the LockNotOwnedError of an expired lock
+        # (covered by test_context_manager_not_raise_on_release_lock_not_owned_error).
         try:
-            async with self.get_lock(
-                r, "foo", timeout=0.1, raise_on_release_error=False
-            ) as lock:
+            async with self.get_lock(r, "foo", raise_on_release_error=False) as lock:
                 await lock.release()
         except LockError:
             pytest.fail("LockError should not have been raised")
 
         with pytest.raises(LockError):
-            async with self.get_lock(
-                r, "foo", timeout=0.1, raise_on_release_error=True
-            ) as lock:
+            async with self.get_lock(r, "foo", raise_on_release_error=True) as lock:
                 await lock.release()
 
     async def test_high_sleep_small_blocking_timeout(self, r, fake_lock_time):
@@ -370,6 +369,21 @@ class TestLock:
         await r.set("foo", "a")
         with pytest.raises(LockNotOwnedError):
             await lock.reacquire()
+
+    async def test_lock_error_gives_correct_lock_name(self, r):
+        await r.set("foo", "bar")
+        with pytest.raises(LockError) as excinfo:
+            async with self.get_lock(r, "foo", blocking_timeout=0.1):
+                pass
+        assert excinfo.value.lock_name == "foo"
+
+    async def test_lock_not_owned_error_gives_correct_lock_name(self, r):
+        lock = self.get_lock(r, "foo", timeout=10)
+        assert await lock.acquire(blocking=False)
+        await r.set("foo", "a")
+        with pytest.raises(LockNotOwnedError) as excinfo:
+            await lock.extend(10)
+        assert excinfo.value.lock_name == "foo"
 
     async def test_release_cancellation_preserves_lock_state(self, r):
         """

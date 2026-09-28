@@ -7,6 +7,7 @@ from redis.commands.vectorset.commands import QuantizationOptions
 
 from .conftest import (
     _get_client,
+    skip_if_redis_enterprise,
     skip_if_server_version_lt,
 )
 
@@ -978,6 +979,7 @@ def _validate_quantization(original, quantized, tolerance=0.1):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 def test_vrange_basic(d_client):
     """Test basic VRANGE functionality with lexicographical ordering."""
     # Add elements with different names
@@ -1000,6 +1002,7 @@ def test_vrange_basic(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 def test_vrange_with_count(d_client):
     """Test VRANGE with count parameter."""
     # Add elements
@@ -1028,6 +1031,7 @@ def test_vrange_with_count(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 def test_vrange_iteration(d_client):
     """Test VRANGE for stateless iteration."""
     # Add elements
@@ -1051,6 +1055,7 @@ def test_vrange_iteration(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 def test_vrange_empty_key(d_client):
     """Test VRANGE on non-existent key."""
     result = d_client.vset().vrange("nonexistent", "-", "+")
@@ -1061,6 +1066,7 @@ def test_vrange_empty_key(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 def test_vrange_special_characters(d_client):
     """Test VRANGE with elements containing special characters."""
     # Add elements with special characters
@@ -1077,6 +1083,7 @@ def test_vrange_special_characters(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 def test_vrange_single_element(d_client):
     """Test VRANGE with a single element."""
     d_client.vset().vadd("myset", [1.0, 2.0], "single")
@@ -1092,6 +1099,7 @@ def test_vrange_single_element(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 def test_vrange_lexicographical_order(d_client):
     """Test that VRANGE returns elements in correct lexicographical order."""
     # Add elements in random order
@@ -1106,6 +1114,7 @@ def test_vrange_lexicographical_order(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 def test_vrange_numeric_strings(d_client):
     """Test VRANGE with numeric string elements."""
     # Add numeric strings (lexicographical order, not numeric)

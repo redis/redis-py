@@ -9,11 +9,15 @@ from redis.utils import (
     DEFAULT_RESP_VERSION,
     deprecated_args,
     deprecated_function,
+    dict_merge,
     ensure_string,
     experimental_args,
     experimental_method,
     extract_expire_flags,
     format_error_message,
+    list_keys_to_dict,
+    merge_result,
+    pipeline,
     safe_str,
     SENTINEL,
     str_if_bytes,
@@ -346,3 +350,90 @@ class TestDecodeFieldValue:
     def test_undecodable_bytes_use_replacement_character(self):
         result = decode_field_value(b"\xff", key="k", field_encodings={"k": "utf-8"})
         assert result == "�"
+
+
+@pytest.mark.fixed_client
+class TestDictMerge:
+    def test_merges_multiple_dicts(self):
+        assert dict_merge({"a": 1, "b": 2}, {"c": 3}) == {"a": 1, "b": 2, "c": 3}
+
+    def test_later_dicts_take_precedence(self):
+        assert dict_merge({"a": 1, "b": 2}, {"b": 3, "c": 4}) == {
+            "a": 1,
+            "b": 3,
+            "c": 4,
+        }
+
+    def test_no_args_returns_empty_dict(self):
+        assert dict_merge() == {}
+
+    def test_does_not_mutate_inputs(self):
+        first = {"a": 1}
+        dict_merge(first, {"a": 2})
+        assert first == {"a": 1}
+
+
+@pytest.mark.fixed_client
+class TestMergeResult:
+    def test_flattens_and_deduplicates_across_nodes(self):
+        merged = merge_result("CMD", {"node1": [1, 2, 3], "node2": [3, 4]})
+        assert sorted(merged) == [1, 2, 3, 4]
+
+    def test_empty_values(self):
+        assert merge_result("CMD", {"node1": []}) == []
+
+    def test_returns_a_list(self):
+        assert isinstance(merge_result("CMD", {"node1": [1], "node2": [2]}), list)
+
+
+@pytest.mark.fixed_client
+class TestListKeysToDict:
+    def test_maps_every_key_to_the_callback(self):
+        def callback():
+            pass
+
+        assert list_keys_to_dict(["GET", "SET"], callback) == {
+            "GET": callback,
+            "SET": callback,
+        }
+
+
+@pytest.mark.fixed_client
+class TestPipelineContextManager:
+    class _FakePipeline:
+        def __init__(self):
+            self.executed = False
+            self.reset_calls = 0
+
+        def execute(self):
+            self.executed = True
+
+        def reset(self):
+            self.reset_calls += 1
+
+    class _FakeRedis:
+        def __init__(self, fake_pipeline):
+            self._fake_pipeline = fake_pipeline
+
+        def pipeline(self):
+            return self._fake_pipeline
+
+    def test_executes_and_resets_on_success(self):
+        fake_pipeline = self._FakePipeline()
+        with pipeline(self._FakeRedis(fake_pipeline)) as p:
+            assert p is fake_pipeline
+        assert fake_pipeline.executed is True
+        assert fake_pipeline.reset_calls == 1
+
+    def test_resets_but_does_not_execute_on_exception(self):
+        # A pipeline using WATCH holds a real connection checked out from
+        # the pool as soon as watch() is called - reset() is what returns
+        # it. Without a guaranteed reset() on this path, that connection
+        # stayed checked out until the pipeline object happened to be
+        # garbage collected.
+        fake_pipeline = self._FakePipeline()
+        with pytest.raises(ValueError):
+            with pipeline(self._FakeRedis(fake_pipeline)):
+                raise ValueError("boom")
+        assert fake_pipeline.executed is False
+        assert fake_pipeline.reset_calls == 1

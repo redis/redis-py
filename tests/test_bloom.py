@@ -306,6 +306,34 @@ def test_cms_merge(client):
 
 
 @pytest.mark.redismod
+@skip_ifmodversion_lt("8.11.0", "bf")
+def test_cms_cell_size(client):
+    for cell_size in (1, 2, 4, 8):
+        assert client.cms().initbydim(
+            f"cell_dim{cell_size}", 1000, 5, cell_size=cell_size
+        )
+        assert cell_size == client.cms().info(f"cell_dim{cell_size}")["cell_size"]
+        assert client.cms().initbyprob(
+            f"cell_prob{cell_size}", 0.01, 0.01, cell_size=cell_size
+        )
+        assert cell_size == client.cms().info(f"cell_prob{cell_size}")["cell_size"]
+
+    # the server uses 4-byte counters when CELL_SIZE is omitted
+    assert client.cms().initbydim("cell_default", 1000, 5)
+    info = client.cms().info("cell_default")
+    assert 1000 == info["width"]
+    assert 5 == info["depth"]
+    assert 0 == info["count"]
+    assert 4 == info["cell_size"]
+
+    # only 1, 2, 4 and 8 are valid cell sizes
+    with pytest.raises(redis.ResponseError):
+        client.cms().initbydim("cell_bad", 1000, 5, cell_size=3)
+    with pytest.raises(redis.ResponseError):
+        client.cms().initbyprob("cell_bad", 0.01, 0.01, cell_size=16)
+
+
+@pytest.mark.redismod
 def test_topk(client):
     # test list with empty buckets
     assert client.topk().reserve("topk", 3, 50, 4, 0.9)
