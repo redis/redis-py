@@ -347,6 +347,11 @@ async def test_send_packed_command_writes_to_open_transport(socket_timeout):
     [
         (TypeError, "'NoneType' object is not callable"),
         (AttributeError, "'NoneType' object has no attribute '_add_writer'"),
+        (
+            RuntimeError,
+            "unable to perform operation on <TCPTransport closed=True>; "
+            "the handler is closed",
+        ),
     ],
 )
 async def test_send_packed_command_translates_closed_transport_error(
@@ -373,17 +378,30 @@ async def test_send_packed_command_translates_closed_transport_error(
     assert not conn.is_connected
 
 
-async def test_send_packed_command_preserves_type_error_on_open_transport():
+@pytest.mark.parametrize(
+    ("error_type", "message"),
+    [
+        (TypeError, "sequence item 0: expected a bytes-like object"),
+        (
+            RuntimeError,
+            "unable to perform operation on <TCPTransport closed=True>; "
+            "the handler is closed",
+        ),
+    ],
+)
+async def test_send_packed_command_preserves_write_errors_on_open_transport(
+    error_type, message
+):
     conn = Connection(health_check_interval=0)
     writer = mock.Mock()
     writer.transport.is_closing.return_value = False
-    error = TypeError("sequence item 0: expected a bytes-like object")
+    error = error_type(message)
     writer.writelines.side_effect = error
     writer.drain = mock.AsyncMock()
     conn._reader = mock.Mock()
     conn._writer = writer
 
-    with pytest.raises(TypeError) as exc_info:
+    with pytest.raises(error_type) as exc_info:
         await conn.send_packed_command(b"PING", check_health=False)
 
     assert exc_info.value is error

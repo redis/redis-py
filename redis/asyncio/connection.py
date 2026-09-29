@@ -1260,10 +1260,11 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         try:
             writer.writelines(command)
             await writer.drain()
-        except (TypeError, AttributeError) as e:
+        except (TypeError, AttributeError, RuntimeError) as e:
             # CPython gh-136234 adds the missing connection-lost check in 3.13.10+
             # and 3.14.1+. Python 3.12, 3.13.0-3.13.9, and 3.14.0 can instead
             # leak TypeError or AttributeError from the transport (#4287).
+            # uvloop raises RuntimeError on a write to a closed transport (#4352).
             if writer.transport.is_closing():
                 raise ConnectionError(
                     "Connection closed by the server while writing"
