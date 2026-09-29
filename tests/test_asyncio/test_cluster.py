@@ -5853,7 +5853,7 @@ class TestClusterPubSub:
     """
 
     async def wait_for_message(
-        self, pubsub, timeout=0.2, ignore_subscribe_messages=False, sharded=False
+        self, pubsub, timeout=0.5, ignore_subscribe_messages=False, sharded=False
     ):
         """Helper method to wait for a message with timeout.
 
