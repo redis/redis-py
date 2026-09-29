@@ -1361,7 +1361,13 @@ class RedisCluster(
         retry_attempts = self.retry.get_retries()
 
         passed_targets = kwargs.pop("target_nodes", None)
-        if passed_targets and not self._is_node_flag(passed_targets):
+        if (
+            passed_targets is not None
+            and not self._is_node_flag(passed_targets)
+            and not (
+                isinstance(passed_targets, (list, dict, str)) and not passed_targets
+            )
+        ):
             target_nodes = self._parse_target_nodes(passed_targets)
             target_nodes_specified = True
             retry_attempts = 0
@@ -1594,6 +1600,9 @@ class RedisCluster(
                     and self.reinitialize_counter % self.reinitialize_steps == 0
                 ):
                     await self.aclose()
+                    await self.initialize(
+                        additional_startup_nodes_info=[(e.host, e.port)]
+                    )
                     # Reset the counter
                     self.reinitialize_counter = 0
                 else:
