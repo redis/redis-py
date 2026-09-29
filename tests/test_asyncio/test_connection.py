@@ -237,6 +237,42 @@ async def test_async_resp_read_response_raises_after_disconnect(parser_class):
 
 
 @pytest.mark.parametrize(
+    "parser_class",
+    [_AsyncRESP2Parser, _AsyncRESP3Parser, _AsyncHiredisParser],
+    ids=["AsyncRESP2Parser", "AsyncRESP3Parser", "AsyncHiredisParser"],
+)
+async def test_async_parser_read_guards_report_a_never_connected_parser(parser_class):
+    # The read guards consult _connected, which used to be assigned only by
+    # on_connect() / on_disconnect(). A parser that has never connected - the
+    # one a fresh Connection owns before connect() - therefore raised
+    # AttributeError from those guards instead of the retryable ConnectionError,
+    # so no retry or failover layer acted on it. can_read() raises OSError,
+    # which Connection.can_read() converts to ConnectionError.
+    if parser_class is _AsyncHiredisParser and not HIREDIS_AVAILABLE:
+        pytest.skip("Hiredis not available")
+
+    parser = parser_class(socket_read_size=65536)
+
+    assert parser._connected is False
+    with pytest.raises(ConnectionError):
+        await parser.read_response()
+    with pytest.raises(OSError):
+        await parser.can_read()
+
+
+async def test_connection_read_guards_report_a_never_connected_connection():
+    # End-to-end counterpart: the AttributeError also sailed past
+    # Connection.can_read()'s ``except OSError``, so neither the ConnectionError
+    # conversion nor the disconnect() it performs happened.
+    conn = Connection()
+
+    with pytest.raises(ConnectionError):
+        await conn.read_response()
+    with pytest.raises(ConnectionError):
+        await conn.can_read()
+
+
+@pytest.mark.parametrize(
     ("protocol", "parser_class", "expected_parser_class"),
     [
         (None, _AsyncRESP2Parser, _AsyncRESP3Parser),
@@ -1097,6 +1133,22 @@ def test_parse_url_invalid_db_keeps_stable_message():
     assert str(exc_info.value) == "Invalid value for 'db' in connection URL."
 
 
+@pytest.mark.parametrize(
+    ("url", "expected_port"),
+    (
+        ("redis://localhost", None),
+        ("redis://localhost:6380", 6380),
+        ("redis://localhost:0", 0),
+    ),
+)
+def test_connection_pool_from_url_preserves_explicit_port(url, expected_port):
+    kwargs = parse_url(url)
+    pool = ConnectionPool.from_url(url)
+
+    assert kwargs.get("port") == expected_port
+    assert pool.connection_kwargs.get("port") == expected_port
+
+
 def test_parse_url_retry_on_error_unknown_name():
     with pytest.raises(ValueError) as exc_info:
         parse_url("redis://localhost:6379/?retry_on_error=NotARealError")
@@ -1128,3 +1180,22 @@ async def test_parse_url_retry_on_error_usable_in_retry():
     with pytest.raises(ConnectionError):
         await conn.retry.call_with_retry(do=do, fail=fail)
     assert calls == 2
+
+
+@pytest.mark.parametrize("port", [True, False, 1.5, "nope", None])
+def test_async_connection_rejects_bool_port(port):
+    """bool subclasses int; port=True must not become privileged port 1."""
+    with pytest.raises(TypeError, match="port must be an integer"):
+        Connection(port=port)
+
+
+def test_async_connection_accepts_numeric_port_string():
+    """Callers still pass a decimal string such as \"6379\"."""
+    conn = Connection(port="6379")
+    assert conn.port == 6379
+
+
+@pytest.mark.parametrize("port", [-1, 65536, 99999])
+def test_async_connection_rejects_out_of_range_port(port):
+    with pytest.raises(ValueError, match="port must be in 0..65535"):
+        Connection(port=port)

@@ -17,6 +17,7 @@ from redis.utils import (
     format_error_message,
     list_keys_to_dict,
     merge_result,
+    pipeline,
     safe_str,
     SENTINEL,
     str_if_bytes,
@@ -395,3 +396,44 @@ class TestListKeysToDict:
             "GET": callback,
             "SET": callback,
         }
+
+
+@pytest.mark.fixed_client
+class TestPipelineContextManager:
+    class _FakePipeline:
+        def __init__(self):
+            self.executed = False
+            self.reset_calls = 0
+
+        def execute(self):
+            self.executed = True
+
+        def reset(self):
+            self.reset_calls += 1
+
+    class _FakeRedis:
+        def __init__(self, fake_pipeline):
+            self._fake_pipeline = fake_pipeline
+
+        def pipeline(self):
+            return self._fake_pipeline
+
+    def test_executes_and_resets_on_success(self):
+        fake_pipeline = self._FakePipeline()
+        with pipeline(self._FakeRedis(fake_pipeline)) as p:
+            assert p is fake_pipeline
+        assert fake_pipeline.executed is True
+        assert fake_pipeline.reset_calls == 1
+
+    def test_resets_but_does_not_execute_on_exception(self):
+        # A pipeline using WATCH holds a real connection checked out from
+        # the pool as soon as watch() is called - reset() is what returns
+        # it. Without a guaranteed reset() on this path, that connection
+        # stayed checked out until the pipeline object happened to be
+        # garbage collected.
+        fake_pipeline = self._FakePipeline()
+        with pytest.raises(ValueError):
+            with pipeline(self._FakeRedis(fake_pipeline)):
+                raise ValueError("boom")
+        assert fake_pipeline.executed is False
+        assert fake_pipeline.reset_calls == 1

@@ -1274,7 +1274,7 @@ class SearchCommands:
 
     def info(self):
         """
-        Get info an stats about the the current index, including the number of
+        Get info and stats about the current index, including the number of
         documents, memory consumption, etc
 
         For more information see `FT.INFO <https://redis.io/commands/ft.info>`_.
@@ -1388,7 +1388,7 @@ class SearchCommands:
             options["post_processing"] = post_processing
         if params_substitution:
             pieces.extend(self.get_params_args(params_substitution))
-        if timeout:
+        if timeout is not None:
             pieces.extend(("TIMEOUT", timeout))
         if cursor:
             options["cursor"] = True
@@ -1826,7 +1826,7 @@ class SearchCommands:
 class AsyncSearchCommands(SearchCommands):
     async def info(self):
         """
-        Get info an stats about the the current index, including the number of
+        Get info and stats about the current index, including the number of
         documents, memory consumption, etc
 
         For more information see `FT.INFO <https://redis.io/commands/ft.info>`_.
@@ -1927,7 +1927,7 @@ class AsyncSearchCommands(SearchCommands):
             options["post_processing"] = post_processing
         if params_substitution:
             pieces.extend(self.get_params_args(params_substitution))
-        if timeout:
+        if timeout is not None:
             pieces.extend(("TIMEOUT", timeout))
         if cursor:
             options["cursor"] = True

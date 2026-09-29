@@ -1632,7 +1632,13 @@ class PubSub:
         return self.execute_command("SUNSUBSCRIBE", *args)
 
     async def listen(self) -> AsyncIterator:
-        """Listen for messages on channels this client has been subscribed to"""
+        """Listen for messages on channels this client has been subscribed to.
+
+        Iteration ends once every channel and pattern has been unsubscribed
+        from. If nothing is subscribed when iteration begins it ends
+        immediately rather than waiting, so subscribe first: a listener
+        started before any subscription finishes without yielding anything.
+        """
         while self.subscribed:
             response = await self.handle_message(await self.parse_response(block=True))
             if response is not None:
@@ -1710,22 +1716,31 @@ class PubSub:
                 sharded=True,
             )
 
-        # if this is an unsubscribe message, remove it from memory
+        # if this is an unsubscribe message, remove it from memory.
+        # ``discard`` rather than ``remove``: the guard above already makes the
+        # removal conditional, so the two are equivalent for a single caller -
+        # but another writer can drop the same entry between the check and the
+        # removal, and ``remove`` would then raise ``KeyError`` out of a pubsub
+        # read that no caller catches. ``ClusterPubSub._detach_shard_channel``
+        # is such a writer: it forgets a migrating shard channel locally,
+        # deliberately without the per-node I/O lock this bookkeeping runs
+        # under, because waiting for that lock stalls reconciliation behind a
+        # poll's whole retry budget on the node being migrated away from.
         if message_type in self.UNSUBSCRIBE_MESSAGE_TYPES:
             if message_type == "punsubscribe":
                 pattern = response[1]
                 if pattern in self.pending_unsubscribe_patterns:
-                    self.pending_unsubscribe_patterns.remove(pattern)
+                    self.pending_unsubscribe_patterns.discard(pattern)
                     self.patterns.pop(pattern, None)
             elif message_type == "sunsubscribe":
                 s_channel = response[1]
                 if s_channel in self.pending_unsubscribe_shard_channels:
-                    self.pending_unsubscribe_shard_channels.remove(s_channel)
+                    self.pending_unsubscribe_shard_channels.discard(s_channel)
                     self.shard_channels.pop(s_channel, None)
             else:
                 channel = response[1]
                 if channel in self.pending_unsubscribe_channels:
-                    self.pending_unsubscribe_channels.remove(channel)
+                    self.pending_unsubscribe_channels.discard(channel)
                     self.channels.pop(channel, None)
 
         if message_type in self.PUBLISH_MESSAGE_TYPES:
