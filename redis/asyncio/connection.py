@@ -1419,12 +1419,13 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                 add_debug_log_for_connection_failure(self, e, "reading response")
                 await self.disconnect(nowait=True)
             raise ConnectionError(f"Error while reading from {host_error} : {e.args}")
-        except UNRECOVERABLE_PARSE_ERRORS:
+        except UNRECOVERABLE_PARSE_ERRORS as e:
             # See the sync Connection.read_response and #4291. The async parser
             # re-parses from self._pos = 0 rather than rewinding a socket
             # buffer, but the consequence is the same: the bytes that already
             # failed to parse are still there, so the connection is not
             # reusable no matter what disconnect_on_error says.
+            add_debug_log_for_connection_failure(self, e, "reading response")
             await self.disconnect(nowait=True)
             raise
         except BaseException as e:
