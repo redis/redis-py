@@ -1145,6 +1145,17 @@ class TestParseLengthPrefixedSubkeys:
             "ccc",
         ]
 
+    def test_multibyte_subkeys_use_byte_lengths(self):
+        # the server prefixes each subkey with its size in bytes (sdslen):
+        # each 键 is 3 bytes in UTF-8, so "键键" is prefixed with 6
+        assert _parse_length_prefixed_subkeys("6:键键,3:abc") == ["键键", "abc"]
+
+    def test_multibyte_subkeys_from_bytes(self):
+        assert _parse_length_prefixed_subkeys("6:键键,3:abc".encode("utf-8")) == [
+            "键键",
+            "abc",
+        ]
+
 
 class TestSubkeyspaceChannelClass:
     """Tests for SubkeyspaceChannel class."""
@@ -1365,6 +1376,30 @@ class TestSubkeyChannelDetection:
 class TestSubkeyNotificationParsing:
     """Tests for KeyNotification parsing of subkey channels."""
 
+    @pytest.mark.parametrize("as_bytes", [False, True])
+    @pytest.mark.parametrize(
+        ("channel", "data"),
+        [
+            ("__subkeyspace@0__:myhash", "hset"),
+            ("__subkeyspace@0__:myhash", "hset|4:abc"),
+            ("__subkeyspace@0__:myhash", "hset|3:abc;3:def"),
+            ("__subkeyspace@0__:myhash", "hset|x:abc"),
+            ("__subkeyevent@0__:hset", "1:k"),
+            ("__subkeyevent@0__:hset", "4:abc|3:foo"),
+            ("__subkeyspaceitem@0__:myhash", "hset"),
+            ("__subkeyspaceevent@0__:hset", "3:foo"),
+        ],
+    )
+    def test_malformed_payload_returns_none(self, channel, data, as_bytes):
+        payload = data.encode() if as_bytes else data
+        assert KeyNotification.try_parse(channel, payload) is None
+        assert (
+            KeyNotification.from_message(
+                {"type": "pmessage", "channel": channel, "data": payload}
+            )
+            is None
+        )
+
     # --- subkeyspace ---
 
     def test_subkeyspace_parse(self):
@@ -1377,6 +1412,22 @@ class TestSubkeyNotificationParsing:
         assert n.database == 0
         assert n.is_keyspace is True
         assert n.subkeys == ["field", "field2"]
+
+    def test_subkeyspace_multibyte_subkeys_bytes_payload(self):
+        # payload lengths are byte counts: "键键" is 6 bytes in UTF-8
+        n = KeyNotification.try_parse(
+            "__subkeyspace@0__:myhash", "hset|6:键键,3:abc".encode("utf-8")
+        )
+        assert n is not None
+        assert n.event_type == "hset"
+        assert n.subkeys == ["键键", "abc"]
+
+    def test_subkeyspace_multibyte_subkeys_str_payload(self):
+        # decode_responses=True delivers the payload as str; the byte lengths
+        # must still be honored after re-encoding
+        n = KeyNotification.try_parse("__subkeyspace@0__:myhash", "hset|6:键键,3:abc")
+        assert n is not None
+        assert n.subkeys == ["键键", "abc"]
 
     def test_subkeyspace_single_subkey(self):
         n = KeyNotification.try_parse("__subkeyspace@0__:myhash", "hdel|3:foo")
@@ -1418,6 +1469,16 @@ class TestSubkeyNotificationParsing:
         assert n.database == 0
         assert n.is_keyspace is False
         assert n.subkeys == ["field", "field2"]
+
+    def test_subkeyevent_multibyte_key_bytes_payload(self):
+        # key length prefix is a byte count: "键键" is 6 bytes in UTF-8
+        n = KeyNotification.try_parse(
+            "__subkeyevent@0__:hset", "6:键键|3:abc".encode("utf-8")
+        )
+        assert n is not None
+        assert n.key == "键键"
+        assert n.event_type == "hset"
+        assert n.subkeys == ["abc"]
 
     def test_subkeyevent_single_subkey(self):
         n = KeyNotification.try_parse("__subkeyevent@0__:hdel", "6:myhash|3:foo")

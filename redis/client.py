@@ -1614,7 +1614,13 @@ class PubSub:
         return self.execute_command("SUNSUBSCRIBE", *args)
 
     def listen(self):
-        "Listen for messages on channels this client has been subscribed to"
+        """Listen for messages on channels this client has been subscribed to.
+
+        Iteration ends once every channel and pattern has been unsubscribed
+        from. If nothing is subscribed when iteration begins it ends
+        immediately rather than waiting, so subscribe first: a listener
+        started before any subscription finishes without yielding anything.
+        """
         while self.subscribed:
             response = self.handle_message(self.parse_response(block=True))
             if response is not None:

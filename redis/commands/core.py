@@ -92,7 +92,6 @@ from redis.typing import (
     ZSetRangeResponse,
 )
 from redis.utils import (
-    deprecated_function,
     experimental_args,
     experimental_method,
     extract_expire_flags,
@@ -862,6 +861,57 @@ class ManagementCommands(CommandsProtocol):
             args.append(b"ID")
             args += client_id
         return self.execute_command("CLIENT LIST", *args, **kwargs)
+
+    @overload
+    def client_list_iter(
+        self: SyncClientProtocol,
+        _type: str | None = None,
+        client_id: List[EncodableT] = [],
+        **kwargs,
+    ) -> Iterator[dict[str, str]]: ...
+
+    @overload
+    def client_list_iter(
+        self: AsyncClientProtocol,
+        _type: str | None = None,
+        client_id: List[EncodableT] = [],
+        **kwargs,
+    ) -> Awaitable[Iterator[dict[str, str]]]: ...
+
+    def client_list_iter(
+        self, _type: str | None = None, client_id: List[EncodableT] = [], **kwargs
+    ) -> Iterator[dict[str, str]] | Awaitable[Iterator[dict[str, str]]]:
+        """
+        Like ``client_list()``, but returns an iterator that parses and
+        yields one client record at a time instead of building the full
+        list upfront. This bounds the memory held for parsed records to
+        one record at a time rather than all of them at once, which
+        matters when there are many thousands of connected clients.
+
+        The full CLIENT LIST reply is still read off the socket in one
+        piece before this can start yielding - that part is unavoidable
+        given how RESP bulk-string framing works - so this only reduces
+        the memory used to hold the parsed records, not the raw reply.
+
+        :param _type: optional. one of the client types (normal, master,
+         replica, pubsub)
+        :param client_id: optional. a list of client ids
+
+        For more information, see https://redis.io/commands/client-list
+        """
+        args = []
+        if _type is not None:
+            client_types = ("normal", "master", "replica", "pubsub")
+            if str(_type).lower() not in client_types:
+                raise DataError(f"CLIENT LIST _type must be one of {client_types!r}")
+            args.append(b"TYPE")
+            args.append(_type)
+        if not isinstance(client_id, list):
+            raise DataError("client_id must be a list")
+        if client_id:
+            args.append(b"ID")
+            args += client_id
+        return self.execute_command("CLIENT LIST", *args, as_iter=True, **kwargs)
 
     @overload
     def client_getname(self: SyncClientProtocol, **kwargs) -> bytes | str | None: ...
@@ -4493,11 +4543,6 @@ class BasicKeyCommands(CommandsProtocol):
         self: AsyncClientProtocol, name: KeyT, time: ExpiryT, value: EncodableT
     ) -> Awaitable[bool]: ...
 
-    @deprecated_function(
-        version="2.6.12",
-        reason="Use 'set' instead.",
-        name="setex",
-    )
     def setex(
         self, name: KeyT, time: ExpiryT, value: EncodableT
     ) -> bool | Awaitable[bool]:
@@ -4506,8 +4551,9 @@ class BasicKeyCommands(CommandsProtocol):
         seconds. ``time`` can be represented by an integer or a Python
         timedelta object.
 
-        As per Redis 2.6.12, SETEX is considered deprecated.
-        Please use SET with EX parameter in new code.
+        Redis has deprecated SETEX since version 2.6.12. The command remains
+        available for compatibility. Please use SET with the EX parameter in
+        new code.
 
         For more information, see https://redis.io/commands/setex
         """
@@ -10172,17 +10218,15 @@ class HashCommands(CommandsProtocol):
         mapping: Mapping[FieldT, EncodableT],
     ) -> Awaitable[bool]: ...
 
-    @deprecated_function(
-        version="4.0.0",
-        reason="Use 'hset' instead.",
-        name="hmset",
-    )
     def hmset(
         self, name: KeyT, mapping: Mapping[FieldT, EncodableT]
     ) -> bool | Awaitable[bool]:
         """
         Set key to value within hash ``name`` for each corresponding
         key and value from the ``mapping`` dict.
+
+        Redis has deprecated HMSET since version 4.0.0. The command remains
+        available for compatibility. Please use HSET in new code.
 
         For more information, see https://redis.io/commands/hmset
         """

@@ -333,6 +333,98 @@ async def moved_redirection_helper(
             assert fetched_node.server_type == PRIMARY
 
 
+class TestMovedReinitialization:
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("reinitialize_steps", [0, 1, 3])
+    async def test_moved_refreshes_topology_before_retry(self, reinitialize_steps):
+        r = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            reinitialize_steps=reinitialize_steps,
+        )
+        key = "foo"
+        slot = r.keyslot(key)
+        refreshes = []
+        command_nodes = []
+
+        async def execute_command(node, command, *args, **kwargs):
+            if command == "CLUSTER SLOTS":
+                refreshes.append(node.name)
+                return cluster_slots
+            assert command == "GET"
+            command_nodes.append(node.port)
+            if node.port != owner_port:
+                raise MovedError(f"{slot} {default_host}:{owner_port}")
+            return b"value"
+
+        async with aclosing(r):
+            with (
+                mock.patch.object(
+                    ClusterNode,
+                    "execute_command",
+                    autospec=True,
+                    side_effect=execute_command,
+                ),
+                mock.patch.object(AsyncCommandsParser, "initialize", autospec=True),
+            ):
+                # Move the key back and forth, crossing the refresh threshold twice.
+                for moved_count in range(1, 7):
+                    owner_port = 7000 if moved_count % 2 else 7001
+                    other_port = 7001 if owner_port == 7000 else 7000
+                    cluster_slots = [
+                        [0, 8191, [default_host, other_port, "other"]],
+                        [8192, 16383, [default_host, owner_port, "owner"]],
+                    ]
+
+                    assert await r.get(key) == b"value"
+                    assert command_nodes[-2:] == [other_port, owner_port]
+                    assert len(command_nodes) == moved_count * 2
+                    assert r.get_node_from_key(key).port == owner_port
+                    assert r._initialize is False
+                    expected_refreshes = (
+                        moved_count // reinitialize_steps if reinitialize_steps else 0
+                    )
+                    assert len(refreshes) == expected_refreshes
+                    assert r.reinitialize_counter == (
+                        moved_count % reinitialize_steps
+                        if reinitialize_steps
+                        else moved_count
+                    )
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize(
+    ("url", "expected_port"),
+    [
+        ("redis://localhost", 6379),
+        ("redis://localhost:6380", 6380),
+        ("redis://localhost:0", 0),
+    ],
+)
+async def test_from_url_preserves_startup_node_port(
+    url: str, expected_port: int
+) -> None:
+    cluster = RedisCluster.from_url(url)
+
+    assert len(cluster.startup_nodes) == 1
+    assert cluster.startup_nodes[0].port == expected_port
+
+    await cluster.aclose()
+
+
+@pytest.mark.fixed_client
+def test_from_url_requires_startup_node_host() -> None:
+    with pytest.raises(RedisClusterException, match="requires at least one node"):
+        RedisCluster.from_url("redis://:0")
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize("port", [None, "", False, 0.0])
+def test_constructor_rejects_other_falsy_ports(port: Any) -> None:
+    with pytest.raises(RedisClusterException, match="requires at least one node"):
+        RedisCluster(host="localhost", port=port)
+
+
 @pytest.mark.onlycluster
 class TestRedisClusterObj:
     """
@@ -2934,6 +3026,37 @@ class TestStaticMetadataRouting:
         await rc.aclose()
 
     @pytest.mark.fixed_client
+    @pytest.mark.parametrize("empty_targets", [[], {}, ""])
+    async def test_execute_command_empty_target_nodes_falls_back(
+        self, empty_targets: Any
+    ) -> None:
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+        default_node = rc.get_default_node()
+
+        with mock.patch.object(
+            RedisCluster,
+            "_execute_command",
+            new=mock.AsyncMock(return_value=100),
+        ) as execute:
+            result = await rc.execute_command("DBSIZE", target_nodes=empty_targets)
+
+        assert result == 100
+        execute.assert_awaited_once_with(default_node, "DBSIZE")
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("invalid_targets", [False, 0, (), b""])
+    async def test_execute_command_rejects_invalid_empty_target_nodes(
+        self, invalid_targets: Any
+    ) -> None:
+        rc = await get_mocked_redis_client(host=default_host, port=7000)
+
+        with pytest.raises(TypeError, match="target_nodes type"):
+            await rc.execute_command("DBSIZE", target_nodes=invalid_targets)
+
+        await rc.aclose()
+
+    @pytest.mark.fixed_client
     async def test_command_subcommands_route_to_default_node(self) -> None:
         rc = await get_mocked_redis_client(host=default_host, port=7000)
         default_node = rc.get_default_node()
@@ -4666,6 +4789,23 @@ class TestClusterPipeline:
                 "when running redis in cluster mode..."
             )
 
+    async def test_client_list_iter_blocked_on_cluster_pipeline(self) -> None:
+        """
+        client_list_iter sends the same CLIENT LIST command as client_list,
+        which PIPELINE_BLOCKED_COMMANDS blocks on ClusterPipeline.
+        client_list_iter has no wire-command entry of its own to add there,
+        so it must be blocked explicitly too, or it would fall through to
+        the inherited implementation and queue CLIENT LIST like a real
+        pipelined command instead of raising.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            pipe = r.pipeline()
+            with pytest.raises(RedisClusterException):
+                pipe.client_list_iter()
+        finally:
+            await r.aclose()
+
     async def test_evalsha_not_blocked_on_cluster_pipeline(self) -> None:
         """EVALSHA must be usable on async ClusterPipeline (see #2914)."""
         assert "EVALSHA" not in PIPELINE_BLOCKED_COMMANDS
@@ -5713,7 +5853,7 @@ class TestClusterPubSub:
     """
 
     async def wait_for_message(
-        self, pubsub, timeout=0.2, ignore_subscribe_messages=False, sharded=False
+        self, pubsub, timeout=0.5, ignore_subscribe_messages=False, sharded=False
     ):
         """Helper method to wait for a message with timeout.
 

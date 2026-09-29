@@ -1,3 +1,5 @@
+import inspect
+
 import pytest
 
 from redis._parsers.helpers import (
@@ -98,6 +100,16 @@ def test_parse_client_list():
     ]
     clients = parse_client_list(response)
     assert clients == expected
+
+
+@pytest.mark.fixed_client
+def test_parse_client_list_as_iter():
+    # ``as_iter=True`` (client_list_iter's opt-in path) must yield the same
+    # records as the eager list form, just lazily and one at a time.
+    response = "id=1 addr=127.0.0.1:1\nid=2 addr=127.0.0.1:2"
+    result = parse_client_list(response, as_iter=True)
+    assert inspect.isgenerator(result)
+    assert list(result) == parse_client_list(response)
 
 
 @pytest.mark.fixed_client

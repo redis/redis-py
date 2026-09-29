@@ -259,6 +259,53 @@ class TestLock:
         assert 8000 < (await r.pttl("foo")) <= 10000
         await lock.release()
 
+    async def test_extend_lock_zero_additional_time_replace_ttl_raises_error(self, r):
+        lock = self.get_lock(r, "foo", timeout=0)
+        assert await lock.acquire(blocking=False)
+        with pytest.raises(LockNotOwnedError):
+            await lock.extend(0, replace_ttl=True)
+        assert await r.get("foo") == lock.local.token
+        assert await r.pttl("foo") == -1
+        await lock.release()
+
+    async def test_extend_lock_zero_timeout_replace_ttl_keeps_existing_ttl(self, r):
+        lock = self.get_lock(r, "foo", timeout=10)
+        assert await lock.acquire(blocking=False)
+        old_ttl = await r.pttl("foo")
+        assert await lock.extend(0, replace_ttl=True)
+        assert await r.get("foo") == lock.local.token
+        assert 0 < (await r.pttl("foo")) <= old_ttl
+        await lock.release()
+
+    async def test_extend_lock_negative_timeout_replace_ttl_keeps_existing_ttl(self, r):
+        lock = self.get_lock(r, "foo", timeout=10)
+        assert await lock.acquire(blocking=False)
+        old_ttl = await r.pttl("foo")
+        assert await lock.extend(-1, replace_ttl=True)
+        assert await r.get("foo") == lock.local.token
+        assert 0 < (await r.pttl("foo")) <= old_ttl
+        await lock.release()
+
+    async def test_extend_lock_negative_additional_time_without_replace_keeps_existing_ttl(
+        self, r
+    ):
+        lock = self.get_lock(r, "foo", timeout=10)
+        assert await lock.acquire(blocking=False)
+        old_ttl = await r.pttl("foo")
+        assert await lock.extend(-20)
+        assert await r.get("foo") == lock.local.token
+        assert 0 < (await r.pttl("foo")) <= old_ttl
+        await lock.release()
+
+    async def test_extend_lock_zero_timeout_without_replace_raises_error(self, r):
+        lock = self.get_lock(r, "foo", timeout=0)
+        assert await lock.acquire(blocking=False)
+        with pytest.raises(LockNotOwnedError):
+            await lock.extend(0)
+        assert await r.get("foo") == lock.local.token
+        assert await r.pttl("foo") == -1
+        await lock.release()
+
     async def test_extend_lock_float(self, r):
         lock = self.get_lock(r, "foo", timeout=10.5)
         assert await lock.acquire(blocking=False)
@@ -294,6 +341,14 @@ class TestLock:
         assert await r.pttl("foo") <= 5000
         assert await lock.reacquire()
         assert 8000 < (await r.pttl("foo")) <= 10000
+        await lock.release()
+
+    async def test_reacquire_lock_zero_timeout_keeps_lock(self, r):
+        lock = self.get_lock(r, "foo", timeout=0)
+        assert await lock.acquire(blocking=False)
+        assert await lock.reacquire()
+        assert await r.get("foo") == lock.local.token
+        assert await r.pttl("foo") == -1
         await lock.release()
 
     async def test_reacquiring_unlocked_lock_raises_error(self, r):
