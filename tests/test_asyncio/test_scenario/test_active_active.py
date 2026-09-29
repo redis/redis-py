@@ -20,7 +20,7 @@ from redis.maint_notifications import MaintenanceState, MaintNotificationsConfig
 from redis.multidb.circuit import State as CBState
 from redis.multidb.exception import TemporaryUnavailableException
 from redis.utils import dummy_fail_async
-from tests.test_scenario.conftest import RELAXED_TIMEOUT
+from tests.test_scenario.conftest import RELAXED_TIMEOUT, use_mock_proxy
 from tests.test_scenario.fault_injector_client import (
     ActionRequest,
     ActionType,
@@ -688,6 +688,10 @@ class TestActiveActive:
             assert messages_count >= 2
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        use_mock_proxy(),
+        reason="Mock proxy doesn't support topology change effects.",
+    )
     @pytest.mark.parametrize("effect, trigger", PLANNED_MAINTENANCE_SCENARIOS)
     @pytest.mark.parametrize(
         "r_multi_db",
@@ -808,15 +812,18 @@ class TestActiveActive:
         )
 
         async with client as r_multi_db:
+            # Client initialized on the first command - before the fault is injected,
+            # so the initial health check does not run into it and the failover
+            # observed below starts from the intended active database.
+            await retry.call_with_retry(
+                lambda: r_multi_db.set("key", "value"), lambda _: dummy_fail_async()
+            )
+
             event = asyncio.Event()
             asyncio.create_task(
                 trigger_network_failure_action(
                     fault_injector_client, endpoint_config, event
                 )
-            )
-
-            await retry.call_with_retry(
-                lambda: r_multi_db.set("key", "value"), lambda _: dummy_fail_async()
             )
 
             # Execute commands before network failure

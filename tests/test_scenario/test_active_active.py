@@ -18,7 +18,7 @@ from redis.multidb.failover import DEFAULT_FAILOVER_ATTEMPTS, DEFAULT_FAILOVER_D
 from redis.asyncio.multidb.healthcheck import LagAwareHealthCheck
 from redis.retry import Retry
 from redis.utils import dummy_fail
-from tests.test_scenario.conftest import RELAXED_TIMEOUT
+from tests.test_scenario.conftest import RELAXED_TIMEOUT, use_mock_proxy
 from tests.test_scenario.fault_injector_client import (
     ActionRequest,
     ActionType,
@@ -737,6 +737,10 @@ class TestActiveActive:
         pubsub_thread.stop()
         assert messages_count > 2
 
+    @pytest.mark.skipif(
+        use_mock_proxy(),
+        reason="Mock proxy doesn't support topology change effects.",
+    )
     @pytest.mark.parametrize("effect, trigger", PLANNED_MAINTENANCE_SCENARIOS)
     @pytest.mark.parametrize(
         "r_multi_db",
