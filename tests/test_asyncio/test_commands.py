@@ -5390,6 +5390,26 @@ class TestRedisCommands:
         assert response[1]["consumer"] == consumer2.encode()
 
     @skip_if_server_version_lt("5.0.0")
+    @pytest.mark.parametrize("consumer", ["", b"", "consumer1", b"consumer1"])
+    async def test_xpending_range_consumer_filter(self, r, consumer):
+        stream, group = "stream", "group"
+        first = await r.xadd(stream, {"foo": "bar"})
+        second = await r.xadd(stream, {"foo": "baz"})
+        await r.xgroup_create(stream, group, 0)
+        await r.xreadgroup(group, consumer, streams={stream: ">"}, count=1)
+        await r.xreadgroup(group, "other", streams={stream: ">"}, count=1)
+
+        pending = await r.xpending_range(stream, group, "-", "+", 5)
+        assert [item["message_id"] for item in pending] == [first, second]
+
+        filtered = await r.xpending_range(
+            stream, group, "-", "+", 5, consumername=consumer
+        )
+        assert [item["message_id"] for item in filtered] == [first]
+        expected_consumer = consumer.encode() if isinstance(consumer, str) else consumer
+        assert filtered[0]["consumer"] == expected_consumer
+
+    @skip_if_server_version_lt("5.0.0")
     async def test_xrange(self, r: redis.Redis):
         stream = "stream"
         m1 = await r.xadd(stream, {"foo": "bar"})
