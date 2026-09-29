@@ -6228,6 +6228,9 @@ class TestRedisCommands:
         # specifying member and longitude and latitude
         with pytest.raises(exceptions.DataError):
             assert r.geosearch("barcelona", member="Paris", longitude=2, latitude=1)
+        # origin (0, 0) is a valid coordinate and must still conflict with member
+        with pytest.raises(exceptions.DataError):
+            r.geosearch("barcelona", member="Paris", longitude=0, latitude=0, radius=10)
         # specifying one of longitude and latitude
         with pytest.raises(exceptions.DataError):
             assert r.geosearch("barcelona", longitude=2)
@@ -6261,6 +6264,45 @@ class TestRedisCommands:
         # use any without count
         with pytest.raises(exceptions.DataError):
             assert r.geosearch("barcelona", member="place3", radius=100, any=1)
+
+    def test_geosearch_forwards_zero_numeric_arguments(self):
+        # GEOSEARCH origin, radius, box size, count, and member name can all
+        # legitimately be 0. Truthiness guards dropped those values, so the
+        # command on the wire omitted BYRADIUS/BYBOX/COUNT/FROMMEMBER or sent
+        # both FROMMEMBER and FROMLONLAT. Runs without a server.
+        client = redis.Redis()
+
+        def wire_args(**kwargs):
+            with mock.patch.object(client, "execute_command", return_value=[]) as m:
+                client.geosearch("places", **kwargs)
+                return list(m.call_args[0])
+
+        origin_radius = wire_args(longitude=0, latitude=0, radius=0, unit="m")
+        assert origin_radius[2:5] == [b"FROMLONLAT", 0, 0]
+        assert origin_radius[-3:] == [b"BYRADIUS", 0, "m"]
+
+        member_zero = wire_args(member=0, radius=10, unit="km")
+        assert member_zero[2:4] == [b"FROMMEMBER", 0]
+        assert member_zero[-3:] == [b"BYRADIUS", 10, "km"]
+
+        box_zero_width = wire_args(longitude=1, latitude=2, width=0, height=1, unit="m")
+        assert box_zero_width[-4:] == [b"BYBOX", 0, 1, "m"]
+
+        count_zero = wire_args(longitude=1, latitude=2, radius=10, count=0, unit="m")
+        assert count_zero[-2:] == [b"COUNT", 0]
+        assert "COUNT" not in wire_args(longitude=1, latitude=2, radius=10, unit="m")
+
+        store_radius_zero = []
+        with mock.patch.object(client, "execute_command", return_value=0) as m:
+            client.geosearchstore("dest", "places", longitude=0, latitude=0, radius=0)
+            store_radius_zero = list(m.call_args[0])
+        assert store_radius_zero[:3] == ["GEOSEARCHSTORE", "dest", "places"]
+        assert store_radius_zero[-3:] == [b"BYRADIUS", 0, "m"]
+
+        with pytest.raises(exceptions.DataError):
+            client.geosearch(
+                "places", member="Paris", longitude=0, latitude=0, radius=10
+            )
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
