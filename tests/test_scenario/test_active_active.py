@@ -4,18 +4,26 @@ import os
 import threading
 from time import monotonic, sleep
 from typing import Optional
+from urllib.parse import urlparse
 
 import pytest
 
 from redis import Redis, RedisCluster
 from redis.backoff import ConstantBackoff
 from redis.client import Pipeline
+from redis.maint_notifications import MaintenanceState, MaintNotificationsConfig
+from redis.multidb.circuit import State as CBState
 from redis.multidb.exception import TemporaryUnavailableException
 from redis.multidb.failover import DEFAULT_FAILOVER_ATTEMPTS, DEFAULT_FAILOVER_DELAY
 from redis.asyncio.multidb.healthcheck import LagAwareHealthCheck
 from redis.retry import Retry
 from redis.utils import dummy_fail
-from tests.test_scenario.fault_injector_client import ActionRequest, ActionType
+from tests.test_scenario.conftest import RELAXED_TIMEOUT
+from tests.test_scenario.fault_injector_client import (
+    ActionRequest,
+    ActionType,
+    TopologyChangeStandaloneEffects,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +102,155 @@ def trigger_network_failure_action(
         event.set()
 
     logger.info(f"Action completed. Status: {status_result['status']}")
+
+
+# The planned maintenance below is a shard migration, optionally followed by an
+# endpoint rebind, run by the fault injector on the cluster of the active database. It
+# takes as long as the shards take to move, so it gets the wait the maintenance
+# notification tests give the same effect triggers.
+PLANNED_MAINTENANCE_TIMEOUT = 180
+PLANNED_MAINTENANCE_TIMEOUT_MESSAGE = (
+    f"Planned maintenance has not completed within {PLANNED_MAINTENANCE_TIMEOUT} "
+    "seconds"
+)
+# A push notification is only processed when the client reads from the connection it
+# arrived on, so the command loop is what delivers the notifications. The MOVING state
+# stays on the pool for the TTL of the notification, and the loop has to sample it
+# inside that window.
+MAINTENANCE_COMMAND_INTERVAL = 0.2
+# How long past the MOVING TTL the client keeps being exercised after the fault
+# injector reports the maintenance complete: by then the handoff has been reverted and
+# the pool is expected to be back in its default state.
+POST_MAINTENANCE_MARGIN = 10
+NO_FAILOVER_MESSAGE = (
+    "Active database changed during planned maintenance: the underlying client is "
+    "expected to hand off inside its own cluster, without a geo failover"
+)
+# The maintenance moves the shards of the active database to another node of its
+# cluster and rebinds the endpoint there, so the client receives MIGRATING/MIGRATED
+# followed by MOVING and reconnects to the new node. The migrate-only trigger of the
+# same effect family is deliberately not here: it leaves the endpoint on the old node
+# while the shard lives on the new one, and the network failure the other tests of
+# this module inject targets the node hosting the shard - the client would keep
+# talking to an undisturbed proxy and those tests would stop failing over.
+PLANNED_MAINTENANCE_SCENARIOS = [
+    pytest.param(
+        TopologyChangeStandaloneEffects.DATA_MOVEMENT_CONN_DROP,
+        "endpoint_rebind",
+        id="endpoint_rebind",
+    ),
+]
+# Passed to the underlying clients through DatabaseConfig.client_kwargs, which is the
+# only way to enable the notifications in a MultiDBClient - MultiDbConfig disables
+# them otherwise. The relaxed timeout is what MIGRATING applies to the connections
+# for the duration of the maintenance.
+MAINT_NOTIFICATIONS_ENABLED = MaintNotificationsConfig(
+    enabled=True, relaxed_timeout=RELAXED_TIMEOUT
+)
+# The r_multi_db parameters shared by the maintenance notification tests. The
+# failure threshold is as low as in the failover tests, so an error the handoff
+# leaks to the client would show up as a failover; the health check interval is the
+# same for the same reason. The health check timeout, on the other hand, has to
+# exceed the default 3 seconds: a single health check running out of time opens the
+# database's circuit no matter the failure threshold, and the shard switch can stall
+# a PING for longer than that. The unplanned failure test keeps the default: under
+# the network failure it injects, the health check timing out is what fails the
+# database over.
+MAINT_NOTIFICATIONS_MULTI_DB_PARAMS = {
+    "client_class": Redis,
+    "min_num_failures": 2,
+    "health_check_interval": FAILOVER_HEALTH_CHECK_INTERVAL,
+    "maint_notifications_config": MAINT_NOTIFICATIONS_ENABLED,
+}
+
+
+def trigger_planned_maintenance_action(
+    fault_injector_client,
+    config,
+    effect: TopologyChangeStandaloneEffects,
+    trigger: str,
+    event: threading.Event,
+    failures: list,
+    results: list,
+):
+    """Run a planned maintenance on the cluster of the active database and wait for it.
+
+    Meant for a spawned thread: get_operation_result reports a failed or timed-out
+    action through pytest.fail, which on another thread only kills that thread. The
+    outcome is recorded into ``results`` / ``failures`` for the test thread to assert
+    on, and ``event`` is set whatever happened, so the test's wait for the maintenance
+    always ends.
+    """
+    try:
+        action_id = fault_injector_client.trigger_effect(config, effect, trigger)
+        results.append(
+            fault_injector_client.get_operation_result(
+                action_id, timeout=PLANNED_MAINTENANCE_TIMEOUT
+            )
+        )
+        logger.info(f"Planned maintenance completed: {results[-1]}")
+    except BaseException as e:
+        logger.error(f"Planned maintenance failed: {type(e).__name__}: {e}")
+        failures.append(f"{type(e).__name__}: {e}")
+    finally:
+        event.set()
+
+
+def observe_maintenance_states(r_multi_db) -> set:
+    """Sample the maintenance states of the active database's connection pool.
+
+    MOVING is applied to the whole pool through its connection kwargs for the TTL of
+    the notification; MIGRATING/MIGRATED only mark the connection they arrive on.
+    Both are read so a test can tell a handoff that happened from one that never did.
+    """
+    pool = r_multi_db.command_executor.active_database.client.connection_pool
+    states = {pool.connection_kwargs.get("maintenance_state", MaintenanceState.NONE)}
+
+    with pool._lock:
+        for conn in pool._get_free_connections():
+            states.add(conn.maintenance_state)
+        for conn in pool._get_in_use_connections():
+            states.add(conn.maintenance_state)
+
+    return states
+
+
+def assert_no_failover(r_multi_db, listener, config):
+    """Assert the client stayed on its initial database with every circuit closed."""
+    assert not listener.is_changed_flag, NO_FAILOVER_MESSAGE
+
+    # MOVING rewrites `host` for the TTL of the notification; the original address is
+    # what tells which cluster the client is on.
+    connection_kwargs = (
+        r_multi_db.command_executor.active_database.client.get_connection_kwargs()
+    )
+    active_host = connection_kwargs.get(
+        "orig_host_address", connection_kwargs.get("host")
+    )
+    assert active_host == urlparse(config["endpoints"][0]).hostname, NO_FAILOVER_MESSAGE
+
+    for database, _ in r_multi_db.get_databases():
+        assert database.circuit.state == CBState.CLOSED, database
+
+
+def assert_pool_in_default_state(r_multi_db):
+    """Assert the handoff has been reverted on the active database's pool."""
+    pool = r_multi_db.command_executor.active_database.client.connection_pool
+
+    assert (
+        pool.connection_kwargs.get("maintenance_state", MaintenanceState.NONE)
+        == MaintenanceState.NONE
+    )
+
+    with pool._lock:
+        connections = [
+            *pool._get_free_connections(),
+            *pool._get_in_use_connections(),
+        ]
+
+    for conn in connections:
+        assert conn.maintenance_state == MaintenanceState.NONE, conn
+        assert conn.host == conn.orig_host_address, conn
 
 
 class TestActiveActive:
@@ -579,3 +736,158 @@ class TestActiveActive:
 
         pubsub_thread.stop()
         assert messages_count > 2
+
+    @pytest.mark.parametrize("effect, trigger", PLANNED_MAINTENANCE_SCENARIOS)
+    @pytest.mark.parametrize(
+        "r_multi_db",
+        [
+            {
+                **MAINT_NOTIFICATIONS_MULTI_DB_PARAMS,
+                "health_check_timeout": RELAXED_TIMEOUT,
+            },
+        ],
+        ids=["standalone"],
+        indirect=True,
+    )
+    @pytest.mark.timeout(300)
+    def test_multi_db_client_no_failover_during_planned_maintenance(
+        self, r_multi_db, fault_injector_client, effect, trigger
+    ):
+        """
+        With maintenance notifications enabled, a planned maintenance on the cluster of
+        the active database is handled by the underlying client - it follows the
+        MIGRATING/MOVING notifications inside that cluster - and never turns into a
+        geo failover to the other database.
+        """
+        r_multi_db, listener, config = r_multi_db
+
+        # Handle unavailable databases from previous test.
+        retry = Retry(
+            supported_errors=(TemporaryUnavailableException,),
+            retries=DEFAULT_FAILOVER_ATTEMPTS,
+            backoff=ConstantBackoff(backoff=DEFAULT_FAILOVER_DELAY),
+        )
+
+        # Client initialized on the first command.
+        retry.call_with_retry(
+            lambda: r_multi_db.set("key", "value"), lambda _: dummy_fail()
+        )
+
+        event = threading.Event()
+        failures = []
+        results = []
+        thread = threading.Thread(
+            target=trigger_planned_maintenance_action,
+            daemon=True,
+            args=(
+                fault_injector_client,
+                config,
+                effect,
+                trigger,
+                event,
+                failures,
+                results,
+            ),
+        )
+        thread.start()
+
+        # The commands run without the retry above on purpose: the handoff is
+        # expected to be transparent, so an error that reaches this loop is a
+        # failure of the test, not something to retry through.
+        observed_states = set()
+        deadline = monotonic() + PLANNED_MAINTENANCE_TIMEOUT
+        while not event.is_set():
+            assert monotonic() < deadline, PLANNED_MAINTENANCE_TIMEOUT_MESSAGE
+            assert r_multi_db.get("key") == "value"
+            observed_states |= observe_maintenance_states(r_multi_db)
+            assert not listener.is_changed_flag, NO_FAILOVER_MESSAGE
+            sleep(MAINTENANCE_COMMAND_INTERVAL)
+
+        thread.join()
+        assert not failures, f"Planned maintenance failed: {'; '.join(failures)}"
+
+        # Keep going past the MOVING TTL, so the handoff is observed and then reverted
+        # while the client is in use.
+        settle_deadline = (
+            monotonic()
+            + fault_injector_client.get_moving_ttl()
+            + POST_MAINTENANCE_MARGIN
+        )
+        while monotonic() < settle_deadline:
+            assert r_multi_db.get("key") == "value"
+            observed_states |= observe_maintenance_states(r_multi_db)
+            assert not listener.is_changed_flag, NO_FAILOVER_MESSAGE
+            sleep(MAINTENANCE_COMMAND_INTERVAL)
+
+        # Server-side proof that the shards did move, so the test cannot pass on a
+        # maintenance that never happened.
+        output = results[0]["output"]
+        assert output["source_node"] != output["target_node"], output
+
+        # The endpoint rebind is what MOVING announces, and it is on the pool for the
+        # whole TTL, so not seeing it means the notification never arrived.
+        logger.info(f"Maintenance states observed on the pool: {observed_states}")
+        assert MaintenanceState.MOVING in observed_states, (
+            f"No MOVING notification observed during {trigger}: {observed_states}"
+        )
+
+        assert_no_failover(r_multi_db, listener, config)
+        assert_pool_in_default_state(r_multi_db)
+
+    @pytest.mark.parametrize(
+        "r_multi_db",
+        [MAINT_NOTIFICATIONS_MULTI_DB_PARAMS],
+        ids=["standalone"],
+        indirect=True,
+    )
+    @pytest.mark.timeout(100)
+    def test_multi_db_client_failover_on_unplanned_failure_with_maint_notifications(
+        self, r_multi_db, fault_injector_client
+    ):
+        """
+        Maintenance notifications only cover planned maintenance: an unplanned failure
+        of the active database's cluster still fails the client over to the other one.
+        """
+        r_multi_db, listener, config = r_multi_db
+
+        # Handle unavailable databases from previous test.
+        retry = Retry(
+            supported_errors=(TemporaryUnavailableException,),
+            retries=DEFAULT_FAILOVER_ATTEMPTS,
+            backoff=ConstantBackoff(backoff=DEFAULT_FAILOVER_DELAY),
+        )
+
+        event = threading.Event()
+        thread = threading.Thread(
+            target=trigger_network_failure_action,
+            daemon=True,
+            args=(fault_injector_client, config, event),
+        )
+
+        # Client initialized on the first command.
+        retry.call_with_retry(
+            lambda: r_multi_db.set("key", "value"), lambda _: dummy_fail()
+        )
+        thread.start()
+
+        # Execute commands before network failure
+        while not event.is_set():
+            assert (
+                retry.call_with_retry(
+                    lambda: r_multi_db.get("key"), lambda _: dummy_fail()
+                )
+                == "value"
+            )
+            sleep(0.5)
+
+        # Execute commands until database failover
+        deadline = monotonic() + FAILOVER_TIMEOUT
+        while not listener.is_changed_flag:
+            assert monotonic() < deadline, FAILOVER_TIMEOUT_MESSAGE
+            assert (
+                retry.call_with_retry(
+                    lambda: r_multi_db.get("key"), lambda _: dummy_fail()
+                )
+                == "value"
+            )
+            sleep(0.5)
