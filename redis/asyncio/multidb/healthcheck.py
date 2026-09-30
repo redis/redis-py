@@ -302,7 +302,6 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
         stall with no notification behind it - an unplanned failure - keeps
         the plain budget.
         """
-        tracker = self._maintenance_trackers.get(id(database))
         task = asyncio.ensure_future(self._execute(health_check, database))
         start = time.monotonic()
         deadline = start + health_check.health_check_timeout
@@ -315,7 +314,7 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
                 if done:
                     return task.result()
 
-                relaxed_deadline = self._relaxed_deadline(tracker, health_check, start)
+                relaxed_deadline = self._relaxed_deadline(database, health_check, start)
                 if relaxed_deadline is not None and relaxed_deadline > deadline:
                     deadline = relaxed_deadline
                     continue
@@ -331,16 +330,19 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
             task.cancel()
             raise
 
-    @staticmethod
     def _relaxed_deadline(
-        tracker: Optional[_MaintenanceWindowTracker],
-        health_check: HealthCheck,
-        start: float,
+        self, database, health_check: HealthCheck, start: float
     ) -> Optional[float]:
         """
         The deadline the active maintenance windows relax the check to, or
         None when the database is not under maintenance.
+
+        The tracker is looked up here rather than when the check starts: the
+        first check of a database is what creates its client, and the tracker
+        with it, so a maintenance announced during that check would otherwise
+        go unnoticed.
         """
+        tracker = self._maintenance_trackers.get(id(database))
         if tracker is None:
             return None
 

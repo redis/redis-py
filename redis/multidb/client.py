@@ -199,8 +199,12 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         config.client_kwargs["retry"] = Retry(retries=0, backoff=NoBackoff())
 
         # Maintenance notifications are disabled by default in underlying clients,
-        # but user can override this by providing their own config.
-        if "maint_notifications_config" not in config.client_kwargs:
+        # but user can override this by providing their own config. A supplied
+        # pool keeps its own configuration.
+        if (
+            not config.from_pool
+            and "maint_notifications_config" not in config.client_kwargs
+        ):
             config.client_kwargs["maint_notifications_config"] = (
                 MaintNotificationsConfig(enabled=False)
             )
@@ -362,7 +366,9 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
         return PubSub(self, **kwargs)
 
-    def _sync_health_check_timeout(self, databases: Iterable[SyncDatabase]) -> float:
+    def _sync_health_check_timeout(
+        self, databases: Iterable[SyncDatabase]
+    ) -> Optional[float]:
         """
         How long a health check of the given databases, run from the calling
         thread, is waited for before it is given up on.
@@ -373,8 +379,9 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         the database is under a server maintenance (see
         ``relaxed_health_check_budget``), so databases with maintenance
         notifications enabled count with their relaxed budget. A blocking
-        relaxed timeout (``None``) has no budget to derive; those databases
-        count with the plain one.
+        relaxed timeout (``None``) relaxes the budget up to the notification's
+        time-to-live, which is not known here: the wait is then unbounded, and
+        the check itself ends when that window does.
         """
         with self._hc_lock:
             health_checks = list(self._health_checks)
@@ -384,17 +391,22 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             config = database.client.get_connection_kwargs().get(
                 "maint_notifications_config"
             )
-            relaxed_timeout = None
-            if (
+            if not (
                 isinstance(config, MaintNotificationsConfig)
                 and config.enabled
                 and config.is_relaxed_timeouts_enabled()
             ):
+                relaxed_timeout = None
+                relaxed = False
+            else:
                 relaxed_timeout = config.relaxed_timeout
+                relaxed = True
+                if relaxed_timeout is None:
+                    return None
 
             for health_check in health_checks:
                 budget = health_check.health_check_timeout
-                if relaxed_timeout is not None:
+                if relaxed:
                     budget = max(
                         budget,
                         relaxed_health_check_budget(health_check, relaxed_timeout),
@@ -414,6 +426,9 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         is_healthy = await self._health_check_policy.execute(health_checks, database)
 
         if not is_healthy:
+            # The exception path is logged by the caller; a check that reports
+            # unhealthy without raising would otherwise open the circuit silently
+            logger.debug(f"Health check reported database unhealthy: {database}")
             if database.circuit.state != CBState.OPEN:
                 database.circuit.state = CBState.OPEN
             return is_healthy

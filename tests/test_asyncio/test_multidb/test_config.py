@@ -200,6 +200,23 @@ class TestMultiDbConfig:
         assert pool._maint_notifications_pool_handler is not None
         assert pool._maint_notifications_pool_handler.config is user_maint_config
 
+    def test_supplied_pool_keeps_its_own_maint_notifications_config(self):
+        """
+        The disabled default only applies to clients built from client_kwargs; a
+        pool the user supplies is used as it is, and its kwargs are not touched.
+        """
+        pool = ConnectionPool(host="host1", port=6379, protocol=3)
+        db_config = DatabaseConfig(from_pool=pool, weight=1.0)
+
+        config = MultiDbConfig(databases_config=[db_config])
+        databases = config.databases()
+
+        db, weight = databases[0]
+        assert db.client.connection_pool is pool
+        assert "maint_notifications_config" not in db_config.client_kwargs
+        # The pool's own RESP3 default ("auto") is left in place
+        assert pool.maint_notifications_enabled()
+
 
 @pytest.mark.fixed_client
 class TestDatabaseConfig:

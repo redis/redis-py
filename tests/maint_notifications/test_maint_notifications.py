@@ -882,6 +882,16 @@ class TestMaintNotificationsConnectionHandlerEvents:
         assert isinstance(self.listener.events[0], MaintenanceCompletedEvent)
         assert self.listener.events[0].notification is None
 
+    def test_completed_without_prior_start_dispatches_nothing(self):
+        """The start may have been routed to another connection of the cluster."""
+        self.mock_connection.maintenance_state = MaintenanceState.NONE
+
+        self.handler.handle_maintenance_completed_notification(
+            notification=NodeMigratedNotification(id=1)
+        )
+
+        assert self.listener.events == []
+
     def test_start_and_completed_pair_through_handle_notification(self):
         self.handler.handle_notification(NodeFailingOverNotification(id=1, ttl=5))
         self.handler.handle_notification(NodeFailedOverNotification(id=1))

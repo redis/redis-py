@@ -90,13 +90,13 @@ class TestMultiDbClient:
         indirect=True,
     )
     @pytest.mark.parametrize(
-        "maint_config, relaxed",
+        "maint_config, expected_wait",
         [
-            (None, False),
-            (MaintNotificationsConfig(enabled=False, relaxed_timeout=10), False),
-            (MaintNotificationsConfig(enabled=True, relaxed_timeout=-1), False),
-            (MaintNotificationsConfig(enabled=True, relaxed_timeout=None), False),
-            (MaintNotificationsConfig(enabled=True, relaxed_timeout=10), True),
+            (None, "default"),
+            (MaintNotificationsConfig(enabled=False, relaxed_timeout=10), "default"),
+            (MaintNotificationsConfig(enabled=True, relaxed_timeout=-1), "default"),
+            (MaintNotificationsConfig(enabled=True, relaxed_timeout=None), "unbounded"),
+            (MaintNotificationsConfig(enabled=True, relaxed_timeout=10), "relaxed"),
         ],
         ids=["no_config", "disabled", "no_relaxation", "blocking", "relaxed"],
     )
@@ -108,14 +108,16 @@ class TestMultiDbClient:
         mock_db2,
         mock_hc,
         maint_config,
-        relaxed,
+        expected_wait,
     ):
         """
         The health check budget is relaxed while a database is under maintenance,
         so the wait on a health check run from the calling thread has to hold the
         relaxed budget of a database with maintenance notifications enabled;
         otherwise a maintenance during initialization would surface as a
-        TimeoutError instead of an unhealthy database.
+        TimeoutError instead of an unhealthy database. A blocking relaxed timeout
+        relaxes the budget up to the notification's time-to-live, which is not
+        known up front, so the wait is unbounded.
         """
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
         mock_multi_db_config.health_checks = [mock_hc]
@@ -126,12 +128,21 @@ class TestMultiDbClient:
             mock_db.client.get_connection_kwargs.return_value = {
                 "maint_notifications_config": maint_config
             }
+
+        def assert_wait(actual, expected):
+            if expected is None:
+                assert actual is None
+            else:
+                assert actual == pytest.approx(expected)
+
         expected = DEFAULT_SYNC_HEALTH_CHECK_TIMEOUT
-        if relaxed:
+        if expected_wait == "relaxed":
             expected = (
                 relaxed_health_check_budget(mock_hc, maint_config.relaxed_timeout)
                 + SYNC_HEALTH_CHECK_TIMEOUT_MARGIN
             )
+        elif expected_wait == "unbounded":
+            expected = None
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             client = MultiDBClient(mock_multi_db_config)
@@ -142,9 +153,7 @@ class TestMultiDbClient:
                     wraps=client._bg_scheduler.run_coro_sync,
                 ) as run_coro_sync:
                     client.initialize()
-                    assert run_coro_sync.call_args.kwargs["timeout"] == pytest.approx(
-                        expected
-                    )
+                    assert_wait(run_coro_sync.call_args.kwargs["timeout"], expected)
 
                     # A single database is waited for with its own budget
                     client.set_active_database(mock_db1)
@@ -152,9 +161,7 @@ class TestMultiDbClient:
                         DEFAULT_SYNC_HEALTH_CHECK_TIMEOUT
                     )
                     client.set_active_database(mock_db)
-                    assert run_coro_sync.call_args.kwargs["timeout"] == pytest.approx(
-                        expected
-                    )
+                    assert_wait(run_coro_sync.call_args.kwargs["timeout"], expected)
             finally:
                 client.close()
 

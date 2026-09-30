@@ -432,7 +432,8 @@ Enabling the notifications
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 `MultiDbConfig` disables maintenance notifications in the underlying clients unless a
-`MaintNotificationsConfig` is passed through `client_kwargs`. The notifications require
+`MaintNotificationsConfig` is passed through `client_kwargs`; a database configured
+with `from_pool` keeps whatever its pool was built with. The notifications require
 RESP3, and the relaxed timeout they apply only means something when the connections
 have a finite socket timeout to relax:
 
@@ -497,8 +498,12 @@ client of the affected database, and the `MultiDBClient` keeps that database act
   behind it, an unplanned failure, keeps the configured budget and fails the database
   over as before. `relaxed_timeout=-1` disables the relaxation of both the connections
   and the budget; `relaxed_timeout=None` (blocking sockets) relaxes the budget up to
-  the notification's time-to-live. `LagAwareHealthCheck` is relaxed the same way, with
-  each REST request still bounded by its own `http_timeout`.
+  the notification's time-to-live. The notifications reach the health checks through
+  the probe client's Redis connections, which only a check that talks to the
+  database keeps reading - `PingHealthCheck` does, `LagAwareHealthCheck` uses the
+  REST API alone. Combined with a `PingHealthCheck` (the default), the budget of a
+  `LagAwareHealthCheck` is relaxed the same way, with each REST request still bounded
+  by its own `http_timeout`; on its own it keeps the configured budget.
 
 - **Idle connections.** A connection that is idle through the maintenance has the
   notifications, and possibly the server's close after an endpoint rebind, waiting in
@@ -532,10 +537,37 @@ Observing a maintenance
 The phases the underlying clients go through are observable: the handlers dispatch a
 `MaintenanceStartedEvent` when a notification starts relaxing timeouts and a
 `MaintenanceCompletedEvent` when the relaxation is reverted, to the `event_dispatcher`
-of the `MaintNotificationsConfig` passed in `client_kwargs`. See
-:ref:`maintenance-notification-events` for the events and a listener example. A geo
-failover, should one happen anyway, is reported through the `ActiveDatabaseChanged`
-event described in the next section.
+of the `MaintNotificationsConfig` passed in `client_kwargs`. Both events carry the
+`state` (`MaintenanceState.MOVING` for a pool-level handoff,
+`MaintenanceState.MAINTENANCE` for a connection-level migration or failover), the
+affected `connection_pool` and `connection`, the `notification` and the `config` acted
+with; `notification` is `None` when the relaxation ended because a connection still
+under maintenance was closed. The events are dispatched synchronously from the
+connection's read path, so listeners must not block.
+
+.. code-block:: python
+
+    from redis.event import (
+        EventDispatcher,
+        EventListenerInterface,
+        MaintenanceCompletedEvent,
+        MaintenanceStartedEvent,
+    )
+    from redis.maint_notifications import MaintNotificationsConfig
+
+    class LogMaintenanceListener(EventListenerInterface):
+        def listen(self, event):
+            print(f"{type(event).__name__}: {event.state} {event.notification}")
+
+    dispatcher = EventDispatcher()
+    listener = LogMaintenanceListener()
+    dispatcher.register_listeners(
+        {MaintenanceStartedEvent: [listener], MaintenanceCompletedEvent: [listener]}
+    )
+    maint_config = MaintNotificationsConfig(enabled=True, event_dispatcher=dispatcher)
+
+A geo failover, should one happen anyway, is reported through the
+`ActiveDatabaseChanged` event described in the next section.
 
 Custom failover callbacks
 -------------------------

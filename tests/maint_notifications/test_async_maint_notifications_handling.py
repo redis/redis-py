@@ -1996,6 +1996,29 @@ async def test_async_connection_handler_dispatches_maintenance_event_pair():
 
 
 @pytest.mark.asyncio
+async def test_async_connection_handler_completion_without_start_dispatches_nothing():
+    """The start may have been routed to another connection of the cluster."""
+    listener = _RecordingListener()
+    config = _config_with_listener(listener)
+    connection = DummyAsyncConnection()
+    handler = AsyncMaintNotificationsConnectionHandler(connection, config)
+
+    with (
+        mock.patch(
+            "redis.asyncio.maint_notifications.record_maint_notification_count",
+            new=AsyncMock(),
+        ),
+        mock.patch(
+            "redis.asyncio.maint_notifications.record_connection_relaxed_timeout",
+            new=AsyncMock(),
+        ),
+    ):
+        await handler.handle_notification(NodeMigratedNotification(id=1))
+
+    assert listener.events == []
+
+
+@pytest.mark.asyncio
 async def test_async_connection_handler_dispatches_nothing_when_relaxation_disabled():
     listener = _RecordingListener()
     config = _config_with_listener(listener, relaxed_timeout=-1)

@@ -389,6 +389,11 @@ class AsyncMaintNotificationsConnectionHandler:
         ):
             return
 
+        # A completion can reach a connection whose start went to another one,
+        # or none at all; only a connection that was relaxed has a start event
+        # to pair the completion with
+        was_relaxed = self.connection.maintenance_state == MaintenanceState.MAINTENANCE
+
         notification = None
         if kwargs.get("notification"):
             notification = kwargs["notification"]
@@ -412,16 +417,17 @@ class AsyncMaintNotificationsConnectionHandler:
                 relaxed=False,
             )
 
-        _dispatch_maintenance_event(
-            self.config,
-            MaintenanceCompletedEvent(
-                connection_pool=self._get_pool(),
-                connection=self.connection,
-                state=MaintenanceState.MAINTENANCE,
-                notification=notification,
-                config=self.config,
-            ),
-        )
+        if was_relaxed:
+            _dispatch_maintenance_event(
+                self.config,
+                MaintenanceCompletedEvent(
+                    connection_pool=self._get_pool(),
+                    connection=self.connection,
+                    state=MaintenanceState.MAINTENANCE,
+                    notification=notification,
+                    config=self.config,
+                ),
+            )
 
 
 class AsyncOSSMaintNotificationsHandler:

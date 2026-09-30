@@ -239,6 +239,28 @@ class TestMaintenanceAwareBudget:
         assert await policy.execute([mock_hc], mock_db) is True
 
     @pytest.mark.asyncio
+    async def test_window_started_during_first_probe_is_honoured(self):
+        """
+        The first check of a database is what creates its client, and the
+        tracker with it; a notification arriving during that check must count.
+        """
+        mock_db = Mock(spec=Database)
+        policy = HealthyAllPolicy()
+        started = _maintenance_event(
+            MaintenanceStartedEvent, object(), relaxed_timeout=0.5
+        )
+
+        async def get_client_creating_tracker(database):
+            tracker = _MaintenanceWindowTracker()
+            policy._maintenance_trackers[id(database)] = tracker
+            _MaintenanceWindowListener(tracker).listen(started)
+            return AsyncMock()
+
+        policy.get_client = get_client_creating_tracker
+
+        assert await policy.execute([self._slow_check(0.3)], mock_db) is True
+
+    @pytest.mark.asyncio
     async def test_relaxed_budget_is_bounded(self):
         mock_db = Mock(spec=Database)
         policy, listener = self._policy_with_tracker(mock_db)

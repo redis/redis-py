@@ -194,8 +194,12 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         config.client_kwargs.update({"retry": Retry(retries=0, backoff=NoBackoff())})
 
         # Maintenance notifications are disabled by default in underlying clients,
-        # but user can override this by providing their own config.
-        if "maint_notifications_config" not in config.client_kwargs:
+        # but user can override this by providing their own config. A supplied
+        # pool keeps its own configuration.
+        if (
+            not config.from_pool
+            and "maint_notifications_config" not in config.client_kwargs
+        ):
             config.client_kwargs["maint_notifications_config"] = (
                 MaintNotificationsConfig(enabled=False)
             )
@@ -432,6 +436,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         )
 
         if not is_healthy:
+            # The exception path is logged by the caller; a check that reports
+            # unhealthy without raising would otherwise open the circuit silently
+            logger.debug(f"Health check reported database unhealthy: {database}")
             if database.circuit.state != CBState.OPEN:
                 database.circuit.state = CBState.OPEN
             return is_healthy
