@@ -351,6 +351,37 @@ class MetadataResolver(ABC):
         """
         pass
 
+    def is_trackable_read(self, command_name: str) -> bool:
+        """
+        Determines whether the server would remember this command's keys while tracking.
+
+        The server-side-tracking view of :meth:`resolve`, decided by
+        :func:`_is_trackable_read`. Never affects what may be stored: it only decides whether
+        a ``CLIENT CACHING NO`` in front of a read is worth sending under ``optout`` tracking.
+        Fails closed, which there means skipping the ``NO`` - tracking a reply the client does
+        not store only wastes invalidation-table entries, where storing a reply the server
+        does not track is stale forever.
+
+        Concrete rather than abstract, unlike its neighbours, so a resolver written against
+        the previous version of this ABC keeps working. :class:`BaseMetadataResolver`
+        overrides it with a memoized implementation.
+
+        Args:
+            command_name: The name of the command to check, in any case.
+
+        Returns:
+            bool: True only when the command carries the ``readonly`` command flag.
+        """
+        if not isinstance(command_name, str):
+            return False
+
+        try:
+            metadata = self.resolve(command_name)
+        except ValueError:
+            return False
+
+        return _is_trackable_read(metadata)
+
     @abstractmethod
     def with_fallback(self, fallback: "MetadataResolver") -> "MetadataResolver":
         """
@@ -428,6 +459,37 @@ class AsyncMetadataResolver(ABC):
         """
         pass
 
+    async def is_trackable_read(self, command_name: str) -> bool:
+        """
+        Determines whether the server would remember this command's keys while tracking.
+
+        The server-side-tracking view of :meth:`resolve`, decided by
+        :func:`_is_trackable_read`. Never affects what may be stored: it only decides whether
+        a ``CLIENT CACHING NO`` in front of a read is worth sending under ``optout`` tracking.
+        Fails closed, which there means skipping the ``NO`` - tracking a reply the client does
+        not store only wastes invalidation-table entries, where storing a reply the server
+        does not track is stale forever.
+
+        Concrete rather than abstract, unlike its neighbours, so a resolver written against
+        the previous version of this ABC keeps working. :class:`AsyncBaseMetadataResolver`
+        overrides it with a memoized implementation.
+
+        Args:
+            command_name: The name of the command to check, in any case.
+
+        Returns:
+            bool: True only when the command carries the ``readonly`` command flag.
+        """
+        if not isinstance(command_name, str):
+            return False
+
+        try:
+            metadata = await self.resolve(command_name)
+        except ValueError:
+            return False
+
+        return _is_trackable_read(metadata)
+
     @abstractmethod
     def with_fallback(
         self, fallback: "AsyncMetadataResolver"
@@ -477,6 +539,10 @@ class BaseMetadataResolver(MetadataResolver):
         self._replica_safe: dict[str, bool] = {
             cmd: False for cmd in _REPLICA_UNSAFE_COMMANDS
         }
+        # No ``_REPLICA_UNSAFE_COMMANDS`` pre-seed: trackability is the readonly flag alone,
+        # and TOUCH - the one command that seed excludes - is precisely the trackable read
+        # ``optout`` most wants to exempt.
+        self._trackable_read: dict[str, bool] = {}
 
     def resolve(self, command_name: str) -> CommandMetadata | None:
         module, command = _split_command_name(command_name)
@@ -566,6 +632,29 @@ class BaseMetadataResolver(MetadataResolver):
 
         return replica_safe
 
+    def is_trackable_read(self, command_name: str) -> bool:
+        if not isinstance(command_name, str):
+            return False
+
+        memo_key = command_name.lower()
+
+        try:
+            return self._trackable_read[memo_key]
+        except KeyError:
+            pass
+
+        try:
+            metadata = self.resolve(command_name)
+        except ValueError:
+            metadata = None
+
+        trackable_read = _is_trackable_read(metadata)
+
+        if len(self._trackable_read) < _MEMO_MAX_ENTRIES:
+            self._trackable_read[memo_key] = trackable_read
+
+        return trackable_read
+
     @abstractmethod
     def with_fallback(self, fallback: "MetadataResolver") -> "MetadataResolver":
         pass
@@ -604,6 +693,10 @@ class AsyncBaseMetadataResolver(AsyncMetadataResolver):
         self._replica_safe: dict[str, bool] = {
             cmd: False for cmd in _REPLICA_UNSAFE_COMMANDS
         }
+        # No ``_REPLICA_UNSAFE_COMMANDS`` pre-seed: trackability is the readonly flag alone,
+        # and TOUCH - the one command that seed excludes - is precisely the trackable read
+        # ``optout`` most wants to exempt.
+        self._trackable_read: dict[str, bool] = {}
 
     async def resolve(self, command_name: str) -> CommandMetadata | None:
         module, command = _split_command_name(command_name)
@@ -692,6 +785,29 @@ class AsyncBaseMetadataResolver(AsyncMetadataResolver):
             self._replica_safe[memo_key] = replica_safe
 
         return replica_safe
+
+    async def is_trackable_read(self, command_name: str) -> bool:
+        if not isinstance(command_name, str):
+            return False
+
+        memo_key = command_name.lower()
+
+        try:
+            return self._trackable_read[memo_key]
+        except KeyError:
+            pass
+
+        try:
+            metadata = await self.resolve(command_name)
+        except ValueError:
+            metadata = None
+
+        trackable_read = _is_trackable_read(metadata)
+
+        if len(self._trackable_read) < _MEMO_MAX_ENTRIES:
+            self._trackable_read[memo_key] = trackable_read
+
+        return trackable_read
 
     @abstractmethod
     def with_fallback(
@@ -875,6 +991,29 @@ def _is_replica_safe(metadata: CommandMetadata | None) -> bool:
 
     Takes ``None`` - what an exhausted resolver chain resolves to - so the
     unknown-command case is decided here as well.
+    """
+    if metadata is None:
+        return False
+
+    return metadata.is_readonly
+
+
+def _is_trackable_read(metadata: CommandMetadata | None) -> bool:
+    """
+    Decide whether the server would remember the keys of the command a record describes.
+
+    The ``readonly`` command flag alone, because that plus the key names of the invocation is
+    the whole gate the server applies before it records a read against a tracking client. The
+    negative signals that make a command ineligible to store do not enter it: ``XPENDING`` is
+    tipped ``nondeterministic_output`` and ``TOUCH`` is tipped ``dont_cache``, and the server
+    tracks both.
+
+    Deliberately does not require ``has_complete_metadata``, unlike
+    :func:`_is_client_side_cacheable`: the readonly flag comes from the command flags, which
+    every ``COMMAND`` reply carries, and only the tips can be missing.
+
+    Takes ``None`` - what an exhausted resolver chain resolves to - so the unknown-command
+    case is decided here as well.
     """
     if metadata is None:
         return False
