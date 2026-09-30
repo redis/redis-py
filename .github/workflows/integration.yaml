@@ -60,6 +60,10 @@ jobs:
             CVE-2026-102273 # incomplete algorithm confusion defense when mixing symmetric and asymmetric algorithms
             CVE-2026-102274 # a malformed RSA JWK aborts parsing of the whole JWK Set
             CVE-2026-101917 # PyJWKClient unbounded JWKS requests via kid values (incomplete fix of CVE-2026-48524)
+            CVE-2026-102270 # ReDoS in is_pem_format with crafted PEM-like input
+            # Fixed in 2.15.0. This one does reach the verify_signature=False decode in JWToken, but the tokens
+            # come from the configured identity provider, and the impact is a RecursionError instead of DecodeError.
+            CVE-2026-101918 # RecursionError from a deeply nested payload escapes PyJWTError handling
 
   lint:
     name: Code linters
