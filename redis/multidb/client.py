@@ -1,9 +1,13 @@
 import asyncio
 import logging
 import threading
-from typing import Any, Callable, List, Literal, Optional
+from typing import Any, Callable, Iterable, List, Literal, Optional
 
-from redis.asyncio.multidb.healthcheck import HealthCheck, HealthCheckPolicy
+from redis.asyncio.multidb.healthcheck import (
+    HealthCheck,
+    HealthCheckPolicy,
+    relaxed_health_check_budget,
+)
 from redis.background import BackgroundScheduler
 from redis.backoff import NoBackoff
 from redis.client import PubSubWorkerThread
@@ -32,6 +36,11 @@ from redis.typing import ChannelT, PubSubHandler, Subscription
 from redis.utils import experimental
 
 logger = logging.getLogger(__name__)
+
+# The floor of the time a health check run from the calling thread is waited
+# for, and the margin left on top of the largest budget a check can take
+DEFAULT_SYNC_HEALTH_CHECK_TIMEOUT = 10.0
+SYNC_HEALTH_CHECK_TIMEOUT_MARGIN = 1.0
 
 
 @experimental
@@ -103,7 +112,12 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         # Uses run_coro_sync to run in the shared background loop - this ensures
         # connection pools created during initial health check remain valid for
         # subsequent recurring health checks (they use the same event loop).
-        self._bg_scheduler.run_coro_sync(self._perform_initial_health_check)
+        self._bg_scheduler.run_coro_sync(
+            self._perform_initial_health_check,
+            timeout=self._sync_health_check_timeout(
+                database for database, _ in self._databases
+            ),
+        )
 
         # Starts recurring health checks on the background.
         # Uses run_recurring_coro which shares the same event loop as run_coro_sync
@@ -152,7 +166,11 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         if not exists:
             raise ValueError("Given database is not a member of database list")
 
-        self._bg_scheduler.run_coro_sync(self._check_db_health, database)
+        self._bg_scheduler.run_coro_sync(
+            self._check_db_health,
+            database,
+            timeout=self._sync_health_check_timeout((database,)),
+        )
 
         if database.circuit.state == CBState.CLOSED:
             highest_weighted_db, _ = self._databases.get_top_n(1)[0]
@@ -213,7 +231,11 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         )
 
         try:
-            self._bg_scheduler.run_coro_sync(self._check_db_health, database)
+            self._bg_scheduler.run_coro_sync(
+                self._check_db_health,
+                database,
+                timeout=self._sync_health_check_timeout((database,)),
+            )
         except UnhealthyDatabaseException:
             if not skip_initial_health_check:
                 raise
@@ -339,6 +361,47 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             self.initialize()
 
         return PubSub(self, **kwargs)
+
+    def _sync_health_check_timeout(self, databases: Iterable[SyncDatabase]) -> float:
+        """
+        How long a health check of the given databases, run from the calling
+        thread, is waited for before it is given up on.
+
+        The wait has to hold the largest budget a check can take, or a check
+        that legitimately runs long would surface as a ``TimeoutError`` to the
+        caller instead of as an unhealthy database. A budget is relaxed while
+        the database is under a server maintenance (see
+        ``relaxed_health_check_budget``), so databases with maintenance
+        notifications enabled count with their relaxed budget. A blocking
+        relaxed timeout (``None``) has no budget to derive; those databases
+        count with the plain one.
+        """
+        with self._hc_lock:
+            health_checks = list(self._health_checks)
+
+        timeout = DEFAULT_SYNC_HEALTH_CHECK_TIMEOUT
+        for database in databases:
+            config = database.client.get_connection_kwargs().get(
+                "maint_notifications_config"
+            )
+            relaxed_timeout = None
+            if (
+                isinstance(config, MaintNotificationsConfig)
+                and config.enabled
+                and config.is_relaxed_timeouts_enabled()
+            ):
+                relaxed_timeout = config.relaxed_timeout
+
+            for health_check in health_checks:
+                budget = health_check.health_check_timeout
+                if relaxed_timeout is not None:
+                    budget = max(
+                        budget,
+                        relaxed_health_check_budget(health_check, relaxed_timeout),
+                    )
+                timeout = max(timeout, budget + SYNC_HEALTH_CHECK_TIMEOUT_MARGIN)
+
+        return timeout
 
     async def _check_db_health(self, database: SyncDatabase) -> bool:
         """

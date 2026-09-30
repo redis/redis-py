@@ -88,20 +88,35 @@ def require_lag_aware_credentials():
 
 
 def trigger_network_failure_action(
-    fault_injector_client, config, event: Optional[threading.Event] = None
+    fault_injector_client,
+    config,
+    event: Optional[threading.Event] = None,
+    failures: Optional[list] = None,
 ):
+    """Inject a network failure on the cluster of the active database and wait for it.
+
+    Meant for a spawned thread: get_operation_result reports a failed or timed-out
+    action through pytest.fail, which on another thread only kills that thread. The
+    failure is recorded into ``failures`` for the test thread to assert on, and
+    ``event`` is set whatever happened, so the test's wait for the injection always
+    ends instead of running into its timeout.
+    """
     action_request = ActionRequest(
         action_type=ActionType.NETWORK_FAILURE,
         parameters={"bdb_id": config["bdb_id"], "delay": 3, "cluster_index": 0},
     )
 
-    result = fault_injector_client.trigger_action(action_request)
-    status_result = fault_injector_client.get_operation_result(result["action_id"])
-
-    if event:
-        event.set()
-
-    logger.info(f"Action completed. Status: {status_result['status']}")
+    try:
+        result = fault_injector_client.trigger_action(action_request)
+        status_result = fault_injector_client.get_operation_result(result["action_id"])
+        logger.info(f"Action completed. Status: {status_result['status']}")
+    except BaseException as e:
+        logger.error(f"Network failure injection failed: {type(e).__name__}: {e}")
+        if failures is not None:
+            failures.append(f"{type(e).__name__}: {e}")
+    finally:
+        if event:
+            event.set()
 
 
 # The planned maintenance below is a shard migration, optionally followed by an
@@ -150,12 +165,16 @@ MAINT_NOTIFICATIONS_ENABLED = MaintNotificationsConfig(
 # The r_multi_db parameters shared by the maintenance notification tests. The
 # failure threshold is as low as in the failover tests, so an error the handoff
 # leaks to the client would show up as a failover; the health check interval is the
-# same for the same reason. The health check timeout, on the other hand, has to
-# exceed the default 3 seconds: a single health check running out of time opens the
-# database's circuit no matter the failure threshold, and the shard switch can stall
-# a PING for longer than that. The unplanned failure test keeps the default: under
-# the network failure it injects, the health check timing out is what fails the
-# database over.
+# same for the same reason. The health check timeout keeps its default of 3 seconds
+# on purpose: a single health check running out of it opens the database's circuit
+# no matter the failure threshold, and the shard switch can stall a PING for longer
+# than that. The health check client is built from the database client's connection
+# kwargs and receives the same MIGRATING notification, which relaxes both its socket
+# timeout and the health check budget for the duration of the maintenance - so the
+# planned maintenance test passing with the default budget is what proves the
+# relaxation, while the unplanned failure test relies on the same default: under
+# the network failure it injects, no notification arrives and the health check
+# timing out is what fails the database over.
 MAINT_NOTIFICATIONS_MULTI_DB_PARAMS = {
     "client_class": Redis,
     "min_num_failures": 2,
@@ -213,6 +232,41 @@ def observe_maintenance_states(r_multi_db) -> set:
             states.add(conn.maintenance_state)
 
     return states
+
+
+def observe_health_check_maintenance_states(r_multi_db) -> set:
+    """Sample the maintenance states of the health check clients' connection pools.
+
+    The health checks probe through their own clients, built from the databases'
+    connection kwargs, so a maintenance notification a probe receives shows up on
+    those pools - the only place it can show up while the client itself sends no
+    commands. The pools live on the health check loop, so a collection changing
+    under the iteration is skipped and picked up on the next sample.
+    """
+    states = set()
+
+    for client in list(r_multi_db._health_check_policy._clients.values()):
+        pool = client.connection_pool
+        states.add(
+            pool.connection_kwargs.get("maintenance_state", MaintenanceState.NONE)
+        )
+        try:
+            connections = [
+                *pool._get_free_connections(),
+                *pool._get_in_use_connections(),
+            ]
+        except RuntimeError:
+            continue
+        for conn in connections:
+            states.add(conn.maintenance_state)
+
+    return states
+
+
+def assert_circuits_closed(databases):
+    """Assert no health check has opened a circuit."""
+    for database in databases:
+        assert database.circuit.state == CBState.CLOSED, database
 
 
 def assert_no_failover(r_multi_db, listener, config):
@@ -291,10 +345,11 @@ class TestActiveActive:
         )
 
         event = threading.Event()
+        failures = []
         thread = threading.Thread(
             target=trigger_network_failure_action,
             daemon=True,
-            args=(fault_injector_client, config, event),
+            args=(fault_injector_client, config, event, failures),
         )
 
         # Client initialized on the first command.
@@ -312,6 +367,9 @@ class TestActiveActive:
                 == "value"
             )
             sleep(0.5)
+
+        thread.join()
+        assert not failures, f"Network failure injection failed: {'; '.join(failures)}"
 
         # Execute commands until database failover
         deadline = monotonic() + FAILOVER_TIMEOUT
@@ -356,10 +414,11 @@ class TestActiveActive:
         )
 
         event = threading.Event()
+        failures = []
         thread = threading.Thread(
             target=trigger_network_failure_action,
             daemon=True,
-            args=(fault_injector_client, config, event),
+            args=(fault_injector_client, config, event, failures),
         )
 
         # Adding additional health check to the client.
@@ -387,6 +446,9 @@ class TestActiveActive:
                 == "value"
             )
             sleep(0.5)
+
+        thread.join()
+        assert not failures, f"Network failure injection failed: {'; '.join(failures)}"
 
         # Execute commands after network failure
         deadline = monotonic() + FAILOVER_TIMEOUT
@@ -429,10 +491,11 @@ class TestActiveActive:
         )
 
         event = threading.Event()
+        failures = []
         thread = threading.Thread(
             target=trigger_network_failure_action,
             daemon=True,
-            args=(fault_injector_client, config, event),
+            args=(fault_injector_client, config, event, failures),
         )
 
         def callback():
@@ -460,6 +523,9 @@ class TestActiveActive:
         while not event.is_set():
             retry.call_with_retry(lambda: callback(), lambda _: dummy_fail())
             sleep(0.5)
+
+        thread.join()
+        assert not failures, f"Network failure injection failed: {'; '.join(failures)}"
 
         # Execute pipeline until database failover
         deadline = monotonic() + FAILOVER_TIMEOUT
@@ -497,10 +563,11 @@ class TestActiveActive:
         )
 
         event = threading.Event()
+        failures = []
         thread = threading.Thread(
             target=trigger_network_failure_action,
             daemon=True,
-            args=(fault_injector_client, config, event),
+            args=(fault_injector_client, config, event, failures),
         )
 
         def callback():
@@ -522,6 +589,9 @@ class TestActiveActive:
         while not event.is_set():
             retry.call_with_retry(lambda: callback(), lambda _: dummy_fail())
             sleep(0.5)
+
+        thread.join()
+        assert not failures, f"Network failure injection failed: {'; '.join(failures)}"
 
         # Execute pipeline until database failover
         deadline = monotonic() + FAILOVER_TIMEOUT
@@ -559,10 +629,11 @@ class TestActiveActive:
         )
 
         event = threading.Event()
+        failures = []
         thread = threading.Thread(
             target=trigger_network_failure_action,
             daemon=True,
-            args=(fault_injector_client, config, event),
+            args=(fault_injector_client, config, event, failures),
         )
 
         def callback(pipe: Pipeline):
@@ -585,6 +656,9 @@ class TestActiveActive:
                 lambda: r_multi_db.transaction(callback), lambda _: dummy_fail()
             )
             sleep(0.5)
+
+        thread.join()
+        assert not failures, f"Network failure injection failed: {'; '.join(failures)}"
 
         # Execute transaction until database failover
         deadline = monotonic() + FAILOVER_TIMEOUT
@@ -622,10 +696,11 @@ class TestActiveActive:
         )
 
         event = threading.Event()
+        failures = []
         thread = threading.Thread(
             target=trigger_network_failure_action,
             daemon=True,
-            args=(fault_injector_client, config, event),
+            args=(fault_injector_client, config, event, failures),
         )
         data = json.dumps({"message": "test"})
         messages_count = 0
@@ -650,6 +725,9 @@ class TestActiveActive:
                 lambda: r_multi_db.publish("test-channel", data), lambda _: dummy_fail()
             )
             sleep(0.5)
+
+        thread.join()
+        assert not failures, f"Network failure injection failed: {'; '.join(failures)}"
 
         # Execute publish until database failover
         deadline = monotonic() + FAILOVER_TIMEOUT
@@ -692,10 +770,11 @@ class TestActiveActive:
         )
 
         event = threading.Event()
+        failures = []
         thread = threading.Thread(
             target=trigger_network_failure_action,
             daemon=True,
-            args=(fault_injector_client, config, event),
+            args=(fault_injector_client, config, event, failures),
         )
         data = json.dumps({"message": "test"})
         messages_count = 0
@@ -724,6 +803,9 @@ class TestActiveActive:
             )
             sleep(0.5)
 
+        thread.join()
+        assert not failures, f"Network failure injection failed: {'; '.join(failures)}"
+
         # Execute publish until database failover
         deadline = monotonic() + FAILOVER_TIMEOUT
         while not listener.is_changed_flag:
@@ -744,12 +826,7 @@ class TestActiveActive:
     @pytest.mark.parametrize("effect, trigger", PLANNED_MAINTENANCE_SCENARIOS)
     @pytest.mark.parametrize(
         "r_multi_db",
-        [
-            {
-                **MAINT_NOTIFICATIONS_MULTI_DB_PARAMS,
-                "health_check_timeout": RELAXED_TIMEOUT,
-            },
-        ],
+        [MAINT_NOTIFICATIONS_MULTI_DB_PARAMS],
         ids=["standalone"],
         indirect=True,
     )
@@ -838,6 +915,113 @@ class TestActiveActive:
         assert_no_failover(r_multi_db, listener, config)
         assert_pool_in_default_state(r_multi_db)
 
+    @pytest.mark.skipif(
+        use_mock_proxy(),
+        reason="Mock proxy doesn't support topology change effects.",
+    )
+    @pytest.mark.parametrize("effect, trigger", PLANNED_MAINTENANCE_SCENARIOS)
+    @pytest.mark.parametrize(
+        "r_multi_db",
+        [MAINT_NOTIFICATIONS_MULTI_DB_PARAMS],
+        ids=["standalone"],
+        indirect=True,
+    )
+    @pytest.mark.timeout(300)
+    def test_health_checks_keep_circuits_closed_during_planned_maintenance(
+        self, r_multi_db, fault_injector_client, effect, trigger
+    ):
+        """
+        The health checks on their own never open a circuit during a planned
+        maintenance. The client sends no commands while the maintenance runs, so the
+        health checks are the only traffic to the databases: a circuit opening here
+        could only come from a health check running out of its budget, never from an
+        error a command leaked. This isolates the health check budget from the
+        connection handling the other planned maintenance test exercises.
+        """
+        r_multi_db, listener, config = r_multi_db
+
+        # Handle unavailable databases from previous test.
+        retry = Retry(
+            supported_errors=(TemporaryUnavailableException,),
+            retries=DEFAULT_FAILOVER_ATTEMPTS,
+            backoff=ConstantBackoff(backoff=DEFAULT_FAILOVER_DELAY),
+        )
+
+        # Client initialized on the first command, which also starts the recurring
+        # health checks. The last command until the maintenance has settled.
+        retry.call_with_retry(
+            lambda: r_multi_db.set("key", "value"), lambda _: dummy_fail()
+        )
+        databases = [database for database, _ in r_multi_db.get_databases()]
+
+        event = threading.Event()
+        failures = []
+        results = []
+        thread = threading.Thread(
+            target=trigger_planned_maintenance_action,
+            daemon=True,
+            args=(
+                fault_injector_client,
+                config,
+                effect,
+                trigger,
+                event,
+                failures,
+                results,
+            ),
+        )
+        thread.start()
+
+        # Only the health checks talk to the databases from here on; the test
+        # watches the circuits they drive.
+        observed_states = set()
+        deadline = monotonic() + PLANNED_MAINTENANCE_TIMEOUT
+        while not event.is_set():
+            assert monotonic() < deadline, PLANNED_MAINTENANCE_TIMEOUT_MESSAGE
+            observed_states |= observe_health_check_maintenance_states(r_multi_db)
+            assert_circuits_closed(databases)
+            assert not listener.is_changed_flag, NO_FAILOVER_MESSAGE
+            sleep(MAINTENANCE_COMMAND_INTERVAL)
+
+        thread.join()
+        assert not failures, f"Planned maintenance failed: {'; '.join(failures)}"
+
+        # Keep watching past the MOVING TTL: the health checks run through the
+        # handoff and its revert as well.
+        settle_deadline = (
+            monotonic()
+            + fault_injector_client.get_moving_ttl()
+            + POST_MAINTENANCE_MARGIN
+        )
+        while monotonic() < settle_deadline:
+            observed_states |= observe_health_check_maintenance_states(r_multi_db)
+            assert_circuits_closed(databases)
+            assert not listener.is_changed_flag, NO_FAILOVER_MESSAGE
+            sleep(MAINTENANCE_COMMAND_INTERVAL)
+
+        # Server-side proof that the shards did move, so the test cannot pass on a
+        # maintenance that never happened.
+        output = results[0]["output"]
+        assert output["source_node"] != output["target_node"], output
+
+        # The health checks must have probed through the maintenance for the test
+        # to prove anything: the handoff is on their pools for the whole TTL, so not
+        # seeing it means the notification never reached a probe.
+        logger.info(
+            f"Maintenance states observed on the probe pools: {observed_states}"
+        )
+        assert MaintenanceState.MOVING in observed_states, (
+            f"No MOVING notification observed by the health checks during {trigger}: "
+            f"{observed_states}"
+        )
+
+        # Traffic resumes on the initial database. The idle connection has the
+        # maintenance's notifications, and the server's close, waiting in its
+        # buffer; the pool must drain and discard them and reconnect rather than
+        # surface a connection error the failure detector would count.
+        assert r_multi_db.get("key") == "value"
+        assert_no_failover(r_multi_db, listener, config)
+
     @pytest.mark.parametrize(
         "r_multi_db",
         [MAINT_NOTIFICATIONS_MULTI_DB_PARAMS],
@@ -862,10 +1046,11 @@ class TestActiveActive:
         )
 
         event = threading.Event()
+        failures = []
         thread = threading.Thread(
             target=trigger_network_failure_action,
             daemon=True,
-            args=(fault_injector_client, config, event),
+            args=(fault_injector_client, config, event, failures),
         )
 
         # Client initialized on the first command.
@@ -883,6 +1068,9 @@ class TestActiveActive:
                 == "value"
             )
             sleep(0.5)
+
+        thread.join()
+        assert not failures, f"Network failure injection failed: {'; '.join(failures)}"
 
         # Execute commands until database failover
         deadline = monotonic() + FAILOVER_TIMEOUT

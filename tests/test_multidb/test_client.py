@@ -16,7 +16,12 @@ from redis.exceptions import (
     RedisClusterException,
     RedisClusterUnreachableError,
 )
-from redis.multidb.client import MultiDBClient
+from redis.maint_notifications import MaintNotificationsConfig
+from redis.multidb.client import (
+    DEFAULT_SYNC_HEALTH_CHECK_TIMEOUT,
+    SYNC_HEALTH_CHECK_TIMEOUT_MARGIN,
+    MultiDBClient,
+)
 from redis.multidb.exception import (
     NoValidDatabaseException,
     InitialHealthCheckFailedError,
@@ -24,7 +29,11 @@ from redis.multidb.exception import (
 )
 from redis.multidb.failover import WeightBasedFailoverStrategy
 from redis.multidb.failure_detector import FailureDetector
-from redis.asyncio.multidb.healthcheck import HealthCheck, AbstractHealthCheck
+from redis.asyncio.multidb.healthcheck import (
+    HealthCheck,
+    AbstractHealthCheck,
+    relaxed_health_check_budget,
+)
 from tests.helpers import wait_for_condition
 from tests.test_multidb.conftest import create_weighted_list
 
@@ -65,6 +74,87 @@ class TestMultiDbClient:
                 assert RedisClusterUnreachableError in supported
                 assert ConnectionError in supported
                 assert RedisClusterException not in supported
+            finally:
+                client.close()
+
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    @pytest.mark.parametrize(
+        "maint_config, relaxed",
+        [
+            (None, False),
+            (MaintNotificationsConfig(enabled=False, relaxed_timeout=10), False),
+            (MaintNotificationsConfig(enabled=True, relaxed_timeout=-1), False),
+            (MaintNotificationsConfig(enabled=True, relaxed_timeout=None), False),
+            (MaintNotificationsConfig(enabled=True, relaxed_timeout=10), True),
+        ],
+        ids=["no_config", "disabled", "no_relaxation", "blocking", "relaxed"],
+    )
+    def test_health_checks_run_from_caller_wait_for_relaxed_budget(
+        self,
+        mock_multi_db_config,
+        mock_db,
+        mock_db1,
+        mock_db2,
+        mock_hc,
+        maint_config,
+        relaxed,
+    ):
+        """
+        The health check budget is relaxed while a database is under maintenance,
+        so the wait on a health check run from the calling thread has to hold the
+        relaxed budget of a database with maintenance notifications enabled;
+        otherwise a maintenance during initialization would surface as a
+        TimeoutError instead of an unhealthy database.
+        """
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
+        mock_hc.check_health.return_value = True
+        for database in (mock_db, mock_db1, mock_db2):
+            database.client.get_connection_kwargs.return_value = {}
+        if maint_config is not None:
+            mock_db.client.get_connection_kwargs.return_value = {
+                "maint_notifications_config": maint_config
+            }
+        expected = DEFAULT_SYNC_HEALTH_CHECK_TIMEOUT
+        if relaxed:
+            expected = (
+                relaxed_health_check_budget(mock_hc, maint_config.relaxed_timeout)
+                + SYNC_HEALTH_CHECK_TIMEOUT_MARGIN
+            )
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+                with patch.object(
+                    client._bg_scheduler,
+                    "run_coro_sync",
+                    wraps=client._bg_scheduler.run_coro_sync,
+                ) as run_coro_sync:
+                    client.initialize()
+                    assert run_coro_sync.call_args.kwargs["timeout"] == pytest.approx(
+                        expected
+                    )
+
+                    # A single database is waited for with its own budget
+                    client.set_active_database(mock_db1)
+                    assert run_coro_sync.call_args.kwargs["timeout"] == pytest.approx(
+                        DEFAULT_SYNC_HEALTH_CHECK_TIMEOUT
+                    )
+                    client.set_active_database(mock_db)
+                    assert run_coro_sync.call_args.kwargs["timeout"] == pytest.approx(
+                        expected
+                    )
             finally:
                 client.close()
 

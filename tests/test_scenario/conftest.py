@@ -40,9 +40,11 @@ DEFAULT_ENDPOINT_NAME = "m-standard"
 DEFAULT_OSS_API_ENDPOINT_NAME = "maint-notifications-oss-api"
 
 # Bounded budget for the Active-Active readiness wait below. Long enough to outlast the
-# recovery of a network failure a preceding test injected, short enough that a genuinely
-# dead endpoint fails the run instead of hanging it.
-MULTI_DB_READY_TIMEOUT = 60
+# recovery of a network failure a preceding test injected, and the propagation of the
+# endpoint's new DNS record after an endpoint rebind a preceding planned maintenance
+# test triggered (observed to take up to about 90 seconds), short enough that a
+# genuinely dead endpoint fails the run instead of hanging it.
+MULTI_DB_READY_TIMEOUT = 180
 MULTI_DB_READY_INTERVAL = 1
 
 

@@ -77,6 +77,7 @@ from redis.asyncio.observability.recorder import (
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
+from redis.event import MaintenanceCompletedEvent
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -94,6 +95,7 @@ from redis.maint_notifications import (
     NodeMovingNotification,
     _build_moving_cleanup_connection_kwargs,
     _build_moving_connection_kwargs,
+    _dispatch_maintenance_event,
 )
 from redis.observability.metrics import CloseReason
 from redis.typing import EncodableT
@@ -223,6 +225,71 @@ class AsyncMaintNotificationsAbstractConnection:
                 "Maintenance notifications are only supported with hiredis and RESP3 parsers!"
             )
         return parser
+
+    async def handle_pending_push_notifications(self) -> None:
+        """
+        Read the push notifications buffered on this idle connection and apply
+        them if the connection is still alive.
+
+        A pooled connection that has readable data while idle either has push
+        notifications waiting, or has been closed by the server - or both, when
+        the notifications announced the maintenance that closed it. The socket
+        state cannot be told apart from the pending data without reading it, so
+        the buffered notifications are collected first and handed to their
+        handlers only once the drain has shown the socket to be alive. A
+        notification buffered on a socket the server has since closed describes
+        a maintenance that has already concluded for this connection: it is
+        discarded, and the ``ConnectionError`` the drain raises lets the pool
+        reconnect before any command is sent.
+
+        Anything buffered that is not a push notification - a reply, or an error
+        reply, left unread by an earlier command - means the connection is dirty,
+        and is reported as a ``ConnectionError`` as well, so that the pool
+        reconnects instead of the next command reading a stale reply.
+        """
+        parser = self._get_push_notifications_parser()
+        deferred: list = []
+
+        def defer(handler):
+            async def deferred_handler(notification):
+                deferred.append((handler, notification))
+
+            return deferred_handler
+
+        handlers = (
+            (parser.node_moving_push_handler_func, parser.set_node_moving_push_handler),
+            (parser.maintenance_push_handler_func, parser.set_maintenance_push_handler),
+            (
+                parser.oss_cluster_maint_push_handler_func,
+                parser.set_oss_cluster_maint_push_handler,
+            ),
+        )
+        for handler, set_handler in handlers:
+            if handler is not None:
+                set_handler(defer(handler))
+
+        alive = False
+        try:
+            while await self.can_read():
+                if await self.read_response(push_request=True) is not None:
+                    raise ConnectionError("Connection has data")
+            alive = True
+        except ResponseError as e:
+            raise ConnectionError("Connection has data") from e
+        finally:
+            for handler, set_handler in handlers:
+                set_handler(handler)
+            if not alive and deferred and logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    f"Discarding {len(deferred)} push notification(s) buffered on "
+                    f"a connection that is closed or dirty: {self}"
+                )
+
+        for handler, notification in deferred:
+            try:
+                await handler(notification)
+            except Exception as e:
+                logger.error(f"Error handling {notification}: {e}")
 
     @abstractmethod
     def get_protocol(self):
@@ -1230,6 +1297,22 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             # reset the sets that keep track of received start maint
             # notifications and skipped end maint notifications
             self.reset_received_notifications()
+            # The relaxation ended without a completion notification: report
+            # it the same way the notification would have been reported.
+            if self.maint_notifications_config is not None:
+                pool_handler = self._maint_notifications_pool_handler
+                _dispatch_maintenance_event(
+                    self.maint_notifications_config,
+                    MaintenanceCompletedEvent(
+                        connection_pool=(
+                            pool_handler.pool if pool_handler is not None else None
+                        ),
+                        connection=self,
+                        state=MaintenanceState.MAINTENANCE,
+                        notification=None,
+                        config=self.maint_notifications_config,
+                    ),
+                )
 
     async def _send_ping(self):
         """Send PING, expect PONG in return"""
@@ -2661,7 +2744,7 @@ class AsyncMaintNotificationsAbstractConnectionPool:
         notification_hash: int,
         reset_relaxed_timeout: bool,
         reset_host_address: bool,
-    ) -> None:
+    ) -> bool:
         """
         Revert MOVING pool state atomically after the notification TTL.
 
@@ -2669,6 +2752,10 @@ class AsyncMaintNotificationsAbstractConnectionPool:
         up in the same critical section. Splitting the cleanup lets an
         acquire/release interleave, which can leave stale MOVING state or undo a
         newer overlapping MOVING notification.
+
+        Returns True when the pool's connection kwargs were reverted, False when
+        a newer MOVING notification had superseded this one and they were left
+        for it to revert.
         """
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
@@ -2694,6 +2781,7 @@ class AsyncMaintNotificationsAbstractConnectionPool:
                 reset_host_address=reset_host_address,
                 include_free_connections=True,
             )
+            return kwargs is not None
 
     async def _disconnect_connections(
         self, connections: Iterable["AbstractConnection"]
@@ -3036,9 +3124,16 @@ class ConnectionPool(
         # a command. if not, the connection was either returned to the
         # pool before all data has been read or the socket has been
         # closed. either way, reconnect and verify everything is good.
+        # With maintenance notifications enabled the pending data may be
+        # push notifications that have to be applied rather than a reason
+        # to reconnect; reading them is what tells the two apart, and it
+        # raises for a socket the server has closed in the meantime.
         try:
-            if await connection.can_read() and not self.maint_notifications_enabled():
-                raise ConnectionError("Connection has data") from None
+            if await connection.can_read():
+                if self.maint_notifications_enabled():
+                    await connection.handle_pending_push_notifications()
+                else:
+                    raise ConnectionError("Connection has data") from None
         except (ConnectionError, TimeoutError, OSError):
             await connection.disconnect()
             await connection.connect()
