@@ -5399,7 +5399,6 @@ class ListCommands(CommandsProtocol):
         alpha: bool = False,
         store: str | None = None,
         groups: bool | None = False,
-        _command: str = "SORT",
     ) -> SortResponse | Awaitable[SortResponse]:
         """
         Sort and return the list, set or sorted set at ``name``.
@@ -5426,6 +5425,32 @@ class ListCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/sort
         """
+        return self._sort(
+            "SORT",
+            name,
+            start=start,
+            num=num,
+            by=by,
+            get=get,
+            desc=desc,
+            alpha=alpha,
+            store=store,
+            groups=groups,
+        )
+
+    def _sort(
+        self,
+        command: str,
+        name: KeyT,
+        start: int | None = None,
+        num: int | None = None,
+        by: str | None = None,
+        get: list[str] | None = None,
+        desc: bool = False,
+        alpha: bool = False,
+        store: str | None = None,
+        groups: bool | None = False,
+    ) -> SortResponse | Awaitable[SortResponse]:
         if (start is not None and num is None) or (num is not None and start is None):
             raise DataError("``start`` and ``num`` must both be specified")
 
@@ -5459,8 +5484,13 @@ class ListCommands(CommandsProtocol):
                 )
 
         options = {"groups": len(get) if groups else None}
-        options["keys"] = [name]
-        return self.execute_command(_command, *pieces, **options)
+        # Only declare the sorted key as cacheable when the reply depends on
+        # that key alone. With ``by`` or ``get`` the result also depends on
+        # external keys the command never declares to the server, so an entry
+        # stored under ``keys=[name]`` could never be invalidated and later
+        # calls would return a stale ordering. Leave it uncacheable then.
+        options["keys"] = [name] if by is None and get is None else None
+        return self.execute_command(command, *pieces, **options)
 
     @overload
     def sort_ro(
@@ -5515,7 +5545,8 @@ class ListCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/sort_ro
         """
-        return self.sort(
+        return self._sort(
+            "SORT_RO",
             key,
             start=start,
             num=num,
@@ -5523,7 +5554,6 @@ class ListCommands(CommandsProtocol):
             get=get,
             desc=desc,
             alpha=alpha,
-            _command="SORT_RO",
         )
 
 

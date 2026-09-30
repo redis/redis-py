@@ -280,6 +280,37 @@ class TestCache:
                 "cache": DefaultCache(CacheConfig(max_size=5)),
                 "single_connection_client": False,
             },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_sort_ro_with_by_is_not_cached(self, r, r2):
+        # With ``by`` (or ``get``) the SORT_RO reply also depends on external
+        # keys the command never declares to the server. Caching it under
+        # keys=[name] would never be invalidated when those weights change,
+        # so such calls stay uncacheable and must always reflect fresh data.
+        r.delete("mylist")
+        r.rpush("mylist", "1", "2", "3")
+        r.mset({"weight_1": "3", "weight_2": "2", "weight_3": "1"})
+        assert r.sort_ro("mylist", by="weight_*") == [b"3", b"2", b"1"]
+        # change an external weight from a second client
+        r2.mset({"weight_1": "0"})
+        time.sleep(0.1)
+        # the new ordering is returned, not a stale cached one
+        assert r.sort_ro("mylist", by="weight_*") == [b"1", b"3", b"2"]
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": True,
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": False,
+            },
             {
                 "cache": DefaultCache(CacheConfig(max_size=5)),
                 "single_connection_client": False,
