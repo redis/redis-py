@@ -2006,6 +2006,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         store = False
 
         if keys is not None:
+            # Materialized once: ``keys`` may be a one-shot iterable, and it is read again
+            # below to build the ``CacheKey`` the reverse index is keyed by.
+            keys = tuple(keys)
             with self._cache_lock:
                 # Eligibility is asked with a throwaway empty-keys ``CacheKey`` because
                 # ``DefaultCache.is_cachable`` looks only at ``key.command``.
@@ -2017,7 +2020,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             # cache lock: it invokes application code and touches no cache state. Folding it
             # into ``is_cachable`` would also invoke it from ``DefaultCache.set`` and from
             # the eligibility probe above, both with an empty key tuple.
-            store = eligible and self._cache.config.should_cache(command, tuple(keys))
+            store = eligible and self._cache.config.should_cache(command, keys)
 
         if not store:
             self._current_command_cache_key = None
@@ -2041,15 +2044,21 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
         # Creates cache key.
         self._current_command_cache_key = CacheKey(
-            command=command, redis_keys=tuple(keys), redis_args=args
+            command=command, redis_keys=keys, redis_args=args
         )
 
         with self._cache_lock:
             # We have to trigger invalidation processing in case if
             # it was cached by another connection to avoid
             # queueing invalidations in stale connections.
+            #
+            # Only an entry we might serve is drained. An IN_PROGRESS one is never served and
+            # is overwritten by our own placeholder below, so draining cannot change the
+            # result - while its ``connection_ref`` socket may hold the owner's reply pair,
+            # or another command's reply if the placeholder was stranded, and the drain
+            # (which returns non-push replies too) would consume either one.
             entry = self._cache.get(self._current_command_cache_key)
-            if entry is not None:
+            if entry is not None and entry.status != CacheEntryStatus.IN_PROGRESS:
                 with self._pool_lock:
                     while entry.connection_ref.can_read():
                         try:

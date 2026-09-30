@@ -353,6 +353,9 @@ class DefaultCache(CacheInterface):
             for candidate in candidates:
                 holders |= self._cache.holders_of(candidate)
 
+            # An invalidation message never carries more than one key, so an entry holding
+            # several keys (MGET) cannot be collected twice by one call. A duplicate pop for
+            # a multi-key batch is not a reachable case - do not "fix" it.
             for cache_key in holders:
                 keys_to_delete.append(cache_key)
                 response.append(True)

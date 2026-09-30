@@ -2580,6 +2580,63 @@ class TestCacheEntryLifecycle:
         mock_connection.send_command.assert_called_once_with("GET", "foo", keys=["foo"])
         assert proxy.read_response() == b"fresh"
 
+    @pytest.mark.parametrize(
+        "tracking_mode", [TrackingMode.PLAIN, TrackingMode.OPTIN, TrackingMode.OPTOUT]
+    )
+    def test_an_in_progress_entry_is_not_drained(
+        self, proxy_factory, mock_connection, tracking_mode
+    ):
+        """
+        The owner's socket of a placeholder is never drained.
+
+        The drain returns non-push replies too, so it would consume the owner's reply
+        pair - or another command's reply if the placeholder was stranded. An IN_PROGRESS
+        entry is never served either way, so there is nothing for the drain to protect.
+        """
+        proxy, cache = proxy_factory(tracking_mode, cache_predicate=_cache_everything)
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        owner = Mock()
+        # One readable reply, so a regression fails the assertion rather than spinning.
+        owner.can_read.side_effect = [True, False]
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+                status=CacheEntryStatus.IN_PROGRESS,
+                connection_ref=owner,
+            )
+        )
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+
+        owner.read_response.assert_not_called()
+        # Our own placeholder replaced the other one.
+        assert cache.get(cache_key).connection_ref is mock_connection
+
+    def test_one_shot_keys_are_indexed_under_the_real_keys(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        ``keys`` is materialized once, so a generator is not consumed by the intent check
+        and stored with no keys - an entry the reverse index could never invalidate.
+        """
+        proxy, cache = proxy_factory(
+            TrackingMode.PLAIN, cache_predicate=_cache_everything
+        )
+        mock_connection.read_response.return_value = b"bar"
+
+        proxy.send_command("GET", "foo", keys=(key for key in ["foo"]))
+        assert proxy.read_response() == b"bar"
+
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        assert cache.get(cache_key).cache_value == b"bar"
+        cache.delete_by_redis_keys([b"foo"])
+        assert cache.get(cache_key) is None
+
     def test_a_hit_records_the_metrics_without_touching_the_socket(
         self, proxy_factory, mock_connection
     ):
