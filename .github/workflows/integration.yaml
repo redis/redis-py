@@ -47,6 +47,19 @@ jobs:
             CVE-2026-34073 # DNS name constraints were validated only against SANs, not against the peer name used in verification
                            # Update version when msal dependency in entraid is updated
             CVE-2026-4539  # pygments ReDoS in AdlLexer, local access only, no fix available yet
+            # PyJWT 2.13.0 issues, fixed in 2.14.0. PyJWT is pinned to ~=2.13.0 by redis-entraid 1.2.1 (latest),
+            # so no fixed version can be installed yet. redis-py only decodes claims with verify_signature=False
+            # and does not use JWKS, PyJWKClient or HMAC keys. Remove these when redis-entraid is updated.
+            CVE-2026-102265 # RecursionError from a deeply nested header escapes PyJWTError handling
+            CVE-2026-102266 # HS256 verification with an empty oct JWK
+            CVE-2026-102267 # PyJWKClient follows JWKS redirects without validating the destination
+            CVE-2026-102268 # algorithm confusion via PEM text not recognized by is_pem_format
+            CVE-2026-102269 # signature segments with non-Base64URL characters are accepted
+            CVE-2026-102271 # HMACAlgorithm.prepare_key asymmetric key check relies on text markers
+            CVE-2026-102272 # HMACAlgorithm.prepare_key JWK detection bypass (patch bypass of CVE-2026-48526)
+            CVE-2026-102273 # incomplete algorithm confusion defense when mixing symmetric and asymmetric algorithms
+            CVE-2026-102274 # a malformed RSA JWK aborts parsing of the whole JWK Set
+            CVE-2026-101917 # PyJWKClient unbounded JWKS requests via kid values (incomplete fix of CVE-2026-48524)
 
   lint:
     name: Code linters
