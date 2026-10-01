@@ -1283,16 +1283,14 @@ class TestBaseMetadataResolver:
         for command in ("get", "GET", "Get"):
             assert resolver.is_trackable_read(command) is True
 
-    def test_is_trackable_read_has_a_working_default_on_the_abc(self):
+    def test_is_trackable_read_is_abstract_on_the_abc(self):
         """
-        Added to ``MetadataResolver`` as a concrete method, not an abstract one, so a resolver
-        written against the previous version of the ABC keeps working - and answers correctly,
-        over its own ``resolve``.
+        A ``MetadataResolver`` must implement ``is_trackable_read`` like its other views.
         """
 
         class ResolverWithoutTheView(MetadataResolver):
             def resolve(self, command_name):
-                return {"get": CACHEABLE_KEYED}.get(command_name.lower())
+                return None
 
             def resolve_policies(self, command_name):
                 return None
@@ -1306,11 +1304,8 @@ class TestBaseMetadataResolver:
             def with_fallback(self, fallback):
                 return self
 
-        resolver = ResolverWithoutTheView()
-
-        assert resolver.is_trackable_read("GET") is True
-        assert resolver.is_trackable_read("SET") is False
-        assert resolver.is_trackable_read(b"GET") is False
+        with pytest.raises(TypeError, match="is_trackable_read"):
+            ResolverWithoutTheView()
 
     def test_the_views_are_case_insensitive(self):
         """

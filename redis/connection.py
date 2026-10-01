@@ -2029,10 +2029,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         if not store:
             self._current_command_cache_key = None
 
-            # One path for what used to be the ``keys is None`` branch and the ineligible
-            # branch, so an eligible read whose command method never plumbed ``keys=`` still
-            # gets its optout ``NO``. That is the correct direction: the server tracks it
-            # regardless, and we will not store it.
+            # One path for keyless and ineligible commands alike, so an eligible read whose
+            # command method never plumbed ``keys=`` still gets its optout ``NO``. That is the
+            # correct direction: the server tracks it regardless, and we will not store it.
             #
             # Trackability is asked only here, and never affects storage. A ``NO`` in front of
             # a command the server would not track - a write, a keyless read - is consumed
@@ -2090,8 +2089,8 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             #   a reply for a command we never sent.
             #
             # An IN_PROGRESS entry is somebody else's fetch in flight and carries no value to
-            # serve, so it is not a hit: fall through and send. Returning early on one used to
-            # leave ``read_response`` reading a reply that was never requested.
+            # serve, so it is not a hit: fall through and send. Returning without sending
+            # would leave ``read_response`` reading a reply that was never requested.
             if entry is not None and entry.status != CacheEntryStatus.IN_PROGRESS:
                 self._pending_cache_hit = copy.deepcopy(entry.cache_value)
                 self._current_command_cache_key = None

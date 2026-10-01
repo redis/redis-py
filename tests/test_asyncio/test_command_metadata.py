@@ -694,16 +694,14 @@ class TestAsyncBaseMetadataResolver:
         for command in ("get", "GET", "Get"):
             assert await resolver.is_trackable_read(command) is True
 
-    async def test_is_trackable_read_has_a_working_default_on_the_abc(self):
+    async def test_is_trackable_read_is_abstract_on_the_abc(self):
         """
-        Added to ``AsyncMetadataResolver`` as a concrete method, not an abstract one, so a
-        resolver written against the previous version of the ABC keeps working - and answers
-        correctly, over its own ``resolve``.
+        An ``AsyncMetadataResolver`` must implement ``is_trackable_read`` like its other views.
         """
 
         class ResolverWithoutTheView(AsyncMetadataResolver):
             async def resolve(self, command_name):
-                return {"get": CACHEABLE_KEYED}.get(command_name.lower())
+                return None
 
             async def resolve_policies(self, command_name):
                 return None
@@ -717,11 +715,8 @@ class TestAsyncBaseMetadataResolver:
             def with_fallback(self, fallback):
                 return self
 
-        resolver = ResolverWithoutTheView()
-
-        assert await resolver.is_trackable_read("GET") is True
-        assert await resolver.is_trackable_read("SET") is False
-        assert await resolver.is_trackable_read(b"GET") is False
+        with pytest.raises(TypeError, match="is_trackable_read"):
+            ResolverWithoutTheView()
 
     async def test_is_cacheable_fails_closed_for_an_unresolvable_name(self):
         """

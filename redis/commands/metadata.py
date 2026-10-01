@@ -351,6 +351,7 @@ class MetadataResolver(ABC):
         """
         pass
 
+    @abstractmethod
     def is_trackable_read(self, command_name: str) -> bool:
         """
         Determines whether the server would remember this command's keys while tracking.
@@ -358,13 +359,10 @@ class MetadataResolver(ABC):
         The server-side-tracking view of :meth:`resolve`, decided by
         :func:`_is_trackable_read`. Never affects what may be stored: it only decides whether
         a ``CLIENT CACHING NO`` in front of a read is worth sending under ``optout`` tracking.
-        Fails closed, which there means skipping the ``NO`` - tracking a reply the client does
-        not store only wastes invalidation-table entries, where storing a reply the server
-        does not track is stale forever.
-
-        Concrete rather than abstract, unlike its neighbours, so a resolver written against
-        the previous version of this ABC keeps working. :class:`BaseMetadataResolver`
-        overrides it with a memoized implementation.
+        When in doubt it returns False, so the ``NO`` is skipped and the server keeps
+        tracking the keys. That is the safe side: an extra tracked key only costs an entry in
+        the server's invalidation table, but a stored reply that the server does not track is
+        never invalidated and can go stale.
 
         Args:
             command_name: The name of the command to check, in any case.
@@ -372,15 +370,7 @@ class MetadataResolver(ABC):
         Returns:
             bool: True only when the command carries the ``readonly`` command flag.
         """
-        if not isinstance(command_name, str):
-            return False
-
-        try:
-            metadata = self.resolve(command_name)
-        except ValueError:
-            return False
-
-        return _is_trackable_read(metadata)
+        pass
 
     @abstractmethod
     def with_fallback(self, fallback: "MetadataResolver") -> "MetadataResolver":
@@ -459,6 +449,7 @@ class AsyncMetadataResolver(ABC):
         """
         pass
 
+    @abstractmethod
     async def is_trackable_read(self, command_name: str) -> bool:
         """
         Determines whether the server would remember this command's keys while tracking.
@@ -466,13 +457,10 @@ class AsyncMetadataResolver(ABC):
         The server-side-tracking view of :meth:`resolve`, decided by
         :func:`_is_trackable_read`. Never affects what may be stored: it only decides whether
         a ``CLIENT CACHING NO`` in front of a read is worth sending under ``optout`` tracking.
-        Fails closed, which there means skipping the ``NO`` - tracking a reply the client does
-        not store only wastes invalidation-table entries, where storing a reply the server
-        does not track is stale forever.
-
-        Concrete rather than abstract, unlike its neighbours, so a resolver written against
-        the previous version of this ABC keeps working. :class:`AsyncBaseMetadataResolver`
-        overrides it with a memoized implementation.
+        When in doubt it returns False, so the ``NO`` is skipped and the server keeps
+        tracking the keys. That is the safe side: an extra tracked key only costs an entry in
+        the server's invalidation table, but a stored reply that the server does not track is
+        never invalidated and can go stale.
 
         Args:
             command_name: The name of the command to check, in any case.
@@ -480,15 +468,7 @@ class AsyncMetadataResolver(ABC):
         Returns:
             bool: True only when the command carries the ``readonly`` command flag.
         """
-        if not isinstance(command_name, str):
-            return False
-
-        try:
-            metadata = await self.resolve(command_name)
-        except ValueError:
-            return False
-
-        return _is_trackable_read(metadata)
+        pass
 
     @abstractmethod
     def with_fallback(

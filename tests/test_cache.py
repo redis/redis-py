@@ -2589,6 +2589,59 @@ class TestCacheReverseIndex:
         assert cache.delete_by_redis_keys([b"foo"]) == [True]
         assert cache.size == 0
 
+    def test_a_lone_holder_is_stored_bare_and_promoted_on_the_second(
+        self, mock_connection
+    ):
+        # Most keys have one holder, and a set per key is most of the index's memory.
+        cache = DefaultCache(CacheConfig(max_size=10))
+        first = self._entry(cache, "GET", ("foo",), b"a", mock_connection)
+
+        assert cache.collection._by_redis_key["foo"] == first
+
+        second = self._entry(cache, "MGET", ("foo", "bar"), b"b", mock_connection)
+
+        assert cache.collection._by_redis_key["foo"] == {first, second}
+        assert cache.collection._by_redis_key["bar"] == second
+        assert cache.collection.holders_of("foo") == frozenset({first, second})
+
+    def test_a_set_dropping_to_one_holder_is_demoted(self, mock_connection):
+        cache = DefaultCache(CacheConfig(max_size=10))
+        evicted = self._entry(cache, "GET", ("foo",), b"a", mock_connection)
+        kept = self._entry(cache, "MGET", ("foo", "bar"), b"b", mock_connection)
+
+        assert cache.eviction_policy.evict_next() == evicted
+
+        assert cache.collection._by_redis_key["foo"] == kept
+        assert cache.collection.holders_of("foo") == frozenset({kept})
+        assert cache.delete_by_redis_keys([b"foo"]) == [True]
+        assert cache.size == 0
+        assert cache.collection._by_redis_key == {}
+
+    def test_a_key_named_twice_by_one_invocation_is_indexed_once(self, mock_connection):
+        cache = DefaultCache(CacheConfig(max_size=10))
+        cache_key = self._entry(cache, "MGET", ("foo", "foo"), b"a", mock_connection)
+
+        assert cache.collection._by_redis_key["foo"] == cache_key
+        assert cache.collection.holders_of("foo") == frozenset({cache_key})
+
+        assert cache.eviction_policy.evict_next() == cache_key
+
+        assert cache.collection.holders_of("foo") == frozenset()
+        assert cache.collection._by_redis_key == {}
+
+    def test_evicting_one_of_many_holders_keeps_the_rest(self, mock_connection):
+        cache = DefaultCache(CacheConfig(max_size=10))
+        evicted = self._entry(cache, "GET", ("foo",), b"a", mock_connection)
+        kept_a = self._entry(cache, "MGET", ("foo", "bar"), b"b", mock_connection)
+        kept_b = self._entry(cache, "MGET", ("foo", "baz"), b"c", mock_connection)
+
+        assert cache.eviction_policy.evict_next() == evicted
+
+        assert cache.collection.holders_of("foo") == frozenset({kept_a, kept_b})
+        assert cache.delete_by_redis_keys([b"foo"]) == [True, True]
+        assert cache.size == 0
+        assert cache.collection._by_redis_key == {}
+
 
 class TestUnitLRUPolicy:
     def test_type(self):

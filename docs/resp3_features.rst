@@ -231,7 +231,11 @@ Some things work the same in every mode:
 - Pipelines, transactions and ``send_packed_command`` bypass the cache. Under ``optout`` the
   server still tracks the keys they read.
 - A command redirected with ``ASK`` is sent without ``CLIENT CACHING``, and its reply is not
-  stored. On the server, ``ASKING`` and ``CLIENT CACHING`` cancel each other.
+  stored. ``ASKING`` and ``CLIENT CACHING`` each apply only to the command that immediately
+  follows them, so one command cannot carry both. Pairing the redirected read with
+  ``CLIENT CACHING`` would strip the ``ASK`` allowance, and the read would be redirected
+  again. The reply is not stored because it belongs to a slot that is migrating. Under
+  ``optout`` the server tracks the read by default anyway.
 - Under ``optout``, the client sends ``CLIENT CACHING NO`` only for commands that the metadata
   table marks ``readonly``. Any other read stays tracked. The worst case is an unused entry in
   the server's invalidation table, never a stale reply.

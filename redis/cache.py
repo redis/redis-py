@@ -223,17 +223,29 @@ class _IndexedCacheEntries(OrderedDict):
     up would go stale on every eviction, and a stale index is the one thing it must never be -
     a missed entry is a reply that is never invalidated. Overriding the mutating methods here
     means every insertion and removal path keeps it exact, whoever calls it.
+
+    Most Redis keys have exactly one holder, and a ``set`` costs over 200 bytes, so a lone
+    holder is stored bare and promoted to a ``set`` only when a second one arrives - and
+    demoted back when it drops to one again. That trades an ``isinstance`` check on each
+    index update for most of the index's memory.
     """
 
     def __init__(self, *args, **kwargs) -> None:
         # Assigned before delegating: ``OrderedDict.__init__`` may populate, which routes
         # through the ``__setitem__`` below.
-        self._by_redis_key: dict[Any, set[CacheKey]] = {}
+        self._by_redis_key: dict[Any, CacheKey | set[CacheKey]] = {}
         super().__init__(*args, **kwargs)
 
     def __setitem__(self, key: CacheKey, value: "CacheEntry") -> None:
+        index = self._by_redis_key
         for redis_key in key.redis_keys:
-            self._by_redis_key.setdefault(redis_key, set()).add(key)
+            holders = index.get(redis_key)
+            if holders is None:
+                index[redis_key] = key
+            elif isinstance(holders, set):
+                holders.add(key)
+            elif holders != key:
+                index[redis_key] = {holders, key}
         super().__setitem__(key, value)
 
     def __delitem__(self, key: CacheKey) -> None:
@@ -260,16 +272,27 @@ class _IndexedCacheEntries(OrderedDict):
 
         Returned as a snapshot, because the caller deletes what it finds.
         """
-        return frozenset(self._by_redis_key.get(redis_key, ()))
+        holders = self._by_redis_key.get(redis_key)
+        if holders is None:
+            return frozenset()
+        if isinstance(holders, set):
+            return frozenset(holders)
+        return frozenset((holders,))
 
     def _unindex(self, key: CacheKey) -> None:
+        index = self._by_redis_key
         for redis_key in key.redis_keys:
-            holders = self._by_redis_key.get(redis_key)
+            holders = index.get(redis_key)
             if holders is None:
                 continue
-            holders.discard(key)
-            if not holders:
-                del self._by_redis_key[redis_key]
+            if isinstance(holders, set):
+                holders.discard(key)
+                if len(holders) == 1:
+                    index[redis_key] = next(iter(holders))
+                elif not holders:
+                    del index[redis_key]
+            elif holders == key:
+                del index[redis_key]
 
 
 class DefaultCache(CacheInterface):
@@ -345,10 +368,9 @@ class DefaultCache(CacheInterface):
 
             # The reverse index answers this without walking the map. Both spellings are
             # looked up because an entry is indexed under its keys exactly as the invocation
-            # supplied them, while the server names them in its own encoding. Unioned rather
-            # than iterated separately, so an entry indexed under both spellings of this one
-            # key is still collected once - which is what the ``any()`` over candidates did
-            # when this walked the whole map.
+            # supplied them, while the server names them in its own encoding. The two results
+            # are unioned, so an entry indexed under both spellings of this one key is
+            # collected once.
             holders: set[CacheKey] = set()
             for candidate in candidates:
                 holders |= self._cache.holders_of(candidate)
