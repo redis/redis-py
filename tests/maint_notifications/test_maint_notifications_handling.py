@@ -2327,9 +2327,11 @@ class TestPendingPushNotificationsOnIdleConnection(TestMaintenanceNotificationsB
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_pending_pushes_on_closed_connection_are_discarded(self, pool_class):
         """
-        The notifications buffered ahead of the server's close describe a
-        maintenance that has already concluded for this connection: nothing is
-        applied, and the pool reconnects before the command is sent.
+        The server closes the connections of a moved endpoint once the MOVING
+        time-to-live expires, so notifications buffered ahead of the server's
+        close describe a maintenance that is over: nothing is applied, and the
+        pool reconnects through the configured address before the command is
+        sent, instead of letting the command fail on the dead socket.
         """
         pool, connection = self._idle_connection(pool_class)
         sock = connection._sock
@@ -2343,8 +2345,12 @@ class TestPendingPushNotificationsOnIdleConnection(TestMaintenanceNotificationsB
             assert sock.closed
             assert connection._sock is not sock
             assert connection._sock.connected
+            # Reconnected through the configured address, not the MOVING target
+            assert connection._sock.address == (
+                DEFAULT_ADDRESS.split(":")[0],
+                int(DEFAULT_ADDRESS.split(":")[1]),
+            )
             assert connection.maintenance_state == MaintenanceState.NONE
-            assert connection.host == DEFAULT_ADDRESS.split(":")[0]
             assert connection.socket_timeout == connection.orig_socket_timeout
             assert (
                 pool.connection_kwargs.get("maintenance_state", MaintenanceState.NONE)
@@ -2366,6 +2372,7 @@ class TestPendingPushNotificationsOnIdleConnection(TestMaintenanceNotificationsB
         A reply left unread by an earlier command is not a push notification: the
         connection is dirty, and the pool reconnects it rather than letting the
         next command read the stale reply - as it did before the notifications.
+        The pushes read ahead of it are discarded with it.
         """
         pool, connection = self._idle_connection(pool_class)
         sock = connection._sock

@@ -138,6 +138,27 @@ def relaxed_health_check_budget(
     )
 
 
+def database_maint_notifications_config(client) -> Optional[MaintNotificationsConfig]:
+    """
+    The maintenance notifications config a database client was built with, or
+    None when it has none.
+
+    The standalone clients keep it in their connection kwargs. The cluster
+    clients hold it as an attribute, and their connection kwargs only carry it
+    once the notifications are enabled.
+    """
+    config = getattr(client, "maint_notifications_config", None)
+    if config is None:
+        config = client.get_connection_kwargs().get("maint_notifications_config")
+    return config if isinstance(config, MaintNotificationsConfig) else None
+
+
+# How often a check that has outlived its plain budget re-evaluates the
+# maintenance windows relaxing it, so that a completed maintenance restores
+# the plain budget without waiting out the relaxed one
+MAINTENANCE_WINDOW_POLL_INTERVAL = 0.5
+
+
 class _MaintenanceWindow:
     """One relaxation the probe client of a database is currently under."""
 
@@ -298,9 +319,11 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
         The budget is ``health_check_timeout``, relaxed while the database is
         under a server maintenance: the probe client reports the maintenance
         windows it is in, and a check that runs out of the plain budget inside
-        one is given the relaxed budget instead, measured from its start. A
-        stall with no notification behind it - an unplanned failure - keeps
-        the plain budget.
+        one is given the relaxed budget instead, measured from its start. The
+        windows are re-evaluated while the check is relaxed, so a maintenance
+        that completes restores the plain budget - a probe still hung after it
+        does not get to use up the relaxed one. A stall with no notification
+        behind it - an unplanned failure - keeps the plain budget.
         """
         task = asyncio.ensure_future(self._execute(health_check, database))
         start = time.monotonic()
@@ -314,9 +337,12 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
                 if done:
                     return task.result()
 
+                now = time.monotonic()
                 relaxed_deadline = self._relaxed_deadline(database, health_check, start)
-                if relaxed_deadline is not None and relaxed_deadline > deadline:
-                    deadline = relaxed_deadline
+                if relaxed_deadline is not None and relaxed_deadline > now:
+                    deadline = min(
+                        relaxed_deadline, now + MAINTENANCE_WINDOW_POLL_INTERVAL
+                    )
                     continue
 
                 task.cancel()
@@ -407,7 +433,7 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
                     # to a TLS port and mark a healthy database unavailable.
                     filtered_kwargs["ssl"] = True
                 probe_config = self._maintenance_aware_config(
-                    db_id, conn_kwargs.get("maint_notifications_config")
+                    db_id, database_maint_notifications_config(database.client)
                 )
                 if probe_config is not None:
                     filtered_kwargs["maint_notifications_config"] = probe_config
@@ -422,12 +448,8 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
                     # above; the async cluster also represents TLS as
                     # connection_class=SSLConnection in its connection kwargs.
                     filtered_kwargs["ssl"] = True
-                # Both cluster clients hold the config they were built with;
-                # the connection kwargs only carry it once it is enabled.
                 probe_config = self._maintenance_aware_config(
-                    db_id,
-                    getattr(database.client, "maint_notifications_config", None)
-                    or conn_kwargs.get("maint_notifications_config"),
+                    db_id, database_maint_notifications_config(database.client)
                 )
                 if probe_config is not None:
                     filtered_kwargs["maint_notifications_config"] = probe_config

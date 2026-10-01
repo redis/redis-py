@@ -1718,6 +1718,7 @@ async def test_async_pending_pushes_on_alive_connection_are_applied_in_order():
 
 @pytest.mark.asyncio
 async def test_async_pending_pushes_on_closed_connection_are_discarded():
+    """A closed socket means the maintenance is over: nothing is applied."""
     migrating = NodeMigratingNotification(id=1, ttl=5)
     moving = NodeMovingNotification(
         id=2, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=5

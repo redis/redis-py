@@ -507,10 +507,12 @@ client of the affected database, and the `MultiDBClient` keeps that database act
 
 - **Idle connections.** A connection that is idle through the maintenance has the
   notifications, and possibly the server's close after an endpoint rebind, waiting in
-  its buffer. When the pool hands it out again it reads them first: a connection the
-  server has closed is reconnected before the command is sent, and the stale
-  notifications it carried are discarded, so resuming traffic after an idle period does
-  not count as a failure towards a failover.
+  its buffer. When the pool hands it out again it reads them first. If the connection
+  is still alive the maintenance is still in progress and the notifications are
+  applied as usual. If the server has closed it, the maintenance is over: the stale
+  notifications are discarded and the connection is reconnected, through the
+  configured address, before the command is sent - so resuming traffic after an idle
+  period does not count as a failure towards a failover.
 
 The failure detector and the circuit breakers are not involved in any of this: a
 maintenance that the notifications cover produces neither the command failures nor

@@ -228,24 +228,23 @@ class AsyncMaintNotificationsAbstractConnection:
 
     async def handle_pending_push_notifications(self) -> None:
         """
-        Read the push notifications buffered on this idle connection and apply
-        them if the connection is still alive.
+        Process the push notifications buffered on this idle connection if it
+        is still alive, and report a connection that has to be reconnected.
 
         A pooled connection that has readable data while idle either has push
         notifications waiting, or has been closed by the server - or both, when
         the notifications announced the maintenance that closed it. The socket
         state cannot be told apart from the pending data without reading it, so
-        the buffered notifications are collected first and handed to their
-        handlers only once the drain has shown the socket to be alive. A
-        notification buffered on a socket the server has since closed describes
-        a maintenance that has already concluded for this connection: it is
-        discarded, and the ``ConnectionError`` the drain raises lets the pool
-        reconnect before any command is sent.
-
-        Anything buffered that is not a push notification - a reply, or an error
-        reply, left unread by an earlier command - means the connection is dirty,
-        and is reported as a ``ConnectionError`` as well, so that the pool
-        reconnects instead of the next command reading a stale reply.
+        the notifications are collected first and handed to their handlers only
+        once the drain has shown the socket to be alive: the server closes the
+        connections of a moved endpoint when the MOVING time-to-live expires,
+        so an alive socket means the maintenance is still in progress and the
+        announced address current. A notification buffered on a socket the
+        server has since closed describes a maintenance that is over, after
+        which the configured address is what to connect to again: it is
+        discarded, and the ``ConnectionError`` raised here makes the pool
+        reconnect before any command is sent. A reply left unread by an earlier
+        command means the connection is dirty and is reported the same way.
         """
         parser = self._get_push_notifications_parser()
         deferred: list = []
@@ -282,7 +281,7 @@ class AsyncMaintNotificationsAbstractConnection:
             if not alive and deferred and logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
                     f"Discarding {len(deferred)} push notification(s) buffered on "
-                    f"a connection that is closed or dirty: {self}"
+                    f"a connection that is closed or dirty, reconnecting: {self}"
                 )
 
         for handler, notification in deferred:

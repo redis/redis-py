@@ -6,6 +6,7 @@ from typing import Any, Callable, Iterable, List, Literal, Optional
 from redis.asyncio.multidb.healthcheck import (
     HealthCheck,
     HealthCheckPolicy,
+    database_maint_notifications_config,
     relaxed_health_check_budget,
 )
 from redis.background import BackgroundScheduler
@@ -388,11 +389,9 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
         timeout = DEFAULT_SYNC_HEALTH_CHECK_TIMEOUT
         for database in databases:
-            config = database.client.get_connection_kwargs().get(
-                "maint_notifications_config"
-            )
+            config = database_maint_notifications_config(database.client)
             if not (
-                isinstance(config, MaintNotificationsConfig)
+                config is not None
                 and config.enabled
                 and config.is_relaxed_timeouts_enabled()
             ):

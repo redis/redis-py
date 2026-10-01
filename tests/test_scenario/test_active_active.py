@@ -1017,8 +1017,8 @@ class TestActiveActive:
 
         # Traffic resumes on the initial database. The idle connection has the
         # maintenance's notifications, and the server's close, waiting in its
-        # buffer; the pool must drain and discard them and reconnect rather than
-        # surface a connection error the failure detector would count.
+        # buffer; the pool must discard them and reconnect rather than surface
+        # a connection error the failure detector would count.
         assert r_multi_db.get("key") == "value"
         assert_no_failover(r_multi_db, listener, config)
 

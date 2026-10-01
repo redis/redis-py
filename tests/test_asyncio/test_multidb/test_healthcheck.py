@@ -17,6 +17,7 @@ from redis.asyncio.multidb.healthcheck import (
     HealthyMajorityPolicy,
     HealthyAnyPolicy,
     relaxed_health_check_budget,
+    database_maint_notifications_config,
     _MaintenanceWindowListener,
     _MaintenanceWindowTracker,
 )
@@ -340,6 +341,33 @@ class TestMaintenanceAwareBudget:
         assert isinstance(exc_info.value.original_exception, asyncio.TimeoutError)
 
     @pytest.mark.asyncio
+    async def test_completed_window_restores_plain_budget_mid_check(self):
+        """
+        A probe still hung once the maintenance has completed must not get to
+        use up the relaxed budget: the plain one applies again.
+        """
+        mock_db = Mock(spec=Database)
+        policy, listener = self._policy_with_tracker(mock_db)
+        source = object()
+        listener.listen(
+            _maintenance_event(MaintenanceStartedEvent, source, relaxed_timeout=5)
+        )
+
+        async def complete_soon():
+            await asyncio.sleep(0.3)
+            listener.listen(_maintenance_event(MaintenanceCompletedEvent, source))
+
+        completion = asyncio.create_task(complete_soon())
+        start = time.monotonic()
+        with pytest.raises(UnhealthyDatabaseException) as exc_info:
+            # Would be allowed 1 * (5 + 0.01) s while the window is active
+            await policy.execute([self._slow_check(3.0)], mock_db)
+        await completion
+
+        assert isinstance(exc_info.value.original_exception, asyncio.TimeoutError)
+        assert time.monotonic() - start < 1.5
+
+    @pytest.mark.asyncio
     async def test_completed_window_restores_budget(self):
         mock_db = Mock(spec=Database)
         policy, listener = self._policy_with_tracker(mock_db)
@@ -414,6 +442,31 @@ class TestMaintenanceAwareBudget:
         with pytest.raises(asyncio.CancelledError):
             await task
         await asyncio.wait_for(cancelled.wait(), 1.0)
+
+
+@pytest.mark.onlynoncluster
+class TestDatabaseMaintNotificationsConfig:
+    """The config is resolved the way each client type carries it."""
+
+    def test_standalone_client_carries_it_in_connection_kwargs(self):
+        config = MaintNotificationsConfig(enabled=True)
+        client = Mock(spec=Redis)
+        client.get_connection_kwargs.return_value = {
+            "maint_notifications_config": config
+        }
+        assert database_maint_notifications_config(client) is config
+
+    def test_cluster_client_carries_it_as_an_attribute(self):
+        config = MaintNotificationsConfig(enabled=True)
+        client = Mock(spec=AsyncRedisCluster)
+        client.maint_notifications_config = config
+        client.get_connection_kwargs.return_value = {}
+        assert database_maint_notifications_config(client) is config
+
+    def test_client_without_config(self):
+        client = Mock(spec=Redis)
+        client.get_connection_kwargs.return_value = {}
+        assert database_maint_notifications_config(client) is None
 
 
 @pytest.mark.onlynoncluster
