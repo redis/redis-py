@@ -2790,6 +2790,28 @@ class TestClusterRedisCommands:
             keys = r.scan_iter(match="1*", target_nodes=target_nodes)
             assert sorted(keys) == keys_1
 
+    @skip_if_server_version_lt("8.12.0")
+    def test_cluster_bless_scan(self, r):
+        r.set("a", 1)
+        r.set("b", 2)
+        r.set("c", 3)
+        assert r.bless_set("a", "NO-EVICT") == 1
+        assert r.bless_set("b", "NO-EVICT") == 1
+        assert r.bless_get("a") == [b"NO-EVICT"]
+        assert r.bless_get("c") == []
+
+        primaries = sorted(node.name for node in r.get_primaries())
+        for kwargs in ({}, {"target_nodes": "primaries"}):
+            cursors, keys = r.bless_scan(**kwargs)
+            assert sorted(keys) == [b"a", b"b"]
+            assert sorted(cursors.keys()) == primaries
+            assert all(cursor == 0 for cursor in cursors.values())
+
+        assert r.bless_clear("a", "NO-EVICT") == 1
+        cursors, keys = r.bless_scan()
+        assert keys == [b"b"]
+        assert sorted(cursors.keys()) == primaries
+
     def test_cluster_randomkey(self, r):
         node = r.get_node_from_key("{foo}")
         assert r.randomkey(target_nodes=node) is None

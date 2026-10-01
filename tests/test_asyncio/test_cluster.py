@@ -2766,6 +2766,28 @@ class TestClusterRedisCommands:
             ]
             assert sorted(keys) == keys_1
 
+    @skip_if_server_version_lt("8.12.0")
+    async def test_cluster_bless_scan(self, r: RedisCluster) -> None:
+        await r.set("a", 1)
+        await r.set("b", 2)
+        await r.set("c", 3)
+        assert await r.bless_set("a", "NO-EVICT") == 1
+        assert await r.bless_set("b", "NO-EVICT") == 1
+        assert await r.bless_get("a") == [b"NO-EVICT"]
+        assert await r.bless_get("c") == []
+
+        primaries = sorted(node.name for node in r.get_primaries())
+        for kwargs in ({}, {"target_nodes": "primaries"}):
+            cursors, keys = await r.bless_scan(**kwargs)
+            assert sorted(keys) == [b"a", b"b"]
+            assert sorted(cursors.keys()) == primaries
+            assert all(cursor == 0 for cursor in cursors.values())
+
+        assert await r.bless_clear("a", "NO-EVICT") == 1
+        cursors, keys = await r.bless_scan()
+        assert keys == [b"b"]
+        assert sorted(cursors.keys()) == primaries
+
     async def test_cluster_randomkey(self, r: RedisCluster) -> None:
         node = r.get_node_from_key("{foo}")
         assert await r.randomkey(target_nodes=node) is None

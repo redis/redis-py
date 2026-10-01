@@ -3317,6 +3317,48 @@ class TestRedisCommands:
         assert await r.rpushx("a", "4") == 4
         assert await r.lrange("a", 0, -1) == [b"1", b"2", b"3", b"4"]
 
+    # BLESS COMMANDS
+    @skip_if_server_version_lt("8.12.0")
+    async def test_bless_set_get_clear(self, r: redis.Redis):
+        await r.set("a", 1)
+        assert await r.bless_get("a") == []
+        assert await r.bless_set("a", "NO-EVICT") == 1
+        assert await r.bless_set("a", "NO-EVICT") == 0
+        assert await r.bless_get("a") == [b"NO-EVICT"]
+        assert await r.bless_clear("a", "NO-EVICT") == 1
+        assert await r.bless_clear("a", "NO-EVICT") == 0
+        assert await r.bless_get("a") == []
+
+    @skip_if_server_version_lt("8.12.0")
+    async def test_bless_missing_key(self, r: redis.Redis):
+        with pytest.raises(exceptions.ResponseError):
+            await r.bless_get("a")
+        with pytest.raises(exceptions.ResponseError):
+            await r.bless_set("a", "NO-EVICT")
+        with pytest.raises(exceptions.ResponseError):
+            await r.bless_clear("a", "NO-EVICT")
+
+    @skip_if_server_version_lt("8.12.0")
+    @pytest.mark.onlynoncluster
+    async def test_bless_scan(self, r: redis.Redis):
+        await r.set("a", 1)
+        await r.set("b", 2)
+        await r.set("c", 3)
+        assert await r.bless_scan() == (0, [])
+        await r.bless_set("a", "NO-EVICT")
+        await r.bless_set("b", "NO-EVICT")
+        cursor, keys = await r.bless_scan()
+        assert cursor == 0
+        assert set(keys) == {b"a", b"b"}
+
+        cursor, keys = 0, []
+        while True:
+            cursor, page = await r.bless_scan(cursor, "NO-EVICT", count=1)
+            keys.extend(page)
+            if cursor == 0:
+                break
+        assert set(keys) == {b"a", b"b"}
+
     # SCAN COMMANDS
     @skip_if_server_version_lt("2.8.0")
     @pytest.mark.onlynoncluster

@@ -511,6 +511,7 @@ class AbstractRedisCluster:
         ),
         list_keys_to_dict(
             [
+                "BLESS SCAN",
                 "FLUSHALL",
                 "FLUSHDB",
                 "FUNCTION DELETE",
@@ -612,7 +613,7 @@ class AbstractRedisCluster:
         list_keys_to_dict(
             ["CLIENT UNBLOCK"], lambda command, res: 1 if sum(res.values()) > 0 else 0
         ),
-        list_keys_to_dict(["SCAN"], parse_scan_result),
+        list_keys_to_dict(["BLESS SCAN", "SCAN"], parse_scan_result),
         list_keys_to_dict(
             ["SCRIPT LOAD"], lambda command, res: list(res.values()).pop()
         ),
@@ -4738,6 +4739,7 @@ PIPELINE_BLOCKED_COMMANDS = (
     "BGREWRITEAOF",
     "BGSAVE",
     "BITOP",
+    "BLESS SCAN",
     "BRPOPLPUSH",
     "CLIENT GETNAME",
     "CLIENT KILL",

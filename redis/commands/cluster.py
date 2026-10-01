@@ -40,11 +40,13 @@ from redis.utils import deprecated_function
 from .core import (
     ACLCommands,
     AsyncACLCommands,
+    AsyncBlessCommands,
     AsyncDataAccessCommands,
     AsyncFunctionCommands,
     AsyncManagementCommands,
     AsyncModuleCommands,
     AsyncScriptCommands,
+    BlessCommands,
     DataAccessCommands,
     FunctionCommands,
     HotkeysMetricsTypes,
@@ -1540,6 +1542,7 @@ class RedisClusterCommands(
     ClusterDataAccessCommands,
     ScriptCommands,
     FunctionCommands,
+    BlessCommands,
     ModuleCommands,
     RedisModuleCommands,
 ):
@@ -1571,6 +1574,7 @@ class AsyncRedisClusterCommands(
     AsyncClusterDataAccessCommands,
     AsyncScriptCommands,
     AsyncFunctionCommands,
+    AsyncBlessCommands,
     AsyncModuleCommands,
     AsyncRedisModuleCommands,
 ):

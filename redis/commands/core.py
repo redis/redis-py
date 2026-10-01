@@ -12532,6 +12532,121 @@ class FunctionCommands:
 AsyncFunctionCommands = FunctionCommands
 
 
+BlessFlag = Literal["NO-EVICT"]
+
+
+class BlessCommands(CommandsProtocol):
+    """
+    Redis BLESS commands: per-key flags that alter how the server treats a key.
+    """
+
+    @overload
+    def bless_get(self: SyncClientProtocol, name: KeyT) -> list[bytes | str]: ...
+
+    @overload
+    def bless_get(
+        self: AsyncClientProtocol, name: KeyT
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def bless_get(self, name: KeyT) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+        """
+        Return the list of bless flags currently set on the key ``name``.
+
+        Raises a ``ResponseError`` if the key does not exist.
+
+        For more information, see https://redis.io/commands/bless-get
+        """
+        return self.execute_command("BLESS GET", name)
+
+    @overload
+    def bless_set(
+        self: SyncClientProtocol, name: KeyT, flag: BlessFlag = "NO-EVICT"
+    ) -> int: ...
+
+    @overload
+    def bless_set(
+        self: AsyncClientProtocol, name: KeyT, flag: BlessFlag = "NO-EVICT"
+    ) -> Awaitable[int]: ...
+
+    def bless_set(
+        self, name: KeyT, flag: BlessFlag = "NO-EVICT"
+    ) -> int | Awaitable[int]:
+        """
+        Set the bless ``flag`` on the key ``name``.
+
+        Returns 1 if the flag was set, 0 if it was already set.
+        Raises a ``ResponseError`` if the key does not exist.
+
+        For more information, see https://redis.io/commands/bless-set
+        """
+        return self.execute_command("BLESS SET", name, flag)
+
+    @overload
+    def bless_clear(
+        self: SyncClientProtocol, name: KeyT, flag: BlessFlag = "NO-EVICT"
+    ) -> int: ...
+
+    @overload
+    def bless_clear(
+        self: AsyncClientProtocol, name: KeyT, flag: BlessFlag = "NO-EVICT"
+    ) -> Awaitable[int]: ...
+
+    def bless_clear(
+        self, name: KeyT, flag: BlessFlag = "NO-EVICT"
+    ) -> int | Awaitable[int]:
+        """
+        Clear the bless ``flag`` from the key ``name``.
+
+        Returns 1 if the flag was cleared, 0 if it was not set.
+        Raises a ``ResponseError`` if the key does not exist.
+
+        For more information, see https://redis.io/commands/bless-clear
+        """
+        return self.execute_command("BLESS CLEAR", name, flag)
+
+    @overload
+    def bless_scan(
+        self: SyncClientProtocol,
+        cursor: int = 0,
+        flag: BlessFlag = "NO-EVICT",
+        count: int | None = None,
+        **kwargs,
+    ) -> ScanResponse: ...
+
+    @overload
+    def bless_scan(
+        self: AsyncClientProtocol,
+        cursor: int = 0,
+        flag: BlessFlag = "NO-EVICT",
+        count: int | None = None,
+        **kwargs,
+    ) -> Awaitable[ScanResponse]: ...
+
+    def bless_scan(
+        self,
+        cursor: int = 0,
+        flag: BlessFlag = "NO-EVICT",
+        count: int | None = None,
+        **kwargs,
+    ) -> ScanResponse | Awaitable[ScanResponse]:
+        """
+        Incrementally return lists of key names that carry the bless ``flag``.
+        Also return a cursor indicating the scan position.
+
+        ``count`` provides a hint to Redis about the number of keys to
+            return per batch.
+
+        For more information, see https://redis.io/commands/bless-scan
+        """
+        pieces: list[EncodableT] = [cursor, flag]
+        if count is not None:
+            pieces.extend([b"COUNT", count])
+        return self.execute_command("BLESS SCAN", *pieces, **kwargs)
+
+
+AsyncBlessCommands = BlessCommands
+
+
 class DataAccessCommands(
     BasicKeyCommands,
     HyperlogCommands,
@@ -12577,6 +12692,7 @@ class CoreCommands(
     PubSubCommands,
     ScriptCommands,
     FunctionCommands,
+    BlessCommands,
 ):
     """
     A class containing all of the implemented redis commands. This class is
@@ -12593,6 +12709,7 @@ class AsyncCoreCommands(
     AsyncPubSubCommands,
     AsyncScriptCommands,
     AsyncFunctionCommands,
+    AsyncBlessCommands,
 ):
     """
     A class containing all of the implemented redis commands. This class is
