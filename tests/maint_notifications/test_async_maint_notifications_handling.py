@@ -1666,6 +1666,9 @@ class ScriptedParser(_AsyncRESP3Parser):
 
     async def read_response(self, disable_decoding=False, push_request=False):
         item = self.script.pop(0)
+        if item == "hang":
+            # A frame only partly received: the rest never arrives
+            await asyncio.sleep(10)
         if isinstance(item, Exception):
             raise item
         if isinstance(item, NodeMovingNotification):
@@ -1740,8 +1743,8 @@ async def test_async_pending_pushes_on_closed_connection_are_discarded():
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "stale_reply",
-    [b"OK", ResponseError("MOVED 1337 1.2.3.4:6379")],
-    ids=["reply", "error_reply"],
+    [b"OK", None, ResponseError("MOVED 1337 1.2.3.4:6379")],
+    ids=["reply", "null_reply", "error_reply"],
 )
 async def test_async_stale_reply_on_idle_connection_is_a_connection_error(stale_reply):
     """A reply left unread by an earlier command marks the connection dirty."""
@@ -1752,6 +1755,24 @@ async def test_async_stale_reply_on_idle_connection_is_a_connection_error(stale_
 
     with pytest.raises(RedisConnectionError, match="Connection has data"):
         await connection.handle_pending_push_notifications()
+
+    moving_handler.assert_not_awaited()
+    assert parser.node_moving_push_handler_func is moving_handler
+
+
+@pytest.mark.asyncio
+async def test_async_partial_push_frame_is_a_bounded_connection_error():
+    """A frame only partly received must not block the checkout."""
+    moving = NodeMovingNotification(
+        id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=5
+    )
+    connection, parser, moving_handler, _ = _scripted_connection([moving, "hang"])
+
+    with mock.patch(
+        "redis.asyncio.connection.PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT", 0.05
+    ):
+        with pytest.raises(RedisConnectionError, match="Timed out"):
+            await connection.handle_pending_push_notifications()
 
     moving_handler.assert_not_awaited()
     assert parser.node_moving_push_handler_func is moving_handler

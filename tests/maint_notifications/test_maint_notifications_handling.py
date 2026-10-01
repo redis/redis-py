@@ -2364,8 +2364,8 @@ class TestPendingPushNotificationsOnIdleConnection(TestMaintenanceNotificationsB
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     @pytest.mark.parametrize(
         "stale_reply",
-        [b"+OK\r\n", b"-MOVED 1337 1.2.3.4:6379\r\n"],
-        ids=["reply", "error_reply"],
+        [b"+OK\r\n", b"_\r\n", b"-MOVED 1337 1.2.3.4:6379\r\n"],
+        ids=["reply", "null_reply", "error_reply"],
     )
     def test_stale_reply_on_idle_connection_reconnects(self, pool_class, stale_reply):
         """
@@ -2377,6 +2377,29 @@ class TestPendingPushNotificationsOnIdleConnection(TestMaintenanceNotificationsB
         pool, connection = self._idle_connection(pool_class)
         sock = connection._sock
         sock.pending_responses.extend([self.MOVING_PUSH, stale_reply])
+
+        try:
+            assert pool.get_connection() is connection
+
+            assert sock.closed
+            assert connection._sock is not sock
+            assert connection._sock.connected
+            assert connection.maintenance_state == MaintenanceState.NONE
+            assert not pool._maint_notifications_pool_handler._processed_notifications
+        finally:
+            pool.release(connection)
+            pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_partial_push_frame_on_idle_connection_reconnects(self, pool_class):
+        """
+        A push frame only partly received must not block the checkout: the
+        read is bounded, and running out of it reconnects the connection.
+        """
+        pool, connection = self._idle_connection(pool_class)
+        sock = connection._sock
+        # The frame header and first element, with the rest never arriving
+        sock.pending_responses.append(b">4\r\n$6\r\nMOVING\r\n")
 
         try:
             assert pool.get_connection() is connection

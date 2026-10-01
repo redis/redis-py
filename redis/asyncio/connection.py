@@ -90,6 +90,7 @@ from redis.exceptions import (
 )
 from redis.himport import HImportRegistry
 from redis.maint_notifications import (
+    PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT,
     MaintenanceState,
     MaintNotificationsConfig,
     NodeMovingNotification,
@@ -243,8 +244,12 @@ class AsyncMaintNotificationsAbstractConnection:
         server has since closed describes a maintenance that is over, after
         which the configured address is what to connect to again: it is
         discarded, and the ``ConnectionError`` raised here makes the pool
-        reconnect before any command is sent. A reply left unread by an earlier
-        command means the connection is dirty and is reported the same way.
+        reconnect before any command is sent.
+
+        Anything read that is not a maintenance notification - a reply, a null
+        or an error reply left unread by an earlier command - means the
+        connection is dirty and is reported the same way, as is a frame that
+        does not complete within ``PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT``.
         """
         parser = self._get_push_notifications_parser()
         deferred: list = []
@@ -270,7 +275,19 @@ class AsyncMaintNotificationsAbstractConnection:
         alive = False
         try:
             while await self.can_read():
-                if await self.read_response(push_request=True) is not None:
+                read = len(deferred)
+                try:
+                    await asyncio.wait_for(
+                        self.read_response(push_request=True),
+                        PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    raise ConnectionError(
+                        "Timed out reading a pending push notification"
+                    ) from None
+                # Only a maintenance notification reaches a deferred handler;
+                # anything else is a reply left unread by an earlier command
+                if len(deferred) == read:
                     raise ConnectionError("Connection has data")
             alive = True
         except ResponseError as e:
