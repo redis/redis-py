@@ -141,13 +141,18 @@ def relaxed_health_check_budget(
 def database_maint_notifications_config(client) -> Optional[MaintNotificationsConfig]:
     """
     The maintenance notifications config a database client was built with, or
-    None when it has none.
+    None when its notifications are off.
 
-    The standalone clients keep it in their connection kwargs. The cluster
-    clients hold it as an attribute, and their connection kwargs only carry it
-    once the notifications are enabled.
+    The cluster clients hold the config as an attribute. The standalone clients
+    keep it on their pool's notifications handler, and in their connection
+    kwargs, only while the notifications are enabled: a disabled config is not
+    retained, so None also stands for a client that has them disabled.
     """
     config = getattr(client, "maint_notifications_config", None)
+    if config is None:
+        pool = getattr(client, "connection_pool", None)
+        handler = getattr(pool, "_maint_notifications_pool_handler", None)
+        config = getattr(handler, "config", None)
     if config is None:
         config = client.get_connection_kwargs().get("maint_notifications_config")
     return config if isinstance(config, MaintNotificationsConfig) else None
@@ -386,17 +391,21 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
 
         return deadline
 
-    def _maintenance_aware_config(
-        self, db_id: int, source_config: Optional[MaintNotificationsConfig]
-    ) -> Optional[MaintNotificationsConfig]:
+    def _probe_maint_notifications_config(
+        self, db_id: int, client
+    ) -> MaintNotificationsConfig:
         """
-        Copy of the database's maintenance notifications config for the
-        health check client, reporting the maintenance windows the client
-        enters to this policy. The database's own config stays untouched.
-        Returns None when the database has no maintenance notifications.
+        The maintenance notifications config for the health check client of a
+        database: a copy of the database client's config reporting the
+        maintenance windows the probe enters to this policy, when the
+        notifications are enabled; the database client's own config, or an
+        explicitly disabled one, otherwise. The probe must never enable what
+        the database client has not - without a config of its own it would
+        default to ``"auto"`` on RESP3. The database's config stays untouched.
         """
+        source_config = database_maint_notifications_config(client)
         if source_config is None or not source_config.enabled:
-            return None
+            return source_config or MaintNotificationsConfig(enabled=False)
 
         tracker = _MaintenanceWindowTracker()
         listener = _MaintenanceWindowListener(tracker)
@@ -432,11 +441,9 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
                     # drops, so without this the probe would speak plaintext
                     # to a TLS port and mark a healthy database unavailable.
                     filtered_kwargs["ssl"] = True
-                probe_config = self._maintenance_aware_config(
-                    db_id, database_maint_notifications_config(database.client)
+                filtered_kwargs["maint_notifications_config"] = (
+                    self._probe_maint_notifications_config(db_id, database.client)
                 )
-                if probe_config is not None:
-                    filtered_kwargs["maint_notifications_config"] = probe_config
                 client = AsyncRedis(**filtered_kwargs)
             elif isinstance(database.client, (AsyncRedisCluster, SyncRedisCluster)):
                 # Cluster client - create a single cluster client that handles
@@ -448,11 +455,9 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
                     # above; the async cluster also represents TLS as
                     # connection_class=SSLConnection in its connection kwargs.
                     filtered_kwargs["ssl"] = True
-                probe_config = self._maintenance_aware_config(
-                    db_id, database_maint_notifications_config(database.client)
+                filtered_kwargs["maint_notifications_config"] = (
+                    self._probe_maint_notifications_config(db_id, database.client)
                 )
-                if probe_config is not None:
-                    filtered_kwargs["maint_notifications_config"] = probe_config
                 startup_nodes = database.client.startup_nodes
                 if startup_nodes:
                     nodes_manager = database.client.nodes_manager

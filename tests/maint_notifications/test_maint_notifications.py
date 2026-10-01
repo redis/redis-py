@@ -4,6 +4,7 @@ import pytest
 
 from redis._parsers.base import MaintenanceNotificationsParser
 from redis.connection import (
+    CacheProxyConnection,
     Connection,
     ConnectionInterface,
     MaintNotificationsAbstractConnection,
@@ -1016,6 +1017,50 @@ class TestMaintNotificationsPoolHandlerEvents:
         handler.handle_node_moving_notification(self._moving())
 
         assert self.listener.events == []
+
+    def test_no_event_when_handoff_relaxes_nothing(self):
+        """A handoff handled only for the proactive reconnect relaxes no timeout."""
+        config = _config_with_listener(
+            self.listener, proactive_reconnect=True, relaxed_timeout=-1
+        )
+        handler = MaintNotificationsPoolHandler(self.mock_pool, config)
+        notification = self._moving()
+        self.mock_pool.connection_kwargs = {
+            "maintenance_notification_hash": hash(notification)
+        }
+
+        with patch("threading.Timer"):
+            handler.handle_node_moving_notification(notification)
+        handler.handle_node_moved_notification(notification)
+
+        # The handoff itself is still handled
+        assert self.mock_pool.update_connections_settings.call_count == 2
+        assert self.listener.events == []
+
+
+@pytest.mark.fixed_client
+class TestCacheProxyConnectionMaintenanceEvents:
+    """With client-side caching the proxy is the source of both events."""
+
+    def test_disconnect_completes_with_the_proxy_as_source(self):
+        listener = _RecordingListener()
+        config = _config_with_listener(listener)
+        connection = Connection(protocol=3, maint_notifications_config=config)
+        proxy = CacheProxyConnection(connection, Mock(), threading.RLock())
+
+        proxy._maint_notifications_connection_handler.handle_maintenance_start_notification(
+            MaintenanceState.MAINTENANCE, NodeMigratingNotification(id=1, ttl=5)
+        )
+        assert proxy.maintenance_state == MaintenanceState.MAINTENANCE
+
+        proxy.disconnect()
+
+        assert proxy.maintenance_state == MaintenanceState.NONE
+        assert [type(e) for e in listener.events] == [
+            MaintenanceStartedEvent,
+            MaintenanceCompletedEvent,
+        ]
+        assert all(event.connection is proxy for event in listener.events)
 
 
 @pytest.mark.fixed_client

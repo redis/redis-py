@@ -227,6 +227,35 @@ class AsyncMaintNotificationsAbstractConnection:
             )
         return parser
 
+    def _complete_maintenance_on_disconnect(self) -> None:
+        """
+        Restore the settings a maintenance relaxed on this connection when it is
+        closed, and report the relaxation as completed - the same way the
+        completion notification would have been reported. The MOVING state is
+        left alone: it is owned by the pool-level TTL cleanup.
+        """
+        if self.maintenance_state != MaintenanceState.MAINTENANCE:
+            return
+        self.reset_tmp_settings(reset_relaxed_timeout=True)
+        self.maintenance_state = MaintenanceState.NONE
+        # reset the sets that keep track of received start maint
+        # notifications and skipped end maint notifications
+        self.reset_received_notifications()
+        if self.maint_notifications_config is not None:
+            pool_handler = self._maint_notifications_pool_handler
+            _dispatch_maintenance_event(
+                self.maint_notifications_config,
+                MaintenanceCompletedEvent(
+                    connection_pool=(
+                        pool_handler.pool if pool_handler is not None else None
+                    ),
+                    connection=self,
+                    state=MaintenanceState.MAINTENANCE,
+                    notification=None,
+                    config=self.maint_notifications_config,
+                ),
+            )
+
     async def handle_pending_push_notifications(self) -> None:
         """
         Process the push notifications buffered on this idle connection if it
@@ -1304,31 +1333,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                 close_reason=CloseReason.APPLICATION_CLOSE,
             )
 
-        if self.maintenance_state == MaintenanceState.MAINTENANCE:
-            # MOVING state is owned by the pool-level TTL cleanup. Regular
-            # maintenance timeout relaxation can be restored when this
-            # connection closes, matching the sync lifecycle.
-            self.reset_tmp_settings(reset_relaxed_timeout=True)
-            self.maintenance_state = MaintenanceState.NONE
-            # reset the sets that keep track of received start maint
-            # notifications and skipped end maint notifications
-            self.reset_received_notifications()
-            # The relaxation ended without a completion notification: report
-            # it the same way the notification would have been reported.
-            if self.maint_notifications_config is not None:
-                pool_handler = self._maint_notifications_pool_handler
-                _dispatch_maintenance_event(
-                    self.maint_notifications_config,
-                    MaintenanceCompletedEvent(
-                        connection_pool=(
-                            pool_handler.pool if pool_handler is not None else None
-                        ),
-                        connection=self,
-                        state=MaintenanceState.MAINTENANCE,
-                        notification=None,
-                        config=self.maint_notifications_config,
-                    ),
-                )
+        self._complete_maintenance_on_disconnect()
 
     async def _send_ping(self):
         """Send PING, expect PONG in return"""

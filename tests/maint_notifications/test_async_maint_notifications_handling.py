@@ -2155,6 +2155,40 @@ async def test_async_pool_handler_dispatches_moving_event_pair():
 
 
 @pytest.mark.asyncio
+async def test_async_pool_handler_dispatches_nothing_when_handoff_relaxes_nothing():
+    """A handoff handled only for the proactive reconnect relaxes no timeout."""
+    listener = _RecordingListener()
+    config = _config_with_listener(
+        listener, proactive_reconnect=True, relaxed_timeout=-1
+    )
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=config,
+    )
+    handler = AsyncMaintNotificationsPoolHandler(pool, config)
+    notification = NodeMovingNotification(
+        id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=5
+    )
+
+    with mock.patch(
+        "redis.asyncio.maint_notifications.record_connection_handoff",
+        new=AsyncMock(),
+    ):
+        try:
+            await handler.handle_node_moving_notification(notification)
+            # The handoff itself is still handled
+            assert pool.connection_kwargs["host"] == MOVED_HOST
+            await handler.handle_node_moved_notification(notification)
+        finally:
+            await handler.cancel_scheduled_tasks()
+
+    assert pool.connection_kwargs["host"] == DEFAULT_HOST
+    assert listener.events == []
+
+
+@pytest.mark.asyncio
 async def test_async_pool_handler_superseded_moving_completes_once():
     listener = _RecordingListener()
     config = _config_with_listener(listener)

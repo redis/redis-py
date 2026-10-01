@@ -425,6 +425,35 @@ class MaintNotificationsAbstractConnection:
             )
         return parser
 
+    def _complete_maintenance_on_disconnect(self) -> None:
+        """
+        Restore the settings a maintenance relaxed on this connection when it is
+        closed, and report the relaxation as completed - the same way the
+        completion notification would have been reported. The MOVING state is
+        left alone: it is owned by the pool-level TTL cleanup.
+        """
+        if self.maintenance_state != MaintenanceState.MAINTENANCE:
+            return
+        self.reset_tmp_settings(reset_relaxed_timeout=True)
+        self.maintenance_state = MaintenanceState.NONE
+        # reset the sets that keep track of received start maint
+        # notifications and skipped end maint notifications
+        self.reset_received_notifications()
+        if self.maint_notifications_config is not None:
+            pool_handler = self._maint_notifications_pool_handler
+            _dispatch_maintenance_event(
+                self.maint_notifications_config,
+                MaintenanceCompletedEvent(
+                    connection_pool=(
+                        pool_handler.pool if pool_handler is not None else None
+                    ),
+                    connection=self,
+                    state=MaintenanceState.MAINTENANCE,
+                    notification=None,
+                    config=self.maint_notifications_config,
+                ),
+            )
+
     def handle_pending_push_notifications(self) -> None:
         """
         Process the push notifications buffered on this idle connection if it
@@ -1489,32 +1518,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 close_reason=CloseReason.APPLICATION_CLOSE,
             )
 
-        if self.maintenance_state == MaintenanceState.MAINTENANCE:
-            # this block will be executed only if the connection was in maintenance state
-            # and the connection was closed.
-            # The state change won't be applied on connections that are in Moving state
-            # because their state and configurations will be handled when the moving ttl expires.
-            self.reset_tmp_settings(reset_relaxed_timeout=True)
-            self.maintenance_state = MaintenanceState.NONE
-            # reset the sets that keep track of received start maint
-            # notifications and skipped end maint notifications
-            self.reset_received_notifications()
-            # The relaxation ended without a completion notification: report
-            # it the same way the notification would have been reported.
-            if self.maint_notifications_config is not None:
-                pool_handler = self._maint_notifications_pool_handler
-                _dispatch_maintenance_event(
-                    self.maint_notifications_config,
-                    MaintenanceCompletedEvent(
-                        connection_pool=(
-                            pool_handler.pool if pool_handler is not None else None
-                        ),
-                        connection=self,
-                        state=MaintenanceState.MAINTENANCE,
-                        notification=None,
-                        config=self.maint_notifications_config,
-                    ),
-                )
+        self._complete_maintenance_on_disconnect()
 
     def mark_for_reconnect(self):
         self._should_reconnect = True
@@ -2021,6 +2025,10 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def disconnect(self, *args, **kwargs):
         with self._cache_lock:
             self._cache.flush()
+        # The maintenance handlers are bound to this proxy, so the relaxation
+        # a maintenance applied is reported with the proxy as its source
+        if isinstance(self._conn, MaintNotificationsAbstractConnection):
+            self._complete_maintenance_on_disconnect()
         self._conn.disconnect(*args, **kwargs)
 
     def check_health(self):

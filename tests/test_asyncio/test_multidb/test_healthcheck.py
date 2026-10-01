@@ -463,6 +463,14 @@ class TestDatabaseMaintNotificationsConfig:
         client.get_connection_kwargs.return_value = {}
         assert database_maint_notifications_config(client) is config
 
+    def test_standalone_client_carries_it_on_the_pool_handler(self):
+        config = MaintNotificationsConfig(enabled=True)
+        client = Mock(spec=Redis)
+        client.connection_pool = Mock()
+        client.connection_pool._maint_notifications_pool_handler.config = config
+        client.get_connection_kwargs.return_value = {}
+        assert database_maint_notifications_config(client) is config
+
     def test_client_without_config(self):
         client = Mock(spec=Redis)
         client.get_connection_kwargs.return_value = {}
@@ -1404,13 +1412,36 @@ class TestAbstractHealthCheckPolicy:
     async def test_get_client_without_maintenance_notifications_tracks_nothing(
         self, client_kwargs
     ):
+        """
+        The probe must not enable notifications the database client has not:
+        it gets an explicitly disabled config, not the RESP3 default of "auto".
+        """
         mock_db = Mock(spec=Database)
         mock_db.client = Redis(**client_kwargs)
         policy = HealthyAllPolicy()
 
         try:
-            await policy.get_client(mock_db)
+            client = await policy.get_client(mock_db)
             assert id(mock_db) not in policy._maintenance_trackers
+            assert client.connection_pool._maint_notifications_pool_handler is None
+            assert not client.connection_pool.maint_notifications_enabled()
+        finally:
+            await policy.close()
+
+    @pytest.mark.asyncio
+    async def test_get_client_keeps_cluster_notifications_disabled(self):
+        """A cluster client keeps a disabled config as an attribute only."""
+        mock_db = Mock(spec=Database)
+        mock_db.client = AsyncRedisCluster(
+            startup_nodes=[AsyncClusterNode("localhost", 7000)],
+            maint_notifications_config=MaintNotificationsConfig(enabled=False),
+        )
+        policy = HealthyAllPolicy()
+
+        try:
+            client = await policy.get_client(mock_db)
+            assert id(mock_db) not in policy._maintenance_trackers
+            assert client.maint_notifications_config.enabled is False
         finally:
             await policy.close()
 

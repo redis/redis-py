@@ -176,16 +176,19 @@ class AsyncMaintNotificationsPoolHandler:
 
             self._processed_notifications.add(notification)
 
-            _dispatch_maintenance_event(
-                self.config,
-                MaintenanceStartedEvent(
-                    connection_pool=self.pool,
-                    connection=self.connection,
-                    state=MaintenanceState.MOVING,
-                    notification=notification,
-                    config=self.config,
-                ),
-            )
+            # The events report relaxed timeouts; a handoff handled only for
+            # the proactive reconnect relaxes nothing
+            if self.config.is_relaxed_timeouts_enabled():
+                _dispatch_maintenance_event(
+                    self.config,
+                    MaintenanceStartedEvent(
+                        connection_pool=self.pool,
+                        connection=self.connection,
+                        state=MaintenanceState.MOVING,
+                        notification=notification,
+                        config=self.config,
+                    ),
+                )
 
     async def run_proactive_reconnect(
         self, moving_address_src: str | None = None
@@ -232,7 +235,7 @@ class AsyncMaintNotificationsPoolHandler:
 
             # A newer MOVING notification has superseded this one when the
             # kwargs were not reverted: the pool stays relaxed until it expires.
-            if reverted:
+            if reverted and self.config.is_relaxed_timeouts_enabled():
                 _dispatch_maintenance_event(
                     self.config,
                     MaintenanceCompletedEvent(
