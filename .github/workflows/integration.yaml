@@ -29,9 +29,9 @@ env:
   COVERAGE_CORE: sysmon
   # patch releases get included in the base version image when they are published
   # for example after 8.2.1 is published, 8.2 image contains 8.2.1 content
-  CURRENT_REDIS_VERSION: '8.8.0'
+  CURRENT_REDIS_VERSION: '8.10.2'
   REDIS_VERSION_CUSTOM_MAP: >-
-    8.12.0:unstable-35791556614-debian
+    8.12.0:8.12-m02-int
 
 jobs:
   dependency-audit:
@@ -60,6 +60,10 @@ jobs:
             CVE-2026-102273 # incomplete algorithm confusion defense when mixing symmetric and asymmetric algorithms
             CVE-2026-102274 # a malformed RSA JWK aborts parsing of the whole JWK Set
             CVE-2026-101917 # PyJWKClient unbounded JWKS requests via kid values (incomplete fix of CVE-2026-48524)
+            CVE-2026-102270 # ReDoS in is_pem_format with crafted PEM-like input
+            # Fixed in 2.15.0. This one does reach the verify_signature=False decode in JWToken, but the tokens
+            # come from the configured identity provider, and the impact is a RecursionError instead of DecodeError.
+            CVE-2026-101918 # RecursionError from a deeply nested payload escapes PyJWTError handling
 
   lint:
     name: Code linters
@@ -93,7 +97,7 @@ jobs:
       max-parallel: 30
       fail-fast: false
       matrix:
-        redis-version: ['8.12.0', '8.10.2', '${{ needs.redis_version.outputs.CURRENT }}', '8.6.3', '8.4.3', '8.2.6', '8.0.6' ,'7.4.9', '7.2.14']
+        redis-version: ['8.12.0', '${{ needs.redis_version.outputs.CURRENT }}', '8.8.3', '8.6.7', '8.4.7', '8.2.10', '8.0.6' ,'7.4.9', '7.2.14']
         python-version: ['3.10', '3.14']
         parser-backend: ['plain']
         event-loop: ['asyncio']
@@ -174,7 +178,7 @@ jobs:
     # in pipeline ofter these pypy jobs hang, so their timeout is set
     # to just 50 minutes - close to the max time the jobs are running at the moment
     # adding more tests will make them even slower, and we will need to adjust the timeout
-    timeout-minutes: 50
+    timeout-minutes: 60
     strategy:
       max-parallel: 30
       fail-fast: false
