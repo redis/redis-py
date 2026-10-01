@@ -51,7 +51,7 @@ class AbstractBloom:
     @staticmethod
     def append_no_scale(params, noScale):
         """Append NONSCALING tag to params."""
-        if noScale is not None:
+        if noScale:
             params.extend(["NONSCALING"])
 
     @staticmethod
@@ -64,7 +64,7 @@ class AbstractBloom:
     @staticmethod
     def append_no_create(params, noCreate):
         """Append NOCREATE tag to params."""
-        if noCreate is not None:
+        if noCreate:
             params.extend(["NOCREATE"])
 
     @staticmethod

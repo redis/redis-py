@@ -121,6 +121,20 @@ def test_bf_insert(client):
 
 
 @pytest.mark.redismod
+def test_bf_false_flags_are_not_sent(client):
+    # noScale=False and noCreate=False must behave like omitting the flag,
+    # not send NONSCALING / NOCREATE.
+    assert client.bf().create("bloom", 0.01, 1, noScale=False)
+    assert [1, 1, 1] == intlist(client.bf().madd("bloom", "a", "b", "c"))
+    assert [1, 1, 1] == intlist(
+        client.bf().insert("bloom_ins", ["a", "b", "c"], capacity=1, noScale=False)
+    )
+    assert [1] == intlist(client.bf().insert("bloom_new", ["a"], noCreate=False))
+    assert [1] == client.cf().insert("cuckoo_new", ["a"], nocreate=False)
+    assert [1] == client.cf().insertnx("cuckoo_nx_new", ["a"], nocreate=False)
+
+
+@pytest.mark.redismod
 # BF.SCANDUMP/LOADCHUNK does not complete against Redis Enterprise's bloom module
 # (the scandump cursor loop times out).
 @skip_if_redis_enterprise()
