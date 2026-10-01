@@ -1,3 +1,4 @@
+import threading
 import warnings
 from abc import ABC, abstractmethod
 from collections import OrderedDict
@@ -228,43 +229,57 @@ class _IndexedCacheEntries(OrderedDict):
     holder is stored bare and promoted to a ``set`` only when a second one arrives - and
     demoted back when it drops to one again. That trades an ``isinstance`` check on each
     index update for most of the index's memory.
+
+    Every mutation holds ``_lock`` across both the map update and its index update. The map is
+    shared by a whole pool, while each :class:`~redis.connection.CacheProxyConnection` guards it
+    with a lock of its own, so two connections can mutate it at once - and an index update is a
+    read-modify-write that would otherwise lose a holder, leaving an entry no invalidation can
+    find. The lock is a leaf: nothing is acquired under it, so it cannot join a lock cycle with
+    the connection and pool locks. Plain reads of the map - the cache-hit path - do not take it.
     """
 
     def __init__(self, *args, **kwargs) -> None:
         # Assigned before delegating: ``OrderedDict.__init__`` may populate, which routes
-        # through the ``__setitem__`` below.
+        # through the ``__setitem__`` below. The lock is re-entrant in case an ``OrderedDict``
+        # implementation (PyPy's, say) routes one overridden method through another.
+        self._lock = threading.RLock()
         self._by_redis_key: dict[Any, CacheKey | set[CacheKey]] = {}
         super().__init__(*args, **kwargs)
 
     def __setitem__(self, key: CacheKey, value: "CacheEntry") -> None:
-        index = self._by_redis_key
-        for redis_key in key.redis_keys:
-            holders = index.get(redis_key)
-            if holders is None:
-                index[redis_key] = key
-            elif isinstance(holders, set):
-                holders.add(key)
-            elif holders != key:
-                index[redis_key] = {holders, key}
-        super().__setitem__(key, value)
+        with self._lock:
+            index = self._by_redis_key
+            for redis_key in key.redis_keys:
+                holders = index.get(redis_key)
+                if holders is None:
+                    index[redis_key] = key
+                elif isinstance(holders, set):
+                    holders.add(key)
+                elif holders != key:
+                    index[redis_key] = {holders, key}
+            super().__setitem__(key, value)
 
     def __delitem__(self, key: CacheKey) -> None:
-        super().__delitem__(key)
-        self._unindex(key)
+        with self._lock:
+            super().__delitem__(key)
+            self._unindex(key)
 
     def pop(self, key: CacheKey, *args):
-        value = super().pop(key, *args)
-        self._unindex(key)
-        return value
+        with self._lock:
+            value = super().pop(key, *args)
+            self._unindex(key)
+            return value
 
     def popitem(self, last: bool = True):
-        key, value = super().popitem(last=last)
-        self._unindex(key)
-        return key, value
+        with self._lock:
+            key, value = super().popitem(last=last)
+            self._unindex(key)
+            return key, value
 
     def clear(self) -> None:
-        super().clear()
-        self._by_redis_key.clear()
+        with self._lock:
+            super().clear()
+            self._by_redis_key.clear()
 
     def holders_of(self, redis_key) -> frozenset:
         """
@@ -272,14 +287,16 @@ class _IndexedCacheEntries(OrderedDict):
 
         Returned as a snapshot, because the caller deletes what it finds.
         """
-        holders = self._by_redis_key.get(redis_key)
-        if holders is None:
-            return frozenset()
-        if isinstance(holders, set):
-            return frozenset(holders)
-        return frozenset((holders,))
+        with self._lock:
+            holders = self._by_redis_key.get(redis_key)
+            if holders is None:
+                return frozenset()
+            if isinstance(holders, set):
+                return frozenset(holders)
+            return frozenset((holders,))
 
     def _unindex(self, key: CacheKey) -> None:
+        # Called with ``_lock`` held.
         index = self._by_redis_key
         for redis_key in key.redis_keys:
             holders = index.get(redis_key)

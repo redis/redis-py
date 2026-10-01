@@ -1,3 +1,5 @@
+import sys
+import threading
 import time
 import uuid
 import warnings
@@ -2641,6 +2643,63 @@ class TestCacheReverseIndex:
         assert cache.delete_by_redis_keys([b"foo"]) == [True, True]
         assert cache.size == 0
         assert cache.collection._by_redis_key == {}
+
+    def test_concurrent_mutations_keep_the_index_exact(self, mock_connection):
+        # The map is shared by a whole pool while each connection locks it with a lock of
+        # its own, so sets and pops from different connections interleave. Every key here
+        # shares the Redis key "foo", which makes each update a promotion or a demotion -
+        # the read-modify-writes that lose a holder when they race.
+        collection = DefaultCache(CacheConfig(max_size=10)).collection
+        keys = [
+            CacheKey(command="MGET", redis_keys=("foo", f"k{i}"), redis_args=(i,))
+            for i in range(8)
+        ]
+        entry = CacheEntry(
+            cache_key=keys[0],
+            cache_value=b"v",
+            status=CacheEntryStatus.VALID,
+            connection_ref=mock_connection,
+        )
+
+        # A racing update can also raise - a demotion deleting an index slot another thread
+        # already deleted - and an exception in a thread would not fail the test by itself.
+        errors = []
+
+        def churn(offset):
+            try:
+                for i in range(3000):
+                    key = keys[(i + offset) % len(keys)]
+                    if i % 2:
+                        collection.pop(key, None)
+                    else:
+                        collection[key] = entry
+            except Exception as e:
+                errors.append(e)
+
+        # A short switch interval makes the threads interleave inside the updates.
+        switch_interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        try:
+            threads = [
+                threading.Thread(target=churn, args=(offset,)) for offset in range(4)
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        finally:
+            sys.setswitchinterval(switch_interval)
+
+        assert errors == []
+        expected = {}
+        for key in collection:
+            for redis_key in key.redis_keys:
+                expected.setdefault(redis_key, set()).add(key)
+        actual = {
+            redis_key: holders if isinstance(holders, set) else {holders}
+            for redis_key, holders in collection._by_redis_key.items()
+        }
+        assert actual == expected
 
 
 class TestUnitLRUPolicy:
