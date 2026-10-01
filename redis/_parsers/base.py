@@ -476,16 +476,23 @@ class AsyncPushNotificationsParser(Protocol):
 
                 if notification is not None:
                     return await self.maintenance_push_handler_func(notification)
-            if (
-                msg_type == _SMIGRATED_MESSAGE
-                and self.oss_cluster_maint_push_handler_func
+            if msg_type == _SMIGRATED_MESSAGE and (
+                self.oss_cluster_maint_push_handler_func
+                or self.maintenance_push_handler_func
             ):
                 parser_function = MSG_TYPE_TO_MAINT_NOTIFICATION_PARSER_MAPPING[
                     msg_type
                 ][1]
                 notification = parser_function(response)
+
+                # Like the sync parser: the connection handler ends the
+                # relaxation SMIGRATING applied to this connection, the
+                # cluster handler refreshes the topology
                 if notification is not None:
-                    return await self.oss_cluster_maint_push_handler_func(notification)
+                    if self.maintenance_push_handler_func:
+                        await self.maintenance_push_handler_func(notification)
+                    if self.oss_cluster_maint_push_handler_func:
+                        await self.oss_cluster_maint_push_handler_func(notification)
         except Exception as e:
             logger.error(
                 "Error handling {} message ({}): {}".format(msg_type, response, e)
