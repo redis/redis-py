@@ -2009,6 +2009,10 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             # Materialized once: ``keys`` may be a one-shot iterable, and it is read again
             # below to build the ``CacheKey`` the reverse index is keyed by.
             keys = tuple(keys)
+
+        # An empty key list - ``mget([])``, ``exists()`` - is treated as no key list: there
+        # is nothing to track, and the predicate is promised never to see an empty tuple.
+        if keys:
             with self._cache_lock:
                 # Eligibility is asked with a throwaway empty-keys ``CacheKey`` because
                 # ``DefaultCache.is_cachable`` looks only at ``key.command``.
@@ -2234,16 +2238,23 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             # Prevent not-allowed command from caching.
             if self._current_command_cache_key is None:
                 return response
-            # If response is None prevent from caching.
+            # If response is None prevent from caching. Only our own placeholder is
+            # dropped: the entry may by now belong to another connection.
             if response is None:
-                self._cache.delete_by_cache_keys([self._current_command_cache_key])
+                self._drop_own_placeholder()
                 return response
 
             cache_entry = self._cache.get(self._current_command_cache_key)
 
-            # Cache only responses that still valid
-            # and wasn't invalidated by another connection in meantime.
-            if cache_entry is not None:
+            # Promote only the placeholder this connection staked. It may have been
+            # invalidated in the meantime, or replaced by another connection's placeholder
+            # for the same key - promoting that one would bind our reply to its
+            # ``connection_ref``, and a later hit would drain that connection's own reply.
+            if (
+                cache_entry is not None
+                and cache_entry.status == CacheEntryStatus.IN_PROGRESS
+                and cache_entry.connection_ref is self._conn
+            ):
                 cache_entry.status = CacheEntryStatus.VALID
                 cache_entry.cache_value = response
                 self._cache.set(cache_entry)

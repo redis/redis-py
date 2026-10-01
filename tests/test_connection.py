@@ -2872,6 +2872,120 @@ class TestCacheEntryLifecycle:
         assert mock_connection.read_response.call_count == 2
         assert cache.get(cache_key).connection_ref is other
 
+    def test_a_reply_does_not_promote_another_connections_placeholder(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        Between our send and our read, another connection's ``send_command`` for the same
+        key can replace the entry with its own placeholder. Promoting that one would bind
+        our reply to its ``connection_ref``, and the next hit would drain that connection's
+        own reply off its socket.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        other = Mock()
+        mock_connection.read_response.return_value = b"ours"
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+                status=CacheEntryStatus.IN_PROGRESS,
+                connection_ref=other,
+            )
+        )
+
+        assert proxy.read_response() == b"ours"
+
+        entry = cache.get(cache_key)
+        assert entry.status == CacheEntryStatus.IN_PROGRESS
+        assert entry.connection_ref is other
+        assert proxy._current_command_cache_key is None
+
+    def test_a_reply_does_not_overwrite_an_entry_resolved_by_another_connection(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        The placeholder we staked may already have been replaced and resolved to VALID by
+        another connection. Our reply may be the older one, so it must not overwrite it.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        other = Mock()
+        mock_connection.read_response.return_value = b"ours"
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=b"theirs",
+                status=CacheEntryStatus.VALID,
+                connection_ref=other,
+            )
+        )
+
+        assert proxy.read_response() == b"ours"
+        assert cache.get(cache_key).cache_value == b"theirs"
+        assert cache.get(cache_key).connection_ref is other
+
+    def test_a_nil_reply_does_not_evict_another_connections_entry(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        A nil reply is not stored, and drops our own placeholder - under the same scoped
+        rule as a failed read, so an entry another connection now owns survives it.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        other = Mock()
+        mock_connection.read_response.return_value = None
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+                status=CacheEntryStatus.IN_PROGRESS,
+                connection_ref=other,
+            )
+        )
+
+        assert proxy.read_response() is None
+        assert cache.get(cache_key).connection_ref is other
+        assert proxy._current_command_cache_key is None
+
+        # Our own placeholder is still dropped on a nil reply.
+        cache.flush()
+        proxy.send_command("GET", "foo", keys=["foo"])
+        assert proxy.read_response() is None
+        assert cache.get(cache_key) is None
+
+    @pytest.mark.parametrize("command,keys", [("MGET", []), ("EXISTS", ())])
+    def test_an_empty_key_list_is_not_offered_to_the_predicate(
+        self, proxy_factory, mock_connection, command, keys
+    ):
+        """
+        ``mget([])`` and ``exists()`` pass an empty key list. It is treated as no key list,
+        so a predicate that reads ``keys[0]`` is never called with nothing to read.
+        """
+        predicate = Mock(side_effect=lambda command, keys: bool(keys[0]))
+        proxy, cache = proxy_factory(TrackingMode.OPTIN, cache_predicate=predicate)
+        mock_connection.read_response.return_value = []
+
+        proxy.send_command(command, keys=keys)
+        assert proxy.read_response() == []
+
+        predicate.assert_not_called()
+        mock_connection.send_command.assert_called_once_with(command, keys=keys)
+        assert cache.size == 0
+
 
 @pytest.mark.fixed_client
 @pytest.mark.onlynoncluster
