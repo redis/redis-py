@@ -5006,7 +5006,9 @@ class ListCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/blmpop
         """
-        cmd_args = [timeout, numkeys, *args, direction, "COUNT", count]
+        cmd_args = [timeout, numkeys, *args, direction]
+        if count is not None:
+            cmd_args.extend(["COUNT", count])
 
         return self.execute_command("BLMPOP", *cmd_args)
 
@@ -5042,7 +5044,7 @@ class ListCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/lmpop
         """
         cmd_args = [num_keys] + list(args) + [direction]
-        if count != 1:
+        if count is not None and count != 1:
             cmd_args.extend(["COUNT", count])
 
         return self.execute_command("LMPOP", *cmd_args)
@@ -8802,7 +8804,7 @@ class SortedSetCommands(CommandsProtocol):
             args.append("MIN")
         else:
             args.append("MAX")
-        if count != 1:
+        if count is not None and count != 1:
             args.extend(["COUNT", count])
 
         return self.execute_command("ZMPOP", *args)
@@ -8857,7 +8859,8 @@ class SortedSetCommands(CommandsProtocol):
             args.append("MIN")
         else:
             args.append("MAX")
-        args.extend(["COUNT", count])
+        if count is not None:
+            args.extend(["COUNT", count])
 
         return self.execute_command("BZMPOP", *args)
 
