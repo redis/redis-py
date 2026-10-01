@@ -2245,6 +2245,14 @@ def test_parse_url_invalid_db_keeps_stable_message():
     assert str(exc_info.value) == "Invalid value for 'db' in connection URL."
 
 
+def test_parse_url_db_path_does_not_join_segments():
+    with pytest.raises(ValueError, match="Invalid database index"):
+        parse_url("redis://localhost/10/0")
+    assert parse_url("redis://localhost/1/")["db"] == 1
+    assert parse_url("redis://localhost/0")["db"] == 0
+    assert "db" not in parse_url("redis://localhost/foo")
+
+
 @pytest.mark.parametrize(
     ("url", "expected_port"),
     (

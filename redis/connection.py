@@ -2600,12 +2600,20 @@ def parse_url(url):
             kwargs["port"] = int(url.port)
 
         # If there's a path argument, use it as the db argument if a
-        # querystring value wasn't specified
+        # querystring value wasn't specified. The path is one index.
+        # "/10/0" must not become 100 by deleting the slashes.
         if url.path and "db" not in kwargs:
-            try:
-                kwargs["db"] = int(unquote(url.path).replace("/", ""))
-            except (AttributeError, ValueError):
-                pass
+            path = unquote(url.path)
+            segments = [part for part in path.split("/") if part]
+            if len(segments) > 1 and all(
+                part.isascii() and part.isdigit() for part in segments
+            ):
+                raise ValueError("Invalid database index in connection URL.")
+            if len(segments) == 1:
+                try:
+                    kwargs["db"] = int(segments[0])
+                except (AttributeError, ValueError):
+                    pass
 
         if url.scheme == "rediss":
             kwargs["connection_class"] = SSLConnection
