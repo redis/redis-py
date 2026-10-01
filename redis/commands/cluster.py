@@ -47,6 +47,7 @@ from .core import (
     AsyncModuleCommands,
     AsyncScriptCommands,
     BlessCommands,
+    BlessFlag,
     DataAccessCommands,
     FunctionCommands,
     HotkeysMetricsTypes,
@@ -1534,6 +1535,92 @@ class AsyncClusterDataAccessCommands(
                 }
 
 
+class ClusterBlessCommands(BlessCommands):
+    """
+    A class for Redis Cluster BLESS commands
+
+    The class inherits from Redis's core BlessCommands class and does the
+    required adjustments to work with cluster mode
+    """
+
+    def bless_scan_iter(
+        self,
+        flag: BlessFlag = "NO-EVICT",
+        count: int | None = None,
+        **kwargs,
+    ) -> Iterator[bytes | str]:
+        # Do the first query with cursor=0 for all nodes
+        cursors, data = self.bless_scan(flag=flag, count=count, **kwargs)
+        yield from data
+
+        cursors = {name: cursor for name, cursor in cursors.items() if cursor != 0}
+        if cursors:
+            # Get nodes by name
+            nodes = {name: self.get_node(node_name=name) for name in cursors.keys()}
+
+            # Iterate over each node till its cursor is 0
+            kwargs.pop("target_nodes", None)
+            while cursors:
+                for name, cursor in cursors.items():
+                    cur, data = self.bless_scan(
+                        cursor=cursor,
+                        flag=flag,
+                        count=count,
+                        target_nodes=nodes[name],
+                        **kwargs,
+                    )
+                    yield from data
+                    cursors[name] = cur[name]
+
+                cursors = {
+                    name: cursor for name, cursor in cursors.items() if cursor != 0
+                }
+
+
+class AsyncClusterBlessCommands(ClusterBlessCommands, AsyncBlessCommands):
+    """
+    A class for Redis Cluster BLESS commands
+
+    The class inherits from Redis's core BlessCommands class and does the
+    required adjustments to work with cluster mode
+    """
+
+    async def bless_scan_iter(
+        self,
+        flag: BlessFlag = "NO-EVICT",
+        count: int | None = None,
+        **kwargs,
+    ) -> AsyncIterator[bytes | str]:
+        # Do the first query with cursor=0 for all nodes
+        cursors, data = await self.bless_scan(flag=flag, count=count, **kwargs)
+        for value in data:
+            yield value
+
+        cursors = {name: cursor for name, cursor in cursors.items() if cursor != 0}
+        if cursors:
+            # Get nodes by name
+            nodes = {name: self.get_node(node_name=name) for name in cursors.keys()}
+
+            # Iterate over each node till its cursor is 0
+            kwargs.pop("target_nodes", None)
+            while cursors:
+                for name, cursor in cursors.items():
+                    cur, data = await self.bless_scan(
+                        cursor=cursor,
+                        flag=flag,
+                        count=count,
+                        target_nodes=nodes[name],
+                        **kwargs,
+                    )
+                    for value in data:
+                        yield value
+                    cursors[name] = cur[name]
+
+                cursors = {
+                    name: cursor for name, cursor in cursors.items() if cursor != 0
+                }
+
+
 class RedisClusterCommands(
     ClusterMultiKeyCommands,
     ClusterManagementCommands,
@@ -1542,7 +1629,7 @@ class RedisClusterCommands(
     ClusterDataAccessCommands,
     ScriptCommands,
     FunctionCommands,
-    BlessCommands,
+    ClusterBlessCommands,
     ModuleCommands,
     RedisModuleCommands,
 ):
@@ -1574,7 +1661,7 @@ class AsyncRedisClusterCommands(
     AsyncClusterDataAccessCommands,
     AsyncScriptCommands,
     AsyncFunctionCommands,
-    AsyncBlessCommands,
+    AsyncClusterBlessCommands,
     AsyncModuleCommands,
     AsyncRedisModuleCommands,
 ):

@@ -3359,6 +3359,20 @@ class TestRedisCommands:
                 break
         assert set(keys) == {b"a", b"b"}
 
+    @skip_if_server_version_lt("8.12.0")
+    @pytest.mark.onlynoncluster
+    async def test_bless_scan_iter(self, r: redis.Redis):
+        await r.set("a", 1)
+        await r.set("b", 2)
+        await r.set("c", 3)
+        assert [k async for k in r.bless_scan_iter()] == []
+        await r.bless_set("a", "NO-EVICT")
+        await r.bless_set("b", "NO-EVICT")
+        keys = [k async for k in r.bless_scan_iter()]
+        assert set(keys) == {b"a", b"b"}
+        keys = [k async for k in r.bless_scan_iter(count=1)]
+        assert set(keys) == {b"a", b"b"}
+
     # SCAN COMMANDS
     @skip_if_server_version_lt("2.8.0")
     @pytest.mark.onlynoncluster

@@ -12643,8 +12643,48 @@ class BlessCommands(CommandsProtocol):
             pieces.extend([b"COUNT", count])
         return self.execute_command("BLESS SCAN", *pieces, **kwargs)
 
+    def bless_scan_iter(
+        self,
+        flag: BlessFlag = "NO-EVICT",
+        count: int | None = None,
+        **kwargs,
+    ) -> Iterator[bytes | str]:
+        """
+        Make an iterator using the BLESS SCAN command so that the client doesn't
+        need to remember the cursor position.
 
-AsyncBlessCommands = BlessCommands
+        ``count`` provides a hint to Redis about the number of keys to
+            return per batch.
+        """
+        cursor = "0"
+        while cursor != 0:
+            cursor, data = self.bless_scan(
+                cursor=cursor, flag=flag, count=count, **kwargs
+            )
+            yield from data
+
+
+class AsyncBlessCommands(BlessCommands):
+    async def bless_scan_iter(
+        self,
+        flag: BlessFlag = "NO-EVICT",
+        count: int | None = None,
+        **kwargs,
+    ) -> AsyncIterator[bytes | str]:
+        """
+        Make an iterator using the BLESS SCAN command so that the client doesn't
+        need to remember the cursor position.
+
+        ``count`` provides a hint to Redis about the number of keys to
+            return per batch.
+        """
+        cursor = "0"
+        while cursor != 0:
+            cursor, data = await self.bless_scan(
+                cursor=cursor, flag=flag, count=count, **kwargs
+            )
+            for d in data:
+                yield d
 
 
 class DataAccessCommands(

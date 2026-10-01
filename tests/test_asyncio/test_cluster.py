@@ -2788,6 +2788,25 @@ class TestClusterRedisCommands:
         assert keys == [b"b"]
         assert sorted(cursors.keys()) == primaries
 
+    @skip_if_server_version_lt("8.12.0")
+    async def test_cluster_bless_scan_iter(self, r: RedisCluster) -> None:
+        keys_blessed = []
+        for i in range(100):
+            s = str(i)
+            await r.set(s, 1)
+            if s.startswith("1"):
+                await r.bless_set(s, "NO-EVICT")
+                keys_blessed.append(s.encode("utf-8"))
+        keys_blessed.sort()
+
+        assert sorted([k async for k in r.bless_scan_iter()]) == keys_blessed
+        # count=1 forces every primary through more than one cursor round
+        assert sorted([k async for k in r.bless_scan_iter(count=1)]) == keys_blessed
+        assert (
+            sorted([k async for k in r.bless_scan_iter(target_nodes="primaries")])
+            == keys_blessed
+        )
+
     async def test_cluster_randomkey(self, r: RedisCluster) -> None:
         node = r.get_node_from_key("{foo}")
         assert await r.randomkey(target_nodes=node) is None
