@@ -89,6 +89,24 @@ async def test_bf_insert(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
+async def test_bf_false_flags_are_not_sent(decoded_r: redis.Redis):
+    # noScale=False and noCreate=False must behave like omitting the flag,
+    # not send NONSCALING / NOCREATE.
+    assert await decoded_r.bf().create("bloom", 0.01, 1, noScale=False)
+    assert [1, 1, 1] == intlist(await decoded_r.bf().madd("bloom", "a", "b", "c"))
+    assert [1, 1, 1] == intlist(
+        await decoded_r.bf().insert(
+            "bloom_ins", ["a", "b", "c"], capacity=1, noScale=False
+        )
+    )
+    assert [1] == intlist(
+        await decoded_r.bf().insert("bloom_new", ["a"], noCreate=False)
+    )
+    assert [1] == await decoded_r.cf().insert("cuckoo_new", ["a"], nocreate=False)
+    assert [1] == await decoded_r.cf().insertnx("cuckoo_nx_new", ["a"], nocreate=False)
+
+
+@pytest.mark.redismod
 async def test_bf_scandump_and_loadchunk(decoded_r: redis.Redis):
     # Store a filter
     await decoded_r.bf().create("myBloom", "0.0001", "1000")
