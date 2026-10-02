@@ -3278,8 +3278,8 @@ class BasicKeyCommands(CommandsProtocol):
     def getex(
         self: SyncClientProtocol,
         name: KeyT,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         persist: bool = False,
@@ -3289,8 +3289,8 @@ class BasicKeyCommands(CommandsProtocol):
     def getex(
         self: AsyncClientProtocol,
         name: KeyT,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         persist: bool = False,
@@ -3299,8 +3299,8 @@ class BasicKeyCommands(CommandsProtocol):
     def getex(
         self,
         name: KeyT,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         persist: bool = False,
@@ -3314,6 +3314,9 @@ class BasicKeyCommands(CommandsProtocol):
         ``ex`` sets an expire flag on key ``name`` for ``ex`` seconds.
 
         ``px`` sets an expire flag on key ``name`` for ``px`` milliseconds.
+
+        ``ex`` and ``px`` also accept digit-only strings, such as ``"60"``
+        and ``"500"``, respectively.
 
         ``exat`` sets an expire flag on key ``name`` for ``ex`` seconds,
         specified in unix time.
@@ -3465,8 +3468,8 @@ class BasicKeyCommands(CommandsProtocol):
         lbound: EncodableT | None = None,
         ubound: EncodableT | None = None,
         saturate: bool = False,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         persist: bool = False,
@@ -3483,8 +3486,8 @@ class BasicKeyCommands(CommandsProtocol):
         lbound: EncodableT | None = None,
         ubound: EncodableT | None = None,
         saturate: bool = False,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         persist: bool = False,
@@ -3500,8 +3503,8 @@ class BasicKeyCommands(CommandsProtocol):
         lbound: EncodableT | None = None,
         ubound: EncodableT | None = None,
         saturate: bool = False,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         persist: bool = False,
@@ -3525,6 +3528,9 @@ class BasicKeyCommands(CommandsProtocol):
         Otherwise, out-of-bounds results are rejected, leaving the value and
         TTL unchanged and returning the current value and zero as the actual
         increment.
+
+        ``ex`` and ``px`` accept digit-only strings for seconds and milliseconds,
+        respectively, in addition to integers and timedeltas.
 
         ``enx`` applies the expiration only when the key does not already
         have an expiration, and requires ``ex``, ``px``, ``exat``, or ``pxat``.
@@ -3864,8 +3870,8 @@ class BasicKeyCommands(CommandsProtocol):
         self: SyncClientProtocol,
         mapping: Mapping[AnyKeyT, EncodableT],
         data_persist_option: DataPersistOptions | None = None,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         keepttl: bool = False,
@@ -3876,8 +3882,8 @@ class BasicKeyCommands(CommandsProtocol):
         self: AsyncClientProtocol,
         mapping: Mapping[AnyKeyT, EncodableT],
         data_persist_option: DataPersistOptions | None = None,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         keepttl: bool = False,
@@ -3887,8 +3893,8 @@ class BasicKeyCommands(CommandsProtocol):
         self,
         mapping: Mapping[AnyKeyT, EncodableT],
         data_persist_option: DataPersistOptions | None = None,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         keepttl: bool = False,
@@ -3912,6 +3918,9 @@ class BasicKeyCommands(CommandsProtocol):
         ``ex`` sets an expire flag on the keys in ``mapping`` for ``ex`` seconds.
 
         ``px`` sets an expire flag on the keys in ``mapping`` for ``px`` milliseconds.
+
+        ``ex`` and ``px`` also accept digit-only strings, such as ``"60"``
+        and ``"500"``, respectively.
 
         ``exat`` sets an expire flag on the keys in ``mapping`` for ``exat`` seconds,
             specified in unix time.
@@ -4347,8 +4356,8 @@ class BasicKeyCommands(CommandsProtocol):
         self: SyncClientProtocol,
         name: KeyT,
         value: EncodableT,
-        ex: ExpiryT | None = ...,
-        px: ExpiryT | None = ...,
+        ex: ExpiryT | str | None = ...,
+        px: ExpiryT | str | None = ...,
         nx: bool = ...,
         xx: bool = ...,
         keepttl: bool = ...,
@@ -4366,8 +4375,8 @@ class BasicKeyCommands(CommandsProtocol):
         self: AsyncClientProtocol,
         name: KeyT,
         value: EncodableT,
-        ex: ExpiryT | None = ...,
-        px: ExpiryT | None = ...,
+        ex: ExpiryT | str | None = ...,
+        px: ExpiryT | str | None = ...,
         nx: bool = ...,
         xx: bool = ...,
         keepttl: bool = ...,
@@ -4385,8 +4394,8 @@ class BasicKeyCommands(CommandsProtocol):
         self,
         name: KeyT,
         value: EncodableT,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         nx: bool = False,
         xx: bool = False,
         keepttl: bool = False,
@@ -4410,6 +4419,9 @@ class BasicKeyCommands(CommandsProtocol):
         ``ex`` sets an expire flag on key ``name`` for ``ex`` seconds.
 
         ``px`` sets an expire flag on key ``name`` for ``px`` milliseconds.
+
+        ``ex`` and ``px`` also accept digit-only strings, such as ``"60"``
+        and ``"500"``, respectively.
 
         ``nx`` if set to True, set the value at key ``name`` to ``value`` only
             if it does not exist.
@@ -9863,8 +9875,8 @@ class HashCommands(CommandsProtocol):
         self: SyncClientProtocol,
         name: KeyT,
         *keys: FieldT,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         persist: bool = False,
@@ -9875,8 +9887,8 @@ class HashCommands(CommandsProtocol):
         self: AsyncClientProtocol,
         name: KeyT,
         *keys: FieldT,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         persist: bool = False,
@@ -9886,8 +9898,8 @@ class HashCommands(CommandsProtocol):
         self,
         name: KeyT,
         *keys: FieldT,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         persist: bool = False,
@@ -9899,6 +9911,9 @@ class HashCommands(CommandsProtocol):
         ``ex`` sets an expire flag on ``kyes`` for ``ex`` seconds.
 
         ``px`` sets an expire flag on ``keys`` for ``px`` milliseconds.
+
+        ``ex`` and ``px`` also accept digit-only strings, such as ``"60"``
+        and ``"500"``, respectively.
 
         ``exat`` sets an expire flag on ``keys`` for ``ex`` seconds,
         specified in unix time.
@@ -10071,8 +10086,8 @@ class HashCommands(CommandsProtocol):
         value: EncodableT | None = None,
         mapping: Mapping[FieldT, EncodableT] | None = None,
         items: Sequence[EncodableT] | None = None,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         data_persist_option: HashDataPersistOptions | None = None,
@@ -10087,8 +10102,8 @@ class HashCommands(CommandsProtocol):
         value: EncodableT | None = None,
         mapping: Mapping[FieldT, EncodableT] | None = None,
         items: Sequence[EncodableT] | None = None,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         data_persist_option: HashDataPersistOptions | None = None,
@@ -10102,8 +10117,8 @@ class HashCommands(CommandsProtocol):
         value: EncodableT | None = None,
         mapping: Mapping[FieldT, EncodableT] | None = None,
         items: Sequence[EncodableT] | None = None,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         data_persist_option: HashDataPersistOptions | None = None,
@@ -10121,6 +10136,9 @@ class HashCommands(CommandsProtocol):
         ``ex`` sets an expire flag on ``keys`` for ``ex`` seconds.
 
         ``px`` sets an expire flag on ``keys`` for ``px`` milliseconds.
+
+        ``ex`` and ``px`` also accept digit-only strings, such as ``"60"``
+        and ``"500"``, respectively.
 
         ``exat`` sets an expire flag on ``keys`` for ``ex`` seconds,
             specified in unix time.
