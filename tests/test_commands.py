@@ -6266,8 +6266,8 @@ class TestRedisCommands:
             assert r.geosearch("barcelona", member="place3", radius=100, any=1)
 
     def test_geosearch_forwards_zero_numeric_arguments(self):
-        # GEOSEARCH origin, radius, box size, count, and member name can all
-        # legitimately be 0. Truthiness guards dropped those values, so the
+        # GEOSEARCH zero arguments must be forwarded for server validation.
+        # Truthiness guards dropped those values, so the
         # command on the wire omitted BYRADIUS/BYBOX/COUNT/FROMMEMBER or sent
         # both FROMMEMBER and FROMLONLAT. Runs without a server.
         client = redis.Redis()
@@ -6290,7 +6290,7 @@ class TestRedisCommands:
 
         count_zero = wire_args(longitude=1, latitude=2, radius=10, count=0, unit="m")
         assert count_zero[-2:] == [b"COUNT", 0]
-        assert "COUNT" not in wire_args(longitude=1, latitude=2, radius=10, unit="m")
+        assert b"COUNT" not in wire_args(longitude=1, latitude=2, radius=10, unit="m")
 
         store_radius_zero = []
         with mock.patch.object(client, "execute_command", return_value=0) as m:

@@ -4899,7 +4899,7 @@ class TestRedisCommands:
             longitude=1, latitude=2, radius=10, count=0, unit="m"
         )
         assert count_zero[-2:] == [b"COUNT", 0]
-        assert "COUNT" not in await wire_args(
+        assert b"COUNT" not in await wire_args(
             longitude=1, latitude=2, radius=10, unit="m"
         )
 
