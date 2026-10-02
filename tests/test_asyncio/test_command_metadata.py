@@ -10,6 +10,7 @@ from redis.commands.metadata import (
     _is_replica_safe,
     _STATIC_COMMAND_METADATA,
     AsyncDynamicMetadataResolver,
+    AsyncMetadataResolver,
     AsyncStaticMetadataResolver,
     CommandMetadata,
     CommandMetadataRecordsCache,
@@ -317,17 +318,27 @@ class TestMemoBounds:
 
         assert len(resolver._cacheable) == _MEMO_MAX_ENTRIES
 
+    async def test_the_trackable_read_memo_stops_at_the_cap(self):
+        resolver = AsyncStaticMetadataResolver()
+
+        await self._fill_beyond_the_cap(resolver.is_trackable_read)
+
+        assert len(resolver._trackable_read) == _MEMO_MAX_ENTRIES
+
     async def test_the_views_stay_correct_past_the_cap(self):
         """A capped memo recomputes; it never answers wrongly."""
         resolver = AsyncStaticMetadataResolver()
 
         await self._fill_beyond_the_cap(resolver.resolve_policies)
         await self._fill_beyond_the_cap(resolver.is_cacheable)
+        await self._fill_beyond_the_cap(resolver.is_trackable_read)
 
         assert policy_pair(await resolver.resolve_policies("get")) == KEYED_POLICIES
         assert await resolver.is_cacheable("get") is True
+        assert await resolver.is_trackable_read("get") is True
         assert await resolver.resolve_policies("nosuchmodule.nosuchcommand") is None
         assert await resolver.is_cacheable("nosuchmodule.nosuchcommand") is False
+        assert await resolver.is_trackable_read("nosuchmodule.nosuchcommand") is False
 
 
 @pytest.mark.asyncio
@@ -639,6 +650,73 @@ class TestAsyncBaseMetadataResolver:
         assert await resolver.is_replica_safe(None) is False
         assert await resolver.is_replica_safe(123) is False
         assert await resolver.is_replica_safe("nosuchcommand") is False
+
+    @pytest.mark.parametrize(
+        "command,trackable",
+        [
+            ("GET", True),
+            ("MGET", True),
+            # Readonly and keyed, but never eligible to store - which is exactly why optout
+            # wants to exempt them.
+            ("TOUCH", True),
+            ("XPENDING", True),
+            # Readonly but keyless, so the ``NO`` is a harmless no-op.
+            ("KEYS", True),
+            ("EVAL_RO", True),
+            # Absent from the shipped table, so undecidable: fails closed.
+            ("SET", False),
+            ("DEL", False),
+            ("XREADGROUP", False),
+            ("NOSUCHCOMMAND", False),
+            ("NOSUCHMODULE.NOSUCHCOMMAND", False),
+        ],
+    )
+    async def test_is_trackable_read_decides_from_the_readonly_flag(
+        self, command, trackable
+    ):
+        resolver = AsyncStaticMetadataResolver()
+
+        assert await resolver.is_trackable_read(command) is trackable
+
+    @pytest.mark.parametrize(
+        "command",
+        ["a.b.c", b"GET", bytearray(b"GET"), memoryview(b"GET"), 1, None],
+        ids=["two-dots", "bytes", "bytearray", "memoryview", "int", "none"],
+    )
+    async def test_is_trackable_read_fails_closed_on_an_undecidable_name(self, command):
+        resolver = AsyncStaticMetadataResolver()
+
+        assert await resolver.is_trackable_read(command) is False
+
+    async def test_is_trackable_read_is_case_insensitive(self):
+        resolver = AsyncStaticMetadataResolver()
+
+        for command in ("get", "GET", "Get"):
+            assert await resolver.is_trackable_read(command) is True
+
+    async def test_is_trackable_read_is_abstract_on_the_abc(self):
+        """
+        An ``AsyncMetadataResolver`` must implement ``is_trackable_read`` like its other views.
+        """
+
+        class ResolverWithoutTheView(AsyncMetadataResolver):
+            async def resolve(self, command_name):
+                return None
+
+            async def resolve_policies(self, command_name):
+                return None
+
+            async def is_cacheable(self, command_name):
+                return False
+
+            async def is_replica_safe(self, command_name):
+                return False
+
+            def with_fallback(self, fallback):
+                return self
+
+        with pytest.raises(TypeError, match="is_trackable_read"):
+            ResolverWithoutTheView()
 
     async def test_is_cacheable_fails_closed_for_an_unresolvable_name(self):
         """
