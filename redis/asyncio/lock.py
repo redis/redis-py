@@ -213,7 +213,7 @@ class Lock:
         """
         sleep = self.sleep
         if token is None:
-            token = uuid.uuid1().hex.encode()
+            token = uuid.uuid4().hex.encode()
         else:
             try:
                 encoder = self.redis.connection_pool.get_encoder()

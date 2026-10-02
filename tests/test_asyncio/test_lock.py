@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 
 import pytest
 import pytest_asyncio
@@ -55,6 +56,17 @@ class TestLock:
     async def test_lock_token_thread_local_false(self, r):
         lock = self.get_lock(r, "foo", thread_local=False)
         await self._test_lock_token(r, lock)
+
+    async def test_default_token_is_random_uuid4(self, r):
+        # An auto-generated token must be unpredictable: it is the only secret
+        # that proves lock ownership to release/extend/reacquire. A v1 UUID
+        # leaks the host node and clock sequence and is derived from the time,
+        # so an observer could reconstruct it; a v4 UUID is random.
+        lock = self.get_lock(r, "foo")
+        assert await lock.acquire(blocking=False)
+        token = lock.local.token
+        assert uuid.UUID(token.decode()).version == 4
+        await lock.release()
 
     async def _test_lock_token(self, r, lock):
         assert await lock.acquire(blocking=False, token="test")
