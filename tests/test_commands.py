@@ -4319,7 +4319,7 @@ class TestRedisCommands:
         assert b"member1" in r.smembers(mv_set_dest)
 
     # BLESS COMMANDS
-    @skip_if_server_version_lt("8.12.0")
+    @skip_if_server_version_lt("8.11.0")
     def test_bless_set_get_clear(self, r):
         r.set("a", 1)
         assert r.bless_get("a") == []
@@ -4330,7 +4330,7 @@ class TestRedisCommands:
         assert r.bless_clear("a", "NO-EVICT") == 0
         assert r.bless_get("a") == []
 
-    @skip_if_server_version_lt("8.12.0")
+    @skip_if_server_version_lt("8.11.0")
     def test_bless_missing_key(self, r):
         with pytest.raises(exceptions.ResponseError):
             r.bless_get("a")
@@ -4340,15 +4340,15 @@ class TestRedisCommands:
             r.bless_clear("a", "NO-EVICT")
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("8.12.0")
+    @skip_if_server_version_lt("8.11.0")
     def test_bless_scan(self, r):
         r.set("a", 1)
         r.set("b", 2)
         r.set("c", 3)
-        assert r.bless_scan() == (0, [])
+        assert r.bless_scan(0, "NO-EVICT") == (0, [])
         r.bless_set("a", "NO-EVICT")
         r.bless_set("b", "NO-EVICT")
-        cursor, keys = r.bless_scan()
+        cursor, keys = r.bless_scan(0, "NO-EVICT")
         assert cursor == 0
         assert set(keys) == {b"a", b"b"}
 
@@ -4361,17 +4361,17 @@ class TestRedisCommands:
         assert set(keys) == {b"a", b"b"}
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("8.12.0")
+    @skip_if_server_version_lt("8.11.0")
     def test_bless_scan_iter(self, r):
         r.set("a", 1)
         r.set("b", 2)
         r.set("c", 3)
-        assert list(r.bless_scan_iter()) == []
+        assert list(r.bless_scan_iter("NO-EVICT")) == []
         r.bless_set("a", "NO-EVICT")
         r.bless_set("b", "NO-EVICT")
-        keys = list(r.bless_scan_iter())
+        keys = list(r.bless_scan_iter("NO-EVICT"))
         assert set(keys) == {b"a", b"b"}
-        keys = list(r.bless_scan_iter(count=1))
+        keys = list(r.bless_scan_iter("NO-EVICT", count=1))
         assert set(keys) == {b"a", b"b"}
 
     # SCAN COMMANDS

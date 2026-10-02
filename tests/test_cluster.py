@@ -2790,7 +2790,7 @@ class TestClusterRedisCommands:
             keys = r.scan_iter(match="1*", target_nodes=target_nodes)
             assert sorted(keys) == keys_1
 
-    @skip_if_server_version_lt("8.12.0")
+    @skip_if_server_version_lt("8.11.0")
     def test_cluster_bless_scan(self, r):
         r.set("a", 1)
         r.set("b", 2)
@@ -2802,17 +2802,17 @@ class TestClusterRedisCommands:
 
         primaries = sorted(node.name for node in r.get_primaries())
         for kwargs in ({}, {"target_nodes": "primaries"}):
-            cursors, keys = r.bless_scan(**kwargs)
+            cursors, keys = r.bless_scan(0, "NO-EVICT", **kwargs)
             assert sorted(keys) == [b"a", b"b"]
             assert sorted(cursors.keys()) == primaries
             assert all(cursor == 0 for cursor in cursors.values())
 
         assert r.bless_clear("a", "NO-EVICT") == 1
-        cursors, keys = r.bless_scan()
+        cursors, keys = r.bless_scan(0, "NO-EVICT")
         assert keys == [b"b"]
         assert sorted(cursors.keys()) == primaries
 
-    @skip_if_server_version_lt("8.12.0")
+    @skip_if_server_version_lt("8.11.0")
     def test_cluster_bless_scan_iter(self, r):
         keys_blessed = []
         for i in range(100):
@@ -2823,10 +2823,13 @@ class TestClusterRedisCommands:
                 keys_blessed.append(s.encode("utf-8"))
         keys_blessed.sort()
 
-        assert sorted(r.bless_scan_iter()) == keys_blessed
+        assert sorted(r.bless_scan_iter("NO-EVICT")) == keys_blessed
         # count=1 forces every primary through more than one cursor round
-        assert sorted(r.bless_scan_iter(count=1)) == keys_blessed
-        assert sorted(r.bless_scan_iter(target_nodes="primaries")) == keys_blessed
+        assert sorted(r.bless_scan_iter("NO-EVICT", count=1)) == keys_blessed
+        assert (
+            sorted(r.bless_scan_iter("NO-EVICT", target_nodes="primaries"))
+            == keys_blessed
+        )
 
     def test_cluster_randomkey(self, r):
         node = r.get_node_from_key("{foo}")

@@ -1545,12 +1545,12 @@ class ClusterBlessCommands(BlessCommands):
 
     def bless_scan_iter(
         self,
-        flag: BlessFlag = "NO-EVICT",
+        flag: BlessFlag,
         count: int | None = None,
         **kwargs,
     ) -> Iterator[bytes | str]:
         # Do the first query with cursor=0 for all nodes
-        cursors, data = self.bless_scan(flag=flag, count=count, **kwargs)
+        cursors, data = self.bless_scan(cursor=0, flag=flag, count=count, **kwargs)
         yield from data
 
         cursors = {name: cursor for name, cursor in cursors.items() if cursor != 0}
@@ -1587,12 +1587,14 @@ class AsyncClusterBlessCommands(ClusterBlessCommands, AsyncBlessCommands):
 
     async def bless_scan_iter(
         self,
-        flag: BlessFlag = "NO-EVICT",
+        flag: BlessFlag,
         count: int | None = None,
         **kwargs,
     ) -> AsyncIterator[bytes | str]:
         # Do the first query with cursor=0 for all nodes
-        cursors, data = await self.bless_scan(flag=flag, count=count, **kwargs)
+        cursors, data = await self.bless_scan(
+            cursor=0, flag=flag, count=count, **kwargs
+        )
         for value in data:
             yield value
 

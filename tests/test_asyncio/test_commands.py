@@ -3318,7 +3318,7 @@ class TestRedisCommands:
         assert await r.lrange("a", 0, -1) == [b"1", b"2", b"3", b"4"]
 
     # BLESS COMMANDS
-    @skip_if_server_version_lt("8.12.0")
+    @skip_if_server_version_lt("8.11.0")
     async def test_bless_set_get_clear(self, r: redis.Redis):
         await r.set("a", 1)
         assert await r.bless_get("a") == []
@@ -3329,7 +3329,7 @@ class TestRedisCommands:
         assert await r.bless_clear("a", "NO-EVICT") == 0
         assert await r.bless_get("a") == []
 
-    @skip_if_server_version_lt("8.12.0")
+    @skip_if_server_version_lt("8.11.0")
     async def test_bless_missing_key(self, r: redis.Redis):
         with pytest.raises(exceptions.ResponseError):
             await r.bless_get("a")
@@ -3338,16 +3338,16 @@ class TestRedisCommands:
         with pytest.raises(exceptions.ResponseError):
             await r.bless_clear("a", "NO-EVICT")
 
-    @skip_if_server_version_lt("8.12.0")
+    @skip_if_server_version_lt("8.11.0")
     @pytest.mark.onlynoncluster
     async def test_bless_scan(self, r: redis.Redis):
         await r.set("a", 1)
         await r.set("b", 2)
         await r.set("c", 3)
-        assert await r.bless_scan() == (0, [])
+        assert await r.bless_scan(0, "NO-EVICT") == (0, [])
         await r.bless_set("a", "NO-EVICT")
         await r.bless_set("b", "NO-EVICT")
-        cursor, keys = await r.bless_scan()
+        cursor, keys = await r.bless_scan(0, "NO-EVICT")
         assert cursor == 0
         assert set(keys) == {b"a", b"b"}
 
@@ -3359,18 +3359,18 @@ class TestRedisCommands:
                 break
         assert set(keys) == {b"a", b"b"}
 
-    @skip_if_server_version_lt("8.12.0")
+    @skip_if_server_version_lt("8.11.0")
     @pytest.mark.onlynoncluster
     async def test_bless_scan_iter(self, r: redis.Redis):
         await r.set("a", 1)
         await r.set("b", 2)
         await r.set("c", 3)
-        assert [k async for k in r.bless_scan_iter()] == []
+        assert [k async for k in r.bless_scan_iter("NO-EVICT")] == []
         await r.bless_set("a", "NO-EVICT")
         await r.bless_set("b", "NO-EVICT")
-        keys = [k async for k in r.bless_scan_iter()]
+        keys = [k async for k in r.bless_scan_iter("NO-EVICT")]
         assert set(keys) == {b"a", b"b"}
-        keys = [k async for k in r.bless_scan_iter(count=1)]
+        keys = [k async for k in r.bless_scan_iter("NO-EVICT", count=1)]
         assert set(keys) == {b"a", b"b"}
 
     # SCAN COMMANDS

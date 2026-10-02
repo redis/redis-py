@@ -12559,18 +12559,14 @@ class BlessCommands(CommandsProtocol):
         return self.execute_command("BLESS GET", name)
 
     @overload
-    def bless_set(
-        self: SyncClientProtocol, name: KeyT, flag: BlessFlag = "NO-EVICT"
-    ) -> int: ...
+    def bless_set(self: SyncClientProtocol, name: KeyT, flag: BlessFlag) -> int: ...
 
     @overload
     def bless_set(
-        self: AsyncClientProtocol, name: KeyT, flag: BlessFlag = "NO-EVICT"
+        self: AsyncClientProtocol, name: KeyT, flag: BlessFlag
     ) -> Awaitable[int]: ...
 
-    def bless_set(
-        self, name: KeyT, flag: BlessFlag = "NO-EVICT"
-    ) -> int | Awaitable[int]:
+    def bless_set(self, name: KeyT, flag: BlessFlag) -> int | Awaitable[int]:
         """
         Set the bless ``flag`` on the key ``name``.
 
@@ -12582,18 +12578,14 @@ class BlessCommands(CommandsProtocol):
         return self.execute_command("BLESS SET", name, flag)
 
     @overload
-    def bless_clear(
-        self: SyncClientProtocol, name: KeyT, flag: BlessFlag = "NO-EVICT"
-    ) -> int: ...
+    def bless_clear(self: SyncClientProtocol, name: KeyT, flag: BlessFlag) -> int: ...
 
     @overload
     def bless_clear(
-        self: AsyncClientProtocol, name: KeyT, flag: BlessFlag = "NO-EVICT"
+        self: AsyncClientProtocol, name: KeyT, flag: BlessFlag
     ) -> Awaitable[int]: ...
 
-    def bless_clear(
-        self, name: KeyT, flag: BlessFlag = "NO-EVICT"
-    ) -> int | Awaitable[int]:
+    def bless_clear(self, name: KeyT, flag: BlessFlag) -> int | Awaitable[int]:
         """
         Clear the bless ``flag`` from the key ``name``.
 
@@ -12607,8 +12599,8 @@ class BlessCommands(CommandsProtocol):
     @overload
     def bless_scan(
         self: SyncClientProtocol,
-        cursor: int = 0,
-        flag: BlessFlag = "NO-EVICT",
+        cursor: int,
+        flag: BlessFlag,
         count: int | None = None,
         **kwargs,
     ) -> ScanResponse: ...
@@ -12616,22 +12608,27 @@ class BlessCommands(CommandsProtocol):
     @overload
     def bless_scan(
         self: AsyncClientProtocol,
-        cursor: int = 0,
-        flag: BlessFlag = "NO-EVICT",
+        cursor: int,
+        flag: BlessFlag,
         count: int | None = None,
         **kwargs,
     ) -> Awaitable[ScanResponse]: ...
 
     def bless_scan(
         self,
-        cursor: int = 0,
-        flag: BlessFlag = "NO-EVICT",
+        cursor: int,
+        flag: BlessFlag,
         count: int | None = None,
         **kwargs,
     ) -> ScanResponse | Awaitable[ScanResponse]:
         """
         Incrementally return lists of key names that carry the bless ``flag``.
         Also return a cursor indicating the scan position.
+
+        ``cursor`` is the scan position to continue from; pass 0 to start
+            a new scan.
+
+        ``flag`` is the bless flag the returned keys must carry.
 
         ``count`` provides a hint to Redis about the number of keys to
             return per batch.
@@ -12645,7 +12642,7 @@ class BlessCommands(CommandsProtocol):
 
     def bless_scan_iter(
         self,
-        flag: BlessFlag = "NO-EVICT",
+        flag: BlessFlag,
         count: int | None = None,
         **kwargs,
     ) -> Iterator[bytes | str]:
@@ -12667,7 +12664,7 @@ class BlessCommands(CommandsProtocol):
 class AsyncBlessCommands(BlessCommands):
     async def bless_scan_iter(
         self,
-        flag: BlessFlag = "NO-EVICT",
+        flag: BlessFlag,
         count: int | None = None,
         **kwargs,
     ) -> AsyncIterator[bytes | str]:
