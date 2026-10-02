@@ -4318,6 +4318,62 @@ class TestRedisCommands:
         assert r.smove(mv_set_src, mv_set_dest, b"member1") == 1
         assert b"member1" in r.smembers(mv_set_dest)
 
+    # BLESS COMMANDS
+    @skip_if_server_version_lt("8.11.0")
+    def test_bless_set_get_clear(self, r):
+        r.set("a", 1)
+        assert r.bless_get("a") == []
+        assert r.bless_set("a", "NO-EVICT") == 1
+        assert r.bless_set("a", "NO-EVICT") == 0
+        assert r.bless_get("a") == [b"NO-EVICT"]
+        assert r.bless_clear("a", "NO-EVICT") == 1
+        assert r.bless_clear("a", "NO-EVICT") == 0
+        assert r.bless_get("a") == []
+
+    @skip_if_server_version_lt("8.11.0")
+    def test_bless_missing_key(self, r):
+        with pytest.raises(exceptions.ResponseError):
+            r.bless_get("a")
+        with pytest.raises(exceptions.ResponseError):
+            r.bless_set("a", "NO-EVICT")
+        with pytest.raises(exceptions.ResponseError):
+            r.bless_clear("a", "NO-EVICT")
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.11.0")
+    def test_bless_scan(self, r):
+        r.set("a", 1)
+        r.set("b", 2)
+        r.set("c", 3)
+        assert r.bless_scan(0, "NO-EVICT") == (0, [])
+        r.bless_set("a", "NO-EVICT")
+        r.bless_set("b", "NO-EVICT")
+        cursor, keys = r.bless_scan(0, "NO-EVICT")
+        assert cursor == 0
+        assert set(keys) == {b"a", b"b"}
+
+        cursor, keys = 0, []
+        while True:
+            cursor, page = r.bless_scan(cursor, "NO-EVICT", count=1)
+            keys.extend(page)
+            if cursor == 0:
+                break
+        assert set(keys) == {b"a", b"b"}
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.11.0")
+    def test_bless_scan_iter(self, r):
+        r.set("a", 1)
+        r.set("b", 2)
+        r.set("c", 3)
+        assert list(r.bless_scan_iter("NO-EVICT")) == []
+        r.bless_set("a", "NO-EVICT")
+        r.bless_set("b", "NO-EVICT")
+        keys = list(r.bless_scan_iter("NO-EVICT"))
+        assert set(keys) == {b"a", b"b"}
+        keys = list(r.bless_scan_iter("NO-EVICT", count=1))
+        assert set(keys) == {b"a", b"b"}
+
     # SCAN COMMANDS
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.0")
