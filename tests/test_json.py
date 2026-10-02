@@ -1582,6 +1582,7 @@ def test_decoders_and_unstring():
     assert decode_list(["hello", b"world"]) == ["hello", "world"]
 
 
+@pytest.mark.fixed_client
 def test_unstring_decimal_point_must_be_a_literal_dot():
     """The float pattern must only match a *literal* decimal point.
 
