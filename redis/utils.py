@@ -359,8 +359,8 @@ def ensure_string(key):
 
 
 def extract_expire_flags(
-    ex: Optional[ExpiryT] = None,
-    px: Optional[ExpiryT] = None,
+    ex: ExpiryT | str | None = None,
+    px: ExpiryT | str | None = None,
     exat: Optional[AbsExpiryT] = None,
     pxat: Optional[AbsExpiryT] = None,
 ) -> List[EncodableT]:
