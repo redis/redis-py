@@ -176,8 +176,12 @@ class MultiDbConfig:
             )
 
             # Maintenance notifications are disabled by default in underlying clients,
-            # but user can override this by providing their own config.
-            if "maint_notifications_config" not in database_config.client_kwargs:
+            # but user can override this by providing their own config. A supplied
+            # pool keeps its own configuration.
+            if (
+                not database_config.from_pool
+                and "maint_notifications_config" not in database_config.client_kwargs
+            ):
                 database_config.client_kwargs["maint_notifications_config"] = (
                     MaintNotificationsConfig(enabled=False)
                 )

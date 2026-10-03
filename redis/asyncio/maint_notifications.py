@@ -8,6 +8,7 @@ from redis.asyncio.observability.recorder import (
     record_connection_relaxed_timeout,
     record_maint_notification_count,
 )
+from redis.event import MaintenanceCompletedEvent, MaintenanceStartedEvent
 from redis.maint_notifications import (
     MaintenanceNotification,
     MaintenanceState,
@@ -15,6 +16,7 @@ from redis.maint_notifications import (
     NodeMovingNotification,
     OSSNodeMigratedNotification,
     OSSNodeMigratingNotification,
+    _dispatch_maintenance_event,
     _get_maintenance_notification_name,
     _get_maintenance_notification_type,
     _should_skip_connection_timeout_update,
@@ -174,6 +176,20 @@ class AsyncMaintNotificationsPoolHandler:
 
             self._processed_notifications.add(notification)
 
+            # The events report relaxed timeouts; a handoff handled only for
+            # the proactive reconnect relaxes nothing
+            if self.config.is_relaxed_timeouts_enabled():
+                _dispatch_maintenance_event(
+                    self.config,
+                    MaintenanceStartedEvent(
+                        connection_pool=self.pool,
+                        connection=self.connection,
+                        state=MaintenanceState.MOVING,
+                        notification=notification,
+                        config=self.config,
+                    ),
+                )
+
     async def run_proactive_reconnect(
         self, moving_address_src: str | None = None
     ) -> None:
@@ -211,11 +227,25 @@ class AsyncMaintNotificationsPoolHandler:
             # Cleanup has to reset future connection kwargs and existing
             # matching connections together under the pool lock. Splitting it
             # lets an acquire/release interleave and leaves stale MOVING state.
-            await self.pool.cleanup_moving_notification(
+            reverted = await self.pool.cleanup_moving_notification(
                 notification_hash=notification_hash,
                 reset_relaxed_timeout=reset_relaxed_timeout,
                 reset_host_address=reset_host_address,
             )
+
+            # A newer MOVING notification has superseded this one when the
+            # kwargs were not reverted: the pool stays relaxed until it expires.
+            if reverted and self.config.is_relaxed_timeouts_enabled():
+                _dispatch_maintenance_event(
+                    self.config,
+                    MaintenanceCompletedEvent(
+                        connection_pool=self.pool,
+                        connection=self.connection,
+                        state=MaintenanceState.MOVING,
+                        notification=notification,
+                        config=self.config,
+                    ),
+                )
 
     def _schedule(
         self,
@@ -265,16 +295,26 @@ class AsyncMaintNotificationsConnectionHandler:
         self.connection = connection
         self.config = config
 
+    def _get_pool(self) -> Any | None:
+        """
+        Get the pool from the connection's pool handler, or None for
+        standalone connections without a pool.
+        """
+        pool_handler = getattr(
+            self.connection, "_maint_notifications_pool_handler", None
+        )
+        if pool_handler:
+            return getattr(pool_handler, "pool", None)
+        return None
+
     def _get_pool_name(self) -> str:
         """
         Get the pool name from the connection's pool handler.
         Falls back to connection representation if pool is not available.
         """
-        pool_handler = getattr(
-            self.connection, "_maint_notifications_pool_handler", None
-        )
-        if pool_handler and getattr(pool_handler, "pool", None):
-            return get_pool_name(pool_handler.pool)
+        pool = self._get_pool()
+        if pool:
+            return get_pool_name(pool)
         # Fallback for standalone connections without a pool
         return repr(self.connection)
 
@@ -334,12 +374,28 @@ class AsyncMaintNotificationsConnectionHandler:
             relaxed=True,
         )
 
+        _dispatch_maintenance_event(
+            self.config,
+            MaintenanceStartedEvent(
+                connection_pool=self._get_pool(),
+                connection=self.connection,
+                state=maintenance_state,
+                notification=notification,
+                config=self.config,
+            ),
+        )
+
     async def handle_maintenance_completed_notification(self, **kwargs: Any) -> None:
         # Only reset timeouts if state is not MOVING and relaxed timeouts are enabled
         if _should_skip_connection_timeout_update(
             self.connection.maintenance_state, self.config
         ):
             return
+
+        # A completion can reach a connection whose start went to another one,
+        # or none at all; only a connection that was relaxed has a start event
+        # to pair the completion with
+        was_relaxed = self.connection.maintenance_state == MaintenanceState.MAINTENANCE
 
         notification = None
         if kwargs.get("notification"):
@@ -362,6 +418,18 @@ class AsyncMaintNotificationsConnectionHandler:
                 connection_name=self._get_pool_name(),
                 maint_notification=maint_notification,
                 relaxed=False,
+            )
+
+        if was_relaxed:
+            _dispatch_maintenance_event(
+                self.config,
+                MaintenanceCompletedEvent(
+                    connection_pool=self._get_pool(),
+                    connection=self.connection,
+                    state=MaintenanceState.MAINTENANCE,
+                    notification=notification,
+                    config=self.config,
+                ),
             )
 
 

@@ -6,6 +6,7 @@ import pytest
 
 import redis.asyncio as redis
 from redis._defaults import DEFAULT_SOCKET_CONNECT_TIMEOUT, DEFAULT_SOCKET_TIMEOUT
+from redis._parsers.resp3 import _AsyncRESP3Parser
 from redis.asyncio.connection import (
     BlockingConnectionPool,
     Connection,
@@ -16,6 +17,12 @@ from redis.asyncio.maint_notifications import (
     AsyncMaintNotificationsConnectionHandler,
     AsyncMaintNotificationsPoolHandler,
     AsyncOSSMaintNotificationsHandler,
+)
+from redis.event import (
+    EventDispatcher,
+    EventListenerInterface,
+    MaintenanceCompletedEvent,
+    MaintenanceStartedEvent,
 )
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import RedisError, ResponseError
@@ -304,6 +311,50 @@ async def test_async_parser_routes_maintenance_push_notifications_to_connection_
         await connection._parser.handle_push_response(["FAILED_OVER", 2])
         assert connection.maintenance_state == MaintenanceState.NONE
         assert connection.socket_timeout == DEFAULT_SOCKET_TIMEOUT
+
+
+@pytest.mark.asyncio
+async def test_async_parser_routes_smigrated_to_connection_and_cluster_handlers():
+    """
+    SMIGRATED ends the relaxation SMIGRATING applied to the connection, like the
+    sync parser, and still reaches the cluster handler for the topology refresh.
+    """
+    listener = _RecordingListener()
+    config = _config_with_listener(listener)
+    connection = Connection(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=config,
+    )
+    cluster_handler = AsyncMock()
+    connection._parser.set_oss_cluster_maint_push_handler(cluster_handler)
+
+    with (
+        mock.patch(
+            "redis.asyncio.maint_notifications.record_maint_notification_count",
+            new=AsyncMock(),
+        ),
+        mock.patch(
+            "redis.asyncio.maint_notifications.record_connection_relaxed_timeout",
+            new=AsyncMock(),
+        ),
+    ):
+        await connection._parser.handle_push_response(["SMIGRATING", 1, "1-100"])
+        assert connection.maintenance_state == MaintenanceState.MAINTENANCE
+        assert connection.socket_timeout == RELAXED_TIMEOUT
+
+        await connection._parser.handle_push_response(
+            ["SMIGRATED", 1, [["127.0.0.1:6379", "127.0.0.1:6380", "1-100"]]]
+        )
+
+    assert connection.maintenance_state == MaintenanceState.NONE
+    assert connection.socket_timeout == DEFAULT_SOCKET_TIMEOUT
+    cluster_handler.assert_awaited_once()
+    assert [type(e) for e in listener.events] == [
+        MaintenanceStartedEvent,
+        MaintenanceCompletedEvent,
+    ]
 
 
 @pytest.mark.asyncio
@@ -1598,7 +1649,7 @@ async def test_pool_disconnect_does_not_cancel_scheduled_tasks():
 
 
 @pytest.mark.asyncio
-async def test_async_pool_ensure_connection_allows_pending_push_when_enabled():
+async def test_async_pool_ensure_connection_applies_pending_push_when_enabled():
     pool = ConnectionPool(
         host=DEFAULT_HOST,
         port=DEFAULT_PORT,
@@ -1609,10 +1660,177 @@ async def test_async_pool_ensure_connection_allows_pending_push_when_enabled():
     connection.connect = AsyncMock()
     connection.can_read = AsyncMock(return_value=True)
     connection.disconnect = AsyncMock()
+    connection.handle_pending_push_notifications = AsyncMock()
 
     await pool.ensure_connection(connection)
 
+    connection.handle_pending_push_notifications.assert_awaited_once()
     connection.disconnect.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_async_pool_ensure_connection_reconnects_when_pending_pushes_are_stale():
+    """A drain that finds the socket closed makes the pool reconnect silently."""
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=MaintNotificationsConfig(enabled=True),
+    )
+    connection = MagicMock()
+    connection.connect = AsyncMock()
+    connection.can_read = AsyncMock(side_effect=[True, False])
+    connection.disconnect = AsyncMock()
+    connection.handle_pending_push_notifications = AsyncMock(
+        side_effect=RedisConnectionError("closed")
+    )
+
+    await pool.ensure_connection(connection)
+
+    connection.disconnect.assert_awaited_once()
+    assert connection.connect.await_count == 2
+
+
+class ScriptedParser(_AsyncRESP3Parser):
+    """
+    Parser that replays a script of buffered push notifications the way the
+    real one does: each is handed to the handler installed at read time, and
+    an exception in the script is the server's close being reached.
+    """
+
+    def __init__(self, socket_read_size):
+        super().__init__(socket_read_size)
+        self.script = []
+
+    async def can_read(self):
+        return bool(self.script)
+
+    async def can_read_destructive(self):
+        return bool(self.script)
+
+    async def read_response(self, disable_decoding=False, push_request=False):
+        item = self.script.pop(0)
+        if item == "hang":
+            # A frame only partly received: the rest never arrives
+            await asyncio.sleep(10)
+        if isinstance(item, Exception):
+            raise item
+        if isinstance(item, NodeMovingNotification):
+            await self.node_moving_push_handler_func(item)
+        elif isinstance(item, NodeMigratingNotification):
+            await self.maintenance_push_handler_func(item)
+        else:
+            # A reply that is not a push notification is returned as it is
+            return item
+        return None
+
+
+def _scripted_connection(script):
+    config = MaintNotificationsConfig(enabled=True, relaxed_timeout=RELAXED_TIMEOUT)
+    connection = Connection(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=config,
+        parser_class=ScriptedParser,
+    )
+    parser = connection._parser
+    parser.script = list(script)
+    moving_handler = AsyncMock()
+    maintenance_handler = AsyncMock()
+    parser.set_node_moving_push_handler(moving_handler)
+    parser.set_maintenance_push_handler(maintenance_handler)
+    return connection, parser, moving_handler, maintenance_handler
+
+
+@pytest.mark.asyncio
+async def test_async_pending_pushes_on_alive_connection_are_applied_in_order():
+    migrating = NodeMigratingNotification(id=1, ttl=5)
+    moving = NodeMovingNotification(
+        id=2, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=5
+    )
+    connection, parser, moving_handler, maintenance_handler = _scripted_connection(
+        [migrating, moving]
+    )
+    order = []
+    moving_handler.side_effect = lambda n: order.append(n)
+    maintenance_handler.side_effect = lambda n: order.append(n)
+
+    await connection.handle_pending_push_notifications()
+
+    assert order == [migrating, moving]
+    assert parser.node_moving_push_handler_func is moving_handler
+    assert parser.maintenance_push_handler_func is maintenance_handler
+
+
+@pytest.mark.asyncio
+async def test_async_pending_pushes_on_closed_connection_are_discarded():
+    """A closed socket means the maintenance is over: nothing is applied."""
+    migrating = NodeMigratingNotification(id=1, ttl=5)
+    moving = NodeMovingNotification(
+        id=2, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=5
+    )
+    connection, parser, moving_handler, maintenance_handler = _scripted_connection(
+        [migrating, moving, RedisConnectionError("Connection closed by server.")]
+    )
+
+    with pytest.raises(RedisConnectionError):
+        await connection.handle_pending_push_notifications()
+
+    moving_handler.assert_not_awaited()
+    maintenance_handler.assert_not_awaited()
+    # The handlers are back in place for the pushes the next command reads
+    assert parser.node_moving_push_handler_func is moving_handler
+    assert parser.maintenance_push_handler_func is maintenance_handler
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stale_reply",
+    [b"OK", None, ResponseError("MOVED 1337 1.2.3.4:6379")],
+    ids=["reply", "null_reply", "error_reply"],
+)
+async def test_async_stale_reply_on_idle_connection_is_a_connection_error(stale_reply):
+    """A reply left unread by an earlier command marks the connection dirty."""
+    moving = NodeMovingNotification(
+        id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=5
+    )
+    connection, parser, moving_handler, _ = _scripted_connection([moving, stale_reply])
+
+    with pytest.raises(RedisConnectionError, match="Connection has data"):
+        await connection.handle_pending_push_notifications()
+
+    moving_handler.assert_not_awaited()
+    assert parser.node_moving_push_handler_func is moving_handler
+
+
+@pytest.mark.asyncio
+async def test_async_partial_push_frame_is_a_bounded_connection_error():
+    """A frame only partly received must not block the checkout."""
+    moving = NodeMovingNotification(
+        id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=5
+    )
+    connection, parser, moving_handler, _ = _scripted_connection([moving, "hang"])
+
+    with mock.patch(
+        "redis.asyncio.connection.PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT", 0.05
+    ):
+        with pytest.raises(RedisConnectionError, match="Timed out"):
+            await connection.handle_pending_push_notifications()
+
+    moving_handler.assert_not_awaited()
+    assert parser.node_moving_push_handler_func is moving_handler
+
+
+@pytest.mark.asyncio
+async def test_async_pending_pushes_without_handler_are_not_deferred():
+    """An OSS cluster connection has no pool handler; its slot stays unset."""
+    connection, parser, _, _ = _scripted_connection([])
+    parser.set_node_moving_push_handler(None)
+
+    await connection.handle_pending_push_notifications()
+
+    assert parser.node_moving_push_handler_func is None
 
 
 @pytest.mark.asyncio
@@ -1783,3 +2001,310 @@ async def test_single_connection_client_does_not_reconnect_unmarked_connection()
     pool.release.assert_not_awaited()
 
     await client.aclose(close_connection_pool=False)
+
+
+class _RecordingListener(EventListenerInterface):
+    def __init__(self):
+        self.events = []
+
+    def listen(self, event):
+        self.events.append(event)
+
+
+def _config_with_listener(listener, **kwargs):
+    dispatcher = EventDispatcher(
+        {
+            MaintenanceStartedEvent: [listener],
+            MaintenanceCompletedEvent: [listener],
+        }
+    )
+    kwargs.setdefault("enabled", True)
+    kwargs.setdefault("relaxed_timeout", RELAXED_TIMEOUT)
+    return MaintNotificationsConfig(event_dispatcher=dispatcher, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_async_connection_handler_dispatches_maintenance_event_pair():
+    listener = _RecordingListener()
+    config = _config_with_listener(listener)
+    connection = DummyAsyncConnection()
+    handler = AsyncMaintNotificationsConnectionHandler(connection, config)
+    migrating = NodeMigratingNotification(id=1, ttl=5)
+    migrated = NodeMigratedNotification(id=1)
+
+    with (
+        mock.patch(
+            "redis.asyncio.maint_notifications.record_maint_notification_count",
+            new=AsyncMock(),
+        ),
+        mock.patch(
+            "redis.asyncio.maint_notifications.record_connection_relaxed_timeout",
+            new=AsyncMock(),
+        ),
+    ):
+        await handler.handle_notification(migrating)
+        assert connection.maintenance_state == MaintenanceState.MAINTENANCE
+        await handler.handle_notification(migrated)
+
+    assert [type(e) for e in listener.events] == [
+        MaintenanceStartedEvent,
+        MaintenanceCompletedEvent,
+    ]
+    started, completed = listener.events
+    assert started.state == MaintenanceState.MAINTENANCE
+    assert started.connection is connection
+    assert started.connection_pool is None
+    assert started.notification is migrating
+    assert started.config is config
+    assert completed.state == MaintenanceState.MAINTENANCE
+    assert completed.connection is connection
+    assert completed.notification is migrated
+
+
+@pytest.mark.asyncio
+async def test_async_connection_handler_completion_without_start_dispatches_nothing():
+    """The start may have been routed to another connection of the cluster."""
+    listener = _RecordingListener()
+    config = _config_with_listener(listener)
+    connection = DummyAsyncConnection()
+    handler = AsyncMaintNotificationsConnectionHandler(connection, config)
+
+    with (
+        mock.patch(
+            "redis.asyncio.maint_notifications.record_maint_notification_count",
+            new=AsyncMock(),
+        ),
+        mock.patch(
+            "redis.asyncio.maint_notifications.record_connection_relaxed_timeout",
+            new=AsyncMock(),
+        ),
+    ):
+        await handler.handle_notification(NodeMigratedNotification(id=1))
+
+    assert listener.events == []
+
+
+@pytest.mark.asyncio
+async def test_async_connection_handler_dispatches_nothing_when_relaxation_disabled():
+    listener = _RecordingListener()
+    config = _config_with_listener(listener, relaxed_timeout=-1)
+    connection = DummyAsyncConnection()
+    handler = AsyncMaintNotificationsConnectionHandler(connection, config)
+
+    with (
+        mock.patch(
+            "redis.asyncio.maint_notifications.record_maint_notification_count",
+            new=AsyncMock(),
+        ),
+        mock.patch(
+            "redis.asyncio.maint_notifications.record_connection_relaxed_timeout",
+            new=AsyncMock(),
+        ),
+    ):
+        await handler.handle_notification(NodeMigratingNotification(id=1, ttl=5))
+        await handler.handle_notification(NodeMigratedNotification(id=1))
+
+    assert listener.events == []
+
+
+@pytest.mark.asyncio
+async def test_async_pool_handler_dispatches_moving_event_pair():
+    listener = _RecordingListener()
+    config = _config_with_listener(listener)
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=config,
+    )
+    handler = AsyncMaintNotificationsPoolHandler(pool, config)
+    connection = DummyAsyncConnection(peer=DEFAULT_HOST)
+    handler.set_connection(connection)
+    notification = NodeMovingNotification(
+        id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=5
+    )
+
+    with mock.patch(
+        "redis.asyncio.maint_notifications.record_connection_handoff",
+        new=AsyncMock(),
+    ):
+        try:
+            await handler.handle_node_moving_notification(notification)
+            # The same notification delivered on another connection is a no-op
+            await handler.handle_node_moving_notification(notification)
+
+            assert len(listener.events) == 1
+            started = listener.events[0]
+            assert isinstance(started, MaintenanceStartedEvent)
+            assert started.state == MaintenanceState.MOVING
+            assert started.connection_pool is pool
+            assert started.connection is connection
+            assert started.notification is notification
+            assert started.config is config
+
+            await handler.handle_node_moved_notification(notification)
+        finally:
+            await handler.cancel_scheduled_tasks()
+
+    assert len(listener.events) == 2
+    completed = listener.events[1]
+    assert isinstance(completed, MaintenanceCompletedEvent)
+    assert completed.state == MaintenanceState.MOVING
+    assert completed.connection_pool is pool
+    assert completed.notification is notification
+
+
+@pytest.mark.asyncio
+async def test_async_pool_handler_dispatches_nothing_when_handoff_relaxes_nothing():
+    """A handoff handled only for the proactive reconnect relaxes no timeout."""
+    listener = _RecordingListener()
+    config = _config_with_listener(
+        listener, proactive_reconnect=True, relaxed_timeout=-1
+    )
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=config,
+    )
+    handler = AsyncMaintNotificationsPoolHandler(pool, config)
+    notification = NodeMovingNotification(
+        id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=5
+    )
+
+    with mock.patch(
+        "redis.asyncio.maint_notifications.record_connection_handoff",
+        new=AsyncMock(),
+    ):
+        try:
+            await handler.handle_node_moving_notification(notification)
+            # The handoff itself is still handled
+            assert pool.connection_kwargs["host"] == MOVED_HOST
+            await handler.handle_node_moved_notification(notification)
+        finally:
+            await handler.cancel_scheduled_tasks()
+
+    assert pool.connection_kwargs["host"] == DEFAULT_HOST
+    assert listener.events == []
+
+
+@pytest.mark.asyncio
+async def test_async_pool_handler_superseded_moving_completes_once():
+    listener = _RecordingListener()
+    config = _config_with_listener(listener)
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=config,
+    )
+    handler = AsyncMaintNotificationsPoolHandler(pool, config)
+    first = NodeMovingNotification(
+        id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=5
+    )
+    second = NodeMovingNotification(
+        id=2, new_node_host="5.6.7.8", new_node_port=MOVED_PORT, ttl=5
+    )
+
+    with mock.patch(
+        "redis.asyncio.maint_notifications.record_connection_handoff",
+        new=AsyncMock(),
+    ):
+        try:
+            await handler.handle_node_moving_notification(first)
+            await handler.handle_node_moving_notification(second)
+            assert [type(e) for e in listener.events] == [
+                MaintenanceStartedEvent,
+                MaintenanceStartedEvent,
+            ]
+
+            # The first handoff expires while the second still owns the pool
+            await handler.handle_node_moved_notification(first)
+            assert len(listener.events) == 2
+
+            await handler.handle_node_moved_notification(second)
+        finally:
+            await handler.cancel_scheduled_tasks()
+
+    assert len(listener.events) == 3
+    completed = listener.events[2]
+    assert isinstance(completed, MaintenanceCompletedEvent)
+    assert completed.notification is second
+
+
+@pytest.mark.asyncio
+async def test_async_cleanup_moving_notification_reports_whether_it_reverted():
+    config = MaintNotificationsConfig(enabled=True, relaxed_timeout=RELAXED_TIMEOUT)
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=config,
+    )
+    first = NodeMovingNotification(
+        id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=5
+    )
+    second = NodeMovingNotification(
+        id=2, new_node_host="5.6.7.8", new_node_port=MOVED_PORT, ttl=5
+    )
+    await pool.apply_moving_notification(first, config, DEFAULT_HOST)
+    await pool.apply_moving_notification(second, config, DEFAULT_HOST)
+
+    assert (
+        await pool.cleanup_moving_notification(
+            notification_hash=hash(first),
+            reset_relaxed_timeout=True,
+            reset_host_address=True,
+        )
+        is False
+    )
+    assert (
+        await pool.cleanup_moving_notification(
+            notification_hash=hash(second),
+            reset_relaxed_timeout=True,
+            reset_host_address=True,
+        )
+        is True
+    )
+
+
+def _connected_async_connection(config):
+    connection = Connection(protocol=3, maint_notifications_config=config)
+    # disconnect() is a no-op on a connection that was never connected
+    connection._reader = MagicMock()
+    connection._writer = MagicMock()
+    connection._writer.wait_closed = AsyncMock()
+    return connection
+
+
+@pytest.mark.asyncio
+async def test_async_disconnect_in_maintenance_dispatches_completed_event():
+    listener = _RecordingListener()
+    config = _config_with_listener(listener)
+    connection = _connected_async_connection(config)
+    connection.maintenance_state = MaintenanceState.MAINTENANCE
+
+    await connection.disconnect()
+
+    assert connection.maintenance_state == MaintenanceState.NONE
+    assert len(listener.events) == 1
+    event = listener.events[0]
+    assert isinstance(event, MaintenanceCompletedEvent)
+    assert event.state == MaintenanceState.MAINTENANCE
+    assert event.connection is connection
+    assert event.connection_pool is None
+    assert event.notification is None
+    assert event.config is config
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", [MaintenanceState.NONE, MaintenanceState.MOVING])
+async def test_async_disconnect_outside_maintenance_dispatches_nothing(state):
+    listener = _RecordingListener()
+    config = _config_with_listener(listener)
+    connection = _connected_async_connection(config)
+    connection.maintenance_state = state
+
+    await connection.disconnect()
+
+    assert listener.events == []

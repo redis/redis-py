@@ -55,7 +55,11 @@ from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from .driver_info import DriverInfo, resolve_driver_info
-from .event import AfterConnectionReleasedEvent, EventDispatcher
+from .event import (
+    AfterConnectionReleasedEvent,
+    EventDispatcher,
+    MaintenanceCompletedEvent,
+)
 from .exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -69,11 +73,13 @@ from .exceptions import (
 )
 from .himport import HImportRegistry
 from .maint_notifications import (
+    PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT,
     MaintenanceState,
     MaintNotificationsConfig,
     MaintNotificationsConnectionHandler,
     MaintNotificationsPoolHandler,
     OSSMaintNotificationsHandler,
+    _dispatch_maintenance_event,
 )
 from .observability.attributes import (
     DB_CLIENT_CONNECTION_POOL_NAME,
@@ -425,6 +431,110 @@ class MaintNotificationsAbstractConnection:
                 "Maintenance notifications are only supported with hiredis and RESP3 parsers!"
             )
         return parser
+
+    def _complete_maintenance_on_disconnect(self) -> None:
+        """
+        Restore the settings a maintenance relaxed on this connection when it is
+        closed, and report the relaxation as completed - the same way the
+        completion notification would have been reported. The MOVING state is
+        left alone: it is owned by the pool-level TTL cleanup.
+        """
+        if self.maintenance_state != MaintenanceState.MAINTENANCE:
+            return
+        self.reset_tmp_settings(reset_relaxed_timeout=True)
+        self.maintenance_state = MaintenanceState.NONE
+        # reset the sets that keep track of received start maint
+        # notifications and skipped end maint notifications
+        self.reset_received_notifications()
+        if self.maint_notifications_config is not None:
+            pool_handler = self._maint_notifications_pool_handler
+            _dispatch_maintenance_event(
+                self.maint_notifications_config,
+                MaintenanceCompletedEvent(
+                    connection_pool=(
+                        pool_handler.pool if pool_handler is not None else None
+                    ),
+                    connection=self,
+                    state=MaintenanceState.MAINTENANCE,
+                    notification=None,
+                    config=self.maint_notifications_config,
+                ),
+            )
+
+    def handle_pending_push_notifications(self) -> None:
+        """
+        Process the push notifications buffered on this idle connection if it
+        is still alive, and report a connection that has to be reconnected.
+
+        A pooled connection that has readable data while idle either has push
+        notifications waiting, or has been closed by the server - or both, when
+        the notifications announced the maintenance that closed it. The socket
+        state cannot be told apart from the pending data without reading it, so
+        the notifications are collected first and handed to their handlers only
+        once the drain has shown the socket to be alive: the server closes the
+        connections of a moved endpoint when the MOVING time-to-live expires,
+        so an alive socket means the maintenance is still in progress and the
+        announced address current. A notification buffered on a socket the
+        server has since closed describes a maintenance that is over, after
+        which the configured address is what to connect to again: it is
+        discarded, and the ``ConnectionError`` raised here makes the pool
+        reconnect before any command is sent.
+
+        Anything read that is not a maintenance notification - a reply, a null
+        or an error reply left unread by an earlier command - means the
+        connection is dirty and is reported the same way, as is a frame that
+        does not complete within ``PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT``.
+        """
+        parser = self._get_push_notifications_parser()
+        deferred: list = []
+
+        def defer(handler):
+            def deferred_handler(notification):
+                deferred.append((handler, notification))
+
+            return deferred_handler
+
+        handlers = (
+            (parser.node_moving_push_handler_func, parser.set_node_moving_push_handler),
+            (parser.maintenance_push_handler_func, parser.set_maintenance_push_handler),
+            (
+                parser.oss_cluster_maint_push_handler_func,
+                parser.set_oss_cluster_maint_push_handler,
+            ),
+        )
+        for handler, set_handler in handlers:
+            if handler is not None:
+                set_handler(defer(handler))
+
+        alive = False
+        try:
+            while self.can_read():
+                read = len(deferred)
+                self.read_response(
+                    push_request=True,
+                    timeout=PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT,
+                )
+                # Only a maintenance notification reaches a deferred handler;
+                # anything else is a reply left unread by an earlier command
+                if len(deferred) == read:
+                    raise ConnectionError("Connection has data")
+            alive = True
+        except ResponseError as e:
+            raise ConnectionError("Connection has data") from e
+        finally:
+            for handler, set_handler in handlers:
+                set_handler(handler)
+            if not alive and deferred and logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    f"Discarding {len(deferred)} push notification(s) buffered on "
+                    f"a connection that is closed or dirty, reconnecting: {self}"
+                )
+
+        for handler, notification in deferred:
+            try:
+                handler(notification)
+            except Exception as e:
+                logger.error(f"Error handling {notification}: {e}")
 
     @abstractmethod
     def _get_socket(self) -> Optional[socket.socket]:
@@ -1415,16 +1525,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 close_reason=CloseReason.APPLICATION_CLOSE,
             )
 
-        if self.maintenance_state == MaintenanceState.MAINTENANCE:
-            # this block will be executed only if the connection was in maintenance state
-            # and the connection was closed.
-            # The state change won't be applied on connections that are in Moving state
-            # because their state and configurations will be handled when the moving ttl expires.
-            self.reset_tmp_settings(reset_relaxed_timeout=True)
-            self.maintenance_state = MaintenanceState.NONE
-            # reset the sets that keep track of received start maint
-            # notifications and skipped end maint notifications
-            self.reset_received_notifications()
+        self._complete_maintenance_on_disconnect()
 
     def mark_for_reconnect(self):
         self._should_reconnect = True
@@ -1943,6 +2044,10 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def disconnect(self, *args, **kwargs):
         with self._cache_lock:
             self._cache.flush()
+        # The maintenance handlers are bound to this proxy, so the relaxation
+        # a maintenance applied is reported with the proxy as its source
+        if isinstance(self._conn, MaintNotificationsAbstractConnection):
+            self._complete_maintenance_on_disconnect()
         self._conn.disconnect(*args, **kwargs)
 
     def check_health(self):
@@ -3591,28 +3696,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         )
 
         try:
-            # ensure this connection is connected to Redis
-            connection.connect()
-            # connections that the pool provides should be ready to send
-            # a command. if not, the connection was either returned to the
-            # pool before all data has been read or the socket has been
-            # closed. either way, reconnect and verify everything is good.
-            try:
-                if (
-                    connection.can_read()
-                    and self.cache is None
-                    and not self.maint_notifications_enabled()
-                ):
-                    raise ConnectionError("Connection has data")
-            except (ConnectionError, TimeoutError, OSError):
-                connection.disconnect()
-                connection.connect()
-                if (
-                    connection.can_read()
-                    and self.cache is None
-                    and not self.maint_notifications_enabled()
-                ):
-                    raise ConnectionError("Connection not ready")
+            self.ensure_connection(connection)
         except BaseException:
             # release the connection back to the pool so that we don't
             # leak it
@@ -3626,6 +3710,33 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             )
 
         return connection
+
+    def ensure_connection(self, connection: "Connection") -> None:
+        """Ensure that the connection object is connected and valid"""
+        connection.connect()
+        # connections that the pool provides should be ready to send
+        # a command. if not, the connection was either returned to the
+        # pool before all data has been read or the socket has been
+        # closed. either way, reconnect and verify everything is good.
+        # With maintenance notifications enabled the pending data may be
+        # push notifications that have to be applied rather than a reason
+        # to reconnect; reading them is what tells the two apart, and it
+        # raises for a socket the server has closed in the meantime.
+        try:
+            if connection.can_read() and self.cache is None:
+                if self.maint_notifications_enabled():
+                    connection.handle_pending_push_notifications()
+                else:
+                    raise ConnectionError("Connection has data")
+        except (ConnectionError, TimeoutError, OSError):
+            connection.disconnect()
+            connection.connect()
+            if (
+                connection.can_read()
+                and self.cache is None
+                and not self.maint_notifications_enabled()
+            ):
+                raise ConnectionError("Connection not ready")
 
     def get_encoder(self) -> Encoder:
         "Return an encoder based on encoding settings"
@@ -4055,28 +4166,7 @@ class BlockingConnectionPool(ConnectionPool):
         )
 
         try:
-            # ensure this connection is connected to Redis
-            connection.connect()
-            # connections that the pool provides should be ready to send
-            # a command. if not, the connection was either returned to the
-            # pool before all data has been read or the socket has been
-            # closed. either way, reconnect and verify everything is good.
-            try:
-                if (
-                    connection.can_read()
-                    and self.cache is None
-                    and not self.maint_notifications_enabled()
-                ):
-                    raise ConnectionError("Connection has data")
-            except (ConnectionError, TimeoutError, OSError):
-                connection.disconnect()
-                connection.connect()
-                if (
-                    connection.can_read()
-                    and self.cache is None
-                    and not self.maint_notifications_enabled()
-                ):
-                    raise ConnectionError("Connection not ready")
+            self.ensure_connection(connection)
         except BaseException:
             # release the connection back to the pool so that we don't leak it
             self.release(connection)
