@@ -53,7 +53,7 @@ from redis.asyncio.observability.recorder import (
     record_operation_duration,
     record_pubsub_message,
 )
-from redis.asyncio.retry import Retry
+from redis.asyncio.retry import Retry, ensure_async_retry
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.client import (
     EMPTY_RESPONSE,
@@ -413,6 +413,7 @@ class Redis(
 
         if not connection_pool:
             # Create internal connection pool, expected to be closed by Redis instance
+            retry = ensure_async_retry(retry)
             if not retry_on_error:
                 retry_on_error = []
 
@@ -589,6 +590,7 @@ class Redis(
         return self.get_connection_kwargs().get("retry")
 
     def set_retry(self, retry: Retry) -> None:
+        retry = ensure_async_retry(retry)
         self.get_connection_kwargs().update({"retry": retry})
         self.connection_pool.set_retry(retry)
 

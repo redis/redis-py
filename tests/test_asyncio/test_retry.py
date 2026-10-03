@@ -1,9 +1,12 @@
+import inspect
+
 import pytest
 from redis.asyncio import Redis
 from redis.asyncio.connection import Connection, UnixDomainSocketConnection
-from redis.asyncio.retry import Retry
+from redis.asyncio.retry import Retry, ensure_async_retry
 from redis.backoff import AbstractBackoff, ExponentialBackoff, NoBackoff
 from redis.exceptions import ConnectionError, TimeoutError
+from redis.retry import Retry as SyncRetry
 
 
 class BackoffMock(AbstractBackoff):
@@ -153,3 +156,33 @@ class TestRedisClientRetry:
         assert new_conn.retry._retries == new_retry_policy._retries
         await r.connection_pool.release(new_conn)
         await r.aclose()
+
+
+@pytest.mark.fixed_client
+class TestSyncRetryGuard:
+    """Passing sync redis.retry.Retry to asyncio clients must not silently
+    disable retries (redis/redis-py#4262)."""
+
+    def test_ensure_async_retry_passthrough(self):
+        assert ensure_async_retry(None) is None
+        retry = Retry(NoBackoff(), 2)
+        assert ensure_async_retry(retry) is retry
+
+    @pytest.mark.parametrize("Class", [Connection, UnixDomainSocketConnection])
+    def test_connection_converts_sync_retry(self, Class):
+        sync_retry = SyncRetry(NoBackoff(), 3)
+        with pytest.warns(UserWarning, match="redis.asyncio.retry.Retry"):
+            conn = Class(retry=sync_retry)
+        assert type(conn.retry) is Retry
+        assert inspect.iscoroutinefunction(conn.retry.call_with_retry)
+        assert conn.retry.get_retries() == 3
+        assert isinstance(conn.retry._backoff, NoBackoff)
+        # original object is untouched
+        assert type(sync_retry) is SyncRetry
+
+    def test_client_constructor_converts_sync_retry(self):
+        sync_retry = SyncRetry(NoBackoff(), 2)
+        with pytest.warns(UserWarning, match="redis.asyncio.retry.Retry"):
+            r = Redis(retry=sync_retry)
+        assert type(r.get_retry()) is Retry
+        assert r.get_retry().get_retries() == 2

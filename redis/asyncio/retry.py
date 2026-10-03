@@ -1,3 +1,5 @@
+import inspect
+import warnings
 from asyncio import sleep
 from typing import (
     TYPE_CHECKING,
@@ -82,3 +84,35 @@ class Retry(AbstractRetry[Exception]):
                 backoff = self._backoff.compute(failures)
                 if backoff > 0:
                     await sleep(backoff)
+
+
+def ensure_async_retry(
+    retry: AbstractRetry | Retry | None,
+) -> AbstractRetry | Retry | None:
+    """Return an async ``Retry`` for use with ``redis.asyncio`` clients.
+
+    Passing the sync ``redis.retry.Retry`` to an asyncio client is an easy
+    mistake (same class name) and degrades every retry seam to a single
+    attempt with no failure callback, because the sync ``call_with_retry``
+    is a plain ``def`` that returns the coroutine without awaiting it.
+    Rebuild such objects as ``redis.asyncio.retry.Retry`` so the caller's
+    backoff / retries / supported errors are preserved.
+    """
+    if retry is None or isinstance(retry, Retry):
+        return retry
+    if isinstance(retry, AbstractRetry) and not inspect.iscoroutinefunction(
+        retry.call_with_retry
+    ):
+        warnings.warn(
+            "Passing redis.retry.Retry to redis.asyncio clients is deprecated "
+            "and was converted to redis.asyncio.retry.Retry. "
+            "Use redis.asyncio.retry.Retry with redis.asyncio clients.",
+            UserWarning,
+            stacklevel=3,
+        )
+        return Retry(
+            backoff=retry._backoff,
+            retries=retry._retries,
+            supported_errors=tuple(retry._supported_errors),
+        )
+    return retry
