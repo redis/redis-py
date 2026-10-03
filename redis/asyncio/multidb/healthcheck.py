@@ -113,6 +113,15 @@ class HealthCheck(ABC):
         """
         pass
 
+    async def close(self) -> None:
+        """
+        Release resources held by this health check (clients, connections).
+
+        The default implementation is a no-op for health checks that hold no
+        resources of their own.
+        """
+        return None
+
 
 class HealthCheckPolicy(ABC):
     """
@@ -531,6 +540,10 @@ class LagAwareHealthCheck(AbstractHealthCheck):
             health_check_delay=health_check_delay,
             health_check_timeout=health_check_timeout,
         )
+
+    async def close(self) -> None:
+        """Shut down the HTTP client thread pool used for REST API calls."""
+        await self._http_client.aclose()
 
     @staticmethod
     def _database_hosts(database) -> set[str]:

@@ -541,6 +541,13 @@ class TestPingHealthCheck:
 @pytest.mark.onlynoncluster
 class TestLagAwareHealthCheck:
     @pytest.mark.asyncio
+    async def test_close_shuts_down_http_client(self):
+        hc = LagAwareHealthCheck()
+        hc._http_client = AsyncMock()
+        await hc.close()
+        hc._http_client.aclose.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_database_is_healthy_when_bdb_matches_by_dns_name(
         self, mock_client, mock_cb
     ):
