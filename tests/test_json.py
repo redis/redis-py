@@ -1582,6 +1582,29 @@ def test_decoders_and_unstring():
     assert decode_list(["hello", b"world"]) == ["hello", "world"]
 
 
+@pytest.mark.fixed_client
+def test_unstring_decimal_point_must_be_a_literal_dot():
+    """The float pattern must only match a *literal* decimal point.
+
+    ``.`` is a regex metacharacter, so the unescaped pattern used to match
+    any character between two runs of digits (e.g. ``"1a5"``, ``"1 5"``).
+    The whole match was then fed to ``float()``, which raised ``ValueError``
+    instead of the "best effort" return-the-value contract of this helper.
+    """
+    # Still parses genuine numbers.
+    assert unstring("45.55") == 45.55
+    assert unstring("0.0") == 0.0
+    # Non-decimal separators are not numbers: return the value untouched.
+    assert unstring("1a5") == "1a5"
+    assert unstring("1 5") == "1 5"
+    assert unstring("1.2.3") == "1.2.3"
+    assert unstring(".") == "."
+
+    # decode_list() must not raise for the same inputs.
+    assert decode_list("1a5") == "1a5"
+    assert decode_list("1 5") == "1 5"
+
+
 @pytest.mark.redismod
 def test_custom_decoder(client):
     import json
