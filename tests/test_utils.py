@@ -282,6 +282,19 @@ class TestExtractExpireFlags:
     def test_px_as_timedelta_uses_milliseconds(self):
         assert extract_expire_flags(px=timedelta(seconds=2)) == ["PX", 2000]
 
+    def test_px_as_digit_string(self):
+        assert extract_expire_flags(px="500") == ["PX", 500]
+
+    def test_px_invalid_raises(self):
+        with pytest.raises(DataError):
+            extract_expire_flags(px="not-a-number")
+
+    @pytest.mark.parametrize("option", ["ex", "px"])
+    def test_non_decimal_digit_string_raises_data_error(self, option):
+        # Superscript two passes isdigit() but cannot be parsed by int().
+        with pytest.raises(DataError):
+            extract_expire_flags(**{option: "\u00b2"})
+
     def test_exat_as_int(self):
         assert extract_expire_flags(exat=1700000000) == ["EXAT", 1700000000]
 
