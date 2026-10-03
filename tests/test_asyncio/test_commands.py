@@ -4926,6 +4926,44 @@ class TestRedisCommands:
             ],
         ]
 
+    async def test_geosearch_forwards_zero_numeric_arguments(self):
+        # Async mirror of TestRedisCommands.test_geosearch_forwards_zero_numeric_arguments.
+        # GeoCommands is shared, but execute_command is awaited on this stack.
+        client = redis.Redis()
+
+        async def wire_args(**kwargs):
+            with patch.object(
+                client, "execute_command", new_callable=AsyncMock, return_value=[]
+            ) as m:
+                await client.geosearch("places", **kwargs)
+                return list(m.call_args[0])
+
+        origin_radius = await wire_args(longitude=0, latitude=0, radius=0, unit="m")
+        assert origin_radius[2:5] == [b"FROMLONLAT", 0, 0]
+        assert origin_radius[-3:] == [b"BYRADIUS", 0, "m"]
+
+        member_zero = await wire_args(member=0, radius=10, unit="km")
+        assert member_zero[2:4] == [b"FROMMEMBER", 0]
+        assert member_zero[-3:] == [b"BYRADIUS", 10, "km"]
+
+        box_zero_width = await wire_args(
+            longitude=1, latitude=2, width=0, height=1, unit="m"
+        )
+        assert box_zero_width[-4:] == [b"BYBOX", 0, 1, "m"]
+
+        count_zero = await wire_args(
+            longitude=1, latitude=2, radius=10, count=0, unit="m"
+        )
+        assert count_zero[-2:] == [b"COUNT", 0]
+        assert b"COUNT" not in await wire_args(
+            longitude=1, latitude=2, radius=10, unit="m"
+        )
+
+        with pytest.raises(DataError):
+            await client.geosearch(
+                "places", member="Paris", longitude=0, latitude=0, radius=10
+            )
+
     @skip_if_server_version_lt("5.0.0")
     async def test_xack(self, r: redis.Redis):
         stream = "stream"
