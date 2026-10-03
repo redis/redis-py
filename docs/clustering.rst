@@ -228,13 +228,23 @@ the primary and its replications in a Round-Robin manner.
 With load_balancing_strategy you can define a custom strategy for
 assigning read commands to the replicas and primary nodes.
 
+``LoadBalancingStrategy.LATENCY_BASED`` is an opt-in strategy that samples two
+of the primary and replica nodes eligible for a read and chooses the lower
+client-observed latency-and-load score. It learns only from successful reads;
+failed attempts, redirects, writes, and pipeline batches do not update latency.
+All commands still contribute to the number of in-flight requests while the
+strategy is active, so primary write load affects read selection. Measurements
+are local to each client instance and old measurements decay, allowing a
+recovered node to receive traffic again. As with every replica-reading mode,
+reads from replicas can return stale data.
+
 READONLY mode can be set at runtime by calling the readonly() method
 with target_nodes=‘replicas’, and read-write access can be restored by
 calling the readwrite() method.
 
 .. code:: python
 
-   >>> from cluster import RedisCluster as Redis
+   >>> from redis.cluster import LoadBalancingStrategy, RedisCluster as Redis
    # Use 'debug' log level to print the node that the command is executed on
    >>> rc_readonly = Redis(startup_nodes=startup_nodes,
    ...                     read_from_replicas=True)
@@ -248,3 +258,9 @@ calling the readwrite() method.
    >>> rc_readonly.readwrite(target_nodes='replicas')
    # now the get command would be directed only to the slot's primary node
    >>> rc_readonly.get('{foo}1')
+
+   >>> rc_latency = Redis(
+   ...     startup_nodes=startup_nodes,
+   ...     load_balancing_strategy=LoadBalancingStrategy.LATENCY_BASED,
+   ... )
+   >>> rc_latency.get('{foo}1')

@@ -3,6 +3,34 @@
 This directory contains local benchmark scripts for redis-py. They are not part
 of the normal CI test matrix.
 
+## Cluster latency-based load balancing
+
+`cluster_latency_load_balancing.py` compares round-robin and latency-based
+reads against the same Redis Cluster during healthy, degraded, and recovery
+phases. It reports attempted and successful request counts, errors,
+p50/p95/p99 latency, per-node attempt share, and when the restored replica is
+first selected by latency-based routing.
+
+The delay must be introduced outside redis-py. For example, the following uses
+Redis `CLIENT PAUSE` against replica `127.0.0.1:7001`; use a pause longer
+than the degraded phase:
+
+```shell
+python -m benchmarks.cluster_latency_load_balancing \
+  --url redis://localhost:7000/0 \
+  --degraded-node 127.0.0.1:7001 \
+  --degrade-command "redis-cli -h 127.0.0.1 -p 7001 CLIENT PAUSE 20000 ALL" \
+  --recover-command "redis-cli -h 127.0.0.1 -p 7001 CLIENT UNPAUSE"
+```
+
+You can instead use `tc netem`, a proxy, or another server-side fault tool.
+Omit either command to have the script pause while you apply or remove that
+change manually. The default recovery phase is 35 seconds, covering the three
+10-second decay periods plus time to observe the restored node. Keep
+`--socket-timeout` longer than the injected delay when you want the slow
+requests to succeed and train the latency estimator; shorter timeouts exercise
+failure handling instead.
+
 ## OpenTelemetry Benchmarks
 
 `otel_benchmark.py` measures redis-py operation throughput and latency with
