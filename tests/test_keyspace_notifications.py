@@ -1376,6 +1376,30 @@ class TestSubkeyChannelDetection:
 class TestSubkeyNotificationParsing:
     """Tests for KeyNotification parsing of subkey channels."""
 
+    @pytest.mark.parametrize("as_bytes", [False, True])
+    @pytest.mark.parametrize(
+        ("channel", "data"),
+        [
+            ("__subkeyspace@0__:myhash", "hset"),
+            ("__subkeyspace@0__:myhash", "hset|4:abc"),
+            ("__subkeyspace@0__:myhash", "hset|3:abc;3:def"),
+            ("__subkeyspace@0__:myhash", "hset|x:abc"),
+            ("__subkeyevent@0__:hset", "1:k"),
+            ("__subkeyevent@0__:hset", "4:abc|3:foo"),
+            ("__subkeyspaceitem@0__:myhash", "hset"),
+            ("__subkeyspaceevent@0__:hset", "3:foo"),
+        ],
+    )
+    def test_malformed_payload_returns_none(self, channel, data, as_bytes):
+        payload = data.encode() if as_bytes else data
+        assert KeyNotification.try_parse(channel, payload) is None
+        assert (
+            KeyNotification.from_message(
+                {"type": "pmessage", "channel": channel, "data": payload}
+            )
+            is None
+        )
+
     # --- subkeyspace ---
 
     def test_subkeyspace_parse(self):

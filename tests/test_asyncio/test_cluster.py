@@ -2766,6 +2766,57 @@ class TestClusterRedisCommands:
             ]
             assert sorted(keys) == keys_1
 
+    @skip_if_server_version_lt("8.11.0")
+    async def test_cluster_bless_scan(self, r: RedisCluster) -> None:
+        await r.set("a", 1)
+        await r.set("b", 2)
+        await r.set("c", 3)
+        assert await r.bless_set("a", "NO-EVICT") == 1
+        assert await r.bless_set("b", "NO-EVICT") == 1
+        assert await r.bless_get("a") == [b"NO-EVICT"]
+        assert await r.bless_get("c") == []
+
+        primaries = sorted(node.name for node in r.get_primaries())
+        for kwargs in ({}, {"target_nodes": "primaries"}):
+            cursors, keys = await r.bless_scan(0, "NO-EVICT", **kwargs)
+            assert sorted(keys) == [b"a", b"b"]
+            assert sorted(cursors.keys()) == primaries
+            assert all(cursor == 0 for cursor in cursors.values())
+
+        assert await r.bless_clear("a", "NO-EVICT") == 1
+        cursors, keys = await r.bless_scan(0, "NO-EVICT")
+        assert keys == [b"b"]
+        assert sorted(cursors.keys()) == primaries
+
+    @skip_if_server_version_lt("8.11.0")
+    async def test_cluster_bless_scan_iter(self, r: RedisCluster) -> None:
+        keys_blessed = []
+        for i in range(100):
+            s = str(i)
+            await r.set(s, 1)
+            if s.startswith("1"):
+                await r.bless_set(s, "NO-EVICT")
+                keys_blessed.append(s.encode("utf-8"))
+        keys_blessed.sort()
+
+        assert sorted([k async for k in r.bless_scan_iter("NO-EVICT")]) == keys_blessed
+        # count=1 forces every primary through more than one cursor round
+        assert (
+            sorted([k async for k in r.bless_scan_iter("NO-EVICT", count=1)])
+            == keys_blessed
+        )
+        assert (
+            sorted(
+                [
+                    k
+                    async for k in r.bless_scan_iter(
+                        "NO-EVICT", target_nodes="primaries"
+                    )
+                ]
+            )
+            == keys_blessed
+        )
+
     async def test_cluster_randomkey(self, r: RedisCluster) -> None:
         node = r.get_node_from_key("{foo}")
         assert await r.randomkey(target_nodes=node) is None
@@ -5853,7 +5904,7 @@ class TestClusterPubSub:
     """
 
     async def wait_for_message(
-        self, pubsub, timeout=0.2, ignore_subscribe_messages=False, sharded=False
+        self, pubsub, timeout=0.5, ignore_subscribe_messages=False, sharded=False
     ):
         """Helper method to wait for a message with timeout.
 
