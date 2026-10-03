@@ -74,7 +74,7 @@ from redis.asyncio.observability.recorder import (
     record_connection_wait_time,
     record_error_count,
 )
-from redis.asyncio.retry import Retry
+from redis.asyncio.retry import Retry, ensure_async_retry
 from redis.backoff import NoBackoff
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import (
@@ -703,6 +703,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             retry_on_error.append(socket.timeout)
             retry_on_error.append(asyncio.TimeoutError)
         self.retry_on_error = retry_on_error
+        retry = ensure_async_retry(retry)
         if retry or retry_on_error:
             if not retry:
                 self.retry = Retry(NoBackoff(), 1)
@@ -3138,6 +3139,7 @@ class ConnectionPool(
         await self.aclose()
 
     def set_retry(self, retry: "Retry") -> None:
+        retry = ensure_async_retry(retry)
         for conn in self._available_connections:
             conn.retry = retry
         for conn in self._in_use_connections:
