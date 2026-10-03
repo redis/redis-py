@@ -170,6 +170,12 @@ runs:
       shell: bash
 
     - name: Run tests
+      env:
+        # Coverage on PyPy falls back to the pure-Python tracer, which slows the
+        # suite down several times (much more on PyPy 8.0, where reading
+        # frame.f_lineno inside a trace function is slow). PyPy runs exercise
+        # no code paths the CPython jobs miss, so they skip coverage.
+        PYTEST_ADDOPTS: ${{ startsWith(inputs.python-version, 'pypy') && '--no-cov' || '' }}
       run: |
         set -e
 
@@ -322,6 +328,8 @@ runs:
         retention-days: 10
 
     - name: Upload codecov coverage
+      # PyPy runs skip coverage (see the "Run tests" step), so there is nothing to upload.
+      if: ${{ !startsWith(inputs.python-version, 'pypy') }}
       uses: codecov/codecov-action@v6
       with:
         fail_ci_if_error: false
