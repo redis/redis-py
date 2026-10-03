@@ -86,6 +86,35 @@ def test_server_deprecated_commands_do_not_emit_python_warnings():
     execute_command.assert_any_call("HMSET", "a", "field", "value")
 
 
+@pytest.mark.parametrize(
+    "call,expected",
+    [
+        (
+            lambda r: r.lmpop("1", "a", direction="LEFT", count=None),
+            ("LMPOP", "1", "a", "LEFT"),
+        ),
+        (
+            lambda r: r.blmpop(0, "1", "a", direction="LEFT", count=None),
+            ("BLMPOP", 0, "1", "a", "LEFT"),
+        ),
+        (
+            lambda r: r.zmpop("1", ["a"], min=True, count=None),
+            ("ZMPOP", "1", "a", "MIN"),
+        ),
+        (
+            lambda r: r.bzmpop(0, "1", ["a"], min=True, count=None),
+            ("BZMPOP", 0, "1", "a", "MIN"),
+        ),
+    ],
+)
+def test_mpop_commands_omit_count_when_none(call, expected):
+    client = redis.Redis()
+    with patch.object(client, "execute_command") as execute_command:
+        call(client)
+
+    execute_command.assert_called_once_with(*expected)
+
+
 # RESPONSE CALLBACKS
 @pytest.mark.onlynoncluster
 class TestResponseCallbacks:
