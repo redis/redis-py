@@ -157,6 +157,12 @@ class CaseInsensitiveDict(dict):
     def __setitem__(self, k, v):
         super().__setitem__(k.upper(), v)
 
+    def pop(self, k, *args):
+        # Keys are stored uppercased; without this override pop() would miss
+        # existing entries ("set" would not pop "SET") even though
+        # __contains__/__getitem__/__delitem__ are case insensitive.
+        return super().pop(k.upper(), *args)
+
     def update(self, data):
         data = CaseInsensitiveDict(data)
         super().update(data)

@@ -12,6 +12,7 @@ public client constructor must:
 import pytest
 
 import redis
+from redis.client import CaseInsensitiveDict
 from redis.cluster import (
     parse_cluster_shards,
     parse_cluster_shards_unified,
@@ -123,3 +124,18 @@ async def test_async_cluster_client_cluster_shards_callback(protocol, legacy_res
         )
     finally:
         await client.aclose()
+
+
+class TestCaseInsensitiveDictPop:
+    def test_pop_is_case_insensitive(self):
+        d = CaseInsensitiveDict({"SET": 1})
+        assert "set" in d
+        # used to raise KeyError even though the key exists
+        assert d.pop("set") == 1
+        assert "SET" not in d
+
+    def test_pop_default_is_case_insensitive(self):
+        d = CaseInsensitiveDict({"SET": 1})
+        # used to silently return the default even though the key exists
+        assert d.pop("SeT", None) == 1
+        assert d.pop("missing", "sentinel") == "sentinel"
