@@ -3,6 +3,8 @@ from unittest.mock import Mock
 import pytest
 
 from redis.backoff import (
+    ConstantBackoff,
+    DecorrelatedJitterBackoff,
     EqualJitterBackoff,
     ExponentialBackoff,
     ExponentialWithJitterBackoff,
@@ -75,3 +77,30 @@ def test_exponential_backoff_keeps_growing_past_1023_failures() -> None:
 
     assert bo.compute(1023) < bo.compute(1024) < bo.compute(1028) < 0.512
     assert bo.compute(1029) == 0.512
+
+
+class TestBackoffValidation:
+    @pytest.mark.parametrize(
+        "backoff_cls,kwargs",
+        [
+            (ConstantBackoff, {"backoff": -0.5}),
+            (ExponentialBackoff, {"cap": -1.0}),
+            (ExponentialBackoff, {"base": -0.008}),
+            (FullJitterBackoff, {"cap": -1.0}),
+            (FullJitterBackoff, {"base": -1.0}),
+            (EqualJitterBackoff, {"cap": -1.0}),
+            (EqualJitterBackoff, {"base": -1.0}),
+            (DecorrelatedJitterBackoff, {"cap": -1.0}),
+            (DecorrelatedJitterBackoff, {"base": -1.0}),
+        ],
+    )
+    def test_negative_parameters_raise(self, backoff_cls, kwargs):
+        # negative values previously produced negative retry delays, which
+        # crash time.sleep() in sync code and return immediately in asyncio
+        with pytest.raises(ValueError, match="non-negative"):
+            backoff_cls(**kwargs)
+
+    def test_zero_still_allowed(self):
+        # zero is a valid degenerate backoff (NoBackoff is ConstantBackoff(0))
+        assert ConstantBackoff(0).compute(3) == 0
+        assert ExponentialBackoff(cap=0, base=0).compute(3) == 0
