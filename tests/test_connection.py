@@ -1385,6 +1385,58 @@ class TestUnitCacheProxyConnection:
 
         assert len(cache.collection) == 0
 
+    def test_cache_access_is_serialized_by_the_shared_pool_lock(self, mock_connection):
+        # The cache object is shared by every connection the pool creates, but it
+        # is a plain OrderedDict with no lock of its own, so the guard has to be
+        # the pool-wide lock the pool passes in. Before this fix each connection
+        # guarded the shared cache with its own lock, so a cache operation on one
+        # connection did not exclude one on another: an invalidation iterating the
+        # cache on one connection could run while another cached a reply into it
+        # and raise "dictionary changed size during iteration". Holding the pool
+        # lock must therefore block an invalidation on a connection built with it.
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection._event_dispatcher = EventDispatcher()
+
+        cache = DefaultCache(CacheConfig(max_size=10))
+        cache.set(
+            CacheEntry(
+                cache_key=CacheKey(
+                    command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+                ),
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        pool_lock = threading.RLock()
+        proxy_connection = CacheProxyConnection(mock_connection, cache, pool_lock)
+
+        started = threading.Event()
+        finished = threading.Event()
+
+        def flush_via_invalidation():
+            started.set()
+            # data[1] is None is a server-side flush invalidation, which clears the
+            # shared cache through the proxy's own cache guard.
+            proxy_connection._on_invalidation_callback([b"invalidate", None])
+            finished.set()
+
+        worker = threading.Thread(target=flush_via_invalidation, daemon=True)
+        with pool_lock:
+            worker.start()
+            assert started.wait(1)
+            # The pool lock is held here, so the invalidation on the other thread
+            # must not be able to touch the shared cache yet.
+            assert not finished.wait(0.2)
+            assert cache.size == 1
+        worker.join(1)
+        assert finished.is_set()
+        assert cache.size == 0
+
     def test_cacheable_command_without_keys_bypasses_the_cache(
         self, mock_cache, mock_connection
     ):

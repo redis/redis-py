@@ -1859,7 +1859,6 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self.credential_provider = conn.credential_provider
         self._pool_lock = pool_lock
         self._cache = cache
-        self._cache_lock = threading.RLock()
         self._current_command_cache_key = None
         self._current_options = None
         self.register_connect_callback(self._enable_tracking_callback)
@@ -1941,7 +1940,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._conn.on_connect()
 
     def disconnect(self, *args, **kwargs):
-        with self._cache_lock:
+        with self._pool_lock:
             self._cache.flush()
         self._conn.disconnect(*args, **kwargs)
 
@@ -1959,7 +1958,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def send_command(self, *args, **kwargs):
         self._process_pending_invalidations()
 
-        with self._cache_lock:
+        with self._pool_lock:
             # Command is write command or not allowed
             # to be cached.
             if not self._cache.is_cachable(
@@ -1986,15 +1985,14 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             command=args[0], redis_keys=tuple(keys), redis_args=args
         )
 
-        with self._cache_lock:
+        with self._pool_lock:
             # We have to trigger invalidation processing in case if
             # it was cached by another connection to avoid
             # queueing invalidations in stale connections.
             if self._cache.get(self._current_command_cache_key):
                 entry = self._cache.get(self._current_command_cache_key)
 
-                with self._pool_lock:
-                    self._drain_invalidations(entry.connection_ref)
+                self._drain_invalidations(entry.connection_ref)
 
                 # Re-check: if the entry was invalidated during the drain,
                 # fall through to send the command over the network.
@@ -2029,7 +2027,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         disconnect_on_error=True,
         push_request=False,
     ):
-        with self._cache_lock:
+        with self._pool_lock:
             # Check if command response exists in a cache and it's not in progress.
             if self._current_command_cache_key is not None:
                 if (
@@ -2066,13 +2064,13 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             # later call of the same command and key finds an entry, skips the network,
             # then reads a reply nobody asked for - a WRONGTYPE or a NOPERM on one call
             # desynchronizes the connection for the rest of its life.
-            with self._cache_lock:
+            with self._pool_lock:
                 if self._current_command_cache_key is not None:
                     self._cache.delete_by_cache_keys([self._current_command_cache_key])
                     self._current_command_cache_key = None
             raise
 
-        with self._cache_lock:
+        with self._pool_lock:
             # Prevent not-allowed command from caching.
             if self._current_command_cache_key is None:
                 return response
@@ -2275,7 +2273,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 # server has no invalidation state for, so entries cached under
                 # the old session would be served as if still tracked. Flush
                 # them here for the same reason disconnect() does.
-                with self._cache_lock:
+                with self._pool_lock:
                     self._cache.flush()
                 raise
 
@@ -2283,7 +2281,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._drain_invalidations(self._conn)
 
     def _on_invalidation_callback(self, data: List[Union[str, Optional[List[bytes]]]]):
-        with self._cache_lock:
+        with self._pool_lock:
             # Flush cache when DB flushed on server-side
             if data[1] is None:
                 self._cache.flush()
