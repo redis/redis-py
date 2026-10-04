@@ -688,6 +688,15 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         self.credential_provider = credential_provider
         self.password = password
         self.username = username
+        if socket_timeout is not None and socket_timeout < 0:
+            raise ValueError(
+                f"socket_timeout must be non-negative or None, got {socket_timeout}"
+            )
+        if socket_connect_timeout is not None and socket_connect_timeout < 0:
+            raise ValueError(
+                "socket_connect_timeout must be non-negative or None, got "
+                f"{socket_connect_timeout}"
+            )
         self.socket_timeout = socket_timeout
         if socket_connect_timeout is None:
             socket_connect_timeout = socket_timeout

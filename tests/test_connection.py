@@ -2619,3 +2619,19 @@ class TestPushHandlerValueErrorKeepsConnection:
 
         assert conn.is_connected is True
         assert conn.read_response(disconnect_on_error=False) == b"SECOND"
+
+
+class TestConnectionTimeoutValidation:
+    def test_negative_timeouts_raise(self):
+        # used to be accepted silently and only explode far away, inside
+        # socket.settimeout ("Timeout value out of range"), at connect time
+        with pytest.raises(ValueError, match="socket_timeout must be non-negative"):
+            Connection(socket_timeout=-1)
+        with pytest.raises(
+            ValueError, match="socket_connect_timeout must be non-negative"
+        ):
+            Connection(socket_connect_timeout=-0.5)
+
+    def test_none_and_positive_still_accepted(self):
+        assert Connection(socket_timeout=None).socket_timeout is None
+        assert Connection(socket_timeout=5).socket_timeout == 5
