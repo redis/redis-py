@@ -1517,7 +1517,6 @@ class TestUnitCacheProxyConnection:
         mock_cache.is_cachable.return_value = True
         mock_cache.get.side_effect = [
             None,
-            None,
             CacheEntry(
                 cache_key=CacheKey(
                     command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
@@ -1594,11 +1593,6 @@ class TestUnitCacheProxyConnection:
 
         mock_cache.get.assert_has_calls(
             [
-                call(
-                    CacheKey(
-                        command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
-                    )
-                ),
                 call(
                     CacheKey(
                         command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
@@ -1782,10 +1776,9 @@ class TestUnitCacheProxyConnection:
 
         mock_cache.is_cachable.return_value = True
         # get() call sequence in send_command:
-        #   1st: check if entry exists (truthy → enter branch)
-        #   2nd: fetch the entry
-        #   3rd: re-check after drain (None → entry was invalidated)
-        mock_cache.get.side_effect = [cache_entry, cache_entry, None]
+        #   1st: fetch the entry (VALID → drain its connection)
+        #   2nd: re-check after drain (None → entry was invalidated)
+        mock_cache.get.side_effect = [cache_entry, None]
         mock_connection.can_read.return_value = False
         mock_connection.send_command.return_value = None
 
@@ -1812,6 +1805,136 @@ class TestUnitCacheProxyConnection:
                 connection_ref=mock_connection,
             )
         )
+
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Pypy doesn't support side_effect",
+    )
+    def test_in_progress_entry_of_another_connection_is_not_a_hit(
+        self, mock_connection
+    ):
+        # Another connection has sent GET foo and is still waiting for its reply,
+        # so the cache holds that connection's IN_PROGRESS placeholder. This
+        # connection must send its own GET instead of treating the placeholder as
+        # a hit (which skipped the send and then read a socket nothing had been
+        # written to), and must not drain the other connection, whose socket is
+        # where that in-flight reply arrives.
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection._event_dispatcher = Mock(spec=EventDispatcher)
+        mock_connection.can_read.return_value = False
+        mock_connection.read_response.return_value = b"bar"
+
+        other_conn = copy.deepcopy(mock_connection)
+        other_conn.can_read.side_effect = [True, False]
+
+        cache = DefaultCache(CacheConfig(max_size=10))
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+                status=CacheEntryStatus.IN_PROGRESS,
+                connection_ref=other_conn,
+            )
+        )
+
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+        proxy_connection.send_command("GET", "foo", keys=["foo"])
+
+        mock_connection.send_command.assert_called_once_with("GET", "foo", keys=["foo"])
+        other_conn.can_read.assert_not_called()
+        other_conn.read_response.assert_not_called()
+
+        assert proxy_connection.read_response() == b"bar"
+        mock_connection.read_response.assert_called_once()
+        assert cache.get(cache_key).status == CacheEntryStatus.VALID
+        assert cache.get(cache_key).cache_value == b"bar"
+
+    def test_reply_served_from_cache_survives_invalidation_before_read(
+        self, mock_connection
+    ):
+        # send_command finds a VALID entry and answers from the cache, so nothing
+        # is sent. If an invalidation removes the entry before read_response
+        # runs, read_response must still return that answer: deciding again from
+        # the cache found nothing and read the socket, where no reply is coming.
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection._event_dispatcher = EventDispatcher()
+        mock_connection.can_read.return_value = False
+
+        cache = DefaultCache(CacheConfig(max_size=10))
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+        proxy_connection.send_command("GET", "foo", keys=["foo"])
+        mock_connection.send_command.assert_not_called()
+
+        # foo is written elsewhere and the invalidation is processed.
+        proxy_connection._on_invalidation_callback([b"invalidate", [b"foo"]])
+        assert cache.get(cache_key) is None
+
+        assert proxy_connection.read_response() == b"bar"
+        mock_connection.read_response.assert_not_called()
+
+    def test_sent_command_reads_its_reply_even_if_the_entry_fills_meanwhile(
+        self, mock_connection
+    ):
+        # This connection finds no entry, stakes a placeholder and sends GET foo.
+        # Before it reads, another connection's store lands in that placeholder
+        # and marks it VALID. The reply to this connection's own GET is still on
+        # its socket and has to be read: answering from the cache instead left it
+        # there, to be returned as the reply to the next command on the socket.
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection._event_dispatcher = EventDispatcher()
+        mock_connection.can_read.return_value = False
+        mock_connection.read_response.return_value = b"new"
+
+        cache = DefaultCache(CacheConfig(max_size=10))
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+        proxy_connection.send_command("GET", "foo", keys=["foo"])
+        mock_connection.send_command.assert_called_once_with("GET", "foo", keys=["foo"])
+
+        # Another connection's read completes first and fills the entry, the
+        # way read_response stores a reply.
+        entry = cache.get(cache_key)
+        entry.status = CacheEntryStatus.VALID
+        entry.cache_value = b"old"
+
+        assert proxy_connection.read_response() == b"new"
+        mock_connection.read_response.assert_called_once()
 
     @pytest.mark.skipif(
         platform.python_implementation() == "PyPy",

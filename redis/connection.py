@@ -1842,6 +1842,8 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     DUMMY_CACHE_VALUE = b"foo"
     MIN_ALLOWED_VERSION = "7.4.0"
     DEFAULT_SERVER_NAME = "redis"
+    # Marks that the current command was not answered from the cache.
+    _NO_CACHED_REPLY = object()
 
     def __init__(
         self,
@@ -1861,6 +1863,10 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._cache = cache
         self._cache_lock = threading.RLock()
         self._current_command_cache_key = None
+        # Set by send_command when it answers a command from the cache instead of
+        # sending it, so read_response returns that reply without touching the
+        # socket rather than re-deciding from a cache that may have changed since.
+        self._current_command_cached_reply = self._NO_CACHED_REPLY
         self._current_options = None
         self.register_connect_callback(self._enable_tracking_callback)
 
@@ -1954,10 +1960,12 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         # Pre-packed commands are not individually cacheable, so make sure the
         # next read_response does not try to cache their reply under a stale key.
         self._current_command_cache_key = None
+        self._current_command_cached_reply = self._NO_CACHED_REPLY
         self._conn.send_packed_command(command)
 
     def send_command(self, *args, **kwargs):
         self._process_pending_invalidations()
+        self._current_command_cached_reply = self._NO_CACHED_REPLY
 
         with self._cache_lock:
             # Command is write command or not allowed
@@ -1987,30 +1995,43 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         )
 
         with self._cache_lock:
-            # We have to trigger invalidation processing in case if
-            # it was cached by another connection to avoid
-            # queueing invalidations in stale connections.
-            if self._cache.get(self._current_command_cache_key):
-                entry = self._cache.get(self._current_command_cache_key)
+            entry = self._cache.get(self._current_command_cache_key)
 
+            # Only a VALID entry is a hit. An IN_PROGRESS entry is another
+            # connection's request for this key still waiting on its reply: there
+            # is nothing to serve yet, and draining that connection would read
+            # the in-flight reply off its socket from this thread.
+            if entry is not None and entry.status == CacheEntryStatus.VALID:
+                # We have to trigger invalidation processing in case if
+                # it was cached by another connection to avoid
+                # queueing invalidations in stale connections.
                 with self._pool_lock:
                     self._drain_invalidations(entry.connection_ref)
 
                 # Re-check: if the entry was invalidated during the drain,
                 # fall through to send the command over the network.
-                if self._cache.get(self._current_command_cache_key):
+                entry = self._cache.get(self._current_command_cache_key)
+                if entry is not None and entry.status == CacheEntryStatus.VALID:
+                    # Nothing goes on the wire, so keep the reply for
+                    # read_response rather than letting it look the entry up
+                    # again after an invalidation may have removed it.
+                    self._current_command_cached_reply = entry.cache_value
                     return
 
             # Set temporary entry value to prevent
-            # race condition from another connection.
-            self._cache.set(
-                CacheEntry(
-                    cache_key=self._current_command_cache_key,
-                    cache_value=self.DUMMY_CACHE_VALUE,
-                    status=CacheEntryStatus.IN_PROGRESS,
-                    connection_ref=self._conn,
+            # race condition from another connection. If another connection's
+            # request for this key is already in flight, its placeholder is
+            # left in place: our reply still lands in it, and an invalidation
+            # arriving meanwhile still removes it.
+            if entry is None:
+                self._cache.set(
+                    CacheEntry(
+                        cache_key=self._current_command_cache_key,
+                        cache_value=self.DUMMY_CACHE_VALUE,
+                        status=CacheEntryStatus.IN_PROGRESS,
+                        connection_ref=self._conn,
+                    )
                 )
-            )
 
         # Send command over socket only if it's allowed
         # read-only command that not yet cached.
@@ -2030,24 +2051,23 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         push_request=False,
     ):
         with self._cache_lock:
-            # Check if command response exists in a cache and it's not in progress.
+            # send_command answered this command from the cache and sent nothing,
+            # so the reply it kept is the answer and the socket holds none.
+            if self._current_command_cached_reply is not self._NO_CACHED_REPLY:
+                res = copy.deepcopy(self._current_command_cached_reply)
+                self._current_command_cached_reply = self._NO_CACHED_REPLY
+                self._current_command_cache_key = None
+                record_csc_request(
+                    result=CSCResult.HIT,
+                )
+                record_csc_network_saved(
+                    bytes_saved=len(res) if hasattr(res, "__len__") else 0,
+                )
+                return res
+            # Otherwise the command went on the wire and its reply has to be read
+            # from the socket, even if the cache has gained an entry for the key
+            # since: serving that instead would leave our reply unread.
             if self._current_command_cache_key is not None:
-                if (
-                    self._cache.get(self._current_command_cache_key) is not None
-                    and self._cache.get(self._current_command_cache_key).status
-                    != CacheEntryStatus.IN_PROGRESS
-                ):
-                    res = copy.deepcopy(
-                        self._cache.get(self._current_command_cache_key).cache_value
-                    )
-                    self._current_command_cache_key = None
-                    record_csc_request(
-                        result=CSCResult.HIT,
-                    )
-                    record_csc_network_saved(
-                        bytes_saved=len(res) if hasattr(res, "__len__") else 0,
-                    )
-                    return res
                 record_csc_request(
                     result=CSCResult.MISS,
                 )
