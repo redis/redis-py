@@ -11,10 +11,7 @@ class Limit:
         self.count = count
 
     def build_args(self):
-        if self.count:
-            return ["LIMIT", str(self.offset), str(self.count)]
-        else:
-            return []
+        return ["LIMIT", str(self.offset), str(self.count)]
 
 
 class Reducer:
@@ -191,7 +188,8 @@ class AggregateRequest:
         ### Parameters
 
         - **offset**: Result offset from which to begin paging
-        - **num**: Number of results to return
+        - **num**: Number of results to return. Use 0 with offset 0 to omit
+            result rows.
 
 
         Example of sorting the initial results:
