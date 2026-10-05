@@ -4056,6 +4056,24 @@ class TestConnectionPoolMetricCount:
             "unowned release must not record connection.count"
         )
 
+    @patch("redis.connection.record_connection_count")
+    def test_release_rejected_same_pid_decrements_used(self, mock_rec):
+        """A connection checked out by this process but rejected by
+        owns_connection() (e.g. SentinelConnectionPool after a master failover)
+        must still decrement USED."""
+        pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
+        pn = get_pool_name(pool)
+
+        conn = pool.get_connection()
+        mock_rec.reset_mock()
+        with patch.object(pool, "owns_connection", return_value=False):
+            pool.release(conn)
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert used_net == -1, f"USED must be decremented, got {used_net}"
+        assert idle_net == 0, f"IDLE must not increase for dropped conn, got {idle_net}"
+
 
 class TestBlockingConnectionPoolMetricCount:
     """Same metric-count tests for BlockingConnectionPool."""
@@ -4144,3 +4162,30 @@ class TestBlockingConnectionPoolMetricCount:
         assert mock_rec.call_args_list == [], (
             "unowned release must not record connection.count"
         )
+
+    @patch("redis.connection.record_connection_count")
+    def test_release_rejected_same_pid_decrements_used(self, mock_rec):
+        """A connection checked out by this process but rejected by
+        owns_connection() must decrement USED and be removed from _connections
+        so a later reset() does not decrement USED again."""
+        pool = self._pool()
+        pn = get_pool_name(pool)
+
+        conn = pool.get_connection()
+        mock_rec.reset_mock()
+        with patch.object(pool, "owns_connection", return_value=False):
+            pool.release(conn)
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert used_net == -1, f"USED must be decremented, got {used_net}"
+        assert idle_net == 0, f"IDLE must not increase for dropped conn, got {idle_net}"
+        assert conn not in pool._connections
+
+        mock_rec.reset_mock()
+        pool.reset()
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert used_net == 0, f"reset() must not decrement USED again, got {used_net}"
+        assert idle_net == 0, f"reset() must not touch IDLE, got {idle_net}"

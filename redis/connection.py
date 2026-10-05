@@ -4228,11 +4228,8 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                     counter=1,
                 )
             else:
-                # Pool doesn't own this connection (e.g. it was inherited by a
-                # forked child). Do not add it back to the pool. Fork-time
-                # connection.count accounting is handled by reset()/__del__, so
-                # do not record here to avoid double-counting the inherited
-                # connections.
+                # Pool doesn't own this connection, do not add it back
+                # to the pool.
                 connection.disconnect()
                 # Subclasses such as SentinelConnectionPool can override
                 # owns_connection() with a comparison different from local PID
@@ -4240,6 +4237,15 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 # connection.pid == self.pid before reclaiming its slot.
                 if connection.pid == self.pid:
                     self._created_connections -= 1
+                    # The connection was checked out by this process, so
+                    # decrement USED, which was counted in get_connection().
+                    # Connections inherited across a fork are skipped here,
+                    # their accounting is handled by reset()/__del__.
+                    record_connection_count(
+                        pool_name=get_pool_name(self),
+                        connection_state=ConnectionState.USED,
+                        counter=-1,
+                    )
                 return
 
     def owns_connection(self, connection: "Connection") -> int:
@@ -4624,11 +4630,24 @@ class BlockingConnectionPool(ConnectionPool):
                 # to the pool. instead add a None value which is a placeholder
                 # that will cause the pool to recreate the connection if
                 # its needed.
-                # Fork-time connection.count accounting is handled by
-                # reset()/__del__, so do not record here to avoid
-                # double-counting the inherited connections.
                 connection.disconnect()
                 self.pool.put_nowait(None)
+                # Subclasses can override owns_connection() with a comparison
+                # different from local PID ownership. When such a subclass
+                # rejects a connection checked out by this process, stop
+                # tracking it and decrement USED, which was counted in
+                # get_connection(). Connections inherited across a fork are
+                # skipped here, their accounting is handled by reset()/__del__.
+                if connection.pid == self.pid:
+                    try:
+                        self._connections.remove(connection)
+                    except ValueError:
+                        pass
+                    record_connection_count(
+                        pool_name=get_pool_name(self),
+                        connection_state=ConnectionState.USED,
+                        counter=-1,
+                    )
                 return
             if connection.should_reconnect():
                 if logger.isEnabledFor(logging.DEBUG):
