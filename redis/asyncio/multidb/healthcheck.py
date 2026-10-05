@@ -180,10 +180,12 @@ class _MaintenanceWindowTracker:
     keyed by the relaxed source: the pool for a handoff (MOVING), the
     connection for a migration or failover (MAINTENANCE).
 
-    A window is dropped when its completion event arrives, and expires on
-    its own otherwise: a start whose end never arrives (a lost connection,
-    an SMIGRATING whose SMIGRATED is routed elsewhere) must not keep the
-    database relaxed forever.
+    A window lasts, like the relaxation it tracks, until its completion event
+    arrives: the completion notification, the handoff's TTL cleanup, or the
+    disconnect of a connection still under maintenance all report one. A
+    blocking relaxation (``relaxed_timeout=None``) has no timeout of its own
+    to bound the budget with, so that window expires with the notification's
+    time-to-live instead.
     """
 
     def __init__(self):
@@ -204,16 +206,13 @@ class _MaintenanceWindowTracker:
         if not event.config.is_relaxed_timeouts_enabled():
             return
 
-        relaxed_timeout = event.config.relaxed_timeout
-        now = time.monotonic()
         notification = event.notification
-        # The connection stays relaxed until the completion arrives, so a
-        # stall that starts near the end of the notification's TTL still gets
-        # the full relaxed timeout: hold the window for at least that long.
-        expire_at = notification.expire_at if notification is not None else now
-        if relaxed_timeout is not None:
-            expire_at = max(expire_at, now + relaxed_timeout)
-        self._windows[self._key(event)] = _MaintenanceWindow(expire_at, relaxed_timeout)
+        expire_at = (
+            notification.expire_at if notification is not None else time.monotonic()
+        )
+        self._windows[self._key(event)] = _MaintenanceWindow(
+            expire_at, event.config.relaxed_timeout
+        )
 
     def complete(self, event: MaintenanceCompletedEvent) -> None:
         self._windows.pop(self._key(event), None)
@@ -221,7 +220,9 @@ class _MaintenanceWindowTracker:
     def active_windows(self) -> List[_MaintenanceWindow]:
         now = time.monotonic()
         expired = [
-            key for key, window in self._windows.items() if window.expire_at <= now
+            key
+            for key, window in self._windows.items()
+            if window.relaxed_timeout is None and window.expire_at <= now
         ]
         for key in expired:
             del self._windows[key]
@@ -358,7 +359,14 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
                 # The check completed while being cancelled
                 return task.result()
         except asyncio.CancelledError:
+            # Let the check's own cancellation cleanup finish before this call
+            # returns, as asyncio.wait_for would: a check still winding down
+            # after the policy has moved on could use a client closed since
             task.cancel()
+            await asyncio.wait({task})
+            if not task.cancelled():
+                # Retrieve an exception the check raised while being cancelled
+                task.exception()
             raise
 
     def _relaxed_deadline(

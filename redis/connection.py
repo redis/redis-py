@@ -473,10 +473,11 @@ class MaintNotificationsAbstractConnection:
         discarded, and the ``ConnectionError`` raised here makes the pool
         reconnect before any command is sent.
 
-        Anything read that is not a maintenance notification - a reply, a null
-        or an error reply left unread by an earlier command - means the
-        connection is dirty and is reported the same way, as is a frame that
-        does not complete within ``PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT``.
+        Anything read that is not a maintenance notification or a client-side
+        cache invalidation - a reply, a null or an error reply left unread by an
+        earlier command - means the connection is dirty and is reported the same
+        way, as is a frame that does not complete within
+        ``PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT``.
         """
         parser = self._get_push_notifications_parser()
         deferred: list = []
@@ -494,6 +495,13 @@ class MaintNotificationsAbstractConnection:
                 parser.oss_cluster_maint_push_handler_func,
                 parser.set_oss_cluster_maint_push_handler,
             ),
+            # Client-side cache invalidations are pushes too; the ones on a
+            # connection that has to be reconnected are covered by the cache
+            # flush its disconnect performs
+            (
+                parser.invalidation_push_handler_func,
+                parser.set_invalidation_push_handler,
+            ),
         )
         for handler, set_handler in handlers:
             if handler is not None:
@@ -507,8 +515,8 @@ class MaintNotificationsAbstractConnection:
                     push_request=True,
                     timeout=PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT,
                 )
-                # Only a maintenance notification reaches a deferred handler;
-                # anything else is a reply left unread by an earlier command
+                # Only a push reaches a deferred handler; anything else is a
+                # reply left unread by an earlier command
                 if len(deferred) == read:
                     raise ConnectionError("Connection has data")
             alive = True
@@ -2286,6 +2294,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 "Maintenance notifications are not supported by this connection type"
             )
 
+    def _get_parser(self) -> BaseParser:
+        return self._conn._get_parser()
+
     def _get_maint_notifications_connection_instance(
         self, connection
     ) -> MaintNotificationsAbstractConnection:
@@ -3698,10 +3709,10 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         # to reconnect; reading them is what tells the two apart, and it
         # raises for a socket the server has closed in the meantime.
         try:
-            if connection.can_read() and self.cache is None:
+            if connection.can_read():
                 if self.maint_notifications_enabled():
                     connection.handle_pending_push_notifications()
-                else:
+                elif self.cache is None:
                     raise ConnectionError("Connection has data")
         except (ConnectionError, TimeoutError, OSError):
             connection.disconnect()

@@ -303,22 +303,23 @@ class TestMaintenanceAwareBudget:
         assert time.monotonic() - start < 1.0
 
     @pytest.mark.asyncio
-    async def test_expired_window_does_not_extend_budget(self):
+    async def test_window_outlives_notification_ttl_until_completed(self):
+        """
+        The connection stays relaxed until the completion arrives, however long
+        the maintenance outruns its announced time-to-live; so does the budget.
+        """
         mock_db = Mock(spec=Database)
         policy, listener = self._policy_with_tracker(mock_db)
         listener.listen(
             _maintenance_event(
                 MaintenanceStartedEvent,
                 object(),
-                relaxed_timeout=0,
+                relaxed_timeout=0.5,
                 notification=NodeMigratingNotification(id=1, ttl=0),
             )
         )
 
-        with pytest.raises(UnhealthyDatabaseException) as exc_info:
-            await policy.execute([self._slow_check(0.5)], mock_db)
-
-        assert isinstance(exc_info.value.original_exception, asyncio.TimeoutError)
+        assert await policy.execute([self._slow_check(0.3)], mock_db) is True
 
     @pytest.mark.asyncio
     async def test_window_with_relaxation_disabled_does_not_extend_budget(self):
@@ -420,15 +421,21 @@ class TestMaintenanceAwareBudget:
 
     @pytest.mark.asyncio
     async def test_outer_cancellation_cancels_health_check(self):
+        """
+        Cancelling the policy cancels the running check and waits for its
+        cleanup to finish, so the check cannot outlive the policy call.
+        """
         mock_db = Mock(spec=Database)
         policy = HealthyAllPolicy()
-        cancelled = asyncio.Event()
+        cleanup_done = asyncio.Event()
 
         async def hanging_probe(database, client=None):
             try:
                 await asyncio.sleep(10)
             except asyncio.CancelledError:
-                cancelled.set()
+                # Cleanup that takes a moment, as closing a connection would
+                await asyncio.sleep(0.05)
+                cleanup_done.set()
                 raise
             return True
 
@@ -441,7 +448,7 @@ class TestMaintenanceAwareBudget:
 
         with pytest.raises(asyncio.CancelledError):
             await task
-        await asyncio.wait_for(cancelled.wait(), 1.0)
+        assert cleanup_done.is_set()
 
 
 @pytest.mark.onlynoncluster

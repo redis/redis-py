@@ -314,19 +314,16 @@ async def test_async_parser_routes_maintenance_push_notifications_to_connection_
 
 
 @pytest.mark.asyncio
-async def test_async_parser_routes_smigrated_to_connection_and_cluster_handlers():
+async def test_async_parser_routes_smigrated_to_cluster_handler_only():
     """
-    SMIGRATED ends the relaxation SMIGRATING applied to the connection, like the
-    sync parser, and still reaches the cluster handler for the topology refresh.
+    SMIGRATED goes to the cluster handler alone: its topology refresh marks the
+    node's connections for reconnect, and the relaxation SMIGRATING applied to
+    a connection ends - and is reported as completed - when the connection is
+    disconnected, not when this connection happens to read the SMIGRATED.
     """
     listener = _RecordingListener()
     config = _config_with_listener(listener)
-    connection = Connection(
-        host=DEFAULT_HOST,
-        port=DEFAULT_PORT,
-        protocol=3,
-        maint_notifications_config=config,
-    )
+    connection = _connected_async_connection(config)
     cluster_handler = AsyncMock()
     connection._parser.set_oss_cluster_maint_push_handler(cluster_handler)
 
@@ -347,10 +344,15 @@ async def test_async_parser_routes_smigrated_to_connection_and_cluster_handlers(
         await connection._parser.handle_push_response(
             ["SMIGRATED", 1, [["127.0.0.1:6379", "127.0.0.1:6380", "1-100"]]]
         )
+        cluster_handler.assert_awaited_once()
+        assert connection.maintenance_state == MaintenanceState.MAINTENANCE
+        assert connection.socket_timeout == RELAXED_TIMEOUT
+        assert [type(e) for e in listener.events] == [MaintenanceStartedEvent]
+
+        await connection.disconnect()
 
     assert connection.maintenance_state == MaintenanceState.NONE
     assert connection.socket_timeout == DEFAULT_SOCKET_TIMEOUT
-    cluster_handler.assert_awaited_once()
     assert [type(e) for e in listener.events] == [
         MaintenanceStartedEvent,
         MaintenanceCompletedEvent,

@@ -8,7 +8,7 @@ from time import sleep
 
 from redis import Redis
 from redis._defaults import DEFAULT_SOCKET_CONNECT_TIMEOUT, DEFAULT_SOCKET_TIMEOUT
-from redis.cache import CacheConfig
+from redis.cache import CacheConfig, CacheEntry, CacheEntryStatus, CacheKey
 from redis._parsers.resp3 import _RESP3Parser
 from redis.connection import (
     AbstractConnection,
@@ -2284,10 +2284,12 @@ class TestPendingPushNotificationsOnIdleConnection(TestMaintenanceNotificationsB
         f">4\r\n$6\r\nMOVING\r\n:1\r\n:{MOVING_TIMEOUT}\r\n+{AFTER_MOVING_ADDRESS}\r\n"
     ).encode()
     MIGRATING_PUSH = b">3\r\n$9\r\nMIGRATING\r\n:1\r\n:10\r\n"
+    INVALIDATE_PUSH = b">2\r\n$10\r\ninvalidate\r\n*1\r\n$3\r\nkey\r\n"
     # An empty read is how the socket reports the server's close
     SERVER_CLOSE = b""
+    CACHE_KEY = CacheKey(command="GET", redis_keys=("key",))
 
-    def _idle_connection(self, pool_class):
+    def _idle_connection(self, pool_class, enable_cache=False):
         """A pool with one connection that has been used once and released."""
         # The pure-Python parser: the hiredis one checks socket readiness with
         # poll(), which the mock socket's fake file descriptor cannot answer.
@@ -2297,6 +2299,7 @@ class TestPendingPushNotificationsOnIdleConnection(TestMaintenanceNotificationsB
             protocol=3,
             parser_class=_RESP3Parser,
             maint_notifications_config=self.config,
+            cache_config=CacheConfig() if enable_cache else None,
         )
         connection = pool.get_connection()
         connection.send_command("SET", "key", "value")
@@ -2430,6 +2433,73 @@ class TestPendingPushNotificationsOnIdleConnection(TestMaintenanceNotificationsB
             connection.read_response()
 
             assert connection.maintenance_state == MaintenanceState.MAINTENANCE
+        finally:
+            pool.release(connection)
+            pool.disconnect()
+
+    def _cached_idle_connection(self, pool_class):
+        """
+        A client-side caching pool with one idle connection and a cached GET
+        the server's invalidation of ``key`` applies to.
+        """
+        pool, connection = self._idle_connection(pool_class, enable_cache=True)
+        assert pool.cache.set(
+            CacheEntry(
+                cache_key=self.CACHE_KEY,
+                cache_value=b"value",
+                status=CacheEntryStatus.VALID,
+                connection_ref=connection,
+            )
+        )
+        return pool, connection
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_pending_pushes_with_cache_on_alive_connection_are_applied(
+        self, pool_class
+    ):
+        """
+        With client-side caching the pool used to leave the pending data for
+        the next command to read; the notifications are now applied on checkout
+        the same way, and the invalidations buffered with them are applied too.
+        """
+        pool, connection = self._cached_idle_connection(pool_class)
+        sock = connection._conn._sock
+        sock.pending_responses.extend([self.MOVING_PUSH, self.INVALIDATE_PUSH])
+
+        try:
+            assert pool.get_connection() is connection
+
+            assert connection._conn._sock is sock
+            assert connection.maintenance_state == MaintenanceState.MOVING
+            assert connection.host == AFTER_MOVING_ADDRESS.split(":")[0]
+            assert pool.cache.get(self.CACHE_KEY) is None
+        finally:
+            pool.release(connection)
+            pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_pending_pushes_with_cache_on_closed_connection_are_discarded(
+        self, pool_class
+    ):
+        """
+        The reconnect of a closed connection flushes the cache, which covers
+        the invalidations discarded with the stale notifications.
+        """
+        pool, connection = self._cached_idle_connection(pool_class)
+        sock = connection._conn._sock
+        sock.pending_responses.extend(
+            [self.MOVING_PUSH, self.INVALIDATE_PUSH, self.SERVER_CLOSE]
+        )
+
+        try:
+            assert pool.get_connection() is connection
+
+            assert sock.closed
+            assert connection._conn._sock is not sock
+            assert connection._conn._sock.connected
+            assert connection.maintenance_state == MaintenanceState.NONE
+            assert connection.host == DEFAULT_ADDRESS.split(":")[0]
+            assert pool.cache.get(self.CACHE_KEY) is None
         finally:
             pool.release(connection)
             pool.disconnect()

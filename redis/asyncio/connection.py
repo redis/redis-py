@@ -275,10 +275,11 @@ class AsyncMaintNotificationsAbstractConnection:
         discarded, and the ``ConnectionError`` raised here makes the pool
         reconnect before any command is sent.
 
-        Anything read that is not a maintenance notification - a reply, a null
-        or an error reply left unread by an earlier command - means the
-        connection is dirty and is reported the same way, as is a frame that
-        does not complete within ``PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT``.
+        Anything read that is not a maintenance notification or a client-side
+        cache invalidation - a reply, a null or an error reply left unread by an
+        earlier command - means the connection is dirty and is reported the same
+        way, as is a frame that does not complete within
+        ``PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT``.
         """
         parser = self._get_push_notifications_parser()
         deferred: list = []
@@ -295,6 +296,13 @@ class AsyncMaintNotificationsAbstractConnection:
             (
                 parser.oss_cluster_maint_push_handler_func,
                 parser.set_oss_cluster_maint_push_handler,
+            ),
+            # Client-side cache invalidations are pushes too; the ones on a
+            # connection that has to be reconnected are covered by the cache
+            # flush its disconnect performs
+            (
+                parser.invalidation_push_handler_func,
+                parser.set_invalidation_push_handler,
             ),
         )
         for handler, set_handler in handlers:
@@ -314,8 +322,8 @@ class AsyncMaintNotificationsAbstractConnection:
                     raise ConnectionError(
                         "Timed out reading a pending push notification"
                     ) from None
-                # Only a maintenance notification reaches a deferred handler;
-                # anything else is a reply left unread by an earlier command
+                # Only a push reaches a deferred handler; anything else is a
+                # reply left unread by an earlier command
                 if len(deferred) == read:
                     raise ConnectionError("Connection has data")
             alive = True
