@@ -2398,6 +2398,30 @@ class TestTrackingModePairing:
             [(b"CLIENT", b"CACHING", b"YES"), ("GET", "foo")]
         )
 
+    def test_a_packed_send_consumes_the_ask_redirect_suppression(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        The server consumes ``ASKING`` on the next command on the socket, a packed write
+        included, so the read after that write pairs and stores as usual.
+        """
+        proxy, cache = proxy_factory(
+            TrackingMode.OPTIN, cache_predicate=_cache_everything
+        )
+
+        proxy.send_command("ASKING")
+        assert proxy._skip_next_caching is True
+
+        proxy.send_packed_command(b"*1\r\n$4\r\nPING\r\n")
+        assert proxy._skip_next_caching is False
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+
+        mock_connection.pack_commands.assert_called_once_with(
+            [(b"CLIENT", b"CACHING", b"YES"), ("GET", "foo")]
+        )
+        assert cache.size == 1
+
     def test_send_packed_command_clears_the_pending_caching_reply(
         self, proxy_factory, mock_connection
     ):

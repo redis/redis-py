@@ -2003,7 +2003,10 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         # A pre-packed write carries no CLIENT CACHING command of its own, so a flag left
         # over from an earlier send must not make the next read_response swallow a reply -
         # nor may a stale locally-served reply be handed back in place of this write's.
+        # The server consumes a pending ASKING on this write, so the ASK suppression must
+        # not carry over to a later command either.
         self._pending_caching_reply = False
+        self._skip_next_caching = False
         self._pending_cache_hit = _NO_PENDING_HIT
         self._conn.send_packed_command(command)
 
