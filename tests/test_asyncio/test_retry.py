@@ -235,6 +235,17 @@ class TestConnectionConstructorWithRetry:
         assert isinstance(client.get_retry(), Retry)
         assert client.get_retry().get_retries() == new_retry.get_retries()
 
+    def test_redis_set_retry_converts_without_pool_write(self, monkeypatch):
+        client = Redis()
+        monkeypatch.setattr(client.connection_pool, "set_retry", lambda retry: None)
+        sync_retry = SyncRetry(NoBackoff(), 2)
+        with pytest.warns(UserWarning, match="synchronous redis.retry.Retry"):
+            client.set_retry(sync_retry)
+
+        assert isinstance(client.get_retry(), Retry)
+        assert client.get_retry().get_retries() == 2
+        assert type(sync_retry) is SyncRetry
+
     def test_cluster_converts_sync_retry(self):
         retry = SyncRetry(NoBackoff(), 2)
         with pytest.warns(UserWarning, match="synchronous redis.retry.Retry"):
