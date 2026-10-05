@@ -64,6 +64,7 @@ Code = "https://github.com/redis/redis-py"
 Documentation = "https://redis.readthedocs.io/en/latest/"
 Homepage = "https://github.com/redis/redis-py"
 "Issue tracker" = "https://github.com/redis/redis-py/issues"
+Changelog = "https://github.com/redis/redis-py/blob/master/CHANGES"
 
 [tool.hatch.version]
 path = "redis/__init__.py"
