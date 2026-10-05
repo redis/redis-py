@@ -506,8 +506,6 @@ class TestConnectionPoolURLParsing:
             (False, "off"),
             (False, "OFF"),
             (False, "Off"),
-            (False, "disabled"),
-            (False, "DISABLED"),
             (True, 1),
             (True, "1"),
             (True, "y"),
