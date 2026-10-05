@@ -1971,6 +1971,10 @@ class ClusterNode:
 
             raise MaxConnectionsError()
 
+    def owns_connection(self, connection: Connection) -> bool:
+        """Return whether this node created the connection."""
+        return connection in self._connections
+
     async def disconnect_if_needed(self, connection: Connection) -> None:
         """
         Disconnect a connection if it's marked for reconnect.
@@ -2302,6 +2306,15 @@ class NodesManager:
             raise DataError(
                 "get_node requires one of the following: 1. node name 2. host and port"
             )
+
+    def find_connection_owner(self, connection: Connection) -> Optional["ClusterNode"]:
+        """Return the cached node that created this connection, if any."""
+        for node in tuple(self.nodes_cache.values()):
+            if node.owns_connection(connection):
+                return node
+        if connection.host and connection.port:
+            return self.nodes_cache.get(get_node_name(connection.host, connection.port))
+        return None
 
     def set_nodes(
         self,
@@ -3402,6 +3415,28 @@ class TransactionStrategy(AbstractStrategy):
         node: ClusterNode = self._pipe.cluster_client.nodes_manager.get_node_from_slot(
             list(self._pipeline_slots)[0], False
         )
+        # A shared nodes manager can move the slot while this transaction still
+        # holds a connection from the previous owner (failover, reshard, or a
+        # concurrent MOVED). Reusing that connection would send the next command
+        # to the wrong server and reset() would return it to the new node's pool.
+        if self._transaction_connection and not node.owns_connection(
+            self._transaction_connection
+        ):
+            previous_node = (
+                self._pipe.cluster_client.nodes_manager.find_connection_owner(
+                    self._transaction_connection
+                )
+            )
+            if (
+                previous_node is None
+                and self._transaction_node is not None
+                and self._transaction_node.owns_connection(self._transaction_connection)
+            ):
+                previous_node = self._transaction_node
+            if previous_node is not None:
+                previous_node.release(self._transaction_connection)
+            self._transaction_connection = None
+
         self._transaction_node = node
 
         if not self._transaction_connection:
@@ -3780,12 +3815,21 @@ class TransactionStrategy(AbstractStrategy):
             # connections. Detach the reference before releasing so the
             # strategy never holds a pointer to a returned connection.
             # ClusterNode.release is synchronous, so no shield is required.
-            if self._transaction_connection and self._transaction_node:
+            if self._transaction_connection:
                 connection, self._transaction_connection = (
                     self._transaction_connection,
                     None,
                 )
-                self._transaction_node.release(connection)
+                # Release to the node that created the connection. _transaction_node
+                # may already point at a newly resolved slot owner.
+                owner = self._pipe.cluster_client.nodes_manager.find_connection_owner(
+                    connection
+                )
+                if owner is None and self._transaction_node is not None:
+                    if self._transaction_node.owns_connection(connection):
+                        owner = self._transaction_node
+                if owner is not None:
+                    owner.release(connection)
             # clean up the other instance attributes
             self._transaction_connection = None
             self._transaction_node = None
