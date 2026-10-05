@@ -183,10 +183,25 @@ def parse_cluster_slots(
     return slots
 
 
+def _pair_cluster_slots(slots):
+    """Pair a CLUSTER SHARDS flat ``[start, end, start, end, ...]`` slot array
+    into ``[(start, end), ...]``.
+
+    CLUSTER SHARDS returns each shard's slots as a flat integer array in both
+    RESP2 and RESP3; only the outer shard container differs between protocols.
+    If a response ever nests the pairs as sublists, normalize those to tuples.
+    """
+    if slots and isinstance(slots[0], (list, tuple)):
+        return [tuple(s) for s in slots]
+    return [(slots[i], slots[i + 1]) for i in range(0, len(slots), 2)]
+
+
 def parse_cluster_shards(resp, **options):
     """
     Parse CLUSTER SHARDS response.
     """
+    if not resp:
+        return resp
     if isinstance(resp[0], dict):
         return resp
     shards = []
@@ -224,9 +239,7 @@ def parse_cluster_shards_with_str_keys(resp, **options):
         slots = shard_resp.get(b"slots", shard_resp.get("slots", []))
         nodes = shard_resp.get(b"nodes", shard_resp.get("nodes", []))
         shard = {
-            "slots": [
-                tuple(slot) if isinstance(slot, list) else slot for slot in slots
-            ],
+            "slots": _pair_cluster_slots(slots),
             "nodes": [dict(node) if isinstance(node, dict) else node for node in nodes],
         }
         shards.append(shard)
@@ -248,7 +261,7 @@ def parse_cluster_shards_unified(resp, **options):
             slots = shard_resp.get(b"slots", shard_resp.get("slots", []))
             nodes = shard_resp.get(b"nodes", shard_resp.get("nodes", []))
             shard = {
-                "slots": slots,
+                "slots": _pair_cluster_slots(slots),
                 "nodes": [
                     {str_if_bytes(k): v for k, v in node.items()}
                     if isinstance(node, dict)
