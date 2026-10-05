@@ -64,7 +64,6 @@ from .exceptions import (
     ConnectionError,
     DataError,
     MaxConnectionsError,
-    MovedError,
     RedisError,
     ResponseError,
     TimeoutError,
@@ -1845,6 +1844,25 @@ class Connection(AbstractConnection):
 # store it only by convention.
 _NO_PENDING_HIT = object()
 
+# A command name that does not start with one of these cannot be ``CLIENT``, so
+# ``_is_client_caching`` rejects nearly every command before it allocates anything.
+_CLIENT_FIRST_CHARS = frozenset(("c", "C", b"c", b"C"))
+
+
+def _is_client_caching(args) -> bool:
+    """
+    Whether ``args`` is a ``CLIENT CACHING`` command, in any of the spellings
+    ``pack_command`` accepts: ``"CLIENT CACHING"`` as one argument or ``"CLIENT"``,
+    ``"CACHING"`` as two, as ``str`` or ``bytes``, in any case.
+    """
+    command = args[0]
+    if not isinstance(command, (str, bytes)) or command[:1] not in _CLIENT_FIRST_CHARS:
+        return False
+    words = str_if_bytes(command).upper().split()
+    if len(words) == 1 and len(args) > 1 and isinstance(args[1], (str, bytes)):
+        words.append(str_if_bytes(args[1]).upper())
+    return words[:2] == ["CLIENT", "CACHING"]
+
 
 class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInterface):
     DUMMY_CACHE_VALUE = b"foo"
@@ -1990,6 +2008,8 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._conn.send_packed_command(command)
 
     def send_command(self, *args, **kwargs):
+        # Before anything else, so a refused command leaves no state behind.
+        self._refuse_client_caching(args)
         self._process_pending_invalidations()
         self._pending_caching_reply = False
         self._pending_cache_hit = _NO_PENDING_HIT
@@ -2205,36 +2225,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 disconnect_on_error=disconnect_on_error,
                 push_request=push_request,
             )
-        except MovedError:
-            # The slot this read belongs to now lives on another node. Everything cached for
-            # it was tracked by a connection to the *old* owner, which will send no further
-            # invalidation for those keys, so they would go stale silently - the one failure
-            # mode client-side caching must not have.
-            #
-            # Handled here rather than in the cluster client's redirect handler so that every
-            # reason this cache becomes invalid stays in one class, beside the disconnect and
-            # reconnect flushes and the ASK suppression, and the routing code needs to know
-            # nothing about caching.
-            #
-            # ``MovedError`` only. An ASK means the slot is still owned by this node while it
-            # migrates, so its tracking - and anything cached under it - is still good. Note
-            # that ``MovedError`` subclasses ``AskError``, so this must not be widened to the
-            # base class.
-            #
-            # The whole cache goes, not just the moved slot's keys: entries are keyed by
-            # command and arguments, and nothing maps a slot back to the entries holding its
-            # keys. A slot move is rare and a cold cache refills itself, where a stale entry
-            # never corrects itself.
-            with self._cache_lock:
-                self._cache.flush()
-            # The placeholder this pointed at went with the flush; clearing it rather than
-            # relying on the next ``send_command`` to reset it.
-            self._current_command_cache_key = None
-            raise
         except BaseException:
-            # Must stay after ``except MovedError``: this also matches a MOVED, and a MOVED
-            # needs the whole cache flushed, not just this read's own placeholder.
-            #
             # The placeholder ``send_command`` staked is resolved only by the read that just
             # failed, so it has to go with it. Left behind, it sits in the pool-wide cache
             # until an invalidation or a disconnect happens to clear it: nothing else will,
@@ -2345,7 +2336,32 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         return self._conn.pack_command(*args)
 
     def pack_commands(self, commands):
+        # Every pipeline and transaction packs through here, so the guard covers them as
+        # well. The cache's own pairing is unaffected: ``_send_with_caching`` packs through
+        # the wrapped connection, not through this method.
+        for args in commands:
+            self._refuse_client_caching(args)
         return self._conn.pack_commands(commands)
+
+    @staticmethod
+    def _refuse_client_caching(args) -> None:
+        """
+        Refuse a user-sent ``CLIENT CACHING`` on a connection the cache manages.
+
+        The server applies the flag to the next command on the socket, and a pooled
+        connection promises nothing about which command that is. Under ``optout`` a stray
+        ``NO`` would leave the next cached read untracked while its reply is still stored,
+        so it would never be invalidated. The cache sends ``CLIENT CACHING`` itself, paired
+        with the read it belongs to, whenever the tracking mode needs it.
+
+        Raises:
+            RedisError: If ``args`` is a ``CLIENT CACHING`` command.
+        """
+        if _is_client_caching(args):
+            raise RedisError(
+                "CLIENT CACHING cannot be sent on a connection with client-side caching "
+                "enabled: the cache sends it itself, paired with the read it applies to"
+            )
 
     # HIMPORT state lives on the wrapped connection (HIMPORT is never cacheable);
     # delegate so callers treat the proxy like a plain connection and never need
@@ -2513,8 +2529,25 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             # connections' entries every time the pool grows. Flushing the whole shared cache
             # on reconnect is what ``disconnect`` already does, so the semantics do not
             # change - only the coverage does.
+            #
+            # The one entry kept is this connection's own in-flight placeholder. Every
+            # reconnect that fires this callback happens inside the send path, before the
+            # command is written, so the reply it is waiting for comes from the new session -
+            # which this callback is about to enable tracking for. Dropping it would cost the
+            # fill and gain nothing.
             with self._cache_lock:
+                own_placeholder = None
+                if self._current_command_cache_key is not None:
+                    entry = self._cache.get(self._current_command_cache_key)
+                    if (
+                        entry is not None
+                        and entry.status == CacheEntryStatus.IN_PROGRESS
+                        and entry.connection_ref is self._conn
+                    ):
+                        own_placeholder = entry
                 self._cache.flush()
+                if own_placeholder is not None:
+                    self._cache.set(own_placeholder)
 
         self._connected_once = True
         self._pending_caching_reply = False

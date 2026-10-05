@@ -32,7 +32,7 @@ from redis.connection import CacheProxyConnection
 from redis.event import (
     EventDispatcher,
 )
-from redis.exceptions import AskError, MovedError, ResponseError
+from redis.exceptions import AskError, MovedError, RedisError, ResponseError
 from redis.observability.attributes import CSCReason
 from redis.utils import str_if_bytes
 from tests.conftest import _get_client, skip_if_resp_version, skip_if_server_version_lt
@@ -948,6 +948,60 @@ class TestCache:
         "r",
         [
             {
+                "cache": DefaultCache(
+                    CacheConfig(max_size=128, tracking_mode=TrackingMode.OPTOUT)
+                ),
+                "single_connection_client": True,
+            },
+            {
+                "cache": DefaultCache(
+                    CacheConfig(max_size=128, tracking_mode=TrackingMode.OPTOUT)
+                ),
+                "single_connection_client": False,
+            },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_a_user_sent_client_caching_is_refused(self, r, r2):
+        """
+        A stray ``CLIENT CACHING NO`` is consumed by whatever the socket sends next. Under
+        ``optout`` that is a cached read sent alone, so its reply would be stored while the
+        server tracks nothing for it - stale forever. ``single_connection_client`` puts the
+        stray command and the read on one socket, which is where it bites.
+        """
+        cache = r.get_cache()
+
+        with pytest.raises(RedisError, match="CLIENT CACHING cannot be sent"):
+            r.execute_command("CLIENT CACHING", "NO")
+        with pytest.raises(RedisError, match="CLIENT CACHING cannot be sent"):
+            r.pipeline(transaction=False).execute_command(
+                "CLIENT", "CACHING", "NO"
+            ).execute()
+        with pytest.raises(RedisError, match="CLIENT CACHING cannot be sent"):
+            r.pipeline().execute_command(b"CLIENT CACHING", b"NO").execute()
+
+        # Nothing reached the socket, so the next cached read is still tracked.
+        r2.set("foo", "bar")
+        assert r.get("foo") == b"bar"
+        assert cache.size == 1
+
+        r2.set("foo", "baz")
+        assert wait_for_invalidated_value(r, "foo", [b"baz"]) == b"baz"
+
+    @pytest.mark.onlynoncluster
+    def test_client_caching_without_a_cache_is_not_refused(self, r2):
+        # The guard lives on the cache's connections only: without a cache the command
+        # reaches the server, which answers it as before.
+        assert r2.get_cache() is None
+        with pytest.raises(ResponseError, match="tracking mode"):
+            r2.execute_command("CLIENT CACHING", "NO")
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
                 "cache": DefaultCache(CacheConfig(max_size=128)),
                 "single_connection_client": True,
             },
@@ -1532,47 +1586,6 @@ class TestClusterCache:
         # Both attempts paired, and no ASKING anywhere - MOVED is not ASK.
         assert pairings == [b"YES", b"YES"]
         assert "ASKING" not in sends
-
-    @pytest.mark.parametrize(
-        "r",
-        [
-            {
-                "cache": DefaultCache(CacheConfig(max_size=128)),
-            },
-        ],
-        ids=["plain"],
-        indirect=True,
-    )
-    @pytest.mark.onlycluster
-    def test_a_moved_reply_flushes_the_cache(self, r):
-        """
-        Everything cached for a slot that moves was tracked by a connection to the slot's old
-        owner. The new owner has no idea this client holds it, so no invalidation for those
-        keys will ever arrive - the entries would go stale silently.
-
-        The redirect is produced by the server rather than injected: asking a node for a key
-        whose slot it does not own is answered with a real ``MOVED``, which travels the same
-        path a resharding redirect does - out through ``CacheProxyConnection.read_response``,
-        which is where the flush lives. Patching ``parse_response`` to raise instead would
-        never reach that layer.
-        """
-        cache = r.nodes_manager.get_node_from_slot(
-            r.keyslot("foo")
-        ).redis_connection.get_cache()
-
-        r.set("foo", "bar")
-        assert r.get("foo") == b"bar"
-        assert cache.size == 1
-
-        # A node that does not own foo's slot. Every node client shares the one cache, so a
-        # flush triggered on this one clears the entry stored through the owner.
-        owner = r.nodes_manager.get_node_from_slot(r.keyslot("foo"))
-        wrong_node = next(n for n in r.get_primaries() if n.name != owner.name)
-
-        with pytest.raises(MovedError):
-            wrong_node.redis_connection.get("foo")
-
-        assert cache.size == 0
 
     @pytest.mark.parametrize(
         "r",

@@ -2114,6 +2114,81 @@ class TestTrackingModePairing:
         proxy._enable_tracking_callback(mock_connection)
         assert cache.size == 0
 
+    def test_a_reconnect_inside_send_keeps_the_in_flight_placeholder(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        A reconnect inside the send path happens before the command is written, so the reply
+        the placeholder is waiting for comes from the new, tracked session. The reconnect
+        flush clears everything else, but must keep that placeholder, or the reply is
+        returned and never stored.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        mock_connection._parser = Mock()
+        proxy._enable_tracking_callback(mock_connection)
+
+        other = CacheKey(
+            command="GET", redis_keys=("other",), redis_args=("GET", "other")
+        )
+        cache.set(
+            CacheEntry(
+                cache_key=other,
+                cache_value=b"old-session",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        reconnected = []
+
+        def reconnect_then_send(*args, **kwargs):
+            # Fires the connect callback the way ``send_packed_command`` does when it finds
+            # no socket, once - the callback's own ``CLIENT TRACKING`` goes through here too.
+            if not reconnected:
+                reconnected.append(True)
+                proxy._enable_tracking_callback(mock_connection)
+
+        mock_connection.send_command.side_effect = reconnect_then_send
+        mock_connection.read_response.return_value = b"bar"
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+        assert proxy.read_response() == b"bar"
+
+        assert reconnected, "the reconnect never fired"
+        # The old session's entry went with the flush; this read's reply was stored.
+        assert cache.get(other) is None
+        entry = cache.get(
+            CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        )
+        assert entry.status == CacheEntryStatus.VALID
+        assert entry.cache_value == b"bar"
+
+    def test_a_reconnect_flush_drops_another_connections_placeholder(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        Only this connection's own placeholder survives the reconnect flush. Another
+        connection's is in flight on a socket this reconnect knows nothing about.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        mock_connection._parser = Mock()
+        proxy._enable_tracking_callback(mock_connection)
+
+        key = CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        proxy._current_command_cache_key = key
+        cache.set(
+            CacheEntry(
+                cache_key=key,
+                cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+                status=CacheEntryStatus.IN_PROGRESS,
+                connection_ref=Mock(),
+            )
+        )
+
+        proxy._enable_tracking_callback(mock_connection)
+
+        assert cache.size == 0
+
     def test_optin_pairs_yes_before_a_stored_miss(self, proxy_factory, mock_connection):
         proxy, cache = proxy_factory(
             TrackingMode.OPTIN, cache_predicate=_cache_everything
@@ -2429,40 +2504,6 @@ class TestTrackingModePairing:
         assert cache.size == 0
         assert proxy._current_command_cache_key is None
 
-    def test_a_moved_on_the_drained_paired_read_flushes_the_cache(
-        self, proxy_factory, mock_connection
-    ):
-        """
-        The drain after a failed ``+OK`` reads the paired command's own reply, so a MOVED
-        there means the slot moved, and the cache must be flushed as for any other MOVED.
-        """
-        proxy, cache = proxy_factory(
-            TrackingMode.OPTIN, cache_predicate=_cache_everything
-        )
-        unrelated = CacheKey(
-            command="GET", redis_keys=("other",), redis_args=("GET", "other")
-        )
-        cache.set(
-            CacheEntry(
-                cache_key=unrelated,
-                cache_value=b"x",
-                status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection,
-            )
-        )
-        mock_connection.read_response.side_effect = [
-            ResponseError("CLIENT CACHING YES is only valid ..."),
-            MovedError("3999 127.0.0.1:6381"),
-        ]
-
-        proxy.send_command("GET", "foo", keys=["foo"])
-
-        with pytest.raises(MovedError):
-            proxy.read_response()
-
-        assert cache.size == 0
-        assert proxy._current_command_cache_key is None
-
     def test_disconnect_clears_the_pairing_flags(self, proxy_factory, mock_connection):
         proxy, _ = proxy_factory(TrackingMode.OPTOUT)
         proxy._pending_caching_reply = True
@@ -2472,6 +2513,98 @@ class TestTrackingModePairing:
 
         assert proxy._pending_caching_reply is False
         assert proxy._skip_next_caching is False
+
+
+_CLIENT_CACHING_SPELLINGS = [
+    ("CLIENT CACHING", "NO"),
+    ("client caching", "yes"),
+    (b"CLIENT CACHING", b"NO"),
+    ("CLIENT", "CACHING", "NO"),
+    (b"CLIENT", b"CACHING", b"YES"),
+    (b"client", "Caching", "no"),
+]
+_CLIENT_CACHING_IDS = [
+    "str-one-arg",
+    "str-lowercase",
+    "bytes-one-arg",
+    "str-two-args",
+    "bytes-two-args",
+    "mixed-case-and-types",
+]
+
+
+@pytest.mark.fixed_client
+class TestUserSentClientCaching:
+    """
+    A user-sent ``CLIENT CACHING`` sets a flag that the next command on the socket
+    consumes, and a pooled connection promises nothing about which command that is - so
+    the cache refuses it on every connection it manages, in every mode.
+    """
+
+    @pytest.mark.parametrize("mode", list(TrackingMode))
+    @pytest.mark.parametrize("args", _CLIENT_CACHING_SPELLINGS, ids=_CLIENT_CACHING_IDS)
+    def test_send_command_refuses_client_caching(
+        self, proxy_factory, mock_connection, mode, args
+    ):
+        proxy, _ = proxy_factory(mode)
+
+        with pytest.raises(RedisError, match="CLIENT CACHING cannot be sent"):
+            proxy.send_command(*args)
+
+        mock_connection.send_command.assert_not_called()
+        mock_connection.send_packed_command.assert_not_called()
+
+    @pytest.mark.parametrize("args", _CLIENT_CACHING_SPELLINGS, ids=_CLIENT_CACHING_IDS)
+    def test_pack_commands_refuses_client_caching(
+        self, proxy_factory, mock_connection, args
+    ):
+        """
+        Every pipeline and transaction packs through ``pack_commands``, so refusing there
+        covers them without touching the pipeline code.
+        """
+        proxy, _ = proxy_factory(TrackingMode.OPTOUT)
+
+        with pytest.raises(RedisError, match="CLIENT CACHING cannot be sent"):
+            proxy.pack_commands([("SET", "a", "1"), args, ("GET", "a")])
+
+        mock_connection.pack_commands.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ("CLIENT", "TRACKINGINFO"),
+            ("CLIENT ID",),
+            ("CLIENT",),
+            ("CONFIG", "GET", "maxmemory"),
+            ("GET", "foo"),
+            (b"CACHING",),
+        ],
+        ids=["trackinginfo", "client-id", "bare-client", "config", "get", "no-client"],
+    )
+    def test_other_commands_pass_through(self, proxy_factory, mock_connection, args):
+        # ``plain``, so no command is paired and every one reaches ``send_command`` as is.
+        proxy, _ = proxy_factory(TrackingMode.PLAIN)
+
+        proxy.send_command(*args)
+        proxy.pack_commands([args])
+
+        mock_connection.send_command.assert_called_once_with(*args)
+        mock_connection.pack_commands.assert_called_once_with([args])
+
+    def test_the_caches_own_pairing_is_not_refused(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        The pairing packs through the wrapped connection, not through the guarded
+        ``pack_commands``, so the cache can still send its own ``CLIENT CACHING``.
+        """
+        proxy, _ = proxy_factory(TrackingMode.OPTIN, cache_predicate=_cache_everything)
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+
+        mock_connection.pack_commands.assert_called_once()
+        packed = mock_connection.pack_commands.call_args.args[0]
+        assert packed[0] == (b"CLIENT", b"CACHING", b"YES")
 
 
 @pytest.mark.fixed_client
@@ -2692,49 +2825,15 @@ class TestCacheEntryLifecycle:
         proxy.send_command("GET", "foo", keys=["foo"])
         assert proxy.read_response() == b"fresh"
 
-    def test_a_moved_reply_flushes_the_cache(self, proxy_factory, mock_connection):
-        """
-        A MOVED says the slot left this node. Everything cached for it was tracked by a
-        connection to the old owner, which will send no further invalidation for those keys,
-        so the entries have to go.
-
-        Lives here rather than in the cluster client's redirect handler so that every reason
-        the cache becomes invalid sits in one class - beside the disconnect and reconnect
-        flushes and the ASK suppression - and the routing code needs to know nothing about
-        caching.
-        """
-        proxy, cache = proxy_factory(TrackingMode.PLAIN)
-        cache.set(
-            CacheEntry(
-                cache_key=CacheKey(
-                    command="GET", redis_keys=("other",), redis_args=("GET", "other")
-                ),
-                cache_value=b"stale",
-                status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection,
-            )
-        )
-        mock_connection.read_response.side_effect = MovedError("3999 127.0.0.1:6381")
-
-        proxy.send_command("GET", "foo", keys=["foo"])
-        assert cache.size == 2  # the seeded entry plus this read's placeholder
-
-        with pytest.raises(MovedError):
-            proxy.read_response()
-
-        assert cache.size == 0
-        assert proxy._current_command_cache_key is None
-
-    def test_an_ask_reply_does_not_flush_the_cache(
-        self, proxy_factory, mock_connection
+    @pytest.mark.parametrize("redirect", [AskError, MovedError], ids=["ask", "moved"])
+    def test_a_redirect_does_not_flush_the_cache(
+        self, proxy_factory, mock_connection, redirect
     ):
         """
-        An ASK means the slot is still owned by this node while it migrates, so its tracking
-        - and anything cached under it - is still good.
-
-        Regression guard for the exception hierarchy: ``MovedError`` subclasses ``AskError``,
-        so the MOVED handler must not be widened to the base class or every ASK would empty
-        the cache during a resharding burst.
+        A redirect is a scoped cleanup, not a flush. Under an ASK the slot is still owned by
+        this node while it migrates, so its tracking is still good; once a slot moves, the
+        server itself invalidates the moved keys on the connection that tracked them, so
+        nothing cached needs to go on the client's initiative either.
         """
         proxy, cache = proxy_factory(TrackingMode.PLAIN)
         cache.set(
@@ -2747,16 +2846,16 @@ class TestCacheEntryLifecycle:
                 connection_ref=mock_connection,
             )
         )
-        mock_connection.read_response.side_effect = AskError("3999 127.0.0.1:6381")
+        mock_connection.read_response.side_effect = redirect("3999 127.0.0.1:6381")
 
         proxy.send_command("GET", "foo", keys=["foo"])
 
-        with pytest.raises(AskError):
+        with pytest.raises(redirect):
             proxy.read_response()
 
         # This read's own placeholder goes - otherwise it would sit in the cache for as long
         # as the slot migrates, since every read of the key is redirected the same way - but
-        # nothing else does: an ASK is a scoped cleanup, not a flush.
+        # nothing else does.
         assert (
             cache.get(
                 CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))

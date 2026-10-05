@@ -239,6 +239,13 @@ Some things work the same in every mode:
 - Under ``optout``, the client sends ``CLIENT CACHING NO`` only for commands that the metadata
   table marks ``readonly``. Any other read stays tracked. The worst case is an unused entry in
   the server's invalidation table, never a stale reply.
+- ``CLIENT CACHING`` is refused with a ``RedisError`` on every connection of a client that has
+  a cache, including inside pipelines and transactions. The server applies the flag to the next
+  command on that socket, and a pooled client cannot promise which command that is: a stray
+  ``CLIENT CACHING NO`` under ``optout`` would leave the next cached read untracked, so its
+  stored reply would never be invalidated. The client sends ``CLIENT CACHING`` itself,
+  together with the read it applies to, whenever the tracking mode needs it. A client without
+  a cache passes the command to the server as before.
 
 The mode is sent in the tracking handshake, because the server refuses to switch a live
 connection between ``OPTIN`` and ``OPTOUT``. A configuration change therefore applies to new
