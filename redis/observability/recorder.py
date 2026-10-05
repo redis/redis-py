@@ -81,6 +81,7 @@ def record_operation_duration(
         retry_attempts: Number of retry attempts made
 
     Example:
+        >>> import time
         >>> start = time.monotonic()
         >>> # ... execute command ...
         >>> record_operation_duration('SET', time.monotonic() - start, 'localhost', 6379, '0')
@@ -125,6 +126,7 @@ def record_connection_create_time(
         duration_seconds: Time taken to create connection in seconds
 
     Example:
+        >>> import time
         >>> start = time.monotonic()
         >>> # ... create connection ...
         >>> record_connection_create_time('ConnectionPool<localhost:6379>', time.monotonic() - start)
@@ -295,6 +297,7 @@ def record_connection_wait_time(
         duration_seconds: Wait time in seconds
 
     Example:
+        >>> import time
         >>> start = time.monotonic()
         >>> # ... wait for connection from pool ...
         >>> record_connection_wait_time('ConnectionPool<localhost:6379>', time.monotonic() - start)

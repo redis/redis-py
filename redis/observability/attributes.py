@@ -394,6 +394,8 @@ def get_pool_name(pool: Union["ConnectionPoolInterface", "ConnectionPool"]) -> s
         Short pool name in format "host:port_uniqueID"
 
     Example:
+        >>> from redis.connection import ConnectionPool
+        >>> from redis.observability.attributes import get_pool_name
         >>> pool = ConnectionPool(host='localhost', port=6379, db=0)
         >>> get_pool_name(pool)
         'localhost:6379_a1b2c3d4'
