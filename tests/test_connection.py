@@ -3550,7 +3550,9 @@ class TestDeeplyNestedReplyInvalidatesConnection:
     PUBSUB_KWARGS = dict(disconnect_on_error=False, push_request=True)
 
     def test_python_parser_recursion_error_disconnects(self):
-        conn = _connection_with_stream(_deeply_nested_reply(3000), _RESP2Parser)
+        # PyPy bounds recursion by stack bytes, not frames, and its JIT-compiled
+        # parser frames are small enough to fit 3000 levels; 100_000 cannot fit.
+        conn = _connection_with_stream(_deeply_nested_reply(100_000), _RESP2Parser)
 
         with pytest.raises(RecursionError):
             conn.read_response(**self.PUBSUB_KWARGS)
