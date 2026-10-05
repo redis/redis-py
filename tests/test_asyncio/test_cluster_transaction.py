@@ -450,3 +450,62 @@ class TestClusterTransaction:
 
             assert not pipe._execution_strategy._watching
             assert not len(pipe)
+
+
+def _transaction_strategy(nodes: NodesManager) -> "redis.asyncio.cluster.TransactionStrategy":
+    from redis.asyncio.cluster import TransactionStrategy
+
+    pipe = Mock()
+    pipe.cluster_client.nodes_manager = nodes
+    pipe.cluster_client.retry = Retry(NoBackoff(), 0)
+    strategy = TransactionStrategy(pipe)
+    strategy._pipeline_slots.add(1)
+    return strategy
+
+
+def test_watched_connection_moves_when_slot_owner_changes():
+    """A held transaction connection must follow the slot's current owner.
+
+    See https://github.com/redis/redis-py/issues/4253.
+    """
+    node_a = ClusterNode("127.0.0.1", 7000, PRIMARY)
+    node_b = ClusterNode("127.0.0.1", 7001, PRIMARY)
+    nodes = NodesManager([node_a, node_b], False, {})
+    nodes.nodes_cache = {node_a.name: node_a, node_b.name: node_b}
+    nodes.slots_cache = {1: [node_a]}
+    strategy = _transaction_strategy(nodes)
+
+    first_node, first_conn = strategy._get_client_and_connection_for_transaction()
+    assert first_node is node_a
+    assert first_conn in node_a._connections
+    assert first_conn not in node_a._free
+
+    nodes.slots_cache[1] = [node_b]
+    second_node, second_conn = strategy._get_client_and_connection_for_transaction()
+
+    assert second_node is node_b
+    assert second_conn is not first_conn
+    assert second_conn in node_b._connections
+    assert first_conn in node_a._free
+    assert first_conn not in node_b._free
+    assert first_conn not in node_b._connections
+
+
+async def test_reset_releases_transaction_connection_to_its_owner():
+    """reset() must not return node A's connection to a later slot owner."""
+    node_a = ClusterNode("127.0.0.1", 7000, PRIMARY)
+    node_b = ClusterNode("127.0.0.1", 7001, PRIMARY)
+    nodes = NodesManager([node_a, node_b], False, {})
+    nodes.nodes_cache = {node_a.name: node_a, node_b.name: node_b}
+    nodes.slots_cache = {1: [node_b]}
+    strategy = _transaction_strategy(nodes)
+    held = node_a.acquire_connection()
+    strategy._transaction_connection = held
+    strategy._transaction_node = node_b
+    strategy._watching = False
+
+    await strategy.reset()
+
+    assert held in node_a._free
+    assert held not in node_b._free
+    assert strategy._transaction_connection is None
