@@ -3278,8 +3278,8 @@ class BasicKeyCommands(CommandsProtocol):
     def getex(
         self: SyncClientProtocol,
         name: KeyT,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         persist: bool = False,
@@ -3289,8 +3289,8 @@ class BasicKeyCommands(CommandsProtocol):
     def getex(
         self: AsyncClientProtocol,
         name: KeyT,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         persist: bool = False,
@@ -3299,8 +3299,8 @@ class BasicKeyCommands(CommandsProtocol):
     def getex(
         self,
         name: KeyT,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         persist: bool = False,
@@ -3314,6 +3314,9 @@ class BasicKeyCommands(CommandsProtocol):
         ``ex`` sets an expire flag on key ``name`` for ``ex`` seconds.
 
         ``px`` sets an expire flag on key ``name`` for ``px`` milliseconds.
+
+        ``ex`` and ``px`` also accept digit-only strings, such as ``"60"``
+        and ``"500"``, respectively.
 
         ``exat`` sets an expire flag on key ``name`` for ``ex`` seconds,
         specified in unix time.
@@ -3465,8 +3468,8 @@ class BasicKeyCommands(CommandsProtocol):
         lbound: EncodableT | None = None,
         ubound: EncodableT | None = None,
         saturate: bool = False,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         persist: bool = False,
@@ -3483,8 +3486,8 @@ class BasicKeyCommands(CommandsProtocol):
         lbound: EncodableT | None = None,
         ubound: EncodableT | None = None,
         saturate: bool = False,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         persist: bool = False,
@@ -3500,8 +3503,8 @@ class BasicKeyCommands(CommandsProtocol):
         lbound: EncodableT | None = None,
         ubound: EncodableT | None = None,
         saturate: bool = False,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         persist: bool = False,
@@ -3525,6 +3528,9 @@ class BasicKeyCommands(CommandsProtocol):
         Otherwise, out-of-bounds results are rejected, leaving the value and
         TTL unchanged and returning the current value and zero as the actual
         increment.
+
+        ``ex`` and ``px`` accept digit-only strings for seconds and milliseconds,
+        respectively, in addition to integers and timedeltas.
 
         ``enx`` applies the expiration only when the key does not already
         have an expiration, and requires ``ex``, ``px``, ``exat``, or ``pxat``.
@@ -3864,8 +3870,8 @@ class BasicKeyCommands(CommandsProtocol):
         self: SyncClientProtocol,
         mapping: Mapping[AnyKeyT, EncodableT],
         data_persist_option: DataPersistOptions | None = None,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         keepttl: bool = False,
@@ -3876,8 +3882,8 @@ class BasicKeyCommands(CommandsProtocol):
         self: AsyncClientProtocol,
         mapping: Mapping[AnyKeyT, EncodableT],
         data_persist_option: DataPersistOptions | None = None,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         keepttl: bool = False,
@@ -3887,8 +3893,8 @@ class BasicKeyCommands(CommandsProtocol):
         self,
         mapping: Mapping[AnyKeyT, EncodableT],
         data_persist_option: DataPersistOptions | None = None,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         keepttl: bool = False,
@@ -3912,6 +3918,9 @@ class BasicKeyCommands(CommandsProtocol):
         ``ex`` sets an expire flag on the keys in ``mapping`` for ``ex`` seconds.
 
         ``px`` sets an expire flag on the keys in ``mapping`` for ``px`` milliseconds.
+
+        ``ex`` and ``px`` also accept digit-only strings, such as ``"60"``
+        and ``"500"``, respectively.
 
         ``exat`` sets an expire flag on the keys in ``mapping`` for ``exat`` seconds,
             specified in unix time.
@@ -4347,8 +4356,8 @@ class BasicKeyCommands(CommandsProtocol):
         self: SyncClientProtocol,
         name: KeyT,
         value: EncodableT,
-        ex: ExpiryT | None = ...,
-        px: ExpiryT | None = ...,
+        ex: ExpiryT | str | None = ...,
+        px: ExpiryT | str | None = ...,
         nx: bool = ...,
         xx: bool = ...,
         keepttl: bool = ...,
@@ -4366,8 +4375,8 @@ class BasicKeyCommands(CommandsProtocol):
         self: AsyncClientProtocol,
         name: KeyT,
         value: EncodableT,
-        ex: ExpiryT | None = ...,
-        px: ExpiryT | None = ...,
+        ex: ExpiryT | str | None = ...,
+        px: ExpiryT | str | None = ...,
         nx: bool = ...,
         xx: bool = ...,
         keepttl: bool = ...,
@@ -4385,8 +4394,8 @@ class BasicKeyCommands(CommandsProtocol):
         self,
         name: KeyT,
         value: EncodableT,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         nx: bool = False,
         xx: bool = False,
         keepttl: bool = False,
@@ -4410,6 +4419,9 @@ class BasicKeyCommands(CommandsProtocol):
         ``ex`` sets an expire flag on key ``name`` for ``ex`` seconds.
 
         ``px`` sets an expire flag on key ``name`` for ``px`` milliseconds.
+
+        ``ex`` and ``px`` also accept digit-only strings, such as ``"60"``
+        and ``"500"``, respectively.
 
         ``nx`` if set to True, set the value at key ``name`` to ``value`` only
             if it does not exist.
@@ -5006,7 +5018,9 @@ class ListCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/blmpop
         """
-        cmd_args = [timeout, numkeys, *args, direction, "COUNT", count]
+        cmd_args = [timeout, numkeys, *args, direction]
+        if count is not None:
+            cmd_args.extend(["COUNT", count])
 
         return self.execute_command("BLMPOP", *cmd_args)
 
@@ -5042,7 +5056,7 @@ class ListCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/lmpop
         """
         cmd_args = [num_keys] + list(args) + [direction]
-        if count != 1:
+        if count is not None and count != 1:
             cmd_args.extend(["COUNT", count])
 
         return self.execute_command("LMPOP", *cmd_args)
@@ -8802,7 +8816,7 @@ class SortedSetCommands(CommandsProtocol):
             args.append("MIN")
         else:
             args.append("MAX")
-        if count != 1:
+        if count is not None and count != 1:
             args.extend(["COUNT", count])
 
         return self.execute_command("ZMPOP", *args)
@@ -8857,7 +8871,8 @@ class SortedSetCommands(CommandsProtocol):
             args.append("MIN")
         else:
             args.append("MAX")
-        args.extend(["COUNT", count])
+        if count is not None:
+            args.extend(["COUNT", count])
 
         return self.execute_command("BZMPOP", *args)
 
@@ -9863,8 +9878,8 @@ class HashCommands(CommandsProtocol):
         self: SyncClientProtocol,
         name: KeyT,
         *keys: FieldT,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         persist: bool = False,
@@ -9875,8 +9890,8 @@ class HashCommands(CommandsProtocol):
         self: AsyncClientProtocol,
         name: KeyT,
         *keys: FieldT,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         persist: bool = False,
@@ -9886,8 +9901,8 @@ class HashCommands(CommandsProtocol):
         self,
         name: KeyT,
         *keys: FieldT,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         persist: bool = False,
@@ -9899,6 +9914,9 @@ class HashCommands(CommandsProtocol):
         ``ex`` sets an expire flag on ``kyes`` for ``ex`` seconds.
 
         ``px`` sets an expire flag on ``keys`` for ``px`` milliseconds.
+
+        ``ex`` and ``px`` also accept digit-only strings, such as ``"60"``
+        and ``"500"``, respectively.
 
         ``exat`` sets an expire flag on ``keys`` for ``ex`` seconds,
         specified in unix time.
@@ -10071,8 +10089,8 @@ class HashCommands(CommandsProtocol):
         value: EncodableT | None = None,
         mapping: Mapping[FieldT, EncodableT] | None = None,
         items: Sequence[EncodableT] | None = None,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         data_persist_option: HashDataPersistOptions | None = None,
@@ -10087,8 +10105,8 @@ class HashCommands(CommandsProtocol):
         value: EncodableT | None = None,
         mapping: Mapping[FieldT, EncodableT] | None = None,
         items: Sequence[EncodableT] | None = None,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         data_persist_option: HashDataPersistOptions | None = None,
@@ -10102,8 +10120,8 @@ class HashCommands(CommandsProtocol):
         value: EncodableT | None = None,
         mapping: Mapping[FieldT, EncodableT] | None = None,
         items: Sequence[EncodableT] | None = None,
-        ex: ExpiryT | None = None,
-        px: ExpiryT | None = None,
+        ex: ExpiryT | str | None = None,
+        px: ExpiryT | str | None = None,
         exat: AbsExpiryT | None = None,
         pxat: AbsExpiryT | None = None,
         data_persist_option: HashDataPersistOptions | None = None,
@@ -10121,6 +10139,9 @@ class HashCommands(CommandsProtocol):
         ``ex`` sets an expire flag on ``keys`` for ``ex`` seconds.
 
         ``px`` sets an expire flag on ``keys`` for ``px`` milliseconds.
+
+        ``ex`` and ``px`` also accept digit-only strings, such as ``"60"``
+        and ``"500"``, respectively.
 
         ``exat`` sets an expire flag on ``keys`` for ``ex`` seconds,
             specified in unix time.
@@ -12532,6 +12553,158 @@ class FunctionCommands:
 AsyncFunctionCommands = FunctionCommands
 
 
+BlessFlag = Literal["NO-EVICT"]
+
+
+class BlessCommands(CommandsProtocol):
+    """
+    Redis BLESS commands: per-key flags that alter how the server treats a key.
+    """
+
+    @overload
+    def bless_get(self: SyncClientProtocol, name: KeyT) -> list[bytes | str]: ...
+
+    @overload
+    def bless_get(
+        self: AsyncClientProtocol, name: KeyT
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def bless_get(self, name: KeyT) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+        """
+        Return the list of bless flags currently set on the key ``name``.
+
+        Raises a ``ResponseError`` if the key does not exist.
+
+        For more information, see https://redis.io/commands/bless-get
+        """
+        return self.execute_command("BLESS GET", name)
+
+    @overload
+    def bless_set(self: SyncClientProtocol, name: KeyT, flag: BlessFlag) -> int: ...
+
+    @overload
+    def bless_set(
+        self: AsyncClientProtocol, name: KeyT, flag: BlessFlag
+    ) -> Awaitable[int]: ...
+
+    def bless_set(self, name: KeyT, flag: BlessFlag) -> int | Awaitable[int]:
+        """
+        Set the bless ``flag`` on the key ``name``.
+
+        Returns 1 if the flag was set, 0 if it was already set.
+        Raises a ``ResponseError`` if the key does not exist.
+
+        For more information, see https://redis.io/commands/bless-set
+        """
+        return self.execute_command("BLESS SET", name, flag)
+
+    @overload
+    def bless_clear(self: SyncClientProtocol, name: KeyT, flag: BlessFlag) -> int: ...
+
+    @overload
+    def bless_clear(
+        self: AsyncClientProtocol, name: KeyT, flag: BlessFlag
+    ) -> Awaitable[int]: ...
+
+    def bless_clear(self, name: KeyT, flag: BlessFlag) -> int | Awaitable[int]:
+        """
+        Clear the bless ``flag`` from the key ``name``.
+
+        Returns 1 if the flag was cleared, 0 if it was not set.
+        Raises a ``ResponseError`` if the key does not exist.
+
+        For more information, see https://redis.io/commands/bless-clear
+        """
+        return self.execute_command("BLESS CLEAR", name, flag)
+
+    @overload
+    def bless_scan(
+        self: SyncClientProtocol,
+        cursor: int,
+        flag: BlessFlag,
+        count: int | None = None,
+        **kwargs,
+    ) -> ScanResponse: ...
+
+    @overload
+    def bless_scan(
+        self: AsyncClientProtocol,
+        cursor: int,
+        flag: BlessFlag,
+        count: int | None = None,
+        **kwargs,
+    ) -> Awaitable[ScanResponse]: ...
+
+    def bless_scan(
+        self,
+        cursor: int,
+        flag: BlessFlag,
+        count: int | None = None,
+        **kwargs,
+    ) -> ScanResponse | Awaitable[ScanResponse]:
+        """
+        Incrementally return lists of key names that carry the bless ``flag``.
+        Also return a cursor indicating the scan position.
+
+        ``cursor`` is the scan position to continue from; pass 0 to start
+            a new scan.
+
+        ``flag`` is the bless flag the returned keys must carry.
+
+        ``count`` provides a hint to Redis about the number of keys to
+            return per batch.
+
+        For more information, see https://redis.io/commands/bless-scan
+        """
+        pieces: list[EncodableT] = [cursor, flag]
+        if count is not None:
+            pieces.extend([b"COUNT", count])
+        return self.execute_command("BLESS SCAN", *pieces, **kwargs)
+
+    def bless_scan_iter(
+        self,
+        flag: BlessFlag,
+        count: int | None = None,
+        **kwargs,
+    ) -> Iterator[bytes | str]:
+        """
+        Make an iterator using the BLESS SCAN command so that the client doesn't
+        need to remember the cursor position.
+
+        ``count`` provides a hint to Redis about the number of keys to
+            return per batch.
+        """
+        cursor = "0"
+        while cursor != 0:
+            cursor, data = self.bless_scan(
+                cursor=cursor, flag=flag, count=count, **kwargs
+            )
+            yield from data
+
+
+class AsyncBlessCommands(BlessCommands):
+    async def bless_scan_iter(
+        self,
+        flag: BlessFlag,
+        count: int | None = None,
+        **kwargs,
+    ) -> AsyncIterator[bytes | str]:
+        """
+        Make an iterator using the BLESS SCAN command so that the client doesn't
+        need to remember the cursor position.
+
+        ``count`` provides a hint to Redis about the number of keys to
+            return per batch.
+        """
+        cursor = "0"
+        while cursor != 0:
+            cursor, data = await self.bless_scan(
+                cursor=cursor, flag=flag, count=count, **kwargs
+            )
+            for d in data:
+                yield d
+
+
 class DataAccessCommands(
     BasicKeyCommands,
     HyperlogCommands,
@@ -12577,6 +12750,7 @@ class CoreCommands(
     PubSubCommands,
     ScriptCommands,
     FunctionCommands,
+    BlessCommands,
 ):
     """
     A class containing all of the implemented redis commands. This class is
@@ -12593,6 +12767,7 @@ class AsyncCoreCommands(
     AsyncPubSubCommands,
     AsyncScriptCommands,
     AsyncFunctionCommands,
+    AsyncBlessCommands,
 ):
     """
     A class containing all of the implemented redis commands. This class is

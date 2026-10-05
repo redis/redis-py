@@ -158,6 +158,7 @@ _RedisCallbacks = {
     "ACL LOG": parse_acl_log,
     "ACL SETUSER": bool_ok,
     "ACL SAVE": bool_ok,
+    "BLESS SCAN": parse_scan,
     "CLIENT INFO": parse_client_info,
     "CLIENT KILL": parse_client_kill,
     "CLIENT LIST": parse_client_list,

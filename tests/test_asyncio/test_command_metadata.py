@@ -185,6 +185,45 @@ class TestWithheldRoutingPolicies:
         assert await static_resolver.is_cacheable("command") is False
         assert await static_resolver.is_replica_safe("command") is False
 
+    async def test_bless_scan_withholds_routing_and_is_not_replica_safe(self):
+        """
+        The SCAN-shaped container subcommand: keyless, nondeterministic and routed to every
+        primary through COMMAND_FLAGS, so its record must withhold routing like SCAN's does.
+        Unlike SCAN the server reports no flags for it at all, so it is not readonly.
+        """
+        static_resolver = AsyncStaticMetadataResolver()
+        metadata = await static_resolver.resolve("bless scan")
+
+        assert metadata is not None
+        assert metadata.request_policy is None
+        assert metadata.response_policy is None
+        assert metadata.is_readonly is False
+        assert metadata.has_key_argument is False
+        assert metadata.has_nondeterministic_output is True
+        assert metadata.has_complete_metadata is True
+        assert await static_resolver.is_cacheable("bless scan") is False
+        assert await static_resolver.is_replica_safe("bless scan") is False
+
+    @pytest.mark.parametrize("name", ["bless clear", "bless get", "bless set"])
+    async def test_the_keyed_bless_subcommands_route_by_key_and_are_not_cacheable(
+        self, name
+    ):
+        """
+        BLESS GET is included: the server flags it ``fast`` only, with no ``readonly``, so it
+        fails closed exactly like the two writes.
+        """
+        static_resolver = AsyncStaticMetadataResolver()
+        metadata = await static_resolver.resolve(name)
+
+        assert metadata is not None, name
+        assert metadata.request_policy is RequestPolicy.DEFAULT_KEYED, name
+        assert metadata.response_policy is ResponsePolicy.DEFAULT_KEYED, name
+        assert metadata.is_readonly is False, name
+        assert metadata.has_key_argument is True, name
+        assert metadata.has_complete_metadata is True, name
+        assert await static_resolver.is_cacheable(name) is False, name
+        assert await static_resolver.is_replica_safe(name) is False, name
+
     async def test_all_static_entries_in_cluster_command_flags_withhold_routing(self):
         """
         Verify that every command appearing in RedisCluster.command_flags that is present
@@ -195,15 +234,19 @@ class TestWithheldRoutingPolicies:
         table_core = _STATIC_COMMAND_METADATA["core"]
 
         for flag_cmd in RedisCluster.COMMAND_FLAGS:
-            base_cmd = flag_cmd.split()[0].lower()
-            if base_cmd in table_core:
-                metadata = await static_resolver.resolve(base_cmd)
+            # A container command like "COMMAND COUNT" or "SLOWLOG GET" may be recorded under
+            # its first token ("command", "slowlog") or, like "BLESS SCAN", under its full
+            # space-joined name - which is the name the resolver is asked for.
+            for table_cmd in {flag_cmd.split()[0].lower(), flag_cmd.lower()}:
+                if table_cmd not in table_core:
+                    continue
+                metadata = await static_resolver.resolve(table_cmd)
                 assert metadata is not None
                 assert metadata.request_policy is None, (
-                    f"Command '{base_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold request_policy in _STATIC_COMMAND_METADATA"
+                    f"Command '{table_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold request_policy in _STATIC_COMMAND_METADATA"
                 )
                 assert metadata.response_policy is None, (
-                    f"Command '{base_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold response_policy in _STATIC_COMMAND_METADATA"
+                    f"Command '{table_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold response_policy in _STATIC_COMMAND_METADATA"
                 )
 
     @pytest.mark.parametrize(

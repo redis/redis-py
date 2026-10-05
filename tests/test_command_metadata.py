@@ -8,6 +8,7 @@ from redis._parsers import CommandsParser
 from redis._parsers.commands import (
     _build_commands_metadata_cache,
     _build_policy_records,
+    _parse_subcommand,
 )
 from redis.cache import CacheConfig
 from redis.cluster import RedisCluster
@@ -44,10 +45,11 @@ from redis.utils import str_if_bytes
 from tests.conftest import skip_if_server_version_lt
 
 # The server the static table was generated from.
-# 8.10 is the first release that reports every command the
-# table carries (FT.ALIASLIST) and the first that reports the ``script_runner``
-# flag, so the guards that compare the whole table against the live reply cannot run below it.
-STATIC_TABLE_SERVER_VERSION = "8.10.0"
+# 8.11 is the first release that reports every command the
+# table carries (FT.ALIASLIST from 8.10, the BLESS container from 8.11); 8.10 is the first
+# that reports the ``script_runner`` flag. The guards that compare the whole table against
+# the live reply cannot run below it.
+STATIC_TABLE_SERVER_VERSION = "8.11.0"
 
 # Shape of a plain cacheable keyed read, used to stand in for live metadata in the
 # resolver unit tests below.
@@ -127,11 +129,13 @@ WITHHELD_KEYLESS_READS = (
     "scan",
 )
 
-# Every entry of the static table whose routing view is None.
+# Every entry of the static table whose routing view is None. BLESS SCAN and COMMAND are
+# keyless and withhold their routing like the reads above, but neither is flagged readonly.
 ALL_WITHHELD_ROUTING_COMMANDS = (
     *WITHHELD_ROUTING_COMMANDS,
     *INELIGIBLE_RECORD_COMMANDS,
     *WITHHELD_KEYLESS_READS,
+    "bless scan",
     "command",
 )
 
@@ -251,9 +255,19 @@ def live_command_details(commands: dict[str, Any]) -> dict[str, Any]:
     Key a ``COMMAND`` reply the way the record tables are keyed.
 
     Module commands are reported in upper case (``FT.SEARCH``), so the names are
-    lowercased the way ``CommandsParser.initialize`` lowercases them.
+    lowercased the way ``CommandsParser.initialize`` lowercases them. Container
+    subcommands are reported nested under their container as ``bless|scan`` and are
+    flattened under their space-joined name (``bless scan``), the form the tables key them
+    by and ``execute_command`` receives.
     """
-    return {name.lower(): details for name, details in commands.items()}
+    details_by_name = {}
+    for name, details in commands.items():
+        details_by_name[name.lower()] = details
+        for subcommand in details.get("subcommands") or ():
+            subcommand_details = _parse_subcommand(subcommand)
+            subcommand_name = subcommand_details["name"].lower().replace("|", " ")
+            details_by_name[subcommand_name] = subcommand_details
+    return details_by_name
 
 
 def command_flags(details: dict[str, Any]) -> set[str]:
@@ -584,6 +598,43 @@ class TestWithheldRoutingPolicies:
         assert static_resolver.is_cacheable("command") is False
         assert static_resolver.is_replica_safe("command") is False
 
+    def test_bless_scan_withholds_routing_and_is_not_replica_safe(self):
+        """
+        The SCAN-shaped container subcommand: keyless, nondeterministic and routed to every
+        primary through COMMAND_FLAGS, so its record must withhold routing like SCAN's does.
+        Unlike SCAN the server reports no flags for it at all, so it is not readonly.
+        """
+        static_resolver = StaticMetadataResolver()
+        metadata = static_resolver.resolve("bless scan")
+
+        assert metadata is not None
+        assert metadata.request_policy is None
+        assert metadata.response_policy is None
+        assert metadata.is_readonly is False
+        assert metadata.has_key_argument is False
+        assert metadata.has_nondeterministic_output is True
+        assert metadata.has_complete_metadata is True
+        assert static_resolver.is_cacheable("bless scan") is False
+        assert static_resolver.is_replica_safe("bless scan") is False
+
+    @pytest.mark.parametrize("name", ["bless clear", "bless get", "bless set"])
+    def test_the_keyed_bless_subcommands_route_by_key_and_are_not_cacheable(self, name):
+        """
+        BLESS GET is included: the server flags it ``fast`` only, with no ``readonly``, so it
+        fails closed exactly like the two writes.
+        """
+        static_resolver = StaticMetadataResolver()
+        metadata = static_resolver.resolve(name)
+
+        assert metadata is not None, name
+        assert metadata.request_policy is RequestPolicy.DEFAULT_KEYED, name
+        assert metadata.response_policy is ResponsePolicy.DEFAULT_KEYED, name
+        assert metadata.is_readonly is False, name
+        assert metadata.has_key_argument is True, name
+        assert metadata.has_complete_metadata is True, name
+        assert static_resolver.is_cacheable(name) is False, name
+        assert static_resolver.is_replica_safe(name) is False, name
+
     def test_all_static_entries_in_cluster_command_flags_withhold_routing(self):
         """
         Verify that every command appearing in RedisCluster.command_flags that is present
@@ -598,17 +649,19 @@ class TestWithheldRoutingPolicies:
         table_core = _STATIC_COMMAND_METADATA["core"]
 
         for flag_cmd in RedisCluster.COMMAND_FLAGS:
-            # For container commands like "COMMAND COUNT" or "SLOWLOG GET", the primary command name
-            # in the metadata table is the first token (e.g. "command", "slowlog").
-            base_cmd = flag_cmd.split()[0].lower()
-            if base_cmd in table_core:
-                metadata = static_resolver.resolve(base_cmd)
+            # A container command like "COMMAND COUNT" or "SLOWLOG GET" may be recorded under
+            # its first token ("command", "slowlog") or, like "BLESS SCAN", under its full
+            # space-joined name - which is the name the resolver is asked for.
+            for table_cmd in {flag_cmd.split()[0].lower(), flag_cmd.lower()}:
+                if table_cmd not in table_core:
+                    continue
+                metadata = static_resolver.resolve(table_cmd)
                 assert metadata is not None
                 assert metadata.request_policy is None, (
-                    f"Command '{base_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold request_policy in _STATIC_COMMAND_METADATA"
+                    f"Command '{table_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold request_policy in _STATIC_COMMAND_METADATA"
                 )
                 assert metadata.response_policy is None, (
-                    f"Command '{base_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold response_policy in _STATIC_COMMAND_METADATA"
+                    f"Command '{table_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold response_policy in _STATIC_COMMAND_METADATA"
                 )
 
     @pytest.mark.parametrize(
