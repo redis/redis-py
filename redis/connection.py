@@ -2519,7 +2519,7 @@ class UnixDomainSocketConnection(AbstractConnection):
         return self.path
 
 
-FALSE_STRINGS = ("0", "F", "FALSE", "N", "NO")
+FALSE_STRINGS = ("0", "F", "FALSE", "N", "NO", "OFF")
 
 
 def to_bool(value):
