@@ -2751,6 +2751,116 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
         assert "FALSE" in field.args
 
     @pytest.mark.redismod
+    @skip_if_server_version_lt("8.11.0")
+    async def test_async_hnsw_sq8_compression(self, decoded_r: redis.Redis):
+        await decoded_r.ft().create_index(
+            (
+                VectorField(
+                    "sq8",
+                    "HNSW",
+                    {
+                        "TYPE": "FLOAT32",
+                        "DIM": 8,
+                        "DISTANCE_METRIC": "L2",
+                        "COMPRESSION": "SQ8",
+                        "TRAINING_THRESHOLD": 0,
+                    },
+                ),
+                VectorField(
+                    "sq8_default",
+                    "HNSW",
+                    {
+                        "TYPE": "FLOAT16",
+                        "DIM": 8,
+                        "DISTANCE_METRIC": "L2",
+                        "COMPRESSION": "SQ8",
+                    },
+                ),
+                VectorField(
+                    "plain",
+                    "HNSW",
+                    {"TYPE": "FLOAT32", "DIM": 8, "DISTANCE_METRIC": "L2"},
+                    index_missing=True,
+                ),
+            )
+        )
+
+        for i in range(20):
+            vec = np.array([float(i + j) for j in range(8)], dtype=np.float32)
+            await decoded_r.hset(
+                f"doc{i}",
+                mapping={
+                    "sq8": vec.tobytes(),
+                    "sq8_default": vec.astype(np.float16).tobytes(),
+                },
+            )
+
+        query = Query("*=>[KNN 5 @sq8 $vec as score]").no_content()
+        query_params = {"vec": np.arange(8, dtype=np.float32).tobytes()}
+        res = await decoded_r.ft().search(query, query_params=query_params)
+        if expects_resp2_shape(decoded_r) or expects_unified_shape(decoded_r):
+            assert res.total == 5
+            assert "doc0" == res.docs[0].id
+        elif expects_resp3_shape(decoded_r):
+            assert res["total_results"] == 5
+            assert "doc0" == res["results"][0]["id"]
+
+        attrs = (await decoded_r.ft().info())["attributes"]
+        if expects_resp2_shape(decoded_r):
+            sq8, sq8_default, plain = (dict(zip(a[::2], a[1::2])) for a in attrs)
+            assert "INDEXMISSING" in attrs[2]
+        else:
+            sq8, sq8_default, plain = attrs
+            assert plain["flags"] == ["INDEXMISSING"]
+            assert sq8["flags"] == []
+
+        assert sq8["algorithm"] == "HNSW"
+        assert sq8["dim"] == 8
+        assert sq8["M"] == 16
+        assert sq8["compression"] == "SQ8"
+        # An explicit zero is kept and not replaced by the default.
+        assert sq8["training_threshold"] == 0
+        assert sq8_default["compression"] == "SQ8"
+        assert sq8_default["training_threshold"] == 10240
+        assert "compression" not in plain
+        assert "training_threshold" not in plain
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("8.11.0")
+    async def test_async_hnsw_sq8_compression_errors(self, decoded_r: redis.Redis):
+        with pytest.raises(ResponseError, match="FLOAT32 and FLOAT16"):
+            await decoded_r.ft("idx_int8").create_index(
+                (
+                    VectorField(
+                        "v",
+                        "HNSW",
+                        {
+                            "TYPE": "INT8",
+                            "DIM": 8,
+                            "DISTANCE_METRIC": "L2",
+                            "COMPRESSION": "SQ8",
+                        },
+                    ),
+                )
+            )
+
+        with pytest.raises(ResponseError, match="compression was not requested"):
+            await decoded_r.ft("idx_no_compression").create_index(
+                (
+                    VectorField(
+                        "v",
+                        "HNSW",
+                        {
+                            "TYPE": "FLOAT32",
+                            "DIM": 8,
+                            "DISTANCE_METRIC": "L2",
+                            "TRAINING_THRESHOLD": 1024,
+                        },
+                    ),
+                )
+            )
+
+    @pytest.mark.redismod
     @skip_if_server_version_lt("8.1.224")
     async def test_async_svs_vamana_basic_functionality(self, decoded_r: redis.Redis):
         await decoded_r.ft().create_index(
