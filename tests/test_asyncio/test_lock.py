@@ -212,6 +212,16 @@ class TestLock:
         finally:
             await lock1.release()
 
+    async def test_blocking_first_positional_still_binds(self, r, fake_lock_time):
+        lock1 = self.get_lock(r, "foo")
+        assert await lock1.acquire(blocking=False)
+        try:
+            lock2 = self.get_lock(r, "foo")
+            assert not await lock2.acquire(False)
+            assert fake_lock_time.sleeps == []
+        finally:
+            await lock1.release()
+
     async def test_high_sleep_small_blocking_timeout(self, r, fake_lock_time):
         lock1 = self.get_lock(r, "foo")
         assert await lock1.acquire(blocking=False)

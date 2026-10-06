@@ -192,11 +192,11 @@ class Lock:
 
     async def acquire(
         self,
-        *,
-        sleep: Optional[Number] = None,
         blocking: Optional[bool] = None,
         blocking_timeout: Optional[Number] = None,
         token: Optional[Union[str, bytes]] = None,
+        *,
+        sleep: Optional[Number] = None,
     ):
         """
         Use Redis to hold a shared, distributed lock named ``name``.
