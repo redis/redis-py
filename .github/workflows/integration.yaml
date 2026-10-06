@@ -29,9 +29,9 @@ env:
   COVERAGE_CORE: sysmon
   # patch releases get included in the base version image when they are published
   # for example after 8.2.1 is published, 8.2 image contains 8.2.1 content
-  CURRENT_REDIS_VERSION: '8.8.0'
+  CURRENT_REDIS_VERSION: '8.10.2'
   REDIS_VERSION_CUSTOM_MAP: >-
-    8.12.0:unstable-35791556614-debian
+    8.12.0:8.12-m02-int
 
 jobs:
   dependency-audit:
@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: pypa/gh-action-pip-audit@v1.0.8
+      - uses: pypa/gh-action-pip-audit@v1.1.0
         with:
           inputs: dev_requirements.txt
           ignore-vulns: |
@@ -47,6 +47,28 @@ jobs:
             CVE-2026-34073 # DNS name constraints were validated only against SANs, not against the peer name used in verification
                            # Update version when msal dependency in entraid is updated
             CVE-2026-4539  # pygments ReDoS in AdlLexer, local access only, no fix available yet
+            # PyJWT 2.13.0 issues, fixed in 2.14.0. PyJWT is pinned to ~=2.13.0 by redis-entraid 1.2.1 (latest),
+            # so no fixed version can be installed yet. redis-py only decodes claims with verify_signature=False
+            # and does not use JWKS, PyJWKClient or HMAC keys. Remove these when redis-entraid is updated.
+            CVE-2026-102265 # RecursionError from a deeply nested header escapes PyJWTError handling
+            CVE-2026-102266 # HS256 verification with an empty oct JWK
+            CVE-2026-102267 # PyJWKClient follows JWKS redirects without validating the destination
+            CVE-2026-102268 # algorithm confusion via PEM text not recognized by is_pem_format
+            CVE-2026-102269 # signature segments with non-Base64URL characters are accepted
+            CVE-2026-102271 # HMACAlgorithm.prepare_key asymmetric key check relies on text markers
+            CVE-2026-102272 # HMACAlgorithm.prepare_key JWK detection bypass (patch bypass of CVE-2026-48526)
+            CVE-2026-102273 # incomplete algorithm confusion defense when mixing symmetric and asymmetric algorithms
+            CVE-2026-102274 # a malformed RSA JWK aborts parsing of the whole JWK Set
+            CVE-2026-101917 # PyJWKClient unbounded JWKS requests via kid values (incomplete fix of CVE-2026-48524)
+            CVE-2026-102270 # ReDoS in is_pem_format with crafted PEM-like input
+            # Fixed in 2.15.0. This one does reach the verify_signature=False decode in JWToken, but the tokens
+            # come from the configured identity provider, and the impact is a RecursionError instead of DecodeError.
+            CVE-2026-101918 # RecursionError from a deeply nested payload escapes PyJWTError handling
+            # Fixed in 2.15.0. redis-py never imports JWKs (no PyJWK / from_jwk), so OKP key import is unreachable.
+            CVE-2026-102275 # OKP private JWK accepted when the declared x does not match the private key d
+            # No fix released yet. redis-py passes a fresh options dict on every decode call,
+            # so the in-place mutation is never reused for a verifying call.
+            CVE-2026-103001 # decode() mutates a caller-supplied options dict when verify_signature is falsy
 
   lint:
     name: Code linters
@@ -80,7 +102,7 @@ jobs:
       max-parallel: 30
       fail-fast: false
       matrix:
-        redis-version: ['8.12.0', '8.10.2', '${{ needs.redis_version.outputs.CURRENT }}', '8.6.3', '8.4.3', '8.2.6', '8.0.6' ,'7.4.9', '7.2.14']
+        redis-version: ['8.12.0', '${{ needs.redis_version.outputs.CURRENT }}', '8.8.3', '8.6.7', '8.4.7', '8.2.10', '8.0.6' ,'7.4.9', '7.2.14']
         python-version: ['3.10', '3.14']
         parser-backend: ['plain']
         event-loop: ['asyncio']
@@ -161,7 +183,7 @@ jobs:
     # in pipeline ofter these pypy jobs hang, so their timeout is set
     # to just 50 minutes - close to the max time the jobs are running at the moment
     # adding more tests will make them even slower, and we will need to adjust the timeout
-    timeout-minutes: 50
+    timeout-minutes: 60
     strategy:
       max-parallel: 30
       fail-fast: false

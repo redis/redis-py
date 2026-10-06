@@ -5,7 +5,7 @@ import textwrap
 import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
-from functools import wraps
+from functools import cache, wraps
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, TypeVar, Union
 
 from redis.exceptions import DataError
@@ -299,6 +299,7 @@ def check_protocol_version(
     return protocol == expected_version
 
 
+@cache
 def get_lib_version():
     try:
         libver = metadata.version("redis")
@@ -359,8 +360,8 @@ def ensure_string(key):
 
 
 def extract_expire_flags(
-    ex: Optional[ExpiryT] = None,
-    px: Optional[ExpiryT] = None,
+    ex: ExpiryT | str | None = None,
+    px: ExpiryT | str | None = None,
     exat: Optional[AbsExpiryT] = None,
     pxat: Optional[AbsExpiryT] = None,
 ) -> List[EncodableT]:
@@ -371,7 +372,7 @@ def extract_expire_flags(
             exp_options.append(int(ex.total_seconds()))
         elif isinstance(ex, int):
             exp_options.append(ex)
-        elif isinstance(ex, str) and ex.isdigit():
+        elif isinstance(ex, str) and ex.isdecimal():
             exp_options.append(int(ex))
         else:
             raise DataError("ex must be datetime.timedelta or int")
@@ -381,6 +382,8 @@ def extract_expire_flags(
             exp_options.append(int(px.total_seconds() * 1000))
         elif isinstance(px, int):
             exp_options.append(px)
+        elif isinstance(px, str) and px.isdecimal():
+            exp_options.append(int(px))
         else:
             raise DataError("px must be datetime.timedelta or int")
     elif exat is not None:
