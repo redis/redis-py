@@ -511,9 +511,12 @@ class MaintNotificationsAbstractConnection:
         try:
             while self.can_read():
                 read = len(deferred)
+                # The pool disconnects the connection it handed out - with
+                # caching the proxy, not the wrapped connection - on the error
                 self.read_response(
                     push_request=True,
                     timeout=PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT,
+                    disconnect_on_error=False,
                 )
                 # Only a push reaches a deferred handler; anything else is a
                 # reply left unread by an earlier command

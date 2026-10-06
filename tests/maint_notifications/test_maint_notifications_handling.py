@@ -17,6 +17,11 @@ from redis.connection import (
     BlockingConnectionPool,
     MaintenanceState,
 )
+from redis.event import (
+    EventDispatcher,
+    EventListenerInterface,
+    MaintenanceCompletedEvent,
+)
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import ResponseError
 from redis.maint_notifications import (
@@ -2500,6 +2505,43 @@ class TestPendingPushNotificationsOnIdleConnection(TestMaintenanceNotificationsB
             assert connection.maintenance_state == MaintenanceState.NONE
             assert connection.host == DEFAULT_ADDRESS.split(":")[0]
             assert pool.cache.get(self.CACHE_KEY) is None
+        finally:
+            pool.release(connection)
+            pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_closed_cached_connection_in_maintenance_completes_as_the_proxy(
+        self, pool_class
+    ):
+        """
+        The maintenance handlers are bound to the cache proxy, so the relaxation
+        a closed connection ends is reported with the proxy as its source: by
+        the proxy's own disconnect, not by the wrapped connection failing the
+        drain and disconnecting itself. The close arrives inside a frame, which
+        is where the read - rather than the readiness check - runs into it.
+        """
+        events = []
+
+        class Listener(EventListenerInterface):
+            def listen(self, event):
+                events.append(event)
+
+        self.config.event_dispatcher = EventDispatcher(
+            {MaintenanceCompletedEvent: [Listener()]}
+        )
+        pool, connection = self._cached_idle_connection(pool_class)
+        connection.maintenance_state = MaintenanceState.MAINTENANCE
+        connection._processed_start_maint_notifications.add(1)
+        connection._conn._sock.pending_responses.extend(
+            [b">4\r\n$6\r\nMOVING\r\n", self.SERVER_CLOSE]
+        )
+
+        try:
+            assert pool.get_connection() is connection
+
+            assert connection.maintenance_state == MaintenanceState.NONE
+            assert not connection._processed_start_maint_notifications
+            assert [event.connection for event in events] == [connection]
         finally:
             pool.release(connection)
             pool.disconnect()

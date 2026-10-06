@@ -313,9 +313,12 @@ class AsyncMaintNotificationsAbstractConnection:
         try:
             while await self.can_read():
                 read = len(deferred)
+                # The pool disconnects the connection it handed out on the error
                 try:
                     await asyncio.wait_for(
-                        self.read_response(push_request=True),
+                        self.read_response(
+                            push_request=True, disconnect_on_error=False
+                        ),
                         PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT,
                     )
                 except asyncio.TimeoutError:
