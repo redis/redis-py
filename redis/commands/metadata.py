@@ -1169,7 +1169,9 @@ _DONT_CACHE_WRITE_KEYED = replace(_WRITE_KEYED, is_dont_cache=True)
 # Every entry below was validated against a live ``COMMAND`` reply from Redis 8.10.0 with
 # search, timeseries, ReJSON, bf and vectorset loaded (the ``redislabs/client-libs-test``
 # stack image), with the core entries also compared against 7.4.2 to ensure the minimum
-# supported version does not disagree on the fields that decide cacheability.
+# supported version does not disagree on the fields that decide cacheability. The one
+# exception is the ``bless`` container, which first ships in 8.11 and was validated against
+# that release's ``COMMAND INFO`` reply.
 #
 # The table is not exhaustive: on 8.10.0 the server reports 127 cacheable commands and this
 # covers 80 of them. The count is version-qualified because it moves between releases - a
@@ -1196,9 +1198,9 @@ _DONT_CACHE_WRITE_KEYED = replace(_WRITE_KEYED, is_dont_cache=True)
 # recorded ``nondeterministic_output`` where the server tips it nothing. The ``movablekeys``
 # reads - ``eval_ro``, ``evalsha_ro``, ``fcall_ro``, ``sdiffcard``, ``sintercard``,
 # ``sunioncard``, ``xread``, ``zdiff``, ``zinter``, ``zintercard`` and ``zunion`` - plus
-# ``command``, ``dbsize``, ``keys``, ``randomkey``, ``scan``, ``touch`` and ``vrandmember``
-# withhold their routing policies entirely, so the cluster client keeps resolving their
-# targets itself. Their cacheability inputs are unaffected.
+# ``bless scan``, ``command``, ``dbsize``, ``keys``, ``randomkey``, ``scan``, ``touch`` and
+# ``vrandmember`` withhold their routing policies entirely, so the cluster client keeps
+# resolving their targets itself. Their cacheability inputs are unaffected.
 _STATIC_COMMAND_METADATA: CommandMetadataRecordsCache = MappingProxyType(
     {
         "core": MappingProxyType(
@@ -1206,6 +1208,33 @@ _STATIC_COMMAND_METADATA: CommandMetadataRecordsCache = MappingProxyType(
                 "bitcount": _CACHEABLE_KEYED,
                 "bitfield_ro": _CACHEABLE_KEYED,
                 "bitpos": _CACHEABLE_KEYED,
+                # The BLESS container, keyed by subcommand the way ``execute_command``
+                # receives it. Validated against the 8.11 ``COMMAND INFO`` reply, the first
+                # release that reports it.
+                "bless clear": _WRITE_KEYED,
+                # Not cacheable and not replica-eligible: the server flags BLESS GET ``fast``
+                # only - neither ``readonly`` nor ``write`` - and ``is_readonly`` records the
+                # command flag, not the ``RO`` key spec, so it fails closed on both counts.
+                # Recorded with the write shape for the same reason ``command`` is below.
+                "bless get": _WRITE_KEYED,
+                # Keyless, tipped nondeterministic_output and request_policy:special /
+                # response_policy:special, exactly like SCAN. Routing policies are withheld
+                # for the same reason as SCAN: the cluster client routes BLESS SCAN to all
+                # primary nodes (PRIMARIES) through its COMMAND_FLAGS entry and merges the
+                # per-node cursors. Unlike SCAN the server reports no flags at all, so it is
+                # not readonly.
+                "bless scan": CommandMetadata(
+                    request_policy=None,
+                    response_policy=None,
+                    is_readonly=False,
+                    is_blocking=False,
+                    has_key_argument=False,
+                    has_nondeterministic_output=True,
+                    is_script_runner=False,
+                    is_dont_cache=False,
+                    has_complete_metadata=True,
+                ),
+                "bless set": _WRITE_KEYED,
                 # From STATIC_POLICIES. COMMAND is flagged loading/stale, not readonly,
                 # and takes no keys. Routing policies are withheld so the cluster client preserves
                 # the 2-word COMMAND COUNT, COMMAND LIST, COMMAND GETKEYS default-node flags.

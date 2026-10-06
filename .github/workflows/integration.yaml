@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: pypa/gh-action-pip-audit@v1.0.8
+      - uses: pypa/gh-action-pip-audit@v1.1.0
         with:
           inputs: dev_requirements.txt
           ignore-vulns: |
@@ -64,6 +64,9 @@ jobs:
             # Fixed in 2.15.0. This one does reach the verify_signature=False decode in JWToken, but the tokens
             # come from the configured identity provider, and the impact is a RecursionError instead of DecodeError.
             CVE-2026-101918 # RecursionError from a deeply nested payload escapes PyJWTError handling
+            # No fix released yet. redis-py passes a fresh options dict on every decode call,
+            # so the in-place mutation is never reused for a verifying call.
+            CVE-2026-103001 # decode() mutates a caller-supplied options dict when verify_signature is falsy
 
   lint:
     name: Code linters
