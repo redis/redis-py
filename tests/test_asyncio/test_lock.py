@@ -183,6 +183,35 @@ class TestLock:
             async with self.get_lock(r, "foo", raise_on_release_error=True) as lock:
                 await lock.release()
 
+    async def test_acquire_sleep_overrides_constructor_sleep(self, r, fake_lock_time):
+        lock1 = self.get_lock(r, "foo")
+        assert await lock1.acquire(blocking=False)
+        try:
+            bt = 0.2
+            sleep = 0.05
+            override = 0.025
+            lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
+            assert not await lock2.acquire(sleep=override)
+            assert fake_lock_time.sleeps == [override] * 8
+        finally:
+            await lock1.release()
+
+    async def test_blocking_timeout_sleep_overrides_constructor_sleep(
+        self, r, fake_lock_time
+    ):
+        lock1 = self.get_lock(r, "foo")
+        assert await lock1.acquire(blocking=False)
+        try:
+            bt = 0.2
+            sleep = 0.1
+            override = 0.05
+            lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
+            assert not await lock2.acquire(sleep=override)
+            assert fake_lock_time.now == pytest.approx(bt)
+            assert fake_lock_time.sleeps == [override] * 4
+        finally:
+            await lock1.release()
+
     async def test_high_sleep_small_blocking_timeout(self, r, fake_lock_time):
         lock1 = self.get_lock(r, "foo")
         assert await lock1.acquire(blocking=False)
