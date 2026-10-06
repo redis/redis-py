@@ -1842,7 +1842,7 @@ class RedisCluster(
                     return func_value if value_from_callable else exec_value
                 except WatchError:
                     if watch_delay is not None and watch_delay > 0:
-                        time.sleep(watch_delay)
+                        await asyncio.sleep(watch_delay)
                     continue
 
 
