@@ -2574,48 +2574,74 @@ class TestTrackingModePairing:
         assert proxy._skip_next_caching is False
 
 
-_CLIENT_CACHING_SPELLINGS = [
-    ("CLIENT CACHING", "NO"),
-    ("client caching", "yes"),
-    (b"CLIENT CACHING", b"NO"),
-    ("CLIENT", "CACHING", "NO"),
-    (b"CLIENT", b"CACHING", b"YES"),
-    (b"client", "Caching", "no"),
+# Every spelling ``pack_command`` accepts: one argument or two, ``str`` or ``bytes``, any
+# case. Each row is ``(args, the command name the refusal reports)``.
+_CACHE_OWNED_SPELLINGS = [
+    (("CLIENT CACHING", "NO"), "CLIENT CACHING"),
+    (("client caching", "yes"), "CLIENT CACHING"),
+    ((b"CLIENT CACHING", b"NO"), "CLIENT CACHING"),
+    (("CLIENT", "CACHING", "NO"), "CLIENT CACHING"),
+    ((b"CLIENT", b"CACHING", b"YES"), "CLIENT CACHING"),
+    ((b"client", "Caching", "no"), "CLIENT CACHING"),
+    (("CLIENT TRACKING", "OFF"), "CLIENT TRACKING"),
+    (("CLIENT TRACKING", "ON", "REDIRECT", 5), "CLIENT TRACKING"),
+    (("client tracking", "on", "bcast"), "CLIENT TRACKING"),
+    (("CLIENT", b"TRACKING", b"OFF"), "CLIENT TRACKING"),
+    ((b"CLIENT", b"TRACKING", b"OFF"), "CLIENT TRACKING"),
+    ((b"CLIENT TRACKING", b"ON", b"OPTIN"), "CLIENT TRACKING"),
+    (("RESET",), "RESET"),
+    (("reset",), "RESET"),
+    ((b"RESET",), "RESET"),
 ]
-_CLIENT_CACHING_IDS = [
-    "str-one-arg",
-    "str-lowercase",
-    "bytes-one-arg",
-    "str-two-args",
-    "bytes-two-args",
-    "mixed-case-and-types",
+_CACHE_OWNED_IDS = [
+    "caching-str-one-arg",
+    "caching-str-lowercase",
+    "caching-bytes-one-arg",
+    "caching-str-two-args",
+    "caching-bytes-two-args",
+    "caching-mixed-case-and-types",
+    "tracking-off",
+    "tracking-on-redirect",
+    "tracking-lowercase-bcast",
+    "tracking-str-bytes-two-args",
+    "tracking-bytes-two-args",
+    "tracking-bytes-one-arg-optin",
+    "reset",
+    "reset-lowercase",
+    "reset-bytes",
 ]
 
 
 @pytest.mark.fixed_client
-class TestUserSentClientCaching:
+class TestUserSentCacheOwnedCommands:
     """
-    A user-sent ``CLIENT CACHING`` sets a flag that the next command on the socket
-    consumes, and a pooled connection promises nothing about which command that is - so
-    the cache refuses it on every connection it manages, in every mode.
+    ``CLIENT CACHING``, ``CLIENT TRACKING`` and ``RESET`` each change the tracking state
+    the cache relies on for invalidations: a stray ``CLIENT CACHING`` is consumed by
+    whatever the socket sends next, and the other two stop or redirect invalidations while
+    the cache keeps storing replies. So the cache refuses them on every connection it
+    manages, in every mode.
     """
 
     @pytest.mark.parametrize("mode", list(TrackingMode))
-    @pytest.mark.parametrize("args", _CLIENT_CACHING_SPELLINGS, ids=_CLIENT_CACHING_IDS)
-    def test_send_command_refuses_client_caching(
-        self, proxy_factory, mock_connection, mode, args
+    @pytest.mark.parametrize(
+        "args,command", _CACHE_OWNED_SPELLINGS, ids=_CACHE_OWNED_IDS
+    )
+    def test_send_command_refuses_cache_owned_commands(
+        self, proxy_factory, mock_connection, mode, args, command
     ):
         proxy, _ = proxy_factory(mode)
 
-        with pytest.raises(RedisError, match="CLIENT CACHING cannot be sent"):
+        with pytest.raises(RedisError, match=f"^{command} cannot be sent"):
             proxy.send_command(*args)
 
         mock_connection.send_command.assert_not_called()
         mock_connection.send_packed_command.assert_not_called()
 
-    @pytest.mark.parametrize("args", _CLIENT_CACHING_SPELLINGS, ids=_CLIENT_CACHING_IDS)
-    def test_pack_commands_refuses_client_caching(
-        self, proxy_factory, mock_connection, args
+    @pytest.mark.parametrize(
+        "args,command", _CACHE_OWNED_SPELLINGS, ids=_CACHE_OWNED_IDS
+    )
+    def test_pack_commands_refuses_cache_owned_commands(
+        self, proxy_factory, mock_connection, args, command
     ):
         """
         Every pipeline and transaction packs through ``pack_commands``, so refusing there
@@ -2623,7 +2649,7 @@ class TestUserSentClientCaching:
         """
         proxy, _ = proxy_factory(TrackingMode.OPTOUT)
 
-        with pytest.raises(RedisError, match="CLIENT CACHING cannot be sent"):
+        with pytest.raises(RedisError, match=f"^{command} cannot be sent"):
             proxy.pack_commands([("SET", "a", "1"), args, ("GET", "a")])
 
         mock_connection.pack_commands.assert_not_called()
@@ -2632,13 +2658,34 @@ class TestUserSentClientCaching:
         "args",
         [
             ("CLIENT", "TRACKINGINFO"),
+            (b"CLIENT TRACKINGINFO",),
+            ("CLIENT GETREDIR",),
             ("CLIENT ID",),
             ("CLIENT",),
             ("CONFIG", "GET", "maxmemory"),
+            ("CONFIG RESETSTAT",),
+            ("ACL LOG", b"RESET"),
+            ("RENAME", "a", "b"),
+            (b"rpush", b"a", b"1"),
             ("GET", "foo"),
             (b"CACHING",),
+            (b"TRACKING", b"OFF"),
         ],
-        ids=["trackinginfo", "client-id", "bare-client", "config", "get", "no-client"],
+        ids=[
+            "trackinginfo",
+            "trackinginfo-bytes",
+            "getredir",
+            "client-id",
+            "bare-client",
+            "config",
+            "config-resetstat",
+            "acl-log-reset",
+            "rename",
+            "five-char-r-command",
+            "get",
+            "no-client-caching",
+            "no-client-tracking",
+        ],
     )
     def test_other_commands_pass_through(self, proxy_factory, mock_connection, args):
         # ``plain``, so no command is paired and every one reaches ``send_command`` as is.
@@ -2649,6 +2696,27 @@ class TestUserSentClientCaching:
 
         mock_connection.send_command.assert_called_once_with(*args)
         mock_connection.pack_commands.assert_called_once_with([args])
+
+    def test_the_caches_own_tracking_handshake_is_not_refused(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        The connect callback is registered on the wrapped connection, which calls it with
+        itself, so the handshake's ``CLIENT TRACKING ON`` never passes the guarded
+        ``send_command``. ``test_the_mode_is_sent_in_the_tracking_handshake`` pins what it
+        sends.
+        """
+        proxy, _ = proxy_factory(TrackingMode.OPTOUT)
+        mock_connection._parser = Mock()
+
+        mock_connection.register_connect_callback.assert_called_once_with(
+            proxy._enable_tracking_callback
+        )
+        proxy._enable_tracking_callback(mock_connection)
+
+        mock_connection.send_command.assert_called_once_with(
+            "CLIENT", "TRACKING", "ON", "OPTOUT"
+        )
 
     def test_the_caches_own_pairing_is_not_refused(
         self, proxy_factory, mock_connection

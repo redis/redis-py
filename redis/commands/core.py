@@ -1033,6 +1033,9 @@ class ManagementCommands(CommandsProtocol):
         Turn on the tracking mode.
         For more information, about the options look at client_tracking func.
 
+        On a client with client-side caching enabled this raises ``RedisError``:
+        the cache enables tracking itself.
+
         See https://redis.io/commands/client-tracking
         """
         return self.client_tracking(
@@ -1073,6 +1076,9 @@ class ManagementCommands(CommandsProtocol):
         """
         Turn off the tracking mode.
         For more information, about the options look at client_tracking func.
+
+        On a client with client-side caching enabled this raises ``RedisError``:
+        turning tracking off would stop invalidations for cached replies.
 
         See https://redis.io/commands/client-tracking
         """
@@ -1143,6 +1149,10 @@ class ManagementCommands(CommandsProtocol):
 
         ``prefix``  for broadcasting, register a given key prefix, so that
         notifications will be provided only for keys starting with this string.
+
+        On a client with client-side caching enabled this raises ``RedisError``:
+        the cache enables tracking itself, and changing it would stop
+        invalidations for cached replies.
 
         See https://redis.io/commands/client-tracking
         """
@@ -1817,6 +1827,9 @@ class ManagementCommands(CommandsProtocol):
 
     def reset(self) -> (bytes | str) | Awaitable[bytes | str]:
         """Perform a full reset on the connection's server-side context.
+
+        On a client with client-side caching enabled this raises ``RedisError``:
+        the reset turns off the tracking the cache relies on for invalidations.
 
         See: https://redis.io/commands/reset
         """
