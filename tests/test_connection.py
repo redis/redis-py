@@ -2114,6 +2114,41 @@ class TestTrackingModePairing:
         proxy._enable_tracking_callback(mock_connection)
         assert cache.size == 0
 
+    def test_a_failed_first_tracking_handshake_does_not_flush_on_retry(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        A first connect whose ``CLIENT TRACKING`` exchange fails never had tracking on, so
+        nothing was cached through it. The next connect is still a first connect and must
+        not wipe other connections' entries from the pool-shared cache.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        mock_connection._parser = Mock()
+
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=Mock(),
+            )
+        )
+
+        mock_connection.read_response.side_effect = ConnectionError("lost")
+        with pytest.raises(ConnectionError):
+            proxy._enable_tracking_callback(mock_connection)
+
+        mock_connection.read_response.side_effect = None
+        proxy._enable_tracking_callback(mock_connection)
+        assert cache.size == 1
+
+        # Tracking is on now, so the next connect is a reconnect and flushes.
+        proxy._enable_tracking_callback(mock_connection)
+        assert cache.size == 0
+
     def test_a_reconnect_inside_send_keeps_the_in_flight_placeholder(
         self, proxy_factory, mock_connection
     ):

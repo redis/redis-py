@@ -2552,7 +2552,6 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 if own_placeholder is not None:
                     self._cache.set(own_placeholder)
 
-        self._connected_once = True
         self._pending_caching_reply = False
 
         # The mode is sent in the handshake because that is what the server requires:
@@ -2566,6 +2565,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
         conn.send_command(*args)
         conn.read_response()
+        # Set only once tracking is on: a handshake that fails before this point cached
+        # nothing, so the next connect has no session to flush for.
+        self._connected_once = True
         conn._parser.set_invalidation_push_handler(self._on_invalidation_callback)
 
     def _drain_invalidations(self, conn: ConnectionInterface):
