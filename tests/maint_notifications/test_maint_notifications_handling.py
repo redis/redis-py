@@ -2422,6 +2422,28 @@ class TestPendingPushNotificationsOnIdleConnection(TestMaintenanceNotificationsB
             pool.disconnect()
 
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_drain_running_out_of_its_deadline_reconnects(self, pool_class):
+        """
+        The deadline spans the whole drain, not each frame: pushes still
+        pending when it is up are discarded and the connection reconnected.
+        """
+        pool, connection = self._idle_connection(pool_class)
+        sock = connection._sock
+        sock.pending_responses.extend([self.MIGRATING_PUSH, self.MOVING_PUSH])
+
+        try:
+            with patch("redis.connection.PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT", 0):
+                assert pool.get_connection() is connection
+
+            assert sock.closed
+            assert connection._sock is not sock
+            assert connection.maintenance_state == MaintenanceState.NONE
+            assert not pool._maint_notifications_pool_handler._processed_notifications
+        finally:
+            pool.release(connection)
+            pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_handlers_are_restored_after_drain(self, pool_class):
         """A push arriving with the next command is handled as usual."""
         pool, connection = self._idle_connection(pool_class)

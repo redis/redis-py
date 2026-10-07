@@ -484,7 +484,7 @@ class MaintNotificationsAbstractConnection:
         Anything read that is not a maintenance notification or a client-side
         cache invalidation - a reply, a null or an error reply left unread by an
         earlier command - means the connection is dirty and is reported the same
-        way, as is a frame that does not complete within
+        way, as is a drain that does not complete within
         ``PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT``.
         """
         parser = self._get_push_notifications_parser()
@@ -516,14 +516,22 @@ class MaintNotificationsAbstractConnection:
                 set_handler(defer(handler))
 
         alive = False
+        deadline = time.monotonic() + PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT
         try:
             while self.can_read():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ConnectionError(
+                        "Timed out reading pending push notifications"
+                    )
                 read = len(deferred)
                 # The pool disconnects the connection it handed out - with
-                # caching the proxy, not the wrapped connection - on the error
+                # caching the proxy, not the wrapped connection - on the error.
+                # The parsers apply the timeout to each receive of a frame; the
+                # deadline bounds the drain across frames.
                 self.read_response(
                     push_request=True,
-                    timeout=PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT,
+                    timeout=remaining,
                     disconnect_on_error=False,
                 )
                 # Only a push reaches a deferred handler; anything else is a

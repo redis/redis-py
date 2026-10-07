@@ -279,7 +279,7 @@ class AsyncMaintNotificationsAbstractConnection:
         Anything read that is not a maintenance notification or a client-side
         cache invalidation - a reply, a null or an error reply left unread by an
         earlier command - means the connection is dirty and is reported the same
-        way, as is a frame that does not complete within
+        way, as is a drain that does not complete within
         ``PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT``.
         """
         parser = self._get_push_notifications_parser()
@@ -311,8 +311,14 @@ class AsyncMaintNotificationsAbstractConnection:
                 set_handler(defer(handler))
 
         alive = False
+        deadline = time.monotonic() + PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT
         try:
             while await self.can_read():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ConnectionError(
+                        "Timed out reading pending push notifications"
+                    )
                 read = len(deferred)
                 # The pool disconnects the connection it handed out on the error
                 try:
@@ -320,11 +326,11 @@ class AsyncMaintNotificationsAbstractConnection:
                         self.read_response(
                             push_request=True, disconnect_on_error=False
                         ),
-                        PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT,
+                        remaining,
                     )
                 except asyncio.TimeoutError:
                     raise ConnectionError(
-                        "Timed out reading a pending push notification"
+                        "Timed out reading pending push notifications"
                     ) from None
                 # Only a push reaches a deferred handler; anything else is a
                 # reply left unread by an earlier command
@@ -1287,6 +1293,9 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         # The server session is gone, so any HIMPORT fieldsets prepared on this
         # socket no longer exist; reset the tracking.
         self._reset_himport_state()
+        # Likewise the relaxation a maintenance applied to it: restored and
+        # reported here, ahead of a close that may time out or be skipped
+        self._complete_maintenance_on_disconnect()
         # On Python 3.13+, asyncio.timeout() raises RuntimeError when called
         # outside a running Task (e.g. during GC finalization or event-loop
         # callbacks).  In that context we fall back to a synchronous close.
@@ -1344,8 +1353,6 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             await record_connection_closed(
                 close_reason=CloseReason.APPLICATION_CLOSE,
             )
-
-        self._complete_maintenance_on_disconnect()
 
     async def _send_ping(self):
         """Send PING, expect PONG in return"""

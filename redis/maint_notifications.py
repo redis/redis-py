@@ -785,11 +785,11 @@ def _should_skip_connection_timeout_update(
     )
 
 
-# How long a pooled connection's pending push notifications are read for when it
-# is handed out. The notifications are already buffered, so a complete frame costs
-# no wait at all; the bound is for a frame only partly received, which would
-# otherwise block the checkout for the connection's socket timeout - or, with a
-# blocking socket, indefinitely.
+# How long a pooled connection's pending push notifications are read for, in
+# total, when it is handed out. The notifications are already buffered, so a
+# complete frame costs no wait at all; the bound is for a frame only partly
+# received, which would otherwise block the checkout for the connection's socket
+# timeout - or, with a blocking socket, indefinitely.
 PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT = 1.0
 
 

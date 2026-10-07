@@ -1755,6 +1755,10 @@ class ScriptedParser(_AsyncRESP3Parser):
         if item == "hang":
             # A frame only partly received: the rest never arrives
             await asyncio.sleep(10)
+        if isinstance(item, tuple):
+            # A frame whose rest takes this long to arrive
+            delay, item = item
+            await asyncio.sleep(delay)
         if isinstance(item, Exception):
             raise item
         if isinstance(item, NodeMovingNotification):
@@ -1853,6 +1857,27 @@ async def test_async_partial_push_frame_is_a_bounded_connection_error():
         id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=5
     )
     connection, parser, moving_handler, _ = _scripted_connection([moving, "hang"])
+
+    with mock.patch(
+        "redis.asyncio.connection.PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT", 0.05
+    ):
+        with pytest.raises(RedisConnectionError, match="Timed out"):
+            await connection.handle_pending_push_notifications()
+
+    moving_handler.assert_not_awaited()
+    assert parser.node_moving_push_handler_func is moving_handler
+
+
+@pytest.mark.asyncio
+async def test_async_drain_deadline_spans_all_pending_pushes():
+    """The deadline is for the whole drain, not renewed for every frame."""
+    moving = NodeMovingNotification(
+        id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=5
+    )
+    # Each frame arrives within the deadline on its own; together they do not
+    connection, parser, moving_handler, _ = _scripted_connection(
+        [(0.03, moving), (0.03, moving)]
+    )
 
     with mock.patch(
         "redis.asyncio.connection.PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT", 0.05
@@ -2317,6 +2342,24 @@ def _connected_async_connection(config):
     connection._writer = MagicMock()
     connection._writer.wait_closed = AsyncMock()
     return connection
+
+
+@pytest.mark.asyncio
+async def test_async_disconnect_without_socket_still_completes_maintenance():
+    """
+    The relaxation is restored and reported on every disconnect, including
+    one that finds no socket to close and returns early.
+    """
+    listener = _RecordingListener()
+    config = _config_with_listener(listener)
+    connection = Connection(protocol=3, maint_notifications_config=config)
+    connection.maintenance_state = MaintenanceState.MAINTENANCE
+    assert not connection.is_connected
+
+    await connection.disconnect()
+
+    assert connection.maintenance_state == MaintenanceState.NONE
+    assert [type(e) for e in listener.events] == [MaintenanceCompletedEvent]
 
 
 @pytest.mark.asyncio
