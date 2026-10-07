@@ -1,0 +1,102 @@
+---
+name: prepare-for-takeover
+description: Prepare copy-paste-ready maintainer comments that mark stalled but valuable redis-py PRs as `open-for-takeover`, inviting the original author or any other contributor to finish the work. Each comment summarizes what is left based on the maintainer's earlier review. Use when the user says "prepare for takeover", "open for takeover", "mark as abandoned", "invite contributors to finish", or gives one or more PR numbers/URLs that stalled and should be handed over.
+---
+
+# Prepare for Takeover
+
+## Purpose
+
+Some PRs are worth finishing, but the author has gone quiet and the maintainer has no time to complete them. This skill drafts one comment per PR that:
+
+1. Says the PR seems to have stalled but is still valuable for redis-py.
+2. Announces the `open-for-takeover` label.
+3. Lists what is left, taken from the maintainer's earlier review.
+4. Invites the original author to continue, or anyone else to take over while keeping the author's credit.
+
+For now the skill only generates the comment texts. It does not apply labels, post comments, or edit workflows.
+
+## Hard rule: no GitHub writes
+
+Use read-only GitHub access only (`gh pr view`, `gh api` GET). Never comment, label, review, or edit anything on GitHub. The user posts the comments and applies the labels manually. `gh` may fail with a TLS error inside the command sandbox; run it with the sandbox disabled when needed.
+
+## Inputs
+
+- One or more PR numbers or URLs. Default repo: `redis/redis-py`. Invoking the skill on a PR makes it eligible; do not require any label (such as `waiting-for-response`), a minimum inactivity period, or other staleness signals.
+- The maintainer's GitHub login: resolve it with `gh api user --jq .login`. Do not guess.
+
+## Data to collect per PR (read-only)
+
+```
+gh pr view <n> -R <owner/repo> --json title,author,state,isDraft,labels,updatedAt,reviews,comments
+```
+
+From the output, get:
+
+- `author.login`: the PR author.
+- Whether the maintainer has already commented or reviewed (a comment or review by the maintainer's login).
+- The latest maintainer review that has a body, preferably `CHANGES_REQUESTED`. Read it in full; it is the source for "What's left".
+- Current labels (to point out `waiting-for-response` for removal) and `isDraft`.
+
+If the PR is closed or merged, skip it and say so. If the maintainer never left review feedback, write "What's left" from the PR's own open TODOs or ask the user for a line, and do not invent requirements.
+
+## Writing "What's left"
+
+- 2 to 5 short bullets, each one concrete action, in the order of the original review.
+- Paraphrase the review. Do not add new requests that the maintainer did not make.
+- Keep scope notes from the review (for example "change Fixes #N to Refs #N", "keep #N open, retitle the PR").
+- Add "Take the PR out of draft." when `isDraft` is true and the review asked for it.
+- Put file and symbol names in single backticks.
+
+## Comment template
+
+Include the greeting line **only** if the maintainer has not commented on or reviewed this PR before. Otherwise start with `@<author>, this PR seems to have stalled...`.
+
+```markdown
+Hey @<author>, thank you for your contribution!
+
+This PR seems to have stalled, but the change is still valuable for redis-py and I would like to see it land. I don't have the bandwidth to finish it myself right now, so I'm marking it as `open-for-takeover`.
+
+What's left (details in my review above):
+- <action>
+- <action>
+
+@<author>, if you want to continue, you're very welcome to, just let me know here. Otherwise, anyone interested can take it over: leave a comment first so two people don't work on it at the same time, then open a new PR that builds on this branch (keep the original commits so @<author> keeps the credit) and links back here.
+
+Any help is very welcome!
+```
+
+When there is no earlier maintainer review, use `What's left:` without "(details in my review above)".
+
+## Writing rules
+
+- Use "I", never "we/us/our". The maintainer is one person.
+- Never use em dashes, en dashes, or `--` as punctuation; use a single hyphen.
+- No code fences inside the comment (it breaks the outer fence). Use single backticks only.
+- Keep it short; do not restate the full review.
+
+## Output format
+
+Start with one line naming the audience, for example `Written for: the PR authors and other contributors on GitHub.`
+
+Then for each PR, a bold heading with the number and author, followed by the comment in its own fenced ```markdown block:
+
+**#<n>** (@<author>)
+
+```markdown
+<comment>
+```
+
+After the blocks, add at most two short notes:
+
+- PRs that still carry `waiting-for-response` (remove it when adding `open-for-takeover`).
+- PRs that were skipped (closed or merged).
+
+## Label reference
+
+If the user asks for the label details:
+
+- Name: `open-for-takeover`
+- Description: `Stalled but valuable work - anyone is welcome to pick it up and finish it`
+- Color: `0e8a16`
+- Stale bot: add `open-for-takeover` to `exempt-pr-labels` in `.github/workflows/stale-issues.yml`.
