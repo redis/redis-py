@@ -31,7 +31,7 @@ This library ships two parallel stacks (sync under `redis/`, async under `redis/
 
 - **Sync vs async**: every behavior question has a sync (`redis/...`) and async (`redis/asyncio/...`) variant; tests mirror under `tests/` and `tests/test_asyncio/`. A defect or fix on one side usually has a counterpart on the other (`specs/sync_async_deduplication_analysis.md`).
 - **Wire protocol vs response shape**: `protocol=2|3` chooses RESP2/RESP3 on the wire; `legacy_responses=True|False` chooses the Python response shape independently. Both axes are exercised in CI (`invoke run-test-matrix`; see `specs/unified_responses_migration_guide.md`). A claim or fix may behave differently across these four combinations.
-- **Topology**: standalone, cluster (`redis/cluster.py`), and sentinel (`redis/sentinel.py`) have distinct routing, connection, and failure behavior. Cluster adds slot mapping, MOVED/ASK redirection, `READ_COMMANDS` replica routing, and `RequestPolicy`/`ResponsePolicy` resolution.
+- **Topology**: standalone, cluster (`redis/cluster.py`), and sentinel (`redis/sentinel.py`) have distinct routing, connection, and failure behavior. Cluster adds slot mapping, MOVED/ASK redirection, metadata-driven replica routing (`MetadataResolver.is_replica_safe`), and `RequestPolicy`/`ResponsePolicy` resolution.
 - **Parser backend**: pure-Python (`redis/_parsers/resp2.py`, `resp3.py`) vs optional C-accelerated `hiredis`. Behavior must match across both.
 - **Public API compatibility**: signatures, argument names, defaults, return types, error/exception types, and `response_callbacks` shaping are contracts. The compatibility boundary is the latest released version on PyPI, not unreleased branch churn.
 

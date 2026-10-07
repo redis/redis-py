@@ -21,6 +21,7 @@ config
 CoreCommands
 CSC
 DatabaseConfig
+desynchronises
 DNS
 EchoHealthCheck
 EntraID
@@ -51,6 +52,7 @@ millis
 MultiDbConfig
 MultiDBClient
 McCurdy
+normalises
 NOSCRIPT
 NoValidDatabaseException
 NUMPAT
@@ -88,11 +90,15 @@ Solovyov
 SpanKind
 Specfiying
 StatusCode
+subclasses
 TCP
 TemporaryUnavailableException
 TLS
 TOPKCommands
 TimeSeriesCommands
+trackability
+trackable
+untracked
 Uptrace
 ValueError
 WATCHed
@@ -187,6 +193,7 @@ reinitialization
 replicaof
 repo
 resharding
+resolver's
 resolvers
 runtime
 sedrik

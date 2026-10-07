@@ -170,8 +170,89 @@ node's client. On the Cluster client it also supersedes ``policy_resolver``: giv
 
 ``CacheConfig.DEFAULT_ALLOW_LIST`` is deprecated and no longer consulted.
 
+Tracking modes
+~~~~~~~~~~~~~~
+
+Eligibility decides what *may* be cached. ``tracking_mode`` and ``cache_predicate`` decide what
+the application *wants* cached, and with it how much the server has to remember.
+
+By default every cache-managed connection sends ``CLIENT TRACKING ON``, so the server remembers
+the keys of every read-only, keyed command that connection performs - whether or not the reply
+was stored. ``redis.cache.TrackingMode`` selects a narrower contract:
+
+- ``TrackingMode.PLAIN`` - default behaviour. Every trackable read is tracked, and every
+  eligible reply is stored.
+- ``TrackingMode.OPTIN`` - ``CLIENT TRACKING ON OPTIN``. The server remembers nothing unless
+  ``CLIENT CACHING YES`` comes right before the read, which the client sends for exactly the
+  misses it is about to store. Pick it when you cache a small, chosen subset.
+- ``TrackingMode.OPTOUT`` - ``CLIENT TRACKING ON OPTOUT``. The server remembers every trackable
+  read unless ``CLIENT CACHING NO`` comes right before it, which the client sends for the reads
+  it will not store. Pick it when you cache almost everything.
+
+``cache_predicate`` is the intent decision. It is called with the command name and the keys of
+the invocation, and is consulted under ``optin`` and ``optout`` only - passing it with ``plain``
+warns and is ignored. The keys arrive as the
+invocation supplied them, so a predicate that inspects them should not assume ``str`` or
+``bytes`` - ``redis.utils.str_if_bytes`` normalises both, as in the examples below.
+
+.. code:: python
+
+    >>> import redis
+    >>> from redis.cache import CacheConfig, TrackingMode
+    >>> from redis.utils import str_if_bytes
+    >>> r = redis.Redis(host='localhost', port=6379, protocol=3,
+    ...                 cache_config=CacheConfig(
+    ...                     max_size=10_000,
+    ...                     tracking_mode=TrackingMode.OPTOUT,
+    ...                     cache_predicate=lambda command, keys: not str_if_bytes(keys[0]).startswith('counter:'),
+    ...                 ))
+    >>> r.get('user:42')          # sent alone; stored, and tracked by default
+    >>> r.get('counter:hits')     # CLIENT CACHING NO + GET, one write; not stored, not tracked
+
+Under ``optin`` the predicate selects what to cache instead:
+
+.. code:: python
+
+    >>> r = redis.Redis(host='localhost', port=6379, protocol=3,
+    ...                 cache_config=CacheConfig(
+    ...                     tracking_mode=TrackingMode.OPTIN,
+    ...                     cache_predicate=lambda command, keys: str_if_bytes(keys[0]).startswith('user:'),
+    ...                 ))
+    >>> r.get('user:42')          # miss: CLIENT CACHING YES + GET, one write; stored, tracked
+    >>> r.get('user:42')          # hit: nothing on the wire
+    >>> r.get('session:9')        # sent alone; not stored, not tracked
+
+``optin`` with no ``cache_predicate`` caches **nothing** - every read is sent alone and left
+untracked. That configuration is inert, and the client warns about it when the config is built.
+
+Some things work the same in every mode:
+
+- A cache hit sends nothing to the server.
+- Pipelines, transactions and ``send_packed_command`` bypass the cache. Under ``optout`` the
+  server still tracks the keys they read.
+- A command redirected with ``ASK`` is sent without ``CLIENT CACHING``, and its reply is not
+  stored. ``ASKING`` and ``CLIENT CACHING`` each apply only to the command that immediately
+  follows them, so one command cannot carry both. Pairing the redirected read with
+  ``CLIENT CACHING`` would strip the ``ASK`` allowance, and the read would be redirected
+  again. The reply is not stored because it belongs to a slot that is migrating. Under
+  ``optout`` the server tracks the read by default anyway.
+- Under ``optout``, the client sends ``CLIENT CACHING NO`` only for commands that the metadata
+  table marks ``readonly``. Any other read stays tracked. The worst case is an unused entry in
+  the server's invalidation table, never a stale reply.
+- ``CLIENT CACHING`` is refused with a ``RedisError`` on every connection of a client that has
+  a cache, including inside pipelines and transactions. The server applies the flag to the next
+  command on that socket, and a pooled client cannot promise which command that is: a stray
+  ``CLIENT CACHING NO`` under ``optout`` would leave the next cached read untracked, so its
+  stored reply would never be invalidated. The client sends ``CLIENT CACHING`` itself,
+  together with the read it applies to, whenever the tracking mode needs it. A client without
+  a cache passes the command to the server as before.
+
+The mode is sent in the tracking handshake, because the server refuses to switch a live
+connection between ``OPTIN`` and ``OPTOUT``. A configuration change therefore applies to new
+connections only.
+
 Client-side caching is not yet implemented in the async clients, so
-``redis.asyncio.Redis`` and ``redis.asyncio.RedisCluster`` take no ``metadata_resolver``
-argument.
+``redis.asyncio.Redis`` takes no ``metadata_resolver`` argument. However,
+``redis.asyncio.RedisCluster`` accepts ``metadata_resolver`` for dynamic replica routing.
 
 More comprehensive documentation soon will be available at the `Redis documentation site <https://redis.io/docs/latest/>`_.

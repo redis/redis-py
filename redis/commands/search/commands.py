@@ -380,11 +380,11 @@ class SearchCommands:
 
     # ---- RESP2 unified parsers (legacy_responses=False) ----
 
-    # Known FT.INFO attribute keys that are followed by a value
-    # (key-value pairs in the RESP2 flat list).
-    _INFO_ATTR_PAIR_KEYS = frozenset(
-        {"identifier", "attribute", "type", "WEIGHT", "SEPARATOR", "PHONETIC"}
-    )
+    # Uppercase FT.INFO attribute keys that are followed by a value
+    # (key-value pairs in the RESP2 flat list). Lowercase keys, such as
+    # ``identifier``, ``type`` or the vector keys ``algorithm`` and
+    # ``compression``, are always followed by a value; flags are uppercase.
+    _INFO_ATTR_PAIR_KEYS = frozenset({"WEIGHT", "SEPARATOR", "PHONETIC", "M"})
 
     @staticmethod
     def _normalize_info_attribute(attr_list):
@@ -394,6 +394,9 @@ class SearchCommands:
         WEIGHT, 1, SORTABLE, NOSTEM]``.
         RESP3 format: ``{"identifier": name, "attribute": alias, "type":
         "TEXT", "WEIGHT": "1", "flags": ["SORTABLE", "NOSTEM"]}``.
+
+        A key is followed by a value if it is lowercase or listed in
+        ``_INFO_ATTR_PAIR_KEYS``; any other key is a flag.
         """
         result = {}
         flags = []
@@ -401,7 +404,11 @@ class SearchCommands:
         i = 0
         while i < len(attr_list):
             key = str_if_bytes(attr_list[i])
-            if key in pair_keys and i + 1 < len(attr_list):
+            if (
+                isinstance(key, str)
+                and (key.islower() or key in pair_keys)
+                and i + 1 < len(attr_list)
+            ):
                 result[key] = str_if_bytes(attr_list[i + 1])
                 i += 2
             else:
@@ -1274,7 +1281,7 @@ class SearchCommands:
 
     def info(self):
         """
-        Get info an stats about the the current index, including the number of
+        Get info and stats about the current index, including the number of
         documents, memory consumption, etc
 
         For more information see `FT.INFO <https://redis.io/commands/ft.info>`_.
@@ -1388,7 +1395,7 @@ class SearchCommands:
             options["post_processing"] = post_processing
         if params_substitution:
             pieces.extend(self.get_params_args(params_substitution))
-        if timeout:
+        if timeout is not None:
             pieces.extend(("TIMEOUT", timeout))
         if cursor:
             options["cursor"] = True
@@ -1826,7 +1833,7 @@ class SearchCommands:
 class AsyncSearchCommands(SearchCommands):
     async def info(self):
         """
-        Get info an stats about the the current index, including the number of
+        Get info and stats about the current index, including the number of
         documents, memory consumption, etc
 
         For more information see `FT.INFO <https://redis.io/commands/ft.info>`_.
@@ -1927,7 +1934,7 @@ class AsyncSearchCommands(SearchCommands):
             options["post_processing"] = post_processing
         if params_substitution:
             pieces.extend(self.get_params_args(params_substitution))
-        if timeout:
+        if timeout is not None:
             pieces.extend(("TIMEOUT", timeout))
         if cursor:
             options["cursor"] = True

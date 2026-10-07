@@ -2,7 +2,8 @@ import json
 import logging
 import os
 import re
-from typing import Optional
+from time import monotonic, sleep
+from typing import Any, Generator, Optional
 from urllib.parse import urlparse
 
 import pytest
@@ -33,6 +34,68 @@ CLIENT_TIMEOUT = 5
 
 DEFAULT_ENDPOINT_NAME = "m-standard"
 DEFAULT_OSS_API_ENDPOINT_NAME = "maint-notifications-oss-api"
+
+# Bounded budget for the Active-Active readiness wait below. Long enough to outlast the
+# recovery of a network failure a preceding test injected, short enough that a genuinely
+# dead endpoint fails the run instead of hanging it.
+MULTI_DB_READY_TIMEOUT = 60
+MULTI_DB_READY_INTERVAL = 1
+
+
+def wait_for_databases_reachable(client_class, urls, client_kwargs):
+    """Block until every Active-Active database answers PING.
+
+    The Active-Active tests share one environment and each of them injects a network
+    failure into it, so a test can start while the failure the previous one injected is
+    still healing. ``MultiDBClient`` evaluates its initial health check once, and under
+    the default ``ALL_AVAILABLE`` policy raises ``InitialHealthCheckFailedError`` if any
+    database is unreachable at that moment - so without this wait a test fails on the
+    previous test's fault instead of on anything it exercises itself.
+
+    A plain ``PING`` is the gate rather than a faithful replay of ``PingHealthCheck``:
+    the failure these tests inject takes out a whole cluster, so gross reachability is
+    the signal, and the client still runs its own health check afterwards.
+    """
+    deadline = monotonic() + MULTI_DB_READY_TIMEOUT
+
+    while True:
+        unreachable = {}
+
+        for url in urls:
+            error = _ping_error(client_class, url, client_kwargs)
+
+            if error is not None:
+                unreachable[url] = error
+
+        if not unreachable:
+            return
+
+        if monotonic() >= deadline:
+            pytest.fail(
+                f"Active-Active databases still unreachable after "
+                f"{MULTI_DB_READY_TIMEOUT}s: {unreachable}"
+            )
+
+        logging.info("Waiting for Active-Active databases: %s", unreachable)
+        sleep(MULTI_DB_READY_INTERVAL)
+
+
+def _ping_error(client_class, url, client_kwargs):
+    """Return None if the database answers PING, else a description of the failure."""
+    client = None
+
+    try:
+        client = client_class.from_url(url, **client_kwargs)
+        return None if client.ping() else "PING returned a falsy response"
+    except Exception as error:
+        return repr(error)
+    finally:
+        if client is not None:
+            # A throwaway probe client - its pool must not outlive the check.
+            try:
+                client.close()
+            except Exception:
+                pass
 
 
 class CheckActiveDatabaseChangedListener(EventListenerInterface):
@@ -146,7 +209,9 @@ def fault_injector_client_oss_api():
 @pytest.fixture()
 def r_multi_db(
     request,
-) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListener, dict]:
+) -> Generator[
+    tuple[MultiDBClient, CheckActiveDatabaseChangedListener, dict], Any, Any
+]:
     client_class = request.param.get("client_class", Redis)
 
     if client_class == Redis:
@@ -213,7 +278,22 @@ def r_multi_db(
         health_check_delay=health_check_delay,
     )
 
-    return MultiDBClient(config), listener, endpoint_config
+    # Before the client exists, so the initial health check it runs on first use is not
+    # evaluated against a database still recovering from the previous test's fault.
+    wait_for_databases_reachable(
+        client_class,
+        endpoint_config["endpoints"][:2],
+        {"username": username, "password": password},
+    )
+
+    client = MultiDBClient(config)
+
+    yield client, listener, endpoint_config
+
+    # Without this the client keeps a health check loop thread and its event loop
+    # thread running for the rest of the session, polling the databases of a test
+    # that already finished.
+    client.close()
 
 
 def extract_cluster_fqdn(url):

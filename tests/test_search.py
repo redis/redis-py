@@ -4,6 +4,7 @@ import os
 import random
 import time
 from io import TextIOWrapper
+from unittest import mock
 
 import numpy as np
 import pytest
@@ -197,8 +198,20 @@ class SearchTestsBase:
 
 
 class TestBaseSearchFunctionality(SearchTestsBase):
-    _SEARCH_TIMEOUT_DIM = 8192
-    _SEARCH_TIMEOUT_DOCS = 1500
+    # Shape of the index used by the on-timeout tests. The query these build
+    # runs ``KNN _SEARCH_TIMEOUT_DOCS``, and its cost is dominated by the size
+    # of the result set rather than by the vector arithmetic - at a fixed
+    # ``KNN 10`` the query takes ~1.6ms whatever the dimension, so the document
+    # count is what buys runtime and the dimension only buys memory.
+    #
+    # The runtime has to exceed the 1ms per-query timeout by a wide margin.
+    # ``search-on-timeout=fail`` is enforced by a timeout callback racing the
+    # thread running the query, so a query that only slightly overruns its
+    # timeout may still return full results - intended server behavior. Below
+    # roughly a 3x margin the error stops being raised at all; these values
+    # measure at ~890ms, i.e. a ~900x margin, in ~37MB.
+    _SEARCH_TIMEOUT_DIM = 256
+    _SEARCH_TIMEOUT_DOCS = 12000
 
     @pytest.mark.redismod
     # FT.DEL is not available on Redis Enterprise's search module.
@@ -1601,17 +1614,23 @@ class TestBaseSearchFunctionality(SearchTestsBase):
         client.hset("hset:1", "txt", "a")
         client.hset("hset:2", "txt", "b")
         client.hset("hset:3", "txt", "c")
+        # Keep searching until the expiration window of hset:2 has passed. The
+        # loop is bounded by elapsed time rather than by a fixed iteration count,
+        # so it covers the same window without depending on how long a single
+        # search round trip takes.
         if expects_resp2_shape(client) or expects_unified_shape(client):
             assert 3 == client.ft().search(Query("*")).total
             client.pexpire("hset:2", 300)
-            for _ in range(500):
+            deadline = time.monotonic() + 0.5
+            while time.monotonic() < deadline:
                 client.ft().search(Query("*")).docs[1]
             time.sleep(1)
             assert 2 == client.ft().search(Query("*")).total
         elif expects_resp3_shape(client):
             assert 3 == client.ft().search(Query("*"))["total_results"]
             client.pexpire("hset:2", 300)
-            for _ in range(500):
+            deadline = time.monotonic() + 0.5
+            while time.monotonic() < deadline:
                 client.ft().search(Query("*"))["results"][1]
             time.sleep(1)
             assert 2 == client.ft().search(Query("*"))["total_results"]
@@ -3597,6 +3616,169 @@ class TestDifferentFieldTypesSearch(SearchTestsBase):
         assert "FALSE" in field.args
 
     @pytest.mark.redismod
+    @skip_if_server_version_lt("8.11.0")
+    def test_hnsw_sq8_compression(self, client):
+        client.ft().create_index(
+            (
+                VectorField(
+                    "sq8",
+                    "HNSW",
+                    {
+                        "TYPE": "FLOAT32",
+                        "DIM": 8,
+                        "DISTANCE_METRIC": "L2",
+                        "COMPRESSION": "SQ8",
+                        "TRAINING_THRESHOLD": 0,
+                    },
+                ),
+                VectorField(
+                    "sq8_default",
+                    "HNSW",
+                    {
+                        "TYPE": "FLOAT16",
+                        "DIM": 8,
+                        "DISTANCE_METRIC": "L2",
+                        "COMPRESSION": "SQ8",
+                    },
+                ),
+                VectorField(
+                    "plain",
+                    "HNSW",
+                    {"TYPE": "FLOAT32", "DIM": 8, "DISTANCE_METRIC": "L2"},
+                    index_missing=True,
+                ),
+            )
+        )
+
+        for i in range(20):
+            vec = np.array([float(i + j) for j in range(8)], dtype=np.float32)
+            client.hset(
+                f"doc{i}",
+                mapping={
+                    "sq8": vec.tobytes(),
+                    "sq8_default": vec.astype(np.float16).tobytes(),
+                },
+            )
+
+        query = Query("*=>[KNN 5 @sq8 $vec as score]").no_content()
+        query_params = {"vec": np.arange(8, dtype=np.float32).tobytes()}
+        res = client.ft().search(query, query_params=query_params)
+        if expects_resp2_shape(client) or expects_unified_shape(client):
+            assert res.total == 5
+            assert "doc0" == res.docs[0].id
+        elif expects_resp3_shape(client):
+            assert res["total_results"] == 5
+            assert "doc0" == res["results"][0]["id"]
+
+        attrs = client.ft().info()["attributes"]
+        if expects_resp2_shape(client):
+            sq8, sq8_default, plain = (dict(zip(a[::2], a[1::2])) for a in attrs)
+            assert "INDEXMISSING" in attrs[2]
+        else:
+            sq8, sq8_default, plain = attrs
+            assert plain["flags"] == ["INDEXMISSING"]
+            assert sq8["flags"] == []
+
+        assert sq8["algorithm"] == "HNSW"
+        assert sq8["dim"] == 8
+        assert sq8["M"] == 16
+        assert sq8["compression"] == "SQ8"
+        # An explicit zero is kept and not replaced by the default.
+        assert sq8["training_threshold"] == 0
+        assert sq8_default["compression"] == "SQ8"
+        assert sq8_default["training_threshold"] == 10240
+        assert "compression" not in plain
+        assert "training_threshold" not in plain
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("8.11.0")
+    def test_hnsw_sq8_compression_errors(self, client):
+        with pytest.raises(ResponseError, match="FLOAT32 and FLOAT16"):
+            client.ft("idx_int8").create_index(
+                (
+                    VectorField(
+                        "v",
+                        "HNSW",
+                        {
+                            "TYPE": "INT8",
+                            "DIM": 8,
+                            "DISTANCE_METRIC": "L2",
+                            "COMPRESSION": "SQ8",
+                        },
+                    ),
+                )
+            )
+
+        with pytest.raises(ResponseError, match="compression was not requested"):
+            client.ft("idx_no_compression").create_index(
+                (
+                    VectorField(
+                        "v",
+                        "HNSW",
+                        {
+                            "TYPE": "FLOAT32",
+                            "DIM": 8,
+                            "DISTANCE_METRIC": "L2",
+                            "TRAINING_THRESHOLD": 1024,
+                        },
+                    ),
+                )
+            )
+
+    @pytest.mark.fixed_client
+    def test_normalize_info_attribute(self):
+        # Pure parsing check of the RESP2 -> unified FT.INFO attribute
+        # conversion, using the flat lists that RediSearch sends on RESP2.
+        normalize = Search._normalize_info_attribute
+        assert normalize(
+            [
+                "identifier", "v", "attribute", "v", "type", "VECTOR",
+                "algorithm", "HNSW", "data_type", "FLOAT32", "dim", 4,
+                "distance_metric", "L2", "M", 16, "ef_construction", 200,
+                "ef_runtime", 10, "compression", "SQ8",
+                "training_threshold", 0, "INDEXMISSING",
+            ]
+        ) == {
+            "identifier": "v",
+            "attribute": "v",
+            "type": "VECTOR",
+            "algorithm": "HNSW",
+            "data_type": "FLOAT32",
+            "dim": 4,
+            "distance_metric": "L2",
+            "M": 16,
+            "ef_construction": 200,
+            "ef_runtime": 10,
+            "compression": "SQ8",
+            "training_threshold": 0,
+            "flags": ["INDEXMISSING"],
+        }  # fmt: skip
+        assert normalize(
+            [
+                b"identifier", b"g", b"attribute", b"g", b"type", b"GEOSHAPE",
+                b"coord_system", b"FLAT", b"INDEXMISSING",
+            ]
+        ) == {
+            "identifier": "g",
+            "attribute": "g",
+            "type": "GEOSHAPE",
+            "coord_system": "FLAT",
+            "flags": ["INDEXMISSING"],
+        }  # fmt: skip
+        assert normalize(
+            [
+                "identifier", "t", "attribute", "t", "type", "TAG",
+                "SEPARATOR", ";", "CASESENSITIVE", "SORTABLE", "UNF",
+            ]
+        ) == {
+            "identifier": "t",
+            "attribute": "t",
+            "type": "TAG",
+            "SEPARATOR": ";",
+            "flags": ["CASESENSITIVE", "SORTABLE", "UNF"],
+        }  # fmt: skip
+
+    @pytest.mark.redismod
     @skip_ifmodversion_lt("2.4.3", "search")
     def test_text_params(self, client):
         client.flushdb()
@@ -4806,6 +4988,30 @@ class TestHybridSearch(SearchTestsBase):
     # warnings. 6000 docs keeps the query comfortably above the 1ms limit so
     # the timeout reliably triggers across hardware.
     _HYBRID_TIMEOUT_DOCS = 6000
+
+    def test_hybrid_search_forwards_zero_timeout(self):
+        # TIMEOUT 0 means "no timeout" and is a value the server accepts for
+        # FT.HYBRID, so it must reach the wire. Guarding the argument with a
+        # truthiness test made timeout=0 indistinguishable from timeout=None,
+        # which silently downgrades the query to the server's search-timeout
+        # default instead of running it unlimited. Query.get_args() already
+        # emits TIMEOUT 0 (see test_query_timeout); this keeps FT.HYBRID
+        # consistent with it. Runs without a server.
+        hybrid_query = HybridQuery(
+            HybridSearchQuery("foo"),
+            HybridVsimQuery(vector_field_name="@embedding", vector_data="$vec"),
+        )
+        ft = redis.Redis().ft("idx")
+
+        def wire_args(timeout):
+            with mock.patch.object(ft, "execute_command", return_value={}) as m:
+                ft.hybrid_search(query=hybrid_query, timeout=timeout)
+                return list(m.call_args[0])
+
+        assert wire_args(5000)[-2:] == ["TIMEOUT", 5000]
+        assert wire_args(0)[-2:] == ["TIMEOUT", 0]
+        # None stays the "argument not set" sentinel.
+        assert "TIMEOUT" not in wire_args(None)
 
     def _create_hybrid_search_index(self, client, dim=4):
         client.ft().create_index(
@@ -6292,9 +6498,12 @@ class TestHybridSearch(SearchTestsBase):
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
+        # MAXIDLE is expressed in milliseconds, and the two cursors created here
+        # are read over two further round trips. Keep the idle window wide enough
+        # to survive that when the target deployment is remote.
         res = client.ft().hybrid_search(
             query=hybrid_query,
-            cursor=HybridCursorQuery(count=5, max_idle=100),
+            cursor=HybridCursorQuery(count=5, max_idle=10000),
             params_substitution={
                 "vec": np.array([1, 2, 7, 6], dtype=np.float32).tobytes()
             },
