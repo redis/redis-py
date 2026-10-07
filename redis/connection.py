@@ -1670,12 +1670,6 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             if disconnect_on_error:
                 add_debug_log_for_connection_failure(self, e, "reading response")
                 self.disconnect()
-            if is_os_level_timeout(e):
-                # ETIMEDOUT from the OS (e.g. after a network change): the
-                # connection is dead, not slow.
-                raise ConnectionError(
-                    f"Error while reading from {host_error} : {e.args}"
-                )
             raise TimeoutError(f"Timeout reading from {host_error}")
         except TimeoutError as e:
             # The parsers raise redis.exceptions.TimeoutError, which is not an

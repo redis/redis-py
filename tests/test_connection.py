@@ -4170,19 +4170,30 @@ class TestBlockingConnectionPoolMetricCount:
         assert idle_net == 0, f"reset() must not touch IDLE, got {idle_net}"
 
 
-def test_read_response_os_level_timeout_is_a_connection_error():
+@pytest.mark.parametrize("raise_on_timeout", [True, False], ids=["read", "poll"])
+def test_hiredis_read_from_socket_os_level_timeout_is_a_connection_error(
+    raise_on_timeout,
+):
     # socket.timeout is the builtin TimeoutError since Python 3.10, so an
-    # ETIMEDOUT the OS raises on a dead socket lands in the same except clause
-    # as a real read timeout. The connection is broken: raise ConnectionError.
-    conn = Connection(socket_timeout=1)
-    conn._parser.read_response = Mock(
-        side_effect=OSError(ETIMEDOUT, "Operation timed out")
-    )
-    conn.disconnect = Mock()
+    # ETIMEDOUT the OS raises on a dead socket (e.g. after a network change)
+    # lands in the parser's socket.timeout handler. It used to be reported as a
+    # read timeout - or, when polling with raise_on_timeout=False, as "no data",
+    # which hid the broken connection. The connection is dead: ConnectionError.
+    parser = make_hiredis_parser()
+    parser._sock.recv_into.side_effect = OSError(ETIMEDOUT, "Operation timed out")
 
     with pytest.raises(ConnectionError):
-        conn.read_response()
-    conn.disconnect.assert_called_once()
+        parser.read_from_socket(timeout=1, raise_on_timeout=raise_on_timeout)
+
+
+@pytest.mark.parametrize("raise_on_timeout", [True, False], ids=["read", "poll"])
+def test_socket_buffer_os_level_timeout_is_a_connection_error(raise_on_timeout):
+    sock = Mock()
+    sock.recv.side_effect = OSError(ETIMEDOUT, "Operation timed out")
+    buf = SocketBuffer(sock, 65536, 1)
+
+    with pytest.raises(ConnectionError):
+        buf._read_from_socket(timeout=1, raise_on_timeout=raise_on_timeout)
 
 
 def test_send_packed_command_os_level_timeout_is_a_connection_error():
