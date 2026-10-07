@@ -52,7 +52,7 @@ else:
 from ..auth.token import TokenInterface
 from ..driver_info import DriverInfo, resolve_driver_info
 from ..event import AsyncAfterConnectionReleasedEvent, EventDispatcher
-from ..utils import deprecated_args, format_error_message
+from ..utils import deprecated_args, format_error_message, is_os_level_timeout
 
 # the functionality is available in 3.11.x but has a major issue before
 # 3.11.3. See https://github.com/redis/redis-py/issues/2633
@@ -1416,6 +1416,11 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         except asyncio.TimeoutError as e:
             add_debug_log_for_connection_failure(self, e, "writing command")
             await self.disconnect(nowait=True)
+            if is_os_level_timeout(e):
+                # ETIMEDOUT from the OS: the connection is dead, not slow.
+                raise ConnectionError(
+                    f"Error {e.errno} while writing to socket. {e.strerror}."
+                ) from e
             raise TimeoutError("Timeout writing to socket") from None
         except OSError as e:
             add_debug_log_for_connection_failure(self, e, "writing command")
@@ -1529,6 +1534,16 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                     push_request=push_request,
                 )
         except asyncio.TimeoutError as e:
+            if is_os_level_timeout(e):
+                # The OS reported ETIMEDOUT on the socket (e.g. after a network
+                # change): the connection is dead, not slow. Returning None here
+                # made PubSub.listen() re-read the dead socket in a busy loop.
+                if disconnect_on_error:
+                    add_debug_log_for_connection_failure(self, e, "reading response")
+                    await self.disconnect(nowait=True)
+                raise ConnectionError(
+                    f"Error while reading from {host_error} : {e.args}"
+                )
             if timeout is not None:
                 # user requested timeout, return None. Operation can be retried
                 return None

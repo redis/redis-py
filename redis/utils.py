@@ -71,6 +71,19 @@ def pipeline(redis_obj):
         p.reset()
 
 
+def is_os_level_timeout(exc: BaseException) -> bool:
+    """Tell an OS-level timeout apart from a socket/asyncio timeout.
+
+    Since Python 3.10 ``socket.timeout`` and since 3.11 ``asyncio.TimeoutError``
+    are the builtin ``TimeoutError``, an ``OSError`` subclass. A timeout the OS
+    reports on a broken connection (``ETIMEDOUT``, e.g. after a network change)
+    is therefore caught by the same ``except`` clauses as our own read/write
+    timeouts, although it means the connection is dead. Only the OS-level error
+    carries an errno.
+    """
+    return isinstance(exc, OSError) and exc.errno is not None
+
+
 def str_if_bytes(value: Union[str, bytes]) -> str:
     return (
         value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value

@@ -10,6 +10,7 @@ import threading
 import time
 import types
 import warnings
+from errno import ETIMEDOUT
 import weakref
 from errno import EBADF, ECONNREFUSED, EWOULDBLOCK
 from importlib import metadata
@@ -4167,3 +4168,29 @@ class TestBlockingConnectionPoolMetricCount:
         idle_net, used_net = _net(calls)
         assert used_net == 0, f"reset() must not decrement USED again, got {used_net}"
         assert idle_net == 0, f"reset() must not touch IDLE, got {idle_net}"
+
+
+def test_read_response_os_level_timeout_is_a_connection_error():
+    # socket.timeout is the builtin TimeoutError since Python 3.10, so an
+    # ETIMEDOUT the OS raises on a dead socket lands in the same except clause
+    # as a real read timeout. The connection is broken: raise ConnectionError.
+    conn = Connection(socket_timeout=1)
+    conn._parser.read_response = Mock(
+        side_effect=OSError(ETIMEDOUT, "Operation timed out")
+    )
+    conn.disconnect = Mock()
+
+    with pytest.raises(ConnectionError):
+        conn.read_response()
+    conn.disconnect.assert_called_once()
+
+
+def test_send_packed_command_os_level_timeout_is_a_connection_error():
+    conn = Connection(socket_timeout=1)
+    conn._sock = Mock()
+    conn._sock.sendall.side_effect = OSError(ETIMEDOUT, "Operation timed out")
+    conn.disconnect = Mock()
+
+    with pytest.raises(ConnectionError):
+        conn.send_packed_command(b"PING", check_health=False)
+    conn.disconnect.assert_called_once()

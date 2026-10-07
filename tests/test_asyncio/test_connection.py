@@ -1,10 +1,11 @@
 import asyncio
+import math
 import os
 import socket
 import ssl
 import types
 from unittest import mock
-from errno import ECONNREFUSED
+from errno import ECONNREFUSED, ETIMEDOUT
 from unittest.mock import patch
 
 import pytest
@@ -1512,3 +1513,52 @@ class TestAsyncBlockingConnectionPoolMetricCount:
         idle_net -= len(pool._available_connections)
         assert idle_net == 0, f"Lifecycle IDLE should net 0, got {idle_net}"
         assert used_net == 0, f"Lifecycle USED should net 0, got {used_net}"
+
+
+@pytest.mark.parametrize(
+    "timeout",
+    [None, 1.0, math.inf],
+    ids=["socket_timeout", "user_timeout", "blocking_read"],
+)
+async def test_read_response_os_level_timeout_is_a_connection_error(timeout):
+    # Since Python 3.11 asyncio.TimeoutError is the builtin TimeoutError, so an
+    # ETIMEDOUT the OS raises on a dead socket (e.g. after a network change)
+    # lands in the same except clause as our own read timeout. It used to be
+    # reported as a TimeoutError - or, with an explicit timeout, swallowed into
+    # a None return, which made PubSub.listen() re-read the dead socket in a
+    # busy loop. The connection is broken: disconnect and raise ConnectionError.
+    conn = Connection(socket_timeout=1)
+    conn._read_response_from_parser = mock.AsyncMock(
+        side_effect=OSError(ETIMEDOUT, "Operation timed out")
+    )
+    conn.disconnect = mock.AsyncMock()
+
+    with pytest.raises(ConnectionError):
+        await conn.read_response(timeout=timeout)
+    conn.disconnect.assert_awaited_once()
+
+
+async def test_read_response_user_timeout_still_returns_none():
+    conn = Connection()
+
+    async def never_answers(*args, **kwargs):
+        await asyncio.sleep(10)
+
+    conn._read_response_from_parser = never_answers
+    conn.disconnect = mock.AsyncMock()
+
+    assert await conn.read_response(timeout=0.01) is None
+    conn.disconnect.assert_not_awaited()
+
+
+async def test_send_packed_command_os_level_timeout_is_a_connection_error():
+    conn = Connection(socket_timeout=1)
+    conn._reader = conn._writer = mock.Mock()  # look connected
+    conn._send_packed_command = mock.AsyncMock(
+        side_effect=OSError(ETIMEDOUT, "Operation timed out")
+    )
+    conn.disconnect = mock.AsyncMock()
+
+    with pytest.raises(ConnectionError):
+        await conn.send_packed_command(b"PING", check_health=False)
+    conn.disconnect.assert_awaited_once()
