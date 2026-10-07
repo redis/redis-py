@@ -1848,6 +1848,12 @@ _NO_PENDING_HIT = object()
 # so ``_cache_owned_command`` rejects nearly every command before it allocates anything.
 _CLIENT_FIRST_CHARS = frozenset(("c", "C", b"c", b"C"))
 _RESET_FIRST_CHARS = frozenset(("r", "R", b"r", b"R"))
+# ``pack`` splits the command name on whitespace, so a name padded with it still reaches
+# the server as ``CLIENT ...`` or ``RESET``. It encodes a ``str`` name before splitting,
+# so ASCII whitespace is the only kind that splits.
+_WHITESPACE_CHARS = frozenset(
+    (*" \t\n\r\x0b\x0c", *(bytes((c,)) for c in b" \t\n\r\x0b\x0c"))
+)
 
 # The ``CLIENT`` subcommands the cache owns. ``TRACKINGINFO`` and ``GETREDIR`` only read the
 # tracking state, so they are not here.
@@ -1859,26 +1865,36 @@ def _cache_owned_command(args) -> str | None:
     The name of the command in ``args`` if it is one the cache owns - ``CLIENT CACHING``,
     ``CLIENT TRACKING`` or ``RESET`` - else ``None``. Matches every spelling
     ``pack_command`` accepts: ``"CLIENT CACHING"`` as one argument or ``"CLIENT"``,
-    ``"CACHING"`` as two, as ``str`` or ``bytes``, in any case.
+    ``"CACHING"`` as two, as ``str``, ``bytes``, ``bytearray`` or ``memoryview``, in any
+    case, padded with whitespace or not.
     """
     command = args[0]
     if not isinstance(command, (str, bytes)):
-        return None
+        if not isinstance(command, (bytearray, memoryview)):
+            return None
+        command = bytes(command)
     first_char = command[:1]
     if first_char in _RESET_FIRST_CHARS:
-        # ``RESET`` takes no arguments, so only a five-character name can match. The
-        # length check keeps the many other ``R`` commands (``RPOP``, ``RENAME``, ...)
-        # allocation-free.
-        if len(command) == 5 and str_if_bytes(command).upper() == "RESET":
-            return "RESET"
-        return None
-    if first_char not in _CLIENT_FIRST_CHARS:
+        # ``RESET`` takes no arguments, so only a five-character name, or one followed by
+        # whitespace, can match. The check keeps the many other ``R`` commands (``RPOP``,
+        # ``RENAME``, ...) allocation-free.
+        if len(command) != 5 and command[5:6] not in _WHITESPACE_CHARS:
+            return None
+    elif first_char not in _CLIENT_FIRST_CHARS and first_char not in _WHITESPACE_CHARS:
         return None
     words = str_if_bytes(command).upper().split()
-    if not words or words[0] != "CLIENT":
+    if not words:
         return None
-    if len(words) == 1 and len(args) > 1 and isinstance(args[1], (str, bytes)):
-        words.append(str_if_bytes(args[1]).upper())
+    if words[0] == "RESET":
+        return "RESET"
+    if words[0] != "CLIENT":
+        return None
+    if len(words) == 1 and len(args) > 1:
+        subcommand = args[1]
+        if isinstance(subcommand, (bytearray, memoryview)):
+            subcommand = bytes(subcommand)
+        if isinstance(subcommand, (str, bytes)):
+            words.append(str_if_bytes(subcommand).upper())
     if len(words) > 1 and words[1] in _CACHE_OWNED_CLIENT_SUBCOMMANDS:
         return f"CLIENT {words[1]}"
     return None

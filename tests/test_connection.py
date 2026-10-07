@@ -2574,8 +2574,8 @@ class TestTrackingModePairing:
         assert proxy._skip_next_caching is False
 
 
-# Every spelling ``pack_command`` accepts: one argument or two, ``str`` or ``bytes``, any
-# case. Each row is ``(args, the command name the refusal reports)``.
+# Every spelling ``pack_command`` accepts: one argument or two, ``str``, ``bytes``,
+# ``bytearray`` or ``memoryview``, any case, padded with whitespace or not. Each row is ``(args, the command name the refusal reports)``.
 _CACHE_OWNED_SPELLINGS = [
     (("CLIENT CACHING", "NO"), "CLIENT CACHING"),
     (("client caching", "yes"), "CLIENT CACHING"),
@@ -2592,6 +2592,18 @@ _CACHE_OWNED_SPELLINGS = [
     (("RESET",), "RESET"),
     (("reset",), "RESET"),
     ((b"RESET",), "RESET"),
+    ((bytearray(b"CLIENT CACHING"), b"NO"), "CLIENT CACHING"),
+    (("CLIENT", memoryview(b"CACHING"), "YES"), "CLIENT CACHING"),
+    (
+        (bytearray(b"CLIENT"), bytearray(b"TRACKING"), bytearray(b"OFF")),
+        "CLIENT TRACKING",
+    ),
+    ((memoryview(b"RESET"),), "RESET"),
+    ((" CLIENT TRACKING", "OFF"), "CLIENT TRACKING"),
+    (("\tclient tracking", "off"), "CLIENT TRACKING"),
+    ((b" CLIENT CACHING", b"NO"), "CLIENT CACHING"),
+    ((" RESET",), "RESET"),
+    (("reset\t",), "RESET"),
 ]
 _CACHE_OWNED_IDS = [
     "caching-str-one-arg",
@@ -2609,6 +2621,15 @@ _CACHE_OWNED_IDS = [
     "reset",
     "reset-lowercase",
     "reset-bytes",
+    "caching-bytearray-one-arg",
+    "caching-memoryview-subcommand",
+    "tracking-bytearray-two-args",
+    "reset-memoryview",
+    "tracking-leading-space",
+    "tracking-leading-tab",
+    "caching-bytes-leading-space",
+    "reset-leading-space",
+    "reset-trailing-whitespace",
 ]
 
 
@@ -2670,6 +2691,8 @@ class TestUserSentCacheOwnedCommands:
             ("GET", "foo"),
             (b"CACHING",),
             (b"TRACKING", b"OFF"),
+            (" CLIENT TRACKINGINFO",),
+            (bytearray(b"RENAME"), "a", "b"),
         ],
         ids=[
             "trackinginfo",
@@ -2685,6 +2708,8 @@ class TestUserSentCacheOwnedCommands:
             "get",
             "no-client-caching",
             "no-client-tracking",
+            "trackinginfo-leading-space",
+            "rename-bytearray",
         ],
     )
     def test_other_commands_pass_through(self, proxy_factory, mock_connection, args):

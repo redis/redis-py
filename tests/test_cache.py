@@ -35,7 +35,12 @@ from redis.event import (
 from redis.exceptions import AskError, MovedError, RedisError, ResponseError
 from redis.observability.attributes import CSCReason
 from redis.utils import str_if_bytes
-from tests.conftest import _get_client, skip_if_resp_version, skip_if_server_version_lt
+from tests.conftest import (
+    _get_client,
+    assert_resp_response,
+    skip_if_resp_version,
+    skip_if_server_version_lt,
+)
 
 # A record for a command a resolver must report as ineligible, used to prove that eligibility
 # comes from the resolver the config holds rather than from the config itself.
@@ -1056,7 +1061,7 @@ class TestCache:
             assert client.get_cache() is None
             client.client_tracking_on()
             client.client_tracking_off()
-            assert client.reset() == "RESET"
+            assert_resp_response(client, client.reset(), "RESET", b"RESET", "RESET")
         finally:
             client.close()
 
