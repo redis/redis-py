@@ -121,6 +121,20 @@ def test_bf_insert(client):
 
 
 @pytest.mark.redismod
+def test_bf_false_flags_are_not_sent(client):
+    # noScale=False and noCreate=False must behave like omitting the flag,
+    # not send NONSCALING / NOCREATE.
+    assert client.bf().create("bloom", 0.01, 1, noScale=False)
+    assert [1, 1, 1] == intlist(client.bf().madd("bloom", "a", "b", "c"))
+    assert [1, 1, 1] == intlist(
+        client.bf().insert("bloom_ins", ["a", "b", "c"], capacity=1, noScale=False)
+    )
+    assert [1] == intlist(client.bf().insert("bloom_new", ["a"], noCreate=False))
+    assert [1] == client.cf().insert("cuckoo_new", ["a"], nocreate=False)
+    assert [1] == client.cf().insertnx("cuckoo_nx_new", ["a"], nocreate=False)
+
+
+@pytest.mark.redismod
 # BF.SCANDUMP/LOADCHUNK does not complete against Redis Enterprise's bloom module
 # (the scandump cursor loop times out).
 @skip_if_redis_enterprise()
@@ -303,6 +317,34 @@ def test_cms_merge(client):
     assert [9, 9, 11] == client.cms().query("C", "foo", "bar", "baz")
     assert client.cms().merge("C", 2, ["A", "B"], ["2", "3"])
     assert [16, 15, 21] == client.cms().query("C", "foo", "bar", "baz")
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("8.11.0", "bf")
+def test_cms_cell_size(client):
+    for cell_size in (1, 2, 4, 8):
+        assert client.cms().initbydim(
+            f"cell_dim{cell_size}", 1000, 5, cell_size=cell_size
+        )
+        assert cell_size == client.cms().info(f"cell_dim{cell_size}")["cell_size"]
+        assert client.cms().initbyprob(
+            f"cell_prob{cell_size}", 0.01, 0.01, cell_size=cell_size
+        )
+        assert cell_size == client.cms().info(f"cell_prob{cell_size}")["cell_size"]
+
+    # the server uses 4-byte counters when CELL_SIZE is omitted
+    assert client.cms().initbydim("cell_default", 1000, 5)
+    info = client.cms().info("cell_default")
+    assert 1000 == info["width"]
+    assert 5 == info["depth"]
+    assert 0 == info["count"]
+    assert 4 == info["cell_size"]
+
+    # only 1, 2, 4 and 8 are valid cell sizes
+    with pytest.raises(redis.ResponseError):
+        client.cms().initbydim("cell_bad", 1000, 5, cell_size=3)
+    with pytest.raises(redis.ResponseError):
+        client.cms().initbyprob("cell_bad", 0.01, 0.01, cell_size=16)
 
 
 @pytest.mark.redismod

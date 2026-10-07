@@ -99,9 +99,19 @@ filterwarnings = [
     "ignore:sys.monitoring isn't available:coverage.exceptions.CoverageWarning",
 ]
 log_cli_level = "INFO"
-log_cli_date_format = "%H:%M:%S:%f"
+# `%f` is not a strftime directive, so it renders literally. Sub-second
+# resolution has to come from `%(msecs)03d` in the format string instead - and it
+# is not optional: maintenance notifications arrive on all of a pool's
+# connections within a few milliseconds of each other.
+log_cli_date_format = "%H:%M:%S"
 log_cli = false
-log_cli_format = "%(asctime)s %(levelname)s %(threadName)s: %(message)s"
+log_cli_format = "%(asctime)s.%(msecs)03d %(levelname)s %(threadName)s: %(message)s"
+# `log_format`/`log_date_format` are what the "Captured log" sections of a
+# failure report use. Without them pytest falls back to a default format with no
+# timestamp at all, which makes it impossible to order a command failure against
+# the push notification that was supposed to precede it.
+log_format = "%(asctime)s.%(msecs)03d %(levelname)-8s %(threadName)s %(name)s:%(filename)s:%(lineno)s %(message)s"
+log_date_format = "%H:%M:%S"
 log_level = "INFO"
 capture = "yes"
 

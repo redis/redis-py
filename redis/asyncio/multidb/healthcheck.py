@@ -6,11 +6,15 @@ from enum import Enum
 from typing import List, Optional, Tuple, Type, Union
 
 from redis.asyncio import Redis as AsyncRedis
+from redis.asyncio.cluster import ClusterNode as AsyncClusterNode
 from redis.asyncio.cluster import RedisCluster as AsyncRedisCluster
+from redis.asyncio.connection import SSLConnection as AsyncSSLConnection
 from redis.asyncio.http.http_client import DEFAULT_TIMEOUT, AsyncHTTPClientWrapper
 from redis.backoff import NoBackoff
 from redis.client import Redis as SyncRedis
 from redis.cluster import RedisCluster as SyncRedisCluster
+from redis.connection import SSLConnection as SyncSSLConnection
+from redis.exceptions import ConnectionError, TimeoutError
 from redis.http.http_client import HttpClient
 from redis.multidb.exception import UnhealthyDatabaseException
 from redis.retry import Retry
@@ -38,6 +42,28 @@ def _filter_kwargs(kwargs: dict, cls: Type) -> dict:
     """Filter kwargs to only include parameters accepted by the class's __init__."""
     allowed = _get_init_params(cls)
     return {k: v for k, v in kwargs.items() if k in allowed}
+
+
+def _uses_tls(client, conn_kwargs: dict) -> bool:
+    """Detect whether a client's transport is TLS.
+
+    The clients turn ``ssl=True`` into ``connection_class=SSLConnection``:
+    the standalone clients hold it on their connection pool, the async
+    cluster keeps it inside its connection kwargs, and the sync cluster
+    keeps the plain ``ssl`` key there. None of these survive
+    ``_filter_kwargs`` (``connection_class`` is not an ``__init__``
+    parameter of the rebuilt clients), so TLS must be re-expressed as
+    ``ssl=True`` explicitly.
+    """
+    if conn_kwargs.get("ssl"):
+        return True
+    connection_class = conn_kwargs.get("connection_class")
+    if connection_class is None:
+        pool = getattr(client, "connection_pool", None)
+        connection_class = getattr(pool, "connection_class", None)
+    return isinstance(connection_class, type) and issubclass(
+        connection_class, (SyncSSLConnection, AsyncSSLConnection)
+    )
 
 
 DEFAULT_HEALTH_CHECK_PROBES = 3
@@ -176,16 +202,25 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
             if isinstance(database.client, (AsyncRedis, SyncRedis)):
                 conn_kwargs = database.client.get_connection_kwargs()
                 filtered_kwargs = _filter_kwargs(conn_kwargs, AsyncRedis)
+                if _uses_tls(database.client, conn_kwargs):
+                    # Preserve the original transport: the source kwargs carry
+                    # TLS as connection_class=SSLConnection, which the filter
+                    # drops, so without this the probe would speak plaintext
+                    # to a TLS port and mark a healthy database unavailable.
+                    filtered_kwargs["ssl"] = True
                 client = AsyncRedis(**filtered_kwargs)
             elif isinstance(database.client, (AsyncRedisCluster, SyncRedisCluster)):
                 # Cluster client - create a single cluster client that handles
                 # topology changes internally
                 conn_kwargs = database.client.get_connection_kwargs().copy()
                 filtered_kwargs = _filter_kwargs(conn_kwargs, AsyncRedisCluster)
+                if _uses_tls(database.client, conn_kwargs):
+                    # Same transport preservation as the standalone branch
+                    # above; the async cluster also represents TLS as
+                    # connection_class=SSLConnection in its connection kwargs.
+                    filtered_kwargs["ssl"] = True
                 startup_nodes = database.client.startup_nodes
-                # Use the first node as the startup node
                 if startup_nodes:
-                    first_node = startup_nodes[0]
                     nodes_manager = database.client.nodes_manager
                     # The sync and async NodesManager expose this setting under
                     # different names (``_require_full_coverage`` vs
@@ -196,9 +231,15 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
                         "require_full_coverage",
                         getattr(nodes_manager, "_require_full_coverage", True),
                     )
+                    # Seed the health-check client with every configured startup
+                    # node, not just the first: if the first seed is down while
+                    # another is healthy, the probe must still be able to discover
+                    # the cluster instead of marking the database unhealthy.
                     client = AsyncRedisCluster(
-                        host=first_node.host,
-                        port=first_node.port,
+                        startup_nodes=[
+                            AsyncClusterNode(node.host, node.port)
+                            for node in startup_nodes
+                        ],
                         dynamic_startup_nodes=nodes_manager._dynamic_startup_nodes,
                         address_remap=nodes_manager.address_remap,
                         require_full_coverage=require_full_coverage,
@@ -386,9 +427,42 @@ class PingHealthCheck(AbstractHealthCheck):
             return await hc_client.execute_command("PING")
         else:
             # For a cluster checks if all nodes are healthy.
+            # The health check client is created lazily, so the topology has to be
+            # discovered before pinging - an uninitialized client has an empty node
+            # cache, so there would be nothing to ping and the database would be
+            # reported as healthy. Once discovered, this is a no-op.
+            await hc_client.initialize()
             all_nodes = hc_client.get_nodes()
-            for node in all_nodes:
-                if not await node.redis_connection.execute_command("PING"):
+
+            if not all_nodes:
+                return False
+
+            # The nodes are pinged concurrently rather than one after another: a
+            # single health_check_timeout covers the whole health check - every
+            # probe of it - so a serial loop makes the budget scale with the size
+            # of the cluster. Gathering keeps a probe at the cost of one round
+            # trip. Exceptions are collected rather than propagated by gather
+            # itself, so that a failing node does not leave its siblings running
+            # unawaited; the first one is re-raised below to keep the caller's
+            # error handling unchanged.
+            results = await asyncio.gather(
+                *(node.execute_command("PING") for node in all_nodes),
+                return_exceptions=True,
+            )
+
+            for result in results:
+                if isinstance(result, BaseException):
+                    if isinstance(result, (ConnectionError, TimeoutError, OSError)):
+                        # A failing node may have been removed or replaced in the
+                        # cluster, and direct node probes bypass the client's own
+                        # topology-refresh path. Closing the client resets its lazy
+                        # initialization, so the next probe re-discovers the
+                        # topology from the startup nodes instead of pinging the
+                        # stale node forever.
+                        await hc_client.aclose()
+                    raise result
+
+                if not result:
                     return False
 
             return True
@@ -458,6 +532,48 @@ class LagAwareHealthCheck(AbstractHealthCheck):
             health_check_timeout=health_check_timeout,
         )
 
+    @staticmethod
+    def _database_hosts(database) -> set[str]:
+        """
+        The hosts the given database is known by on the Redis Enterprise REST API.
+
+        For a cluster client these are the endpoints the client was configured with,
+        not the nodes it discovered: CLUSTER SLOTS advertises each node's own address,
+        which on a public Redis Enterprise endpoint is neither the endpoint DNS name
+        nor an address the bdb lists. ``startup_nodes`` is read off the client rather
+        than off its nodes manager, because the latter is replaced by the discovered
+        nodes when ``dynamic_startup_nodes`` is enabled, as it is by default.
+        """
+        if isinstance(database.client, (AsyncRedis, SyncRedis)):
+            return {database.client.get_connection_kwargs()["host"]}
+
+        # Cluster client
+        return {node.host for node in database.client.startup_nodes}
+
+    @staticmethod
+    def _find_matching_bdb(bdbs, db_hosts: set[str]) -> Optional[dict]:
+        """
+        The bdb whose endpoints identify one of the given database hosts.
+
+        A DNS name belongs to a single bdb, while databases hosted by the same cluster
+        share the addresses their endpoints resolve to, so a match by DNS name is
+        preferred over a match by address across all of the bdbs.
+        """
+        addr_match = None
+
+        for bdb in bdbs:
+            for endpoint in bdb["endpoints"]:
+                if endpoint["dns_name"] in db_hosts:
+                    return bdb
+
+                # In case if the host was set as public IP
+                if addr_match is None and any(
+                    addr in db_hosts for addr in endpoint["addr"]
+                ):
+                    addr_match = bdb
+
+        return addr_match
+
     async def check_health(self, database, hc_client: AsyncRedisClientT) -> bool:
         """
         Check database health via Redis Enterprise REST API.
@@ -471,35 +587,32 @@ class LagAwareHealthCheck(AbstractHealthCheck):
                 "Database health check url is not set. Please check DatabaseConfig for the current database."
             )
 
-        if isinstance(database.client, (AsyncRedis, SyncRedis)):
-            db_host = database.client.get_connection_kwargs()["host"]
-        else:
-            # Cluster client
-            db_host = database.client.get_nodes()[0].host
+        db_hosts = self._database_hosts(database)
 
+        # Absolute URLs, rather than a base_url set on the HTTP client: one
+        # LagAwareHealthCheck instance serves every database and MultiDBClient
+        # checks them concurrently, so a base_url assignment made here would be
+        # overwritten by another database's check while this one is awaiting its
+        # response - sending the second request to the wrong cluster.
         base_url = f"{database.health_check_url}:{self._rest_api_port}"
-        self._http_client.client.base_url = base_url
 
-        # Find bdb matching to the current database host
-        matching_bdb = None
-        for bdb in await self._http_client.get("/v1/bdbs"):
-            for endpoint in bdb["endpoints"]:
-                if endpoint["dns_name"] == db_host:
-                    matching_bdb = bdb
-                    break
-
-                # In case if the host was set as public IP
-                for addr in endpoint["addr"]:
-                    if addr == db_host:
-                        matching_bdb = bdb
-                        break
+        # Find bdb matching to the current database host. The per-request
+        # deadline stays the client's configured http_timeout; the whole check
+        # is already bounded by health_check_timeout in the policy.
+        matching_bdb = self._find_matching_bdb(
+            await self._http_client.get(f"{base_url}/v1/bdbs"),
+            db_hosts,
+        )
 
         if matching_bdb is None:
-            logger.warning("LagAwareHealthCheck failed: Couldn't find a matching bdb")
+            logger.warning(
+                "LagAwareHealthCheck failed: Couldn't find a bdb matching any of "
+                f"the database hosts {sorted(db_hosts)}"
+            )
             raise ValueError("Could not find a matching bdb")
 
         url = (
-            f"/v1/bdbs/{matching_bdb['uid']}/availability"
+            f"{base_url}/v1/bdbs/{matching_bdb['uid']}/availability"
             f"?extend_check=lag&availability_lag_tolerance_ms={self._lag_aware_tolerance}"
         )
         await self._http_client.get(url, expect_json=False)
