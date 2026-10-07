@@ -82,6 +82,8 @@ class AsyncMaintNotificationsPoolHandler:
         self.config = config
         self._processed_notifications: set[MaintenanceNotification] = set()
         self._scheduled_tasks: set[asyncio.Task[None]] = set()
+        # The handoffs whose relaxation the scheduled cleanup is still to end
+        self._pending_handoffs: set[NodeMovingNotification] = set()
         self._lock = asyncio.Lock()
         self.connection: Any | None = None
 
@@ -96,6 +98,7 @@ class AsyncMaintNotificationsPoolHandler:
         copy = AsyncMaintNotificationsPoolHandler(self.pool, self.config)
         copy._processed_notifications = self._processed_notifications
         copy._scheduled_tasks = self._scheduled_tasks
+        copy._pending_handoffs = self._pending_handoffs
         copy._lock = self._lock
         copy.connection = None
         return copy
@@ -169,6 +172,8 @@ class AsyncMaintNotificationsPoolHandler:
                 self.handle_node_moved_notification,
                 notification,
             )
+            if self.config.is_relaxed_timeouts_enabled():
+                self._pending_handoffs.add(notification)
 
             await record_connection_handoff(
                 pool_name=get_pool_name(self.pool),
@@ -215,6 +220,7 @@ class AsyncMaintNotificationsPoolHandler:
         notification_hash = hash(notification)
 
         async with self._lock:
+            self._pending_handoffs.discard(notification)
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
                     f"Reverting temporary changes related to notification: {notification}, "
@@ -280,10 +286,25 @@ class AsyncMaintNotificationsPoolHandler:
     async def cancel_scheduled_tasks(self) -> None:
         if not self._scheduled_tasks:
             return
+        # The pool is closing, which ends the relaxation the cancelled cleanups
+        # would have ended: report it so their start events are paired
+        pending_handoffs = tuple(self._pending_handoffs)
+        self._pending_handoffs.clear()
         tasks = tuple(self._scheduled_tasks)
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        for notification in pending_handoffs:
+            _dispatch_maintenance_event(
+                self.config,
+                MaintenanceCompletedEvent(
+                    connection_pool=self.pool,
+                    connection=self.connection,
+                    state=MaintenanceState.MOVING,
+                    notification=notification,
+                    config=self.config,
+                ),
+            )
 
 
 class AsyncMaintNotificationsConnectionHandler:

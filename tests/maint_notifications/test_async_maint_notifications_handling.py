@@ -1627,6 +1627,46 @@ async def test_pool_aclose_cancels_handler_scheduled_tasks():
 
 
 @pytest.mark.asyncio
+async def test_pool_aclose_completes_pending_handoff_event():
+    """
+    Closing the pool cancels the cleanup that would have ended the handoff's
+    relaxation; the completion it would have reported is reported instead.
+    """
+    listener = _RecordingListener()
+    config = _config_with_listener(listener)
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=config,
+    )
+    handler = pool._maint_notifications_pool_handler
+    handler.set_connection(DummyAsyncConnection(peer=DEFAULT_HOST))
+    notification = NodeMovingNotification(
+        id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=60
+    )
+
+    with mock.patch(
+        "redis.asyncio.maint_notifications.record_connection_handoff",
+        new=AsyncMock(),
+    ):
+        await handler.handle_node_moving_notification(notification)
+        assert [type(e) for e in listener.events] == [MaintenanceStartedEvent]
+
+        await pool.aclose()
+
+    assert [type(e) for e in listener.events] == [
+        MaintenanceStartedEvent,
+        MaintenanceCompletedEvent,
+    ]
+    completed = listener.events[1]
+    assert completed.state == MaintenanceState.MOVING
+    assert completed.notification is notification
+    assert completed.connection_pool is pool
+    assert handler._pending_handoffs == set()
+
+
+@pytest.mark.asyncio
 async def test_pool_disconnect_does_not_cancel_scheduled_tasks():
     pool = ConnectionPool(
         host=DEFAULT_HOST,
