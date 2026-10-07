@@ -7,6 +7,7 @@ from redis.connection import (
     CacheProxyConnection,
     Connection,
     ConnectionInterface,
+    ConnectionPool,
     MaintNotificationsAbstractConnection,
 )
 from redis.event import (
@@ -1751,3 +1752,58 @@ class TestMaintNotificationsMetricsRecording:
         handler.handle_node_moving_notification(notification)
 
         mock_record_connection_handoff.assert_not_called()
+
+
+@pytest.mark.fixed_client
+class TestHandoffTakesOverMaintenance:
+    """
+    A connection under maintenance that a MOVING handoff takes over has its
+    MAINTENANCE pair closed: its completion notification is skipped while it
+    is MOVING, and the handoff's cleanup does not know what it superseded.
+    """
+
+    def setup_method(self):
+        self.listener = _RecordingListener()
+        self.config = _config_with_listener(self.listener)
+        self.pool = ConnectionPool(
+            host="localhost",
+            port=6379,
+            protocol=3,
+            maint_notifications_config=self.config,
+        )
+
+    def _connection(self, state):
+        conn = Mock()
+        conn.maintenance_state = state
+        conn.maint_notifications_config = self.config
+        return conn
+
+    def test_moving_over_maintenance_dispatches_completed_event(self):
+        conn = self._connection(MaintenanceState.MAINTENANCE)
+
+        self.pool.update_connection_settings(conn, state=MaintenanceState.MOVING)
+
+        assert conn.maintenance_state == MaintenanceState.MOVING
+        assert len(self.listener.events) == 1
+        event = self.listener.events[0]
+        assert isinstance(event, MaintenanceCompletedEvent)
+        assert event.state == MaintenanceState.MAINTENANCE
+        assert event.connection is conn
+        assert event.connection_pool is self.pool
+        assert event.notification is None
+
+    @pytest.mark.parametrize(
+        "state, new_state",
+        [
+            (MaintenanceState.NONE, MaintenanceState.MOVING),
+            (MaintenanceState.MOVING, MaintenanceState.MOVING),
+            (MaintenanceState.MOVING, MaintenanceState.NONE),
+        ],
+    )
+    def test_other_state_transitions_dispatch_nothing(self, state, new_state):
+        conn = self._connection(state)
+
+        self.pool.update_connection_settings(conn, state=new_state)
+
+        assert conn.maintenance_state == new_state
+        assert self.listener.events == []

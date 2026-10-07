@@ -2310,3 +2310,62 @@ async def test_async_disconnect_outside_maintenance_dispatches_nothing(state):
     await connection.disconnect()
 
     assert listener.events == []
+
+
+@pytest.mark.asyncio
+async def test_async_handoff_taking_over_maintenance_dispatches_completed_event():
+    """
+    A connection under maintenance that a MOVING handoff takes over has its
+    MAINTENANCE pair closed: its completion notification is skipped while it
+    is MOVING, and the handoff's cleanup does not know what it superseded.
+    """
+    listener = _RecordingListener()
+    config = _config_with_listener(listener)
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=config,
+    )
+    connection = DummyAsyncConnection()
+    connection.maint_notifications_config = config
+    connection.maintenance_state = MaintenanceState.MAINTENANCE
+
+    pool.update_connection_settings(connection, state=MaintenanceState.MOVING)
+
+    assert connection.maintenance_state == MaintenanceState.MOVING
+    assert len(listener.events) == 1
+    event = listener.events[0]
+    assert isinstance(event, MaintenanceCompletedEvent)
+    assert event.state == MaintenanceState.MAINTENANCE
+    assert event.connection is connection
+    assert event.connection_pool is pool
+    assert event.notification is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "state, new_state",
+    [
+        (MaintenanceState.NONE, MaintenanceState.MOVING),
+        (MaintenanceState.MOVING, MaintenanceState.MOVING),
+        (MaintenanceState.MOVING, MaintenanceState.NONE),
+    ],
+)
+async def test_async_other_state_transitions_dispatch_nothing(state, new_state):
+    listener = _RecordingListener()
+    config = _config_with_listener(listener)
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=config,
+    )
+    connection = DummyAsyncConnection()
+    connection.maint_notifications_config = config
+    connection.maintenance_state = state
+
+    pool.update_connection_settings(connection, state=new_state)
+
+    assert connection.maintenance_state == new_state
+    assert listener.events == []

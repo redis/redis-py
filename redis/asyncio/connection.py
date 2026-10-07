@@ -2539,6 +2539,7 @@ class AsyncMaintNotificationsAbstractConnectionPool:
         Update the settings for a single connection.
         """
         if state:
+            self._complete_maintenance_taken_over_by_handoff(conn, state)
             conn.maintenance_state = state
 
         if update_notification_hash:
@@ -2558,6 +2559,33 @@ class AsyncMaintNotificationsAbstractConnectionPool:
             )
 
         conn.update_current_socket_timeout(relaxed_timeout)
+
+    def _complete_maintenance_taken_over_by_handoff(
+        self, conn: "AsyncMaintNotificationsAbstractConnection", state: MaintenanceState
+    ) -> None:
+        """
+        Report the MAINTENANCE relaxation of a connection a handoff is taking
+        over as completed. The connection's completion notification is skipped
+        while it is MOVING, and the handoff's own cleanup restores it without
+        looking at what it superseded, so this is the only point at which the
+        pair opened by the start event can be closed.
+        """
+        if (
+            state is not MaintenanceState.MOVING
+            or conn.maintenance_state is not MaintenanceState.MAINTENANCE
+            or conn.maint_notifications_config is None
+        ):
+            return
+        _dispatch_maintenance_event(
+            conn.maint_notifications_config,
+            MaintenanceCompletedEvent(
+                connection_pool=self,
+                connection=conn,
+                state=MaintenanceState.MAINTENANCE,
+                notification=None,
+                config=conn.maint_notifications_config,
+            ),
+        )
 
     async def update_connections_settings(
         self,

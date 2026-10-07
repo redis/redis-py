@@ -293,7 +293,10 @@ class MaintenanceCompletedEvent(MaintenanceEvent):
     Event fired when the timeout relaxation announced by a
     ``MaintenanceStartedEvent`` is reverted: the completion notification
     arrived, the handoff TTL expired, or the connection was closed while
-    still under maintenance. In the last case ``notification`` is ``None``.
+    still under maintenance. Also fired, with ``MaintenanceState.MAINTENANCE``,
+    when a handoff takes over a connection under maintenance: the connection
+    stays relaxed, but under the handoff's ``MOVING`` pair from then on. In
+    the last two cases ``notification`` is ``None``.
 
     Not fired when a newer handoff superseded the one that completed; the
     source stays relaxed until the newer one completes.
