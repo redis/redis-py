@@ -981,6 +981,21 @@ class TestMaintNotificationsPoolHandlerEvents:
         assert event.notification is notification
         assert event.config is self.config
 
+    def test_started_event_precedes_relaxing_the_pool(self):
+        """
+        Taking over a connection under maintenance completes that connection's
+        pair; the handoff's pair must already be open for a listener by then.
+        """
+        seen = []
+        self.mock_pool.update_connections_settings.side_effect = (
+            lambda **kwargs: seen.extend(type(e) for e in self.listener.events)
+        )
+
+        with patch("threading.Timer"):
+            self.handler.handle_node_moving_notification(self._moving())
+
+        assert seen == [MaintenanceStartedEvent]
+
     def test_moved_dispatches_completed_event(self):
         notification = self._moving()
         self.mock_pool.connection_kwargs = {

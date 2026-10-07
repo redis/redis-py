@@ -146,6 +146,23 @@ class AsyncMaintNotificationsPoolHandler:
                 self.connection.getpeername() if self.connection else None
             )
 
+            # The events report relaxed timeouts; a handoff handled only for
+            # the proactive reconnect relaxes nothing. Reported before the pool
+            # is relaxed: taking over a connection under maintenance completes
+            # that connection's pair, and a listener must see the handoff's
+            # pair open by then rather than no relaxation at all.
+            if self.config.is_relaxed_timeouts_enabled():
+                _dispatch_maintenance_event(
+                    self.config,
+                    MaintenanceStartedEvent(
+                        connection_pool=self.pool,
+                        connection=self.connection,
+                        state=MaintenanceState.MOVING,
+                        notification=notification,
+                        config=self.config,
+                    ),
+                )
+
             # The async pool owns the active/free connection collections and
             # asyncio.Lock is not reentrant, so the whole MOVING pool mutation
             # has to be one pool-owned atomic operation. The handler still owns
@@ -180,20 +197,6 @@ class AsyncMaintNotificationsPoolHandler:
             )
 
             self._processed_notifications.add(notification)
-
-            # The events report relaxed timeouts; a handoff handled only for
-            # the proactive reconnect relaxes nothing
-            if self.config.is_relaxed_timeouts_enabled():
-                _dispatch_maintenance_event(
-                    self.config,
-                    MaintenanceStartedEvent(
-                        connection_pool=self.pool,
-                        connection=self.connection,
-                        state=MaintenanceState.MOVING,
-                        notification=notification,
-                        config=self.config,
-                    ),
-                )
 
     async def run_proactive_reconnect(
         self, moving_address_src: str | None = None

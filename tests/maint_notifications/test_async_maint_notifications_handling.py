@@ -2175,6 +2175,44 @@ async def test_async_connection_handler_dispatches_nothing_when_relaxation_disab
 
 
 @pytest.mark.asyncio
+async def test_async_pool_handler_started_event_precedes_relaxing_the_pool():
+    """
+    Taking over a connection under maintenance completes that connection's
+    pair; the handoff's pair must already be open for a listener by then.
+    """
+    listener = _RecordingListener()
+    config = _config_with_listener(listener)
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=config,
+    )
+    handler = AsyncMaintNotificationsPoolHandler(pool, config)
+    seen = []
+
+    async def apply(**kwargs):
+        seen.extend(type(e) for e in listener.events)
+
+    pool.apply_moving_notification = apply
+
+    with mock.patch(
+        "redis.asyncio.maint_notifications.record_connection_handoff",
+        new=AsyncMock(),
+    ):
+        try:
+            await handler.handle_node_moving_notification(
+                NodeMovingNotification(
+                    id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=5
+                )
+            )
+        finally:
+            await handler.cancel_scheduled_tasks()
+
+    assert seen == [MaintenanceStartedEvent]
+
+
+@pytest.mark.asyncio
 async def test_async_pool_handler_dispatches_moving_event_pair():
     listener = _RecordingListener()
     config = _config_with_listener(listener)
