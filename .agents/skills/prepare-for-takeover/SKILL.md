@@ -28,21 +28,24 @@ Use read-only GitHub access only (`gh pr view`, `gh api` GET). Never comment, la
 ## Data to collect per PR (read-only)
 
 ```
-gh pr view <n> -R <owner/repo> --json title,author,state,isDraft,labels,updatedAt,reviews,comments
+gh pr view <n> -R <owner/repo> --json title,author,state,isDraft,labels,updatedAt,body,reviews,comments
+gh api repos/<owner/repo>/pulls/<n>/comments --paginate
 ```
+
+The second command returns the inline review comments, which `gh pr view` does not include. A `CHANGES_REQUESTED` review often has an empty or short body with the details inline. Use `user.login`, `body`, `path`, `line`, `in_reply_to_id` and `created_at`; a null `line` means the comment is outdated (the code moved), so check whether it still applies.
 
 From the output, get:
 
 - `author.login`: the PR author.
-- Whether the maintainer has already commented or reviewed (a comment or review by the maintainer's login).
-- The latest maintainer review that has a body, preferably `CHANGES_REQUESTED`. Read it in full; it is the source for "What's left".
+- Whether the maintainer has already commented or reviewed (a comment, review or inline comment by the maintainer's login).
+- All maintainer feedback in chronological order: review bodies, inline comments and conversation comments. Read it in full; it is the source for "What's left". Drop items that a later maintainer comment withdrew or marked as done, and items that a later commit or reply clearly addressed. An empty review body does not mean there is no feedback.
 - Current labels (to point out `waiting-for-response` for removal) and `isDraft`.
 
-If the PR is closed or merged, skip it and say so. If the maintainer never left review feedback, write "What's left" from the PR's own open TODOs or ask the user for a line, and do not invent requirements.
+If the PR is closed or merged, skip it and say so. If the maintainer left no feedback in any of these sources, write "What's left" from the open TODOs in the PR `body` or ask the user for a line, and do not invent requirements.
 
 ## Writing "What's left"
 
-- 2 to 5 short bullets, each one concrete action, in the order of the original review.
+- 2 to 5 short bullets, each one concrete action, in the order the maintainer raised them.
 - Paraphrase the review. Do not add new requests that the maintainer did not make.
 - Keep scope notes from the review (for example "change Fixes #N to Refs #N", "keep #N open, retitle the PR").
 - Add "Take the PR out of draft." when `isDraft` is true and the review asked for it.
@@ -66,7 +69,7 @@ What's left (details in my review above):
 Any help is very welcome!
 ```
 
-When there is no earlier maintainer review, use `What's left:` without "(details in my review above)".
+When there is no earlier maintainer review or inline review comment, use `What's left:` without "(details in my review above)".
 
 ## Writing rules
 
