@@ -7,6 +7,7 @@ from redis.commands.vectorset.commands import QuantizationOptions
 
 from .conftest import (
     _get_client,
+    skip_if_redis_enterprise,
     skip_if_server_version_lt,
 )
 
@@ -643,6 +644,26 @@ def test_vemb_unexisting(d_client):
 
 
 @skip_if_server_version_lt("7.9.0")
+def test_vemb_unified_responses_return_floats_on_both_protocols(request):
+    vector = [1, 0.5, 0]
+    embs = {}
+    for protocol in (2, 3):
+        r = _get_client(
+            redis.Redis,
+            request,
+            decode_responses=True,
+            protocol=protocol,
+            legacy_responses=False,
+        )
+        r.delete("myset")
+        r.vset().vadd("myset", vector, "elem", quantization=QuantizationOptions.NOQUANT)
+        embs[protocol] = r.vset().vemb("myset", "elem")
+
+    assert all(isinstance(value, float) for value in embs[2] + embs[3])
+    assert embs[2] == embs[3] == [1.0, 0.5, 0.0]
+
+
+@skip_if_server_version_lt("7.9.0")
 def test_vlinks(d_client):
     elements_count = 100
     vector_dim = 800
@@ -978,6 +999,7 @@ def _validate_quantization(original, quantized, tolerance=0.1):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 def test_vrange_basic(d_client):
     """Test basic VRANGE functionality with lexicographical ordering."""
     # Add elements with different names
@@ -1000,6 +1022,7 @@ def test_vrange_basic(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 def test_vrange_with_count(d_client):
     """Test VRANGE with count parameter."""
     # Add elements
@@ -1028,6 +1051,7 @@ def test_vrange_with_count(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 def test_vrange_iteration(d_client):
     """Test VRANGE for stateless iteration."""
     # Add elements
@@ -1051,6 +1075,7 @@ def test_vrange_iteration(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 def test_vrange_empty_key(d_client):
     """Test VRANGE on non-existent key."""
     result = d_client.vset().vrange("nonexistent", "-", "+")
@@ -1061,6 +1086,7 @@ def test_vrange_empty_key(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 def test_vrange_special_characters(d_client):
     """Test VRANGE with elements containing special characters."""
     # Add elements with special characters
@@ -1077,6 +1103,7 @@ def test_vrange_special_characters(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 def test_vrange_single_element(d_client):
     """Test VRANGE with a single element."""
     d_client.vset().vadd("myset", [1.0, 2.0], "single")
@@ -1092,6 +1119,7 @@ def test_vrange_single_element(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 def test_vrange_lexicographical_order(d_client):
     """Test that VRANGE returns elements in correct lexicographical order."""
     # Add elements in random order
@@ -1106,6 +1134,7 @@ def test_vrange_lexicographical_order(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 def test_vrange_numeric_strings(d_client):
     """Test VRANGE with numeric string elements."""
     # Add numeric strings (lexicographical order, not numeric)

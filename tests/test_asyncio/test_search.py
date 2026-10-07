@@ -4,6 +4,7 @@ import os
 import asyncio
 from io import TextIOWrapper
 import random
+from unittest import mock
 
 import numpy as np
 import pytest
@@ -173,8 +174,20 @@ class AsyncSearchTestsBase:
 
 
 class TestBaseSearchFunctionality(AsyncSearchTestsBase):
-    _SEARCH_TIMEOUT_DIM = 8192
-    _SEARCH_TIMEOUT_DOCS = 1500
+    # Shape of the index used by the on-timeout tests. The query these build
+    # runs ``KNN _SEARCH_TIMEOUT_DOCS``, and its cost is dominated by the size
+    # of the result set rather than by the vector arithmetic - at a fixed
+    # ``KNN 10`` the query takes ~1.6ms whatever the dimension, so the document
+    # count is what buys runtime and the dimension only buys memory.
+    #
+    # The runtime has to exceed the 1ms per-query timeout by a wide margin.
+    # ``search-on-timeout=fail`` is enforced by a timeout callback racing the
+    # thread running the query, so a query that only slightly overruns its
+    # timeout may still return full results - intended server behavior. Below
+    # roughly a 3x margin the error stops being raised at all; these values
+    # measure at ~890ms, i.e. a ~900x margin, in ~37MB.
+    _SEARCH_TIMEOUT_DIM = 256
+    _SEARCH_TIMEOUT_DOCS = 12000
 
     @pytest.mark.redismod
     async def test_client(self, decoded_r: redis.Redis):
@@ -2738,6 +2751,116 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
         assert "FALSE" in field.args
 
     @pytest.mark.redismod
+    @skip_if_server_version_lt("8.11.0")
+    async def test_async_hnsw_sq8_compression(self, decoded_r: redis.Redis):
+        await decoded_r.ft().create_index(
+            (
+                VectorField(
+                    "sq8",
+                    "HNSW",
+                    {
+                        "TYPE": "FLOAT32",
+                        "DIM": 8,
+                        "DISTANCE_METRIC": "L2",
+                        "COMPRESSION": "SQ8",
+                        "TRAINING_THRESHOLD": 0,
+                    },
+                ),
+                VectorField(
+                    "sq8_default",
+                    "HNSW",
+                    {
+                        "TYPE": "FLOAT16",
+                        "DIM": 8,
+                        "DISTANCE_METRIC": "L2",
+                        "COMPRESSION": "SQ8",
+                    },
+                ),
+                VectorField(
+                    "plain",
+                    "HNSW",
+                    {"TYPE": "FLOAT32", "DIM": 8, "DISTANCE_METRIC": "L2"},
+                    index_missing=True,
+                ),
+            )
+        )
+
+        for i in range(20):
+            vec = np.array([float(i + j) for j in range(8)], dtype=np.float32)
+            await decoded_r.hset(
+                f"doc{i}",
+                mapping={
+                    "sq8": vec.tobytes(),
+                    "sq8_default": vec.astype(np.float16).tobytes(),
+                },
+            )
+
+        query = Query("*=>[KNN 5 @sq8 $vec as score]").no_content()
+        query_params = {"vec": np.arange(8, dtype=np.float32).tobytes()}
+        res = await decoded_r.ft().search(query, query_params=query_params)
+        if expects_resp2_shape(decoded_r) or expects_unified_shape(decoded_r):
+            assert res.total == 5
+            assert "doc0" == res.docs[0].id
+        elif expects_resp3_shape(decoded_r):
+            assert res["total_results"] == 5
+            assert "doc0" == res["results"][0]["id"]
+
+        attrs = (await decoded_r.ft().info())["attributes"]
+        if expects_resp2_shape(decoded_r):
+            sq8, sq8_default, plain = (dict(zip(a[::2], a[1::2])) for a in attrs)
+            assert "INDEXMISSING" in attrs[2]
+        else:
+            sq8, sq8_default, plain = attrs
+            assert plain["flags"] == ["INDEXMISSING"]
+            assert sq8["flags"] == []
+
+        assert sq8["algorithm"] == "HNSW"
+        assert sq8["dim"] == 8
+        assert sq8["M"] == 16
+        assert sq8["compression"] == "SQ8"
+        # An explicit zero is kept and not replaced by the default.
+        assert sq8["training_threshold"] == 0
+        assert sq8_default["compression"] == "SQ8"
+        assert sq8_default["training_threshold"] == 10240
+        assert "compression" not in plain
+        assert "training_threshold" not in plain
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("8.11.0")
+    async def test_async_hnsw_sq8_compression_errors(self, decoded_r: redis.Redis):
+        with pytest.raises(ResponseError, match="FLOAT32 and FLOAT16"):
+            await decoded_r.ft("idx_int8").create_index(
+                (
+                    VectorField(
+                        "v",
+                        "HNSW",
+                        {
+                            "TYPE": "INT8",
+                            "DIM": 8,
+                            "DISTANCE_METRIC": "L2",
+                            "COMPRESSION": "SQ8",
+                        },
+                    ),
+                )
+            )
+
+        with pytest.raises(ResponseError, match="compression was not requested"):
+            await decoded_r.ft("idx_no_compression").create_index(
+                (
+                    VectorField(
+                        "v",
+                        "HNSW",
+                        {
+                            "TYPE": "FLOAT32",
+                            "DIM": 8,
+                            "DISTANCE_METRIC": "L2",
+                            "TRAINING_THRESHOLD": 1024,
+                        },
+                    ),
+                )
+            )
+
+    @pytest.mark.redismod
     @skip_if_server_version_lt("8.1.224")
     async def test_async_svs_vamana_basic_functionality(self, decoded_r: redis.Redis):
         await decoded_r.ft().create_index(
@@ -2930,6 +3053,28 @@ class TestHybridSearch(AsyncSearchTestsBase):
     # warnings. 6000 docs keeps the query comfortably above the 1ms limit so
     # the timeout reliably triggers across hardware.
     _HYBRID_TIMEOUT_DOCS = 6000
+
+    async def test_hybrid_search_forwards_zero_timeout(self):
+        # Async mirror of the sync test with the same name. TIMEOUT 0 means
+        # "no timeout" and must reach the wire instead of being dropped like
+        # an unset argument.
+        hybrid_query = HybridQuery(
+            HybridSearchQuery("foo"),
+            HybridVsimQuery(vector_field_name="@embedding", vector_data="$vec"),
+        )
+        ft = redis.Redis().ft("idx")
+
+        async def wire_args(timeout):
+            with mock.patch.object(
+                ft, "execute_command", mock.AsyncMock(return_value={})
+            ) as m:
+                await ft.hybrid_search(query=hybrid_query, timeout=timeout)
+                return list(m.call_args[0])
+
+        assert (await wire_args(5000))[-2:] == ["TIMEOUT", 5000]
+        assert (await wire_args(0))[-2:] == ["TIMEOUT", 0]
+        # None stays the "argument not set" sentinel.
+        assert "TIMEOUT" not in await wire_args(None)
 
     async def _create_hybrid_search_index(self, decoded_r: redis.Redis, dim=4):
         await decoded_r.ft().create_index(
@@ -4174,9 +4319,12 @@ class TestHybridSearch(AsyncSearchTestsBase):
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
+        # MAXIDLE is expressed in milliseconds, and the two cursors created here
+        # are read over two further round trips. Keep the idle window wide enough
+        # to survive that when the target deployment is remote.
         res = await decoded_r.ft().hybrid_search(
             query=hybrid_query,
-            cursor=HybridCursorQuery(count=5, max_idle=100),
+            cursor=HybridCursorQuery(count=5, max_idle=10000),
             params_substitution={
                 "vec": np.array([1, 2, 7, 6], dtype=np.float32).tobytes()
             },

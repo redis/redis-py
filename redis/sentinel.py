@@ -500,7 +500,7 @@ class Sentinel(SentinelCommands):
         ``himport_prepare`` on the client and live on that client's shared registry,
         so they survive Sentinel failover automatically: the pool re-points to the
         new master and the fieldset is re-prepared lazily on the next
-        ``himport_set``. Each call to current method returns a *new* client with
+        ``himport_set``. Each call to the current method returns a *new* client with
         its *own* empty registry, so call ``himport_prepare`` on the long-lived client
         you reuse rather than creating a fresh one per operation; otherwise ``himport_set``
         fails with ``no such fieldset``. (``himport_set`` is a write and is served by

@@ -237,6 +237,42 @@ async def test_async_resp_read_response_raises_after_disconnect(parser_class):
 
 
 @pytest.mark.parametrize(
+    "parser_class",
+    [_AsyncRESP2Parser, _AsyncRESP3Parser, _AsyncHiredisParser],
+    ids=["AsyncRESP2Parser", "AsyncRESP3Parser", "AsyncHiredisParser"],
+)
+async def test_async_parser_read_guards_report_a_never_connected_parser(parser_class):
+    # The read guards consult _connected, which used to be assigned only by
+    # on_connect() / on_disconnect(). A parser that has never connected - the
+    # one a fresh Connection owns before connect() - therefore raised
+    # AttributeError from those guards instead of the retryable ConnectionError,
+    # so no retry or failover layer acted on it. can_read() raises OSError,
+    # which Connection.can_read() converts to ConnectionError.
+    if parser_class is _AsyncHiredisParser and not HIREDIS_AVAILABLE:
+        pytest.skip("Hiredis not available")
+
+    parser = parser_class(socket_read_size=65536)
+
+    assert parser._connected is False
+    with pytest.raises(ConnectionError):
+        await parser.read_response()
+    with pytest.raises(OSError):
+        await parser.can_read()
+
+
+async def test_connection_read_guards_report_a_never_connected_connection():
+    # End-to-end counterpart: the AttributeError also sailed past
+    # Connection.can_read()'s ``except OSError``, so neither the ConnectionError
+    # conversion nor the disconnect() it performs happened.
+    conn = Connection()
+
+    with pytest.raises(ConnectionError):
+        await conn.read_response()
+    with pytest.raises(ConnectionError):
+        await conn.can_read()
+
+
+@pytest.mark.parametrize(
     ("protocol", "parser_class", "expected_parser_class"),
     [
         (None, _AsyncRESP2Parser, _AsyncRESP3Parser),
@@ -269,6 +305,92 @@ def test_get_resolved_ip_uses_async_writer_peer_before_dns():
             conn._writer = None
 
     getaddrinfo.assert_not_called()
+
+
+async def test_send_packed_command_rejects_closed_transport():
+    conn = Connection(health_check_interval=0)
+    writer = mock.Mock()
+    writer.transport.is_closing.return_value = True
+    writer.drain = mock.AsyncMock()
+    conn._reader = mock.Mock()
+    conn._writer = writer
+
+    with pytest.raises(ConnectionError, match="closed") as exc_info:
+        await conn.send_packed_command(b"PING", check_health=False)
+
+    assert type(exc_info.value) is ConnectionError
+    writer.writelines.assert_not_called()
+    writer.drain.assert_not_awaited()
+    writer.close.assert_called_once()
+    assert not conn.is_connected
+
+
+@pytest.mark.parametrize("socket_timeout", [None, 1])
+async def test_send_packed_command_writes_to_open_transport(socket_timeout):
+    conn = Connection(socket_timeout=socket_timeout, health_check_interval=0)
+    writer = mock.Mock()
+    writer.transport.is_closing.return_value = False
+    writer.drain = mock.AsyncMock()
+    conn._reader = mock.Mock()
+    conn._writer = writer
+
+    await conn.send_packed_command(b"PING", check_health=False)
+
+    writer.transport.is_closing.assert_called_once_with()
+    writer.writelines.assert_called_once_with([b"PING"])
+    writer.drain.assert_awaited_once_with()
+    await conn.disconnect(nowait=True)
+
+
+@pytest.mark.parametrize(
+    ("error_type", "message"),
+    [
+        (TypeError, "'NoneType' object is not callable"),
+        (AttributeError, "'NoneType' object has no attribute '_add_writer'"),
+    ],
+)
+async def test_send_packed_command_translates_closed_transport_error(
+    error_type, message
+):
+    conn = Connection(health_check_interval=0)
+    writer = mock.Mock()
+    writer.transport.is_closing.side_effect = [False, True]
+    error = error_type(message)
+    writer.writelines.side_effect = error
+    writer.drain = mock.AsyncMock()
+    conn._reader = mock.Mock()
+    conn._writer = writer
+
+    with pytest.raises(ConnectionError) as exc_info:
+        await conn.send_packed_command(b"PING", check_health=False)
+
+    assert type(exc_info.value) is ConnectionError
+    assert str(exc_info.value) == "Connection closed by the server while writing"
+    assert exc_info.value.__cause__ is error
+    assert writer.transport.is_closing.call_count == 2
+    writer.drain.assert_not_awaited()
+    writer.close.assert_called_once()
+    assert not conn.is_connected
+
+
+async def test_send_packed_command_preserves_type_error_on_open_transport():
+    conn = Connection(health_check_interval=0)
+    writer = mock.Mock()
+    writer.transport.is_closing.return_value = False
+    error = TypeError("sequence item 0: expected a bytes-like object")
+    writer.writelines.side_effect = error
+    writer.drain = mock.AsyncMock()
+    conn._reader = mock.Mock()
+    conn._writer = writer
+
+    with pytest.raises(TypeError) as exc_info:
+        await conn.send_packed_command(b"PING", check_health=False)
+
+    assert exc_info.value is error
+    assert writer.transport.is_closing.call_count == 2
+    writer.drain.assert_not_awaited()
+    writer.close.assert_called_once()
+    assert not conn.is_connected
 
 
 @pytest.mark.fixed_client
@@ -976,3 +1098,265 @@ async def test_disconnect_no_current_task_calls_close(request):
             mock_on_disconnect.assert_called_once()
 
     assert not conn.is_connected
+
+
+def test_parse_url_retry_on_error_resolves_exception_names():
+    kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
+    assert kw["retry_on_error"] == [ConnectionError]
+
+
+def test_parse_url_retry_on_error_comma_separated():
+    kw = parse_url(
+        "redis://localhost:6379/?retry_on_error=ConnectionError,TimeoutError"
+    )
+    assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
+
+
+def test_parse_url_retry_on_error_bracket_list():
+    kw = parse_url(
+        "redis://localhost:6379/?retry_on_error=[ConnectionError,TimeoutError]"
+    )
+    assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
+
+
+def test_parse_url_retry_on_error_blank_entry():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?retry_on_error=,")
+    assert str(exc_info.value) == (
+        "Invalid value for 'retry_on_error' in connection URL."
+    )
+
+
+def test_parse_url_invalid_db_keeps_stable_message():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?db=not-an-int")
+    assert str(exc_info.value) == "Invalid value for 'db' in connection URL."
+
+
+@pytest.mark.parametrize(
+    ("url", "expected_port"),
+    (
+        ("redis://localhost", None),
+        ("redis://localhost:6380", 6380),
+        ("redis://localhost:0", 0),
+    ),
+)
+def test_connection_pool_from_url_preserves_explicit_port(url, expected_port):
+    kwargs = parse_url(url)
+    pool = ConnectionPool.from_url(url)
+
+    assert kwargs.get("port") == expected_port
+    assert pool.connection_kwargs.get("port") == expected_port
+
+
+def test_parse_url_retry_on_error_unknown_name():
+    with pytest.raises(ValueError) as exc_info:
+        parse_url("redis://localhost:6379/?retry_on_error=NotARealError")
+    assert str(exc_info.value) == (
+        "Invalid value for 'retry_on_error' in connection URL."
+    )
+
+
+@pytest.mark.asyncio
+async def test_parse_url_retry_on_error_usable_in_retry():
+    kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
+    conn = Connection(**kw)
+    assert ConnectionError in conn.retry._supported_errors
+    assert all(
+        isinstance(err, type) and issubclass(err, Exception)
+        for err in conn.retry._supported_errors
+    )
+
+    calls = 0
+
+    async def do():
+        nonlocal calls
+        calls += 1
+        raise ConnectionError("simulated network drop")
+
+    async def fail(error):
+        return None
+
+    with pytest.raises(ConnectionError):
+        await conn.retry.call_with_retry(do=do, fail=fail)
+    assert calls == 2
+
+
+@pytest.mark.parametrize("port", [True, False, 1.5, "nope", None])
+def test_async_connection_rejects_bool_port(port):
+    """bool subclasses int; port=True must not become privileged port 1."""
+    with pytest.raises(TypeError, match="port must be an integer"):
+        Connection(port=port)
+
+
+def test_async_connection_accepts_numeric_port_string():
+    """Callers still pass a decimal string such as \"6379\"."""
+    conn = Connection(port="6379")
+    assert conn.port == 6379
+
+
+@pytest.mark.parametrize("port", [-1, 65536, 99999])
+def test_async_connection_rejects_out_of_range_port(port):
+    with pytest.raises(ValueError, match="port must be in 0..65535"):
+        Connection(port=port)
+
+
+@pytest.mark.parametrize("disconnect_on_error", [True, False])
+async def test_invalid_response_always_disconnects(disconnect_on_error):
+    """A framing violation invalidates the connection regardless of
+    disconnect_on_error. The parsers rewind on error, so the offending reply
+    stays queued and every later read would fail identically. See #4291.
+    """
+    conn = Connection()
+    with (
+        mock.patch.object(
+            conn,
+            "_read_response_from_parser",
+            side_effect=InvalidResponse("Protocol Error"),
+        ),
+        mock.patch.object(conn, "disconnect") as disconnect,
+    ):
+        with pytest.raises(InvalidResponse):
+            await conn.read_response(disconnect_on_error=disconnect_on_error)
+
+    disconnect.assert_called_once_with(nowait=True)
+
+
+# A binary PUBLISH payload delivered to a decode_responses=True subscriber.
+# Encoder.decode runs at the tail of _read_response, after the payload has
+# already been consumed, so this raises UnicodeDecodeError mid-reply.
+BINARY_PUBSUB_MESSAGE = b"*3\r\n$7\r\nmessage\r\n$4\r\nchan\r\n$3\r\n\xff\xfe\xfd\r\n"
+
+
+def _attach_stream(conn, data):
+    """Wire `data` onto conn as if a connect() had just succeeded."""
+    conn._reader = MockStream(data)
+    conn._writer = mock.Mock()
+    conn._writer.close = mock.Mock()
+    conn._writer.wait_closed = mock.AsyncMock()
+    conn._parser.on_connect(conn)
+
+
+@pytest.mark.parametrize(
+    "parser_class",
+    [_AsyncRESP2Parser, _AsyncHiredisParser],
+    ids=["AsyncRESP2Parser", "AsyncHiredisParser"],
+)
+async def test_binary_pubsub_payload_invalidates_connection(parser_class):
+    """The async pubsub read path: a decode_responses=True subscriber handed a
+    binary PUBLISH payload raises UnicodeDecodeError from Encoder.decode, and
+    PubSub.parse_response passes disconnect_on_error=False. The async parser
+    re-parses from self._pos = 0 rather than rewinding a socket buffer, so the
+    undecodable bytes are still there on the next read and it fails identically
+    unless the connection is dropped. See #4291.
+    """
+    if parser_class is _AsyncHiredisParser and not HIREDIS_AVAILABLE:
+        pytest.skip("Hiredis not available")
+
+    conn = Connection(
+        protocol=2,
+        parser_class=parser_class,
+        encoding="utf-8",
+        decode_responses=True,
+    )
+    _attach_stream(conn, BINARY_PUBSUB_MESSAGE + b"+SECOND\r\n")
+
+    with pytest.raises(UnicodeDecodeError):
+        await conn.read_response(disconnect_on_error=False, push_request=True)
+
+    assert conn.is_connected is False
+
+    # PubSub.parse_response calls connect() before reading again. Now that the
+    # connection was really dropped, the reconnect gets a clean stream; before
+    # the fix connect() was a no-op and this read raised again.
+    _attach_stream(conn, b"+RECOVERED\r\n")
+    assert (
+        await conn.read_response(disconnect_on_error=False, push_request=True)
+        == "RECOVERED"
+    )
+
+    await conn.disconnect()
+
+
+@pytest.mark.parametrize(
+    "parser_class",
+    [
+        _AsyncRESP2Parser,
+        _AsyncRESP3Parser,
+        pytest.param(
+            _AsyncHiredisParser,
+            marks=pytest.mark.skipif(
+                not HIREDIS_AVAILABLE, reason="hiredis is not installed"
+            ),
+        ),
+    ],
+    ids=["AsyncRESP2Parser", "AsyncRESP3Parser", "AsyncHiredisParser"],
+)
+class TestAsyncMalformedNumericFrameInvalidatesConnection:
+    """Async version: malformed numeric frames raise InvalidResponse and must drop
+    the connection even with disconnect_on_error=False. The async parser
+    re-parses via self._pos = 0, so undecodable bytes stay queued on retry
+    unless the connection is invalidated.
+    """
+
+    @pytest.mark.asyncio
+    async def test_malformed_integer_frame_disconnects(self, parser_class):
+        """Malformed integer frame `:abc\r\n` raises InvalidResponse."""
+        conn = Connection(protocol=2, parser_class=parser_class)
+        _attach_stream(conn, b":abc\r\n+SECOND\r\n")
+
+        with pytest.raises(InvalidResponse):
+            await conn.read_response(disconnect_on_error=False, push_request=True)
+
+        assert conn.is_connected is False
+        await conn.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_malformed_bulk_length_disconnects(self, parser_class):
+        """Malformed bulk string length `$xyz\r\n` raises InvalidResponse."""
+        conn = Connection(protocol=2, parser_class=parser_class)
+        _attach_stream(conn, b"$xyz\r\n+SECOND\r\n")
+
+        with pytest.raises(InvalidResponse):
+            await conn.read_response(disconnect_on_error=False, push_request=True)
+
+        assert conn.is_connected is False
+        await conn.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_malformed_array_length_disconnects(self, parser_class):
+        """Malformed array length `*abc\r\n` raises InvalidResponse."""
+        conn = Connection(protocol=2, parser_class=parser_class)
+        _attach_stream(conn, b"*abc\r\n+SECOND\r\n")
+
+        with pytest.raises(InvalidResponse):
+            await conn.read_response(disconnect_on_error=False, push_request=True)
+
+        assert conn.is_connected is False
+        await conn.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_next_read_is_clean_after_malformed_integer(self, parser_class):
+        """Reconnect after malformed integer frame serves new stream cleanly."""
+        conn = Connection(protocol=2, parser_class=parser_class)
+        _attach_stream(conn, b":abc\r\n")
+
+        with pytest.raises(InvalidResponse):
+            await conn.read_response(disconnect_on_error=False, push_request=True)
+
+        # Reconnect with fresh stream
+        _attach_stream(conn, b"+RECOVERED\r\n")
+        result = await conn.read_response(disconnect_on_error=False, push_request=True)
+        assert result == b"RECOVERED"
+        await conn.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_valid_integer_frame_leaves_connection_up(self, parser_class):
+        """Valid integer frames must not trigger the new predicate."""
+        conn = Connection(protocol=2, parser_class=parser_class)
+        _attach_stream(conn, b":42\r\n")
+
+        result = await conn.read_response(disconnect_on_error=False, push_request=True)
+        assert result == 42
+        assert conn.is_connected is True
+        await conn.disconnect()

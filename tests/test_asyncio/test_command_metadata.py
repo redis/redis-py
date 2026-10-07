@@ -4,10 +4,13 @@ import pytest
 import pytest_asyncio
 
 from redis._parsers import AsyncCommandsParser
+from redis.asyncio.cluster import RedisCluster
 from redis.commands.metadata import (
     _MEMO_MAX_ENTRIES,
+    _is_replica_safe,
     _STATIC_COMMAND_METADATA,
     AsyncDynamicMetadataResolver,
+    AsyncMetadataResolver,
     AsyncStaticMetadataResolver,
     CommandMetadata,
     CommandMetadataRecordsCache,
@@ -30,6 +33,7 @@ from tests.test_command_metadata import (
     KEYED_POLICIES,
     LIVE_CACHEABILITY_DIVERGENCE,
     STATIC_TABLE_SERVER_VERSION,
+    WITHHELD_KEYLESS_READS,
     WITHHELD_ROUTING_COMMANDS,
     cacheability_fields,
     command_flags,
@@ -154,6 +158,119 @@ class TestWithheldRoutingPolicies:
         for name in ("eval_ro", "evalsha_ro", "fcall_ro"):
             assert (await static_resolver.resolve(name)).is_script_runner is True, name
 
+    async def test_keyless_reads_withhold_routing_and_are_replica_safe(self):
+        static_resolver = AsyncStaticMetadataResolver()
+        for name in WITHHELD_KEYLESS_READS:
+            metadata = await static_resolver.resolve(name)
+
+            assert metadata is not None, name
+            assert metadata.request_policy is None, name
+            assert metadata.response_policy is None, name
+            assert metadata.is_readonly is True, name
+            assert metadata.has_key_argument is False, name
+            assert metadata.has_complete_metadata is True, name
+            assert await static_resolver.is_cacheable(name) is False, name
+            assert await static_resolver.is_replica_safe(name) is True, name
+
+    async def test_command_withholds_routing_and_is_not_replica_safe(self):
+        static_resolver = AsyncStaticMetadataResolver()
+        metadata = await static_resolver.resolve("command")
+
+        assert metadata is not None
+        assert metadata.request_policy is None
+        assert metadata.response_policy is None
+        assert metadata.is_readonly is False
+        assert metadata.has_key_argument is False
+        assert metadata.has_complete_metadata is True
+        assert await static_resolver.is_cacheable("command") is False
+        assert await static_resolver.is_replica_safe("command") is False
+
+    async def test_bless_scan_withholds_routing_and_is_not_replica_safe(self):
+        """
+        The SCAN-shaped container subcommand: keyless, nondeterministic and routed to every
+        primary through COMMAND_FLAGS, so its record must withhold routing like SCAN's does.
+        Unlike SCAN the server reports no flags for it at all, so it is not readonly.
+        """
+        static_resolver = AsyncStaticMetadataResolver()
+        metadata = await static_resolver.resolve("bless scan")
+
+        assert metadata is not None
+        assert metadata.request_policy is None
+        assert metadata.response_policy is None
+        assert metadata.is_readonly is False
+        assert metadata.has_key_argument is False
+        assert metadata.has_nondeterministic_output is True
+        assert metadata.has_complete_metadata is True
+        assert await static_resolver.is_cacheable("bless scan") is False
+        assert await static_resolver.is_replica_safe("bless scan") is False
+
+    @pytest.mark.parametrize("name", ["bless clear", "bless get", "bless set"])
+    async def test_the_keyed_bless_subcommands_route_by_key_and_are_not_cacheable(
+        self, name
+    ):
+        """
+        BLESS GET is included: the server flags it ``fast`` only, with no ``readonly``, so it
+        fails closed exactly like the two writes.
+        """
+        static_resolver = AsyncStaticMetadataResolver()
+        metadata = await static_resolver.resolve(name)
+
+        assert metadata is not None, name
+        assert metadata.request_policy is RequestPolicy.DEFAULT_KEYED, name
+        assert metadata.response_policy is ResponsePolicy.DEFAULT_KEYED, name
+        assert metadata.is_readonly is False, name
+        assert metadata.has_key_argument is True, name
+        assert metadata.has_complete_metadata is True, name
+        assert await static_resolver.is_cacheable(name) is False, name
+        assert await static_resolver.is_replica_safe(name) is False, name
+
+    async def test_all_static_entries_in_cluster_command_flags_withhold_routing(self):
+        """
+        Verify that every command appearing in RedisCluster.command_flags that is present
+        in _STATIC_COMMAND_METADATA has its routing view withheld (request_policy=None and
+        response_policy=None).
+        """
+        static_resolver = AsyncStaticMetadataResolver()
+        table_core = _STATIC_COMMAND_METADATA["core"]
+
+        for flag_cmd in RedisCluster.COMMAND_FLAGS:
+            # A container command like "COMMAND COUNT" or "SLOWLOG GET" may be recorded under
+            # its first token ("command", "slowlog") or, like "BLESS SCAN", under its full
+            # space-joined name - which is the name the resolver is asked for.
+            for table_cmd in {flag_cmd.split()[0].lower(), flag_cmd.lower()}:
+                if table_cmd not in table_core:
+                    continue
+                metadata = await static_resolver.resolve(table_cmd)
+                assert metadata is not None
+                assert metadata.request_policy is None, (
+                    f"Command '{table_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold request_policy in _STATIC_COMMAND_METADATA"
+                )
+                assert metadata.response_policy is None, (
+                    f"Command '{table_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold response_policy in _STATIC_COMMAND_METADATA"
+                )
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "ft.aggregate",
+            "ft.spellcheck",
+            "ft.tagvals",
+            "ft.syndump",
+            "ft.dictdump",
+            "ft.explaincli",
+            "ts.get",
+            "ts.range",
+            "ts.revrange",
+            "sort_ro",
+            "georadius_ro",
+            "georadiusbymember_ro",
+            "substr",
+        ],
+    )
+    async def test_newly_replica_eligible_commands_are_replica_safe(self, cmd):
+        resolver = AsyncStaticMetadataResolver()
+        assert await resolver.is_replica_safe(cmd) is True
+
     async def test_the_ineligible_records_decide_ahead_of_a_live_layer(self):
         """
         Why the documented chain order is static-first, pinned in both directions and offline.
@@ -244,17 +361,27 @@ class TestMemoBounds:
 
         assert len(resolver._cacheable) == _MEMO_MAX_ENTRIES
 
+    async def test_the_trackable_read_memo_stops_at_the_cap(self):
+        resolver = AsyncStaticMetadataResolver()
+
+        await self._fill_beyond_the_cap(resolver.is_trackable_read)
+
+        assert len(resolver._trackable_read) == _MEMO_MAX_ENTRIES
+
     async def test_the_views_stay_correct_past_the_cap(self):
         """A capped memo recomputes; it never answers wrongly."""
         resolver = AsyncStaticMetadataResolver()
 
         await self._fill_beyond_the_cap(resolver.resolve_policies)
         await self._fill_beyond_the_cap(resolver.is_cacheable)
+        await self._fill_beyond_the_cap(resolver.is_trackable_read)
 
         assert policy_pair(await resolver.resolve_policies("get")) == KEYED_POLICIES
         assert await resolver.is_cacheable("get") is True
+        assert await resolver.is_trackable_read("get") is True
         assert await resolver.resolve_policies("nosuchmodule.nosuchcommand") is None
         assert await resolver.is_cacheable("nosuchmodule.nosuchcommand") is False
+        assert await resolver.is_trackable_read("nosuchmodule.nosuchcommand") is False
 
 
 @pytest.mark.asyncio
@@ -510,6 +637,129 @@ class TestAsyncBaseMetadataResolver:
         # absence above - which is what keeps them out when a live layer sits behind.
         assert await static_resolver.is_cacheable("touch") is False
         assert await static_resolver.is_cacheable("eval_ro") is False
+
+    async def test_custom_metadata_decides_replica_safety_for_known_module_reads(self):
+        resolver = AsyncDynamicMetadataResolver(
+            {
+                "ts": {"get": CACHEABLE_KEYED},
+                "ft": {"aggregate": CACHEABLE_KEYED},
+            }
+        )
+
+        assert await resolver.is_replica_safe("ts.get") is True
+        assert await resolver.is_replica_safe("ft.aggregate") is True
+
+    async def test_touch_remains_replica_unsafe_despite_readonly_metadata(self):
+        resolver = AsyncDynamicMetadataResolver({"core": {"touch": CACHEABLE_KEYED}})
+
+        assert await resolver.is_replica_safe("touch") is False
+
+    async def test_the_replica_unsafe_commands_are_seeded_into_the_memo(self):
+        """
+        Seeding the memo at construction is the whole mechanism, so pin it: the entry is in
+        place before any command is looked up, which is what lets these answer from the same
+        single dict lookup as every other command with no per-call test of their own. The
+        record TOUCH would otherwise resolve to reports it readonly, so the seed is the only
+        thing keeping it off a replica.
+        """
+        resolver = AsyncDynamicMetadataResolver({"core": {"touch": CACHEABLE_KEYED}})
+
+        assert resolver._replica_safe == {"touch": False}
+        assert _is_replica_safe(await resolver.resolve("touch")) is True
+        assert await resolver.is_replica_safe("TOUCH") is False
+
+    async def test_static_resolver_decides_replica_safety(self):
+        resolver = AsyncStaticMetadataResolver()
+
+        # Replica safe commands
+        assert await resolver.is_replica_safe("get") is True
+        assert await resolver.is_replica_safe("GET") is True
+        assert await resolver.is_replica_safe("dbsize") is True
+        assert await resolver.is_replica_safe("ttl") is True
+        assert await resolver.is_replica_safe("eval_ro") is True
+        assert await resolver.is_replica_safe("xread") is True
+        assert await resolver.is_replica_safe("json.get") is True
+        assert await resolver.is_replica_safe("ft.search") is True
+
+        # Replica unsafe commands
+        assert await resolver.is_replica_safe("set") is False
+        assert await resolver.is_replica_safe("SET") is False
+        assert await resolver.is_replica_safe("touch") is False
+        assert await resolver.is_replica_safe("TOUCH") is False
+        assert await resolver.is_replica_safe("hset") is False
+        assert await resolver.is_replica_safe("ft.create") is False
+
+        # Non-string or unknown commands
+        assert await resolver.is_replica_safe(None) is False
+        assert await resolver.is_replica_safe(123) is False
+        assert await resolver.is_replica_safe("nosuchcommand") is False
+
+    @pytest.mark.parametrize(
+        "command,trackable",
+        [
+            ("GET", True),
+            ("MGET", True),
+            # Readonly and keyed, but never eligible to store - which is exactly why optout
+            # wants to exempt them.
+            ("TOUCH", True),
+            ("XPENDING", True),
+            # Readonly but keyless, so the ``NO`` is a harmless no-op.
+            ("KEYS", True),
+            ("EVAL_RO", True),
+            # Absent from the shipped table, so undecidable: fails closed.
+            ("SET", False),
+            ("DEL", False),
+            ("XREADGROUP", False),
+            ("NOSUCHCOMMAND", False),
+            ("NOSUCHMODULE.NOSUCHCOMMAND", False),
+        ],
+    )
+    async def test_is_trackable_read_decides_from_the_readonly_flag(
+        self, command, trackable
+    ):
+        resolver = AsyncStaticMetadataResolver()
+
+        assert await resolver.is_trackable_read(command) is trackable
+
+    @pytest.mark.parametrize(
+        "command",
+        ["a.b.c", b"GET", bytearray(b"GET"), memoryview(b"GET"), 1, None],
+        ids=["two-dots", "bytes", "bytearray", "memoryview", "int", "none"],
+    )
+    async def test_is_trackable_read_fails_closed_on_an_undecidable_name(self, command):
+        resolver = AsyncStaticMetadataResolver()
+
+        assert await resolver.is_trackable_read(command) is False
+
+    async def test_is_trackable_read_is_case_insensitive(self):
+        resolver = AsyncStaticMetadataResolver()
+
+        for command in ("get", "GET", "Get"):
+            assert await resolver.is_trackable_read(command) is True
+
+    async def test_is_trackable_read_is_abstract_on_the_abc(self):
+        """
+        An ``AsyncMetadataResolver`` must implement ``is_trackable_read`` like its other views.
+        """
+
+        class ResolverWithoutTheView(AsyncMetadataResolver):
+            async def resolve(self, command_name):
+                return None
+
+            async def resolve_policies(self, command_name):
+                return None
+
+            async def is_cacheable(self, command_name):
+                return False
+
+            async def is_replica_safe(self, command_name):
+                return False
+
+            def with_fallback(self, fallback):
+                return self
+
+        with pytest.raises(TypeError, match="is_trackable_read"):
+            ResolverWithoutTheView()
 
     async def test_is_cacheable_fails_closed_for_an_unresolvable_name(self):
         """

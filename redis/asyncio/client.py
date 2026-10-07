@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import inspect
+import logging
 import math
 import re
 import time
@@ -19,6 +20,7 @@ from typing import (
     MutableMapping,
     Optional,
     Protocol,
+    Sequence,
     Set,
     Tuple,
     Type,
@@ -39,6 +41,7 @@ from redis._defaults import (
 from redis._parsers.helpers import bool_ok, get_response_callbacks
 from redis.asyncio import _himport_exec
 from redis.asyncio.connection import (
+    AbstractConnection,
     Connection,
     ConnectionPool,
     SSLConnection,
@@ -50,7 +53,7 @@ from redis.asyncio.observability.recorder import (
     record_operation_duration,
     record_pubsub_message,
 )
-from redis.asyncio.retry import Retry
+from redis.asyncio.retry import Retry, _to_async_retry
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.client import (
     EMPTY_RESPONSE,
@@ -120,6 +123,31 @@ _NormalizeKeysT = TypeVar("_NormalizeKeysT", bound=Mapping[ChannelT, object])
 if TYPE_CHECKING:
     from redis.asyncio.keyspace_notifications import AsyncKeyspaceNotifications
     from redis.commands.core import Script
+
+
+logger = logging.getLogger(__name__)
+
+
+def is_debug_log_enabled():
+    return logger.isEnabledFor(logging.DEBUG)
+
+
+def add_debug_log_for_operation_failure(
+    connection: AbstractConnection,
+    error: BaseException | None = None,
+    args: Sequence[Any] | None = None,
+):
+    details = connection.extract_connection_details() if connection else "no connection"
+    prefix = (
+        f"{type(error).__name__} received" if error is not None else "Operation failed"
+    )
+    # Log only the command name - argument values can carry secrets
+    # (AUTH, CONFIG SET requirepass, ACL SETUSER) or user data.
+    command = f" for command {safe_str(args[0])}" if args else ""
+    suffix = f", error: {error}" if error is not None else ""
+    logger.debug(
+        f"{prefix}{command}, with connection: {connection}, details: {details}{suffix}",
+    )
 
 
 class ResponseCallbackProtocol(Protocol):
@@ -561,6 +589,7 @@ class Redis(
         return self.get_connection_kwargs().get("retry")
 
     def set_retry(self, retry: Retry) -> None:
+        retry = _to_async_retry(retry)
         self.get_connection_kwargs().update({"retry": retry})
         self.connection_pool.set_retry(retry)
 
@@ -935,6 +964,8 @@ class Redis(
         actual_retry_attempts = 0
 
         def failure_callback(error, failure_count):
+            if is_debug_log_enabled():
+                add_debug_log_for_operation_failure(conn, error, args)
             nonlocal actual_retry_attempts
             actual_retry_attempts = failure_count
             return self._close_connection(
@@ -1347,6 +1378,8 @@ class PubSub:
         actual_retry_attempts = 0
 
         def failure_callback(error, failure_count):
+            if is_debug_log_enabled():
+                add_debug_log_for_operation_failure(conn, error, args)
             nonlocal actual_retry_attempts
             actual_retry_attempts = failure_count
             return self._reconnect(conn, error, failure_count, start_time, command_name)
@@ -1600,7 +1633,13 @@ class PubSub:
         return self.execute_command("SUNSUBSCRIBE", *args)
 
     async def listen(self) -> AsyncIterator:
-        """Listen for messages on channels this client has been subscribed to"""
+        """Listen for messages on channels this client has been subscribed to.
+
+        Iteration ends once every channel and pattern has been unsubscribed
+        from. If nothing is subscribed when iteration begins it ends
+        immediately rather than waiting, so subscribe first: a listener
+        started before any subscription finishes without yielding anything.
+        """
         while self.subscribed:
             response = await self.handle_message(await self.parse_response(block=True))
             if response is not None:
@@ -1620,6 +1659,8 @@ class PubSub:
         if response:
             return await self.handle_message(response, ignore_subscribe_messages)
         return None
+
+    get_sharded_message = get_message
 
     def ping(self, message=None) -> Awaitable[bool]:
         """
@@ -1678,22 +1719,31 @@ class PubSub:
                 sharded=True,
             )
 
-        # if this is an unsubscribe message, remove it from memory
+        # if this is an unsubscribe message, remove it from memory.
+        # ``discard`` rather than ``remove``: the guard above already makes the
+        # removal conditional, so the two are equivalent for a single caller -
+        # but another writer can drop the same entry between the check and the
+        # removal, and ``remove`` would then raise ``KeyError`` out of a pubsub
+        # read that no caller catches. ``ClusterPubSub._detach_shard_channel``
+        # is such a writer: it forgets a migrating shard channel locally,
+        # deliberately without the per-node I/O lock this bookkeeping runs
+        # under, because waiting for that lock stalls reconciliation behind a
+        # poll's whole retry budget on the node being migrated away from.
         if message_type in self.UNSUBSCRIBE_MESSAGE_TYPES:
             if message_type == "punsubscribe":
                 pattern = response[1]
                 if pattern in self.pending_unsubscribe_patterns:
-                    self.pending_unsubscribe_patterns.remove(pattern)
+                    self.pending_unsubscribe_patterns.discard(pattern)
                     self.patterns.pop(pattern, None)
             elif message_type == "sunsubscribe":
                 s_channel = response[1]
                 if s_channel in self.pending_unsubscribe_shard_channels:
-                    self.pending_unsubscribe_shard_channels.remove(s_channel)
+                    self.pending_unsubscribe_shard_channels.discard(s_channel)
                     self.shard_channels.pop(s_channel, None)
             else:
                 channel = response[1]
                 if channel in self.pending_unsubscribe_channels:
-                    self.pending_unsubscribe_channels.remove(channel)
+                    self.pending_unsubscribe_channels.discard(channel)
                     self.channels.pop(channel, None)
 
         if message_type in self.PUBLISH_MESSAGE_TYPES:
@@ -1968,6 +2018,8 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         actual_retry_attempts = 0
 
         def failure_callback(error, failure_count):
+            if is_debug_log_enabled():
+                add_debug_log_for_operation_failure(conn, error, args)
             nonlocal actual_retry_attempts
             actual_retry_attempts = failure_count
             return self._disconnect_reset_raise_on_watching(
@@ -2253,6 +2305,8 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         actual_retry_attempts = 0
 
         def failure_callback(error, failure_count):
+            if is_debug_log_enabled():
+                add_debug_log_for_operation_failure(conn, error, (operation_name,))
             nonlocal actual_retry_attempts
             actual_retry_attempts = failure_count
             return self._disconnect_raise_on_watching(

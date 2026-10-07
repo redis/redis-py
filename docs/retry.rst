@@ -29,9 +29,33 @@ As you can see from the example above, Redis client supports 2 parameters to con
       which can be overridden by passing a tuple with :ref:`exceptions-label` to the ``supported_errors`` parameter.
 * ``retry_on_error``: list of additional :ref:`exceptions-label` to retry on
 
+``retry_on_error`` can also be set in a connection URL as a comma-separated
+list of names from :mod:`redis.exceptions` (for example
+``redis://localhost?retry_on_error=ConnectionError,TimeoutError``).
+
 
 If no ``retry`` is provided, a default one is created with  :class:`~.ExponentialWithJitterBackoff` as backoff strategy
 and 3 retries.
+
+
+Retry with asyncio
+******************
+
+Async clients use ``redis.asyncio.retry.Retry`` so retry callbacks and backoff
+delays can be awaited:
+
+>>> from redis.asyncio import Redis
+>>> from redis.asyncio.retry import Retry
+>>> from redis.backoff import ExponentialBackoff
+>>>
+>>> retry = Retry(ExponentialBackoff(), 3)
+>>> r = Redis(host='localhost', port=6379, retry=retry)
+
+Passing :class:`redis.retry.Retry` to an async client is supported for
+compatibility, but it is converted to ``redis.asyncio.retry.Retry`` and emits a
+warning. Custom synchronous ``call_with_retry`` implementations cannot be
+preserved by that conversion, so async clients should be configured with an
+async retry policy directly.
 
 
 Retry in Redis Cluster

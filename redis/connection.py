@@ -1,4 +1,6 @@
 import copy
+import functools
+import logging
 import os
 import socket
 import sys
@@ -31,16 +33,25 @@ from redis.cache import (
     CacheInterface,
     CacheKey,
     CacheProxy,
+    TrackingMode,
 )
 from redis.commands.metadata import MetadataResolver
 
+from . import exceptions as redis_exceptions
 from ._defaults import (
     DEFAULT_SOCKET_CONNECT_TIMEOUT,
     DEFAULT_SOCKET_READ_SIZE,
     DEFAULT_SOCKET_TIMEOUT,
     get_default_socket_keepalive_options,
 )
-from ._parsers import BaseParser, Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
+from ._parsers import (
+    UNRECOVERABLE_PARSE_ERRORS,
+    BaseParser,
+    Encoder,
+    _HiredisParser,
+    _RESP2Parser,
+    _RESP3Parser,
+)
 from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
@@ -122,6 +133,32 @@ if HIREDIS_AVAILABLE:
     DefaultParser = _HiredisParser
 else:
     DefaultParser = _RESP2Parser
+
+logger = logging.getLogger(__name__)
+
+
+def add_debug_log_for_connection_failure(
+    connection: "AbstractConnection",
+    error: BaseException,
+    operation: str,
+) -> None:
+    """
+    Render the connection's live state on a failure that is about to close it.
+
+    Must be called *before* ``disconnect()``. ``extract_connection_details()``
+    reads the resolved ip, local port and armed read timeout off the socket, so
+    once the socket is gone it can only report ``not connected`` - which hides
+    exactly the state needed to explain the failure. In particular it is what
+    tells apart a read that ran under the original timeout from one that ran
+    under a relaxed maintenance timeout.
+    """
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            f"{type(error).__name__} while {operation}, "
+            f"with connection: {connection}, "
+            f"details: {connection.extract_connection_details()}, "
+            f"error: {error}",
+        )
 
 
 class HiredisRespSerializer:
@@ -612,21 +649,24 @@ class MaintNotificationsAbstractConnection:
                 oss_cluster_maint_notifications_handler.config
             )
 
-    def activate_maint_notifications_handling_if_enabled(self, check_health=True):
-        # Send maintenance notifications handshake if RESP3 is active
+    def _should_enable_maint_notifications(self) -> bool:
+        # Maintenance notifications are sent only if RESP3 is active
         # and maintenance notifications are enabled
-        # and we have a host to determine the endpoint type from
-        # When the maint_notifications_config enabled mode is "auto",
-        # we just log a warning if the handshake fails
-        # When the mode is enabled=True, we raise an exception in case of failure
+        # and we have a host to determine the endpoint type from.
         host = getattr(self, "host", None)
-        if (
+        return bool(
             check_protocol_version(self.get_protocol(), 3)
             and self.maint_notifications_config
             and self.maint_notifications_config.enabled
             and self._maint_notifications_connection_handler
             and host is not None
-        ):
+        )
+
+    def activate_maint_notifications_handling_if_enabled(self, check_health=True):
+        # When the maint_notifications_config enabled mode is "auto",
+        # we just log a warning if the handshake fails
+        # When the mode is enabled=True, we raise an exception in case of failure
+        if self._should_enable_maint_notifications():
             self._enable_maintenance_notifications(
                 maint_notifications_config=self.maint_notifications_config,
                 check_health=check_health,
@@ -635,40 +675,91 @@ class MaintNotificationsAbstractConnection:
     def _enable_maintenance_notifications(
         self, maint_notifications_config: MaintNotificationsConfig, check_health=True
     ):
+        # Kept for callers that enable maintenance notifications outside of the
+        # connection handshake. During on_connect the send and the response
+        # handling are split (see _send_maint_notifications_command /
+        # _handle_maint_notifications_response) so the reply can be pipelined
+        # with the rest of the handshake.
+        self._send_maint_notifications_command(
+            maint_notifications_config, check_health=check_health
+        )
+        self._handle_maint_notifications_response(maint_notifications_config)
+
+    def _maint_notifications_command_args(
+        self, maint_notifications_config: MaintNotificationsConfig
+    ):
+        host = getattr(self, "host", None)
+        if host is None:
+            raise ValueError(
+                "Cannot enable maintenance notifications for connection"
+                " object that doesn't have a host attribute."
+            )
+        endpoint_type = maint_notifications_config.get_endpoint_type(host, self)
+        return (
+            "CLIENT",
+            "MAINT_NOTIFICATIONS",
+            "ON",
+            "moving-endpoint-type",
+            endpoint_type.value,
+        )
+
+    def _send_maint_notifications_command(
+        self, maint_notifications_config: MaintNotificationsConfig, check_health=True
+    ):
+        self.send_command(
+            *self._maint_notifications_command_args(maint_notifications_config),
+            check_health=check_health,
+        )
+
+    def _add_maint_notifications_to_handshake(self, deferred_reads, check_health=True):
+        # If maintenance notifications are enabled for this connection, send the
+        # CLIENT MAINT_NOTIFICATIONS command with the rest of the handshake tail and
+        # defer reading its reply (appended to deferred_reads), rather than paying its
+        # own round-trip. When enabled == "auto" a failure is logged and swallowed;
+        # when enabled is True it raises.
+        if not self._should_enable_maint_notifications():
+            return
+        maint_notifications_config = self.maint_notifications_config
+        self._send_maint_notifications_command(
+            maint_notifications_config, check_health=check_health
+        )
+        deferred_reads.append(
+            lambda: self._handle_maint_notifications_response(
+                maint_notifications_config
+            )
+        )
+
+    def _handle_maint_notifications_response(
+        self, maint_notifications_config: MaintNotificationsConfig
+    ):
         try:
-            host = getattr(self, "host", None)
-            if host is None:
-                raise ValueError(
-                    "Cannot enable maintenance notifications for connection"
-                    " object that doesn't have a host attribute."
+            response = self.read_response()
+            if not response or str_if_bytes(response) != "OK":
+                raise ResponseError(
+                    "The server doesn't support maintenance notifications"
                 )
-            else:
-                endpoint_type = maint_notifications_config.get_endpoint_type(host, self)
-                self.send_command(
-                    "CLIENT",
-                    "MAINT_NOTIFICATIONS",
-                    "ON",
-                    "moving-endpoint-type",
-                    endpoint_type.value,
-                    check_health=check_health,
-                )
-                response = self.read_response()
-                if not response or str_if_bytes(response) != "OK":
-                    raise ResponseError(
-                        "The server doesn't support maintenance notifications"
-                    )
         except Exception as e:
             if (
                 isinstance(e, ResponseError)
                 and maint_notifications_config.enabled == "auto"
             ):
                 # Log warning but don't fail the connection
-                import logging
-
-                logger = logging.getLogger(__name__)
                 logger.debug(f"Failed to enable maintenance notifications: {e}")
             else:
                 raise
+
+    def _read_ok_or_raise(self, error_message):
+        # Read one handshake reply and require it to be "OK".
+        if str_if_bytes(self.read_response()) != "OK":
+            raise ConnectionError(error_message)
+
+    def _read_optional_setinfo(self):
+        # Read one CLIENT SETINFO reply. Older servers may not support the command,
+        # so a ResponseError is swallowed instead of failing the connection.
+        try:
+            self.read_response()
+        except ResponseError:
+            pass
 
     def get_resolved_ip(self) -> Optional[str]:
         """
@@ -688,8 +779,10 @@ class MaintNotificationsAbstractConnection:
             conn_socket = self._get_socket()
             if conn_socket is not None:
                 peer_addr = conn_socket.getpeername()
-                if peer_addr and len(peer_addr) >= 1:
-                    # For TCP sockets, peer_addr is typically (host, port) tuple
+                # For TCP sockets, peer_addr is typically a (host, port) tuple.
+                # AF_UNIX sockets report a path string instead, and indexing it
+                # would yield the first character of the path.
+                if isinstance(peer_addr, tuple) and peer_addr:
                     # Return just the host part
                     return peer_addr[0]
         except (AttributeError, OSError):
@@ -762,12 +855,22 @@ class MaintNotificationsAbstractConnection:
             # will lead to a deadlock
             if conn_socket.gettimeout() != 0:
                 conn_socket.settimeout(timeout)
+            # Deliberately outside the guard above. The parser caches this value
+            # to restore after a per-call timeout override, so while a can_read
+            # probe holds the socket at 0 the cache *is* the pending restore
+            # value: writing it is how the new timeout gets armed without
+            # flipping the socket back to blocking mid-read. Skipping it here
+            # instead would let the probe restore the pre-relaxation timeout and
+            # lose a maintenance relaxation for the life of the connection.
             self.update_parser_timeout(timeout)
 
     def update_parser_timeout(self, timeout: Optional[float] = None):
         parser = self._get_parser()
         if parser and parser._buffer:
-            if isinstance(parser, _RESP3Parser) and timeout:
+            # Both parsers cache this value to restore after a per-call timeout
+            # override, so both must receive exactly what was armed on the
+            # socket - including None, which means "block indefinitely".
+            if isinstance(parser, _RESP3Parser):
                 parser._buffer.socket_timeout = timeout
             elif isinstance(parser, _HiredisParser):
                 parser._socket_timeout = timeout
@@ -1192,54 +1295,71 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             ):
                 raise ConnectionError("Invalid RESP version")
 
-        # Activate maintenance notifications for this connection
-        # if enabled in the configuration
-        # This is a no-op if maintenance notifications are not enabled
-        self.activate_maint_notifications_handling_if_enabled(check_health=check_health)
+        # The tail of the handshake (optional CLIENT MAINT_NOTIFICATIONS, then
+        # CLIENT SETNAME / SETINFO / SELECT) does not affect control flow -- the replies
+        # are only validated or discarded. So we optimize the flow: send every command
+        # first (without blocking on a reply between them), then read the replies back in
+        # send order. All requests are on the wire before we block on the first read, so
+        # the whole tail costs a single round-trip instead of one per command. AUTH/HELLO
+        # stays a separate round-trip above because its reply drives the RESP2->RESP3
+        # parser upgrade, the pre-6.0 AUTH retry, and proto validation.
+        #
+        # deferred_reads holds one zero-arg handler per command sent below; each reads
+        # exactly one reply (in send order) and validates it. Per-command check_health
+        # reproduces the original behavior: at most one health PING/PONG fires before the
+        # first tail command (only when no HELLO/AUTH ran, e.g. RESP2 no-auth), and it is
+        # self-contained so it never desyncs the deferred replies.
+        #
+        # TODO: apply the same optimization to the async handshake in
+        # redis/asyncio/connection.py, where not all tail commands are handled this way
+        # yet (e.g. maintenance notifications are still issued separately there).
+        deferred_reads = []
+
+        # Maintenance notifications (RESP3-only, opt-in) go first when enabled, so their
+        # reply is read together with the rest of the tail.
+        self._add_maint_notifications_to_handshake(deferred_reads, check_health)
 
         # if a client_name is given, set it
         if self.client_name:
             self.send_command(
+                "CLIENT", "SETNAME", self.client_name, check_health=check_health
+            )
+            deferred_reads.append(
+                functools.partial(self._read_ok_or_raise, "Error setting client name")
+            )
+
+        # Set the library name and version from driver_info. Older servers may not
+        # support CLIENT SETINFO, so any ResponseError to these replies is swallowed.
+        if self.driver_info and self.driver_info.formatted_name:
+            self.send_command(
                 "CLIENT",
-                "SETNAME",
-                self.client_name,
+                "SETINFO",
+                "LIB-NAME",
+                self.driver_info.formatted_name,
                 check_health=check_health,
             )
-            if str_if_bytes(self.read_response()) != "OK":
-                raise ConnectionError("Error setting client name")
+            deferred_reads.append(self._read_optional_setinfo)
 
-        # Set the library name and version from driver_info
-        try:
-            if self.driver_info and self.driver_info.formatted_name:
-                self.send_command(
-                    "CLIENT",
-                    "SETINFO",
-                    "LIB-NAME",
-                    self.driver_info.formatted_name,
-                    check_health=check_health,
-                )
-                self.read_response()
-        except ResponseError:
-            pass
-
-        try:
-            if self.driver_info and self.driver_info.lib_version:
-                self.send_command(
-                    "CLIENT",
-                    "SETINFO",
-                    "LIB-VER",
-                    self.driver_info.lib_version,
-                    check_health=check_health,
-                )
-                self.read_response()
-        except ResponseError:
-            pass
+        if self.driver_info and self.driver_info.lib_version:
+            self.send_command(
+                "CLIENT",
+                "SETINFO",
+                "LIB-VER",
+                self.driver_info.lib_version,
+                check_health=check_health,
+            )
+            deferred_reads.append(self._read_optional_setinfo)
 
         # if a database is specified, switch to it
         if self.db:
             self.send_command("SELECT", self.db, check_health=check_health)
-            if str_if_bytes(self.read_response()) != "OK":
-                raise ConnectionError("Invalid Database")
+            deferred_reads.append(
+                functools.partial(self._read_ok_or_raise, "Invalid Database")
+            )
+
+        # Read the deferred replies in the order the commands were sent.
+        for read_and_validate_response in deferred_reads:
+            read_and_validate_response()
 
     def disconnect(self, *args, **kwargs):
         "Disconnects from the Redis server"
@@ -1349,10 +1469,12 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 command = [command]
             for item in command:
                 self._sock.sendall(item)
-        except socket.timeout:
+        except socket.timeout as e:
+            add_debug_log_for_connection_failure(self, e, "writing command")
             self.disconnect()
             raise TimeoutError("Timeout writing to socket")
         except OSError as e:
+            add_debug_log_for_connection_failure(self, e, "writing command")
             self.disconnect()
             if len(e.args) == 1:
                 errno, errmsg = "UNKNOWN", e.args[0]
@@ -1360,11 +1482,12 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 errno = e.args[0]
                 errmsg = e.args[1]
             raise ConnectionError(f"Error {errno} while writing to socket. {errmsg}.")
-        except BaseException:
+        except BaseException as e:
             # BaseExceptions can be raised when a socket send operation is not
             # finished, e.g. due to a timeout.  Ideally, a caller could then re-try
             # to send un-sent data. However, the send_packed_command() API
             # does not support it so there is no point in keeping the connection open.
+            add_debug_log_for_connection_failure(self, e, "writing command")
             self.disconnect()
             raise
 
@@ -1415,19 +1538,43 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 response = self._parser.read_response(
                     disable_decoding=disable_decoding, timeout=timeout
                 )
-        except socket.timeout:
+        except socket.timeout as e:
             if disconnect_on_error:
+                add_debug_log_for_connection_failure(self, e, "reading response")
+                self.disconnect()
+            raise TimeoutError(f"Timeout reading from {host_error}")
+        except TimeoutError as e:
+            # The parsers raise redis.exceptions.TimeoutError, which is not an
+            # OSError, so without this branch it would fall through to
+            # BaseException and keep the parser's undecorated message. Re-raise
+            # it with the host, matching what the async stack already reports.
+            if disconnect_on_error:
+                add_debug_log_for_connection_failure(self, e, "reading response")
                 self.disconnect()
             raise TimeoutError(f"Timeout reading from {host_error}")
         except OSError as e:
             if disconnect_on_error:
+                add_debug_log_for_connection_failure(self, e, "reading response")
                 self.disconnect()
             raise ConnectionError(f"Error while reading from {host_error} : {e.args}")
-        except BaseException:
+        except UNRECOVERABLE_PARSE_ERRORS as e:
+            # The parser failed partway through a reply, after the read cursor
+            # had already passed bytes it cannot re-interpret. The rewind and
+            # disconnect_on_error=False exist so an *interrupted* read can be
+            # re-parsed from the start (#2510, #2695) - an in-band ResponseError
+            # is returned as a value and purged, never rewound. Re-parsing here
+            # just reproduces the same failure, so honouring
+            # disconnect_on_error=False would make every later read fail
+            # identically, forever. Drop the connection regardless. See #4291.
+            add_debug_log_for_connection_failure(self, e, "reading response")
+            self.disconnect()
+            raise
+        except BaseException as e:
             # Also by default close in case of BaseException.  A lot of code
             # relies on this behaviour when doing Command/Response pairs.
             # See #1128.
             if disconnect_on_error:
+                add_debug_log_for_connection_failure(self, e, "reading response")
                 self.disconnect()
             raise
 
@@ -1519,16 +1666,48 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         self._socket_connect_timeout = value
 
     def extract_connection_details(self) -> str:
-        socket_address = None
+        """
+        Render the connection's identity, maintenance state and effective timeouts.
+
+        This is what the debug logs use to explain a failed or timed out command:
+
+        - ``host`` vs ``orig host`` says whether the connection still points at the
+          node being moved away from, or has already been repointed at the new one.
+        - ``state`` says whether maintenance handling touched this connection at
+          all, so an unaffected node's connections are distinguishable.
+        - ``socket_timeout`` vs ``active read timeout`` says which timeout the read
+          actually ran under. They diverge for a command that was already in flight
+          when the relaxed timeout was applied.
+        """
         if self._sock is None:
             return "not connected"
+
+        socket_address = None
+        active_read_timeout = None
         try:
-            socket_address = self._sock.getsockname() if self._sock else None
-            socket_address = socket_address[1] if socket_address else None
+            socket_name = self._sock.getsockname()
+            # AF_UNIX sockets report a path string rather than a (host, port) tuple
+            if isinstance(socket_name, tuple) and len(socket_name) > 1:
+                socket_address = socket_name[1]
+            # The timeout armed on the socket is what a blocking read is really
+            # using, which can lag self.socket_timeout for an in-flight command.
+            active_read_timeout = self._sock.gettimeout()
         except (AttributeError, OSError):
             pass
 
-        return f"connected to ip {self.get_resolved_ip()}, local socket port: {socket_address}"
+        state = getattr(self.maintenance_state, "value", self.maintenance_state)
+        return (
+            f"connected to ip {self.get_resolved_ip()}, "
+            f"local socket port: {socket_address}, "
+            f"host: {self._host_error()} "
+            f"(orig: {getattr(self, 'orig_host_address', None)}), "
+            f"state: {state}, "
+            f"socket_timeout: {self.socket_timeout} "
+            f"(orig: {getattr(self, 'orig_socket_timeout', None)}), "
+            f"active read timeout: {active_read_timeout}, "
+            f"should_reconnect: {self.should_reconnect()}, "
+            f"notification_hash: {self.maintenance_notification_hash}"
+        )
 
 
 class Connection(AbstractConnection):
@@ -1559,7 +1738,20 @@ class Connection(AbstractConnection):
             avoid setting additional TCP keepalive options.
         """
         self._host = host
-        self.port = int(port)
+        # bool subclasses int; port=True would become privileged port 1.
+        # Numeric strings stay valid. Callers still pass "6379".
+        if isinstance(port, bool):
+            raise TypeError("port must be an integer, not bool")
+        if isinstance(port, str):
+            try:
+                port = int(port)
+            except ValueError:
+                raise TypeError("port must be an integer, not str") from None
+        elif not isinstance(port, int):
+            raise TypeError(f"port must be an integer, not {type(port).__name__}")
+        if not 0 <= port <= 65535:
+            raise ValueError(f"port must be in 0..65535, got {port}")
+        self.port = port
         self.socket_keepalive = socket_keepalive
         if socket_keepalive_options is SENTINEL:
             socket_keepalive_options = get_default_socket_keepalive_options()
@@ -1647,6 +1839,31 @@ class Connection(AbstractConnection):
         self._host = value
 
 
+# Distinguishes "no locally-served reply is waiting" from a cached value that happens to be
+# falsy. ``None`` cannot do the job: it is a legitimate reply shape, and the cache refuses to
+# store it only by convention.
+_NO_PENDING_HIT = object()
+
+# A command name that does not start with one of these cannot be ``CLIENT``, so
+# ``_is_client_caching`` rejects nearly every command before it allocates anything.
+_CLIENT_FIRST_CHARS = frozenset(("c", "C", b"c", b"C"))
+
+
+def _is_client_caching(args) -> bool:
+    """
+    Whether ``args`` is a ``CLIENT CACHING`` command, in any of the spellings
+    ``pack_command`` accepts: ``"CLIENT CACHING"`` as one argument or ``"CLIENT"``,
+    ``"CACHING"`` as two, as ``str`` or ``bytes``, in any case.
+    """
+    command = args[0]
+    if not isinstance(command, (str, bytes)) or command[:1] not in _CLIENT_FIRST_CHARS:
+        return False
+    words = str_if_bytes(command).upper().split()
+    if len(words) == 1 and len(args) > 1 and isinstance(args[1], (str, bytes)):
+        words.append(str_if_bytes(args[1]).upper())
+    return words[:2] == ["CLIENT", "CACHING"]
+
+
 class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInterface):
     DUMMY_CACHE_VALUE = b"foo"
     MIN_ALLOWED_VERSION = "7.4.0"
@@ -1670,7 +1887,20 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._cache = cache
         self._cache_lock = threading.RLock()
         self._current_command_cache_key = None
-        self._current_options = None
+        # Read once: the configuration cannot change after the pool built the cache, and the
+        # mode is a connection-setup property anyway - the server refuses to switch a live
+        # connection between OPTIN and OPTOUT, so a configuration change applies to new
+        # connections only.
+        self._tracking_mode = cache.config.get_tracking_mode()
+        # A CLIENT CACHING ``+OK`` is queued ahead of the next data reply.
+        self._pending_caching_reply = False
+        # The next command is an ASK-redirected attempt, which must not be paired.
+        self._skip_next_caching = False
+        # Distinguishes a reconnect from the first connect in the tracking callback.
+        self._connected_once = False
+        # A reply ``send_command`` resolved from the cache, waiting for ``read_response`` to
+        # hand it back. Set means nothing was written, so there is no reply on the socket.
+        self._pending_cache_hit = _NO_PENDING_HIT
         self.register_connect_callback(self._enable_tracking_callback)
 
         if isinstance(self._conn, MaintNotificationsAbstractConnection):
@@ -1752,6 +1982,13 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def disconnect(self, *args, **kwargs):
         with self._cache_lock:
             self._cache.flush()
+        # Both flags describe an exchange on the socket that is about to die with it. A stale
+        # ``_pending_caching_reply`` would make the next ``read_response`` swallow a reply;
+        # a stale ``_skip_next_caching`` would leak the ASK suppression onto an unrelated
+        # later command.
+        self._pending_caching_reply = False
+        self._skip_next_caching = False
+        self._pending_cache_hit = _NO_PENDING_HIT
         self._conn.disconnect(*args, **kwargs)
 
     def check_health(self):
@@ -1763,60 +2000,135 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         # Pre-packed commands are not individually cacheable, so make sure the
         # next read_response does not try to cache their reply under a stale key.
         self._current_command_cache_key = None
+        # A pre-packed write carries no CLIENT CACHING command of its own, so a flag left
+        # over from an earlier send must not make the next read_response swallow a reply -
+        # nor may a stale locally-served reply be handed back in place of this write's.
+        # The server consumes a pending ASKING on this write, so the ASK suppression must
+        # not carry over to a later command either.
+        self._pending_caching_reply = False
+        self._skip_next_caching = False
+        self._pending_cache_hit = _NO_PENDING_HIT
         self._conn.send_packed_command(command)
 
     def send_command(self, *args, **kwargs):
+        # Before anything else, so a refused command leaves no state behind.
+        self._refuse_client_caching(args)
         self._process_pending_invalidations()
+        self._pending_caching_reply = False
+        self._pending_cache_hit = _NO_PENDING_HIT
 
-        with self._cache_lock:
-            # Command is write command or not allowed
-            # to be cached.
-            if not self._cache.is_cachable(
-                CacheKey(command=args[0], redis_keys=(), redis_args=())
-            ):
-                self._current_command_cache_key = None
-                self._conn.send_command(*args, **kwargs)
-                return
-
-        # Eligibility and keyability are two separate questions, and both must be answered
-        # yes before a reply may be stored. The command metadata answers the first; the
-        # presence of ``keys`` answers the second, because a command's key positions are
-        # supplied by its command method rather than derived here. A cacheable command
-        # whose invocation carries no key list is therefore a gap in what this client has
-        # been taught, not an error: send it normally and cache nothing.
-        keys = kwargs.get("keys")
-        if keys is None:
+        if self._skip_next_caching:
+            # An ASK-redirected attempt.
+            # ``ASKING`` like ``CLIENT CACHING`` needs to be immediatelly before the next command
+            # so we can't have both additions to the command we are sending,
+            # and pairing here would strip the ASK allowance and the read would
+            # be redirected again.
+            # Cache nothing either: the reply belongs to a migrating
+            # slot, and the attempt is tracked by default under optout anyway.
+            self._skip_next_caching = False
             self._current_command_cache_key = None
             self._conn.send_command(*args, **kwargs)
             return
 
+        command = args[0]
+        if isinstance(command, str) and command.upper() == "ASKING":
+            # The cluster executor sends ASKING as its own command on this connection right
+            # before the redirected attempt, so observing it here is all the notice needed -
+            # no kwarg threading, and the flag mirrors the server's own one-shot semantics.
+            self._skip_next_caching = True
+
+        # Eligibility, keyability and intent are three separate questions, and all three must
+        # be answered yes before a reply may be stored. The command metadata answers the
+        # first; the presence of ``keys`` answers the second, because a command's key
+        # positions are supplied by its command method rather than derived here. A cacheable
+        # command whose invocation carries no key list is therefore a gap in what this client
+        # has been taught, not an error: send it normally and cache nothing. The configured
+        # tracking mode and predicate answer the third.
+        keys = kwargs.get("keys")
+        store = False
+
+        if keys is not None:
+            # Materialized once: ``keys`` may be a one-shot iterable, and it is read again
+            # below to build the ``CacheKey`` the reverse index is keyed by.
+            keys = tuple(keys)
+
+        # An empty key list - ``mget([])``, ``exists()`` - is treated as no key list: there
+        # is nothing to track, and the predicate is promised never to see an empty tuple.
+        if keys:
+            with self._cache_lock:
+                # Eligibility is asked with a throwaway empty-keys ``CacheKey`` because
+                # ``DefaultCache.is_cachable`` looks only at ``key.command``.
+                eligible = self._cache.is_cachable(
+                    CacheKey(command=command, redis_keys=(), redis_args=())
+                )
+
+            # Intent is asked separately, after the real keys are known, and outside the
+            # cache lock: it invokes application code and touches no cache state. Folding it
+            # into ``is_cachable`` would also invoke it from ``DefaultCache.set`` and from
+            # the eligibility probe above, both with an empty key tuple.
+            store = eligible and self._cache.config.should_cache(command, keys)
+
+        if not store:
+            self._current_command_cache_key = None
+
+            # One path for keyless and ineligible commands alike, so an eligible read whose
+            # command method never plumbed ``keys=`` still gets its optout ``NO``. That is the
+            # correct direction: the server tracks it regardless, and we will not store it.
+            #
+            # Trackability is asked only here, and never affects storage. A ``NO`` in front of
+            # a command the server would not track - a write, a keyless read - is consumed
+            # with no effect, so the only cost of getting it wrong is a wasted command; the
+            # check fails closed, which skips the ``NO`` rather than risking a stored reply.
+            if self._tracking_mode is TrackingMode.OPTOUT and (
+                self._cache.config.is_trackable_read(command)
+            ):
+                self._send_with_caching(b"NO", args, kwargs)
+            else:
+                self._conn.send_command(*args, **kwargs)
+            return
+
         # Creates cache key.
         self._current_command_cache_key = CacheKey(
-            command=args[0], redis_keys=tuple(keys), redis_args=args
+            command=command, redis_keys=keys, redis_args=args
         )
 
         with self._cache_lock:
             # We have to trigger invalidation processing in case if
             # it was cached by another connection to avoid
             # queueing invalidations in stale connections.
-            if self._cache.get(self._current_command_cache_key):
+            #
+            # Only an entry we might serve is drained. An IN_PROGRESS one is never served and
+            # is overwritten by our own placeholder below, so draining cannot change the
+            # result - while its ``connection_ref`` socket may hold the owner's reply pair,
+            # or another command's reply if the placeholder was stranded, and the drain
+            # (which returns non-push replies too) would consume either one.
+            entry = self._cache.get(self._current_command_cache_key)
+            if entry is not None and entry.status != CacheEntryStatus.IN_PROGRESS:
+                with self._pool_lock:
+                    self._drain_invalidations(entry.connection_ref)
+
+                # Re-check: the entry may have been invalidated during the drain, or filled
+                # in by the connection that was fetching it.
                 entry = self._cache.get(self._current_command_cache_key)
 
-                with self._pool_lock:
-                    while entry.connection_ref.can_read():
-                        try:
-                            entry.connection_ref.read_response(
-                                push_request=True,
-                                timeout=0,
-                                disconnect_on_error=False,
-                            )
-                        except TimeoutError:
-                            break
-
-                # Re-check: if the entry was invalidated during the drain,
-                # fall through to send the command over the network.
-                if self._cache.get(self._current_command_cache_key):
-                    return
+            # Whether this read is served locally is decided here, once, and the value is
+            # carried to ``read_response`` - which must not re-derive it from cache state.
+            # Two things can happen to the entry between the two calls, and re-deriving
+            # desynchronises the connection under both:
+            #
+            # - another connection resolves this very entry object and flips it to VALID with
+            #   *its* reply, so a re-derived check would serve that value and never read the
+            #   reply we did send;
+            # - an invalidation removes it, so a re-derived check would find nothing and read
+            #   a reply for a command we never sent.
+            #
+            # An IN_PROGRESS entry is somebody else's fetch in flight and carries no value to
+            # serve, so it is not a hit: fall through and send. Returning without sending
+            # would leave ``read_response`` reading a reply that was never requested.
+            if entry is not None and entry.status != CacheEntryStatus.IN_PROGRESS:
+                self._pending_cache_hit = copy.deepcopy(entry.cache_value)
+                self._current_command_cache_key = None
+                return
 
             # Set temporary entry value to prevent
             # race condition from another connection.
@@ -1830,8 +2142,40 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             )
 
         # Send command over socket only if it's allowed
-        # read-only command that not yet cached.
-        self._conn.send_command(*args, **kwargs)
+        # read-only command that not yet cached. Under optin the server remembers nothing
+        # unless ``CLIENT CACHING YES`` comes right before the read, so this - the one place
+        # that decided to store the reply - is where the pair is sent. Under plain and optout
+        # the read is tracked by default and goes out alone.
+        if self._tracking_mode is TrackingMode.OPTIN:
+            self._send_with_caching(b"YES", args, kwargs)
+        else:
+            self._conn.send_command(*args, **kwargs)
+
+    def _send_with_caching(self, decision: bytes, args, kwargs) -> None:
+        """
+        Write ``CLIENT CACHING YES|NO`` and its read to the socket as one write.
+
+        One write is the entire pairing guarantee: the server consumes the CACHING flag on the
+        next command that is not a ``CLIENT`` subcommand, so anything the library slipped in
+        between would take the flag instead of the read - under optin leaving the read
+        untracked, under optout exempting the wrong command. Health-checking is left to
+        ``send_packed_command``, which PINGs before it writes anything, so the PING cannot
+        land inside the pair.
+
+        Calls the wrapped connection's ``send_packed_command`` rather than this class's own
+        override, which clears ``_current_command_cache_key`` and would discard the
+        IN_PROGRESS placeholder the caller just set.
+
+        Args:
+            decision: ``b"YES"`` under optin, ``b"NO"`` under optout.
+            args: The paired command, as ``send_command`` received it.
+            kwargs: The paired command's keyword arguments, read for ``check_health``.
+        """
+        packed = self._conn.pack_commands([(b"CLIENT", b"CACHING", decision), args])
+        self._conn.send_packed_command(
+            packed, check_health=kwargs.get("check_health", True)
+        )
+        self._pending_caching_reply = True
 
     def can_read(self, timeout: float = 0) -> bool:
         # TODO: Rename this API; it detects pending data or dirty/closed
@@ -1846,50 +2190,75 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         disconnect_on_error=True,
         push_request=False,
     ):
-        with self._cache_lock:
-            # Check if command response exists in a cache and it's not in progress.
-            if self._current_command_cache_key is not None:
-                if (
-                    self._cache.get(self._current_command_cache_key) is not None
-                    and self._cache.get(self._current_command_cache_key).status
-                    != CacheEntryStatus.IN_PROGRESS
-                ):
-                    res = copy.deepcopy(
-                        self._cache.get(self._current_command_cache_key).cache_value
-                    )
-                    self._current_command_cache_key = None
-                    record_csc_request(
-                        result=CSCResult.HIT,
-                    )
-                    record_csc_network_saved(
-                        bytes_saved=len(res) if hasattr(res, "__len__") else 0,
-                    )
-                    return res
-                record_csc_request(
-                    result=CSCResult.MISS,
+        if self._pending_cache_hit is not _NO_PENDING_HIT:
+            # ``send_command`` resolved this read from the cache and wrote nothing, so there
+            # is no reply on the socket and the cache is deliberately not consulted again -
+            # see the note there on why re-deriving the decision desynchronises the
+            # connection.
+            response = self._pending_cache_hit
+            self._pending_cache_hit = _NO_PENDING_HIT
+            record_csc_request(
+                result=CSCResult.HIT,
+            )
+            record_csc_network_saved(
+                bytes_saved=len(response) if hasattr(response, "__len__") else 0,
+            )
+            return response
+
+        if self._current_command_cache_key is not None:
+            # A key is still set, so ``send_command`` decided to store this reply and sent the
+            # command: by construction a miss.
+            record_csc_request(
+                result=CSCResult.MISS,
+            )
+
+        try:
+            if self._pending_caching_reply:
+                # Consumed before the wire read below, so an interleaved invalidation cannot
+                # be mistaken for either reply of the pair. Inside the ``try`` so a failure
+                # here drops the placeholder exactly as a failed data read does.
+                self._pending_caching_reply = False
+                self._read_caching_reply(
+                    timeout=timeout, disconnect_on_error=disconnect_on_error
                 )
 
-        response = self._conn.read_response(
-            disable_decoding=disable_decoding,
-            timeout=timeout,
-            disconnect_on_error=disconnect_on_error,
-            push_request=push_request,
-        )
+            response = self._conn.read_response(
+                disable_decoding=disable_decoding,
+                timeout=timeout,
+                disconnect_on_error=disconnect_on_error,
+                push_request=push_request,
+            )
+        except BaseException:
+            # The placeholder ``send_command`` staked is resolved only by the read that just
+            # failed, so it has to go with it. Left behind, it sits in the pool-wide cache
+            # until an invalidation or a disconnect happens to clear it: nothing else will,
+            # because this command never completed and so the server is tracking nothing for
+            # it. A ``WRONGTYPE`` or ``NOPERM`` reply is enough to strand one, as is the
+            # ``-ASK`` on the first attempt of a redirected read.
+            self._drop_own_placeholder()
+            raise
 
         with self._cache_lock:
             # Prevent not-allowed command from caching.
             if self._current_command_cache_key is None:
                 return response
-            # If response is None prevent from caching.
+            # If response is None prevent from caching. Only our own placeholder is
+            # dropped: the entry may by now belong to another connection.
             if response is None:
-                self._cache.delete_by_cache_keys([self._current_command_cache_key])
+                self._drop_own_placeholder()
                 return response
 
             cache_entry = self._cache.get(self._current_command_cache_key)
 
-            # Cache only responses that still valid
-            # and wasn't invalidated by another connection in meantime.
-            if cache_entry is not None:
+            # Promote only the placeholder this connection staked. It may have been
+            # invalidated in the meantime, or replaced by another connection's placeholder
+            # for the same key - promoting that one would bind our reply to its
+            # ``connection_ref``, and a later hit would drain that connection's own reply.
+            if (
+                cache_entry is not None
+                and cache_entry.status == CacheEntryStatus.IN_PROGRESS
+                and cache_entry.connection_ref is self._conn
+            ):
                 cache_entry.status = CacheEntryStatus.VALID
                 cache_entry.cache_value = response
                 self._cache.set(cache_entry)
@@ -1898,11 +2267,104 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
         return response
 
+    def _drop_own_placeholder(self) -> None:
+        """
+        Drop the ``IN_PROGRESS`` placeholder this connection staked, if it is still ours.
+
+        Called when the read that would have resolved the placeholder fails. The cache is
+        shared by the whole pool while each proxy's lock is its own, so the entry under this
+        key may no longer be the one this connection put there, and the delete is scoped to
+        the two conditions that prove it is:
+
+        - still ``IN_PROGRESS`` - another connection's successful read can resolve this very
+          entry to ``VALID`` in place, and deleting it would discard a correctly stored reply;
+        - ``connection_ref`` is this connection - another connection's ``send_command`` for
+          the same key replaces the entry with its own placeholder, and deleting it would
+          evict a fetch that is still in flight.
+
+        Clears ``_current_command_cache_key`` either way: the read it pointed at is over.
+        """
+        key = self._current_command_cache_key
+        if key is None:
+            return
+
+        with self._cache_lock:
+            entry = self._cache.get(key)
+            if (
+                entry is not None
+                and entry.status == CacheEntryStatus.IN_PROGRESS
+                and entry.connection_ref is self._conn
+            ):
+                self._cache.delete_by_cache_keys([key])
+
+        self._current_command_cache_key = None
+
+    def _read_caching_reply(self, *, timeout, disconnect_on_error) -> None:
+        """
+        Consume the ``+OK`` of a ``CLIENT CACHING`` command sent ahead of a read.
+
+        Called inside ``read_response``'s ``try``, whose handlers clean up after any failure
+        here the same way they do after a failed data read. A ``ConnectionError`` fails both
+        commands together - never the read alone, whose reply would otherwise be stored
+        without the tracking that makes it safe. The wrapped socket is closed, but the cache
+        is flushed only when the client's error handling then disconnects this connection,
+        or when the next connect re-enables tracking.
+
+        Args:
+            timeout: The caller's bound for this read.
+            disconnect_on_error: Passed through to the wrapped connection.
+
+        Raises:
+            ResponseError: Re-raised after the paired read's reply has been drained.
+            ConnectionError: If the server answered something other than ``OK``.
+        """
+        try:
+            reply = self._conn.read_response(
+                timeout=timeout, disconnect_on_error=disconnect_on_error
+            )
+        except ResponseError:
+            # The paired read executed on the server regardless. Leaving its reply on the
+            # socket would return this connection to the pool one reply out of sync, and the
+            # next borrower would read our answer. The placeholder is dropped by the caller's
+            # ``except BaseException``, as for any other failed read.
+            self._conn.read_response(
+                timeout=timeout, disconnect_on_error=disconnect_on_error
+            )
+            raise
+
+        if str_if_bytes(reply) != "OK":
+            raise ConnectionError(f"Unexpected CLIENT CACHING reply: {reply!r}")
+
     def pack_command(self, *args):
         return self._conn.pack_command(*args)
 
     def pack_commands(self, commands):
+        # Every pipeline and transaction packs through here, so the guard covers them as
+        # well. The cache's own pairing is unaffected: ``_send_with_caching`` packs through
+        # the wrapped connection, not through this method.
+        for args in commands:
+            self._refuse_client_caching(args)
         return self._conn.pack_commands(commands)
+
+    @staticmethod
+    def _refuse_client_caching(args) -> None:
+        """
+        Refuse a user-sent ``CLIENT CACHING`` on a connection the cache manages.
+
+        The server applies the flag to the next command on the socket, and a pooled
+        connection promises nothing about which command that is. Under ``optout`` a stray
+        ``NO`` would leave the next cached read untracked while its reply is still stored,
+        so it would never be invalidated. The cache sends ``CLIENT CACHING`` itself, paired
+        with the read it belongs to, whenever the tracking mode needs it.
+
+        Raises:
+            RedisError: If ``args`` is a ``CLIENT CACHING`` command.
+        """
+        if _is_client_caching(args):
+            raise RedisError(
+                "CLIENT CACHING cannot be sent on a connection with client-side caching "
+                "enabled: the cache sends it itself, paired with the read it applies to"
+            )
 
     # HIMPORT state lives on the wrapped connection (HIMPORT is never cacheable);
     # delegate so callers treat the proxy like a plain connection and never need
@@ -2056,21 +2518,80 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._conn._connect()
 
     def _host_error(self):
-        self._conn._host_error()
+        return self._conn._host_error()
 
     def _enable_tracking_callback(self, conn: ConnectionInterface) -> None:
-        conn.send_command("CLIENT", "TRACKING", "ON")
+        if self._connected_once:
+            # The server destroys a connection's tracking state on disconnect, so every entry
+            # cached through the previous session has lost its invalidation channel. Paths
+            # that reconnect silently inside the send path never call ``disconnect``, so the
+            # flush cannot live there alone.
+            #
+            # Gated on a previous connect because this callback also fires on a first connect
+            # and the cache is pool-shared: an unconditional flush would wipe other
+            # connections' entries every time the pool grows. Flushing the whole shared cache
+            # on reconnect is what ``disconnect`` already does, so the semantics do not
+            # change - only the coverage does.
+            #
+            # The one entry kept is this connection's own in-flight placeholder. Every
+            # reconnect that fires this callback happens inside the send path, before the
+            # command is written, so the reply it is waiting for comes from the new session -
+            # which this callback is about to enable tracking for. Dropping it would cost the
+            # fill and gain nothing.
+            with self._cache_lock:
+                own_placeholder = None
+                if self._current_command_cache_key is not None:
+                    entry = self._cache.get(self._current_command_cache_key)
+                    if (
+                        entry is not None
+                        and entry.status == CacheEntryStatus.IN_PROGRESS
+                        and entry.connection_ref is self._conn
+                    ):
+                        own_placeholder = entry
+                self._cache.flush()
+                if own_placeholder is not None:
+                    self._cache.set(own_placeholder)
+
+        self._pending_caching_reply = False
+
+        # The mode is sent in the handshake because that is what the server requires:
+        # switching OPTIN <-> OPTOUT on a live connection is an error, so a configuration
+        # change applies to new connections only.
+        args = ["CLIENT", "TRACKING", "ON"]
+        if self._tracking_mode is TrackingMode.OPTIN:
+            args.append("OPTIN")
+        elif self._tracking_mode is TrackingMode.OPTOUT:
+            args.append("OPTOUT")
+
+        conn.send_command(*args)
         conn.read_response()
+        # Set only once tracking is on: a handshake that fails before this point cached
+        # nothing, so the next connect has no session to flush for.
+        self._connected_once = True
         conn._parser.set_invalidation_push_handler(self._on_invalidation_callback)
 
-    def _process_pending_invalidations(self):
-        while self.can_read():
+    def _drain_invalidations(self, conn: ConnectionInterface):
+        while conn.can_read():
             try:
-                self._conn.read_response(
+                conn.read_response(
                     push_request=True, timeout=0, disconnect_on_error=False
                 )
             except TimeoutError:
                 break
+            except UNRECOVERABLE_PARSE_ERRORS:
+                # Invalidation replies are read straight off the raw
+                # connection, so the disconnect a parse failure now forces
+                # bypasses this proxy's disconnect() and its cache flush. The
+                # next connect() opens a fresh CLIENT TRACKING session that the
+                # server has no invalidation state for, so entries cached under
+                # the old session would be served as if still tracked. Flush
+                # them here for the same reason disconnect() does.
+                with self._cache_lock:
+                    self._cache.flush()
+                raise
+
+    def _process_pending_invalidations(self):
+        self._drain_invalidations(self._conn)
 
     def _on_invalidation_callback(self, data: List[Union[str, Optional[List[bytes]]]]):
         with self._cache_lock:
@@ -2309,7 +2830,7 @@ class UnixDomainSocketConnection(AbstractConnection):
         return self.path
 
 
-FALSE_STRINGS = ("0", "F", "FALSE", "N", "NO")
+FALSE_STRINGS = ("0", "F", "FALSE", "N", "NO", "OFF")
 
 
 def to_bool(value):
@@ -2334,6 +2855,21 @@ def parse_ssl_verify_flags(value):
     return verify_flags
 
 
+def parse_retry_on_error(value):
+    # exception class names are passed as a comma-separated list,
+    # e.g. ConnectionError,TimeoutError
+    retry_on_error = []
+    for name in value.replace("[", "").replace("]", "").split(","):
+        name = name.strip()
+        if not name:
+            raise ValueError("Empty retry_on_error entry")
+        exc = getattr(redis_exceptions, name, None)
+        if not (isinstance(exc, type) and issubclass(exc, Exception)):
+            raise ValueError(f"Unknown redis exception {name!r}")
+        retry_on_error.append(exc)
+    return retry_on_error
+
+
 URL_QUERY_ARGUMENT_PARSERS = {
     "db": int,
     "socket_timeout": float,
@@ -2341,7 +2877,7 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "socket_read_size": int,
     "socket_keepalive": to_bool,
     "retry_on_timeout": to_bool,
-    "retry_on_error": list,
+    "retry_on_error": parse_retry_on_error,
     "max_connections": int,
     "health_check_interval": int,
     "ssl_check_hostname": to_bool,
@@ -2396,7 +2932,7 @@ def parse_url(url):
     else:  # implied:  url.scheme in ("redis", "rediss"):
         if url.hostname:
             kwargs["host"] = unquote(url.hostname)
-        if url.port:
+        if url.port is not None:
             kwargs["port"] = int(url.port)
 
         # If there's a path argument, use it as the db argument if a
@@ -2737,6 +3273,11 @@ class MaintNotificationsAbstractConnectionPool:
                     raise ValueError(
                         "Either maint_notifications_pool_handler or oss_cluster_maint_notifications_handler must be set"
                     )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Marking active connection for reconnect after config update "
+                        f"config update: {conn}, {conn.extract_connection_details()}"
+                    )
                 conn.mark_for_reconnect()
 
     def _should_update_connection(
@@ -2895,11 +3436,17 @@ class MaintNotificationsAbstractConnectionPool:
 
         :param moving_address_src: The address of the node that is being moved.
         """
+        debug = logger.isEnabledFor(logging.DEBUG)
         with self._get_pool_lock():
             for conn in self._get_in_use_connections():
                 if self._should_update_connection(
                     conn, "connected_address", moving_address_src
                 ):
+                    if debug:
+                        logger.debug(
+                            f"Marking active connection for reconnect: {conn}, "
+                            f"{conn.extract_connection_details()}"
+                        )
                     conn.mark_for_reconnect()
 
     def disconnect_free_connections(
@@ -2912,11 +3459,17 @@ class MaintNotificationsAbstractConnectionPool:
 
         :param moving_address_src: The address of the node that is being moved.
         """
+        debug = logger.isEnabledFor(logging.DEBUG)
         with self._get_pool_lock():
             for conn in self._get_free_connections():
                 if self._should_update_connection(
                     conn, "connected_address", moving_address_src
                 ):
+                    if debug:
+                        logger.debug(
+                            f"Disconnecting free connection: {conn}, "
+                            f"{conn.extract_connection_details()}"
+                        )
                     conn.disconnect()
 
 
@@ -3398,7 +3951,6 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         "Create a new connection"
         if self._created_connections >= self.max_connections:
             raise MaxConnectionsError("Too many connections")
-        self._created_connections += 1
 
         kwargs = dict(self.connection_kwargs)
 
@@ -3409,6 +3961,9 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             )
         else:
             connection = self.connection_class(**kwargs)
+
+        # Only a connection that exists can be released, so count it here.
+        self._created_connections += 1
 
         # Record new connection created (starts as IDLE) - only after successful construction
         record_connection_count(
@@ -3432,6 +3987,11 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
             if self.owns_connection(connection):
                 if connection.should_reconnect():
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            "Disconnecting released connection marked for reconnect: "
+                            f"{connection}, {connection.extract_connection_details()}"
+                        )
                     connection.disconnect()
                 self._available_connections.append(connection)
                 self._event_dispatcher.dispatch(
@@ -3782,7 +4342,15 @@ class BlockingConnectionPool(ConnectionPool):
             if connection is None:
                 # Start timing for observability
                 start_time_created = time.monotonic()
-                connection = self.make_connection()
+                try:
+                    connection = self.make_connection()
+                except BaseException:
+                    # Hand the slot back, or the pool shrinks on every failure.
+                    try:
+                        self.pool.put_nowait(None)
+                    except Full:
+                        pass
+                    raise
                 is_created = True
         finally:
             if self._locked:
@@ -3872,6 +4440,11 @@ class BlockingConnectionPool(ConnectionPool):
                 )
                 return
             if connection.should_reconnect():
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Disconnecting released connection marked for reconnect: "
+                        f"{connection}, {connection.extract_connection_details()}"
+                    )
                 connection.disconnect()
             # Put the connection back into the pool.
             pool_name = get_pool_name(self)
