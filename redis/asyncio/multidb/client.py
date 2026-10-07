@@ -473,7 +473,6 @@ class Pipeline(AsyncRedisModuleCommands, AsyncCoreCommands):
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         await self.reset()
-        await self._client.__aexit__(exc_type, exc_value, traceback)
 
     def __await__(self):
         return self._async_self().__await__()

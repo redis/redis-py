@@ -7838,7 +7838,8 @@ class StreamCommands(CommandsProtocol):
         min: minimum stream ID.
         max: maximum stream ID.
         count: number of messages to return
-        consumername: name of a consumer to filter by (optional).
+        consumername: name of a consumer to filter by (optional). Empty names
+        are supported; only None omits the consumer filter.
         """
         if {min, max, count} == {None}:
             if idle is not None or consumername is not None:
@@ -7870,7 +7871,7 @@ class StreamCommands(CommandsProtocol):
         except TypeError:
             pass
         # consumername
-        if consumername:
+        if consumername is not None:
             pieces.append(consumername)
 
         return self.execute_command("XPENDING", *pieces, parse_detail=True)
