@@ -9,6 +9,7 @@ import ssl
 import threading
 import time
 import types
+import warnings
 import weakref
 from errno import EBADF, ECONNREFUSED, EWOULDBLOCK
 from typing import Any
@@ -33,6 +34,7 @@ from redis.cache import (
     DefaultCache,
     EvictionPolicy,
     LRUPolicy,
+    TrackingMode,
 )
 from redis.connection import (
     CacheProxyConnection,
@@ -48,13 +50,16 @@ from redis.event import (
     EventDispatcher,
 )
 from redis.exceptions import (
+    AskError,
     ConnectionError,
     InvalidResponse,
+    MovedError,
     RedisError,
     ResponseError,
     TimeoutError,
 )
 from redis.observability.attributes import (
+    CSCResult,
     DB_CLIENT_CONNECTION_POOL_NAME,
     DB_CLIENT_CONNECTION_STATE,
     ConnectionState,
@@ -1515,8 +1520,12 @@ class TestUnitCacheProxyConnection:
         mock_connection._event_dispatcher = EventDispatcher()
 
         mock_cache.is_cachable.return_value = True
+        # Scripted positionally, so it tracks how many lookups the proxy makes:
+        #   1st - ``send_command`` checking for an existing entry (None, so it sends)
+        #   2nd - ``read_response`` fetching the placeholder to promote to VALID
+        # The rest is slack. ``read_response`` no longer re-derives the hit decision from
+        # cache state, which is what removed the lookups this list used to carry.
         mock_cache.get.side_effect = [
-            None,
             None,
             CacheEntry(
                 cache_key=CacheKey(
@@ -1592,13 +1601,12 @@ class TestUnitCacheProxyConnection:
             ]
         )
 
+        # Two lookups, both under the same cache key: one in ``send_command`` and one in
+        # ``read_response`` to promote the placeholder. There used to be a third, from
+        # ``read_response`` re-deriving the hit decision from cache state - which is exactly
+        # the lookup that could disagree with what ``send_command`` had already decided.
         mock_cache.get.assert_has_calls(
             [
-                call(
-                    CacheKey(
-                        command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
-                    )
-                ),
                 call(
                     CacheKey(
                         command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
@@ -1782,10 +1790,9 @@ class TestUnitCacheProxyConnection:
 
         mock_cache.is_cachable.return_value = True
         # get() call sequence in send_command:
-        #   1st: check if entry exists (truthy → enter branch)
-        #   2nd: fetch the entry
-        #   3rd: re-check after drain (None → entry was invalidated)
-        mock_cache.get.side_effect = [cache_entry, cache_entry, None]
+        #   1st: fetch the entry (truthy → drain the connection that holds it)
+        #   2nd: re-check after the drain (None → the entry was invalidated)
+        mock_cache.get.side_effect = [cache_entry, None]
         mock_connection.can_read.return_value = False
         mock_connection.send_command.return_value = None
 
@@ -2000,6 +2007,1207 @@ class TestUnitCacheProxyConnection:
             disconnect_on_error=False,
             push_request=True,
         )
+
+
+@pytest.fixture()
+def proxy_factory(mock_connection):
+    """
+    Builds a ``CacheProxyConnection`` over the mocked inner connection, with a real
+    ``DefaultCache`` configured for the given tracking mode and predicate.
+    """
+
+    def build(tracking_mode, cache_predicate=None, max_size=10):
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection._event_dispatcher = EventDispatcher()
+        mock_connection.can_read.return_value = False
+
+        # ``optin`` with no predicate is inert by design and warns at config time; the
+        # tests that pin that warning live in ``tests/test_cache.py``.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            cache = DefaultCache(
+                CacheConfig(
+                    max_size=max_size,
+                    tracking_mode=tracking_mode,
+                    cache_predicate=cache_predicate,
+                )
+            )
+
+        proxy = CacheProxyConnection(mock_connection, cache, threading.RLock())
+        return proxy, cache
+
+    return build
+
+
+def _cache_everything(command, keys):
+    return True
+
+
+def _cache_nothing(command, keys):
+    return False
+
+
+@pytest.mark.fixed_client
+class TestTrackingModePairing:
+    """
+    The wire pairing of ``CLIENT CACHING YES|NO`` with the single read it applies to.
+
+    The server consumes the CACHING flag on the next command that is not a ``CLIENT``
+    subcommand, so the pair must reach the socket as one write with nothing between. These
+    tests assert that shape against a mocked inner connection; that the pairing actually
+    lands on a real server is what the integration tests in ``tests/test_cache.py`` prove.
+    """
+
+    @pytest.mark.parametrize(
+        "tracking_mode,expected",
+        [
+            (TrackingMode.PLAIN, ("CLIENT", "TRACKING", "ON")),
+            (TrackingMode.OPTIN, ("CLIENT", "TRACKING", "ON", "OPTIN")),
+            (TrackingMode.OPTOUT, ("CLIENT", "TRACKING", "ON", "OPTOUT")),
+        ],
+    )
+    def test_the_mode_is_sent_in_the_tracking_handshake(
+        self, proxy_factory, mock_connection, tracking_mode, expected
+    ):
+        # The mode is a connection-setup property: the server refuses to switch a live
+        # connection between OPTIN and OPTOUT.
+        proxy, _ = proxy_factory(tracking_mode)
+        mock_connection._parser = Mock()
+
+        proxy._enable_tracking_callback(mock_connection)
+
+        mock_connection.send_command.assert_called_once_with(*expected)
+
+    def test_the_tracking_callback_flushes_the_cache_only_on_reconnect(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        The server destroys a connection's tracking state on disconnect, so entries cached
+        through the previous session have lost their invalidation channel. Gated on a previous
+        connect because the cache is pool-shared: an unconditional flush would wipe other
+        connections' entries every time the pool grows.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        mock_connection._parser = Mock()
+
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        # First connect: another connection's entries must survive.
+        proxy._enable_tracking_callback(mock_connection)
+        assert cache.size == 1
+
+        # Reconnect: the tracking state died with the old socket.
+        proxy._enable_tracking_callback(mock_connection)
+        assert cache.size == 0
+
+    def test_a_failed_first_tracking_handshake_does_not_flush_on_retry(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        A first connect whose ``CLIENT TRACKING`` exchange fails never had tracking on, so
+        nothing was cached through it. The next connect is still a first connect and must
+        not wipe other connections' entries from the pool-shared cache.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        mock_connection._parser = Mock()
+
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=Mock(),
+            )
+        )
+
+        mock_connection.read_response.side_effect = ConnectionError("lost")
+        with pytest.raises(ConnectionError):
+            proxy._enable_tracking_callback(mock_connection)
+
+        mock_connection.read_response.side_effect = None
+        proxy._enable_tracking_callback(mock_connection)
+        assert cache.size == 1
+
+        # Tracking is on now, so the next connect is a reconnect and flushes.
+        proxy._enable_tracking_callback(mock_connection)
+        assert cache.size == 0
+
+    def test_a_reconnect_inside_send_keeps_the_in_flight_placeholder(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        A reconnect inside the send path happens before the command is written, so the reply
+        the placeholder is waiting for comes from the new, tracked session. The reconnect
+        flush clears everything else, but must keep that placeholder, or the reply is
+        returned and never stored.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        mock_connection._parser = Mock()
+        proxy._enable_tracking_callback(mock_connection)
+
+        other = CacheKey(
+            command="GET", redis_keys=("other",), redis_args=("GET", "other")
+        )
+        cache.set(
+            CacheEntry(
+                cache_key=other,
+                cache_value=b"old-session",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        reconnected = []
+
+        def reconnect_then_send(*args, **kwargs):
+            # Fires the connect callback the way ``send_packed_command`` does when it finds
+            # no socket, once - the callback's own ``CLIENT TRACKING`` goes through here too.
+            if not reconnected:
+                reconnected.append(True)
+                proxy._enable_tracking_callback(mock_connection)
+
+        mock_connection.send_command.side_effect = reconnect_then_send
+        mock_connection.read_response.return_value = b"bar"
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+        assert proxy.read_response() == b"bar"
+
+        assert reconnected, "the reconnect never fired"
+        # The old session's entry went with the flush; this read's reply was stored.
+        assert cache.get(other) is None
+        entry = cache.get(
+            CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        )
+        assert entry.status == CacheEntryStatus.VALID
+        assert entry.cache_value == b"bar"
+
+    def test_a_reconnect_flush_drops_another_connections_placeholder(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        Only this connection's own placeholder survives the reconnect flush. Another
+        connection's is in flight on a socket this reconnect knows nothing about.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        mock_connection._parser = Mock()
+        proxy._enable_tracking_callback(mock_connection)
+
+        key = CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        proxy._current_command_cache_key = key
+        cache.set(
+            CacheEntry(
+                cache_key=key,
+                cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+                status=CacheEntryStatus.IN_PROGRESS,
+                connection_ref=Mock(),
+            )
+        )
+
+        proxy._enable_tracking_callback(mock_connection)
+
+        assert cache.size == 0
+
+    def test_optin_pairs_yes_before_a_stored_miss(self, proxy_factory, mock_connection):
+        proxy, cache = proxy_factory(
+            TrackingMode.OPTIN, cache_predicate=_cache_everything
+        )
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+
+        # One write, the CACHING command first, nothing in between.
+        mock_connection.pack_commands.assert_called_once_with(
+            [(b"CLIENT", b"CACHING", b"YES"), ("GET", "foo")]
+        )
+        mock_connection.send_packed_command.assert_called_once_with(
+            mock_connection.pack_commands.return_value, check_health=True
+        )
+        mock_connection.send_command.assert_not_called()
+        # The placeholder is in place, so a concurrent invalidation can still cancel it.
+        assert cache.size == 1
+        assert proxy._pending_caching_reply is True
+
+    def test_optin_sends_a_predicate_excluded_read_alone(
+        self, proxy_factory, mock_connection
+    ):
+        proxy, cache = proxy_factory(TrackingMode.OPTIN, cache_predicate=_cache_nothing)
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+
+        mock_connection.send_command.assert_called_once_with("GET", "foo", keys=["foo"])
+        mock_connection.send_packed_command.assert_not_called()
+        # Not stored, and no placeholder either: the read is left untracked.
+        assert cache.size == 0
+        assert proxy._current_command_cache_key is None
+        assert proxy._pending_caching_reply is False
+
+    def test_optout_pairs_no_before_a_predicate_excluded_read(
+        self, proxy_factory, mock_connection
+    ):
+        proxy, cache = proxy_factory(
+            TrackingMode.OPTOUT, cache_predicate=_cache_nothing
+        )
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+
+        mock_connection.pack_commands.assert_called_once_with(
+            [(b"CLIENT", b"CACHING", b"NO"), ("GET", "foo")]
+        )
+        mock_connection.send_command.assert_not_called()
+        assert cache.size == 0
+        assert proxy._current_command_cache_key is None
+
+    def test_optout_sends_a_stored_miss_alone(self, proxy_factory, mock_connection):
+        # Opt-out tracks every trackable read by default, so a read that will be stored needs
+        # no CACHING command at all.
+        proxy, cache = proxy_factory(TrackingMode.OPTOUT)
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+
+        mock_connection.send_command.assert_called_once_with("GET", "foo", keys=["foo"])
+        mock_connection.send_packed_command.assert_not_called()
+        assert cache.size == 1
+
+    def test_optout_does_not_pair_before_a_write(self, proxy_factory, mock_connection):
+        # A CACHING command in front of a write is consumed with no effect, so sending one
+        # would be pure waste.
+        proxy, _ = proxy_factory(TrackingMode.OPTOUT)
+
+        proxy.send_command("SET", "foo", "bar")
+
+        mock_connection.send_command.assert_called_once_with("SET", "foo", "bar")
+        mock_connection.send_packed_command.assert_not_called()
+
+    def test_optout_pairs_no_before_touch(self, proxy_factory, mock_connection):
+        """
+        TOUCH is the command opt-out most wants to exempt: read-only and keyed, so the server
+        tracks it, but a local cache hit would skip its server-side effect, so it is never
+        eligible to store. It is also the one command ``is_replica_safe`` reports False for,
+        which is why trackability is decided by ``is_trackable_read`` instead.
+        """
+        proxy, cache = proxy_factory(TrackingMode.OPTOUT)
+
+        proxy.send_command("TOUCH", "foo", keys=["foo"])
+
+        mock_connection.pack_commands.assert_called_once_with(
+            [(b"CLIENT", b"CACHING", b"NO"), ("TOUCH", "foo")]
+        )
+        assert cache.size == 0
+
+    def test_optout_pairs_no_when_the_invocation_carries_no_keys(
+        self, proxy_factory, mock_connection
+    ):
+        # An eligible read whose command method never plumbed ``keys=`` is a gap in what this
+        # client has been taught, not an error. The server tracks it regardless and we will
+        # not store it, so exempting it is the right direction.
+        proxy, cache = proxy_factory(TrackingMode.OPTOUT)
+
+        proxy.send_command("ZRANK", "foo", "bar")
+
+        mock_connection.pack_commands.assert_called_once_with(
+            [(b"CLIENT", b"CACHING", b"NO"), ("ZRANK", "foo", "bar")]
+        )
+        assert cache.size == 0
+
+    @pytest.mark.parametrize(
+        "args,kwargs",
+        [
+            (("GET", "foo"), {"keys": ["foo"]}),
+            (("TOUCH", "foo"), {"keys": ["foo"]}),
+            (("SET", "foo", "bar"), {}),
+            (("ZRANK", "foo", "bar"), {}),
+        ],
+        ids=["stored-miss", "touch", "write", "eligible-without-keys"],
+    )
+    def test_plain_mode_never_pairs(self, proxy_factory, mock_connection, args, kwargs):
+        # The compatibility gate: plain mode is byte-for-byte today's behaviour.
+        proxy, _ = proxy_factory(TrackingMode.PLAIN)
+
+        proxy.send_command(*args, **kwargs)
+
+        mock_connection.send_command.assert_called_once_with(*args, **kwargs)
+        mock_connection.send_packed_command.assert_not_called()
+        assert proxy._pending_caching_reply is False
+
+    def test_read_response_consumes_the_caching_reply_first(
+        self, proxy_factory, mock_connection
+    ):
+        proxy, cache = proxy_factory(
+            TrackingMode.OPTIN, cache_predicate=_cache_everything
+        )
+        mock_connection.read_response.side_effect = [b"OK", b"bar"]
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+
+        assert proxy.read_response() == b"bar"
+        assert mock_connection.read_response.call_count == 2
+        assert proxy._pending_caching_reply is False
+
+        # The data reply is what gets stored, never the ``+OK``.
+        stored = cache.get(
+            CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        )
+        assert stored.cache_value == b"bar"
+        assert stored.status is CacheEntryStatus.VALID
+
+    def test_a_response_error_on_the_caching_reply_drains_the_data_reply(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        The paired read executed on the server regardless. Leaving its reply on the socket
+        would return this connection to the pool one reply out of sync, and the next borrower
+        would read our answer.
+        """
+        proxy, cache = proxy_factory(
+            TrackingMode.OPTIN, cache_predicate=_cache_everything
+        )
+        mock_connection.read_response.side_effect = [
+            ResponseError("CLIENT CACHING YES is only valid ..."),
+            b"bar",
+        ]
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+        assert cache.size == 1
+
+        with pytest.raises(ResponseError):
+            proxy.read_response()
+
+        # Both replies consumed, the placeholder dropped, nothing stored.
+        assert mock_connection.read_response.call_count == 2
+        assert cache.size == 0
+        assert proxy._current_command_cache_key is None
+
+    def test_an_unexpected_caching_reply_fails_the_connection(
+        self, proxy_factory, mock_connection
+    ):
+        proxy, _ = proxy_factory(TrackingMode.OPTIN, cache_predicate=_cache_everything)
+        mock_connection.read_response.side_effect = [b"PONG", b"bar"]
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+
+        with pytest.raises(ConnectionError, match="Unexpected CLIENT CACHING reply"):
+            proxy.read_response()
+
+    def test_the_ask_redirect_suppression_is_one_shot(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        ``ASKING`` and ``CLIENT CACHING`` clear each other on the server, so the redirected
+        attempt must be sent alone - and its reply belongs to a migrating slot, so nothing is
+        stored for it either. The next read pairs again.
+        """
+        proxy, cache = proxy_factory(
+            TrackingMode.OPTIN, cache_predicate=_cache_everything
+        )
+
+        proxy.send_command("ASKING")
+        proxy.send_command("GET", "foo", keys=["foo"])
+
+        mock_connection.send_packed_command.assert_not_called()
+        assert mock_connection.send_command.call_args_list == [
+            call("ASKING"),
+            call("GET", "foo", keys=["foo"]),
+        ]
+        assert cache.size == 0
+        assert proxy._current_command_cache_key is None
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+
+        mock_connection.pack_commands.assert_called_once_with(
+            [(b"CLIENT", b"CACHING", b"YES"), ("GET", "foo")]
+        )
+
+    def test_a_packed_send_consumes_the_ask_redirect_suppression(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        The server consumes ``ASKING`` on the next command on the socket, a packed write
+        included, so the read after that write pairs and stores as usual.
+        """
+        proxy, cache = proxy_factory(
+            TrackingMode.OPTIN, cache_predicate=_cache_everything
+        )
+
+        proxy.send_command("ASKING")
+        assert proxy._skip_next_caching is True
+
+        proxy.send_packed_command(b"*1\r\n$4\r\nPING\r\n")
+        assert proxy._skip_next_caching is False
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+
+        mock_connection.pack_commands.assert_called_once_with(
+            [(b"CLIENT", b"CACHING", b"YES"), ("GET", "foo")]
+        )
+        assert cache.size == 1
+
+    def test_send_packed_command_clears_the_pending_caching_reply(
+        self, proxy_factory, mock_connection
+    ):
+        proxy, _ = proxy_factory(TrackingMode.OPTIN, cache_predicate=_cache_everything)
+        proxy._pending_caching_reply = True
+
+        proxy.send_packed_command(b"*1\r\n$4\r\nPING\r\n")
+
+        assert proxy._pending_caching_reply is False
+
+    def test_a_no_paired_read_leaves_an_existing_entry_untouched(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        A read that resolves to "don't cache" never consults the local cache, and never
+        overwrites what is already there.
+
+        The entry survives because the not-store branch nulls the current cache key before
+        pairing the ``NO``, which is what shuts both the hit lookup and the store-back out of
+        the exchange. A key left over from a previous command on this connection is seeded
+        here so that null-out is load-bearing rather than incidental.
+        """
+        proxy, cache = proxy_factory(
+            TrackingMode.OPTOUT, cache_predicate=_cache_nothing
+        )
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=b"cached",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        mock_connection.read_response.side_effect = [b"OK", b"fresh"]
+        proxy._current_command_cache_key = cache_key
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+
+        mock_connection.pack_commands.assert_called_once_with(
+            [(b"CLIENT", b"CACHING", b"NO"), ("GET", "foo")]
+        )
+        # The server's reply, not the entry sitting in the cache.
+        assert proxy.read_response() == b"fresh"
+        # ...and that entry is neither evicted nor updated.
+        assert cache.size == 1
+        assert cache.get(cache_key).cache_value == b"cached"
+        assert cache.get(cache_key).status is CacheEntryStatus.VALID
+
+    def test_a_connection_error_on_the_caching_reply_fails_both_commands(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        "Fail both, never replay the read alone": a dead socket takes the pair with it.
+
+        Deliberately asymmetric with the ``ResponseError`` path, which drains the paired
+        read's reply. Here there is no second reply to take off the socket, so draining would
+        block on a connection that is already gone.
+        """
+        proxy, cache = proxy_factory(
+            TrackingMode.OPTIN, cache_predicate=_cache_everything
+        )
+        mock_connection.read_response.side_effect = ConnectionError("dead socket")
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+        assert cache.size == 1
+
+        with pytest.raises(ConnectionError, match="dead socket"):
+            proxy.read_response()
+
+        assert mock_connection.read_response.call_count == 1
+        # Clear, so a connection that somehow gets reused cannot swallow a later reply as a
+        # stale ``+OK``.
+        assert proxy._pending_caching_reply is False
+        # The placeholder goes with the failed read, as it does for a failed data read,
+        # without waiting for a disconnect to flush it.
+        assert cache.size == 0
+        assert proxy._current_command_cache_key is None
+
+    @pytest.mark.parametrize(
+        "side_effect",
+        [
+            [TimeoutError("timed out")],
+            [b"PONG", b"bar"],
+        ],
+        ids=["timeout", "unexpected-reply"],
+    )
+    def test_any_failure_on_the_caching_reply_drops_the_placeholder(
+        self, proxy_factory, mock_connection, side_effect
+    ):
+        proxy, cache = proxy_factory(
+            TrackingMode.OPTIN, cache_predicate=_cache_everything
+        )
+        mock_connection.read_response.side_effect = side_effect
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+        assert cache.size == 1
+
+        with pytest.raises((TimeoutError, ConnectionError)):
+            proxy.read_response()
+
+        assert cache.size == 0
+        assert proxy._current_command_cache_key is None
+
+    def test_disconnect_clears_the_pairing_flags(self, proxy_factory, mock_connection):
+        proxy, _ = proxy_factory(TrackingMode.OPTOUT)
+        proxy._pending_caching_reply = True
+        proxy._skip_next_caching = True
+
+        proxy.disconnect()
+
+        assert proxy._pending_caching_reply is False
+        assert proxy._skip_next_caching is False
+
+
+_CLIENT_CACHING_SPELLINGS = [
+    ("CLIENT CACHING", "NO"),
+    ("client caching", "yes"),
+    (b"CLIENT CACHING", b"NO"),
+    ("CLIENT", "CACHING", "NO"),
+    (b"CLIENT", b"CACHING", b"YES"),
+    (b"client", "Caching", "no"),
+]
+_CLIENT_CACHING_IDS = [
+    "str-one-arg",
+    "str-lowercase",
+    "bytes-one-arg",
+    "str-two-args",
+    "bytes-two-args",
+    "mixed-case-and-types",
+]
+
+
+@pytest.mark.fixed_client
+class TestUserSentClientCaching:
+    """
+    A user-sent ``CLIENT CACHING`` sets a flag that the next command on the socket
+    consumes, and a pooled connection promises nothing about which command that is - so
+    the cache refuses it on every connection it manages, in every mode.
+    """
+
+    @pytest.mark.parametrize("mode", list(TrackingMode))
+    @pytest.mark.parametrize("args", _CLIENT_CACHING_SPELLINGS, ids=_CLIENT_CACHING_IDS)
+    def test_send_command_refuses_client_caching(
+        self, proxy_factory, mock_connection, mode, args
+    ):
+        proxy, _ = proxy_factory(mode)
+
+        with pytest.raises(RedisError, match="CLIENT CACHING cannot be sent"):
+            proxy.send_command(*args)
+
+        mock_connection.send_command.assert_not_called()
+        mock_connection.send_packed_command.assert_not_called()
+
+    @pytest.mark.parametrize("args", _CLIENT_CACHING_SPELLINGS, ids=_CLIENT_CACHING_IDS)
+    def test_pack_commands_refuses_client_caching(
+        self, proxy_factory, mock_connection, args
+    ):
+        """
+        Every pipeline and transaction packs through ``pack_commands``, so refusing there
+        covers them without touching the pipeline code.
+        """
+        proxy, _ = proxy_factory(TrackingMode.OPTOUT)
+
+        with pytest.raises(RedisError, match="CLIENT CACHING cannot be sent"):
+            proxy.pack_commands([("SET", "a", "1"), args, ("GET", "a")])
+
+        mock_connection.pack_commands.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ("CLIENT", "TRACKINGINFO"),
+            ("CLIENT ID",),
+            ("CLIENT",),
+            ("CONFIG", "GET", "maxmemory"),
+            ("GET", "foo"),
+            (b"CACHING",),
+        ],
+        ids=["trackinginfo", "client-id", "bare-client", "config", "get", "no-client"],
+    )
+    def test_other_commands_pass_through(self, proxy_factory, mock_connection, args):
+        # ``plain``, so no command is paired and every one reaches ``send_command`` as is.
+        proxy, _ = proxy_factory(TrackingMode.PLAIN)
+
+        proxy.send_command(*args)
+        proxy.pack_commands([args])
+
+        mock_connection.send_command.assert_called_once_with(*args)
+        mock_connection.pack_commands.assert_called_once_with([args])
+
+    def test_the_caches_own_pairing_is_not_refused(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        The pairing packs through the wrapped connection, not through the guarded
+        ``pack_commands``, so the cache can still send its own ``CLIENT CACHING``.
+        """
+        proxy, _ = proxy_factory(TrackingMode.OPTIN, cache_predicate=_cache_everything)
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+
+        mock_connection.pack_commands.assert_called_once()
+        packed = mock_connection.pack_commands.call_args.args[0]
+        assert packed[0] == (b"CLIENT", b"CACHING", b"YES")
+
+
+@pytest.mark.fixed_client
+class TestCacheEntryLifecycle:
+    """
+    What the pool-wide cache holds after a read, and when it may be trusted.
+
+    A hit is decided once in ``send_command`` and carried to ``read_response``, never
+    re-derived from cache state. A MOVED flushes the whole cache, an ASK does not, and a
+    read that fails drops only the placeholder this connection staked for it.
+    """
+
+    # ---------------------------------------------------------------- the hit decision
+
+    def test_another_connection_filling_our_placeholder_does_not_skip_our_reply(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        The hit is decided once, in ``send_command``, and never re-derived in
+        ``read_response``.
+
+        ``send_command`` replaces any entry for the key with an IN_PROGRESS placeholder and
+        sends. Another connection reading the same key resolves that very entry object and
+        flips it to VALID with *its* reply. A ``read_response`` that asked the cache again
+        would hand back that value and never read the reply we did send, leaving the
+        connection one reply out of sync for whoever borrows it next.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        mock_connection.read_response.return_value = b"ours"
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+
+        # Stand in for the other connection completing first, in place, on our entry.
+        entry = cache.get(cache_key)
+        assert entry.status is CacheEntryStatus.IN_PROGRESS
+        entry.status = CacheEntryStatus.VALID
+        entry.cache_value = b"theirs"
+        cache.set(entry)
+
+        # Our own reply, read off the socket.
+        assert proxy.read_response() == b"ours"
+        assert mock_connection.read_response.call_count == 1
+
+    def test_an_invalidation_after_the_hit_was_decided_still_serves_it(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        The other direction of the same rule.
+
+        ``send_command`` resolved a hit and wrote nothing, so there is no reply on the socket.
+        A ``read_response`` that asked the cache again would find the entry gone - invalidated
+        in between - and read a reply for a command that was never sent.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=b"cached",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+        mock_connection.send_command.assert_not_called()
+
+        # The invalidation lands between the two calls.
+        cache.flush()
+
+        assert proxy.read_response() == b"cached"
+        mock_connection.read_response.assert_not_called()
+
+    def test_an_in_progress_entry_from_another_connection_is_not_a_hit(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        A placeholder is somebody else's fetch in flight and carries no value to serve.
+
+        Returning early on one used to leave ``read_response`` with no value to hand back and
+        a socket it never wrote to, so it read the next reply that happened to arrive.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+                status=CacheEntryStatus.IN_PROGRESS,
+                connection_ref=mock_connection,
+            )
+        )
+        mock_connection.can_read.return_value = False
+        mock_connection.read_response.return_value = b"fresh"
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+
+        # Sent, rather than answered from a placeholder that holds nothing.
+        mock_connection.send_command.assert_called_once_with("GET", "foo", keys=["foo"])
+        assert proxy.read_response() == b"fresh"
+
+    @pytest.mark.parametrize(
+        "tracking_mode", [TrackingMode.PLAIN, TrackingMode.OPTIN, TrackingMode.OPTOUT]
+    )
+    def test_an_in_progress_entry_is_not_drained(
+        self, proxy_factory, mock_connection, tracking_mode
+    ):
+        """
+        The owner's socket of a placeholder is never drained.
+
+        The drain returns non-push replies too, so it would consume the owner's reply
+        pair - or another command's reply if the placeholder was stranded. An IN_PROGRESS
+        entry is never served either way, so there is nothing for the drain to protect.
+        """
+        proxy, cache = proxy_factory(tracking_mode, cache_predicate=_cache_everything)
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        owner = Mock()
+        # One readable reply, so a regression fails the assertion rather than spinning.
+        owner.can_read.side_effect = [True, False]
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+                status=CacheEntryStatus.IN_PROGRESS,
+                connection_ref=owner,
+            )
+        )
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+
+        owner.read_response.assert_not_called()
+        # Our own placeholder replaced the other one.
+        assert cache.get(cache_key).connection_ref is mock_connection
+
+    def test_one_shot_keys_are_indexed_under_the_real_keys(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        ``keys`` is materialized once, so a generator is not consumed by the intent check
+        and stored with no keys - an entry the reverse index could never invalidate.
+        """
+        proxy, cache = proxy_factory(
+            TrackingMode.PLAIN, cache_predicate=_cache_everything
+        )
+        mock_connection.read_response.return_value = b"bar"
+
+        proxy.send_command("GET", "foo", keys=(key for key in ["foo"]))
+        assert proxy.read_response() == b"bar"
+
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        assert cache.get(cache_key).cache_value == b"bar"
+        cache.delete_by_redis_keys([b"foo"])
+        assert cache.get(cache_key) is None
+
+    def test_a_hit_records_the_metrics_without_touching_the_socket(
+        self, proxy_factory, mock_connection
+    ):
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        cache.set(
+            CacheEntry(
+                cache_key=CacheKey(
+                    command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+                ),
+                cache_value=b"cached",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+        with patch("redis.connection.record_csc_request") as record:
+            assert proxy.read_response() == b"cached"
+
+        record.assert_called_once_with(result=CSCResult.HIT)
+
+    def test_a_stored_miss_records_a_miss(self, proxy_factory, mock_connection):
+        proxy, _ = proxy_factory(TrackingMode.PLAIN)
+        mock_connection.read_response.return_value = b"fresh"
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+        with patch("redis.connection.record_csc_request") as record:
+            assert proxy.read_response() == b"fresh"
+
+        record.assert_called_once_with(result=CSCResult.MISS)
+
+    def test_a_pending_hit_does_not_outlive_a_disconnect(
+        self, proxy_factory, mock_connection
+    ):
+        # A resolved-but-unserved hit belongs to the exchange the dead socket was part of.
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        cache.set(
+            CacheEntry(
+                cache_key=CacheKey(
+                    command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+                ),
+                cache_value=b"cached",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        mock_connection.read_response.return_value = b"fresh"
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+        proxy.disconnect()
+
+        # The next read goes to the wire rather than replaying a stale local value.
+        proxy.send_command("GET", "foo", keys=["foo"])
+        assert proxy.read_response() == b"fresh"
+
+    @pytest.mark.parametrize("redirect", [AskError, MovedError], ids=["ask", "moved"])
+    def test_a_redirect_does_not_flush_the_cache(
+        self, proxy_factory, mock_connection, redirect
+    ):
+        """
+        A redirect is a scoped cleanup, not a flush. Under an ASK the slot is still owned by
+        this node while it migrates, so its tracking is still good; once a slot moves, the
+        server itself invalidates the moved keys on the connection that tracked them, so
+        nothing cached needs to go on the client's initiative either.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        cache.set(
+            CacheEntry(
+                cache_key=CacheKey(
+                    command="GET", redis_keys=("other",), redis_args=("GET", "other")
+                ),
+                cache_value=b"kept",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        mock_connection.read_response.side_effect = redirect("3999 127.0.0.1:6381")
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+
+        with pytest.raises(redirect):
+            proxy.read_response()
+
+        # This read's own placeholder goes - otherwise it would sit in the cache for as long
+        # as the slot migrates, since every read of the key is redirected the same way - but
+        # nothing else does.
+        assert (
+            cache.get(
+                CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+            )
+            is None
+        )
+        assert (
+            cache.get(
+                CacheKey(
+                    command="GET", redis_keys=("other",), redis_args=("GET", "other")
+                )
+            ).cache_value
+            == b"kept"
+        )
+
+    # ---------------------------------------------------------------- failed reads
+
+    def test_a_failed_read_does_not_evict_another_connections_placeholder(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        The cache is pool-wide and each proxy's lock is its own. Between our send and our
+        failure, another connection's ``send_command`` for the same key can replace the
+        entry with its own placeholder; deleting by key alone would evict that fetch while
+        it is still in flight.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        other = Mock()
+        mock_connection.read_response.side_effect = ResponseError(
+            "WRONGTYPE Operation against a key holding the wrong kind of value"
+        )
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+                status=CacheEntryStatus.IN_PROGRESS,
+                connection_ref=other,
+            )
+        )
+
+        with pytest.raises(ResponseError):
+            proxy.read_response()
+
+        assert cache.get(cache_key).connection_ref is other
+        assert proxy._current_command_cache_key is None
+
+    def test_a_failed_read_does_not_evict_a_placeholder_resolved_in_place(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        Another connection's successful read can resolve this very entry object to VALID
+        without replacing it, so it keeps our ``connection_ref``. The status check is what
+        stops our failure from throwing that correctly stored reply away.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        mock_connection.read_response.side_effect = ResponseError("NOPERM")
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+        entry = cache.get(cache_key)
+        entry.status = CacheEntryStatus.VALID
+        entry.cache_value = b"theirs"
+        cache.set(entry)
+
+        with pytest.raises(ResponseError):
+            proxy.read_response()
+
+        assert cache.get(cache_key).cache_value == b"theirs"
+        assert cache.get(cache_key).status == CacheEntryStatus.VALID
+
+    def test_an_error_on_the_caching_reply_is_scoped_the_same_way(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        The ``+OK`` of a CLIENT CACHING pair can fail too, and after the paired read is
+        drained the placeholder is dropped by the same ``except BaseException`` as a failed
+        data read. It uses the same scoped rule, so it cannot evict an entry another
+        connection now owns either.
+        """
+        proxy, cache = proxy_factory(
+            TrackingMode.OPTIN, cache_predicate=_cache_everything
+        )
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        other = Mock()
+        mock_connection.read_response.side_effect = [
+            ResponseError("CLIENT CACHING YES is only valid ..."),
+            b"bar",
+        ]
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+                status=CacheEntryStatus.IN_PROGRESS,
+                connection_ref=other,
+            )
+        )
+
+        with pytest.raises(ResponseError):
+            proxy.read_response()
+
+        # Both replies drained, and the other connection's placeholder survives.
+        assert mock_connection.read_response.call_count == 2
+        assert cache.get(cache_key).connection_ref is other
+
+    def test_a_reply_does_not_promote_another_connections_placeholder(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        Between our send and our read, another connection's ``send_command`` for the same
+        key can replace the entry with its own placeholder. Promoting that one would bind
+        our reply to its ``connection_ref``, and the next hit would drain that connection's
+        own reply off its socket.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        other = Mock()
+        mock_connection.read_response.return_value = b"ours"
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+                status=CacheEntryStatus.IN_PROGRESS,
+                connection_ref=other,
+            )
+        )
+
+        assert proxy.read_response() == b"ours"
+
+        entry = cache.get(cache_key)
+        assert entry.status == CacheEntryStatus.IN_PROGRESS
+        assert entry.connection_ref is other
+        assert proxy._current_command_cache_key is None
+
+    def test_a_reply_does_not_overwrite_an_entry_resolved_by_another_connection(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        The placeholder we staked may already have been replaced and resolved to VALID by
+        another connection. Our reply may be the older one, so it must not overwrite it.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        other = Mock()
+        mock_connection.read_response.return_value = b"ours"
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=b"theirs",
+                status=CacheEntryStatus.VALID,
+                connection_ref=other,
+            )
+        )
+
+        assert proxy.read_response() == b"ours"
+        assert cache.get(cache_key).cache_value == b"theirs"
+        assert cache.get(cache_key).connection_ref is other
+
+    def test_a_nil_reply_does_not_evict_another_connections_entry(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        A nil reply is not stored, and drops our own placeholder - under the same scoped
+        rule as a failed read, so an entry another connection now owns survives it.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        other = Mock()
+        mock_connection.read_response.return_value = None
+
+        proxy.send_command("GET", "foo", keys=["foo"])
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+                status=CacheEntryStatus.IN_PROGRESS,
+                connection_ref=other,
+            )
+        )
+
+        assert proxy.read_response() is None
+        assert cache.get(cache_key).connection_ref is other
+        assert proxy._current_command_cache_key is None
+
+        # Our own placeholder is still dropped on a nil reply.
+        cache.flush()
+        proxy.send_command("GET", "foo", keys=["foo"])
+        assert proxy.read_response() is None
+        assert cache.get(cache_key) is None
+
+    @pytest.mark.parametrize("command,keys", [("MGET", []), ("EXISTS", ())])
+    def test_an_empty_key_list_is_not_offered_to_the_predicate(
+        self, proxy_factory, mock_connection, command, keys
+    ):
+        """
+        ``mget([])`` and ``exists()`` pass an empty key list. It is treated as no key list,
+        so a predicate that reads ``keys[0]`` is never called with nothing to read.
+        """
+        predicate = Mock(side_effect=lambda command, keys: bool(keys[0]))
+        proxy, cache = proxy_factory(TrackingMode.OPTIN, cache_predicate=predicate)
+        mock_connection.read_response.return_value = []
+
+        proxy.send_command(command, keys=keys)
+        assert proxy.read_response() == []
+
+        predicate.assert_not_called()
+        mock_connection.send_command.assert_called_once_with(command, keys=keys)
+        assert cache.size == 0
+
+
+@pytest.mark.fixed_client
+@pytest.mark.onlynoncluster
+@pytest.mark.parametrize(
+    "parser_class",
+    [_RESP3Parser, _HiredisParser],
+    ids=["RESP3Parser", "HiredisParser"],
+)
+def test_invalidation_pushes_interleave_with_a_caching_pair(r, parser_class):
+    """
+    The server may send an invalidation message at any reply boundary, including the two
+    boundaries a ``CLIENT CACHING`` pair introduces.
+
+    Both parsers have to hand the push to the invalidation handler and carry on to the next
+    real reply. If either stopped at the push instead, the ``+OK`` check would see a push list
+    and fail the connection, or the paired read would return the push as its own reply. Driven
+    over a canned byte stream because a Mock connection cannot exercise a parser at all.
+    """
+    if parser_class is _HiredisParser and not HIREDIS_AVAILABLE:
+        pytest.skip("Hiredis not available")
+
+    args = dict(r.connection_pool.connection_kwargs)
+    args["parser_class"] = parser_class
+    args["protocol"] = 3
+    conn = Connection(**args)
+    conn.connect()
+
+    cache = DefaultCache(CacheConfig(max_size=10))
+    for key in ("before", "between"):
+        cache.set(
+            CacheEntry(
+                cache_key=CacheKey(
+                    command="GET", redis_keys=(key,), redis_args=("GET", key)
+                ),
+                cache_value=b"stale",
+                status=CacheEntryStatus.VALID,
+                connection_ref=conn,
+            )
+        )
+    assert cache.size == 2
+
+    proxy = CacheProxyConnection(conn, cache, threading.RLock())
+    # ``_enable_tracking_callback`` wires this on connect; this connection is already up.
+    conn._parser.set_invalidation_push_handler(proxy._on_invalidation_callback)
+
+    stream = (
+        # Ahead of the ``+OK``.
+        b">2\r\n$10\r\ninvalidate\r\n*1\r\n$6\r\nbefore\r\n"
+        b"+OK\r\n"
+        # Between the ``+OK`` and the paired read's reply.
+        b">2\r\n$10\r\ninvalidate\r\n*1\r\n$7\r\nbetween\r\n"
+        b"$5\r\nfresh\r\n"
+    )
+    mock_socket = MockSocket(stream)
+    if isinstance(conn._parser, _RESP3Parser):
+        conn._parser._buffer._sock = mock_socket
+    else:
+        conn._parser._sock = mock_socket
+
+    proxy._pending_caching_reply = True
+
+    assert proxy.read_response(disconnect_on_error=False) in (b"fresh", "fresh")
+    # Both pushes reached the handler rather than being mistaken for command replies.
+    assert cache.size == 0
 
 
 class TestConnectionPoolGetConnectionCount:
@@ -2312,3 +3520,312 @@ def test_connection_rejects_out_of_range_port(port):
 def test_connection_allows_ephemeral_port_zero():
     c = redis.Connection(port=0)
     assert c.port == 0
+
+
+class _CannedSocket:
+    """Serves a canned byte stream, then behaves like an open-but-idle socket."""
+
+    def __init__(self, data):
+        self.data = data
+        self.timeout = None
+
+    def recv(self, n):
+        if not self.data:
+            raise socket.timeout("idle")
+        chunk, self.data = self.data[:n], self.data[n:]
+        return chunk
+
+    def recv_into(self, buffer, nbytes=0):
+        # _HiredisParser reads through recv_into, so both parsers must be
+        # served here: the CI matrix runs the suite with and without hiredis
+        # installed, and pinning one parser would leave the other untested.
+        chunk = self.recv(nbytes or len(buffer))
+        buffer[: len(chunk)] = chunk
+        return len(chunk)
+
+    def settimeout(self, t):
+        self.timeout = t
+
+    def gettimeout(self):
+        return self.timeout
+
+    def close(self):
+        pass
+
+    def shutdown(self, how):
+        pass
+
+
+def _connection_with_stream(data, parser_class=None, **kwargs):
+    if parser_class is not None:
+        kwargs["parser_class"] = parser_class
+    conn = Connection(protocol=2, **kwargs)
+    conn._sock = _CannedSocket(data)
+    conn._parser.on_connect(conn)
+    return conn
+
+
+def _reconnect_with(conn, monkeypatch, data):
+    """Make conn.connect() serve `data`, the way a real reconnect would."""
+
+    def fake_connect():
+        if conn._sock is None:
+            conn._sock = _CannedSocket(data)
+            conn._parser.on_connect(conn)
+
+    monkeypatch.setattr(conn, "connect", fake_connect)
+
+
+# A binary PUBLISH payload delivered to a decode_responses=True subscriber.
+# Encoder.decode runs at the tail of _read_response, after the cursor has
+# already passed the payload, so this raises UnicodeDecodeError mid-reply on
+# both parser backends.
+BINARY_PUBSUB_MESSAGE = b"*3\r\n$7\r\nmessage\r\n$4\r\nchan\r\n$3\r\n\xff\xfe\xfd\r\n"
+
+
+class TestInvalidResponseInvalidatesConnection:
+    """A framing violation must drop the connection even when the caller
+    passed disconnect_on_error=False, otherwise the rewound bytes stay queued
+    and every subsequent read fails identically. See #4291.
+    """
+
+    # The signature PubSub.parse_response uses.
+    PUBSUB_KWARGS = dict(disconnect_on_error=False, push_request=True)
+
+    def test_framing_error_disconnects_on_pubsub_path(self):
+        conn = _connection_with_stream(b"?bogus\r\n+SECOND\r\n")
+
+        with pytest.raises(redis.InvalidResponse):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        assert conn.is_connected is False
+
+    def test_pubsub_path_recovers_after_framing_error(self, monkeypatch):
+        conn = _connection_with_stream(b"?bogus\r\n+SECOND\r\n")
+        _reconnect_with(conn, monkeypatch, b"+RECOVERED\r\n")
+
+        with pytest.raises(redis.InvalidResponse):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        # PubSub.parse_response then calls conn.connect() before reading
+        # again. On master the connection is still up, so connect() is a
+        # no-op, the poisoned bytes are still queued, and this read raises
+        # InvalidResponse again -- forever. After the fix connect() really
+        # reconnects and the next read sees a clean stream.
+        conn.connect()
+        assert conn.read_response(**self.PUBSUB_KWARGS) == b"RECOVERED"
+
+    def test_in_band_response_error_does_not_disconnect(self):
+        """The rewind exists for in-band ResponseError; it must keep working."""
+        conn = _connection_with_stream(b"-ERR in band\r\n+SECOND\r\n")
+
+        with pytest.raises(redis.ResponseError):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        assert conn.is_connected is True
+        assert conn.read_response(**self.PUBSUB_KWARGS) == b"SECOND"
+
+    def test_framing_error_still_disconnects_by_default(self):
+        conn = _connection_with_stream(b"?bogus\r\n")
+
+        with pytest.raises(redis.InvalidResponse):
+            conn.read_response()
+
+        assert conn.is_connected is False
+
+
+@pytest.mark.parametrize(
+    "parser_class",
+    [_RESP2Parser, _HiredisParser],
+    ids=["RESP2Parser", "HiredisParser"],
+)
+class TestBinaryPubSubPayloadInvalidatesConnection:
+    """The realistic pubsub trigger is not an unknown type byte but
+    Encoder.decode at the tail of _read_response: a decode_responses=True
+    subscriber handed a binary PUBLISH payload raises UnicodeDecodeError after
+    the cursor has passed the payload. Both parser backends raise it, and
+    PubSub.parse_response passes disconnect_on_error=False, so before the
+    widened predicate the connection stayed up with the undecodable bytes
+    queued and every later read raised identically. See #4291.
+    """
+
+    PUBSUB_KWARGS = dict(disconnect_on_error=False, push_request=True)
+
+    def _subscriber(self, data, parser_class):
+        if parser_class is _HiredisParser and not HIREDIS_AVAILABLE:
+            pytest.skip("Hiredis not available")
+        return _connection_with_stream(
+            data, parser_class, encoding="utf-8", decode_responses=True
+        )
+
+    def test_binary_payload_disconnects(self, parser_class):
+        conn = self._subscriber(BINARY_PUBSUB_MESSAGE + b"+SECOND\r\n", parser_class)
+
+        with pytest.raises(UnicodeDecodeError):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        assert conn.is_connected is False
+
+    def test_next_read_is_clean_after_binary_payload(self, parser_class, monkeypatch):
+        conn = self._subscriber(BINARY_PUBSUB_MESSAGE + b"+SECOND\r\n", parser_class)
+        _reconnect_with(conn, monkeypatch, b"+RECOVERED\r\n")
+
+        with pytest.raises(UnicodeDecodeError):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        # PubSub.parse_response calls conn.connect() before reading again.
+        # Before the fix the connection was still up, connect() was a no-op,
+        # and this read raised UnicodeDecodeError on the same queued bytes.
+        conn.connect()
+        assert conn.read_response(**self.PUBSUB_KWARGS) == "RECOVERED"
+
+    def test_decodable_payload_leaves_connection_up(self, parser_class):
+        """A payload that decodes cleanly must not trip the new predicate."""
+        conn = self._subscriber(
+            b"*3\r\n$7\r\nmessage\r\n$4\r\nchan\r\n$2\r\nhi\r\n", parser_class
+        )
+
+        assert conn.read_response(**self.PUBSUB_KWARGS) == ["message", "chan", "hi"]
+        assert conn.is_connected is True
+
+
+def _deeply_nested_reply(depth):
+    # Matches what Redis emits for
+    #   EVAL "local t={} local c=t for i=1,3000 do local n={} c[1]=n c=n end return t" 0
+    # which is an ordinary command reply, not a synthetic stream (#4291).
+    return b"*1\r\n" * depth + b"*0\r\n"
+
+
+class TestDeeplyNestedReplyInvalidatesConnection:
+    """Deeply nested aggregate replies fail mid-parse: the pure-Python parsers
+    exhaust the stack (RecursionError) and hiredis hits its own nesting limit
+    (InvalidResponse). Both are unrecoverable by re-parsing, so both must drop
+    the connection even under disconnect_on_error=False. #4144 converts the
+    pure-Python case into a bounded-depth InvalidResponse; catching
+    RecursionError here is what stops the loop until that lands.
+    """
+
+    PUBSUB_KWARGS = dict(disconnect_on_error=False, push_request=True)
+
+    def test_python_parser_recursion_error_disconnects(self):
+        # PyPy bounds recursion by stack bytes, not frames, and its JIT-compiled
+        # parser frames are small enough to fit 3000 levels; 100_000 cannot fit.
+        conn = _connection_with_stream(_deeply_nested_reply(100_000), _RESP2Parser)
+
+        with pytest.raises(RecursionError):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        assert conn.is_connected is False
+
+    @pytest.mark.skipif(not HIREDIS_AVAILABLE, reason="hiredis is not installed")
+    def test_hiredis_nesting_limit_disconnects(self):
+        conn = _connection_with_stream(_deeply_nested_reply(3000), _HiredisParser)
+
+        with pytest.raises(redis.InvalidResponse):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        assert conn.is_connected is False
+
+    def test_shallow_nesting_still_parses(self):
+        conn = _connection_with_stream(_deeply_nested_reply(3), _RESP2Parser)
+
+        assert conn.read_response(**self.PUBSUB_KWARGS) == [[[[]]]]
+        assert conn.is_connected is True
+
+
+@pytest.mark.parametrize(
+    "parser_class",
+    [
+        _RESP2Parser,
+        _RESP3Parser,
+        pytest.param(
+            _HiredisParser,
+            marks=pytest.mark.skipif(
+                not HIREDIS_AVAILABLE, reason="hiredis is not installed"
+            ),
+        ),
+    ],
+    ids=["RESP2Parser", "RESP3Parser", "HiredisParser"],
+)
+class TestMalformedNumericFrameInvalidatesConnection:
+    """Malformed numeric frames (non-numeric integers, bulk lengths, or array
+    lengths such as `:abc\r\n`, `$xyz\r\n`, `*abc\r\n`) are protocol errors, so the
+    parser raises InvalidResponse. Before the fix, these stayed queued with
+    disconnect_on_error=False, causing infinite retries on the same frame.
+    See #4291.
+    """
+
+    PUBSUB_KWARGS = dict(disconnect_on_error=False, push_request=True)
+
+    def test_malformed_integer_frame_disconnects(self, parser_class):
+        """Malformed integer frame `:abc\r\n` raises InvalidResponse."""
+        conn = _connection_with_stream(b":abc\r\n+SECOND\r\n", parser_class)
+
+        with pytest.raises(InvalidResponse):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        assert conn.is_connected is False
+
+    def test_malformed_bulk_length_disconnects(self, parser_class):
+        """Malformed bulk string length `$xyz\r\n` raises InvalidResponse."""
+        conn = _connection_with_stream(b"$xyz\r\n+SECOND\r\n", parser_class)
+
+        with pytest.raises(InvalidResponse):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        assert conn.is_connected is False
+
+    def test_malformed_array_length_disconnects(self, parser_class):
+        """Malformed array length `*abc\r\n` raises InvalidResponse."""
+        conn = _connection_with_stream(b"*abc\r\n+SECOND\r\n", parser_class)
+
+        with pytest.raises(InvalidResponse):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        assert conn.is_connected is False
+
+    def test_next_read_is_clean_after_malformed_integer(
+        self, parser_class, monkeypatch
+    ):
+        """Reconnect after malformed integer frame serves new stream cleanly."""
+        conn = _connection_with_stream(b":abc\r\n+SECOND\r\n", parser_class)
+        _reconnect_with(conn, monkeypatch, b"+RECOVERED\r\n")
+
+        with pytest.raises(InvalidResponse):
+            conn.read_response(**self.PUBSUB_KWARGS)
+
+        conn.connect()
+        assert conn.read_response(**self.PUBSUB_KWARGS) == b"RECOVERED"
+
+    def test_valid_integer_frame_leaves_connection_up(self, parser_class):
+        """Valid integer frames must not trigger the new predicate."""
+        conn = _connection_with_stream(b":42\r\n", parser_class)
+
+        assert conn.read_response(**self.PUBSUB_KWARGS) == 42
+        assert conn.is_connected is True
+
+
+@pytest.mark.skipif(not HIREDIS_AVAILABLE, reason="hiredis is not installed")
+class TestPushHandlerValueErrorKeepsConnection:
+    """A ValueError raised by the *push handler* is not a framing error: hiredis
+    has already consumed the whole push frame before the handler runs. With
+    disconnect_on_error=False the connection must stay up and the next queued
+    frame must remain readable. Guards against widening
+    UNRECOVERABLE_PARSE_ERRORS to plain ValueError.
+    """
+
+    def test_push_handler_value_error_does_not_disconnect(self):
+        conn = Connection(protocol=3, parser_class=_HiredisParser)
+        conn._sock = _CannedSocket(b">2\r\n$7\r\nmessage\r\n$5\r\nhello\r\n+SECOND\r\n")
+        conn._parser.on_connect(conn)
+
+        def boom(response):
+            raise ValueError("handler bug")
+
+        conn._parser.pubsub_push_handler_func = boom
+
+        with pytest.raises(ValueError, match="handler bug"):
+            conn.read_response(disconnect_on_error=False, push_request=True)
+
+        assert conn.is_connected is True
+        assert conn.read_response(disconnect_on_error=False) == b"SECOND"
