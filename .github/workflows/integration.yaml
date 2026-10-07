@@ -64,6 +64,8 @@ jobs:
             # Fixed in 2.15.0. This one does reach the verify_signature=False decode in JWToken, but the tokens
             # come from the configured identity provider, and the impact is a RecursionError instead of DecodeError.
             CVE-2026-101918 # RecursionError from a deeply nested payload escapes PyJWTError handling
+            # Fixed in 2.15.0. redis-py never imports JWKs (no PyJWK / from_jwk), so OKP key import is unreachable.
+            CVE-2026-102275 # OKP private JWK accepted when the declared x does not match the private key d
             # No fix released yet. redis-py passes a fresh options dict on every decode call,
             # so the in-place mutation is never reused for a verifying call.
             CVE-2026-103001 # decode() mutates a caller-supplied options dict when verify_signature is falsy
