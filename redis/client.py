@@ -1842,11 +1842,17 @@ class PubSubWorkerThread(threading.Thread):
                 self.exception_handler(e, pubsub, self)
         pubsub.close()
 
-    def stop(self) -> None:
+    def stop(self, timeout: Optional[float] = None) -> None:
         # trip the flag so the run loop exits. the run loop will
         # close the pubsub connection, which disconnects the socket
         # and returns the connection to the pool.
         self._running.clear()
+        # wait for that close before returning, so a caller that
+        # follows stop() with pubsub.close() does not disconnect the
+        # socket while get_message is still reading it. the exception
+        # handler calls stop() from this thread; joining there deadlocks.
+        if threading.current_thread() is not self and self.is_alive():
+            self.join(timeout)
 
 
 class Pipeline(Redis):
