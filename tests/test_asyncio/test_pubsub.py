@@ -496,6 +496,19 @@ class TestPubSubSubscribeUnsubscribe:
         await self._test_subscribe_unsubscribe(**kwargs)
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    async def test_get_sharded_message_reads_shard_channel_messages(self, r, pubsub):
+        """``get_sharded_message`` mirrors the sync alias of ``get_message``."""
+        assert await pubsub.ssubscribe("foo") is None
+        assert (await pubsub.get_sharded_message(timeout=1))["type"] == "ssubscribe"
+
+        assert await r.spublish("foo", "hello") == 1
+        message = await pubsub.get_sharded_message(timeout=1)
+        assert message["type"] == "smessage"
+        assert message["channel"] == b"foo"
+        assert message["data"] == b"hello"
+
+    @pytest.mark.onlynoncluster
     async def _test_resubscribe_on_reconnection(
         self, p, sub_type, unsub_type, sub_func, unsub_func, keys
     ):
