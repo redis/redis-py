@@ -22,6 +22,11 @@ DEFAULT_USER_AGENT = "HttpClient/1.0 (+https://example.invalid)"
 DEFAULT_TIMEOUT = 30.0
 RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 
+# urllib's redirect handler copies every plain header onto the follow-up
+# request, even one pointing at another host or downgrading to http, so
+# credential headers must be attached as unredirected headers instead.
+UNREDIRECTED_HEADERS = frozenset({"authorization", "proxy-authorization", "cookie"})
+
 
 @dataclass
 class HttpResponse:
@@ -252,7 +257,12 @@ class HttpClient:
         all_headers = self._prepare_headers(headers, body)
         data = body.encode("utf-8") if isinstance(body, str) else body
 
-        req = Request(url=url, method=method.upper(), data=data, headers=all_headers)
+        req = Request(url=url, method=method.upper(), data=data)
+        for name, value in all_headers.items():
+            if name in UNREDIRECTED_HEADERS:
+                req.add_unredirected_header(name, value)
+            else:
+                req.add_header(name, value)
 
         context: Optional[ssl.SSLContext] = None
         if url.lower().startswith("https"):

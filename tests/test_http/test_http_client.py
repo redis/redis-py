@@ -1,5 +1,7 @@
 import json
 import gzip
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from io import BytesIO
 from typing import Any, Dict
 from urllib.error import HTTPError
@@ -340,7 +342,8 @@ class TestHttpClient:
         def fake_urlopen(request, *, timeout=None, context=None):
             captured["timeout"] = timeout
             captured["context"] = context
-            captured["headers"] = dict(request.headers)
+            captured["headers"] = dict(request.header_items())
+            captured["unredirected"] = dict(request.unredirected_hdrs)
             captured["method"] = getattr(request, "method", "").upper()
             return FakeResponse(
                 status=200,
@@ -366,6 +369,69 @@ class TestHttpClient:
         assert "authorization" in headers and headers["authorization"].startswith(
             "Basic "
         )
+        # Authorization must be attached as an unredirected header so urllib
+        # does not replay it to a redirect target
+        unredirected = {k.lower() for k in captured["unredirected"]}
+        assert "authorization" in unredirected
         assert headers.get("accept") == "application/json"
         assert "gzip" in headers.get("accept-encoding", "").lower()
         assert "user-agent" in headers
+
+    def test_credentials_not_sent_to_redirect_target(self) -> None:
+        # Arrange: a real urllib round trip through two loopback servers, so
+        # the stdlib redirect handling is exercised rather than a fake urlopen.
+        # The origin server redirects to a second server on another port,
+        # which is another origin.
+        received = {}
+
+        class TargetHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                received["target_auth"] = self.headers.get("Authorization")
+                body = json.dumps({"ok": True}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, format, *args):
+                pass
+
+        class OriginHandler(BaseHTTPRequestHandler):
+            redirect_to = ""
+
+            def do_GET(self):
+                received["origin_auth"] = self.headers.get("Authorization")
+                self.send_response(302)
+                self.send_header("Location", self.redirect_to)
+                self.end_headers()
+
+            def log_message(self, format, *args):
+                pass
+
+        target = HTTPServer(("127.0.0.1", 0), TargetHandler)
+        origin = HTTPServer(("127.0.0.1", 0), OriginHandler)
+        OriginHandler.redirect_to = f"http://127.0.0.1:{target.server_port}/elsewhere"
+        threading.Thread(target=target.serve_forever, daemon=True).start()
+        threading.Thread(target=origin.serve_forever, daemon=True).start()
+
+        try:
+            client = HttpClient(
+                base_url=f"http://127.0.0.1:{origin.server_port}/",
+                auth_basic=("user", "secret"),
+            )
+
+            # Act
+            result = client.get("v1/resource")
+
+            # Assert: the redirect was followed, the origin got the
+            # credentials and the redirect target did not
+            assert result == {"ok": True}
+            assert received["origin_auth"] is not None
+            assert received["origin_auth"].startswith("Basic ")
+            assert received["target_auth"] is None
+        finally:
+            origin.shutdown()
+            target.shutdown()
+            origin.server_close()
+            target.server_close()
