@@ -7068,6 +7068,8 @@ class TestRedisCommands:
         info = r.xinfo_stream(stream, full=True)
         consumer = info["groups"][0]["consumers"][0]
         assert isinstance(consumer, dict)
+        assert consumer["name"] == b"consumer"
+        assert consumer["pel-count"] == 1
 
     @skip_if_server_version_lt("8.5.0")
     def test_xinfo_stream_idempotent_fields(self, r):
