@@ -13,6 +13,7 @@ from typing import (
     Literal,
     Mapping,
     Optional,
+    Type,
     Union,
 )
 
@@ -907,88 +908,104 @@ class MaintNotificationsPoolHandler:
                 # just return
                 return
 
-            with self.pool._lock:
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        f"Handling node MOVING notification: {notification}, "
-                        f"with connection: {self.connection}, connected to ip "
-                        f"{self.connection.get_resolved_ip() if self.connection else None}"
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    f"Handling node MOVING notification: {notification}, "
+                    f"with connection: {self.connection}, connected to ip "
+                    f"{self.connection.get_resolved_ip() if self.connection else None}"
+                )
+            # Get the current connected address - if any
+            # This is the address that is being moved
+            # and we need to handle only connections
+            # connected to the same address
+            moving_address_src = (
+                self.connection.getpeername() if self.connection else None
+            )
+
+            # Reported before the pool is relaxed: taking over a connection
+            # under maintenance completes that connection's pair, and a
+            # listener must see the handoff's pair open by then rather than
+            # no relaxation at all.
+            self._dispatch_handoff_event(MaintenanceStartedEvent, notification)
+
+            try:
+                with self.pool._lock:
+                    if getattr(self.pool, "set_in_maintenance", False):
+                        # Set pool in maintenance mode - executed only if
+                        # BlockingConnectionPool is used
+                        self.pool.set_in_maintenance(True)
+
+                    # Update maintenance state, timeout and optionally host
+                    # address connection settings for matching connections
+                    self.pool.update_connections_settings(
+                        state=MaintenanceState.MOVING,
+                        maintenance_notification_hash=hash(notification),
+                        relaxed_timeout=self.config.relaxed_timeout,
+                        host_address=notification.new_node_host,
+                        matching_address=moving_address_src,
+                        matching_pattern="connected_address",
+                        update_notification_hash=True,
+                        include_free_connections=True,
                     )
-                # Get the current connected address - if any
-                # This is the address that is being moved
-                # and we need to handle only connections
-                # connected to the same address
-                moving_address_src = (
-                    self.connection.getpeername() if self.connection else None
-                )
 
-                # The events report relaxed timeouts; a handoff handled only for
-                # the proactive reconnect relaxes nothing. Reported before the pool
-                # is relaxed: taking over a connection under maintenance completes
-                # that connection's pair, and a listener must see the handoff's
-                # pair open by then rather than no relaxation at all.
-                if self.config.is_relaxed_timeouts_enabled():
-                    _dispatch_maintenance_event(
-                        self.config,
-                        MaintenanceStartedEvent(
-                            connection_pool=self.pool,
-                            connection=self.connection,
-                            state=MaintenanceState.MOVING,
-                            notification=notification,
-                            config=self.config,
-                        ),
+                    if self.config.proactive_reconnect:
+                        if notification.new_node_host is not None:
+                            self.run_proactive_reconnect(moving_address_src)
+                        else:
+                            threading.Timer(
+                                notification.ttl / 2,
+                                self.run_proactive_reconnect,
+                                args=(moving_address_src,),
+                            ).start()
+
+                    # Update config for new connections:
+                    # Set state to MOVING
+                    # update host
+                    # if relax timeouts are enabled - update timeouts
+                    self.pool.update_connection_kwargs(
+                        **_build_moving_connection_kwargs(notification, self.config)
                     )
 
-                if getattr(self.pool, "set_in_maintenance", False):
-                    # Set pool in maintenance mode - executed only if
-                    # BlockingConnectionPool is used
-                    self.pool.set_in_maintenance(True)
+                    if getattr(self.pool, "set_in_maintenance", False):
+                        self.pool.set_in_maintenance(False)
 
-                # Update maintenance state, timeout and optionally host address
-                # connection settings for matching connections
-                self.pool.update_connections_settings(
-                    state=MaintenanceState.MOVING,
-                    maintenance_notification_hash=hash(notification),
-                    relaxed_timeout=self.config.relaxed_timeout,
-                    host_address=notification.new_node_host,
-                    matching_address=moving_address_src,
-                    matching_pattern="connected_address",
-                    update_notification_hash=True,
-                    include_free_connections=True,
-                )
-
-                if self.config.proactive_reconnect:
-                    if notification.new_node_host is not None:
-                        self.run_proactive_reconnect(moving_address_src)
-                    else:
-                        threading.Timer(
-                            notification.ttl / 2,
-                            self.run_proactive_reconnect,
-                            args=(moving_address_src,),
-                        ).start()
-
-                # Update config for new connections:
-                # Set state to MOVING
-                # update host
-                # if relax timeouts are enabled - update timeouts
-                self.pool.update_connection_kwargs(
-                    **_build_moving_connection_kwargs(notification, self.config)
-                )
-
-                if getattr(self.pool, "set_in_maintenance", False):
-                    self.pool.set_in_maintenance(False)
-
-            threading.Timer(
-                notification.ttl,
-                self.handle_node_moved_notification,
-                args=(notification,),
-            ).start()
+                threading.Timer(
+                    notification.ttl,
+                    self.handle_node_moved_notification,
+                    args=(notification,),
+                ).start()
+            except BaseException:
+                # The relaxation reported above was not applied, or has no
+                # cleanup to end it: close its pair
+                self._dispatch_handoff_event(MaintenanceCompletedEvent, notification)
+                raise
 
             record_connection_handoff(
                 pool_name=get_pool_name(self.pool),
             )
 
             self._processed_notifications.add(notification)
+
+    def _dispatch_handoff_event(
+        self,
+        event_type: Type[MaintenanceEvent],
+        notification: NodeMovingNotification,
+    ) -> None:
+        """
+        Report a handoff's relaxation. The events report relaxed timeouts; a
+        handoff handled only for the proactive reconnect relaxes nothing.
+        """
+        if self.config.is_relaxed_timeouts_enabled():
+            _dispatch_maintenance_event(
+                self.config,
+                event_type(
+                    connection_pool=self.pool,
+                    connection=self.connection,
+                    state=MaintenanceState.MOVING,
+                    notification=notification,
+                    config=self.config,
+                ),
+            )
 
     def run_proactive_reconnect(self, moving_address_src: Optional[str] = None):
         """
@@ -1046,17 +1063,8 @@ class MaintNotificationsPoolHandler:
 
             # A newer MOVING notification has superseded this one when the
             # kwargs were not reverted: the pool stays relaxed until it expires.
-            if kwargs is not None and self.config.is_relaxed_timeouts_enabled():
-                _dispatch_maintenance_event(
-                    self.config,
-                    MaintenanceCompletedEvent(
-                        connection_pool=self.pool,
-                        connection=self.connection,
-                        state=MaintenanceState.MOVING,
-                        notification=notification,
-                        config=self.config,
-                    ),
-                )
+            if kwargs is not None:
+                self._dispatch_handoff_event(MaintenanceCompletedEvent, notification)
 
 
 class MaintNotificationsConnectionHandler:

@@ -996,6 +996,22 @@ class TestMaintNotificationsPoolHandlerEvents:
 
         assert seen == [MaintenanceStartedEvent]
 
+    def test_failed_handoff_closes_its_pair(self):
+        """A pool mutation that fails leaves no relaxation to end later."""
+        notification = self._moving()
+        self.mock_pool.update_connections_settings.side_effect = RuntimeError("boom")
+
+        with patch("threading.Timer") as timer, pytest.raises(RuntimeError):
+            self.handler.handle_node_moving_notification(notification)
+
+        assert [type(e) for e in self.listener.events] == [
+            MaintenanceStartedEvent,
+            MaintenanceCompletedEvent,
+        ]
+        assert self.listener.events[1].notification is notification
+        timer.assert_not_called()
+        assert notification not in self.handler._processed_notifications
+
     def test_moved_dispatches_completed_event(self):
         notification = self._moving()
         self.mock_pool.connection_kwargs = {
@@ -1767,6 +1783,25 @@ class TestMaintNotificationsMetricsRecording:
         handler.handle_node_moving_notification(notification)
 
         mock_record_connection_handoff.assert_not_called()
+
+
+@pytest.mark.fixed_client
+class TestDisconnectCompletesMaintenance:
+    def test_disconnect_without_socket_still_completes_maintenance(self):
+        """
+        The relaxation is restored and reported on every disconnect, including
+        one that finds no socket to close and returns early.
+        """
+        listener = _RecordingListener()
+        config = _config_with_listener(listener)
+        connection = Connection(protocol=3, maint_notifications_config=config)
+        connection.maintenance_state = MaintenanceState.MAINTENANCE
+        assert connection._sock is None
+
+        connection.disconnect()
+
+        assert connection.maintenance_state == MaintenanceState.NONE
+        assert [type(e) for e in listener.events] == [MaintenanceCompletedEvent]
 
 
 @pytest.mark.fixed_client

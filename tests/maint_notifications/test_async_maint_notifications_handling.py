@@ -2213,6 +2213,36 @@ async def test_async_pool_handler_started_event_precedes_relaxing_the_pool():
 
 
 @pytest.mark.asyncio
+async def test_async_failed_handoff_closes_its_pair():
+    """A pool mutation that fails leaves no relaxation to end later."""
+    listener = _RecordingListener()
+    config = _config_with_listener(listener)
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=config,
+    )
+    handler = AsyncMaintNotificationsPoolHandler(pool, config)
+    pool.apply_moving_notification = AsyncMock(side_effect=RuntimeError("boom"))
+    notification = NodeMovingNotification(
+        id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=5
+    )
+
+    with pytest.raises(RuntimeError):
+        await handler.handle_node_moving_notification(notification)
+
+    assert [type(e) for e in listener.events] == [
+        MaintenanceStartedEvent,
+        MaintenanceCompletedEvent,
+    ]
+    assert listener.events[1].notification is notification
+    assert handler._scheduled_tasks == set()
+    assert handler._pending_handoffs == set()
+    assert notification not in handler._processed_notifications
+
+
+@pytest.mark.asyncio
 async def test_async_pool_handler_dispatches_moving_event_pair():
     listener = _RecordingListener()
     config = _config_with_listener(listener)

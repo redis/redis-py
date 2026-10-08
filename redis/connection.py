@@ -1495,6 +1495,9 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         # The server session is gone, so any HIMPORT fieldsets prepared on this
         # socket no longer exist; reset the tracking.
         self._reset_himport_state()
+        # Likewise the relaxation a maintenance applied to it: restored and
+        # reported here, ahead of a close that may find no socket to close
+        self._complete_maintenance_on_disconnect()
         self._parser.on_disconnect()
 
         conn_sock = self._sock
@@ -1544,8 +1547,6 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             record_connection_closed(
                 close_reason=CloseReason.APPLICATION_CLOSE,
             )
-
-        self._complete_maintenance_on_disconnect()
 
     def mark_for_reconnect(self):
         self._should_reconnect = True
