@@ -35,7 +35,12 @@ from redis.event import (
 from redis.exceptions import AskError, MovedError, RedisError, ResponseError
 from redis.observability.attributes import CSCReason
 from redis.utils import str_if_bytes
-from tests.conftest import _get_client, skip_if_resp_version, skip_if_server_version_lt
+from tests.conftest import (
+    _get_client,
+    assert_resp_response,
+    skip_if_resp_version,
+    skip_if_server_version_lt,
+)
 
 # A record for a command a resolver must report as ineligible, used to prove that eligibility
 # comes from the resolver the config holds rather than from the config itself.
@@ -1014,6 +1019,68 @@ class TestCache:
         indirect=True,
     )
     @pytest.mark.onlynoncluster
+    def test_a_user_sent_client_tracking_or_reset_is_refused(self, r, r2):
+        """
+        ``CLIENT TRACKING OFF`` and ``RESET`` both turn tracking off, while the cache keeps
+        storing replies through the connection - stale forever. This predates the tracking
+        modes, so it is checked in ``plain``. ``single_connection_client`` puts the stray
+        command and the read on one socket, which is where it bites.
+        """
+        cache = r.get_cache()
+        refused = [
+            lambda: r.client_tracking_off(),
+            lambda: r.client_tracking_on(),
+            lambda: r.reset(),
+            lambda: r.execute_command("CLIENT", b"TRACKING", b"OFF"),
+            lambda: r.execute_command(b"CLIENT", b"TRACKING", b"OFF"),
+            lambda: r.execute_command(b"RESET"),
+            lambda: r.pipeline(transaction=False).client_tracking_off().execute(),
+            lambda: r.pipeline().get("foo").execute_command("RESET").execute(),
+        ]
+        for call in refused:
+            with pytest.raises(RedisError, match="cannot be sent on a connection"):
+                call()
+
+        # Reading the tracking state is still allowed, and shows tracking is still on.
+        assert "on" in tracking_flags(r)
+
+        # Nothing reached the socket, so the next cached read is still tracked.
+        r2.set("foo", "bar")
+        assert r.get("foo") == b"bar"
+        assert cache.size == 1
+
+        r2.set("foo", "baz")
+        assert wait_for_invalidated_value(r, "foo", [b"baz"]) == b"baz"
+
+    @pytest.mark.onlynoncluster
+    def test_client_tracking_and_reset_without_a_cache_are_not_refused(self, request):
+        # The guard lives on the cache's connections only. A dedicated client, because
+        # RESET also drops the connection back to RESP2.
+        client = _get_client(redis.Redis, request, flushdb=False)
+        try:
+            assert client.get_cache() is None
+            client.client_tracking_on()
+            client.client_tracking_off()
+            assert_resp_response(client, client.reset(), "RESET", b"RESET", "RESET")
+        finally:
+            client.close()
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": DefaultCache(CacheConfig(max_size=128)),
+                "single_connection_client": True,
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=128)),
+                "single_connection_client": False,
+            },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
     def test_the_cache_is_flushed_when_tracking_is_re_enabled(self, r):
         """
         The server destroys a connection's tracking state on disconnect, so every entry cached
@@ -1312,6 +1379,25 @@ class TestClusterCache:
         assert (
             cache == r.nodes_manager.get_node_from_slot(1).redis_connection.get_cache()
         )
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": DefaultCache(CacheConfig(max_size=128))}],
+        indirect=True,
+    )
+    @pytest.mark.onlycluster
+    def test_a_user_sent_client_tracking_or_reset_is_refused(self, r):
+        # Every node connection of a cached cluster is a cache proxy, so the guard covers
+        # the fan-out of ``client_tracking_off`` and the cluster pipeline as well.
+        with pytest.raises(RedisError, match="CLIENT TRACKING cannot be sent"):
+            r.client_tracking_off()
+        with pytest.raises(RedisError, match="CLIENT TRACKING cannot be sent"):
+            r.client_tracking_on(target_nodes=redis.RedisCluster.PRIMARIES)
+        with pytest.raises(RedisError, match="RESET cannot be sent"):
+            r.pipeline().get("foo").execute_command("RESET").execute()
+
+        node = r.get_node_from_key("foo")
+        assert "on" in tracking_flags(node.redis_connection)
 
     @pytest.mark.parametrize(
         "r",
