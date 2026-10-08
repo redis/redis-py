@@ -195,10 +195,16 @@ class Lock:
         blocking: Optional[bool] = None,
         blocking_timeout: Optional[Number] = None,
         token: Optional[Union[str, bytes]] = None,
+        *,
+        sleep: Optional[Number] = None,
     ):
         """
         Use Redis to hold a shared, distributed lock named ``name``.
         Returns True once the lock is acquired.
+
+        ``sleep`` specifies the amount of time to sleep per attempt. If
+        not specified, the ``sleep`` value passed to the constructor
+        will be used.
 
         If ``blocking`` is False, always return immediately. If the lock
         was acquired, return True, otherwise return False.
@@ -211,7 +217,8 @@ class Lock:
         object with the default encoding. If a token isn't specified, a UUID
         will be generated.
         """
-        sleep = self.sleep
+        if sleep is None:
+            sleep = self.sleep
         if token is None:
             token = uuid.uuid1().hex.encode()
         else:

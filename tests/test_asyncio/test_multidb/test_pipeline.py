@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import nullcontext
 from unittest.mock import Mock, AsyncMock, patch
 
 import pybreaker
@@ -23,6 +24,113 @@ def mock_pipe() -> Pipeline:
 
 @pytest.mark.onlynoncluster
 class TestPipeline:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("raise_error", [False, True])
+    @pytest.mark.parametrize("mock_multi_db_config,mock_db", [({}, {})], indirect=True)
+    async def test_context_exit_keeps_parent_open(
+        self, mock_multi_db_config, mock_db, mock_hc, raise_error
+    ):
+        databases = create_weighted_list(mock_db)
+        db_pipe = mock_pipe()
+        db_pipe.execute.side_effect = [[True], [b"value"]]
+        mock_db.client.pipeline.return_value = db_pipe
+        mock_db.client.execute_command.return_value = b"value"
+
+        with (
+            patch.object(mock_multi_db_config, "databases", return_value=databases),
+            patch.object(
+                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
+            ),
+        ):
+            async with MultiDBClient(mock_multi_db_config) as client:
+                await client._recurring_hc_task
+                health_check_timer = client._bg_scheduler._next_timer
+                assert health_check_timer is not None
+                with (
+                    pytest.raises(ValueError, match="pipeline failed")
+                    if raise_error
+                    else nullcontext()
+                ):
+                    async with client.pipeline() as pipe:
+                        pipe.set("key", "value")
+                        assert await pipe.execute() == [True]
+                        pipe.get("discarded")
+                        if raise_error:
+                            raise ValueError("pipeline failed")
+
+                assert len(pipe) == 0
+                mock_db.client.aclose.assert_not_awaited()
+                assert client._bg_scheduler._next_timer is health_check_timer
+                assert not health_check_timer.cancelled()
+                assert await client.get("key") == b"value"
+                async with client.pipeline() as next_pipe:
+                    next_pipe.get("key")
+                    assert await next_pipe.execute() == [b"value"]
+                mock_db.client.aclose.assert_not_awaited()
+
+            mock_db.client.aclose.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("raise_error", [False, True])
+    @pytest.mark.parametrize("mock_multi_db_config,mock_db", [({}, {})], indirect=True)
+    async def test_context_exit_preserves_pipeline_in_flight(
+        self, mock_multi_db_config, mock_db, mock_hc, raise_error
+    ):
+        databases = create_weighted_list(mock_db)
+        execution_started = asyncio.Event()
+        finish_execution = asyncio.Event()
+        db_pipe = mock_pipe()
+
+        async def execute():
+            execution_started.set()
+            await finish_execution.wait()
+            return [b"value"]
+
+        db_pipe.execute.side_effect = execute
+        mock_db.client.pipeline.return_value = db_pipe
+
+        with (
+            patch.object(mock_multi_db_config, "databases", return_value=databases),
+            patch.object(
+                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
+            ),
+        ):
+            async with MultiDBClient(mock_multi_db_config) as client:
+                await client._recurring_hc_task
+                health_check_timer = client._bg_scheduler._next_timer
+                assert health_check_timer is not None
+
+                async def run_pipeline():
+                    async with client.pipeline() as pipe:
+                        pipe.get("key")
+                        return await pipe.execute()
+
+                pending = asyncio.create_task(run_pipeline())
+                try:
+                    await asyncio.wait_for(execution_started.wait(), timeout=1)
+                    with (
+                        pytest.raises(ValueError, match="pipeline failed")
+                        if raise_error
+                        else nullcontext()
+                    ):
+                        async with client.pipeline() as other_pipe:
+                            other_pipe.set("discarded", "value")
+                            if raise_error:
+                                raise ValueError("pipeline failed")
+
+                    assert len(other_pipe) == 0
+                    mock_db.client.aclose.assert_not_awaited()
+                    finish_execution.set()
+                    assert await pending == [b"value"]
+                    mock_db.client.aclose.assert_not_awaited()
+                    assert client._bg_scheduler._next_timer is health_check_timer
+                    assert not health_check_timer.cancelled()
+                finally:
+                    finish_execution.set()
+                    await asyncio.gather(pending, return_exceptions=True)
+
+            mock_db.client.aclose.assert_awaited_once()
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
