@@ -4096,20 +4096,28 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 is_created = True
             self._in_use_connections.add(connection)
 
-        # Record state transition: IDLE -> USED
-        # (make_connection already recorded IDLE +1 for new connections)
-        # This ensures counters stay balanced if connect() fails and release() is called
+        # Record state transition for observability
         pool_name = get_pool_name(self)
-        record_connection_count(
-            pool_name=pool_name,
-            connection_state=ConnectionState.IDLE,
-            counter=-1,
-        )
-        record_connection_count(
-            pool_name=pool_name,
-            connection_state=ConnectionState.USED,
-            counter=1,
-        )
+        if is_created:
+            # New connection created and acquired: just USED +1
+            # (connection was never idle in the pool)
+            record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.USED,
+                counter=1,
+            )
+        else:
+            # Existing connection acquired from pool: IDLE -> USED
+            record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.IDLE,
+                counter=-1,
+            )
+            record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.USED,
+                counter=1,
+            )
 
         try:
             self.ensure_connection(connection)
@@ -4181,13 +4189,6 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         # Only a connection that exists can be released, so count it here.
         self._created_connections += 1
 
-        # Record new connection created (starts as IDLE) - only after successful construction
-        record_connection_count(
-            pool_name=get_pool_name(self),
-            connection_state=ConnectionState.IDLE,
-            counter=1,
-        )
-
         return connection
 
     def release(self, connection: "Connection") -> None:
@@ -4229,7 +4230,6 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             else:
                 # Pool doesn't own this connection, do not add it back
                 # to the pool.
-                # Still need to decrement USED since it was counted in get_connection()
                 connection.disconnect()
                 # Subclasses such as SentinelConnectionPool can override
                 # owns_connection() with a comparison different from local PID
@@ -4237,11 +4237,15 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 # connection.pid == self.pid before reclaiming its slot.
                 if connection.pid == self.pid:
                     self._created_connections -= 1
-                record_connection_count(
-                    pool_name="unknown_pool",
-                    connection_state=ConnectionState.USED,
-                    counter=-1,
-                )
+                    # The connection was checked out by this process, so
+                    # decrement USED, which was counted in get_connection().
+                    # Connections inherited across a fork are skipped here,
+                    # their accounting is handled by reset()/__del__.
+                    record_connection_count(
+                        pool_name=get_pool_name(self),
+                        connection_state=ConnectionState.USED,
+                        counter=-1,
+                    )
                 return
 
     def owns_connection(self, connection: "Connection") -> int:
@@ -4501,13 +4505,6 @@ class BlockingConnectionPool(ConnectionPool):
                 connection = self.connection_class(**self.connection_kwargs)
             self._connections.append(connection)
 
-            # Record new connection created (starts as IDLE)
-            record_connection_count(
-                pool_name=get_pool_name(self),
-                connection_state=ConnectionState.IDLE,
-                counter=1,
-            )
-
             return connection
         finally:
             if self._locked:
@@ -4576,20 +4573,28 @@ class BlockingConnectionPool(ConnectionPool):
                     pass
                 self._locked = False
 
-        # Record state transition: IDLE -> USED
-        # (make_connection already recorded IDLE +1 for new connections)
-        # This ensures counters stay balanced if connect() fails and release() is called
+        # Record state transition for observability
         pool_name = get_pool_name(self)
-        record_connection_count(
-            pool_name=pool_name,
-            connection_state=ConnectionState.IDLE,
-            counter=-1,
-        )
-        record_connection_count(
-            pool_name=pool_name,
-            connection_state=ConnectionState.USED,
-            counter=1,
-        )
+        if is_created:
+            # New connection created and acquired: just USED +1
+            # (connection was never idle in the pool)
+            record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.USED,
+                counter=1,
+            )
+        else:
+            # Existing connection acquired from pool: IDLE -> USED
+            record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.IDLE,
+                counter=-1,
+            )
+            record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.USED,
+                counter=1,
+            )
 
         try:
             self.ensure_connection(connection)
@@ -4627,12 +4632,22 @@ class BlockingConnectionPool(ConnectionPool):
                 # its needed.
                 connection.disconnect()
                 self.pool.put_nowait(None)
-                # Still need to decrement USED since it was counted in get_connection()
-                record_connection_count(
-                    pool_name="unknown_pool",
-                    connection_state=ConnectionState.USED,
-                    counter=-1,
-                )
+                # Subclasses can override owns_connection() with a comparison
+                # different from local PID ownership. When such a subclass
+                # rejects a connection checked out by this process, stop
+                # tracking it and decrement USED, which was counted in
+                # get_connection(). Connections inherited across a fork are
+                # skipped here, their accounting is handled by reset()/__del__.
+                if connection.pid == self.pid:
+                    try:
+                        self._connections.remove(connection)
+                    except ValueError:
+                        pass
+                    record_connection_count(
+                        pool_name=get_pool_name(self),
+                        connection_state=ConnectionState.USED,
+                        counter=-1,
+                    )
                 return
             if connection.should_reconnect():
                 if logger.isEnabledFor(logging.DEBUG):

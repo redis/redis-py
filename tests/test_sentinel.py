@@ -7,6 +7,7 @@ from redis.client import StrictRedis
 
 import redis.sentinel
 from redis import exceptions
+from redis.observability.attributes import ConnectionState, get_pool_name
 from redis.sentinel import (
     MasterNotFoundError,
     ReplicaNotFoundError,
@@ -332,6 +333,51 @@ def test_master_failover_reclaims_discarded_connection_slot():
 
     assert pool._created_connections == 0
     pool.get_connection()
+
+
+@pytest.mark.fixed_client
+@pytest.mark.onlynoncluster
+def test_master_failover_release_decrements_used_count():
+    master_a = ("master-a", 6379)
+    master_b = ("master-b", 6379)
+
+    class FakeConnection:
+        def __init__(self, **kwargs):
+            self.host, self.port = master_a
+            self.pid = os.getpid()
+
+        def connect(self):
+            pass
+
+        def disconnect(self):
+            pass
+
+        def can_read(self, timeout=0):
+            return False
+
+        def should_reconnect(self):
+            return False
+
+    pool = SentinelConnectionPool(
+        "mymaster",
+        mock.MagicMock(),
+        connection_class=FakeConnection,
+        max_connections=2,
+    )
+    pool.proxy.master_address = master_a
+    pool_name = get_pool_name(pool)
+
+    with mock.patch("redis.connection.record_connection_count") as mock_rec:
+        connection = pool.get_connection()
+        pool.proxy.master_address = master_b
+        pool.release(connection)
+
+    net = {ConnectionState.IDLE: 0, ConnectionState.USED: 0}
+    for c in mock_rec.call_args_list:
+        if c.kwargs["pool_name"] == pool_name:
+            net[c.kwargs["connection_state"]] += c.kwargs["counter"]
+    assert net[ConnectionState.USED] == 0
+    assert net[ConnectionState.IDLE] == 0
 
 
 @pytest.mark.onlynoncluster
