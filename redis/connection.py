@@ -4673,21 +4673,7 @@ class BlockingConnectionPool(ConnectionPool):
                     counter=1,
                 )
             except Full:
-                # Connection can't go back to pool; discard it.
-                # Remove it from self._connections so that a later reset() or
-                # __del__ does not count it as in-use and decrement USED again.
-                try:
-                    self._connections.remove(connection)
-                except ValueError:
-                    pass
-                connection.disconnect()
-                # Still need to decrement USED since it was counted in
-                # get_connection().
-                record_connection_count(
-                    pool_name=pool_name,
-                    connection_state=ConnectionState.USED,
-                    counter=-1,
-                )
+                pass
         finally:
             if self._locked:
                 try:
