@@ -126,13 +126,15 @@ else:
 
 
 class HiredisRespSerializer:
-    def __init__(self, fallback, encode):
+    def __init__(self, fallback=None, encode=None):
         self._fallback = fallback
         self._encode = encode
 
     def pack(self, *args: List):
         """Pack a series of arguments into the Redis protocol"""
-        if any(isinstance(arg, memoryview) for arg in args):
+        if self._fallback is not None and any(
+            isinstance(arg, memoryview) for arg in args
+        ):
             return self._fallback(*args)
         output = []
 
@@ -141,7 +143,11 @@ class HiredisRespSerializer:
         elif b" " in args[0]:
             args = tuple(args[0].split()) + args[1:]
         args = tuple(
-            bytes(arg) if isinstance(arg, bytearray) else self._encode(arg)
+            bytes(arg)
+            if isinstance(arg, (bytearray, memoryview))
+            else self._encode(arg)
+            if self._encode is not None
+            else arg
             for arg in args
         )
         try:
