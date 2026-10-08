@@ -40,6 +40,7 @@ INCR
 init
 IOError
 Instrumentations
+invalidations
 JSONCommands
 JSONPath
 Jaeger

@@ -1660,6 +1660,8 @@ class PubSub:
             return await self.handle_message(response, ignore_subscribe_messages)
         return None
 
+    get_sharded_message = get_message
+
     def ping(self, message=None) -> Awaitable[bool]:
         """
         Ping the Redis server to test connectivity.

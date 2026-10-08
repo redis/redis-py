@@ -1844,24 +1844,60 @@ class Connection(AbstractConnection):
 # store it only by convention.
 _NO_PENDING_HIT = object()
 
-# A command name that does not start with one of these cannot be ``CLIENT``, so
-# ``_is_client_caching`` rejects nearly every command before it allocates anything.
+# A command name that does not start with one of these cannot be ``CLIENT`` or ``RESET``,
+# so ``_cache_owned_command`` rejects nearly every command before it allocates anything.
 _CLIENT_FIRST_CHARS = frozenset(("c", "C", b"c", b"C"))
+_RESET_FIRST_CHARS = frozenset(("r", "R", b"r", b"R"))
+# ``pack`` splits the command name on whitespace, so a name padded with it still reaches
+# the server as ``CLIENT ...`` or ``RESET``. It encodes a ``str`` name before splitting,
+# so ASCII whitespace is the only kind that splits.
+_WHITESPACE_CHARS = frozenset(
+    (*" \t\n\r\x0b\x0c", *(bytes((c,)) for c in b" \t\n\r\x0b\x0c"))
+)
+
+# The ``CLIENT`` subcommands the cache owns. ``TRACKINGINFO`` and ``GETREDIR`` only read the
+# tracking state, so they are not here.
+_CACHE_OWNED_CLIENT_SUBCOMMANDS = frozenset(("CACHING", "TRACKING"))
 
 
-def _is_client_caching(args) -> bool:
+def _cache_owned_command(args) -> str | None:
     """
-    Whether ``args`` is a ``CLIENT CACHING`` command, in any of the spellings
+    The name of the command in ``args`` if it is one the cache owns - ``CLIENT CACHING``,
+    ``CLIENT TRACKING`` or ``RESET`` - else ``None``. Matches every spelling
     ``pack_command`` accepts: ``"CLIENT CACHING"`` as one argument or ``"CLIENT"``,
-    ``"CACHING"`` as two, as ``str`` or ``bytes``, in any case.
+    ``"CACHING"`` as two, as ``str``, ``bytes``, ``bytearray`` or ``memoryview``, in any
+    case, padded with whitespace or not.
     """
     command = args[0]
-    if not isinstance(command, (str, bytes)) or command[:1] not in _CLIENT_FIRST_CHARS:
-        return False
+    if not isinstance(command, (str, bytes)):
+        if not isinstance(command, (bytearray, memoryview)):
+            return None
+        command = bytes(command)
+    first_char = command[:1]
+    if first_char in _RESET_FIRST_CHARS:
+        # ``RESET`` takes no arguments, so only a five-character name, or one followed by
+        # whitespace, can match. The check keeps the many other ``R`` commands (``RPOP``,
+        # ``RENAME``, ...) allocation-free.
+        if len(command) != 5 and command[5:6] not in _WHITESPACE_CHARS:
+            return None
+    elif first_char not in _CLIENT_FIRST_CHARS and first_char not in _WHITESPACE_CHARS:
+        return None
     words = str_if_bytes(command).upper().split()
-    if len(words) == 1 and len(args) > 1 and isinstance(args[1], (str, bytes)):
-        words.append(str_if_bytes(args[1]).upper())
-    return words[:2] == ["CLIENT", "CACHING"]
+    if not words:
+        return None
+    if words[0] == "RESET":
+        return "RESET"
+    if words[0] != "CLIENT":
+        return None
+    if len(words) == 1 and len(args) > 1:
+        subcommand = args[1]
+        if isinstance(subcommand, (bytearray, memoryview)):
+            subcommand = bytes(subcommand)
+        if isinstance(subcommand, (str, bytes)):
+            words.append(str_if_bytes(subcommand).upper())
+    if len(words) > 1 and words[1] in _CACHE_OWNED_CLIENT_SUBCOMMANDS:
+        return f"CLIENT {words[1]}"
+    return None
 
 
 class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInterface):
@@ -2012,7 +2048,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
     def send_command(self, *args, **kwargs):
         # Before anything else, so a refused command leaves no state behind.
-        self._refuse_client_caching(args)
+        self._refuse_cache_owned_command(args)
         self._process_pending_invalidations()
         self._pending_caching_reply = False
         self._pending_cache_hit = _NO_PENDING_HIT
@@ -2340,31 +2376,49 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
     def pack_commands(self, commands):
         # Every pipeline and transaction packs through here, so the guard covers them as
-        # well. The cache's own pairing is unaffected: ``_send_with_caching`` packs through
-        # the wrapped connection, not through this method.
+        # well. The cache's own commands are unaffected: ``_send_with_caching`` packs
+        # through the wrapped connection, and the tracking handshake is sent on it.
         for args in commands:
-            self._refuse_client_caching(args)
+            self._refuse_cache_owned_command(args)
         return self._conn.pack_commands(commands)
 
     @staticmethod
-    def _refuse_client_caching(args) -> None:
+    def _refuse_cache_owned_command(args) -> None:
         """
-        Refuse a user-sent ``CLIENT CACHING`` on a connection the cache manages.
+        Refuse a user-sent ``CLIENT CACHING``, ``CLIENT TRACKING`` or ``RESET`` on a
+        connection the cache manages.
 
-        The server applies the flag to the next command on the socket, and a pooled
-        connection promises nothing about which command that is. Under ``optout`` a stray
-        ``NO`` would leave the next cached read untracked while its reply is still stored,
-        so it would never be invalidated. The cache sends ``CLIENT CACHING`` itself, paired
-        with the read it belongs to, whenever the tracking mode needs it.
+        Each of them changes the tracking state the cache relies on for invalidations:
+
+        - ``CLIENT CACHING`` sets a flag the server applies to the next command on the
+          socket, and a pooled connection promises nothing about which command that is.
+          Under ``optout`` a stray ``NO`` would leave the next cached read untracked while
+          its reply is still stored, so it would never be invalidated. The cache sends it
+          itself, paired with the read it belongs to, whenever the tracking mode needs it.
+        - ``CLIENT TRACKING`` turns tracking off or reconfigures it, so the cache would keep
+          storing replies that no invalidation reaches. The cache enables tracking itself
+          when the connection is established.
+        - ``RESET`` clears tracking along with the rest of the connection state.
 
         Raises:
-            RedisError: If ``args`` is a ``CLIENT CACHING`` command.
+            RedisError: If ``args`` is one of these commands.
         """
-        if _is_client_caching(args):
-            raise RedisError(
-                "CLIENT CACHING cannot be sent on a connection with client-side caching "
-                "enabled: the cache sends it itself, paired with the read it applies to"
+        command = _cache_owned_command(args)
+        if command is None:
+            return
+        if command == "CLIENT CACHING":
+            reason = "the cache sends it itself, paired with the read it applies to"
+        elif command == "CLIENT TRACKING":
+            reason = (
+                "the cache enables tracking itself, and changing it would stop "
+                "invalidations for cached replies"
             )
+        else:
+            reason = "it turns off the tracking the cache relies on for invalidations"
+        raise RedisError(
+            f"{command} cannot be sent on a connection with client-side caching "
+            f"enabled: {reason}"
+        )
 
     # HIMPORT state lives on the wrapped connection (HIMPORT is never cacheable);
     # delegate so callers treat the proxy like a plain connection and never need
@@ -3951,7 +4005,6 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         "Create a new connection"
         if self._created_connections >= self.max_connections:
             raise MaxConnectionsError("Too many connections")
-        self._created_connections += 1
 
         kwargs = dict(self.connection_kwargs)
 
@@ -3962,6 +4015,9 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             )
         else:
             connection = self.connection_class(**kwargs)
+
+        # Only a connection that exists can be released, so count it here.
+        self._created_connections += 1
 
         # Record new connection created (starts as IDLE) - only after successful construction
         record_connection_count(
@@ -4340,7 +4396,15 @@ class BlockingConnectionPool(ConnectionPool):
             if connection is None:
                 # Start timing for observability
                 start_time_created = time.monotonic()
-                connection = self.make_connection()
+                try:
+                    connection = self.make_connection()
+                except BaseException:
+                    # Hand the slot back, or the pool shrinks on every failure.
+                    try:
+                        self.pool.put_nowait(None)
+                    except Full:
+                        pass
+                    raise
                 is_created = True
         finally:
             if self._locked:
