@@ -5,7 +5,7 @@ import textwrap
 import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
-from functools import wraps
+from functools import cache, wraps
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, TypeVar, Union
 
 from redis.exceptions import DataError
@@ -299,6 +299,7 @@ def check_protocol_version(
     return protocol == expected_version
 
 
+@cache
 def get_lib_version():
     try:
         libver = metadata.version("redis")
