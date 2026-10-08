@@ -29,23 +29,44 @@ Use read-only GitHub access only (`gh pr view`, `gh api` GET). Never comment, la
 
 ```
 gh pr view <n> -R <owner/repo> --json title,author,state,isDraft,labels,updatedAt,body,reviews,comments
-gh api repos/<owner/repo>/pulls/<n>/comments --paginate
+gh api graphql --paginate -F owner=<owner> -F repo=<repo> -F n=<n> -f query='
+  query($owner: String!, $repo: String!, $n: Int!, $endCursor: String) {
+    repository(owner: $owner, name: $repo) {
+      pullRequest(number: $n) {
+        reviewThreads(first: 100, after: $endCursor) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            isResolved isOutdated path line subjectType
+            comments(first: 100) {
+              nodes { author { login } body createdAt pullRequestReview { state } }
+            }
+          }
+        }
+      }
+    }
+  }'
 ```
 
-The second command returns the inline review comments, which `gh pr view` does not include. A `CHANGES_REQUESTED` review often has an empty or short body with the details inline. Use `user.login`, `body`, `path`, `line`, `in_reply_to_id` and `created_at`; a null `line` means the comment is outdated (the code moved), so check whether it still applies.
+The second command returns the inline review threads, which `gh pr view` does not include. A `CHANGES_REQUESTED` review often has an empty or short body with the details inline. Per thread:
+
+- `isResolved: true` means the thread was settled (often the author resolved it after the fix, with no reply); treat it as done unless a later maintainer comment reopens it.
+- `isOutdated: true` means the code moved under the comment; check whether it still applies.
+- `subjectType: FILE` is a file-level comment. Its `line` is null, but it is still current.
+
+Ignore pending (unsubmitted) feedback: reviews with `state: PENDING` and thread comments whose `pullRequestReview.state` is `PENDING`. They are drafts visible only to the maintainer, so they must not appear in a public comment or count as an earlier review.
 
 From the output, get:
 
 - `author.login`: the PR author.
-- Whether the maintainer has already commented or reviewed (a comment, review or inline comment by the maintainer's login).
-- All maintainer feedback in chronological order: review bodies, inline comments and conversation comments. Read it in full; it is the source for "What's left". Drop items that a later maintainer comment withdrew or marked as done, and items that a later commit or reply clearly addressed. An empty review body does not mean there is no feedback.
+- Whether the maintainer has already commented or reviewed (a comment, submitted review or inline comment by the maintainer's login).
+- All maintainer feedback in chronological order: review bodies, inline comments and conversation comments. Read it in full; it is the source for "What's left". Drop items in resolved threads, items that a later maintainer comment withdrew or marked as done, and items that a later commit or reply clearly addressed. An empty review body does not mean there is no feedback.
 - Current labels (to point out `waiting-for-response` for removal) and `isDraft`.
 
 If the PR is closed or merged, skip it and say so. If the maintainer left no feedback in any of these sources, write "What's left" from the open TODOs in the PR `body` or ask the user for a line, and do not invent requirements.
 
 ## Writing "What's left"
 
-- 2 to 5 short bullets, each one concrete action, in the order the maintainer raised them.
+- 1 to 5 short bullets, each one concrete action, in the order the maintainer raised them.
 - Paraphrase the review. Do not add new requests that the maintainer did not make.
 - Keep scope notes from the review (for example "change Fixes #N to Refs #N", "keep #N open, retitle the PR").
 - Add "Take the PR out of draft." when `isDraft` is true and the review asked for it.
