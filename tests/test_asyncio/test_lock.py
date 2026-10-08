@@ -58,10 +58,9 @@ class TestLock:
         await self._test_lock_token(r, lock)
 
     async def test_default_token_is_random_uuid4(self, r):
-        # An auto-generated token must be unpredictable: it is the only secret
-        # that proves lock ownership to release/extend/reacquire. A v1 UUID
-        # leaks the host node and clock sequence and is derived from the time,
-        # so an observer could reconstruct it; a v4 UUID is random.
+        # The default token should be random and should not embed host or
+        # time data: a v1 UUID writes the host MAC address and a clock
+        # reading into the key's value. A v4 UUID is random.
         lock = self.get_lock(r, "foo")
         assert await lock.acquire(blocking=False)
         token = lock.local.token
