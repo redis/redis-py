@@ -1147,7 +1147,8 @@ def test_network_connection_failure():
     # Match only the stable part of the error message across OS
     exp_err = rf"Error {ECONNREFUSED} connecting to localhost:9999\."
     with pytest.raises(ConnectionError, match=exp_err):
-        redis = Redis(port=9999)
+        # nothing listens on this port, so skip the default backoff retries
+        redis = Redis(port=9999, retry=Retry(NoBackoff(), 0))
         redis.set("a", "b")
 
 
@@ -1159,7 +1160,10 @@ def test_network_connection_failure():
 def test_unix_socket_connection_failure():
     exp_err = "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
     with pytest.raises(ConnectionError, match=exp_err):
-        redis = Redis(unix_socket_path="unix:///tmp/a.sock")
+        # the socket file does not exist, so skip the default backoff retries
+        redis = Redis(
+            unix_socket_path="unix:///tmp/a.sock", retry=Retry(NoBackoff(), 0)
+        )
         redis.set("a", "b")
 
 

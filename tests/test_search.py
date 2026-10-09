@@ -608,14 +608,19 @@ class TestBaseSearchFunctionality(SearchTestsBase):
     @pytest.mark.redismod
     @skip_if_redis_enterprise()
     def test_auto_complete(self, client):
-        n = 0
         with open(TITLES_CSV) as f:
-            cr = csv.reader(f)
+            suggestions = [
+                Suggestion(row[0], score=float(row[1])) for row in csv.reader(f)
+            ]
 
-            for row in cr:
-                n += 1
-                term, score = row[0], float(row[1])
-                assert n == client.ft().sugadd("ac", Suggestion(term, score=score))
+        # sugadd pipelines its suggestions and returns the last reply, which is
+        # the dictionary size, so batching keeps the size check per batch
+        ft = client.ft()
+        n = 0
+        for i in range(0, len(suggestions), 500):
+            batch = suggestions[i : i + 500]
+            n += len(batch)
+            assert n == ft.sugadd("ac", *batch)
 
         assert n == client.ft().suglen("ac")
         ret = client.ft().sugget("ac", "bad", with_scores=True)

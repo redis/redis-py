@@ -5,7 +5,9 @@ from urllib.parse import urlparse
 
 import pytest
 import redis
+from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError, RedisError
+from redis.retry import Retry
 
 from .conftest import (
     skip_if_cryptography,
@@ -55,7 +57,9 @@ class TestSSL:
     def test_ssl_connection_without_ssl(self, request):
         ssl_url = request.config.option.redis_ssl_url
         p = urlparse(ssl_url)[1].split(":")
-        r = redis.Redis(host=p[0], port=p[1], ssl=False)
+        # the TLS port closes a plaintext connection every time, so skip the
+        # default backoff retries
+        r = redis.Redis(host=p[0], port=p[1], ssl=False, retry=Retry(NoBackoff(), 0))
 
         with pytest.raises(ConnectionError) as e:
             r.ping()
@@ -126,6 +130,8 @@ class TestSSL:
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers="foo:bar",
+            # an invalid cipher list never connects, so skip the backoff retries
+            retry=Retry(NoBackoff(), 0),
         )
         with pytest.raises(RedisError) as e:
             r.ping()
@@ -150,6 +156,8 @@ class TestSSL:
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers=ssl_ciphers,
+            # the cipher list is rejected on every attempt, so skip the backoff
+            retry=Retry(NoBackoff(), 0),
         )
         with pytest.raises(RedisError) as e:
             r.ping()
