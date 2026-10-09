@@ -1843,6 +1843,11 @@ class PubSubWorkerThread(threading.Thread):
         pubsub.close()
 
     def stop(self, timeout: Optional[float] = None) -> None:
+        """Wait for the worker to finish after clearing the running flag.
+
+        timeout bounds that wait. None waits until the worker exits.
+        The wait is skipped when stop() runs on the worker thread.
+        """
         # trip the flag so the run loop exits. the run loop will
         # close the pubsub connection, which disconnects the socket
         # and returns the connection to the pool.
