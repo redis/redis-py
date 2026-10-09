@@ -19,6 +19,7 @@ from unittest.mock import call, patch, MagicMock, Mock
 
 import pytest
 import redis
+from packaging.version import Version
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
 from redis._parsers.hiredis import NOT_ENOUGH_DATA, _socket_can_read, _socket_is_closed
@@ -3793,9 +3794,9 @@ def _deeply_nested_reply(depth):
 
 # hiredis-py 3.4.1 is the first release whose bundled hiredis limits reply
 # nesting depth (to 1024); earlier releases parse a reply of any depth.
-HIREDIS_LIMITS_NESTING_DEPTH = HIREDIS_AVAILABLE and tuple(
-    int(part) for part in metadata.version("hiredis").split(".")[:3]
-) >= (3, 4, 1)
+HIREDIS_LIMITS_NESTING_DEPTH = HIREDIS_AVAILABLE and Version(
+    metadata.version("hiredis")
+) >= Version("3.4.1")
 
 
 class TestDeeplyNestedReplyInvalidatesConnection:
@@ -3818,12 +3819,14 @@ class TestDeeplyNestedReplyInvalidatesConnection:
         # by earlier tests with no stack left to report their errors, so collect
         # first and keep GC off during the deep parse.
         gc.collect()
+        gc_was_enabled = gc.isenabled()
         gc.disable()
         try:
             with pytest.raises(RecursionError):
                 conn.read_response(**self.PUBSUB_KWARGS)
         finally:
-            gc.enable()
+            if gc_was_enabled:
+                gc.enable()
 
         assert conn.is_connected is False
 
