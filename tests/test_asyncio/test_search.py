@@ -174,21 +174,6 @@ class AsyncSearchTestsBase:
 
 
 class TestBaseSearchFunctionality(AsyncSearchTestsBase):
-    # Shape of the index used by the on-timeout tests. The query these build
-    # runs ``KNN _SEARCH_TIMEOUT_DOCS``, and its cost is dominated by the size
-    # of the result set rather than by the vector arithmetic - at a fixed
-    # ``KNN 10`` the query takes ~1.6ms whatever the dimension, so the document
-    # count is what buys runtime and the dimension only buys memory.
-    #
-    # The runtime has to exceed the 1ms per-query timeout by a wide margin.
-    # ``search-on-timeout=fail`` is enforced by a timeout callback racing the
-    # thread running the query, so a query that only slightly overruns its
-    # timeout may still return full results - intended server behavior. Below
-    # roughly a 3x margin the error stops being raised at all; these values
-    # measure at ~890ms, i.e. a ~900x margin, in ~37MB.
-    _SEARCH_TIMEOUT_DIM = 256
-    _SEARCH_TIMEOUT_DOCS = 12000
-
     @pytest.mark.redismod
     async def test_client(self, decoded_r: redis.Redis):
         num_docs = 500
@@ -1249,55 +1234,47 @@ class TestBaseSearchFunctionality(AsyncSearchTestsBase):
 
     async def _create_search_timeout_index(self, decoded_r: redis.Redis):
         await decoded_r.ft().create_index(
-            (
-                TextField("description"),
-                VectorField(
-                    "embedding",
-                    "FLAT",
-                    {
-                        "TYPE": "FLOAT32",
-                        "DIM": self._SEARCH_TIMEOUT_DIM,
-                        "DISTANCE_METRIC": "L2",
-                    },
-                ),
-            ),
+            (TextField("description"),),
             definition=IndexDefinition(prefix=["search-timeout-item:"]),
         )
         await AsyncSearchTestsBase.waitForIndex(decoded_r, "idx")
+        for i in range(5):
+            await decoded_r.hset(f"search-timeout-item:{i}", "description", "red shoes")
 
-    async def _add_data_for_search_timeout(self, decoded_r: redis.Redis):
-        vectors = [
-            np.full(self._SEARCH_TIMEOUT_DIM, value, dtype=np.float32).tobytes()
-            for value in (0.1, 0.2, 0.3, 0.4, 0.5)
-        ]
-        pipeline = decoded_r.pipeline()
-        batch_size = 250
-        for i in range(self._SEARCH_TIMEOUT_DOCS):
-            pipeline.hset(
-                f"search-timeout-item:{i}",
-                mapping={
-                    "description": "red shoes",
-                    "embedding": vectors[i % len(vectors)],
-                },
+    async def _search_with_forced_timeout(self, decoded_r: redis.Redis, query):
+        # Whether a real query outlives its TIMEOUT depends on the dataset and
+        # on how fast the server is, so force the timeout instead:
+        # ``_FT.DEBUG FT.SEARCH ... TIMEOUT_AFTER_N 0`` runs the wrapped
+        # FT.SEARCH and has it time out before the first result. search()
+        # still builds the arguments and parses the reply.
+        ft = decoded_r.ft()
+        execute_command = ft.execute_command
+
+        def execute_with_forced_timeout(*args, **options):
+            return execute_command(
+                "_FT.DEBUG",
+                *args,
+                "TIMEOUT_AFTER_N",
+                0,
+                "DEBUG_PARAMS_COUNT",
+                2,
+                **options,
             )
-            if (i + 1) % batch_size == 0:
-                await pipeline.execute()
-                pipeline = decoded_r.pipeline()
-        await pipeline.execute()
+
+        ft.execute_command = execute_with_forced_timeout
+        return await ft.search(query)
 
     @pytest.mark.redismod
-    @pytest.mark.timeout(60)
+    # The Redis Enterprise skip and the 8.0.0 gate come from the _FT.DEBUG
+    # timeout hook, not from TIMEOUT itself: Redis Enterprise does not expose
+    # the hook, and the 7.x stack images predate it.
+    @skip_if_redis_enterprise()
+    @skip_if_server_version_lt("8.0.0")
     async def test_search_query_with_timeout(self, decoded_r: redis.Redis):
         await self._create_search_timeout_index(decoded_r)
-        await self._add_data_for_search_timeout(decoded_r)
 
-        query_vector = np.full(
-            self._SEARCH_TIMEOUT_DIM, 0.25, dtype=np.float32
-        ).tobytes()
-        query = Query(f"*=>[KNN {self._SEARCH_TIMEOUT_DOCS} @embedding $vec]").timeout(
-            1
-        )
-        res = await decoded_r.ft().search(query, query_params={"vec": query_vector})
+        query = Query("red").timeout(1)
+        res = await self._search_with_forced_timeout(decoded_r, query)
 
         if expects_resp3_shape(decoded_r):
             warnings = res.get("warning", [])
@@ -1319,33 +1296,35 @@ class TestBaseSearchFunctionality(AsyncSearchTestsBase):
             assert warnings == []
 
     @pytest.mark.redismod
-    @pytest.mark.timeout(60)
+    # The Redis Enterprise skip comes from the _FT.DEBUG timeout hook, which
+    # Redis Enterprise does not expose, not from the fail policy itself.
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("8.9.0")
     async def test_search_query_with_timeout_fail_policy(self, decoded_r: redis.Redis):
         await self._create_search_timeout_index(decoded_r)
-        await self._add_data_for_search_timeout(decoded_r)
 
-        query_vector = np.full(
-            self._SEARCH_TIMEOUT_DIM, 0.25, dtype=np.float32
-        ).tobytes()
-        query = Query(f"*=>[KNN {self._SEARCH_TIMEOUT_DOCS} @embedding $vec]").timeout(
-            1
-        )
+        query = Query("red").timeout(1)
 
         # ``search-on-timeout`` controls whether a timed-out query returns the
         # partial results collected so far (``return``, the default) or fails
-        # the command (``fail``).  Capture the original value so it is always
-        # restored, even if the assertion below raises.
+        # the command (``fail``). The server refuses TIMEOUT_AFTER_N with
+        # ``fail`` while search worker threads are enabled, so turn them off.
+        # Capture the original values so they are always restored, even if
+        # the assertion below raises.
         config = await decoded_r.config_get("search-on-timeout")
         original = config["search-on-timeout"]
+        config = await decoded_r.config_get("search-workers")
+        original_workers = config["search-workers"]
         try:
+            assert await decoded_r.config_set("search-workers", 0)
             assert await decoded_r.config_set("search-on-timeout", "fail")
             # With the ``fail`` policy the server aborts the timed-out search
             # instead of returning partial results.
-            with pytest.raises(redis.ResponseError):
-                await decoded_r.ft().search(query, query_params={"vec": query_vector})
+            with pytest.raises(redis.ResponseError, match="Timeout limit was reached"):
+                await self._search_with_forced_timeout(decoded_r, query)
         finally:
             await decoded_r.config_set("search-on-timeout", original)
+            await decoded_r.config_set("search-workers", original_workers)
 
     @pytest.mark.redismod
     async def test_binary_and_text_fields(self, decoded_r: redis.Redis):
