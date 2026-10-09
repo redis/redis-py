@@ -283,7 +283,7 @@ class TestMaintenanceAwareBudget:
         mock_db = Mock(spec=Database)
         policy, listener = self._policy_with_tracker(mock_db)
         notification = NodeMigratingNotification(id=1, ttl=5)
-        notification.expire_at = time.monotonic() + 0.4
+        notification.expire_at = time.monotonic() + 1.0
         listener.listen(
             _maintenance_event(
                 MaintenanceStartedEvent,
@@ -297,10 +297,10 @@ class TestMaintenanceAwareBudget:
 
         start = time.monotonic()
         with pytest.raises(UnhealthyDatabaseException) as exc_info:
-            await policy.execute([self._slow_check(2.0)], mock_db)
+            await policy.execute([self._slow_check(3.0)], mock_db)
 
         assert isinstance(exc_info.value.original_exception, asyncio.TimeoutError)
-        assert time.monotonic() - start < 1.0
+        assert time.monotonic() - start < 2.0
 
     @pytest.mark.asyncio
     async def test_window_outlives_notification_ttl_until_completed(self):

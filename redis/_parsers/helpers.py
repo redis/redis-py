@@ -805,6 +805,12 @@ def parse_xinfo_stream(response, **options):
                 {str_if_bytes(k): v for k, v in group.items()}
                 for group in data["groups"]
             ]
+            for g in data["groups"]:
+                if g["consumers"] and g["consumers"][0] is not None:
+                    g["consumers"] = [
+                        {str_if_bytes(k): v for k, v in c.items()}
+                        for c in g["consumers"]
+                    ]
     return data
 
 
