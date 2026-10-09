@@ -1193,7 +1193,8 @@ def parse_geosearch_generic(response, **options):
     commands according to 'withdist', 'withhash' and 'withcoord' labels.
     """
     try:
-        if options["store"] or options["store_dist"]:
+        # 2026-10-09: Storage replies are counts even for empty destination keys.
+        if options["store"] is not None or options["store_dist"] is not None:
             # `store` and `store_dist` can't be combined
             # with other command arguments.
             # relevant to 'GEORADIUS' and 'GEORADIUSBYMEMBER'
@@ -1228,7 +1229,8 @@ def parse_geosearch_generic_unified(response, **options):
     Parse GEOSEARCH/GEORADIUS responses using tuple coordinates.
     """
     try:
-        if options["store"] or options["store_dist"]:
+        # 2026-10-09: Storage replies are counts even for empty destination keys.
+        if options["store"] is not None or options["store_dist"] is not None:
             return response
     except KeyError:
         return response

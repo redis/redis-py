@@ -6518,6 +6518,46 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("3.2.0")
+    @pytest.mark.parametrize("destination", ["", b"", memoryview(b"")])
+    @pytest.mark.parametrize("store_option", ["store", "store_dist"])
+    @pytest.mark.parametrize("by_member", [False, True])
+    def test_georadius_empty_store_key(self, r, destination, store_option, by_member):
+        # 2026-10-09: Empty keys must retain GEO storage and integer responses.
+        r.geoadd("barcelona", (2.1909389952632, 41.433791470673, "place1"))
+        options = {store_option: destination}
+        if by_member:
+            result = r.georadiusbymember("barcelona", "place1", 1000, **options)
+        else:
+            result = r.georadius("barcelona", 2.191, 41.433, 1000, **options)
+
+        assert result == 1
+        assert r.zrange(destination, 0, -1) == [b"place1"]
+        stored_score = r.zscore(destination, "place1")
+        if store_option == "store":
+            assert stored_score == r.zscore("barcelona", "place1")
+        else:
+            assert 0 <= stored_score < 1000
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("3.2.0")
+    @pytest.mark.parametrize(
+        "store, store_dist", [("", "dist"), ("store", ""), ("", ""), (b"", b"")]
+    )
+    @pytest.mark.parametrize("by_member", [False, True])
+    def test_georadius_empty_store_conflict(self, r, store, store_dist, by_member):
+        # 2026-10-09: Both explicit storage options remain mutually exclusive.
+        r.geoadd("barcelona", (2.1909389952632, 41.433791470673, "place1"))
+        options = {"store": store, "store_dist": store_dist}
+        with pytest.raises(
+            redis.DataError, match="store and store_dist can't be set together"
+        ):
+            if by_member:
+                r.georadiusbymember("barcelona", "place1", 1000, **options)
+            else:
+                r.georadius("barcelona", 2.191, 41.433, 1000, **options)
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("3.2.0")
     def test_georadius_store(self, r):
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
