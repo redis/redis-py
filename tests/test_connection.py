@@ -12,12 +12,14 @@ import types
 import warnings
 import weakref
 from errno import EBADF, ECONNREFUSED, EWOULDBLOCK
+from importlib import metadata
 from typing import Any
 from unittest import mock
 from unittest.mock import call, patch, MagicMock, Mock
 
 import pytest
 import redis
+from packaging.version import Version
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
 from redis._parsers.hiredis import NOT_ENOUGH_DATA, _socket_can_read, _socket_is_closed
@@ -1147,7 +1149,8 @@ def test_network_connection_failure():
     # Match only the stable part of the error message across OS
     exp_err = rf"Error {ECONNREFUSED} connecting to localhost:9999\."
     with pytest.raises(ConnectionError, match=exp_err):
-        redis = Redis(port=9999)
+        # nothing listens on this port, so skip the default backoff retries
+        redis = Redis(port=9999, retry=Retry(NoBackoff(), 0))
         redis.set("a", "b")
 
 
@@ -1159,7 +1162,10 @@ def test_network_connection_failure():
 def test_unix_socket_connection_failure():
     exp_err = "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
     with pytest.raises(ConnectionError, match=exp_err):
-        redis = Redis(unix_socket_path="unix:///tmp/a.sock")
+        # the socket file does not exist, so skip the default backoff retries
+        redis = Redis(
+            unix_socket_path="unix:///tmp/a.sock", retry=Retry(NoBackoff(), 0)
+        )
         redis.set("a", "b")
 
 
@@ -3790,10 +3796,17 @@ def _deeply_nested_reply(depth):
     return b"*1\r\n" * depth + b"*0\r\n"
 
 
+# hiredis-py 3.4.1 is the first release whose bundled hiredis limits reply
+# nesting depth (to 1024); earlier releases parse a reply of any depth.
+HIREDIS_LIMITS_NESTING_DEPTH = HIREDIS_AVAILABLE and Version(
+    metadata.version("hiredis")
+) >= Version("3.4.1")
+
+
 class TestDeeplyNestedReplyInvalidatesConnection:
     """Deeply nested aggregate replies fail mid-parse: the pure-Python parsers
-    exhaust the stack (RecursionError) and hiredis hits its own nesting limit
-    (InvalidResponse). Both are unrecoverable by re-parsing, so both must drop
+    exhaust the stack (RecursionError) and hiredis >= 3.4.1 hits its own nesting
+    limit (InvalidResponse). Both are unrecoverable by re-parsing, so both must drop
     the connection even under disconnect_on_error=False. #4144 converts the
     pure-Python case into a bounded-depth InvalidResponse; catching
     RecursionError here is what stops the loop until that lands.
@@ -3806,12 +3819,25 @@ class TestDeeplyNestedReplyInvalidatesConnection:
         # parser frames are small enough to fit 3000 levels; 100_000 cannot fit.
         conn = _connection_with_stream(_deeply_nested_reply(100_000), _RESP2Parser)
 
-        with pytest.raises(RecursionError):
-            conn.read_response(**self.PUBSUB_KWARGS)
+        # A GC pass at the recursion limit would run finalizers of garbage left
+        # by earlier tests with no stack left to report their errors, so collect
+        # first and keep GC off during the deep parse.
+        gc.collect()
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            with pytest.raises(RecursionError):
+                conn.read_response(**self.PUBSUB_KWARGS)
+        finally:
+            if gc_was_enabled:
+                gc.enable()
 
         assert conn.is_connected is False
 
-    @pytest.mark.skipif(not HIREDIS_AVAILABLE, reason="hiredis is not installed")
+    @pytest.mark.skipif(
+        not HIREDIS_LIMITS_NESTING_DEPTH,
+        reason="requires hiredis >= 3.4.1, which limits reply nesting depth",
+    )
     def test_hiredis_nesting_limit_disconnects(self):
         conn = _connection_with_stream(_deeply_nested_reply(3000), _HiredisParser)
 

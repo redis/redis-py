@@ -1026,7 +1026,8 @@ async def test_format_error_message(conn, error, expected_message):
 async def test_network_connection_failure():
     exp_err = rf"^Error {ECONNREFUSED} connecting to 127.0.0.1:9999.(.+)$"
     with pytest.raises(ConnectionError, match=exp_err):
-        redis = Redis(host="127.0.0.1", port=9999)
+        # nothing listens on this port, so skip the default backoff retries
+        redis = Redis(host="127.0.0.1", port=9999, retry=Retry(NoBackoff(), 0))
         await redis.set("a", "b")
 
 
@@ -1034,7 +1035,10 @@ async def test_network_connection_failure():
 async def test_unix_socket_connection_failure():
     exp_err = "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
     with pytest.raises(ConnectionError, match=exp_err):
-        redis = Redis(unix_socket_path="unix:///tmp/a.sock")
+        # the socket file does not exist, so skip the default backoff retries
+        redis = Redis(
+            unix_socket_path="unix:///tmp/a.sock", retry=Retry(NoBackoff(), 0)
+        )
         await redis.set("a", "b")
 
 
