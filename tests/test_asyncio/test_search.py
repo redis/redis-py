@@ -606,16 +606,19 @@ class TestBaseSearchFunctionality(AsyncSearchTestsBase):
 
     @pytest.mark.redismod
     async def test_auto_complete(self, decoded_r: redis.Redis):
-        n = 0
         with open(TITLES_CSV) as f:
-            cr = csv.reader(f)
+            suggestions = [
+                Suggestion(row[0], score=float(row[1])) for row in csv.reader(f)
+            ]
 
-            for row in cr:
-                n += 1
-                term, score = row[0], float(row[1])
-                assert n == await decoded_r.ft().sugadd(
-                    "ac", Suggestion(term, score=score)
-                )
+        # sugadd pipelines its suggestions and returns the last reply, which is
+        # the dictionary size, so batching keeps the size check per batch
+        ft = decoded_r.ft()
+        n = 0
+        for i in range(0, len(suggestions), 500):
+            batch = suggestions[i : i + 500]
+            n += len(batch)
+            assert n == await ft.sugadd("ac", *batch)
 
         assert n == await decoded_r.ft().suglen("ac")
         ret = await decoded_r.ft().sugget("ac", "bad", with_scores=True)

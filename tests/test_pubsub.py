@@ -16,6 +16,7 @@ import pytest
 import redis
 from redis import Subscription
 from redis._parsers import Encoder
+from redis.backoff import NoBackoff
 from redis.client import PubSub
 from redis.cluster import ClusterPubSub
 from redis.crc import key_slot
@@ -30,6 +31,7 @@ from redis.exceptions import (
 from redis.observability import recorder
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
+from redis.retry import Retry
 from redis.utils import str_if_bytes
 
 from .conftest import (
@@ -1404,8 +1406,9 @@ class TestPubSubAutoDecoding:
 
 
 class TestPubSubRedisDown:
-    def test_channel_subscribe(self, r):
-        r = redis.Redis(host="localhost", port=6390)
+    def test_channel_subscribe(self):
+        # nothing listens on this port, so skip the default backoff retries
+        r = redis.Redis(host="localhost", port=6390, retry=Retry(NoBackoff(), 0))
         p = r.pubsub()
         with pytest.raises(ConnectionError):
             p.subscribe("foo")
