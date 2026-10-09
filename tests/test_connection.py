@@ -12,12 +12,14 @@ import types
 import warnings
 import weakref
 from errno import EBADF, ECONNREFUSED, EWOULDBLOCK
+from importlib import metadata
 from typing import Any
 from unittest import mock
 from unittest.mock import call, patch, MagicMock, Mock
 
 import pytest
 import redis
+from packaging.version import Version
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
 from redis._parsers.hiredis import NOT_ENOUGH_DATA, _socket_can_read, _socket_is_closed
@@ -63,6 +65,7 @@ from redis.observability.attributes import (
     DB_CLIENT_CONNECTION_POOL_NAME,
     DB_CLIENT_CONNECTION_STATE,
     ConnectionState,
+    get_pool_name,
 )
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE, SENTINEL
@@ -1146,7 +1149,8 @@ def test_network_connection_failure():
     # Match only the stable part of the error message across OS
     exp_err = rf"Error {ECONNREFUSED} connecting to localhost:9999\."
     with pytest.raises(ConnectionError, match=exp_err):
-        redis = Redis(port=9999)
+        # nothing listens on this port, so skip the default backoff retries
+        redis = Redis(port=9999, retry=Retry(NoBackoff(), 0))
         redis.set("a", "b")
 
 
@@ -1158,7 +1162,10 @@ def test_network_connection_failure():
 def test_unix_socket_connection_failure():
     exp_err = "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
     with pytest.raises(ConnectionError, match=exp_err):
-        redis = Redis(unix_socket_path="unix:///tmp/a.sock")
+        # the socket file does not exist, so skip the default backoff retries
+        redis = Redis(
+            unix_socket_path="unix:///tmp/a.sock", retry=Retry(NoBackoff(), 0)
+        )
         redis.set("a", "b")
 
 
@@ -3789,10 +3796,17 @@ def _deeply_nested_reply(depth):
     return b"*1\r\n" * depth + b"*0\r\n"
 
 
+# hiredis-py 3.4.1 is the first release whose bundled hiredis limits reply
+# nesting depth (to 1024); earlier releases parse a reply of any depth.
+HIREDIS_LIMITS_NESTING_DEPTH = HIREDIS_AVAILABLE and Version(
+    metadata.version("hiredis")
+) >= Version("3.4.1")
+
+
 class TestDeeplyNestedReplyInvalidatesConnection:
     """Deeply nested aggregate replies fail mid-parse: the pure-Python parsers
-    exhaust the stack (RecursionError) and hiredis hits its own nesting limit
-    (InvalidResponse). Both are unrecoverable by re-parsing, so both must drop
+    exhaust the stack (RecursionError) and hiredis >= 3.4.1 hits its own nesting
+    limit (InvalidResponse). Both are unrecoverable by re-parsing, so both must drop
     the connection even under disconnect_on_error=False. #4144 converts the
     pure-Python case into a bounded-depth InvalidResponse; catching
     RecursionError here is what stops the loop until that lands.
@@ -3805,12 +3819,25 @@ class TestDeeplyNestedReplyInvalidatesConnection:
         # parser frames are small enough to fit 3000 levels; 100_000 cannot fit.
         conn = _connection_with_stream(_deeply_nested_reply(100_000), _RESP2Parser)
 
-        with pytest.raises(RecursionError):
-            conn.read_response(**self.PUBSUB_KWARGS)
+        # A GC pass at the recursion limit would run finalizers of garbage left
+        # by earlier tests with no stack left to report their errors, so collect
+        # first and keep GC off during the deep parse.
+        gc.collect()
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            with pytest.raises(RecursionError):
+                conn.read_response(**self.PUBSUB_KWARGS)
+        finally:
+            if gc_was_enabled:
+                gc.enable()
 
         assert conn.is_connected is False
 
-    @pytest.mark.skipif(not HIREDIS_AVAILABLE, reason="hiredis is not installed")
+    @pytest.mark.skipif(
+        not HIREDIS_LIMITS_NESTING_DEPTH,
+        reason="requires hiredis >= 3.4.1, which limits reply nesting depth",
+    )
     def test_hiredis_nesting_limit_disconnects(self):
         conn = _connection_with_stream(_deeply_nested_reply(3000), _HiredisParser)
 
@@ -3922,3 +3949,221 @@ class TestPushHandlerValueErrorKeepsConnection:
 
         assert conn.is_connected is True
         assert conn.read_response(disconnect_on_error=False) == b"SECOND"
+
+
+class _DummyConnection:
+    """Minimal connection stub for pool metric tests (no real socket)."""
+
+    description_format = "DummyConnection<>"
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.pid = os.getpid()
+        self._sock = None
+
+    def connect(self):
+        self._sock = MagicMock()
+
+    def disconnect(self):
+        self._sock = None
+
+    def can_read(self):
+        return False
+
+    def should_reconnect(self):
+        return False
+
+    def re_auth(self):
+        pass
+
+
+def _pool_metric_calls(mock_fn, pool_name):
+    """Extract (state, delta) tuples from record_connection_count calls for a pool.
+
+    Filters by pool_name to avoid interference from GC of other pools.
+    """
+    result = []
+    for c in mock_fn.call_args_list:
+        p = c.kwargs.get("pool_name", c.args[0] if c.args else None)
+        if p != pool_name:
+            continue
+        state = c.kwargs.get("connection_state", c.args[1] if len(c.args) > 1 else None)
+        counter = c.kwargs.get("counter", c.args[2] if len(c.args) > 2 else 1)
+        result.append((state, counter))
+    return result
+
+
+def _net(calls):
+    """Return (idle_net, used_net) from a list of (state, delta) tuples."""
+    idle = sum(d for s, d in calls if s == ConnectionState.IDLE)
+    used = sum(d for s, d in calls if s == ConnectionState.USED)
+    return idle, used
+
+
+class TestConnectionPoolMetricCount:
+    """Tests for db.client.connection.count UpDownCounter accuracy.
+
+    Verifies that get_connection / release produce balanced IDLE and USED
+    counter updates across ConnectionPool and BlockingConnectionPool.
+    """
+
+    @patch("redis.connection.record_connection_count")
+    def test_new_connection_records_only_used(self, mock_rec):
+        """A new connection should record USED +1 only (never was idle)."""
+        pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
+        pn = get_pool_name(pool)
+        mock_rec.reset_mock()
+
+        conn = pool.get_connection()
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert idle_net == 0, f"New conn should not touch IDLE, got {idle_net}"
+        assert used_net == 1
+        pool.release(conn)
+
+    @patch("redis.connection.record_connection_count")
+    def test_reused_connection_transitions_idle_to_used(self, mock_rec):
+        """A reused connection should record IDLE -1, USED +1."""
+        pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
+        pn = get_pool_name(pool)
+        conn = pool.get_connection()
+        pool.release(conn)
+        mock_rec.reset_mock()
+
+        conn2 = pool.get_connection()
+        assert conn2 is conn
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert idle_net == -1
+        assert used_net == 1
+        pool.release(conn2)
+
+    @patch("redis.connection.record_connection_count")
+    def test_full_lifecycle_nets_to_zero(self, mock_rec):
+        """create -> use -> release -> reuse -> release -> destroy = net 0."""
+        pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
+        pn = get_pool_name(pool)
+        mock_rec.reset_mock()
+
+        conn = pool.get_connection()
+        pool.release(conn)
+        conn = pool.get_connection()
+        pool.release(conn)
+
+        # Simulate destruction (what __del__ / reset does)
+        idle_count = len(pool._available_connections)
+        if idle_count:
+            mock_rec(
+                pool_name=pn,
+                connection_state=ConnectionState.IDLE,
+                counter=-idle_count,
+            )
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert idle_net == 0, f"Lifecycle IDLE should net 0, got {idle_net}"
+        assert used_net == 0, f"Lifecycle USED should net 0, got {used_net}"
+
+    @patch("redis.connection.record_connection_count")
+    def test_release_unowned_does_not_record(self, mock_rec):
+        """release() of a connection the pool no longer owns (e.g. inherited by
+        a forked child) must not record connection.count. Fork-time accounting
+        is owned by reset()/__del__; recording here would double-count."""
+        pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
+
+        conn = pool.get_connection()
+        mock_rec.reset_mock()
+        conn.pid = -1  # simulate a connection inherited across a fork
+        pool.release(conn)
+
+        assert mock_rec.call_args_list == [], (
+            "unowned release must not record connection.count"
+        )
+
+    @patch("redis.connection.record_connection_count")
+    def test_release_rejected_same_pid_decrements_used(self, mock_rec):
+        """A connection checked out by this process but rejected by
+        owns_connection() (e.g. SentinelConnectionPool after a master failover)
+        must still decrement USED."""
+        pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
+        pn = get_pool_name(pool)
+
+        conn = pool.get_connection()
+        mock_rec.reset_mock()
+        with patch.object(pool, "owns_connection", return_value=False):
+            pool.release(conn)
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert used_net == -1, f"USED must be decremented, got {used_net}"
+        assert idle_net == 0, f"IDLE must not increase for dropped conn, got {idle_net}"
+
+
+class TestBlockingConnectionPoolMetricCount:
+    """Same metric-count tests for BlockingConnectionPool."""
+
+    def _pool(self):
+        return BlockingConnectionPool(
+            connection_class=_DummyConnection,
+            max_connections=10,
+            timeout=0.1,
+        )
+
+    @patch("redis.connection.record_connection_count")
+    def test_new_connection_records_only_used(self, mock_rec):
+        pool = self._pool()
+        pn = get_pool_name(pool)
+        mock_rec.reset_mock()
+
+        conn = pool.get_connection()
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert idle_net == 0
+        assert used_net == 1
+        pool.release(conn)
+
+    @patch("redis.connection.record_connection_count")
+    def test_release_unowned_does_not_record(self, mock_rec):
+        """Unowned (inherited-across-fork) release must not record; fork-time
+        accounting is owned by reset()/__del__."""
+        pool = self._pool()
+        mock_rec.reset_mock()
+
+        conn = pool.get_connection()
+        mock_rec.reset_mock()
+        conn.pid = -1
+        pool.release(conn)
+
+        assert mock_rec.call_args_list == [], (
+            "unowned release must not record connection.count"
+        )
+
+    @patch("redis.connection.record_connection_count")
+    def test_release_rejected_same_pid_decrements_used(self, mock_rec):
+        """A connection checked out by this process but rejected by
+        owns_connection() must decrement USED and be removed from _connections
+        so a later reset() does not decrement USED again."""
+        pool = self._pool()
+        pn = get_pool_name(pool)
+
+        conn = pool.get_connection()
+        mock_rec.reset_mock()
+        with patch.object(pool, "owns_connection", return_value=False):
+            pool.release(conn)
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert used_net == -1, f"USED must be decremented, got {used_net}"
+        assert idle_net == 0, f"IDLE must not increase for dropped conn, got {idle_net}"
+        assert conn not in pool._connections
+
+        mock_rec.reset_mock()
+        pool.reset()
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert used_net == 0, f"reset() must not decrement USED again, got {used_net}"
+        assert idle_net == 0, f"reset() must not touch IDLE, got {idle_net}"
