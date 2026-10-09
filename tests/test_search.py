@@ -198,21 +198,6 @@ class SearchTestsBase:
 
 
 class TestBaseSearchFunctionality(SearchTestsBase):
-    # Shape of the index used by the on-timeout tests. The query these build
-    # runs ``KNN _SEARCH_TIMEOUT_DOCS``, and its cost is dominated by the size
-    # of the result set rather than by the vector arithmetic - at a fixed
-    # ``KNN 10`` the query takes ~1.6ms whatever the dimension, so the document
-    # count is what buys runtime and the dimension only buys memory.
-    #
-    # The runtime has to exceed the 1ms per-query timeout by a wide margin.
-    # ``search-on-timeout=fail`` is enforced by a timeout callback racing the
-    # thread running the query, so a query that only slightly overruns its
-    # timeout may still return full results - intended server behavior. Below
-    # roughly a 3x margin the error stops being raised at all; these values
-    # measure at ~890ms, i.e. a ~900x margin, in ~37MB.
-    _SEARCH_TIMEOUT_DIM = 256
-    _SEARCH_TIMEOUT_DOCS = 12000
-
     @pytest.mark.redismod
     # FT.DEL is not available on Redis Enterprise's search module.
     @skip_if_redis_enterprise()
@@ -608,14 +593,19 @@ class TestBaseSearchFunctionality(SearchTestsBase):
     @pytest.mark.redismod
     @skip_if_redis_enterprise()
     def test_auto_complete(self, client):
-        n = 0
         with open(TITLES_CSV) as f:
-            cr = csv.reader(f)
+            suggestions = [
+                Suggestion(row[0], score=float(row[1])) for row in csv.reader(f)
+            ]
 
-            for row in cr:
-                n += 1
-                term, score = row[0], float(row[1])
-                assert n == client.ft().sugadd("ac", Suggestion(term, score=score))
+        # sugadd pipelines its suggestions and returns the last reply, which is
+        # the dictionary size, so batching keeps the size check per batch
+        ft = client.ft()
+        n = 0
+        for i in range(0, len(suggestions), 500):
+            batch = suggestions[i : i + 500]
+            n += len(batch)
+            assert n == ft.sugadd("ac", *batch)
 
         assert n == client.ft().suglen("ac")
         ret = client.ft().sugget("ac", "bad", with_scores=True)
@@ -1688,55 +1678,47 @@ class TestBaseSearchFunctionality(SearchTestsBase):
 
     def _create_search_timeout_index(self, client):
         client.ft().create_index(
-            (
-                TextField("description"),
-                VectorField(
-                    "embedding",
-                    "FLAT",
-                    {
-                        "TYPE": "FLOAT32",
-                        "DIM": self._SEARCH_TIMEOUT_DIM,
-                        "DISTANCE_METRIC": "L2",
-                    },
-                ),
-            ),
+            (TextField("description"),),
             definition=IndexDefinition(prefix=["search-timeout-item:"]),
         )
         SearchTestsBase.waitForIndex(client, "idx")
+        for i in range(5):
+            client.hset(f"search-timeout-item:{i}", "description", "red shoes")
 
-    def _add_data_for_search_timeout(self, client):
-        vectors = [
-            np.full(self._SEARCH_TIMEOUT_DIM, value, dtype=np.float32).tobytes()
-            for value in (0.1, 0.2, 0.3, 0.4, 0.5)
-        ]
-        pipeline = client.pipeline()
-        batch_size = 250
-        for i in range(self._SEARCH_TIMEOUT_DOCS):
-            pipeline.hset(
-                f"search-timeout-item:{i}",
-                mapping={
-                    "description": "red shoes",
-                    "embedding": vectors[i % len(vectors)],
-                },
+    def _search_with_forced_timeout(self, client, query):
+        # Whether a real query outlives its TIMEOUT depends on the dataset and
+        # on how fast the server is, so force the timeout instead:
+        # ``_FT.DEBUG FT.SEARCH ... TIMEOUT_AFTER_N 0`` runs the wrapped
+        # FT.SEARCH and has it time out before the first result. search()
+        # still builds the arguments and parses the reply.
+        ft = client.ft()
+        execute_command = ft.execute_command
+
+        def execute_with_forced_timeout(*args, **options):
+            return execute_command(
+                "_FT.DEBUG",
+                *args,
+                "TIMEOUT_AFTER_N",
+                0,
+                "DEBUG_PARAMS_COUNT",
+                2,
+                **options,
             )
-            if (i + 1) % batch_size == 0:
-                pipeline.execute()
-                pipeline = client.pipeline()
-        pipeline.execute()
+
+        ft.execute_command = execute_with_forced_timeout
+        return ft.search(query)
 
     @pytest.mark.redismod
-    @pytest.mark.timeout(60)
+    # The Redis Enterprise skip and the 8.0.0 gate come from the _FT.DEBUG
+    # timeout hook, not from TIMEOUT itself: Redis Enterprise does not expose
+    # the hook, and the 7.x stack images predate it.
+    @skip_if_redis_enterprise()
+    @skip_if_server_version_lt("8.0.0")
     def test_search_query_with_timeout(self, client):
         self._create_search_timeout_index(client)
-        self._add_data_for_search_timeout(client)
 
-        query_vector = np.full(
-            self._SEARCH_TIMEOUT_DIM, 0.25, dtype=np.float32
-        ).tobytes()
-        query = Query(f"*=>[KNN {self._SEARCH_TIMEOUT_DOCS} @embedding $vec]").timeout(
-            1
-        )
-        res = client.ft().search(query, query_params={"vec": query_vector})
+        query = Query("red").timeout(1)
+        res = self._search_with_forced_timeout(client, query)
 
         if expects_resp3_shape(client):
             warnings = res.get("warning", [])
@@ -1758,32 +1740,33 @@ class TestBaseSearchFunctionality(SearchTestsBase):
             assert warnings == []
 
     @pytest.mark.redismod
-    @pytest.mark.timeout(60)
+    # The Redis Enterprise skip comes from the _FT.DEBUG timeout hook, which
+    # Redis Enterprise does not expose, not from the fail policy itself.
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("8.9.0")
     def test_search_query_with_timeout_fail_policy(self, client):
         self._create_search_timeout_index(client)
-        self._add_data_for_search_timeout(client)
 
-        query_vector = np.full(
-            self._SEARCH_TIMEOUT_DIM, 0.25, dtype=np.float32
-        ).tobytes()
-        query = Query(f"*=>[KNN {self._SEARCH_TIMEOUT_DOCS} @embedding $vec]").timeout(
-            1
-        )
+        query = Query("red").timeout(1)
 
         # ``search-on-timeout`` controls whether a timed-out query returns the
         # partial results collected so far (``return``, the default) or fails
-        # the command (``fail``).  Capture the original value so it is always
-        # restored, even if the assertion below raises.
+        # the command (``fail``). The server refuses TIMEOUT_AFTER_N with
+        # ``fail`` while search worker threads are enabled, so turn them off.
+        # Capture the original values so they are always restored, even if
+        # the assertion below raises.
         original = client.config_get("search-on-timeout")["search-on-timeout"]
+        original_workers = client.config_get("search-workers")["search-workers"]
         try:
+            assert client.config_set("search-workers", 0)
             assert client.config_set("search-on-timeout", "fail")
             # With the ``fail`` policy the server aborts the timed-out search
             # instead of returning partial results.
-            with pytest.raises(redis.ResponseError):
-                client.ft().search(query, query_params={"vec": query_vector})
+            with pytest.raises(redis.ResponseError, match="Timeout limit was reached"):
+                self._search_with_forced_timeout(client, query)
         finally:
             client.config_set("search-on-timeout", original)
+            client.config_set("search-workers", original_workers)
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.2.0")
