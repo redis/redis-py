@@ -1867,6 +1867,31 @@ class TestPubSubWorkerThread:
         assert not thread.is_alive()
         assert closed == [thread]
 
+    def test_stop_timeout_returns_while_worker_is_blocked(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        class FakePubSub:
+            def get_message(self, ignore_subscribe_messages=True, timeout=0.0):
+                entered.set()
+                release.wait(timeout=2)
+                return None
+
+            def close(self):
+                return None
+
+        thread = redis.client.PubSubWorkerThread(FakePubSub(), sleep_time=0.01)
+        thread.start()
+        assert entered.wait(timeout=1.0)
+        started = time.monotonic()
+        thread.stop(timeout=0.2)
+        elapsed = time.monotonic() - started
+        assert thread.is_alive()
+        assert elapsed < 1.0
+        release.set()
+        thread.join(timeout=2.0)
+        assert not thread.is_alive()
+
 
 class TestPubSubDeadlock:
     @pytest.mark.timeout(30, method="thread")
