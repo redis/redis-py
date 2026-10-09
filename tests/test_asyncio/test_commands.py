@@ -3940,6 +3940,16 @@ class TestRedisCommands:
             [[b"a1", "1.0"], [b"a2", "2.0"]],
         )
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    @pytest.mark.parametrize("dest", ["", b"", memoryview(b"")])
+    async def test_zrangestore_empty_destination(self, r: redis.Redis, dest):
+        # 2026-10-09: Empty destination keys must retain the sorted-set range.
+        await r.zadd("source", {"a": 1, "b": 2, "c": 3})
+        assert await r.zrangestore(dest, "source", 0, 1) == 2
+        assert await r.zrange(dest, 0, -1) == [b"a", b"b"]
+        assert await r.zrange("source", 0, -1) == [b"a", b"b", b"c"]
+
     @skip_if_server_version_lt("2.8.9")
     async def test_zrangebylex(self, r: redis.Redis):
         await r.zadd("a", {"a": 0, "b": 0, "c": 0, "d": 0, "e": 0, "f": 0, "g": 0})
