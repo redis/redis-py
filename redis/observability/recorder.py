@@ -26,6 +26,7 @@ from redis.observability.attributes import (
     AttributeBuilder,
     ConnectionState,
     CSCReason,
+    CSCRefreshResult,
     CSCResult,
     GeoFailoverReason,
     PubSubDirection,
@@ -787,6 +788,35 @@ def record_csc_network_saved(
     try:
         _metrics_collector.record_csc_network_saved(
             bytes_saved=bytes_saved,
+        )
+    except Exception:
+        pass
+
+
+def record_csc_refresh(
+    result: CSCRefreshResult,
+    count: int = 1,
+) -> None:
+    """
+    Record Client Side Caching (CSC) refreshes with the same outcome.
+
+    Args:
+        result: Refresh outcome: ``SUCCESS`` when the re-read was answered, ``FAILURE``
+            when it raised, ``REJECTED`` when the refresh queue was full or the pool had no
+            free connection
+        count: Number of refreshes
+    """
+    global _metrics_collector
+
+    if _metrics_collector is None:
+        _metrics_collector = _get_or_create_collector()
+        if _metrics_collector is None:
+            return
+
+    try:
+        _metrics_collector.record_csc_refresh(
+            result=result,
+            count=count,
         )
     except Exception:
         pass

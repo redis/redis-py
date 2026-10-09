@@ -1,8 +1,11 @@
+import gc
 import sys
 import threading
 import time
 import uuid
 import warnings
+import weakref
+from collections import OrderedDict
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,13 +16,16 @@ from redis.cache import (
     CacheConfigurationInterface,
     CacheEntry,
     CacheEntryStatus,
+    CacheInterface,
     CacheKey,
     CacheProxy,
     DefaultCache,
     EvictionPolicy,
     EvictionPolicyType,
+    InvalidationPolicy,
     LRUPolicy,
     TrackingMode,
+    _CacheRefresher,
 )
 from redis.commands.metadata import (
     CommandMetadata,
@@ -32,10 +38,18 @@ from redis.connection import CacheProxyConnection
 from redis.event import (
     EventDispatcher,
 )
-from redis.exceptions import AskError, MovedError, RedisError, ResponseError
-from redis.observability.attributes import CSCReason
+from redis.exceptions import (
+    AskError,
+    ConnectionError,
+    MovedError,
+    RedisError,
+    ResponseError,
+    TimeoutError,
+)
+from redis.observability.attributes import CSCReason, CSCRefreshResult
 from redis.utils import str_if_bytes
 from tests.conftest import _get_client, skip_if_resp_version, skip_if_server_version_lt
+from tests.helpers import wait_for_condition
 
 # A record for a command a resolver must report as ineligible, used to prove that eligibility
 # comes from the resolver the config holds rather than from the config itself.
@@ -1265,6 +1279,481 @@ class TestCache:
         r2.set("user:42", "bob")
         assert wait_for_invalidated_value(r, "user:42", [b"bob"]) == b"bob"
 
+    # Skipped until a hit stops reading the socket of a connection another thread has
+    # checked out: today readers on one pool steal each other's replies and stall in
+    # ``recv`` or time out. See .agents/csc_drain_owner_checkout_deferred_task.md.
+    @pytest.mark.skip(
+        reason="a CSC hit drains a connection another thread may have checked out; "
+        "see .agents/csc_drain_owner_checkout_deferred_task.md"
+    )
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache_config": CacheConfig()}],
+        indirect=True,
+    )
+    def test_concurrent_cached_reads_on_one_pool(self, r, r2):
+        r.set("counter", 0)
+        r.get("counter")
+
+        observed = _read_while_incremented(r, r2, "counter")
+
+        assert all(observed)
+        assert int(r.get("counter")) == int(r2.get("counter"))
+
+
+def _read_while_incremented(r, r2, key, readers=4, seconds=1.0):
+    """
+    Read ``key`` through ``r`` from several threads while ``r2`` increments it.
+
+    Returns each reader's observed values, in the order it read them. The readers share
+    ``r``'s pool, so a hit can drain a connection another reader is using.
+    """
+    stop = threading.Event()
+    errors = []
+    observed = [[] for _ in range(readers)]
+
+    def read(values):
+        try:
+            while not stop.is_set():
+                values.append(int(r.get(key)))
+        except Exception as e:
+            errors.append(e)
+
+    threads = [
+        threading.Thread(target=read, args=(values,), daemon=True)
+        for values in observed
+    ]
+    for thread in threads:
+        thread.start()
+
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        r2.incr(key)
+
+    stop.set()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert not any(thread.is_alive() for thread in threads), "a reader never finished"
+    assert errors == []
+    return observed
+
+
+def _get_cache_key(*keys):
+    return CacheKey(command="GET", redis_keys=keys, redis_args=("GET", *keys))
+
+
+def _cached_value(cache, cache_key):
+    """The stored reply for ``cache_key``, or None; read without touching the LRU order."""
+    entry = cache.collection.get(cache_key)
+    if entry is None or entry.status != CacheEntryStatus.VALID:
+        return None
+    return str_if_bytes(entry.cache_value)
+
+
+def _server_get_calls(client) -> int:
+    """How many GETs the server has run, from every client: proves a re-read happened."""
+    return int(client.info("commandstats")["cmdstat_get"]["calls"])
+
+
+def _wait_for_refreshes(refresher):
+    # The callback submits inside the read that picked the invalidation up, so by the time
+    # that read returns the keys are pending. Empty means every accepted refresh has
+    # finished or was cancelled; the callers assert which by what the cache holds.
+    wait_for_condition(
+        lambda: not refresher._pending,
+        timeout=2,
+        error_message="refreshes never completed",
+    )
+
+
+def _refresh_config(**kwargs):
+    return CacheConfig(invalidation_policy=InvalidationPolicy.REFRESH, **kwargs)
+
+
+@pytest.mark.onlynoncluster
+@skip_if_resp_version(2)
+@skip_if_server_version_lt("7.4.0")
+class TestCacheRefresh:
+    """
+    Refresh against a live server.
+
+    Invalidations are read only when the tracking connection is used again, so each test
+    caches through a single-connection client and then sends a ``PING`` on it to pick the
+    invalidation up. The refresh itself runs on a second connection from the pool.
+    """
+
+    @pytest.mark.parametrize(
+        "r,expected",
+        [
+            (
+                {"cache_config": _refresh_config(), "single_connection_client": True},
+                b"barbar",
+            ),
+            (
+                {
+                    "cache_config": _refresh_config(),
+                    "single_connection_client": True,
+                    "decode_responses": True,
+                },
+                "barbar",
+            ),
+        ],
+        ids=["single", "decoded"],
+        indirect=["r"],
+    )
+    def test_an_invalidated_entry_is_refreshed_without_a_read(self, r, r2, expected):
+        cache = r.get_cache()
+        r.set("foo", "bar")
+        r.get("foo")
+
+        r2.set("foo", "barbar")
+        r.ping()
+        _wait_for_refreshes(r.connection_pool._cache_refresher)
+
+        # Stored by the refresh: no read of ``foo`` has run since the write. Compared
+        # exactly, so a refresh that decoded differently from the read it replays fails.
+        entry = cache.collection.get(_get_cache_key("foo"))
+        assert entry.status == CacheEntryStatus.VALID
+        assert entry.cache_value == expected
+        assert r.get("foo") == expected
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache_config": _refresh_config(), "single_connection_client": True}],
+        indirect=True,
+    )
+    def test_a_refreshed_entry_is_tracked_again(self, r, r2):
+        cache = r.get_cache()
+        refresher = r.connection_pool._cache_refresher
+        r.set("foo", "v1")
+        r.get("foo")
+
+        r2.set("foo", "v2")
+        r.ping()
+        _wait_for_refreshes(refresher)
+        assert _cached_value(cache, _get_cache_key("foo")) == "v2"
+
+        # The refresh ran on the pool's other connection, which the server now tracks the
+        # key for: the next write is reported there, and the entry is refreshed again.
+        refresh_connection = cache.collection.get(_get_cache_key("foo")).connection_ref
+        assert refresh_connection is not r.connection._conn
+
+        r2.set("foo", "v3")
+        # The pool's only idle connection is the one that refreshed, so a command through
+        # the pool picks its invalidation up.
+        redis.Redis(connection_pool=r.connection_pool).ping()
+        _wait_for_refreshes(refresher)
+
+        assert _cached_value(cache, _get_cache_key("foo")) == "v3"
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache_config": _refresh_config(), "single_connection_client": True}],
+        indirect=True,
+    )
+    def test_a_multi_key_entry_is_refreshed(self, r, r2):
+        cache = r.get_cache()
+        r.mset({"a": "1", "b": "2"})
+        r.mget("a", "b")
+        mget_key = CacheKey(
+            command="MGET", redis_keys=("a", "b"), redis_args=("MGET", "a", "b")
+        )
+
+        r2.set("b", "22")
+        r.ping()
+        _wait_for_refreshes(r.connection_pool._cache_refresher)
+
+        entry = cache.collection.get(mget_key)
+        assert entry is not None and entry.status == CacheEntryStatus.VALID
+        assert [str_if_bytes(v) for v in entry.cache_value] == ["1", "22"]
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache_config": _refresh_config(), "single_connection_client": True}],
+        indirect=True,
+    )
+    def test_a_server_flush_refreshes_nothing(self, r, r2):
+        cache = r.get_cache()
+        refresher = r.connection_pool._cache_refresher
+        r.set("foo", "bar")
+        r.set("baz", "qux")
+        r.get("foo")
+        r.get("baz")
+
+        r2.flushall()
+        # Written again before the flush is picked up, so a refresh queued by mistake
+        # would read a value and store it.
+        r2.set("foo", "bar")
+        r2.set("baz", "qux")
+        r.ping()
+        _wait_for_refreshes(refresher)
+
+        assert cache.size == 0
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache_config": _refresh_config(), "single_connection_client": True}],
+        indirect=True,
+    )
+    def test_a_disconnect_drops_queued_refreshes(self, r, r2):
+        cache = r.get_cache()
+        refresher = r.connection_pool._cache_refresher
+        r.set("foo", "bar")
+        r.set("baz", "qux")
+        r.get("foo")
+        r.get("baz")
+
+        # The first refresh is held before it checks the cache, so the second one stays
+        # queued behind it while the pool disconnects.
+        started = threading.Event()
+        release = threading.Event()
+        done = threading.Event()
+        refresh = _CacheRefresher._refresh
+
+        def held_refresh(self, pool, cache_key, generation):
+            started.set()
+            release.wait(5)
+            try:
+                return refresh(self, pool, cache_key, generation)
+            finally:
+                done.set()
+
+        with patch.object(_CacheRefresher, "_refresh", held_refresh):
+            r2.set("foo", "barbar")
+            r2.set("baz", "quxqux")
+            r.ping()
+            assert started.wait(2)
+
+            get_calls = _server_get_calls(r2)
+            r.connection_pool.disconnect()
+            release.set()
+
+            # The cancel cleared ``_pending``, so completion is told by the held job
+            # returning and the queued one being dequeued.
+            assert done.wait(2)
+            wait_for_condition(
+                refresher._queue.empty,
+                timeout=2,
+                error_message="the queued refresh was never dequeued",
+            )
+
+        # Neither refresh read anything: the held one stopped at its generation check,
+        # and the queued one was dropped unrun.
+        assert _server_get_calls(r2) == get_calls
+        assert cache.size == 0
+
+    # Skipped for the same reason as
+    # ``TestCache::test_concurrent_cached_reads_on_one_pool``: several readers on one pool
+    # stall today, with or without refresh. See
+    # .agents/csc_drain_owner_checkout_deferred_task.md.
+    @pytest.mark.skip(
+        reason="a CSC hit drains a connection another thread may have checked out; "
+        "see .agents/csc_drain_owner_checkout_deferred_task.md"
+    )
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache_config": _refresh_config()}],
+        indirect=True,
+    )
+    def test_concurrent_readers_never_see_a_value_go_back(self, r, r2):
+        cache = r.get_cache()
+        refresher = r.connection_pool._cache_refresher
+        r.set("counter", 0)
+        r.get("counter")
+
+        observed = _read_while_incremented(r, r2, "counter")
+
+        # Each reader's reads are sequential, so whatever served them - the cache, a
+        # refresh or the server - a later read is never older than an earlier one.
+        for values in observed:
+            assert values
+            assert values == sorted(values)
+
+        _wait_for_refreshes(refresher)
+        server_value = int(r2.get("counter"))
+        # A read drains the entry's connection first, so it finds the last invalidation.
+        assert int(r.get("counter")) == server_value
+        cached = _cached_value(cache, _get_cache_key("counter"))
+        assert cached is None or int(cached) == server_value
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache_config": _refresh_config(), "single_connection_client": True}],
+        indirect=True,
+    )
+    def test_a_deleted_key_is_not_stored_back(self, r, r2):
+        cache = r.get_cache()
+        r.set("foo", "bar")
+        r.get("foo")
+
+        r2.delete("foo")
+        get_calls = _server_get_calls(r2)
+        r.ping()
+        _wait_for_refreshes(r.connection_pool._cache_refresher)
+
+        # The re-read ran, answered nil, and a nil reply is never stored.
+        assert _server_get_calls(r2) == get_calls + 1
+        assert cache.collection.get(_get_cache_key("foo")) is None
+        assert r.get("foo") is None
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache_config": _refresh_config(), "single_connection_client": True}],
+        indirect=True,
+    )
+    def test_a_refresh_answered_with_an_error_leaves_the_entry_removed(self, r, r2):
+        cache = r.get_cache()
+        r.set("foo", "bar")
+        r.get("foo")
+
+        r2.delete("foo")
+        r2.lpush("foo", "x")
+        get_calls = _server_get_calls(r2)
+        r.ping()
+        _wait_for_refreshes(r.connection_pool._cache_refresher)
+
+        assert _server_get_calls(r2) == get_calls + 1
+        assert cache.collection.get(_get_cache_key("foo")) is None
+        with pytest.raises(ResponseError, match="WRONGTYPE"):
+            r.get("foo")
+        assert r.ping()
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache_config": _refresh_config(),
+                "single_connection_client": True,
+                "kwargs": {"max_connections": 1},
+            }
+        ],
+        indirect=True,
+    )
+    def test_a_full_pool_skips_the_refresh(self, r, r2):
+        # The single connection is the pool's only one, so a refresh would have to take
+        # the connection the application holds.
+        cache = r.get_cache()
+        r.set("foo", "bar")
+        r.get("foo")
+
+        r2.set("foo", "barbar")
+        get_calls = _server_get_calls(r2)
+        recorded = []
+        with patch(
+            "redis.cache.record_csc_refresh",
+            side_effect=lambda result, count=1: recorded.append((result, count)),
+        ):
+            r.ping()
+            _wait_for_refreshes(r.connection_pool._cache_refresher)
+
+        # Skipped for lack of capacity, which is told apart from a failed checkout.
+        assert recorded == [(CSCRefreshResult.REJECTED, 1)]
+        assert _server_get_calls(r2) == get_calls
+        assert cache.collection.get(_get_cache_key("foo")) is None
+        assert r.connection_pool._created_connections == 1
+        assert r.get("foo") == b"barbar"
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache_config": CacheConfig(), "single_connection_client": True}],
+        indirect=True,
+    )
+    def test_the_evict_default_does_not_refresh(self, r, r2):
+        cache = r.get_cache()
+        r.set("foo", "bar")
+        r.get("foo")
+
+        r2.set("foo", "barbar")
+        r.ping()
+
+        assert r.connection_pool._cache_refresher is None
+        assert cache.collection.get(_get_cache_key("foo")) is None
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache_config": _refresh_config(
+                    tracking_mode=TrackingMode.OPTIN,
+                    cache_predicate=keys_prefixed("foo"),
+                ),
+                "single_connection_client": True,
+            }
+        ],
+        indirect=True,
+    )
+    def test_optin_refreshes_what_the_predicate_selects(self, r, r2):
+        cache = r.get_cache()
+        r.set("foo", "1")
+        r.set("bar", "1")
+        r.get("foo")
+        r.get("bar")
+        assert cache.collection.get(_get_cache_key("bar")) is None
+
+        r2.set("foo", "2")
+        r2.set("bar", "2")
+        r.ping()
+        _wait_for_refreshes(r.connection_pool._cache_refresher)
+
+        assert _cached_value(cache, _get_cache_key("foo")) == "2"
+        assert cache.collection.get(_get_cache_key("bar")) is None
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache_config": _refresh_config(tracking_mode=TrackingMode.OPTOUT),
+                "single_connection_client": True,
+            }
+        ],
+        indirect=True,
+    )
+    def test_optout_refreshes(self, r, r2):
+        cache = r.get_cache()
+        r.set("foo", "1")
+        r.get("foo")
+
+        r2.set("foo", "2")
+        r.ping()
+        _wait_for_refreshes(r.connection_pool._cache_refresher)
+
+        assert _cached_value(cache, _get_cache_key("foo")) == "2"
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache_config": _refresh_config(refresh_max_inflight=1),
+                "single_connection_client": True,
+            }
+        ],
+        indirect=True,
+    )
+    def test_a_hot_key_settles_on_the_server_value(self, r, r2):
+        cache = r.get_cache()
+        r.set("counter", 0)
+        r.get("counter")
+
+        refresher = r.connection_pool._cache_refresher
+        # After the first refresh the key is tracked on whichever pool connection re-read
+        # it, not on the single connection, so later invalidations are picked up through
+        # the pool. How many of them a given ping catches depends on which idle connection
+        # the pool hands out; what must hold is the final value.
+        pool_client = redis.Redis(connection_pool=r.connection_pool)
+        r2.incr("counter")
+        r.ping()
+        for _ in range(199):
+            _wait_for_refreshes(refresher)
+            r2.incr("counter")
+            pool_client.ping()
+        _wait_for_refreshes(refresher)
+
+        # Whatever the bound let through, nothing older than the server's value is served.
+        assert int(r.get("counter")) == 200
+        cached = _cached_value(cache, _get_cache_key("counter"))
+        assert cached is None or int(cached) == 200
+
 
 @pytest.mark.onlycluster
 @skip_if_resp_version(2)
@@ -1909,6 +2398,97 @@ class TestClusterCache:
         assert cache.size == 0
 
 
+@pytest.mark.onlycluster
+@skip_if_resp_version(2)
+@skip_if_server_version_lt("7.4.0")
+class TestClusterCacheRefresh:
+    """
+    Refresh on a cluster: each node pool refreshes on the node that owns the key, and all
+    of them share one cache.
+
+    A write through the same client reaches the node pool's idle connection - the one that
+    cached the key - so the reply of the ``PING`` sent to that node afterwards carries the
+    invalidation in front of it.
+    """
+
+    @staticmethod
+    def _pick_up(r, key):
+        node = r.get_node_from_key(key)
+        r.ping(target_nodes=node)
+        return node.redis_connection.connection_pool._cache_refresher
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache_config": _refresh_config(max_size=128)}],
+        indirect=True,
+    )
+    def test_an_invalidated_entry_is_refreshed_on_its_node(self, r):
+        r.set("{refresh}foo", "bar")
+        r.get("{refresh}foo")
+        cache = r.get_node_from_key("{refresh}foo").redis_connection.get_cache()
+
+        r.set("{refresh}foo", "barbar")
+        refresher = self._pick_up(r, "{refresh}foo")
+        _wait_for_refreshes(refresher)
+
+        assert _cached_value(cache, _get_cache_key("{refresh}foo")) == "barbar"
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache_config": _refresh_config(max_size=128)}],
+        indirect=True,
+    )
+    def test_keys_on_different_nodes_refresh_into_one_cache(self, r):
+        # Served by different primaries in the test cluster.
+        keys = ["foo", "bar"]
+        nodes = {r.get_node_from_key(key).name for key in keys}
+        if len(nodes) < 2:
+            pytest.skip("the keys share a node in this cluster")
+        # The first command on a node pool can reconnect a connection the client used
+        # during discovery, and a reconnect empties the shared cache. Warm every pool up
+        # first, so the entries cached below survive until the writes.
+        for node in r.get_primaries():
+            r.ping(target_nodes=node)
+        for key in keys:
+            r.set(key, "1")
+            r.get(key)
+        cache = r.get_node_from_key("foo").redis_connection.get_cache()
+
+        for key in keys:
+            r.set(key, "2")
+        refreshers = {self._pick_up(r, key) for key in keys}
+        assert len(refreshers) == 2
+        for refresher in refreshers:
+            _wait_for_refreshes(refresher)
+
+        for key in keys:
+            assert _cached_value(cache, _get_cache_key(key)) == "2"
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache_config": _refresh_config(max_size=128)}],
+        indirect=True,
+    )
+    def test_a_server_flush_refreshes_nothing(self, r):
+        # ``flushall`` reaches every primary; a first command on a node pool would empty
+        # the cache through a reconnect before the flush is even read.
+        for node in r.get_primaries():
+            r.ping(target_nodes=node)
+        r.set("{refresh}foo", "bar")
+        r.get("{refresh}foo")
+        cache = r.get_node_from_key("{refresh}foo").redis_connection.get_cache()
+        assert cache.collection.get(_get_cache_key("{refresh}foo")) is not None
+
+        r.flushall()
+        # Written again before the flush is picked up, so a refresh queued by mistake
+        # would read a value and store it.
+        r.set("{refresh}foo", "bar")
+        refresher = self._pick_up(r, "{refresh}foo")
+        _wait_for_refreshes(refresher)
+
+        assert cache.collection.get(_get_cache_key("{refresh}foo")) is None
+
+
 @pytest.mark.onlynoncluster
 @skip_if_resp_version(2)
 @skip_if_server_version_lt("7.4.0")
@@ -2052,6 +2632,30 @@ class TestSentinelCache:
         master.connection_pool.get_connection().disconnect()
         # Make sure cache_data is empty
         assert cache.size == 0
+
+    @pytest.mark.parametrize(
+        "sentinel_setup",
+        [
+            {
+                "cache_config": _refresh_config(max_size=128),
+                "force_master_ip": "localhost",
+            },
+        ],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_an_invalidated_entry_is_refreshed(self, master):
+        cache = master.get_cache()
+        master.set("foo", "bar")
+        master.get("foo")
+
+        # The write and the PING reach the pool's idle connection, the one that cached
+        # ``foo``, so the PING reply carries the invalidation in front of it.
+        master.set("foo", "barbar")
+        master.ping()
+        _wait_for_refreshes(master.connection_pool._cache_refresher)
+
+        assert _cached_value(cache, _get_cache_key("foo")) == "barbar"
 
 
 @pytest.mark.onlynoncluster
@@ -2715,6 +3319,677 @@ class TestCacheReverseIndex:
         assert actual == expected
 
 
+def _valid_entry(cache_key, value=b"bar"):
+    return CacheEntry(
+        cache_key=cache_key,
+        cache_value=value,
+        status=CacheEntryStatus.VALID,
+        connection_ref=None,
+    )
+
+
+class TestTakeEntriesByRedisKeys:
+    @pytest.fixture
+    def cache(self):
+        return DefaultCache(CacheConfig())
+
+    @pytest.mark.parametrize(
+        "indexed,named",
+        [("foo", b"foo"), (b"foo", "foo")],
+        ids=["str-indexed", "bytes-indexed"],
+    )
+    def test_either_spelling_finds_the_entry(self, cache, indexed, named):
+        entry = _valid_entry(_get_cache_key(indexed))
+        cache.set(entry)
+
+        assert cache.take_entries_by_redis_keys([named]) == [entry]
+        assert cache.size == 0
+
+    def test_every_holder_is_removed_and_returned(self, cache):
+        get_entry = _valid_entry(_get_cache_key("foo"))
+        mget_entry = _valid_entry(
+            CacheKey(command="MGET", redis_keys=("foo", "bar"), redis_args=())
+        )
+        other = _valid_entry(_get_cache_key("baz"))
+        for entry in (get_entry, mget_entry, other):
+            cache.set(entry)
+
+        taken = cache.take_entries_by_redis_keys([b"foo"])
+
+        # The MGET entry holds two keys but is named by one, so it comes back once.
+        assert sorted(taken, key=lambda e: e.cache_key.command) == [
+            get_entry,
+            mget_entry,
+        ]
+        assert list(cache.collection) == [other.cache_key]
+        # Nothing indexed under either spelling of the taken keys survives.
+        for redis_key in ("foo", b"foo", "bar", b"bar"):
+            assert cache.collection.holders_of(redis_key) == frozenset()
+
+    def test_entries_keep_their_status(self, cache):
+        valid = _valid_entry(_get_cache_key("foo"))
+        in_progress = CacheEntry(
+            cache_key=CacheKey(command="STRLEN", redis_keys=("foo",), redis_args=()),
+            cache_value=b"foo",
+            status=CacheEntryStatus.IN_PROGRESS,
+            connection_ref=None,
+        )
+        cache.set(valid)
+        cache.set(in_progress)
+
+        statuses = {e.status for e in cache.take_entries_by_redis_keys([b"foo"])}
+
+        assert statuses == {CacheEntryStatus.VALID, CacheEntryStatus.IN_PROGRESS}
+
+    def test_an_unknown_key_takes_nothing(self, cache):
+        entry = _valid_entry(_get_cache_key("foo"))
+        cache.set(entry)
+
+        assert cache.take_entries_by_redis_keys([b"nope"]) == []
+        assert cache.get(entry.cache_key) is entry
+
+    def test_the_interface_default_works_for_a_third_party_cache(self):
+        # A cache implementing only the abstract methods inherits the scanning default.
+        class DictCache(CacheInterface):
+            def __init__(self):
+                self._entries = OrderedDict()
+
+            collection = property(lambda self: self._entries)
+            config = property(lambda self: CacheConfig())
+            eviction_policy = property(lambda self: None)
+            size = property(lambda self: len(self._entries))
+
+            def get(self, key):
+                return self._entries.get(key)
+
+            def set(self, entry):
+                self._entries[entry.cache_key] = entry
+                return True
+
+            def delete_by_cache_keys(self, cache_keys):
+                return [self._entries.pop(k, None) is not None for k in cache_keys]
+
+            def delete_by_redis_keys(self, redis_keys):
+                raise NotImplementedError
+
+            def flush(self):
+                count = len(self._entries)
+                self._entries.clear()
+                return count
+
+            def is_cachable(self, key):
+                return True
+
+        cache = DictCache()
+        get_entry = _valid_entry(_get_cache_key("foo"))
+        mget_entry = _valid_entry(
+            CacheKey(command="MGET", redis_keys=("foo", "bar"), redis_args=())
+        )
+        other = _valid_entry(_get_cache_key("baz"))
+        for entry in (get_entry, mget_entry, other):
+            cache.set(entry)
+
+        # The server's spelling, while the entries were indexed under ``str``.
+        taken = cache.take_entries_by_redis_keys([b"foo"])
+
+        assert taken == [get_entry, mget_entry]
+        assert list(cache.collection) == [other.cache_key]
+
+    def test_the_proxy_forwards(self, cache):
+        entry = _valid_entry(_get_cache_key("foo"))
+        cache.set(entry)
+
+        assert CacheProxy(cache).take_entries_by_redis_keys([b"foo"]) == [entry]
+
+
+class _FakePool:
+    """The pool surface the refresher uses, recording what it is asked for."""
+
+    def __init__(self, cache=None):
+        self.cache = cache if cache is not None else DefaultCache(CacheConfig())
+        self.connection = MagicMock()
+        self.get_connection_error = None
+        # Every connection in use and the pool at its limit.
+        self.full = False
+        self.released = []
+
+    def _get_connection(self, if_available=False):
+        assert if_available, "a refresh must never wait for a pool connection"
+        if self.full:
+            return None
+        if self.get_connection_error is not None:
+            error, self.get_connection_error = self.get_connection_error, None
+            raise error
+        return self.connection
+
+    def release(self, connection):
+        self.released.append(connection)
+
+
+def _sent_keys(connection):
+    return [c.kwargs["keys"] for c in connection.send_command.call_args_list]
+
+
+def _wait(predicate, message="Timeout waiting for the refresher"):
+    wait_for_condition(predicate, timeout=2, error_message=message)
+
+
+class TestCacheRefresher:
+    @pytest.fixture
+    def pool(self):
+        return _FakePool()
+
+    @pytest.fixture
+    def make_refresher(self):
+        """Build refreshers whose workers are stopped and joined after the test."""
+        refreshers = []
+
+        def make(pool, *args, **kwargs):
+            refresher = _CacheRefresher(pool, *args, **kwargs)
+            refreshers.append(refresher)
+            return refresher
+
+        yield make
+        for refresher in refreshers:
+            worker = refresher._thread
+            refresher.stop()
+            if worker is not None:
+                worker.join(timeout=2)
+
+    @pytest.fixture
+    def gate(self, pool, make_refresher):
+        """
+        Hold every refresh inside ``send_command`` until the test sets the event.
+
+        Depends on ``make_refresher`` so that it is torn down first: the gate opens before
+        the workers are joined.
+        """
+        event = threading.Event()
+        pool.connection.send_command.side_effect = lambda *a, **k: event.wait(5)
+        yield event
+        event.set()
+
+    def _idle(self, refresher):
+        _wait(lambda: not refresher._pending, "refresher never went idle")
+
+    def test_no_thread_before_the_first_accepted_key(self, make_refresher, pool):
+        refresher = make_refresher(pool, 4)
+
+        assert refresher._thread is None
+        assert refresher.submit([]) == []
+        assert refresher._thread is None
+
+    def test_a_refresh_replays_the_cached_command(self, make_refresher, pool):
+        refresher = make_refresher(pool, 4)
+        key = _get_cache_key("foo", "bar")
+
+        assert refresher.submit([key]) == []
+        self._idle(refresher)
+
+        pool.connection.send_command.assert_called_once_with(
+            "GET", "foo", "bar", keys=("foo", "bar")
+        )
+        pool.connection.read_response.assert_called_once_with()
+        assert pool.released == [pool.connection]
+
+    def test_keys_over_the_bound_are_rejected(self, make_refresher, pool, gate):
+        refresher = make_refresher(pool, 2)
+        k1, k2, k3 = _get_cache_key("k1"), _get_cache_key("k2"), _get_cache_key("k3")
+
+        assert refresher.submit([k1, k2, k3]) == [k3]
+
+        gate.set()
+        self._idle(refresher)
+        # The slots free on completion, so the rejected key fits now.
+        assert refresher.submit([k3]) == []
+        self._idle(refresher)
+        assert _sent_keys(pool.connection) == [("k1",), ("k2",), ("k3",)]
+
+    def test_a_pending_key_is_not_queued_twice(self, make_refresher, pool, gate):
+        refresher = make_refresher(pool, 4)
+        key = _get_cache_key("foo")
+
+        refresher.submit([key])
+        _wait(lambda: pool.connection.send_command.called)
+        assert refresher.submit([key]) == []
+
+        gate.set()
+        self._idle(refresher)
+        assert pool.connection.send_command.call_count == 1
+
+    def test_a_duplicate_in_one_batch_is_neither_queued_nor_counted(
+        self, make_refresher, pool, gate
+    ):
+        refresher = make_refresher(pool, 2)
+        k1, k2, k3 = _get_cache_key("k1"), _get_cache_key("k2"), _get_cache_key("k3")
+
+        assert refresher.submit([k1, k1, k2]) == []
+        # Both slots are taken by two distinct keys, not by three submissions.
+        assert refresher.submit([k3]) == [k3]
+
+        gate.set()
+        self._idle(refresher)
+        assert _sent_keys(pool.connection) == [("k1",), ("k2",)]
+
+    @pytest.mark.parametrize(
+        "error",
+        [ResponseError("WRONGTYPE"), MovedError("3999 127.0.0.1:6381")],
+        ids=["wrongtype", "moved"],
+    )
+    def test_an_error_reply_fails_the_refresh_without_disconnecting(
+        self, make_refresher, pool, error
+    ):
+        pool.connection.read_response.side_effect = error
+        refresher = make_refresher(pool, 1)
+
+        refresher.submit([_get_cache_key("foo")])
+        self._idle(refresher)
+
+        pool.connection.disconnect.assert_not_called()
+        assert pool.released == [pool.connection]
+        # The slot is free and the worker is alive.
+        pool.connection.read_response.side_effect = None
+        assert refresher.submit([_get_cache_key("bar")]) == []
+        self._idle(refresher)
+        assert _sent_keys(pool.connection) == [("foo",), ("bar",)]
+
+    @pytest.mark.parametrize(
+        "error",
+        [ConnectionError("lost"), TimeoutError("slow"), OSError("reset")],
+        ids=["connection", "timeout", "os"],
+    )
+    def test_a_connection_error_disconnects(self, make_refresher, pool, error):
+        pool.connection.read_response.side_effect = error
+        refresher = make_refresher(pool, 1)
+
+        refresher.submit([_get_cache_key("foo")])
+        self._idle(refresher)
+
+        pool.connection.disconnect.assert_called_once_with()
+        assert pool.released == [pool.connection]
+
+    def test_a_full_pool_skips_the_refresh(self, make_refresher, pool, recorded):
+        # Taking a connection would make an application command fail or wait.
+        pool.full = True
+        refresher = make_refresher(pool, 1)
+
+        refresher.submit([_get_cache_key("foo")])
+        self._idle(refresher)
+
+        assert not pool.connection.send_command.called
+        assert pool.released == []
+        assert recorded == [(CSCRefreshResult.REJECTED, 1)]
+
+        # The pool has room again, so the next refresh runs.
+        pool.full = False
+        refresher.submit([_get_cache_key("bar")])
+        self._idle(refresher)
+        assert _sent_keys(pool.connection) == [("bar",)]
+
+    def test_a_failure_to_get_a_connection_is_survived(self, make_refresher, pool):
+        pool.get_connection_error = ConnectionError("Connection refused")
+        refresher = make_refresher(pool, 1)
+
+        refresher.submit([_get_cache_key("foo")])
+        self._idle(refresher)
+        assert not pool.connection.send_command.called
+        assert pool.released == []
+
+        refresher.submit([_get_cache_key("bar")])
+        self._idle(refresher)
+        assert _sent_keys(pool.connection) == [("bar",)]
+
+    def test_an_unexpected_failure_does_not_kill_the_worker(self, make_refresher, pool):
+        class ExplodingCollection:
+            calls = 0
+
+            def __contains__(self, key):
+                ExplodingCollection.calls += 1
+                if ExplodingCollection.calls == 1:
+                    raise RuntimeError("boom")
+                return False
+
+        pool.cache = MagicMock(collection=ExplodingCollection())
+        refresher = make_refresher(pool, 1)
+
+        refresher.submit([_get_cache_key("foo")])
+        self._idle(refresher)
+        refresher.submit([_get_cache_key("bar")])
+        self._idle(refresher)
+
+        assert _sent_keys(pool.connection) == [("bar",)]
+
+    @pytest.mark.parametrize(
+        "status", [CacheEntryStatus.VALID, CacheEntryStatus.IN_PROGRESS]
+    )
+    def test_a_key_the_cache_already_holds_is_skipped(
+        self, make_refresher, pool, status
+    ):
+        # A user read re-fetched it, or is fetching it: refreshing would race that read.
+        key = _get_cache_key("foo")
+        pool.cache.set(
+            CacheEntry(
+                cache_key=key, cache_value=b"bar", status=status, connection_ref=None
+            )
+        )
+        refresher = make_refresher(pool, 1)
+
+        refresher.submit([key])
+        self._idle(refresher)
+
+        assert not pool.connection.send_command.called
+        assert pool.released == []
+
+    def test_cancel_drops_queued_keys(self, make_refresher, pool, gate):
+        refresher = make_refresher(pool, 4)
+        k1, k2, k3 = _get_cache_key("k1"), _get_cache_key("k2"), _get_cache_key("k3")
+
+        refresher.submit([k1])
+        _wait(lambda: pool.connection.send_command.called)
+        refresher.submit([k2])
+        refresher.cancel_pending()
+        assert refresher.submit([k3]) == []
+
+        gate.set()
+        self._idle(refresher)
+        # k2 was queued ahead of k3 and dropped unrun; k1 was already in flight.
+        assert _sent_keys(pool.connection) == [("k1",), ("k3",)]
+
+    def test_a_job_completing_after_a_cancel_keeps_newer_work_pending(
+        self, make_refresher, pool
+    ):
+        first, second = threading.Event(), threading.Event()
+        gates = iter([first, second])
+        pool.connection.send_command.side_effect = lambda *a, **k: next(gates).wait(5)
+        refresher = make_refresher(pool, 1)
+        key = _get_cache_key("foo")
+
+        refresher.submit([key])
+        _wait(lambda: pool.connection.send_command.call_count == 1)
+        refresher.cancel_pending()
+        # The bound is 1 and the cancel freed the slot, so the same key is accepted again.
+        assert refresher.submit([key]) == []
+
+        first.set()
+        _wait(lambda: pool.connection.send_command.call_count == 2)
+        # The first job has finished, and it must not have released the newer acceptance.
+        assert key in refresher._pending
+        assert refresher.submit([_get_cache_key("bar")]) == [_get_cache_key("bar")]
+
+        second.set()
+        self._idle(refresher)
+
+    def test_the_worker_exits_when_idle_and_restarts(self, make_refresher, pool):
+        refresher = make_refresher(pool, 1, idle_timeout=0.05)
+
+        refresher.submit([_get_cache_key("foo")])
+        first = refresher._thread
+        _wait(lambda: refresher._thread is None, "worker never exited")
+        first.join(timeout=2)
+        assert not first.is_alive()
+
+        # Held inside the refresh, so the new worker cannot go idle before it is checked.
+        gate = threading.Event()
+        pool.connection.send_command.side_effect = lambda *a, **k: gate.wait(5)
+        refresher.submit([_get_cache_key("bar")])
+        second = refresher._thread
+        assert second is not first
+        assert second.is_alive()
+
+        gate.set()
+        self._idle(refresher)
+        assert _sent_keys(pool.connection) == [("foo",), ("bar",)]
+
+    def test_stop_cancels_queued_work_and_stays_usable(
+        self, make_refresher, pool, gate
+    ):
+        refresher = make_refresher(pool, 4)
+
+        refresher.submit([_get_cache_key("k1")])
+        _wait(lambda: pool.connection.send_command.called)
+        refresher.submit([_get_cache_key("k2")])
+        refresher.stop()
+
+        gate.set()
+        _wait(lambda: refresher._thread is None, "worker never exited")
+        assert _sent_keys(pool.connection) == [("k1",)]
+
+        # A pool is reusable after close(), and so is its refresher.
+        refresher.submit([_get_cache_key("k3")])
+        self._idle(refresher)
+        assert _sent_keys(pool.connection) == [("k1",), ("k3",)]
+
+    def test_stop_without_a_worker_queues_nothing(self, make_refresher, pool):
+        refresher = make_refresher(pool, 4)
+
+        refresher.stop()
+        refresher.stop()
+
+        assert refresher._queue.empty()
+
+    def test_a_worker_inherited_across_a_fork_is_replaced(self, make_refresher, pool):
+        # In a forked child the registered thread object exists but never runs.
+        refresher = make_refresher(pool, 4)
+        dead = threading.Thread(target=lambda: None)
+        dead.start()
+        dead.join()
+        refresher._thread = dead
+
+        assert refresher.submit([_get_cache_key("foo")]) == []
+        assert refresher._thread is not dead
+        self._idle(refresher)
+        assert _sent_keys(pool.connection) == [("foo",)]
+
+    def test_a_key_accepted_right_after_stop_still_runs(
+        self, make_refresher, pool, gate
+    ):
+        # The worker is still registered when this key arrives, so no new one is started:
+        # the old one must see it behind the stop and keep going.
+        refresher = make_refresher(pool, 4)
+
+        refresher.submit([_get_cache_key("k1")])
+        _wait(lambda: pool.connection.send_command.called)
+        refresher.stop()
+        worker = refresher._thread
+        assert refresher.submit([_get_cache_key("k2")]) == []
+        assert refresher._thread is worker
+
+        gate.set()
+        self._idle(refresher)
+        assert _sent_keys(pool.connection) == [("k1",), ("k2",)]
+
+    def test_a_flush_while_waiting_for_a_connection_sends_nothing(
+        self, make_refresher, pool, recorded
+    ):
+        # Getting a connection can wait for the pool or for a handshake.
+        in_get, proceed = threading.Event(), threading.Event()
+        connection = pool.connection
+
+        def slow_get_connection(if_available=False):
+            assert if_available
+            in_get.set()
+            proceed.wait(5)
+            return connection
+
+        pool._get_connection = slow_get_connection
+        refresher = make_refresher(pool, 1)
+
+        refresher.submit([_get_cache_key("foo")])
+        assert in_get.wait(2)
+        refresher.cancel_pending()
+        proceed.set()
+
+        _wait(lambda: pool.released == [connection])
+        assert not connection.send_command.called
+        # Cancelled before any round trip, so it is no refresh outcome either.
+        self._idle(refresher)
+        assert recorded == []
+
+    def test_a_worker_that_cannot_start_hands_the_keys_back(self, make_refresher, pool):
+        refresher = make_refresher(pool, 4)
+        k1, k2, k3 = _get_cache_key("k1"), _get_cache_key("k2"), _get_cache_key("k3")
+
+        with patch.object(
+            threading.Thread, "start", side_effect=RuntimeError("can't start")
+        ):
+            assert refresher.submit([k1, k2]) == [k1, k2]
+
+        assert refresher._thread is None
+        assert not refresher._pending
+        # Nothing is stuck: the next submit starts a worker and runs.
+        assert refresher.submit([k3]) == []
+        self._idle(refresher)
+        assert _sent_keys(pool.connection) == [("k3",)]
+
+    @pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+    def test_a_worker_ended_by_a_base_exception_is_replaced(self, make_refresher, pool):
+        class Killed(BaseException):
+            pass
+
+        pool.connection.send_command.side_effect = [Killed(), None]
+        refresher = make_refresher(pool, 4)
+
+        refresher.submit([_get_cache_key("foo")])
+        first = refresher._thread
+        first.join(timeout=2)
+        assert not first.is_alive()
+        assert refresher._thread is None
+
+        refresher.submit([_get_cache_key("bar")])
+        self._idle(refresher)
+        assert _sent_keys(pool.connection) == [("foo",), ("bar",)]
+
+    @pytest.fixture
+    def recorded(self):
+        """The refresh outcomes the refresher reports, as ``(result, count)`` pairs."""
+        calls = []
+        with patch(
+            "redis.cache.record_csc_refresh",
+            side_effect=lambda result, count=1: calls.append((result, count)),
+        ):
+            yield calls
+
+    def test_an_answered_refresh_records_a_success(
+        self, make_refresher, pool, recorded
+    ):
+        refresher = make_refresher(pool, 4)
+
+        refresher.submit([_get_cache_key("foo")])
+        self._idle(refresher)
+
+        assert recorded == [(CSCRefreshResult.SUCCESS, 1)]
+
+    @pytest.mark.parametrize(
+        "error",
+        [ResponseError("WRONGTYPE"), ConnectionError("lost")],
+        ids=["error-reply", "connection"],
+    )
+    def test_a_failed_refresh_records_a_failure(
+        self, make_refresher, pool, recorded, error
+    ):
+        pool.connection.read_response.side_effect = error
+        refresher = make_refresher(pool, 4)
+
+        refresher.submit([_get_cache_key("foo")])
+        self._idle(refresher)
+
+        assert recorded == [(CSCRefreshResult.FAILURE, 1)]
+
+    def test_a_failing_disconnect_records_one_failure(
+        self, make_refresher, pool, recorded
+    ):
+        pool.connection.read_response.side_effect = ConnectionError("lost")
+        pool.connection.disconnect.side_effect = OSError("already closed")
+        refresher = make_refresher(pool, 4)
+
+        refresher.submit([_get_cache_key("foo")])
+        self._idle(refresher)
+
+        assert recorded == [(CSCRefreshResult.FAILURE, 1)]
+        assert pool.released == [pool.connection]
+        # The worker outlived it.
+        pool.connection.read_response.side_effect = None
+        pool.connection.disconnect.side_effect = None
+        refresher.submit([_get_cache_key("bar")])
+        self._idle(refresher)
+        assert recorded[-1] == (CSCRefreshResult.SUCCESS, 1)
+
+    def test_no_connection_records_a_failure(self, make_refresher, pool, recorded):
+        pool.get_connection_error = ConnectionError("Connection refused")
+        refresher = make_refresher(pool, 4)
+
+        refresher.submit([_get_cache_key("foo")])
+        self._idle(refresher)
+
+        assert recorded == [(CSCRefreshResult.FAILURE, 1)]
+
+    def test_rejected_keys_are_recorded_together(
+        self, make_refresher, pool, gate, recorded
+    ):
+        refresher = make_refresher(pool, 1)
+        keys = [_get_cache_key("k1"), _get_cache_key("k2"), _get_cache_key("k3")]
+
+        assert refresher.submit(keys) == keys[1:]
+
+        assert recorded == [(CSCRefreshResult.REJECTED, 2)]
+
+    def test_keys_handed_back_by_a_failed_start_are_recorded_as_rejected(
+        self, make_refresher, pool, recorded
+    ):
+        refresher = make_refresher(pool, 4)
+
+        with patch.object(
+            threading.Thread, "start", side_effect=RuntimeError("can't start")
+        ):
+            refresher.submit([_get_cache_key("k1"), _get_cache_key("k2")])
+
+        assert recorded == [(CSCRefreshResult.REJECTED, 2)]
+
+    def test_skipped_and_cancelled_keys_record_nothing(
+        self, make_refresher, pool, gate, recorded
+    ):
+        # Neither ran a round trip, so neither is a refresh outcome.
+        held = _get_cache_key("held")
+        pool.cache.set(_valid_entry(held))
+        refresher = make_refresher(pool, 4)
+
+        refresher.submit([held])
+        refresher.submit([_get_cache_key("k1")])
+        _wait(lambda: pool.connection.send_command.called)
+        refresher.submit([_get_cache_key("k2")])
+        refresher.cancel_pending()
+        gate.set()
+        _wait(lambda: pool.released == [pool.connection])
+        self._idle(refresher)
+
+        # Only k1, which was in flight when the cancel landed, was answered.
+        assert recorded == [(CSCRefreshResult.SUCCESS, 1)]
+
+    def test_an_idle_worker_does_not_keep_the_pool_alive(self, make_refresher):
+        # Built here rather than taken from the fixture, which keeps a reference of its own.
+        pool = _FakePool()
+        refresher = make_refresher(pool, 1)
+        refresher.submit([_get_cache_key("foo")])
+        self._idle(refresher)
+        pool_ref = weakref.ref(pool)
+        del pool
+
+        _wait(lambda: (gc.collect(), pool_ref())[1] is None, "the pool was kept alive")
+        assert refresher._thread.is_alive()
+
+    def test_the_worker_exits_once_its_pool_is_gone(self, make_refresher):
+        pool = _FakePool()
+        refresher = make_refresher(pool, 1)
+        del pool
+        gc.collect()
+
+        refresher.submit([_get_cache_key("foo")])
+        worker = refresher._thread
+        worker.join(timeout=2)
+
+        assert not worker.is_alive()
+
+
 class TestUnitLRUPolicy:
     def test_type(self):
         policy = LRUPolicy()
@@ -3051,9 +4326,10 @@ class TestUnitCacheConfiguration:
 
     def test_a_third_party_configuration_keeps_todays_behaviour(self):
         """
-        The three tracking-mode decisions are concrete defaults on the public ABC, so a
-        configuration implementing only the five abstract methods still works - as plain
-        mode, storing every eligible reply and never pairing a ``CLIENT CACHING NO``.
+        The three tracking-mode decisions and the invalidation policy are concrete defaults
+        on the public ABC, so a configuration implementing only the five abstract methods
+        still works - as plain mode, storing every eligible reply, never pairing a
+        ``CLIENT CACHING NO``, and evicting invalidated entries without re-reading them.
         """
 
         class MinimalConfig(CacheConfigurationInterface):
@@ -3077,6 +4353,88 @@ class TestUnitCacheConfiguration:
         assert config.get_tracking_mode() is TrackingMode.PLAIN
         assert config.should_cache("GET", (b"foo",)) is True
         assert config.is_trackable_read("GET") is False
+        # The invalidation policy is a concrete default too, so the same configuration keeps
+        # removing invalidated entries and re-reading nothing.
+        assert config.get_invalidation_policy() is InvalidationPolicy.EVICT
+        assert config.get_refresh_max_inflight() == (
+            CacheConfig.DEFAULT_REFRESH_MAX_INFLIGHT
+        )
+
+    def test_the_invalidation_policy_defaults_to_evict(self):
+        cache_conf = CacheConfig()
+
+        assert cache_conf.get_invalidation_policy() is InvalidationPolicy.EVICT
+        # Not used under evict, so no bound is set.
+        assert cache_conf.get_refresh_max_inflight() is None
+
+    def test_the_refresh_accessors_round_trip(self):
+        cache_conf = CacheConfig(
+            invalidation_policy=InvalidationPolicy.REFRESH, refresh_max_inflight=4
+        )
+
+        assert cache_conf.get_invalidation_policy() is InvalidationPolicy.REFRESH
+        assert cache_conf.get_refresh_max_inflight() == 4
+
+    def test_a_bare_string_invalidation_policy_is_refused(self):
+        # It would compare equal to no enum member and silently behave as evict.
+        with pytest.raises(TypeError, match="invalidation_policy must be"):
+            CacheConfig(invalidation_policy="refresh")
+
+    @pytest.mark.parametrize("bound", [0, -1, True, 1.5, "4", None])
+    def test_an_invalid_refresh_max_inflight_is_refused(self, bound):
+        with pytest.raises(ValueError, match="refresh_max_inflight must be"):
+            CacheConfig(
+                invalidation_policy=InvalidationPolicy.REFRESH,
+                refresh_max_inflight=bound,
+            )
+
+    def test_a_refresh_bound_with_evict_is_ignored(self):
+        # Not consulted under evict, so not validated or kept either: the warning says
+        # it is ignored.
+        with pytest.warns(UserWarning, match="ignored with invalidation_policy=evict"):
+            cache_conf = CacheConfig(refresh_max_inflight=0)
+
+        assert cache_conf.get_refresh_max_inflight() is None
+
+    def test_a_refresh_max_inflight_of_one_is_accepted(self):
+        cache_conf = CacheConfig(
+            invalidation_policy=InvalidationPolicy.REFRESH, refresh_max_inflight=1
+        )
+
+        assert cache_conf.get_refresh_max_inflight() == 1
+
+    @pytest.mark.parametrize("bound", [4, CacheConfig.DEFAULT_REFRESH_MAX_INFLIGHT])
+    def test_a_refresh_bound_with_evict_warns(self, bound):
+        # Any passed bound warns, the default's value included.
+        with pytest.warns(UserWarning, match="ignored with invalidation_policy=evict"):
+            CacheConfig(refresh_max_inflight=bound)
+
+    def test_an_omitted_refresh_bound_with_refresh_is_the_default(self):
+        cache_conf = CacheConfig(invalidation_policy=InvalidationPolicy.REFRESH)
+
+        assert cache_conf.get_refresh_max_inflight() == (
+            CacheConfig.DEFAULT_REFRESH_MAX_INFLIGHT
+        )
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {},
+            {"invalidation_policy": InvalidationPolicy.REFRESH},
+            {
+                "invalidation_policy": InvalidationPolicy.REFRESH,
+                "refresh_max_inflight": CacheConfig.DEFAULT_REFRESH_MAX_INFLIGHT,
+            },
+            {
+                "invalidation_policy": InvalidationPolicy.REFRESH,
+                "refresh_max_inflight": 4,
+            },
+        ],
+    )
+    def test_a_consulted_refresh_bound_does_not_warn(self, kwargs):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            CacheConfig(**kwargs)
 
 
 class TestUnitCacheProxy:

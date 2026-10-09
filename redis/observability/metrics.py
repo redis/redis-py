@@ -22,6 +22,7 @@ from redis.observability.attributes import (
     AttributeBuilder,
     ConnectionState,
     CSCReason,
+    CSCRefreshResult,
     CSCResult,
     GeoFailoverReason,
     PubSubDirection,
@@ -234,6 +235,12 @@ class RedisMetricsCollector:
             name="redis.client.csc.network_saved",
             unit="By",
             description="The total number of bytes saved by using CSC",
+        )
+
+        self.csc_refreshes = self.meter.create_counter(
+            name="redis.client.csc.refreshes",
+            unit="{refresh}",
+            description="The total number of cache refreshes after an invalidation, by outcome",
         )
 
     # Resiliency metric recording methods
@@ -710,6 +717,24 @@ class RedisMetricsCollector:
 
         attrs = self.attr_builder.build_csc_attributes()
         self.csc_network_saved.add(bytes_saved, attributes=attrs)
+
+    def record_csc_refresh(
+        self,
+        result: CSCRefreshResult,
+        count: int = 1,
+    ) -> None:
+        """
+        Record Client Side Caching (CSC) refreshes with the same outcome.
+
+        Args:
+            result: Refresh outcome
+            count: Number of refreshes
+        """
+        if not hasattr(self, "csc_refreshes"):
+            return
+
+        attrs = self.attr_builder.build_csc_attributes(refresh_result=result)
+        self.csc_refreshes.add(count, attributes=attrs)
 
     # Utility methods
 

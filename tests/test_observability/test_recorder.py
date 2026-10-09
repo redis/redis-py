@@ -48,6 +48,9 @@ from redis.observability.attributes import (
     DB_CLIENT_GEOFAILOVER_FAIL_FROM,
     DB_CLIENT_GEOFAILOVER_FAIL_TO,
     DB_CLIENT_GEOFAILOVER_REASON,
+    # Client side caching attributes
+    REDIS_CLIENT_CSC_REFRESH_RESULT,
+    CSCRefreshResult,
 )
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector, CloseReason
@@ -61,6 +64,7 @@ from redis.observability.recorder import (
     record_error_count,
     record_geo_failover,
     record_operation_duration,
+    record_csc_refresh,
     record_pubsub_message,
     record_streaming_lag,
     reset_collector,
@@ -1762,3 +1766,84 @@ class TestHistogramBucketBoundaries:
             call_kwargs["explicit_bucket_boundaries_advisory"]
             == default_operation_duration_buckets()
         )
+
+
+@pytest.mark.fixed_client
+class TestRecordCSCRefresh:
+    """Tests for record_csc_refresh - the refresh-on-invalidation outcome counter."""
+
+    @pytest.fixture
+    def refreshes_counter(self):
+        return MagicMock()
+
+    @pytest.fixture
+    def csc_meter(self, refreshes_counter):
+        meter = MagicMock()
+        meter.create_counter.side_effect = lambda name, **kwargs: (
+            refreshes_counter if name == "redis.client.csc.refreshes" else MagicMock()
+        )
+        return meter
+
+    def _install(self, meter, metric_groups):
+        with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
+            collector = RedisMetricsCollector(
+                meter, OTelConfig(metric_groups=metric_groups)
+            )
+        return patch.object(
+            recorder, "_get_or_create_collector", return_value=collector
+        )
+
+    @pytest.fixture
+    def setup_csc_recorder(self, csc_meter):
+        recorder.reset_collector()
+        with self._install(csc_meter, [MetricGroup.CSC]):
+            yield csc_meter
+        recorder.reset_collector()
+
+    def test_the_counter_is_created_with_the_csc_group(self, setup_csc_recorder):
+        record_csc_refresh(result=CSCRefreshResult.SUCCESS)
+
+        names = {c[1]["name"] for c in setup_csc_recorder.create_counter.call_args_list}
+        assert "redis.client.csc.refreshes" in names
+        call_kwargs = next(
+            c[1]
+            for c in setup_csc_recorder.create_counter.call_args_list
+            if c[1]["name"] == "redis.client.csc.refreshes"
+        )
+        assert call_kwargs["unit"] == "{refresh}"
+
+    @pytest.mark.parametrize(
+        "result,value",
+        [
+            (CSCRefreshResult.SUCCESS, "success"),
+            (CSCRefreshResult.FAILURE, "failure"),
+            (CSCRefreshResult.REJECTED, "rejected"),
+        ],
+    )
+    def test_each_outcome_is_recorded_with_its_attribute(
+        self, setup_csc_recorder, refreshes_counter, result, value
+    ):
+        record_csc_refresh(result=result)
+
+        refreshes_counter.add.assert_called_once()
+        args, kwargs = refreshes_counter.add.call_args
+        assert args[0] == 1
+        assert kwargs["attributes"][REDIS_CLIENT_CSC_REFRESH_RESULT] == value
+
+    def test_a_count_is_added_at_once(self, setup_csc_recorder, refreshes_counter):
+        record_csc_refresh(result=CSCRefreshResult.REJECTED, count=3)
+
+        refreshes_counter.add.assert_called_once()
+        assert refreshes_counter.add.call_args[0][0] == 3
+
+    def test_without_the_csc_group_nothing_is_recorded(
+        self, csc_meter, refreshes_counter
+    ):
+        recorder.reset_collector()
+        try:
+            with self._install(csc_meter, [MetricGroup.COMMAND]):
+                record_csc_refresh(result=CSCRefreshResult.SUCCESS)
+        finally:
+            recorder.reset_collector()
+
+        refreshes_counter.add.assert_not_called()

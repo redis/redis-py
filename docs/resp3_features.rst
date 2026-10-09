@@ -251,6 +251,88 @@ The mode is sent in the tracking handshake, because the server refuses to switch
 connection between ``OPTIN`` and ``OPTOUT``. A configuration change therefore applies to new
 connections only.
 
+Refresh on invalidation
+~~~~~~~~~~~~~~~~~~~~~~~
+
+By default (``InvalidationPolicy.EVICT``) an invalidated entry is removed, and the next read
+of it goes to the server. With ``invalidation_policy=InvalidationPolicy.REFRESH`` the entry
+is still removed at once, and the client then re-reads it in the background, so the next
+read can be a hit:
+
+.. code:: python
+
+    >>> import redis
+    >>> from redis.cache import CacheConfig, InvalidationPolicy
+    >>> r = redis.Redis(host='localhost', port=6379, protocol=3,
+    ...                 cache_config=CacheConfig(
+    ...                     invalidation_policy=InvalidationPolicy.REFRESH,
+    ...                     refresh_max_inflight=32,
+    ...                 ))
+
+This works in standalone, Cluster and Sentinel clients. ``refresh_max_inflight`` defaults to
+16 when omitted and must be a positive integer; passing it under ``InvalidationPolicy.EVICT``
+warns and has no effect.
+
+A refresh re-runs the exact command that filled the entry, through the same path as a read,
+so the refreshed reply is stored and tracked exactly as a read's would be. Refresh never makes
+the cache serve an older value than it would without it: the old value is gone before the
+refresh is queued, and a reply the server invalidates again while it is in flight is not
+stored. A server ``FLUSHALL`` or ``FLUSHDB`` empties the cache and refreshes nothing, and
+every time a connection empties the cache, refreshes still queued on its pool are dropped.
+
+Refresh is best effort, and has costs to weigh before turning it on:
+
+- Every refreshed entry costs one extra read on the server, whether or not the application
+  reads the key again. The server reports every change to a cached key, whoever made it, so a
+  key another service writes often is refreshed as often.
+- Each connection pool refreshes on a single background thread, one key at a time and one
+  round trip per key, so refreshes never run in parallel within a pool. The thread starts
+  with the first refresh, ends after 30 seconds with nothing to do, and is stopped by the
+  pool's ``close()``, which also drops queued refreshes.
+- ``refresh_max_inflight`` is the size of that thread's queue: the most keys waiting for a
+  refresh, counting the one being refreshed. It bounds the backlog, not concurrency. When
+  invalidations arrive faster than one round trip per key, the queue fills, and an
+  invalidation that finds it full is handled as without refresh: the entry is removed and
+  the next read fetches it. A failed refresh, a nil reply, and a reply the
+  ``cache_predicate`` does not select do the same.
+- Each refresh borrows a connection from the pool while it runs, and only one the pool can
+  hand out at once: an idle connection, or a new one below ``max_connections``. When every
+  connection is in use and the pool is at its limit, or while a ``BlockingConnectionPool``
+  is in maintenance, the refresh is skipped and the entry stays removed, so a refresh never
+  makes an application command fail or wait to get a connection. It can still take the last
+  free one, for the length of one round trip. A client built with
+  ``single_connection_client=True`` opens a second connection for refreshes.
+- An invalidation is processed when the connection that received it next sends a
+  command, or when a read finds the invalidated entry: before serving a cached value, the
+  reading connection first drains the invalidations queued on the connection that stored
+  it. On a busy pool the first happens almost immediately; on an idle one it is often the
+  next read of the same key, which processes the invalidation, finds the entry removed and
+  fetches the value itself, so refresh gains nothing.
+- A refresh that fails with a connection error or a timeout closes that connection, which
+  empties the cache, as any closed caching connection does.
+- On a Cluster client every node's pool refreshes on its own node, within its own bound, and
+  a flush drops only the refreshes queued on the pool that read it. A refresh answered with
+  ``MOVED`` or ``ASK`` is not redirected: the entry stays removed, and the next read is routed
+  as usual.
+- ``cache_predicate`` is also called from the refresh thread, so it must be thread-safe.
+- With refresh, a custom ``CacheInterface`` implementation has invalidated entries removed
+  through ``take_entries_by_redis_keys``, not ``delete_by_redis_keys``.
+
+Refreshes show up in the cache metrics:
+
+- In ``redis.client.csc.requests``, each refresh is counted like an application read,
+  normally as a miss.
+- In ``redis.client.csc.evictions``, the invalidated entry is still counted, with reason
+  ``invalidation``.
+- In ``redis.client.csc.refreshes``, each refresh that reached the server is counted as
+  ``success`` when it was answered, stored or not, or ``failure`` when it raised. Each one
+  that found the queue full, or was skipped because the pool had no free connection, is
+  counted as ``rejected``. A refresh skipped because a read already re-fetched the key, or
+  dropped by a flush, is not counted.
+
+Async clients
+~~~~~~~~~~~~~
+
 Client-side caching is not yet implemented in the async clients, so
 ``redis.asyncio.Redis`` takes no ``metadata_resolver`` argument. However,
 ``redis.asyncio.RedisCluster`` accepts ``metadata_resolver`` for dynamic replica routing.

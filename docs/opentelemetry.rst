@@ -126,7 +126,8 @@ Available Metric Groups
 +------------------------+----------------------------------------------------------+
 | ``STREAMING``          | Stream message lag (XREAD/XREADGROUP)                    |
 +------------------------+----------------------------------------------------------+
-| ``CSC``                | Client Side Caching (requests, evictions, bytes saved)   |
+| ``CSC``                | Client Side Caching (requests, evictions, bytes saved,   |
+|                        | refreshes)                                               |
 +------------------------+----------------------------------------------------------+
 
 Available Metrics
@@ -166,6 +167,8 @@ The following metrics are collected based on enabled metric groups:
 - ``redis.client.csc.requests`` - Cache requests with hit/miss result (counter)
 - ``redis.client.csc.evictions`` - Cache evictions (counter)
 - ``redis.client.csc.network_saved`` - Bytes saved by caching (counter)
+- ``redis.client.csc.refreshes`` - Refresh attempts after an invalidation, with a
+  success/failure/rejected result (counter)
 - ``redis.client.csc.items`` - Current cache size (observable gauge)
 
 Custom Histogram Buckets
