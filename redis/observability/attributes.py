@@ -62,6 +62,7 @@ REDIS_CLIENT_STREAM_NAME = "redis.client.stream.name"
 REDIS_CLIENT_CONSUMER_GROUP = "redis.client.consumer_group"
 REDIS_CLIENT_CSC_RESULT = "redis.client.csc.result"
 REDIS_CLIENT_CSC_REASON = "redis.client.csc.reason"
+REDIS_CLIENT_CSC_REFRESH_RESULT = "redis.client.csc.refresh.result"
 
 
 class ConnectionState(Enum):
@@ -82,6 +83,12 @@ class CSCResult(Enum):
 class CSCReason(Enum):
     FULL = "full"
     INVALIDATION = "invalidation"
+
+
+class CSCRefreshResult(Enum):
+    SUCCESS = "success"
+    FAILURE = "failure"
+    REJECTED = "rejected"
 
 
 class GeoFailoverReason(Enum):
@@ -310,6 +317,7 @@ class AttributeBuilder:
         pool_name: Optional[str] = None,
         result: Optional[CSCResult] = None,
         reason: Optional[CSCReason] = None,
+        refresh_result: Optional[CSCRefreshResult] = None,
     ) -> Dict[str, Any]:
         """
         Build attributes for a Client Side Caching (CSC) operation.
@@ -318,6 +326,7 @@ class AttributeBuilder:
             pool_name: Connection pool name (used only for csc_items metric)
             result: CSC result ('hit' or 'miss')
             reason: Reason for CSC eviction ('full' or 'invalidation')
+            refresh_result: CSC refresh outcome ('success', 'failure' or 'rejected')
 
         Returns:
             Dictionary of CSC attributes
@@ -332,6 +341,9 @@ class AttributeBuilder:
 
         if reason is not None:
             attrs[REDIS_CLIENT_CSC_REASON] = reason.value
+
+        if refresh_result is not None:
+            attrs[REDIS_CLIENT_CSC_REFRESH_RESULT] = refresh_result.value
 
         return attrs
 
