@@ -63,6 +63,7 @@ from redis.observability.attributes import (
     DB_CLIENT_CONNECTION_POOL_NAME,
     DB_CLIENT_CONNECTION_STATE,
     ConnectionState,
+    get_pool_name,
 )
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE, SENTINEL
@@ -2574,48 +2575,95 @@ class TestTrackingModePairing:
         assert proxy._skip_next_caching is False
 
 
-_CLIENT_CACHING_SPELLINGS = [
-    ("CLIENT CACHING", "NO"),
-    ("client caching", "yes"),
-    (b"CLIENT CACHING", b"NO"),
-    ("CLIENT", "CACHING", "NO"),
-    (b"CLIENT", b"CACHING", b"YES"),
-    (b"client", "Caching", "no"),
+# Every spelling ``pack_command`` accepts: one argument or two, ``str``, ``bytes``,
+# ``bytearray`` or ``memoryview``, any case, padded with whitespace or not. Each row is ``(args, the command name the refusal reports)``.
+_CACHE_OWNED_SPELLINGS = [
+    (("CLIENT CACHING", "NO"), "CLIENT CACHING"),
+    (("client caching", "yes"), "CLIENT CACHING"),
+    ((b"CLIENT CACHING", b"NO"), "CLIENT CACHING"),
+    (("CLIENT", "CACHING", "NO"), "CLIENT CACHING"),
+    ((b"CLIENT", b"CACHING", b"YES"), "CLIENT CACHING"),
+    ((b"client", "Caching", "no"), "CLIENT CACHING"),
+    (("CLIENT TRACKING", "OFF"), "CLIENT TRACKING"),
+    (("CLIENT TRACKING", "ON", "REDIRECT", 5), "CLIENT TRACKING"),
+    (("client tracking", "on", "bcast"), "CLIENT TRACKING"),
+    (("CLIENT", b"TRACKING", b"OFF"), "CLIENT TRACKING"),
+    ((b"CLIENT", b"TRACKING", b"OFF"), "CLIENT TRACKING"),
+    ((b"CLIENT TRACKING", b"ON", b"OPTIN"), "CLIENT TRACKING"),
+    (("RESET",), "RESET"),
+    (("reset",), "RESET"),
+    ((b"RESET",), "RESET"),
+    ((bytearray(b"CLIENT CACHING"), b"NO"), "CLIENT CACHING"),
+    (("CLIENT", memoryview(b"CACHING"), "YES"), "CLIENT CACHING"),
+    (
+        (bytearray(b"CLIENT"), bytearray(b"TRACKING"), bytearray(b"OFF")),
+        "CLIENT TRACKING",
+    ),
+    ((memoryview(b"RESET"),), "RESET"),
+    ((" CLIENT TRACKING", "OFF"), "CLIENT TRACKING"),
+    (("\tclient tracking", "off"), "CLIENT TRACKING"),
+    ((b" CLIENT CACHING", b"NO"), "CLIENT CACHING"),
+    ((" RESET",), "RESET"),
+    (("reset\t",), "RESET"),
 ]
-_CLIENT_CACHING_IDS = [
-    "str-one-arg",
-    "str-lowercase",
-    "bytes-one-arg",
-    "str-two-args",
-    "bytes-two-args",
-    "mixed-case-and-types",
+_CACHE_OWNED_IDS = [
+    "caching-str-one-arg",
+    "caching-str-lowercase",
+    "caching-bytes-one-arg",
+    "caching-str-two-args",
+    "caching-bytes-two-args",
+    "caching-mixed-case-and-types",
+    "tracking-off",
+    "tracking-on-redirect",
+    "tracking-lowercase-bcast",
+    "tracking-str-bytes-two-args",
+    "tracking-bytes-two-args",
+    "tracking-bytes-one-arg-optin",
+    "reset",
+    "reset-lowercase",
+    "reset-bytes",
+    "caching-bytearray-one-arg",
+    "caching-memoryview-subcommand",
+    "tracking-bytearray-two-args",
+    "reset-memoryview",
+    "tracking-leading-space",
+    "tracking-leading-tab",
+    "caching-bytes-leading-space",
+    "reset-leading-space",
+    "reset-trailing-whitespace",
 ]
 
 
 @pytest.mark.fixed_client
-class TestUserSentClientCaching:
+class TestUserSentCacheOwnedCommands:
     """
-    A user-sent ``CLIENT CACHING`` sets a flag that the next command on the socket
-    consumes, and a pooled connection promises nothing about which command that is - so
-    the cache refuses it on every connection it manages, in every mode.
+    ``CLIENT CACHING``, ``CLIENT TRACKING`` and ``RESET`` each change the tracking state
+    the cache relies on for invalidations: a stray ``CLIENT CACHING`` is consumed by
+    whatever the socket sends next, and the other two stop or redirect invalidations while
+    the cache keeps storing replies. So the cache refuses them on every connection it
+    manages, in every mode.
     """
 
     @pytest.mark.parametrize("mode", list(TrackingMode))
-    @pytest.mark.parametrize("args", _CLIENT_CACHING_SPELLINGS, ids=_CLIENT_CACHING_IDS)
-    def test_send_command_refuses_client_caching(
-        self, proxy_factory, mock_connection, mode, args
+    @pytest.mark.parametrize(
+        "args,command", _CACHE_OWNED_SPELLINGS, ids=_CACHE_OWNED_IDS
+    )
+    def test_send_command_refuses_cache_owned_commands(
+        self, proxy_factory, mock_connection, mode, args, command
     ):
         proxy, _ = proxy_factory(mode)
 
-        with pytest.raises(RedisError, match="CLIENT CACHING cannot be sent"):
+        with pytest.raises(RedisError, match=f"^{command} cannot be sent"):
             proxy.send_command(*args)
 
         mock_connection.send_command.assert_not_called()
         mock_connection.send_packed_command.assert_not_called()
 
-    @pytest.mark.parametrize("args", _CLIENT_CACHING_SPELLINGS, ids=_CLIENT_CACHING_IDS)
-    def test_pack_commands_refuses_client_caching(
-        self, proxy_factory, mock_connection, args
+    @pytest.mark.parametrize(
+        "args,command", _CACHE_OWNED_SPELLINGS, ids=_CACHE_OWNED_IDS
+    )
+    def test_pack_commands_refuses_cache_owned_commands(
+        self, proxy_factory, mock_connection, args, command
     ):
         """
         Every pipeline and transaction packs through ``pack_commands``, so refusing there
@@ -2623,7 +2671,7 @@ class TestUserSentClientCaching:
         """
         proxy, _ = proxy_factory(TrackingMode.OPTOUT)
 
-        with pytest.raises(RedisError, match="CLIENT CACHING cannot be sent"):
+        with pytest.raises(RedisError, match=f"^{command} cannot be sent"):
             proxy.pack_commands([("SET", "a", "1"), args, ("GET", "a")])
 
         mock_connection.pack_commands.assert_not_called()
@@ -2632,13 +2680,38 @@ class TestUserSentClientCaching:
         "args",
         [
             ("CLIENT", "TRACKINGINFO"),
+            (b"CLIENT TRACKINGINFO",),
+            ("CLIENT GETREDIR",),
             ("CLIENT ID",),
             ("CLIENT",),
             ("CONFIG", "GET", "maxmemory"),
+            ("CONFIG RESETSTAT",),
+            ("ACL LOG", b"RESET"),
+            ("RENAME", "a", "b"),
+            (b"rpush", b"a", b"1"),
             ("GET", "foo"),
             (b"CACHING",),
+            (b"TRACKING", b"OFF"),
+            (" CLIENT TRACKINGINFO",),
+            (bytearray(b"RENAME"), "a", "b"),
         ],
-        ids=["trackinginfo", "client-id", "bare-client", "config", "get", "no-client"],
+        ids=[
+            "trackinginfo",
+            "trackinginfo-bytes",
+            "getredir",
+            "client-id",
+            "bare-client",
+            "config",
+            "config-resetstat",
+            "acl-log-reset",
+            "rename",
+            "five-char-r-command",
+            "get",
+            "no-client-caching",
+            "no-client-tracking",
+            "trackinginfo-leading-space",
+            "rename-bytearray",
+        ],
     )
     def test_other_commands_pass_through(self, proxy_factory, mock_connection, args):
         # ``plain``, so no command is paired and every one reaches ``send_command`` as is.
@@ -2649,6 +2722,27 @@ class TestUserSentClientCaching:
 
         mock_connection.send_command.assert_called_once_with(*args)
         mock_connection.pack_commands.assert_called_once_with([args])
+
+    def test_the_caches_own_tracking_handshake_is_not_refused(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        The connect callback is registered on the wrapped connection, which calls it with
+        itself, so the handshake's ``CLIENT TRACKING ON`` never passes the guarded
+        ``send_command``. ``test_the_mode_is_sent_in_the_tracking_handshake`` pins what it
+        sends.
+        """
+        proxy, _ = proxy_factory(TrackingMode.OPTOUT)
+        mock_connection._parser = Mock()
+
+        mock_connection.register_connect_callback.assert_called_once_with(
+            proxy._enable_tracking_callback
+        )
+        proxy._enable_tracking_callback(mock_connection)
+
+        mock_connection.send_command.assert_called_once_with(
+            "CLIENT", "TRACKING", "ON", "OPTOUT"
+        )
 
     def test_the_caches_own_pairing_is_not_refused(
         self, proxy_factory, mock_connection
@@ -3829,3 +3923,221 @@ class TestPushHandlerValueErrorKeepsConnection:
 
         assert conn.is_connected is True
         assert conn.read_response(disconnect_on_error=False) == b"SECOND"
+
+
+class _DummyConnection:
+    """Minimal connection stub for pool metric tests (no real socket)."""
+
+    description_format = "DummyConnection<>"
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.pid = os.getpid()
+        self._sock = None
+
+    def connect(self):
+        self._sock = MagicMock()
+
+    def disconnect(self):
+        self._sock = None
+
+    def can_read(self):
+        return False
+
+    def should_reconnect(self):
+        return False
+
+    def re_auth(self):
+        pass
+
+
+def _pool_metric_calls(mock_fn, pool_name):
+    """Extract (state, delta) tuples from record_connection_count calls for a pool.
+
+    Filters by pool_name to avoid interference from GC of other pools.
+    """
+    result = []
+    for c in mock_fn.call_args_list:
+        p = c.kwargs.get("pool_name", c.args[0] if c.args else None)
+        if p != pool_name:
+            continue
+        state = c.kwargs.get("connection_state", c.args[1] if len(c.args) > 1 else None)
+        counter = c.kwargs.get("counter", c.args[2] if len(c.args) > 2 else 1)
+        result.append((state, counter))
+    return result
+
+
+def _net(calls):
+    """Return (idle_net, used_net) from a list of (state, delta) tuples."""
+    idle = sum(d for s, d in calls if s == ConnectionState.IDLE)
+    used = sum(d for s, d in calls if s == ConnectionState.USED)
+    return idle, used
+
+
+class TestConnectionPoolMetricCount:
+    """Tests for db.client.connection.count UpDownCounter accuracy.
+
+    Verifies that get_connection / release produce balanced IDLE and USED
+    counter updates across ConnectionPool and BlockingConnectionPool.
+    """
+
+    @patch("redis.connection.record_connection_count")
+    def test_new_connection_records_only_used(self, mock_rec):
+        """A new connection should record USED +1 only (never was idle)."""
+        pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
+        pn = get_pool_name(pool)
+        mock_rec.reset_mock()
+
+        conn = pool.get_connection()
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert idle_net == 0, f"New conn should not touch IDLE, got {idle_net}"
+        assert used_net == 1
+        pool.release(conn)
+
+    @patch("redis.connection.record_connection_count")
+    def test_reused_connection_transitions_idle_to_used(self, mock_rec):
+        """A reused connection should record IDLE -1, USED +1."""
+        pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
+        pn = get_pool_name(pool)
+        conn = pool.get_connection()
+        pool.release(conn)
+        mock_rec.reset_mock()
+
+        conn2 = pool.get_connection()
+        assert conn2 is conn
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert idle_net == -1
+        assert used_net == 1
+        pool.release(conn2)
+
+    @patch("redis.connection.record_connection_count")
+    def test_full_lifecycle_nets_to_zero(self, mock_rec):
+        """create -> use -> release -> reuse -> release -> destroy = net 0."""
+        pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
+        pn = get_pool_name(pool)
+        mock_rec.reset_mock()
+
+        conn = pool.get_connection()
+        pool.release(conn)
+        conn = pool.get_connection()
+        pool.release(conn)
+
+        # Simulate destruction (what __del__ / reset does)
+        idle_count = len(pool._available_connections)
+        if idle_count:
+            mock_rec(
+                pool_name=pn,
+                connection_state=ConnectionState.IDLE,
+                counter=-idle_count,
+            )
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert idle_net == 0, f"Lifecycle IDLE should net 0, got {idle_net}"
+        assert used_net == 0, f"Lifecycle USED should net 0, got {used_net}"
+
+    @patch("redis.connection.record_connection_count")
+    def test_release_unowned_does_not_record(self, mock_rec):
+        """release() of a connection the pool no longer owns (e.g. inherited by
+        a forked child) must not record connection.count. Fork-time accounting
+        is owned by reset()/__del__; recording here would double-count."""
+        pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
+
+        conn = pool.get_connection()
+        mock_rec.reset_mock()
+        conn.pid = -1  # simulate a connection inherited across a fork
+        pool.release(conn)
+
+        assert mock_rec.call_args_list == [], (
+            "unowned release must not record connection.count"
+        )
+
+    @patch("redis.connection.record_connection_count")
+    def test_release_rejected_same_pid_decrements_used(self, mock_rec):
+        """A connection checked out by this process but rejected by
+        owns_connection() (e.g. SentinelConnectionPool after a master failover)
+        must still decrement USED."""
+        pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
+        pn = get_pool_name(pool)
+
+        conn = pool.get_connection()
+        mock_rec.reset_mock()
+        with patch.object(pool, "owns_connection", return_value=False):
+            pool.release(conn)
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert used_net == -1, f"USED must be decremented, got {used_net}"
+        assert idle_net == 0, f"IDLE must not increase for dropped conn, got {idle_net}"
+
+
+class TestBlockingConnectionPoolMetricCount:
+    """Same metric-count tests for BlockingConnectionPool."""
+
+    def _pool(self):
+        return BlockingConnectionPool(
+            connection_class=_DummyConnection,
+            max_connections=10,
+            timeout=0.1,
+        )
+
+    @patch("redis.connection.record_connection_count")
+    def test_new_connection_records_only_used(self, mock_rec):
+        pool = self._pool()
+        pn = get_pool_name(pool)
+        mock_rec.reset_mock()
+
+        conn = pool.get_connection()
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert idle_net == 0
+        assert used_net == 1
+        pool.release(conn)
+
+    @patch("redis.connection.record_connection_count")
+    def test_release_unowned_does_not_record(self, mock_rec):
+        """Unowned (inherited-across-fork) release must not record; fork-time
+        accounting is owned by reset()/__del__."""
+        pool = self._pool()
+        mock_rec.reset_mock()
+
+        conn = pool.get_connection()
+        mock_rec.reset_mock()
+        conn.pid = -1
+        pool.release(conn)
+
+        assert mock_rec.call_args_list == [], (
+            "unowned release must not record connection.count"
+        )
+
+    @patch("redis.connection.record_connection_count")
+    def test_release_rejected_same_pid_decrements_used(self, mock_rec):
+        """A connection checked out by this process but rejected by
+        owns_connection() must decrement USED and be removed from _connections
+        so a later reset() does not decrement USED again."""
+        pool = self._pool()
+        pn = get_pool_name(pool)
+
+        conn = pool.get_connection()
+        mock_rec.reset_mock()
+        with patch.object(pool, "owns_connection", return_value=False):
+            pool.release(conn)
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert used_net == -1, f"USED must be decremented, got {used_net}"
+        assert idle_net == 0, f"IDLE must not increase for dropped conn, got {idle_net}"
+        assert conn not in pool._connections
+
+        mock_rec.reset_mock()
+        pool.reset()
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert used_net == 0, f"reset() must not decrement USED again, got {used_net}"
+        assert idle_net == 0, f"reset() must not touch IDLE, got {idle_net}"

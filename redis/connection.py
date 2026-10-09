@@ -56,7 +56,11 @@ from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from .driver_info import DriverInfo, resolve_driver_info
-from .event import AfterConnectionReleasedEvent, EventDispatcher
+from .event import (
+    AfterConnectionReleasedEvent,
+    EventDispatcher,
+    MaintenanceCompletedEvent,
+)
 from .exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -70,11 +74,13 @@ from .exceptions import (
 )
 from .himport import HImportRegistry
 from .maint_notifications import (
+    PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT,
     MaintenanceState,
     MaintNotificationsConfig,
     MaintNotificationsConnectionHandler,
     MaintNotificationsPoolHandler,
     OSSMaintNotificationsHandler,
+    _dispatch_maintenance_event,
 )
 from .observability.attributes import (
     DB_CLIENT_CONNECTION_POOL_NAME,
@@ -426,6 +432,129 @@ class MaintNotificationsAbstractConnection:
                 "Maintenance notifications are only supported with hiredis and RESP3 parsers!"
             )
         return parser
+
+    def _complete_maintenance_on_disconnect(self) -> None:
+        """
+        Restore the settings a maintenance relaxed on this connection when it is
+        closed, and report the relaxation as completed - the same way the
+        completion notification would have been reported. The MOVING state is
+        left alone: it is owned by the pool-level TTL cleanup.
+        """
+        if self.maintenance_state != MaintenanceState.MAINTENANCE:
+            return
+        self.reset_tmp_settings(reset_relaxed_timeout=True)
+        self.maintenance_state = MaintenanceState.NONE
+        # reset the sets that keep track of received start maint
+        # notifications and skipped end maint notifications
+        self.reset_received_notifications()
+        if self.maint_notifications_config is not None:
+            pool_handler = self._maint_notifications_pool_handler
+            _dispatch_maintenance_event(
+                self.maint_notifications_config,
+                MaintenanceCompletedEvent(
+                    connection_pool=(
+                        pool_handler.pool if pool_handler is not None else None
+                    ),
+                    connection=self,
+                    state=MaintenanceState.MAINTENANCE,
+                    notification=None,
+                    config=self.maint_notifications_config,
+                ),
+            )
+
+    def handle_pending_push_notifications(self) -> None:
+        """
+        Process the push notifications buffered on this idle connection if it
+        is still alive, and report a connection that has to be reconnected.
+
+        A pooled connection that has readable data while idle either has push
+        notifications waiting, or has been closed by the server - or both, when
+        the notifications announced the maintenance that closed it. The socket
+        state cannot be told apart from the pending data without reading it, so
+        the notifications are collected first and handed to their handlers only
+        once the drain has shown the socket to be alive: the server closes the
+        connections of a moved endpoint when the MOVING time-to-live expires,
+        so an alive socket means the maintenance is still in progress and the
+        announced address current. A notification buffered on a socket the
+        server has since closed describes a maintenance that is over, after
+        which the configured address is what to connect to again: it is
+        discarded, and the ``ConnectionError`` raised here makes the pool
+        reconnect before any command is sent.
+
+        Anything read that is not a maintenance notification or a client-side
+        cache invalidation - a reply, a null or an error reply left unread by an
+        earlier command - means the connection is dirty and is reported the same
+        way, as is a drain that does not complete within
+        ``PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT``.
+        """
+        parser = self._get_push_notifications_parser()
+        deferred: list = []
+
+        def defer(handler):
+            def deferred_handler(notification):
+                deferred.append((handler, notification))
+
+            return deferred_handler
+
+        handlers = (
+            (parser.node_moving_push_handler_func, parser.set_node_moving_push_handler),
+            (parser.maintenance_push_handler_func, parser.set_maintenance_push_handler),
+            (
+                parser.oss_cluster_maint_push_handler_func,
+                parser.set_oss_cluster_maint_push_handler,
+            ),
+            # Client-side cache invalidations are pushes too; the ones on a
+            # connection that has to be reconnected are covered by the cache
+            # flush its disconnect performs
+            (
+                parser.invalidation_push_handler_func,
+                parser.set_invalidation_push_handler,
+            ),
+        )
+        for handler, set_handler in handlers:
+            if handler is not None:
+                set_handler(defer(handler))
+
+        alive = False
+        deadline = time.monotonic() + PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT
+        try:
+            while self.can_read():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ConnectionError(
+                        "Timed out reading pending push notifications"
+                    )
+                read = len(deferred)
+                # The pool disconnects the connection it handed out - with
+                # caching the proxy, not the wrapped connection - on the error.
+                # The parsers apply the timeout to each receive of a frame; the
+                # deadline bounds the drain across frames.
+                self.read_response(
+                    push_request=True,
+                    timeout=remaining,
+                    disconnect_on_error=False,
+                )
+                # Only a push reaches a deferred handler; anything else is a
+                # reply left unread by an earlier command
+                if len(deferred) == read:
+                    raise ConnectionError("Connection has data")
+            alive = True
+        except ResponseError as e:
+            raise ConnectionError("Connection has data") from e
+        finally:
+            for handler, set_handler in handlers:
+                set_handler(handler)
+            if not alive and deferred and logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    f"Discarding {len(deferred)} push notification(s) buffered on "
+                    f"a connection that is closed or dirty, reconnecting: {self}"
+                )
+
+        for handler, notification in deferred:
+            try:
+                handler(notification)
+            except Exception as e:
+                logger.error(f"Error handling {notification}: {e}")
 
     @abstractmethod
     def _get_socket(self) -> Optional[socket.socket]:
@@ -1366,6 +1495,9 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         # The server session is gone, so any HIMPORT fieldsets prepared on this
         # socket no longer exist; reset the tracking.
         self._reset_himport_state()
+        # Likewise the relaxation a maintenance applied to it: restored and
+        # reported here, ahead of a close that may find no socket to close
+        self._complete_maintenance_on_disconnect()
         self._parser.on_disconnect()
 
         conn_sock = self._sock
@@ -1415,17 +1547,6 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             record_connection_closed(
                 close_reason=CloseReason.APPLICATION_CLOSE,
             )
-
-        if self.maintenance_state == MaintenanceState.MAINTENANCE:
-            # this block will be executed only if the connection was in maintenance state
-            # and the connection was closed.
-            # The state change won't be applied on connections that are in Moving state
-            # because their state and configurations will be handled when the moving ttl expires.
-            self.reset_tmp_settings(reset_relaxed_timeout=True)
-            self.maintenance_state = MaintenanceState.NONE
-            # reset the sets that keep track of received start maint
-            # notifications and skipped end maint notifications
-            self.reset_received_notifications()
 
     def mark_for_reconnect(self):
         self._should_reconnect = True
@@ -1844,24 +1965,60 @@ class Connection(AbstractConnection):
 # store it only by convention.
 _NO_PENDING_HIT = object()
 
-# A command name that does not start with one of these cannot be ``CLIENT``, so
-# ``_is_client_caching`` rejects nearly every command before it allocates anything.
+# A command name that does not start with one of these cannot be ``CLIENT`` or ``RESET``,
+# so ``_cache_owned_command`` rejects nearly every command before it allocates anything.
 _CLIENT_FIRST_CHARS = frozenset(("c", "C", b"c", b"C"))
+_RESET_FIRST_CHARS = frozenset(("r", "R", b"r", b"R"))
+# ``pack`` splits the command name on whitespace, so a name padded with it still reaches
+# the server as ``CLIENT ...`` or ``RESET``. It encodes a ``str`` name before splitting,
+# so ASCII whitespace is the only kind that splits.
+_WHITESPACE_CHARS = frozenset(
+    (*" \t\n\r\x0b\x0c", *(bytes((c,)) for c in b" \t\n\r\x0b\x0c"))
+)
+
+# The ``CLIENT`` subcommands the cache owns. ``TRACKINGINFO`` and ``GETREDIR`` only read the
+# tracking state, so they are not here.
+_CACHE_OWNED_CLIENT_SUBCOMMANDS = frozenset(("CACHING", "TRACKING"))
 
 
-def _is_client_caching(args) -> bool:
+def _cache_owned_command(args) -> str | None:
     """
-    Whether ``args`` is a ``CLIENT CACHING`` command, in any of the spellings
+    The name of the command in ``args`` if it is one the cache owns - ``CLIENT CACHING``,
+    ``CLIENT TRACKING`` or ``RESET`` - else ``None``. Matches every spelling
     ``pack_command`` accepts: ``"CLIENT CACHING"`` as one argument or ``"CLIENT"``,
-    ``"CACHING"`` as two, as ``str`` or ``bytes``, in any case.
+    ``"CACHING"`` as two, as ``str``, ``bytes``, ``bytearray`` or ``memoryview``, in any
+    case, padded with whitespace or not.
     """
     command = args[0]
-    if not isinstance(command, (str, bytes)) or command[:1] not in _CLIENT_FIRST_CHARS:
-        return False
+    if not isinstance(command, (str, bytes)):
+        if not isinstance(command, (bytearray, memoryview)):
+            return None
+        command = bytes(command)
+    first_char = command[:1]
+    if first_char in _RESET_FIRST_CHARS:
+        # ``RESET`` takes no arguments, so only a five-character name, or one followed by
+        # whitespace, can match. The check keeps the many other ``R`` commands (``RPOP``,
+        # ``RENAME``, ...) allocation-free.
+        if len(command) != 5 and command[5:6] not in _WHITESPACE_CHARS:
+            return None
+    elif first_char not in _CLIENT_FIRST_CHARS and first_char not in _WHITESPACE_CHARS:
+        return None
     words = str_if_bytes(command).upper().split()
-    if len(words) == 1 and len(args) > 1 and isinstance(args[1], (str, bytes)):
-        words.append(str_if_bytes(args[1]).upper())
-    return words[:2] == ["CLIENT", "CACHING"]
+    if not words:
+        return None
+    if words[0] == "RESET":
+        return "RESET"
+    if words[0] != "CLIENT":
+        return None
+    if len(words) == 1 and len(args) > 1:
+        subcommand = args[1]
+        if isinstance(subcommand, (bytearray, memoryview)):
+            subcommand = bytes(subcommand)
+        if isinstance(subcommand, (str, bytes)):
+            words.append(str_if_bytes(subcommand).upper())
+    if len(words) > 1 and words[1] in _CACHE_OWNED_CLIENT_SUBCOMMANDS:
+        return f"CLIENT {words[1]}"
+    return None
 
 
 class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInterface):
@@ -1989,6 +2146,10 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._pending_caching_reply = False
         self._skip_next_caching = False
         self._pending_cache_hit = _NO_PENDING_HIT
+        # The maintenance handlers are bound to this proxy, so the relaxation
+        # a maintenance applied is reported with the proxy as its source
+        if isinstance(self._conn, MaintNotificationsAbstractConnection):
+            self._complete_maintenance_on_disconnect()
         self._conn.disconnect(*args, **kwargs)
 
     def check_health(self):
@@ -2012,7 +2173,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
     def send_command(self, *args, **kwargs):
         # Before anything else, so a refused command leaves no state behind.
-        self._refuse_client_caching(args)
+        self._refuse_cache_owned_command(args)
         self._process_pending_invalidations()
         self._pending_caching_reply = False
         self._pending_cache_hit = _NO_PENDING_HIT
@@ -2340,31 +2501,49 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
     def pack_commands(self, commands):
         # Every pipeline and transaction packs through here, so the guard covers them as
-        # well. The cache's own pairing is unaffected: ``_send_with_caching`` packs through
-        # the wrapped connection, not through this method.
+        # well. The cache's own commands are unaffected: ``_send_with_caching`` packs
+        # through the wrapped connection, and the tracking handshake is sent on it.
         for args in commands:
-            self._refuse_client_caching(args)
+            self._refuse_cache_owned_command(args)
         return self._conn.pack_commands(commands)
 
     @staticmethod
-    def _refuse_client_caching(args) -> None:
+    def _refuse_cache_owned_command(args) -> None:
         """
-        Refuse a user-sent ``CLIENT CACHING`` on a connection the cache manages.
+        Refuse a user-sent ``CLIENT CACHING``, ``CLIENT TRACKING`` or ``RESET`` on a
+        connection the cache manages.
 
-        The server applies the flag to the next command on the socket, and a pooled
-        connection promises nothing about which command that is. Under ``optout`` a stray
-        ``NO`` would leave the next cached read untracked while its reply is still stored,
-        so it would never be invalidated. The cache sends ``CLIENT CACHING`` itself, paired
-        with the read it belongs to, whenever the tracking mode needs it.
+        Each of them changes the tracking state the cache relies on for invalidations:
+
+        - ``CLIENT CACHING`` sets a flag the server applies to the next command on the
+          socket, and a pooled connection promises nothing about which command that is.
+          Under ``optout`` a stray ``NO`` would leave the next cached read untracked while
+          its reply is still stored, so it would never be invalidated. The cache sends it
+          itself, paired with the read it belongs to, whenever the tracking mode needs it.
+        - ``CLIENT TRACKING`` turns tracking off or reconfigures it, so the cache would keep
+          storing replies that no invalidation reaches. The cache enables tracking itself
+          when the connection is established.
+        - ``RESET`` clears tracking along with the rest of the connection state.
 
         Raises:
-            RedisError: If ``args`` is a ``CLIENT CACHING`` command.
+            RedisError: If ``args`` is one of these commands.
         """
-        if _is_client_caching(args):
-            raise RedisError(
-                "CLIENT CACHING cannot be sent on a connection with client-side caching "
-                "enabled: the cache sends it itself, paired with the read it applies to"
+        command = _cache_owned_command(args)
+        if command is None:
+            return
+        if command == "CLIENT CACHING":
+            reason = "the cache sends it itself, paired with the read it applies to"
+        elif command == "CLIENT TRACKING":
+            reason = (
+                "the cache enables tracking itself, and changing it would stop "
+                "invalidations for cached replies"
             )
+        else:
+            reason = "it turns off the tracking the cache relies on for invalidations"
+        raise RedisError(
+            f"{command} cannot be sent on a connection with client-side caching "
+            f"enabled: {reason}"
+        )
 
     # HIMPORT state lives on the wrapped connection (HIMPORT is never cacheable);
     # delegate so callers treat the proxy like a plain connection and never need
@@ -2457,6 +2636,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             raise NotImplementedError(
                 "Maintenance notifications are not supported by this connection type"
             )
+
+    def _get_parser(self) -> BaseParser:
+        return self._conn._get_parser()
 
     def _get_maint_notifications_connection_instance(
         self, connection
@@ -3321,6 +3503,7 @@ class MaintNotificationsAbstractConnectionPool:
         Update the settings for a single connection.
         """
         if state:
+            self._complete_maintenance_taken_over_by_handoff(conn, state)
             conn.maintenance_state = state
 
         if update_notification_hash:
@@ -3340,6 +3523,33 @@ class MaintNotificationsAbstractConnectionPool:
             )
 
         conn.update_current_socket_timeout(relaxed_timeout)
+
+    def _complete_maintenance_taken_over_by_handoff(
+        self, conn: "MaintNotificationsAbstractConnection", state: "MaintenanceState"
+    ) -> None:
+        """
+        Report the MAINTENANCE relaxation of a connection a handoff is taking
+        over as completed. The connection's completion notification is skipped
+        while it is MOVING, and the handoff's own cleanup restores it without
+        looking at what it superseded, so this is the only point at which the
+        pair opened by the start event can be closed.
+        """
+        if (
+            state is not MaintenanceState.MOVING
+            or conn.maintenance_state is not MaintenanceState.MAINTENANCE
+            or conn.maint_notifications_config is None
+        ):
+            return
+        _dispatch_maintenance_event(
+            conn.maint_notifications_config,
+            MaintenanceCompletedEvent(
+                connection_pool=self,
+                connection=conn,
+                state=MaintenanceState.MAINTENANCE,
+                notification=None,
+                config=conn.maint_notifications_config,
+            ),
+        )
 
     def update_connections_settings(
         self,
@@ -3886,44 +4096,31 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 is_created = True
             self._in_use_connections.add(connection)
 
-        # Record state transition: IDLE -> USED
-        # (make_connection already recorded IDLE +1 for new connections)
-        # This ensures counters stay balanced if connect() fails and release() is called
+        # Record state transition for observability
         pool_name = get_pool_name(self)
-        record_connection_count(
-            pool_name=pool_name,
-            connection_state=ConnectionState.IDLE,
-            counter=-1,
-        )
-        record_connection_count(
-            pool_name=pool_name,
-            connection_state=ConnectionState.USED,
-            counter=1,
-        )
+        if is_created:
+            # New connection created and acquired: just USED +1
+            # (connection was never idle in the pool)
+            record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.USED,
+                counter=1,
+            )
+        else:
+            # Existing connection acquired from pool: IDLE -> USED
+            record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.IDLE,
+                counter=-1,
+            )
+            record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.USED,
+                counter=1,
+            )
 
         try:
-            # ensure this connection is connected to Redis
-            connection.connect()
-            # connections that the pool provides should be ready to send
-            # a command. if not, the connection was either returned to the
-            # pool before all data has been read or the socket has been
-            # closed. either way, reconnect and verify everything is good.
-            try:
-                if (
-                    connection.can_read()
-                    and self.cache is None
-                    and not self.maint_notifications_enabled()
-                ):
-                    raise ConnectionError("Connection has data")
-            except (ConnectionError, TimeoutError, OSError):
-                connection.disconnect()
-                connection.connect()
-                if (
-                    connection.can_read()
-                    and self.cache is None
-                    and not self.maint_notifications_enabled()
-                ):
-                    raise ConnectionError("Connection not ready")
+            self.ensure_connection(connection)
         except BaseException:
             # release the connection back to the pool so that we don't
             # leak it
@@ -3937,6 +4134,33 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             )
 
         return connection
+
+    def ensure_connection(self, connection: "Connection") -> None:
+        """Ensure that the connection object is connected and valid"""
+        connection.connect()
+        # connections that the pool provides should be ready to send
+        # a command. if not, the connection was either returned to the
+        # pool before all data has been read or the socket has been
+        # closed. either way, reconnect and verify everything is good.
+        # With maintenance notifications enabled the pending data may be
+        # push notifications that have to be applied rather than a reason
+        # to reconnect; reading them is what tells the two apart, and it
+        # raises for a socket the server has closed in the meantime.
+        try:
+            if connection.can_read():
+                if self.maint_notifications_enabled():
+                    connection.handle_pending_push_notifications()
+                elif self.cache is None:
+                    raise ConnectionError("Connection has data")
+        except (ConnectionError, TimeoutError, OSError):
+            connection.disconnect()
+            connection.connect()
+            if (
+                connection.can_read()
+                and self.cache is None
+                and not self.maint_notifications_enabled()
+            ):
+                raise ConnectionError("Connection not ready")
 
     def get_encoder(self) -> Encoder:
         "Return an encoder based on encoding settings"
@@ -3964,13 +4188,6 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
         # Only a connection that exists can be released, so count it here.
         self._created_connections += 1
-
-        # Record new connection created (starts as IDLE) - only after successful construction
-        record_connection_count(
-            pool_name=get_pool_name(self),
-            connection_state=ConnectionState.IDLE,
-            counter=1,
-        )
 
         return connection
 
@@ -4013,7 +4230,6 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             else:
                 # Pool doesn't own this connection, do not add it back
                 # to the pool.
-                # Still need to decrement USED since it was counted in get_connection()
                 connection.disconnect()
                 # Subclasses such as SentinelConnectionPool can override
                 # owns_connection() with a comparison different from local PID
@@ -4021,11 +4237,15 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 # connection.pid == self.pid before reclaiming its slot.
                 if connection.pid == self.pid:
                     self._created_connections -= 1
-                record_connection_count(
-                    pool_name="unknown_pool",
-                    connection_state=ConnectionState.USED,
-                    counter=-1,
-                )
+                    # The connection was checked out by this process, so
+                    # decrement USED, which was counted in get_connection().
+                    # Connections inherited across a fork are skipped here,
+                    # their accounting is handled by reset()/__del__.
+                    record_connection_count(
+                        pool_name=get_pool_name(self),
+                        connection_state=ConnectionState.USED,
+                        counter=-1,
+                    )
                 return
 
     def owns_connection(self, connection: "Connection") -> int:
@@ -4285,13 +4505,6 @@ class BlockingConnectionPool(ConnectionPool):
                 connection = self.connection_class(**self.connection_kwargs)
             self._connections.append(connection)
 
-            # Record new connection created (starts as IDLE)
-            record_connection_count(
-                pool_name=get_pool_name(self),
-                connection_state=ConnectionState.IDLE,
-                counter=1,
-            )
-
             return connection
         finally:
             if self._locked:
@@ -4360,44 +4573,31 @@ class BlockingConnectionPool(ConnectionPool):
                     pass
                 self._locked = False
 
-        # Record state transition: IDLE -> USED
-        # (make_connection already recorded IDLE +1 for new connections)
-        # This ensures counters stay balanced if connect() fails and release() is called
+        # Record state transition for observability
         pool_name = get_pool_name(self)
-        record_connection_count(
-            pool_name=pool_name,
-            connection_state=ConnectionState.IDLE,
-            counter=-1,
-        )
-        record_connection_count(
-            pool_name=pool_name,
-            connection_state=ConnectionState.USED,
-            counter=1,
-        )
+        if is_created:
+            # New connection created and acquired: just USED +1
+            # (connection was never idle in the pool)
+            record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.USED,
+                counter=1,
+            )
+        else:
+            # Existing connection acquired from pool: IDLE -> USED
+            record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.IDLE,
+                counter=-1,
+            )
+            record_connection_count(
+                pool_name=pool_name,
+                connection_state=ConnectionState.USED,
+                counter=1,
+            )
 
         try:
-            # ensure this connection is connected to Redis
-            connection.connect()
-            # connections that the pool provides should be ready to send
-            # a command. if not, the connection was either returned to the
-            # pool before all data has been read or the socket has been
-            # closed. either way, reconnect and verify everything is good.
-            try:
-                if (
-                    connection.can_read()
-                    and self.cache is None
-                    and not self.maint_notifications_enabled()
-                ):
-                    raise ConnectionError("Connection has data")
-            except (ConnectionError, TimeoutError, OSError):
-                connection.disconnect()
-                connection.connect()
-                if (
-                    connection.can_read()
-                    and self.cache is None
-                    and not self.maint_notifications_enabled()
-                ):
-                    raise ConnectionError("Connection not ready")
+            self.ensure_connection(connection)
         except BaseException:
             # release the connection back to the pool so that we don't leak it
             self.release(connection)
@@ -4432,12 +4632,22 @@ class BlockingConnectionPool(ConnectionPool):
                 # its needed.
                 connection.disconnect()
                 self.pool.put_nowait(None)
-                # Still need to decrement USED since it was counted in get_connection()
-                record_connection_count(
-                    pool_name="unknown_pool",
-                    connection_state=ConnectionState.USED,
-                    counter=-1,
-                )
+                # Subclasses can override owns_connection() with a comparison
+                # different from local PID ownership. When such a subclass
+                # rejects a connection checked out by this process, stop
+                # tracking it and decrement USED, which was counted in
+                # get_connection(). Connections inherited across a fork are
+                # skipped here, their accounting is handled by reset()/__del__.
+                if connection.pid == self.pid:
+                    try:
+                        self._connections.remove(connection)
+                    except ValueError:
+                        pass
+                    record_connection_count(
+                        pool_name=get_pool_name(self),
+                        connection_state=ConnectionState.USED,
+                        counter=-1,
+                    )
                 return
             if connection.should_reconnect():
                 if logger.isEnabledFor(logging.DEBUG):

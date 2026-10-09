@@ -21,6 +21,7 @@ from redis.asyncio.multidb.failure_detector import (
 )
 from redis.asyncio.multidb.healthcheck import PingHealthCheck, HealthCheck
 from redis.asyncio.retry import Retry
+from redis.maint_notifications import MaintNotificationsConfig
 from redis.multidb.circuit import CircuitBreaker
 
 
@@ -138,6 +139,83 @@ class TestMultiDbConfig:
         assert config.health_check_interval == health_check_interval
         assert config.failover_strategy == mock_failover_strategy
         assert config.auto_fallback_interval == auto_fallback_interval
+
+    def test_underlying_clients_have_disabled_retry_and_maint_notifications(self):
+        """
+        Test that underlying clients have retry disabled (0 retries)
+        and maintenance notifications disabled.
+        """
+        db_configs = [
+            DatabaseConfig(
+                client_kwargs={"host": "host1", "port": "port1"},
+                weight=1.0,
+            ),
+            DatabaseConfig(
+                client_kwargs={"host": "host2", "port": "port2"},
+                weight=0.9,
+            ),
+        ]
+
+        config = MultiDbConfig(databases_config=db_configs)
+        databases = config.databases()
+
+        assert len(databases) == 2
+
+        for db, weight in databases:
+            # Verify retry is disabled (0 retries)
+            retry = db.client.get_retry()
+            assert retry is not None
+            assert retry.get_retries() == 0
+
+            # Verify maint_notifications_config is disabled
+            # When maint_notifications_config.enabled is False, the pool handler is None
+            pool = db.client.connection_pool
+            assert pool._maint_notifications_pool_handler is None
+
+    def test_user_provided_maint_notifications_config_is_respected(self):
+        """
+        Test that user-provided maint_notifications_config is not overwritten.
+        """
+        user_maint_config = MaintNotificationsConfig(enabled=True)
+        db_configs = [
+            DatabaseConfig(
+                client_kwargs={
+                    "host": "host1",
+                    "port": "port1",
+                    "protocol": 3,  # Required for maint notifications
+                    "maint_notifications_config": user_maint_config,
+                },
+                weight=1.0,
+            ),
+        ]
+
+        config = MultiDbConfig(databases_config=db_configs)
+        databases = config.databases()
+
+        assert len(databases) == 1
+
+        db, weight = databases[0]
+        # Verify user-provided maint_notifications_config is respected
+        pool = db.client.connection_pool
+        assert pool._maint_notifications_pool_handler is not None
+        assert pool._maint_notifications_pool_handler.config is user_maint_config
+
+    def test_supplied_pool_keeps_its_own_maint_notifications_config(self):
+        """
+        The disabled default only applies to clients built from client_kwargs; a
+        pool the user supplies is used as it is, and its kwargs are not touched.
+        """
+        pool = ConnectionPool(host="host1", port=6379, protocol=3)
+        db_config = DatabaseConfig(from_pool=pool, weight=1.0)
+
+        config = MultiDbConfig(databases_config=[db_config])
+        databases = config.databases()
+
+        db, weight = databases[0]
+        assert db.client.connection_pool is pool
+        assert "maint_notifications_config" not in db_config.client_kwargs
+        # The pool's own RESP3 default ("auto") is left in place
+        assert pool.maint_notifications_enabled()
 
 
 @pytest.mark.fixed_client

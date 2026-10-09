@@ -17,7 +17,9 @@ from redis.asyncio.multidb.config import (
 from redis.asyncio.multidb.event import AsyncActiveDatabaseChanged
 from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialBackoff, ExponentialWithJitterBackoff, NoBackoff
+from redis.asyncio.multidb.healthcheck import DEFAULT_HEALTH_CHECK_TIMEOUT
 from redis.event import AsyncEventListenerInterface, EventDispatcher
+from redis.exceptions import ResponseError
 from redis.maint_notifications import EndpointType, MaintNotificationsConfig
 from redis.multidb.failure_detector import DEFAULT_MIN_NUM_FAILURES
 from tests.test_scenario.conftest import (
@@ -28,6 +30,7 @@ from tests.test_scenario.conftest import (
     _prepare_ssl_certificates,
     extract_cluster_fqdn,
     get_endpoints_config,
+    multi_db_client_kwargs,
     use_mock_proxy,
 )
 from tests.test_asyncio.test_scenario.async_fault_injector_client import (
@@ -74,6 +77,53 @@ async def _ping_error(client_class, url, client_kwargs):
         client = client_class.from_url(url, **client_kwargs)
         return None if await client.ping() else "PING returned a falsy response"
     except Exception as error:
+        return repr(error)
+    finally:
+        if client is not None:
+            # A throwaway probe client - its pool must not outlive the check.
+            try:
+                await client.aclose()
+            except Exception:
+                pass
+
+
+async def require_maint_notifications_supported(client_class, urls, client_kwargs):
+    """Fail up front when a database does not accept ``CLIENT MAINT_NOTIFICATIONS ON``.
+
+    Async mirror of the sync ``require_maint_notifications_supported``; see that
+    docstring for why both clusters are probed and why this fails rather than skips.
+    """
+    unsupported = {}
+
+    for url in urls:
+        error = await _maint_notifications_error(client_class, url, client_kwargs)
+
+        if error is not None:
+            unsupported[url] = error
+
+    if unsupported:
+        pytest.fail(
+            "Maintenance notifications are rejected by the Active-Active databases "
+            f"{unsupported}. Enable client_maint_notifications on every cluster of the "
+            "environment (ENABLE_MAINTENANCE_NOTIFICATIONS=true in the fault injector "
+            "configuration applies it to all of them)."
+        )
+
+
+async def _maint_notifications_error(client_class, url, client_kwargs):
+    """Return None if the notifications handshake succeeds, else the error."""
+    client = None
+    probe_kwargs = {
+        **client_kwargs,
+        "protocol": 3,
+        "maint_notifications_config": MaintNotificationsConfig(enabled=True),
+    }
+
+    try:
+        client = client_class.from_url(url, **probe_kwargs)
+        await client.ping()
+        return None
+    except ResponseError as error:
         return repr(error)
     finally:
         if client is not None:
@@ -285,7 +335,11 @@ async def r_multi_db(
     # Retry configuration different for health checks as initial health check require more time in case
     # if infrastructure wasn't restored from the previous test.
     health_check_interval = request.param.get("health_check_interval", 10)
+    health_check_timeout = request.param.get(
+        "health_check_timeout", DEFAULT_HEALTH_CHECK_TIMEOUT
+    )
     health_checks = request.param.get("health_checks", [])
+    maint_notifications_config = request.param.get("maint_notifications_config", None)
     event_dispatcher = EventDispatcher()
     listener = CheckActiveDatabaseChangedListener()
     event_dispatcher.register_listeners(
@@ -298,11 +352,9 @@ async def r_multi_db(
     db_config = DatabaseConfig(
         weight=1.0,
         from_url=endpoint_config["endpoints"][0],
-        client_kwargs={
-            "username": username,
-            "password": password,
-            "decode_responses": True,
-        },
+        client_kwargs=multi_db_client_kwargs(
+            username, password, maint_notifications_config
+        ),
         health_check_url=extract_cluster_fqdn(endpoint_config["endpoints"][0]),
     )
     db_configs.append(db_config)
@@ -310,11 +362,9 @@ async def r_multi_db(
     db_config1 = DatabaseConfig(
         weight=0.9,
         from_url=endpoint_config["endpoints"][1],
-        client_kwargs={
-            "username": username,
-            "password": password,
-            "decode_responses": True,
-        },
+        client_kwargs=multi_db_client_kwargs(
+            username, password, maint_notifications_config
+        ),
         health_check_url=extract_cluster_fqdn(endpoint_config["endpoints"][1]),
     )
     db_configs.append(db_config1)
@@ -328,6 +378,7 @@ async def r_multi_db(
         health_check_probes=3,
         health_check_interval=health_check_interval,
         event_dispatcher=event_dispatcher,
+        health_check_timeout=health_check_timeout,
     )
 
     # Before the client exists, so the initial health check it runs on first use is not
@@ -337,6 +388,15 @@ async def r_multi_db(
         endpoint_config["endpoints"][:2],
         {"username": username, "password": password},
     )
+
+    if maint_notifications_config is not None and (
+        maint_notifications_config.enabled is True
+    ):
+        await require_maint_notifications_supported(
+            client_class,
+            endpoint_config["endpoints"][:2],
+            {"username": username, "password": password},
+        )
 
     client = MultiDBClient(config)
 
