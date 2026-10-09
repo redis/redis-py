@@ -5,7 +5,9 @@ import threading
 import time
 import warnings
 from asyncio import CancelledError
+from collections import ChainMap, UserDict  # 2026-10-09
 from string import ascii_letters
+from types import MappingProxyType  # 2026-10-09
 from unittest import mock
 from unittest.mock import patch
 
@@ -4834,6 +4836,32 @@ class TestRedisCommands:
         r.zadd("a", {"a": 0, "b": 0, "c": 0, "d": 0, "e": 0, "f": 0, "g": 0})
         assert r.zlexcount("a", "-", "+") == 7
         assert r.zlexcount("a", "[b", "[f") == 5
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    @pytest.mark.parametrize(
+        "keys_factory", [dict, UserDict, MappingProxyType, ChainMap]
+    )
+    @pytest.mark.parametrize(
+        "command, expected",
+        [
+            ("zunion", [(b"right", -7.0), (b"shared", -1.0), (b"left", 6.0)]),
+            ("zinter", [(b"shared", -1.0)]),
+            ("zunionstore", [(b"right", -7.0), (b"shared", -1.0), (b"left", 6.0)]),
+            ("zinterstore", [(b"shared", -1.0)]),
+        ],
+    )
+    def test_zaggregate_mapping_weights(self, r, keys_factory, command, expected):
+        # 2026-10-09: Mapping wrappers must retain weights and the resulting rank order.
+        r.zadd("a", {"shared": 2, "left": 3})
+        r.zadd("b", {"shared": 5, "right": 7})
+        keys = keys_factory({"a": 2, "b": -1})
+        if command.endswith("store"):
+            assert getattr(r, command)("destination", keys) == len(expected)
+            result = r.zrange("destination", 0, -1, withscores=True)
+        else:
+            result = getattr(r, command)(keys, withscores=True)
+        assert_resp_response(r, result, expected, [list(row) for row in expected])
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
