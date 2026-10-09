@@ -97,6 +97,7 @@ from .observability.recorder import (
     record_connection_closed,
     record_connection_count,
     record_connection_create_time,
+    record_connection_timeout,
     record_connection_wait_time,
     record_csc_eviction,
     record_csc_network_saved,
@@ -4546,6 +4547,7 @@ class BlockingConnectionPool(ConnectionPool):
             try:
                 connection = self.pool.get(block=True, timeout=self.timeout)
             except Empty:
+                record_connection_timeout(pool_name=get_pool_name(self))
                 # Note that this is not caught by the redis client and will be
                 # raised unless handled by application code. If you want never to
                 raise ConnectionError("No connection available.")
