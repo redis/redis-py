@@ -71,6 +71,7 @@ from redis.asyncio.observability.recorder import (
     record_connection_closed,
     record_connection_count,
     record_connection_create_time,
+    record_connection_timeout,
     record_connection_wait_time,
     record_error_count,
 )
@@ -3454,6 +3455,7 @@ class BlockingConnectionPool(ConnectionPool):
                         )
                         is_created = connections_after > connections_before
         except asyncio.TimeoutError as err:
+            await record_connection_timeout(pool_name=get_pool_name(self))
             raise ConnectionError("No connection available.") from err
 
         # Record state transition for observability.
