@@ -10,9 +10,8 @@ import threading
 import time
 import types
 import warnings
-from errno import ETIMEDOUT
 import weakref
-from errno import EBADF, ECONNREFUSED, EWOULDBLOCK
+from errno import EBADF, ECONNREFUSED, ETIMEDOUT, EWOULDBLOCK
 from importlib import metadata
 from typing import Any
 from unittest import mock

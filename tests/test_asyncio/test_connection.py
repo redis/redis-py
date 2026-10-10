@@ -1538,6 +1538,23 @@ async def test_read_response_os_level_timeout_is_a_connection_error(timeout):
     conn.disconnect.assert_awaited_once()
 
 
+async def test_read_response_os_level_timeout_without_disconnect_on_error():
+    # The read PubSub.listen() actually does: a blocking read that leaves the
+    # disconnect to its retry wrapper, which only reconnects if read_response
+    # raises. Returning None here is what kept listen() spinning.
+    conn = Connection(socket_timeout=1)
+    conn._read_response_from_parser = mock.AsyncMock(
+        side_effect=OSError(ETIMEDOUT, "Operation timed out")
+    )
+    conn.disconnect = mock.AsyncMock()
+
+    with pytest.raises(ConnectionError):
+        await conn.read_response(
+            timeout=math.inf, disconnect_on_error=False, push_request=True
+        )
+    conn.disconnect.assert_not_awaited()
+
+
 async def test_read_response_user_timeout_still_returns_none():
     conn = Connection()
 
@@ -1562,3 +1579,4 @@ async def test_send_packed_command_os_level_timeout_is_a_connection_error():
     with pytest.raises(ConnectionError):
         await conn.send_packed_command(b"PING", check_health=False)
     conn.disconnect.assert_awaited_once()
+    conn._reader = conn._writer = None  # disconnect was mocked out
