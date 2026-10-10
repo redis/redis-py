@@ -169,8 +169,16 @@ def add_debug_log_for_connection_failure(
 
 
 class HiredisRespSerializer:
+    def __init__(self, fallback=None, encode=None):
+        self._fallback = fallback
+        self._encode = encode
+
     def pack(self, *args: List):
         """Pack a series of arguments into the Redis protocol"""
+        if self._fallback is not None and any(
+            isinstance(arg, memoryview) for arg in args
+        ):
+            return self._fallback(*args)
         output = []
 
         if isinstance(args[0], str):
@@ -178,7 +186,11 @@ class HiredisRespSerializer:
         elif b" " in args[0]:
             args = tuple(args[0].split()) + args[1:]
         args = tuple(
-            bytes(arg) if isinstance(arg, (bytearray, memoryview)) else arg
+            bytes(arg)
+            if isinstance(arg, (bytearray, memoryview))
+            else self._encode(arg)
+            if self._encode is not None
+            else arg
             for arg in args
         )
         try:
@@ -1218,7 +1230,8 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         if packer is not None:
             return packer
         elif HIREDIS_AVAILABLE:
-            return HiredisRespSerializer()
+            fallback = PythonRespSerializer(self._buffer_cutoff, self.encoder.encode)
+            return HiredisRespSerializer(fallback.pack, self.encoder.encode)
         else:
             return PythonRespSerializer(self._buffer_cutoff, self.encoder.encode)
 
