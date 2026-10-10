@@ -8914,7 +8914,8 @@ class SortedSetCommands(CommandsProtocol):
                 "``withscores`` not supported in combination with ``bylex``."
             )
         pieces = [command]
-        if dest:
+        # 2026-10-09: Only None denotes a range without a destination key.
+        if dest is not None:
             pieces.append(dest)
         pieces.extend([name, start, end])
         if byscore:
