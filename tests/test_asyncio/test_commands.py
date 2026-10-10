@@ -8,7 +8,9 @@ import datetime
 import re
 import sys
 import warnings
+from collections import ChainMap, UserDict  # 2026-10-09
 from string import ascii_letters
+from types import MappingProxyType  # 2026-10-09
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -3739,6 +3741,34 @@ class TestRedisCommands:
         await r.zadd("a", {"a": 0, "b": 0, "c": 0, "d": 0, "e": 0, "f": 0, "g": 0})
         assert await r.zlexcount("a", "-", "+") == 7
         assert await r.zlexcount("a", "[b", "[f") == 5
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    @pytest.mark.parametrize(
+        "keys_factory", [dict, UserDict, MappingProxyType, ChainMap]
+    )
+    @pytest.mark.parametrize(
+        "command, expected",
+        [
+            ("zunion", [(b"right", -7.0), (b"shared", -1.0), (b"left", 6.0)]),
+            ("zinter", [(b"shared", -1.0)]),
+            ("zunionstore", [(b"right", -7.0), (b"shared", -1.0), (b"left", 6.0)]),
+            ("zinterstore", [(b"shared", -1.0)]),
+        ],
+    )
+    async def test_zaggregate_mapping_weights(
+        self, r: redis.Redis, keys_factory, command, expected
+    ):
+        # 2026-10-09: Mapping wrappers must retain weights and the resulting rank order.
+        await r.zadd("a", {"shared": 2, "left": 3})
+        await r.zadd("b", {"shared": 5, "right": 7})
+        keys = keys_factory({"a": 2, "b": -1})
+        if command.endswith("store"):
+            assert await getattr(r, command)("destination", keys) == len(expected)
+            result = await r.zrange("destination", 0, -1, withscores=True)
+        else:
+            result = await getattr(r, command)(keys, withscores=True)
+        assert_resp_response(r, result, expected, [list(row) for row in expected])
 
     @pytest.mark.onlynoncluster
     async def test_zinterstore_sum(self, r: redis.Redis):
