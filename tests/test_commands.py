@@ -86,6 +86,35 @@ def test_server_deprecated_commands_do_not_emit_python_warnings():
     execute_command.assert_any_call("HMSET", "a", "field", "value")
 
 
+@pytest.mark.parametrize(
+    "call,expected",
+    [
+        (
+            lambda r: r.lmpop("1", "a", direction="LEFT", count=None),
+            ("LMPOP", "1", "a", "LEFT"),
+        ),
+        (
+            lambda r: r.blmpop(0, "1", "a", direction="LEFT", count=None),
+            ("BLMPOP", 0, "1", "a", "LEFT"),
+        ),
+        (
+            lambda r: r.zmpop("1", ["a"], min=True, count=None),
+            ("ZMPOP", "1", "a", "MIN"),
+        ),
+        (
+            lambda r: r.bzmpop(0, "1", ["a"], min=True, count=None),
+            ("BZMPOP", 0, "1", "a", "MIN"),
+        ),
+    ],
+)
+def test_mpop_commands_omit_count_when_none(call, expected):
+    client = redis.Redis()
+    with patch.object(client, "execute_command") as execute_command:
+        call(client)
+
+    execute_command.assert_called_once_with(*expected)
+
+
 # RESPONSE CALLBACKS
 @pytest.mark.onlynoncluster
 class TestResponseCallbacks:
@@ -4318,6 +4347,62 @@ class TestRedisCommands:
         assert r.smove(mv_set_src, mv_set_dest, b"member1") == 1
         assert b"member1" in r.smembers(mv_set_dest)
 
+    # BLESS COMMANDS
+    @skip_if_server_version_lt("8.11.0")
+    def test_bless_set_get_clear(self, r):
+        r.set("a", 1)
+        assert r.bless_get("a") == []
+        assert r.bless_set("a", "NO-EVICT") == 1
+        assert r.bless_set("a", "NO-EVICT") == 0
+        assert r.bless_get("a") == [b"NO-EVICT"]
+        assert r.bless_clear("a", "NO-EVICT") == 1
+        assert r.bless_clear("a", "NO-EVICT") == 0
+        assert r.bless_get("a") == []
+
+    @skip_if_server_version_lt("8.11.0")
+    def test_bless_missing_key(self, r):
+        with pytest.raises(exceptions.ResponseError):
+            r.bless_get("a")
+        with pytest.raises(exceptions.ResponseError):
+            r.bless_set("a", "NO-EVICT")
+        with pytest.raises(exceptions.ResponseError):
+            r.bless_clear("a", "NO-EVICT")
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.11.0")
+    def test_bless_scan(self, r):
+        r.set("a", 1)
+        r.set("b", 2)
+        r.set("c", 3)
+        assert r.bless_scan(0, "NO-EVICT") == (0, [])
+        r.bless_set("a", "NO-EVICT")
+        r.bless_set("b", "NO-EVICT")
+        cursor, keys = r.bless_scan(0, "NO-EVICT")
+        assert cursor == 0
+        assert set(keys) == {b"a", b"b"}
+
+        cursor, keys = 0, []
+        while True:
+            cursor, page = r.bless_scan(cursor, "NO-EVICT", count=1)
+            keys.extend(page)
+            if cursor == 0:
+                break
+        assert set(keys) == {b"a", b"b"}
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.11.0")
+    def test_bless_scan_iter(self, r):
+        r.set("a", 1)
+        r.set("b", 2)
+        r.set("c", 3)
+        assert list(r.bless_scan_iter("NO-EVICT")) == []
+        r.bless_set("a", "NO-EVICT")
+        r.bless_set("b", "NO-EVICT")
+        keys = list(r.bless_scan_iter("NO-EVICT"))
+        assert set(keys) == {b"a", b"b"}
+        keys = list(r.bless_scan_iter("NO-EVICT", count=1))
+        assert set(keys) == {b"a", b"b"}
+
     # SCAN COMMANDS
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.0")
@@ -7025,6 +7110,8 @@ class TestRedisCommands:
         info = r.xinfo_stream(stream, full=True)
         consumer = info["groups"][0]["consumers"][0]
         assert isinstance(consumer, dict)
+        assert consumer["name"] == b"consumer"
+        assert consumer["pel-count"] == 1
 
     @skip_if_server_version_lt("8.5.0")
     def test_xinfo_stream_idempotent_fields(self, r):
@@ -7300,6 +7387,24 @@ class TestRedisCommands:
             r.xpending_range(
                 stream, group, min=None, max=None, count=None, consumername=0
             )
+
+    @skip_if_server_version_lt("5.0.0")
+    @pytest.mark.parametrize("consumer", ["", b"", "consumer1", b"consumer1"])
+    def test_xpending_range_consumer_filter(self, r, consumer):
+        stream, group = "stream", "group"
+        first = r.xadd(stream, {"foo": "bar"})
+        second = r.xadd(stream, {"foo": "baz"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"}, count=1)
+        r.xreadgroup(group, "other", streams={stream: ">"}, count=1)
+
+        pending = r.xpending_range(stream, group, "-", "+", 5)
+        assert [item["message_id"] for item in pending] == [first, second]
+
+        filtered = r.xpending_range(stream, group, "-", "+", 5, consumername=consumer)
+        assert [item["message_id"] for item in filtered] == [first]
+        expected_consumer = consumer.encode() if isinstance(consumer, str) else consumer
+        assert filtered[0]["consumer"] == expected_consumer
 
     @skip_if_server_version_lt("5.0.0")
     def test_xrange(self, r):
@@ -8480,11 +8585,11 @@ class TestRedisCommands:
     def test_module(self, stack_r):
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
             stack_r.module_load("/some/fake/path")
-            assert "Error loading the extension." in str(excinfo.value)
+        assert "Error loading the extension." in str(excinfo.value)
 
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
             stack_r.module_load("/some/fake/path", "arg1", "arg2", "arg3", "arg4")
-            assert "Error loading the extension." in str(excinfo.value)
+        assert "Error loading the extension." in str(excinfo.value)
 
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
@@ -8493,13 +8598,13 @@ class TestRedisCommands:
     def test_module_loadex(self, stack_r: redis.Redis):
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
             stack_r.module_loadex("/some/fake/path")
-            assert "Error loading the extension." in str(excinfo.value)
+        assert "Error loading the extension." in str(excinfo.value)
 
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
             stack_r.module_loadex(
                 "/some/fake/path", ["name", "value"], ["arg1", "arg2"]
             )
-            assert "Error loading the extension." in str(excinfo.value)
+        assert "Error loading the extension." in str(excinfo.value)
 
     @skip_if_server_version_lt("2.6.0")
     def test_restore(self, r):

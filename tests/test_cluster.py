@@ -906,12 +906,16 @@ class TestRedisClusterObj:
                 raise error("mocked error")
 
             execute_command.side_effect = raise_error
+            # Without this the attribute is a MagicMock, so the comparison below
+            # is never an integer comparison.
+            execute_command.failed_calls = 0
 
             rc = get_mocked_redis_client(host=default_host, port=default_port)
 
             with pytest.raises(error):
                 rc.get("bar")
-                assert execute_command.failed_calls == rc.cluster_error_retry_attempts
+            # retry counts retries, so the first attempt is one more.
+            assert execute_command.failed_calls == rc.retry.get_retries() + 1
 
     def test_user_on_connect_function(self, request):
         """
@@ -2790,6 +2794,47 @@ class TestClusterRedisCommands:
             keys = r.scan_iter(match="1*", target_nodes=target_nodes)
             assert sorted(keys) == keys_1
 
+    @skip_if_server_version_lt("8.11.0")
+    def test_cluster_bless_scan(self, r):
+        r.set("a", 1)
+        r.set("b", 2)
+        r.set("c", 3)
+        assert r.bless_set("a", "NO-EVICT") == 1
+        assert r.bless_set("b", "NO-EVICT") == 1
+        assert r.bless_get("a") == [b"NO-EVICT"]
+        assert r.bless_get("c") == []
+
+        primaries = sorted(node.name for node in r.get_primaries())
+        for kwargs in ({}, {"target_nodes": "primaries"}):
+            cursors, keys = r.bless_scan(0, "NO-EVICT", **kwargs)
+            assert sorted(keys) == [b"a", b"b"]
+            assert sorted(cursors.keys()) == primaries
+            assert all(cursor == 0 for cursor in cursors.values())
+
+        assert r.bless_clear("a", "NO-EVICT") == 1
+        cursors, keys = r.bless_scan(0, "NO-EVICT")
+        assert keys == [b"b"]
+        assert sorted(cursors.keys()) == primaries
+
+    @skip_if_server_version_lt("8.11.0")
+    def test_cluster_bless_scan_iter(self, r):
+        keys_blessed = []
+        for i in range(100):
+            s = str(i)
+            r.set(s, 1)
+            if s.startswith("1"):
+                r.bless_set(s, "NO-EVICT")
+                keys_blessed.append(s.encode("utf-8"))
+        keys_blessed.sort()
+
+        assert sorted(r.bless_scan_iter("NO-EVICT")) == keys_blessed
+        # count=1 forces every primary through more than one cursor round
+        assert sorted(r.bless_scan_iter("NO-EVICT", count=1)) == keys_blessed
+        assert (
+            sorted(r.bless_scan_iter("NO-EVICT", target_nodes="primaries"))
+            == keys_blessed
+        )
+
     def test_cluster_randomkey(self, r):
         node = r.get_node_from_key("{foo}")
         assert r.randomkey(target_nodes=node) is None
@@ -3818,7 +3863,7 @@ class TestNodesManager:
                 port=default_port,
                 cluster_enabled=False,
             )
-            assert "Cluster mode is not enabled on this node" in str(e.value)
+        assert "Cluster mode is not enabled on this node" in str(e.value)
 
     @pytest.mark.fixed_client
     def test_unreachable_error_is_reserved_for_connectivity_failures(self):

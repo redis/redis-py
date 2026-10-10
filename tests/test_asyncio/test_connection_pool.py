@@ -348,23 +348,29 @@ class TestConnectionPool:
         ],
     )
     @pytest.mark.parametrize("maint_notifications_enabled", [True, False])
+    @pytest.mark.parametrize("reset", [False, True])
     async def test_get_connection_replaces_closed_idle_connection(
-        self, maint_notifications_enabled, parser_class
+        self, maint_notifications_enabled, parser_class, reset
     ):
         """
         A pooled connection whose socket the server closed while it sat idle
         must be reconnected at checkout. Regression test for #4252: with
         maintenance notifications enabled, the pending-push-data exemption
         must not swallow the EOF signal and hand out the dead connection.
+        A reset (RST) leaves no EOF but an exception on the stream, and must
+        be detected the same way.
         """
         async with self.get_pool(connection_class=redis.Connection) as pool:
             conn = pool.make_connection()
             conn.set_parser(parser_class)
 
             # simulate a connection that was healthy when released to the
-            # pool but whose socket the server has since closed
+            # pool but whose socket the server has since closed or reset
             eof_stream = asyncio.StreamReader()
-            eof_stream.feed_eof()
+            if reset:
+                eof_stream.set_exception(ConnectionResetError())
+            else:
+                eof_stream.feed_eof()
             conn._parser._connected = True
             conn._parser._stream = eof_stream
             if parser_class is _AsyncHiredisParser:
@@ -474,11 +480,16 @@ class TestBlockingConnectionPool:
             c1 = await pool.get_connection()
 
             start = asyncio.get_running_loop().time()
-            with pytest.raises(redis.ConnectionError):
-                await pool.get_connection()
+            with patch(
+                "redis.asyncio.connection.record_connection_timeout",
+                new_callable=AsyncMock,
+            ) as record:
+                with pytest.raises(redis.ConnectionError):
+                    await pool.get_connection()
 
             # we should have waited at least some period of time
             assert asyncio.get_running_loop().time() - start >= 0.05
+            record.assert_awaited_once()
             await c1.disconnect()
 
     async def test_connection_pool_blocks_until_conn_available(self, master_host):
@@ -675,6 +686,9 @@ class TestConnectionPoolURLParsing:
             (False, "n"),
             (False, "N"),
             (False, "No"),
+            (False, "off"),
+            (False, "OFF"),
+            (False, "Off"),
             (True, 1),
             (True, "1"),
             (True, "y"),

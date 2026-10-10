@@ -63,7 +63,7 @@ from redis.asyncio.observability.recorder import (
     record_error_count,
     record_operation_duration,
 )
-from redis.asyncio.retry import Retry
+from redis.asyncio.retry import Retry, _to_async_retry
 from redis.auth.token import TokenInterface
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE, AbstractRedis
@@ -602,7 +602,7 @@ class RedisCluster(
             kwargs["redis_connect_func"] = self.on_connect
 
         if retry:
-            self.retry = retry
+            self.retry = _to_async_retry(retry)
         else:
             self.retry = Retry(
                 backoff=ExponentialWithJitterBackoff(
@@ -1118,7 +1118,7 @@ class RedisCluster(
         return self.connection_kwargs
 
     def set_retry(self, retry: Retry) -> None:
-        self.retry = retry
+        self.retry = _to_async_retry(retry)
 
     def set_response_callback(self, command: str, callback: ResponseCallbackT) -> None:
         """Set a custom response callback."""
@@ -1842,7 +1842,7 @@ class RedisCluster(
                     return func_value if value_from_callable else exec_value
                 except WatchError:
                     if watch_delay is not None and watch_delay > 0:
-                        time.sleep(watch_delay)
+                        await asyncio.sleep(watch_delay)
                     continue
 
 

@@ -121,6 +121,20 @@ def test_bf_insert(client):
 
 
 @pytest.mark.redismod
+def test_bf_false_flags_are_not_sent(client):
+    # noScale=False and noCreate=False must behave like omitting the flag,
+    # not send NONSCALING / NOCREATE.
+    assert client.bf().create("bloom", 0.01, 1, noScale=False)
+    assert [1, 1, 1] == intlist(client.bf().madd("bloom", "a", "b", "c"))
+    assert [1, 1, 1] == intlist(
+        client.bf().insert("bloom_ins", ["a", "b", "c"], capacity=1, noScale=False)
+    )
+    assert [1] == intlist(client.bf().insert("bloom_new", ["a"], noCreate=False))
+    assert [1] == client.cf().insert("cuckoo_new", ["a"], nocreate=False)
+    assert [1] == client.cf().insertnx("cuckoo_nx_new", ["a"], nocreate=False)
+
+
+@pytest.mark.redismod
 # BF.SCANDUMP/LOADCHUNK does not complete against Redis Enterprise's bloom module
 # (the scandump cursor loop times out).
 @skip_if_redis_enterprise()
@@ -131,13 +145,17 @@ def test_bf_scandump_and_loadchunk(client):
     # test is probabilistic and might fail. It is OK to change variables if
     # certain to not break anything
     def do_verify():
-        res = 0
+        pipe = client.pipeline(transaction=False)
+        bf = pipe.bf()
         for x in range(1000):
-            client.bf().add("myBloom", x)
-            rv = client.bf().exists("myBloom", x)
-            assert rv
-            rv = client.bf().exists("myBloom", f"nonexist_{x}")
-            res += rv == x
+            bf.add("myBloom", x)
+            bf.exists("myBloom", x)
+            bf.exists("myBloom", f"nonexist_{x}")
+        replies = pipe.execute()
+        res = 0
+        for exists, false_positive in zip(replies[1::3], replies[2::3]):
+            assert exists
+            res += false_positive
         assert res < 5
 
     do_verify()
@@ -168,7 +186,6 @@ def test_bf_scandump_and_loadchunk(client):
     do_verify()
 
     client.bf().client.delete("myBloom")
-    client.bf().create("myBloom", "0.0001", "10000000")
 
 
 @pytest.mark.redismod
