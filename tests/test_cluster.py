@@ -6225,3 +6225,41 @@ class TestClusterPipelineMetricsRecording:
             duration = call_obj[0][0]
             assert isinstance(duration, float)
             assert duration >= 0
+
+
+def test_cluster_shards_slots_shape_is_protocol_agnostic():
+    """CLUSTER SHARDS slots must be the same (start, end) tuples whether the reply
+    arrived as RESP2 (flat shard arrays) or RESP3 (shard maps). The slots value is
+    a flat ``[start, end, ...]`` integer array on both protocols; only the outer
+    shard container changes, so both parse paths must pair it identically."""
+    from redis.cluster import (
+        parse_cluster_shards,
+        parse_cluster_shards_unified,
+        parse_cluster_shards_with_str_keys,
+    )
+
+    resp2 = [
+        [
+            b"slots",
+            [0, 5460, 10000, 11000],
+            b"nodes",
+            [[b"id", b"abc", b"role", b"master"]],
+        ]
+    ]
+    resp3 = [
+        {
+            b"slots": [0, 5460, 10000, 11000],
+            b"nodes": [{b"id": b"abc", b"role": b"master"}],
+        }
+    ]
+    expected = [(0, 5460), (10000, 11000)]
+
+    for parser in (parse_cluster_shards_unified, parse_cluster_shards_with_str_keys):
+        assert parser(resp2)[0]["slots"] == expected
+        assert parser(resp3)[0]["slots"] == expected
+        assert parser(resp2)[0]["slots"] == parser(resp3)[0]["slots"]
+
+    # An empty CLUSTER SHARDS reply (node with no slots assigned) must not raise.
+    assert parse_cluster_shards([]) == []
+    assert parse_cluster_shards_unified([]) == []
+    assert parse_cluster_shards_with_str_keys([]) == []
