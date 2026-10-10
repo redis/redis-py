@@ -117,6 +117,7 @@ from .utils import (
     deprecated_args,
     ensure_string,
     format_error_message,
+    is_os_level_timeout,
     str_if_bytes,
 )
 
@@ -1594,6 +1595,11 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         except socket.timeout as e:
             add_debug_log_for_connection_failure(self, e, "writing command")
             self.disconnect()
+            if is_os_level_timeout(e):
+                # ETIMEDOUT from the OS: the connection is dead, not slow.
+                raise ConnectionError(
+                    f"Error {e.errno} while writing to socket. {e.strerror}."
+                ) from e
             raise TimeoutError("Timeout writing to socket")
         except OSError as e:
             add_debug_log_for_connection_failure(self, e, "writing command")
