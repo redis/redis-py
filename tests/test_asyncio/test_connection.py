@@ -1,4 +1,5 @@
 import asyncio
+import os
 import socket
 import ssl
 import types
@@ -17,6 +18,7 @@ from redis._parsers import (
 from redis._parsers.hiredis import NOT_ENOUGH_DATA
 from redis.asyncio import ConnectionPool, Redis
 from redis.asyncio.connection import (
+    BlockingConnectionPool,
     Connection,
     HiredisRespSerializer,
     SSLConnection,
@@ -26,6 +28,7 @@ from redis.asyncio.connection import (
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
+from redis.observability.attributes import ConnectionState, get_pool_name
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
 
@@ -51,13 +54,17 @@ class DummyHiredisReader:
 
 
 class DummyAsyncStream:
-    def __init__(self, buffer=b"", eof=False):
+    def __init__(self, buffer=b"", eof=False, exception=None):
         self._buffer = bytearray(buffer)
         self.eof = eof
+        self._exception = exception
         self.read_called = False
 
     def at_eof(self):
         return self.eof and not self._buffer
+
+    def exception(self):
+        return self._exception
 
     async def read(self, _):
         self.read_called = True
@@ -142,6 +149,18 @@ async def test_async_hiredis_can_read_raises_on_eof():
     # a server-closed connection must raise like the sync SocketBuffer does,
     # not report readable data (#4252)
     stream = DummyAsyncStream(eof=True)
+    parser = make_async_hiredis_parser(stream)
+
+    with pytest.raises(ConnectionError):
+        await parser.can_read()
+    assert stream.read_called is False
+
+
+@pytest.mark.parametrize("buffer", [b"", b"+OK\r\n"])
+async def test_async_hiredis_can_read_raises_on_reset(buffer):
+    # a reset (RST) leaves no EOF but an exception on the stream, which
+    # asyncio raises before any buffered data, so it must raise like EOF
+    stream = DummyAsyncStream(buffer=buffer, exception=ConnectionResetError())
     parser = make_async_hiredis_parser(stream)
 
     with pytest.raises(ConnectionError):
@@ -241,6 +260,21 @@ async def test_async_resp_can_read_raises_on_eof(parser_class):
     assert stream.read_called is False
 
 
+@pytest.mark.parametrize("buffer", [b"", b"+OK\r\n"])
+@pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
+async def test_async_resp_can_read_raises_on_reset(parser_class, buffer):
+    # a reset (RST) leaves no EOF but an exception on the stream, which
+    # asyncio raises before any buffered data, so it must raise like EOF
+    stream = DummyAsyncStream(buffer=buffer, exception=ConnectionResetError())
+    parser = parser_class(socket_read_size=65536)
+    parser._connected = True
+    parser._stream = stream
+
+    with pytest.raises(ConnectionError):
+        await parser.can_read()
+    assert stream.read_called is False
+
+
 @pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
 async def test_async_resp_can_read_prefers_buffered_data_over_eof(parser_class):
     # data the parser already buffered must stay readable even if the server
@@ -268,6 +302,42 @@ async def test_async_resp_read_response_raises_after_disconnect(parser_class):
     with pytest.raises(ConnectionError):
         await parser.read_response()
     assert stream.read_called is False
+
+
+@pytest.mark.parametrize(
+    "parser_class",
+    [_AsyncRESP2Parser, _AsyncRESP3Parser, _AsyncHiredisParser],
+    ids=["AsyncRESP2Parser", "AsyncRESP3Parser", "AsyncHiredisParser"],
+)
+async def test_async_parser_read_guards_report_a_never_connected_parser(parser_class):
+    # The read guards consult _connected, which used to be assigned only by
+    # on_connect() / on_disconnect(). A parser that has never connected - the
+    # one a fresh Connection owns before connect() - therefore raised
+    # AttributeError from those guards instead of the retryable ConnectionError,
+    # so no retry or failover layer acted on it. can_read() raises OSError,
+    # which Connection.can_read() converts to ConnectionError.
+    if parser_class is _AsyncHiredisParser and not HIREDIS_AVAILABLE:
+        pytest.skip("Hiredis not available")
+
+    parser = parser_class(socket_read_size=65536)
+
+    assert parser._connected is False
+    with pytest.raises(ConnectionError):
+        await parser.read_response()
+    with pytest.raises(OSError):
+        await parser.can_read()
+
+
+async def test_connection_read_guards_report_a_never_connected_connection():
+    # End-to-end counterpart: the AttributeError also sailed past
+    # Connection.can_read()'s ``except OSError``, so neither the ConnectionError
+    # conversion nor the disconnect() it performs happened.
+    conn = Connection()
+
+    with pytest.raises(ConnectionError):
+        await conn.read_response()
+    with pytest.raises(ConnectionError):
+        await conn.can_read()
 
 
 @pytest.mark.parametrize(
@@ -1021,7 +1091,8 @@ async def test_format_error_message(conn, error, expected_message):
 async def test_network_connection_failure():
     exp_err = rf"^Error {ECONNREFUSED} connecting to 127.0.0.1:9999.(.+)$"
     with pytest.raises(ConnectionError, match=exp_err):
-        redis = Redis(host="127.0.0.1", port=9999)
+        # nothing listens on this port, so skip the default backoff retries
+        redis = Redis(host="127.0.0.1", port=9999, retry=Retry(NoBackoff(), 0))
         await redis.set("a", "b")
 
 
@@ -1029,7 +1100,10 @@ async def test_network_connection_failure():
 async def test_unix_socket_connection_failure():
     exp_err = "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
     with pytest.raises(ConnectionError, match=exp_err):
-        redis = Redis(unix_socket_path="unix:///tmp/a.sock")
+        # the socket file does not exist, so skip the default backoff retries
+        redis = Redis(
+            unix_socket_path="unix:///tmp/a.sock", retry=Retry(NoBackoff(), 0)
+        )
         await redis.set("a", "b")
 
 
@@ -1131,6 +1205,22 @@ def test_parse_url_invalid_db_keeps_stable_message():
     assert str(exc_info.value) == "Invalid value for 'db' in connection URL."
 
 
+@pytest.mark.parametrize(
+    ("url", "expected_port"),
+    (
+        ("redis://localhost", None),
+        ("redis://localhost:6380", 6380),
+        ("redis://localhost:0", 0),
+    ),
+)
+def test_connection_pool_from_url_preserves_explicit_port(url, expected_port):
+    kwargs = parse_url(url)
+    pool = ConnectionPool.from_url(url)
+
+    assert kwargs.get("port") == expected_port
+    assert pool.connection_kwargs.get("port") == expected_port
+
+
 def test_parse_url_retry_on_error_unknown_name():
     with pytest.raises(ValueError) as exc_info:
         parse_url("redis://localhost:6379/?retry_on_error=NotARealError")
@@ -1162,3 +1252,297 @@ async def test_parse_url_retry_on_error_usable_in_retry():
     with pytest.raises(ConnectionError):
         await conn.retry.call_with_retry(do=do, fail=fail)
     assert calls == 2
+
+
+@pytest.mark.parametrize("port", [True, False, 1.5, "nope", None])
+def test_async_connection_rejects_bool_port(port):
+    """bool subclasses int; port=True must not become privileged port 1."""
+    with pytest.raises(TypeError, match="port must be an integer"):
+        Connection(port=port)
+
+
+def test_async_connection_accepts_numeric_port_string():
+    """Callers still pass a decimal string such as \"6379\"."""
+    conn = Connection(port="6379")
+    assert conn.port == 6379
+
+
+@pytest.mark.parametrize("port", [-1, 65536, 99999])
+def test_async_connection_rejects_out_of_range_port(port):
+    with pytest.raises(ValueError, match="port must be in 0..65535"):
+        Connection(port=port)
+
+
+@pytest.mark.parametrize("disconnect_on_error", [True, False])
+async def test_invalid_response_always_disconnects(disconnect_on_error):
+    """A framing violation invalidates the connection regardless of
+    disconnect_on_error. The parsers rewind on error, so the offending reply
+    stays queued and every later read would fail identically. See #4291.
+    """
+    conn = Connection()
+    with (
+        mock.patch.object(
+            conn,
+            "_read_response_from_parser",
+            side_effect=InvalidResponse("Protocol Error"),
+        ),
+        mock.patch.object(conn, "disconnect") as disconnect,
+    ):
+        with pytest.raises(InvalidResponse):
+            await conn.read_response(disconnect_on_error=disconnect_on_error)
+
+    disconnect.assert_called_once_with(nowait=True)
+
+
+# A binary PUBLISH payload delivered to a decode_responses=True subscriber.
+# Encoder.decode runs at the tail of _read_response, after the payload has
+# already been consumed, so this raises UnicodeDecodeError mid-reply.
+BINARY_PUBSUB_MESSAGE = b"*3\r\n$7\r\nmessage\r\n$4\r\nchan\r\n$3\r\n\xff\xfe\xfd\r\n"
+
+
+def _attach_stream(conn, data):
+    """Wire `data` onto conn as if a connect() had just succeeded."""
+    conn._reader = MockStream(data)
+    conn._writer = mock.Mock()
+    conn._writer.close = mock.Mock()
+    conn._writer.wait_closed = mock.AsyncMock()
+    conn._parser.on_connect(conn)
+
+
+@pytest.mark.parametrize(
+    "parser_class",
+    [_AsyncRESP2Parser, _AsyncHiredisParser],
+    ids=["AsyncRESP2Parser", "AsyncHiredisParser"],
+)
+async def test_binary_pubsub_payload_invalidates_connection(parser_class):
+    """The async pubsub read path: a decode_responses=True subscriber handed a
+    binary PUBLISH payload raises UnicodeDecodeError from Encoder.decode, and
+    PubSub.parse_response passes disconnect_on_error=False. The async parser
+    re-parses from self._pos = 0 rather than rewinding a socket buffer, so the
+    undecodable bytes are still there on the next read and it fails identically
+    unless the connection is dropped. See #4291.
+    """
+    if parser_class is _AsyncHiredisParser and not HIREDIS_AVAILABLE:
+        pytest.skip("Hiredis not available")
+
+    conn = Connection(
+        protocol=2,
+        parser_class=parser_class,
+        encoding="utf-8",
+        decode_responses=True,
+    )
+    _attach_stream(conn, BINARY_PUBSUB_MESSAGE + b"+SECOND\r\n")
+
+    with pytest.raises(UnicodeDecodeError):
+        await conn.read_response(disconnect_on_error=False, push_request=True)
+
+    assert conn.is_connected is False
+
+    # PubSub.parse_response calls connect() before reading again. Now that the
+    # connection was really dropped, the reconnect gets a clean stream; before
+    # the fix connect() was a no-op and this read raised again.
+    _attach_stream(conn, b"+RECOVERED\r\n")
+    assert (
+        await conn.read_response(disconnect_on_error=False, push_request=True)
+        == "RECOVERED"
+    )
+
+    await conn.disconnect()
+
+
+@pytest.mark.parametrize(
+    "parser_class",
+    [
+        _AsyncRESP2Parser,
+        _AsyncRESP3Parser,
+        pytest.param(
+            _AsyncHiredisParser,
+            marks=pytest.mark.skipif(
+                not HIREDIS_AVAILABLE, reason="hiredis is not installed"
+            ),
+        ),
+    ],
+    ids=["AsyncRESP2Parser", "AsyncRESP3Parser", "AsyncHiredisParser"],
+)
+class TestAsyncMalformedNumericFrameInvalidatesConnection:
+    """Async version: malformed numeric frames raise InvalidResponse and must drop
+    the connection even with disconnect_on_error=False. The async parser
+    re-parses via self._pos = 0, so undecodable bytes stay queued on retry
+    unless the connection is invalidated.
+    """
+
+    @pytest.mark.asyncio
+    async def test_malformed_integer_frame_disconnects(self, parser_class):
+        """Malformed integer frame `:abc\r\n` raises InvalidResponse."""
+        conn = Connection(protocol=2, parser_class=parser_class)
+        _attach_stream(conn, b":abc\r\n+SECOND\r\n")
+
+        with pytest.raises(InvalidResponse):
+            await conn.read_response(disconnect_on_error=False, push_request=True)
+
+        assert conn.is_connected is False
+        await conn.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_malformed_bulk_length_disconnects(self, parser_class):
+        """Malformed bulk string length `$xyz\r\n` raises InvalidResponse."""
+        conn = Connection(protocol=2, parser_class=parser_class)
+        _attach_stream(conn, b"$xyz\r\n+SECOND\r\n")
+
+        with pytest.raises(InvalidResponse):
+            await conn.read_response(disconnect_on_error=False, push_request=True)
+
+        assert conn.is_connected is False
+        await conn.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_malformed_array_length_disconnects(self, parser_class):
+        """Malformed array length `*abc\r\n` raises InvalidResponse."""
+        conn = Connection(protocol=2, parser_class=parser_class)
+        _attach_stream(conn, b"*abc\r\n+SECOND\r\n")
+
+        with pytest.raises(InvalidResponse):
+            await conn.read_response(disconnect_on_error=False, push_request=True)
+
+        assert conn.is_connected is False
+        await conn.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_next_read_is_clean_after_malformed_integer(self, parser_class):
+        """Reconnect after malformed integer frame serves new stream cleanly."""
+        conn = Connection(protocol=2, parser_class=parser_class)
+        _attach_stream(conn, b":abc\r\n")
+
+        with pytest.raises(InvalidResponse):
+            await conn.read_response(disconnect_on_error=False, push_request=True)
+
+        # Reconnect with fresh stream
+        _attach_stream(conn, b"+RECOVERED\r\n")
+        result = await conn.read_response(disconnect_on_error=False, push_request=True)
+        assert result == b"RECOVERED"
+        await conn.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_valid_integer_frame_leaves_connection_up(self, parser_class):
+        """Valid integer frames must not trigger the new predicate."""
+        conn = Connection(protocol=2, parser_class=parser_class)
+        _attach_stream(conn, b":42\r\n")
+
+        result = await conn.read_response(disconnect_on_error=False, push_request=True)
+        assert result == 42
+        assert conn.is_connected is True
+        await conn.disconnect()
+
+
+class _DummyAsyncConnection:
+    """Minimal async connection stub for pool metric tests (no real socket)."""
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.pid = os.getpid()
+        self._sock = None
+
+    async def connect(self):
+        self._sock = mock.MagicMock()
+
+    async def disconnect(self, *args, **kwargs):
+        self._sock = None
+
+    async def can_read(self, *args, **kwargs):
+        return False
+
+    def should_reconnect(self):
+        return False
+
+    def mark_for_reconnect(self):
+        pass
+
+    def set_re_auth_token(self, *args, **kwargs):
+        pass
+
+    async def re_auth(self, *args, **kwargs):
+        pass
+
+
+def _async_pool_metric_calls(mock_fn, pool_name):
+    """Extract (state, delta) tuples from record_connection_count calls for a pool."""
+    result = []
+    for c in mock_fn.call_args_list:
+        p = c.kwargs.get("pool_name", c.args[0] if c.args else None)
+        if p != pool_name:
+            continue
+        state = c.kwargs.get("connection_state", c.args[1] if len(c.args) > 1 else None)
+        counter = c.kwargs.get("counter", c.args[2] if len(c.args) > 2 else 1)
+        result.append((state, counter))
+    return result
+
+
+def _async_net(calls):
+    """Return (idle_net, used_net) from a list of (state, delta) tuples."""
+    idle = sum(d for s, d in calls if s == ConnectionState.IDLE)
+    used = sum(d for s, d in calls if s == ConnectionState.USED)
+    return idle, used
+
+
+class TestAsyncBlockingConnectionPoolMetricCount:
+    """db.client.connection.count accuracy for async BlockingConnectionPool.
+
+    get_connection() must record the acquire-side transition so it balances the
+    USED -1 / IDLE +1 recorded in release(). Without it, every acquire/release
+    cycle drifts USED -1 / IDLE +1 (regression: heavy async + Sentinel apps saw
+    the counter run to large -used / +idle values over time).
+    """
+
+    def _pool(self, max_connections=10):
+        return BlockingConnectionPool(
+            connection_class=_DummyAsyncConnection,
+            max_connections=max_connections,
+            timeout=0.1,
+        )
+
+    @patch("redis.asyncio.connection.record_connection_count")
+    async def test_new_connection_records_only_used(self, mock_rec):
+        pool = self._pool()
+        pn = get_pool_name(pool)
+        mock_rec.reset_mock()
+
+        conn = await pool.get_connection()
+
+        idle_net, used_net = _async_net(_async_pool_metric_calls(mock_rec, pn))
+        assert idle_net == 0, f"New conn should not touch IDLE, got {idle_net}"
+        assert used_net == 1
+        await pool.release(conn)
+
+    @patch("redis.asyncio.connection.record_connection_count")
+    async def test_reused_connection_transitions_idle_to_used(self, mock_rec):
+        pool = self._pool()
+        pn = get_pool_name(pool)
+        conn = await pool.get_connection()
+        await pool.release(conn)
+        mock_rec.reset_mock()
+
+        conn2 = await pool.get_connection()
+        assert conn2 is conn
+
+        idle_net, used_net = _async_net(_async_pool_metric_calls(mock_rec, pn))
+        assert idle_net == -1
+        assert used_net == 1
+        await pool.release(conn2)
+
+    @patch("redis.asyncio.connection.record_connection_count")
+    async def test_full_lifecycle_nets_to_zero(self, mock_rec):
+        """acquire -> release cycles must not drift the counter."""
+        pool = self._pool()
+        pn = get_pool_name(pool)
+        mock_rec.reset_mock()
+
+        for _ in range(5):
+            conn = await pool.get_connection()
+            await pool.release(conn)
+
+        idle_net, used_net = _async_net(_async_pool_metric_calls(mock_rec, pn))
+        # reset()/__del__ record IDLE -len(available) for the idle connections
+        # still pooled; account for that so the whole lifecycle nets to zero.
+        idle_net -= len(pool._available_connections)
+        assert idle_net == 0, f"Lifecycle IDLE should net 0, got {idle_net}"
+        assert used_net == 0, f"Lifecycle USED should net 0, got {used_net}"

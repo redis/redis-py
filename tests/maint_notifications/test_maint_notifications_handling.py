@@ -8,13 +8,19 @@ from time import sleep
 
 from redis import Redis
 from redis._defaults import DEFAULT_SOCKET_CONNECT_TIMEOUT, DEFAULT_SOCKET_TIMEOUT
-from redis.cache import CacheConfig
+from redis.cache import CacheConfig, CacheEntry, CacheEntryStatus, CacheKey
+from redis._parsers.resp3 import _RESP3Parser
 from redis.connection import (
     AbstractConnection,
     Connection,
     ConnectionPool,
     BlockingConnectionPool,
     MaintenanceState,
+)
+from redis.event import (
+    EventDispatcher,
+    EventListenerInterface,
+    MaintenanceCompletedEvent,
 )
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import ResponseError
@@ -434,6 +440,8 @@ class TestMaintenanceNotificationsBase:
         enable_cache=False,
         max_connections=10,
         maint_notifications_config=None,
+        client_name=None,
+        db=0,
     ):
         """Helper method to create a pool and Redis client with maintenance notifications configuration.
 
@@ -456,12 +464,16 @@ class TestMaintenanceNotificationsBase:
         if enable_cache:
             pool_kwargs = {"cache_config": CacheConfig()}
 
+        if client_name is not None:
+            pool_kwargs["client_name"] = client_name
+
         test_pool = pool_class(
             connection_class=connection_class,
             host=DEFAULT_ADDRESS.split(":")[0],
             port=int(DEFAULT_ADDRESS.split(":")[1]),
             max_connections=max_connections,
             protocol=3,  # Required for maintenance notifications
+            db=db,
             maint_notifications_config=config,
             **pool_kwargs,
         )
@@ -531,6 +543,49 @@ class TestMaintenanceNotificationsHandshake(TestMaintenanceNotificationsBase):
                 # for internal-ip
                 test_redis_client.set("hello", "world")
 
+        finally:
+            test_redis_client.close()
+
+    def test_handshake_pipelines_full_tail_with_client_name_and_db(self):
+        """The whole handshake tail -- CLIENT MAINT_NOTIFICATIONS, SETNAME, both
+        SETINFO commands and SELECT -- is pipelined (all sent, then the replies read
+        back in send order).
+
+        Uses enabled="auto" with an internal-ip endpoint so the server rejects
+        MAINT_NOTIFICATIONS and its error reply is swallowed *mid-tail*. Because the
+        maint command is first, a following command only succeeds if the swallow
+        consumed exactly one reply and the remaining SETNAME/SETINFO/SELECT replies
+        stayed aligned -- this is the reply/command-ordering contract the whole
+        optimization depends on.
+        """
+        maint_notifications_config = MaintNotificationsConfig(
+            enabled="auto", endpoint_type=EndpointType.INTERNAL_IP
+        )
+        test_redis_client = self._get_client(
+            ConnectionPool,
+            maint_notifications_config=maint_notifications_config,
+            client_name="myclient",
+            db=5,
+        )
+        try:
+            # Post-handshake commands succeed -> replies stayed aligned even though
+            # the swallowed MAINT_NOTIFICATIONS error sits first in the tail.
+            assert test_redis_client.set("hello", "world") is True
+            assert test_redis_client.get("hello") == b"world"
+
+            # HELLO first (its own round-trip), then the tail commands in send order.
+            handshake_sock = next(
+                s for s in self.mock_sockets if any(b"HELLO" in w for w in s.sent_data)
+            )
+            wire = b"".join(handshake_sock.sent_data)
+            assert (
+                wire.index(b"HELLO")
+                < wire.index(b"MAINT_NOTIFICATIONS")
+                < wire.index(b"SETNAME")
+                < wire.index(b"LIB-NAME")
+                < wire.index(b"LIB-VER")
+                < wire.index(b"SELECT")
+            )
         finally:
             test_redis_client.close()
 
@@ -2220,6 +2275,297 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
         for conn in in_use_connections:
             pool.release(conn)
         if hasattr(pool, "disconnect"):
+            pool.disconnect()
+
+
+@pytest.mark.fixed_client
+class TestPendingPushNotificationsOnIdleConnection(TestMaintenanceNotificationsBase):
+    """
+    A connection idle through a maintenance has the notifications, and possibly
+    the server's close, waiting in its buffer when the pool hands it out again.
+    """
+
+    MOVING_PUSH = (
+        f">4\r\n$6\r\nMOVING\r\n:1\r\n:{MOVING_TIMEOUT}\r\n+{AFTER_MOVING_ADDRESS}\r\n"
+    ).encode()
+    MIGRATING_PUSH = b">3\r\n$9\r\nMIGRATING\r\n:1\r\n:10\r\n"
+    INVALIDATE_PUSH = b">2\r\n$10\r\ninvalidate\r\n*1\r\n$3\r\nkey\r\n"
+    # An empty read is how the socket reports the server's close
+    SERVER_CLOSE = b""
+    CACHE_KEY = CacheKey(command="GET", redis_keys=("key",))
+
+    def _idle_connection(self, pool_class, enable_cache=False):
+        """A pool with one connection that has been used once and released."""
+        # The pure-Python parser: the hiredis one checks socket readiness with
+        # poll(), which the mock socket's fake file descriptor cannot answer.
+        pool = pool_class(
+            host=DEFAULT_ADDRESS.split(":")[0],
+            port=int(DEFAULT_ADDRESS.split(":")[1]),
+            protocol=3,
+            parser_class=_RESP3Parser,
+            maint_notifications_config=self.config,
+            cache_config=CacheConfig() if enable_cache else None,
+        )
+        connection = pool.get_connection()
+        connection.send_command("SET", "key", "value")
+        connection.read_response()
+        pool.release(connection)
+        return pool, connection
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_pending_pushes_on_alive_connection_are_applied(self, pool_class):
+        pool, connection = self._idle_connection(pool_class)
+        sock = connection._sock
+        sock.pending_responses.append(self.MOVING_PUSH)
+
+        try:
+            assert pool.get_connection() is connection
+
+            assert connection._sock is sock
+            assert connection.maintenance_state == MaintenanceState.MOVING
+            assert connection.host == AFTER_MOVING_ADDRESS.split(":")[0]
+            assert (
+                pool.connection_kwargs.get("maintenance_state")
+                == MaintenanceState.MOVING
+            )
+        finally:
+            pool.release(connection)
+            pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_pending_pushes_on_closed_connection_are_discarded(self, pool_class):
+        """
+        The server closes the connections of a moved endpoint once the MOVING
+        time-to-live expires, so notifications buffered ahead of the server's
+        close describe a maintenance that is over: nothing is applied, and the
+        pool reconnects through the configured address before the command is
+        sent, instead of letting the command fail on the dead socket.
+        """
+        pool, connection = self._idle_connection(pool_class)
+        sock = connection._sock
+        sock.pending_responses.extend(
+            [self.MIGRATING_PUSH, self.MOVING_PUSH, self.SERVER_CLOSE]
+        )
+
+        try:
+            assert pool.get_connection() is connection
+
+            assert sock.closed
+            assert connection._sock is not sock
+            assert connection._sock.connected
+            # Reconnected through the configured address, not the MOVING target
+            assert connection._sock.address == (
+                DEFAULT_ADDRESS.split(":")[0],
+                int(DEFAULT_ADDRESS.split(":")[1]),
+            )
+            assert connection.maintenance_state == MaintenanceState.NONE
+            assert connection.socket_timeout == connection.orig_socket_timeout
+            assert (
+                pool.connection_kwargs.get("maintenance_state", MaintenanceState.NONE)
+                == MaintenanceState.NONE
+            )
+            assert not pool._maint_notifications_pool_handler._processed_notifications
+        finally:
+            pool.release(connection)
+            pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    @pytest.mark.parametrize(
+        "stale_reply",
+        [b"+OK\r\n", b"_\r\n", b"-MOVED 1337 1.2.3.4:6379\r\n"],
+        ids=["reply", "null_reply", "error_reply"],
+    )
+    def test_stale_reply_on_idle_connection_reconnects(self, pool_class, stale_reply):
+        """
+        A reply left unread by an earlier command is not a push notification: the
+        connection is dirty, and the pool reconnects it rather than letting the
+        next command read the stale reply - as it did before the notifications.
+        The pushes read ahead of it are discarded with it.
+        """
+        pool, connection = self._idle_connection(pool_class)
+        sock = connection._sock
+        sock.pending_responses.extend([self.MOVING_PUSH, stale_reply])
+
+        try:
+            assert pool.get_connection() is connection
+
+            assert sock.closed
+            assert connection._sock is not sock
+            assert connection._sock.connected
+            assert connection.maintenance_state == MaintenanceState.NONE
+            assert not pool._maint_notifications_pool_handler._processed_notifications
+        finally:
+            pool.release(connection)
+            pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_partial_push_frame_on_idle_connection_reconnects(self, pool_class):
+        """
+        A push frame only partly received must not block the checkout: the
+        read is bounded, and running out of it reconnects the connection.
+        """
+        pool, connection = self._idle_connection(pool_class)
+        sock = connection._sock
+        # The frame header and first element, with the rest never arriving
+        sock.pending_responses.append(b">4\r\n$6\r\nMOVING\r\n")
+
+        try:
+            assert pool.get_connection() is connection
+
+            assert sock.closed
+            assert connection._sock is not sock
+            assert connection._sock.connected
+            assert connection.maintenance_state == MaintenanceState.NONE
+            assert not pool._maint_notifications_pool_handler._processed_notifications
+        finally:
+            pool.release(connection)
+            pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_drain_running_out_of_its_deadline_reconnects(self, pool_class):
+        """
+        The deadline spans the whole drain, not each frame: pushes still
+        pending when it is up are discarded and the connection reconnected.
+        """
+        pool, connection = self._idle_connection(pool_class)
+        sock = connection._sock
+        sock.pending_responses.extend([self.MIGRATING_PUSH, self.MOVING_PUSH])
+
+        try:
+            with patch("redis.connection.PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT", 0):
+                assert pool.get_connection() is connection
+
+            assert sock.closed
+            assert connection._sock is not sock
+            assert connection.maintenance_state == MaintenanceState.NONE
+            assert not pool._maint_notifications_pool_handler._processed_notifications
+        finally:
+            pool.release(connection)
+            pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_handlers_are_restored_after_drain(self, pool_class):
+        """A push arriving with the next command is handled as usual."""
+        pool, connection = self._idle_connection(pool_class)
+        connection._sock.pending_responses.extend(
+            [self.MIGRATING_PUSH, self.SERVER_CLOSE]
+        )
+
+        try:
+            assert pool.get_connection() is connection
+            assert connection.maintenance_state == MaintenanceState.NONE
+
+            # The mock socket queues a MIGRATING push ahead of this SET's reply
+            connection.send_command("SET", "key_receive_migrating", "value")
+            connection.read_response()
+
+            assert connection.maintenance_state == MaintenanceState.MAINTENANCE
+        finally:
+            pool.release(connection)
+            pool.disconnect()
+
+    def _cached_idle_connection(self, pool_class):
+        """
+        A client-side caching pool with one idle connection and a cached GET
+        the server's invalidation of ``key`` applies to.
+        """
+        pool, connection = self._idle_connection(pool_class, enable_cache=True)
+        assert pool.cache.set(
+            CacheEntry(
+                cache_key=self.CACHE_KEY,
+                cache_value=b"value",
+                status=CacheEntryStatus.VALID,
+                connection_ref=connection,
+            )
+        )
+        return pool, connection
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_pending_pushes_with_cache_on_alive_connection_are_applied(
+        self, pool_class
+    ):
+        """
+        With client-side caching the pool used to leave the pending data for
+        the next command to read; the notifications are now applied on checkout
+        the same way, and the invalidations buffered with them are applied too.
+        """
+        pool, connection = self._cached_idle_connection(pool_class)
+        sock = connection._conn._sock
+        sock.pending_responses.extend([self.MOVING_PUSH, self.INVALIDATE_PUSH])
+
+        try:
+            assert pool.get_connection() is connection
+
+            assert connection._conn._sock is sock
+            assert connection.maintenance_state == MaintenanceState.MOVING
+            assert connection.host == AFTER_MOVING_ADDRESS.split(":")[0]
+            assert pool.cache.get(self.CACHE_KEY) is None
+        finally:
+            pool.release(connection)
+            pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_pending_pushes_with_cache_on_closed_connection_are_discarded(
+        self, pool_class
+    ):
+        """
+        The reconnect of a closed connection flushes the cache, which covers
+        the invalidations discarded with the stale notifications.
+        """
+        pool, connection = self._cached_idle_connection(pool_class)
+        sock = connection._conn._sock
+        sock.pending_responses.extend(
+            [self.MOVING_PUSH, self.INVALIDATE_PUSH, self.SERVER_CLOSE]
+        )
+
+        try:
+            assert pool.get_connection() is connection
+
+            assert sock.closed
+            assert connection._conn._sock is not sock
+            assert connection._conn._sock.connected
+            assert connection.maintenance_state == MaintenanceState.NONE
+            assert connection.host == DEFAULT_ADDRESS.split(":")[0]
+            assert pool.cache.get(self.CACHE_KEY) is None
+        finally:
+            pool.release(connection)
+            pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_closed_cached_connection_in_maintenance_completes_as_the_proxy(
+        self, pool_class
+    ):
+        """
+        The maintenance handlers are bound to the cache proxy, so the relaxation
+        a closed connection ends is reported with the proxy as its source: by
+        the proxy's own disconnect, not by the wrapped connection failing the
+        drain and disconnecting itself. The close arrives inside a frame, which
+        is where the read - rather than the readiness check - runs into it.
+        """
+        events = []
+
+        class Listener(EventListenerInterface):
+            def listen(self, event):
+                events.append(event)
+
+        self.config.event_dispatcher = EventDispatcher(
+            {MaintenanceCompletedEvent: [Listener()]}
+        )
+        pool, connection = self._cached_idle_connection(pool_class)
+        connection.maintenance_state = MaintenanceState.MAINTENANCE
+        connection._processed_start_maint_notifications.add(1)
+        connection._conn._sock.pending_responses.extend(
+            [b">4\r\n$6\r\nMOVING\r\n", self.SERVER_CLOSE]
+        )
+
+        try:
+            assert pool.get_connection() is connection
+
+            assert connection.maintenance_state == MaintenanceState.NONE
+            assert not connection._processed_start_maint_notifications
+            assert [event.connection for event in events] == [connection]
+        finally:
+            pool.release(connection)
             pool.disconnect()
 
 

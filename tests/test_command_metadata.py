@@ -8,12 +8,16 @@ from redis._parsers import CommandsParser
 from redis._parsers.commands import (
     _build_commands_metadata_cache,
     _build_policy_records,
+    _parse_subcommand,
 )
 from redis.cache import CacheConfig
+from redis.cluster import RedisCluster
 from redis.commands.metadata import (
     _DEFAULT_KEYED_METADATA,
     _DEFAULT_KEYLESS_METADATA,
     _MEMO_MAX_ENTRIES,
+    _is_replica_safe,
+    _is_trackable_read,
     _METADATA_BY_REQUEST_POLICY,
     _STATIC_COMMAND_METADATA,
     PolicyRecords,
@@ -21,6 +25,7 @@ from redis.commands.metadata import (
     CommandMetadataRecordsCache,
     CommandPolicies,
     DynamicMetadataResolver,
+    MetadataResolver,
     RequestPolicy,
     ResponsePolicy,
     StaticMetadataResolver,
@@ -40,10 +45,11 @@ from redis.utils import str_if_bytes
 from tests.conftest import skip_if_server_version_lt
 
 # The server the static table was generated from.
-# 8.10 is the first release that reports every command the
-# table carries (FT.ALIASLIST) and the first that reports the ``script_runner``
-# flag, so the guards that compare the whole table against the live reply cannot run below it.
-STATIC_TABLE_SERVER_VERSION = "8.10.0"
+# 8.11 is the first release that reports every command the
+# table carries (FT.ALIASLIST from 8.10, the BLESS container from 8.11); 8.10 is the first
+# that reports the ``script_runner`` flag. The guards that compare the whole table against
+# the live reply cannot run below it.
+STATIC_TABLE_SERVER_VERSION = "8.11.0"
 
 # Shape of a plain cacheable keyed read, used to stand in for live metadata in the
 # resolver unit tests below.
@@ -62,7 +68,9 @@ KEYED_POLICIES = (RequestPolicy.DEFAULT_KEYED, ResponsePolicy.DEFAULT_KEYED)
 # rather than command by command, because a table edit that gives any of them a routing policy
 # sends it to an arbitrary node instead of the one holding its keys.
 WITHHELD_ROUTING_COMMANDS = (
+    "sdiffcard",
     "sintercard",
+    "sunioncard",
     "xread",
     "zdiff",
     "zinter",
@@ -94,10 +102,41 @@ LIVE_CACHEABILITY_DIVERGENCE = {
     "vrandmember": "has_nondeterministic_output",
 }
 
-# Every entry of the static table whose routing view is None.
+# What the static table makes client-side cacheable that the legacy
+# ``CacheConfig.DEFAULT_ALLOW_LIST`` never carried. One constant, because two tests pin this
+# delta - the default path and the live-chained path - and a table edit that updated only one
+# of them is exactly how they drifted apart before.
+NEWLY_ELIGIBLE_VS_LEGACY_ALLOW_LIST = frozenset(
+    {
+        "DIGEST",
+        "EXPIRETIME",
+        "FT.SUGGET",
+        "FT.SUGLEN",
+        "HEXPIRETIME",
+        "HPEXPIRETIME",
+        "PEXPIRETIME",
+        "SDIFFCARD",
+        "SUNIONCARD",
+    }
+)
+
+# Keyless readonly commands whose routing policies are withheld so the cluster client routes
+# them via COMMAND_FLAGS (e.g. DEFAULT_NODE or PRIMARIES).
+WITHHELD_KEYLESS_READS = (
+    "dbsize",
+    "keys",
+    "randomkey",
+    "scan",
+)
+
+# Every entry of the static table whose routing view is None. BLESS SCAN and COMMAND are
+# keyless and withhold their routing like the reads above, but neither is flagged readonly.
 ALL_WITHHELD_ROUTING_COMMANDS = (
     *WITHHELD_ROUTING_COMMANDS,
     *INELIGIBLE_RECORD_COMMANDS,
+    *WITHHELD_KEYLESS_READS,
+    "bless scan",
+    "command",
 )
 
 
@@ -195,16 +234,19 @@ def slot_routed_static_commands() -> Iterator[str]:
     """
     The names of every static-table entry the cluster client must route by its keys.
 
-    That is the entries recorded ``DEFAULT_KEYED`` plus the entries that withhold their routing
-    policies: the first route by slot directly, the second send the client down its own slot
-    resolution, and both must land on the node holding the key. Derived from the table so the
+    That is the entries recorded ``DEFAULT_KEYED`` plus the keyed entries that withhold their
+    routing policies: the first route by slot directly, the second send the client down its own
+    slot resolution, and both must land on the node holding the key. Derived from the table so the
     routing tests in ``tests/test_cluster.py`` and its async mirror cannot drift from it.
     """
     for _, _, name in static_table_names():
         module, command = _split_command_name(name)
-        request_policy = _STATIC_COMMAND_METADATA[module][command].request_policy
+        metadata = _STATIC_COMMAND_METADATA[module][command]
 
-        if request_policy is None or request_policy is RequestPolicy.DEFAULT_KEYED:
+        if (
+            metadata.request_policy is None
+            or metadata.request_policy is RequestPolicy.DEFAULT_KEYED
+        ) and metadata.has_key_argument:
             yield name
 
 
@@ -213,9 +255,19 @@ def live_command_details(commands: dict[str, Any]) -> dict[str, Any]:
     Key a ``COMMAND`` reply the way the record tables are keyed.
 
     Module commands are reported in upper case (``FT.SEARCH``), so the names are
-    lowercased the way ``CommandsParser.initialize`` lowercases them.
+    lowercased the way ``CommandsParser.initialize`` lowercases them. Container
+    subcommands are reported nested under their container as ``bless|scan`` and are
+    flattened under their space-joined name (``bless scan``), the form the tables key them
+    by and ``execute_command`` receives.
     """
-    return {name.lower(): details for name, details in commands.items()}
+    details_by_name = {}
+    for name, details in commands.items():
+        details_by_name[name.lower()] = details
+        for subcommand in details.get("subcommands") or ():
+            subcommand_details = _parse_subcommand(subcommand)
+            subcommand_name = subcommand_details["name"].lower().replace("|", " ")
+            details_by_name[subcommand_name] = subcommand_details
+    return details_by_name
 
 
 def command_flags(details: dict[str, Any]) -> set[str]:
@@ -379,6 +431,62 @@ class TestIsClientSideCacheable:
             assert static_resolver.is_cacheable(name) is True, name
 
 
+class TestIsTrackableRead:
+    """
+    Whether the server would remember a command's keys: the ``readonly`` flag alone.
+
+    A different question from eligibility, and deliberately so. The server's own gate reads
+    the readonly flag and the key arguments of the invocation and nothing else, so every
+    negative signal that makes a command ineligible to *store* is irrelevant here. The verdict
+    never affects storage: it decides only whether an ``optout`` ``CLIENT CACHING NO`` in
+    front of a read is worth sending.
+
+    Only the sync suite covers it, for the reason given on ``TestIsClientSideCacheable``.
+    """
+
+    def test_a_readonly_command_is_trackable(self):
+        assert _is_trackable_read(CACHEABLE_KEYED) is True
+
+    def test_a_write_command_is_not_trackable(self):
+        assert _is_trackable_read(replace(CACHEABLE_KEYED, is_readonly=False)) is False
+
+    def test_an_unknown_command_is_not_trackable(self):
+        """What an exhausted resolver chain resolves to."""
+        assert _is_trackable_read(None) is False
+
+    def test_incomplete_metadata_is_still_trackable(self):
+        """
+        Unlike eligibility, which refuses an incomplete record. The readonly flag comes from
+        the command flags, which every ``COMMAND`` reply carries; only the tips can be
+        missing, and no tip enters the server's tracking gate.
+        """
+        metadata = replace(CACHEABLE_KEYED, has_complete_metadata=False)
+
+        assert _is_client_side_cacheable(metadata) is False
+        assert _is_trackable_read(metadata) is True
+
+    @pytest.mark.parametrize(
+        "field",
+        ["is_dont_cache", "has_nondeterministic_output", "is_script_runner"],
+    )
+    def test_the_negative_eligibility_signals_do_not_untrack(self, field):
+        """The server tracks XPENDING, TOUCH and EVAL_RO's own reads all the same."""
+        metadata = replace(CACHEABLE_KEYED, **{field: True})
+
+        assert _is_client_side_cacheable(metadata) is False
+        assert _is_trackable_read(metadata) is True
+
+    def test_a_keyless_read_is_trackable(self):
+        """
+        The server extracts the keys from the invocation itself, so a ``NO`` in front of a
+        keyless read is consumed with no effect. Approximating in this direction wastes one
+        command; approximating the other way would risk a stored, untracked reply.
+        """
+        assert _is_trackable_read(replace(CACHEABLE_KEYED, has_key_argument=False)) is (
+            True
+        )
+
+
 @pytest.mark.fixed_client
 class TestWithheldRoutingPolicies:
     """
@@ -462,6 +570,121 @@ class TestWithheldRoutingPolicies:
         )
         for name in ("eval_ro", "evalsha_ro", "fcall_ro"):
             assert static_resolver.resolve(name).is_script_runner is True, name
+
+    def test_keyless_reads_withhold_routing_and_are_replica_safe(self):
+        static_resolver = StaticMetadataResolver()
+        for name in WITHHELD_KEYLESS_READS:
+            metadata = static_resolver.resolve(name)
+
+            assert metadata is not None, name
+            assert metadata.request_policy is None, name
+            assert metadata.response_policy is None, name
+            assert metadata.is_readonly is True, name
+            assert metadata.has_key_argument is False, name
+            assert metadata.has_complete_metadata is True, name
+            assert static_resolver.is_cacheable(name) is False, name
+            assert static_resolver.is_replica_safe(name) is True, name
+
+    def test_command_withholds_routing_and_is_not_replica_safe(self):
+        static_resolver = StaticMetadataResolver()
+        metadata = static_resolver.resolve("command")
+
+        assert metadata is not None
+        assert metadata.request_policy is None
+        assert metadata.response_policy is None
+        assert metadata.is_readonly is False
+        assert metadata.has_key_argument is False
+        assert metadata.has_complete_metadata is True
+        assert static_resolver.is_cacheable("command") is False
+        assert static_resolver.is_replica_safe("command") is False
+
+    def test_bless_scan_withholds_routing_and_is_not_replica_safe(self):
+        """
+        The SCAN-shaped container subcommand: keyless, nondeterministic and routed to every
+        primary through COMMAND_FLAGS, so its record must withhold routing like SCAN's does.
+        Unlike SCAN the server reports no flags for it at all, so it is not readonly.
+        """
+        static_resolver = StaticMetadataResolver()
+        metadata = static_resolver.resolve("bless scan")
+
+        assert metadata is not None
+        assert metadata.request_policy is None
+        assert metadata.response_policy is None
+        assert metadata.is_readonly is False
+        assert metadata.has_key_argument is False
+        assert metadata.has_nondeterministic_output is True
+        assert metadata.has_complete_metadata is True
+        assert static_resolver.is_cacheable("bless scan") is False
+        assert static_resolver.is_replica_safe("bless scan") is False
+
+    @pytest.mark.parametrize("name", ["bless clear", "bless get", "bless set"])
+    def test_the_keyed_bless_subcommands_route_by_key_and_are_not_cacheable(self, name):
+        """
+        BLESS GET is included: the server flags it ``fast`` only, with no ``readonly``, so it
+        fails closed exactly like the two writes.
+        """
+        static_resolver = StaticMetadataResolver()
+        metadata = static_resolver.resolve(name)
+
+        assert metadata is not None, name
+        assert metadata.request_policy is RequestPolicy.DEFAULT_KEYED, name
+        assert metadata.response_policy is ResponsePolicy.DEFAULT_KEYED, name
+        assert metadata.is_readonly is False, name
+        assert metadata.has_key_argument is True, name
+        assert metadata.has_complete_metadata is True, name
+        assert static_resolver.is_cacheable(name) is False, name
+        assert static_resolver.is_replica_safe(name) is False, name
+
+    def test_all_static_entries_in_cluster_command_flags_withhold_routing(self):
+        """
+        Verify that every command appearing in RedisCluster.command_flags that is present
+        in _STATIC_COMMAND_METADATA has its routing view withheld (request_policy=None and
+        response_policy=None).
+
+        _determine_nodes gives precedence to resolved metadata request_policy over COMMAND_FLAGS,
+        so any static table record for a COMMAND_FLAGS command must withhold its routing policies
+        to ensure the legacy COMMAND_FLAGS routing (e.g. DEFAULT_NODE, PRIMARIES) is consulted.
+        """
+        static_resolver = StaticMetadataResolver()
+        table_core = _STATIC_COMMAND_METADATA["core"]
+
+        for flag_cmd in RedisCluster.COMMAND_FLAGS:
+            # A container command like "COMMAND COUNT" or "SLOWLOG GET" may be recorded under
+            # its first token ("command", "slowlog") or, like "BLESS SCAN", under its full
+            # space-joined name - which is the name the resolver is asked for.
+            for table_cmd in {flag_cmd.split()[0].lower(), flag_cmd.lower()}:
+                if table_cmd not in table_core:
+                    continue
+                metadata = static_resolver.resolve(table_cmd)
+                assert metadata is not None
+                assert metadata.request_policy is None, (
+                    f"Command '{table_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold request_policy in _STATIC_COMMAND_METADATA"
+                )
+                assert metadata.response_policy is None, (
+                    f"Command '{table_cmd}' (from COMMAND_FLAGS '{flag_cmd}') must withhold response_policy in _STATIC_COMMAND_METADATA"
+                )
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "ft.aggregate",
+            "ft.spellcheck",
+            "ft.tagvals",
+            "ft.syndump",
+            "ft.dictdump",
+            "ft.explaincli",
+            "ts.get",
+            "ts.range",
+            "ts.revrange",
+            "sort_ro",
+            "georadius_ro",
+            "georadiusbymember_ro",
+            "substr",
+        ],
+    )
+    def test_newly_replica_eligible_commands_are_replica_safe(self, cmd):
+        resolver = StaticMetadataResolver()
+        assert resolver.is_replica_safe(cmd) is True
 
     def test_the_ineligible_records_decide_ahead_of_a_live_layer(self):
         """
@@ -654,17 +877,27 @@ class TestMemoBounds:
 
         assert len(resolver._cacheable) == _MEMO_MAX_ENTRIES
 
+    def test_the_trackable_read_memo_stops_at_the_cap(self):
+        resolver = StaticMetadataResolver()
+
+        self._fill_beyond_the_cap(resolver.is_trackable_read)
+
+        assert len(resolver._trackable_read) == _MEMO_MAX_ENTRIES
+
     def test_the_views_stay_correct_past_the_cap(self):
         """A capped memo recomputes; it never answers wrongly."""
         resolver = StaticMetadataResolver()
 
         self._fill_beyond_the_cap(resolver.resolve_policies)
         self._fill_beyond_the_cap(resolver.is_cacheable)
+        self._fill_beyond_the_cap(resolver.is_trackable_read)
 
         assert policy_pair(resolver.resolve_policies("get")) == KEYED_POLICIES
         assert resolver.is_cacheable("get") is True
+        assert resolver.is_trackable_read("get") is True
         assert resolver.resolve_policies("nosuchmodule.nosuchcommand") is None
         assert resolver.is_cacheable("nosuchmodule.nosuchcommand") is False
+        assert resolver.is_trackable_read("nosuchmodule.nosuchcommand") is False
 
 
 @pytest.mark.fixed_client
@@ -955,6 +1188,62 @@ class TestBaseMetadataResolver:
         assert static_resolver.is_cacheable("touch") is False
         assert static_resolver.is_cacheable("eval_ro") is False
 
+    def test_custom_metadata_decides_replica_safety_for_known_module_reads(self):
+        resolver = DynamicMetadataResolver(
+            {
+                "ts": {"get": CACHEABLE_KEYED},
+                "ft": {"aggregate": CACHEABLE_KEYED},
+            }
+        )
+
+        assert resolver.is_replica_safe("ts.get") is True
+        assert resolver.is_replica_safe("ft.aggregate") is True
+
+    def test_touch_remains_replica_unsafe_despite_readonly_metadata(self):
+        resolver = DynamicMetadataResolver({"core": {"touch": CACHEABLE_KEYED}})
+
+        assert resolver.is_replica_safe("touch") is False
+
+    def test_the_replica_unsafe_commands_are_seeded_into_the_memo(self):
+        """
+        Seeding the memo at construction is the whole mechanism, so pin it: the entry is in
+        place before any command is looked up, which is what lets these answer from the same
+        single dict lookup as every other command with no per-call test of their own. The
+        record TOUCH would otherwise resolve to reports it readonly, so the seed is the only
+        thing keeping it off a replica.
+        """
+        resolver = DynamicMetadataResolver({"core": {"touch": CACHEABLE_KEYED}})
+
+        assert resolver._replica_safe == {"touch": False}
+        assert _is_replica_safe(resolver.resolve("touch")) is True
+        assert resolver.is_replica_safe("TOUCH") is False
+
+    def test_static_resolver_decides_replica_safety(self):
+        resolver = StaticMetadataResolver()
+
+        # Replica safe commands
+        assert resolver.is_replica_safe("get") is True
+        assert resolver.is_replica_safe("GET") is True
+        assert resolver.is_replica_safe("dbsize") is True
+        assert resolver.is_replica_safe("ttl") is True
+        assert resolver.is_replica_safe("eval_ro") is True
+        assert resolver.is_replica_safe("xread") is True
+        assert resolver.is_replica_safe("json.get") is True
+        assert resolver.is_replica_safe("ft.search") is True
+
+        # Replica unsafe commands
+        assert resolver.is_replica_safe("set") is False
+        assert resolver.is_replica_safe("SET") is False
+        assert resolver.is_replica_safe("touch") is False
+        assert resolver.is_replica_safe("TOUCH") is False
+        assert resolver.is_replica_safe("hset") is False
+        assert resolver.is_replica_safe("ft.create") is False
+
+        # Non-string or unknown commands
+        assert resolver.is_replica_safe(None) is False
+        assert resolver.is_replica_safe(123) is False
+        assert resolver.is_replica_safe("nosuchcommand") is False
+
     def test_the_default_eligible_set_differs_from_the_legacy_allow_list_by_exactly_this(
         self,
     ):
@@ -974,9 +1263,9 @@ class TestBaseMetadataResolver:
         }
         allow_list = set(CacheConfig.DEFAULT_ALLOW_LIST)
 
-        # Newly eligible: two suggestion-dictionary reads the allow-list never carried. Both
-        # arrive without a key list, so they are inert until their methods pass ``keys=``.
-        assert eligible - allow_list == {"FT.SUGGET", "FT.SUGLEN"}
+        # Newly eligible: suggestion-dictionary reads and newly added core/module reads
+        # the legacy allow-list never carried.
+        assert eligible - allow_list == set(NEWLY_ELIGIBLE_VS_LEGACY_ALLOW_LIST)
         # No longer eligible, and all three server-confirmed defects in the allow-list.
         assert allow_list - eligible == {"XPENDING", "TS.INFO", "XREAD"}
 
@@ -999,6 +1288,77 @@ class TestBaseMetadataResolver:
             ValueError, match="Wrong command or module name: foo.bar.baz"
         ):
             static_resolver.resolve_policies("foo.bar.baz")
+
+    @pytest.mark.parametrize(
+        "command,trackable",
+        [
+            # Readonly and keyed: the server remembers every key of the invocation.
+            ("GET", True),
+            ("MGET", True),
+            # Readonly and keyed, but never eligible to store - which is exactly why optout
+            # wants to exempt them. TOUCH would be skipped if this read ``is_replica_safe``,
+            # which is pre-seeded with ``touch -> False``.
+            ("TOUCH", True),
+            ("XPENDING", True),
+            # Readonly but keyless, so the ``NO`` is a harmless no-op. Reported honestly
+            # rather than approximated, because trackability never affects storage.
+            ("KEYS", True),
+            # Readonly; the server does not remember a script runner's own key arguments,
+            # only the reads the script performs. Over-reporting costs one wasted command.
+            ("EVAL_RO", True),
+            # Absent from the shipped table, so undecidable: fails closed, which skips the
+            # ``NO``. Waste, never staleness.
+            ("SET", False),
+            ("DEL", False),
+            ("XREADGROUP", False),
+            ("NOSUCHCOMMAND", False),
+            ("NOSUCHMODULE.NOSUCHCOMMAND", False),
+        ],
+    )
+    def test_is_trackable_read_decides_from_the_readonly_flag(self, command, trackable):
+        assert StaticMetadataResolver().is_trackable_read(command) is trackable
+
+    @pytest.mark.parametrize(
+        "command",
+        ["a.b.c", b"GET", bytearray(b"GET"), memoryview(b"GET"), 1, None],
+        ids=["two-dots", "bytes", "bytearray", "memoryview", "int", "none"],
+    )
+    def test_is_trackable_read_fails_closed_on_an_undecidable_name(self, command):
+        """
+        Same contract as ``is_cacheable``: a raw command whose name cannot be decided must
+        still reach the server, so this never raises into the command execution path.
+        """
+        assert StaticMetadataResolver().is_trackable_read(command) is False
+
+    def test_is_trackable_read_is_case_insensitive(self):
+        resolver = StaticMetadataResolver()
+
+        for command in ("get", "GET", "Get"):
+            assert resolver.is_trackable_read(command) is True
+
+    def test_is_trackable_read_is_abstract_on_the_abc(self):
+        """
+        A ``MetadataResolver`` must implement ``is_trackable_read`` like its other views.
+        """
+
+        class ResolverWithoutTheView(MetadataResolver):
+            def resolve(self, command_name):
+                return None
+
+            def resolve_policies(self, command_name):
+                return None
+
+            def is_cacheable(self, command_name):
+                return False
+
+            def is_replica_safe(self, command_name):
+                return False
+
+            def with_fallback(self, fallback):
+                return self
+
+        with pytest.raises(TypeError, match="is_trackable_read"):
+            ResolverWithoutTheView()
 
     def test_the_views_are_case_insensitive(self):
         """
@@ -1778,9 +2138,13 @@ class TestStaticMetadataAgainstServer:
         # Nothing the allow-list carried is dropped beyond the three the server itself reports
         # as not cacheable.
         assert allow_list - eligible == {"xpending", "ts.info", "xread"}
-        # Everything newly cacheable is a command the table does not carry, so the broadening
-        # is attributable to the fallback rather than to a table edit.
-        assert (eligible - allow_list) & table_names == {"ft.sugget", "ft.suglen"}
+        # Everything newly cacheable is either a command the table does not carry - so the
+        # broadening is attributable to the fallback rather than to a table edit - or one of
+        # the table's own additions over the legacy allow-list, which the default path pins
+        # separately.
+        assert (eligible - allow_list) & table_names == {
+            name.lower() for name in NEWLY_ELIGIBLE_VS_LEGACY_ALLOW_LIST
+        }
         # And it is exactly this large, so a server or module version that starts reporting a
         # command as cacheable when it should not be surfaces here rather than silently
         # broadening what an opt-in user caches. Measured against the pinned

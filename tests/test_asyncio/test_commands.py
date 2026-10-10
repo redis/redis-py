@@ -7,6 +7,7 @@ import binascii
 import datetime
 import re
 import sys
+import warnings
 from string import ascii_letters
 from unittest.mock import AsyncMock, patch
 
@@ -41,6 +42,7 @@ from tests.conftest import (
     expects_resp3_shape,
     expects_unified_shape,
     expected_response_shape,
+    skip_if_redis_enterprise,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
@@ -55,6 +57,25 @@ else:
 REDIS_6_VERSION = "5.9.0"
 
 ClientT = redis.Redis | redis.RedisCluster
+
+
+@pytest.mark.asyncio
+async def test_server_deprecated_commands_do_not_emit_python_warnings():
+    client = redis.Redis()
+    try:
+        with patch.object(
+            client, "execute_command", new_callable=AsyncMock
+        ) as execute_command:
+            execute_command.return_value = True
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", DeprecationWarning)
+                assert await client.setex("a", 60, "1")
+                assert await client.hmset("a", {"field": "value"})
+
+            execute_command.assert_any_await("SETEX", "a", 60, "1")
+            execute_command.assert_any_await("HMSET", "a", "field", "value")
+    finally:
+        await client.aclose()
 
 
 @pytest_asyncio.fixture()
@@ -504,6 +525,12 @@ class TestRedisCommands:
         assert isinstance(clients[0], dict)
         assert "addr" in clients[0]
 
+    @pytest.mark.onlynoncluster
+    async def test_client_list_iter(self, r: redis.Redis):
+        clients = list(await r.client_list_iter())
+        assert isinstance(clients[0], dict)
+        assert "addr" in clients[0]
+
     @skip_if_server_version_lt("5.0.0")
     async def test_client_list_type(self, r: redis.Redis):
         with pytest.raises(exceptions.RedisError):
@@ -541,6 +568,16 @@ class TestRedisCommands:
             b"redis_py_test",
             "redis_py_test",
         )
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    async def test_client_info_name_with_equals(self, r: redis.Redis):
+        # A client name may contain "=", which the "key=value" CLIENT INFO
+        # format made easy to mis-split. Check the name survives the round trip
+        # through the real server rather than only the unit-tested parser.
+        await r.client_setname("test=name")
+        info = await r.client_info()
+        assert info["name"] == "test=name"
 
     @skip_if_server_version_lt("7.2.0")
     async def test_client_setinfo(self, r: redis.Redis):
@@ -836,6 +873,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     async def test_hotkeys_start_basic(self, r: redis.Redis):
         """Test basic HOTKEYS START command with CPU metric"""
         # Reset any previous session
@@ -850,6 +888,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     async def test_hotkeys_start_with_all_metrics(self, r: redis.Redis):
         """Test HOTKEYS START with both CPU and NET metrics"""
         try:
@@ -864,6 +903,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     async def test_hotkeys_start_with_duration(self, r: redis.Redis):
         """Test HOTKEYS START with duration parameter"""
         try:
@@ -878,6 +918,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     async def test_hotkeys_start_with_sample_ratio(self, r: redis.Redis):
         """Test HOTKEYS START with sample ratio"""
         try:
@@ -892,6 +933,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     async def test_hotkeys_start_with_slots_fail_on_non_cluster_setup(
         self, r: redis.Redis
     ):
@@ -907,6 +949,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     async def test_hotkeys_start_with_all_parameters(self, r: redis.Redis):
         """Test HOTKEYS START with all optional parameters"""
         try:
@@ -924,6 +967,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     async def test_hotkeys_stop(self, r: redis.Redis):
         """Test HOTKEYS STOP command"""
         try:
@@ -940,6 +984,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     async def test_hotkeys_reset(self, r: redis.Redis):
         """Test HOTKEYS RESET command"""
         try:
@@ -981,6 +1026,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     async def test_hotkeys_get_ongoing_session(self, r: redis.Redis):
         """Test HOTKEYS GET during an ongoing collection session"""
         try:
@@ -1013,6 +1059,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     async def test_hotkeys_get_terminated_session(self, r: redis.Redis):
         """Test HOTKEYS GET after stopping a collection session"""
         try:
@@ -1042,6 +1089,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     async def test_hotkeys_get_all_fields(self, r: redis.Redis):
         """Test HOTKEYS GET returns all documented fields"""
         try:
@@ -1092,6 +1140,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
     async def test_hotkeys_get_all_fields_decoded(self, decoded_r: redis.Redis):
         """Test HOTKEYS GET returns all documented fields"""
         try:
@@ -3268,6 +3317,62 @@ class TestRedisCommands:
         assert await r.rpushx("a", "4") == 4
         assert await r.lrange("a", 0, -1) == [b"1", b"2", b"3", b"4"]
 
+    # BLESS COMMANDS
+    @skip_if_server_version_lt("8.11.0")
+    async def test_bless_set_get_clear(self, r: redis.Redis):
+        await r.set("a", 1)
+        assert await r.bless_get("a") == []
+        assert await r.bless_set("a", "NO-EVICT") == 1
+        assert await r.bless_set("a", "NO-EVICT") == 0
+        assert await r.bless_get("a") == [b"NO-EVICT"]
+        assert await r.bless_clear("a", "NO-EVICT") == 1
+        assert await r.bless_clear("a", "NO-EVICT") == 0
+        assert await r.bless_get("a") == []
+
+    @skip_if_server_version_lt("8.11.0")
+    async def test_bless_missing_key(self, r: redis.Redis):
+        with pytest.raises(exceptions.ResponseError):
+            await r.bless_get("a")
+        with pytest.raises(exceptions.ResponseError):
+            await r.bless_set("a", "NO-EVICT")
+        with pytest.raises(exceptions.ResponseError):
+            await r.bless_clear("a", "NO-EVICT")
+
+    @skip_if_server_version_lt("8.11.0")
+    @pytest.mark.onlynoncluster
+    async def test_bless_scan(self, r: redis.Redis):
+        await r.set("a", 1)
+        await r.set("b", 2)
+        await r.set("c", 3)
+        assert await r.bless_scan(0, "NO-EVICT") == (0, [])
+        await r.bless_set("a", "NO-EVICT")
+        await r.bless_set("b", "NO-EVICT")
+        cursor, keys = await r.bless_scan(0, "NO-EVICT")
+        assert cursor == 0
+        assert set(keys) == {b"a", b"b"}
+
+        cursor, keys = 0, []
+        while True:
+            cursor, page = await r.bless_scan(cursor, "NO-EVICT", count=1)
+            keys.extend(page)
+            if cursor == 0:
+                break
+        assert set(keys) == {b"a", b"b"}
+
+    @skip_if_server_version_lt("8.11.0")
+    @pytest.mark.onlynoncluster
+    async def test_bless_scan_iter(self, r: redis.Redis):
+        await r.set("a", 1)
+        await r.set("b", 2)
+        await r.set("c", 3)
+        assert [k async for k in r.bless_scan_iter("NO-EVICT")] == []
+        await r.bless_set("a", "NO-EVICT")
+        await r.bless_set("b", "NO-EVICT")
+        keys = [k async for k in r.bless_scan_iter("NO-EVICT")]
+        assert set(keys) == {b"a", b"b"}
+        keys = [k async for k in r.bless_scan_iter("NO-EVICT", count=1)]
+        assert set(keys) == {b"a", b"b"}
+
     # SCAN COMMANDS
     @skip_if_server_version_lt("2.8.0")
     @pytest.mark.onlynoncluster
@@ -4276,8 +4381,7 @@ class TestRedisCommands:
 
     async def test_hmset(self, r: redis.Redis):
         h = {b"a": b"1", b"b": b"2", b"c": b"3"}
-        with pytest.warns(DeprecationWarning):
-            assert await r.hmset("a", h)
+        assert await r.hmset("a", h)
         assert await r.hgetall("a") == h
 
     async def test_hsetnx(self, r: redis.Redis):
@@ -5119,6 +5223,8 @@ class TestRedisCommands:
         info = await r.xinfo_stream(stream, full=True)
         consumer = info["groups"][0]["consumers"][0]
         assert isinstance(consumer, dict)
+        assert consumer["name"] == b"consumer"
+        assert consumer["pel-count"] == 1
 
     @skip_if_server_version_lt("8.5.0")
     async def test_xinfo_stream_idempotent_fields(self, r: redis.Redis):
@@ -5340,6 +5446,26 @@ class TestRedisCommands:
         assert response[0]["consumer"] == consumer1.encode()
         assert response[1]["message_id"] == m2
         assert response[1]["consumer"] == consumer2.encode()
+
+    @skip_if_server_version_lt("5.0.0")
+    @pytest.mark.parametrize("consumer", ["", b"", "consumer1", b"consumer1"])
+    async def test_xpending_range_consumer_filter(self, r, consumer):
+        stream, group = "stream", "group"
+        first = await r.xadd(stream, {"foo": "bar"})
+        second = await r.xadd(stream, {"foo": "baz"})
+        await r.xgroup_create(stream, group, 0)
+        await r.xreadgroup(group, consumer, streams={stream: ">"}, count=1)
+        await r.xreadgroup(group, "other", streams={stream: ">"}, count=1)
+
+        pending = await r.xpending_range(stream, group, "-", "+", 5)
+        assert [item["message_id"] for item in pending] == [first, second]
+
+        filtered = await r.xpending_range(
+            stream, group, "-", "+", 5, consumername=consumer
+        )
+        assert [item["message_id"] for item in filtered] == [first]
+        expected_consumer = consumer.encode() if isinstance(consumer, str) else consumer
+        assert filtered[0]["consumer"] == expected_consumer
 
     @skip_if_server_version_lt("5.0.0")
     async def test_xrange(self, r: redis.Redis):

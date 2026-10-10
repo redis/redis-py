@@ -12,11 +12,12 @@ from redis.asyncio.multidb.config import (
 from redis.asyncio.multidb.database import AsyncDatabase, Database, Databases
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector
 from redis.asyncio.multidb.healthcheck import HealthCheck, HealthCheckPolicy
-from redis.asyncio.retry import Retry
+from redis.asyncio.retry import Retry, _to_async_retry
 from redis.background import BackgroundScheduler
 from redis.backoff import NoBackoff
 from redis.commands import AsyncCoreCommands, AsyncRedisModuleCommands
-from redis.exceptions import DataError
+from redis.exceptions import DataError, RedisClusterUnreachableError
+from redis.maint_notifications import MaintNotificationsConfig
 from redis.multidb.circuit import CircuitBreaker
 from redis.multidb.circuit import State as CBState
 from redis.multidb.exception import (
@@ -63,8 +64,10 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         self._failover_strategy.set_databases(self._databases)
         self._auto_fallback_interval = config.auto_fallback_interval
         self._event_dispatcher = config.event_dispatcher
-        self._command_retry = config.command_retry
-        self._command_retry.update_supported_errors([ConnectionRefusedError])
+        self._command_retry = _to_async_retry(config.command_retry)
+        self._command_retry.update_supported_errors(
+            [ConnectionRefusedError, RedisClusterUnreachableError]
+        )
         self.command_executor = DefaultCommandExecutor(
             failure_detectors=self._failure_detectors,
             databases=self._databases,
@@ -189,6 +192,17 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         # The retry object is not used in the lower level clients, so we can safely remove it.
         # We rely on command_retry in terms of global retries.
         config.client_kwargs.update({"retry": Retry(retries=0, backoff=NoBackoff())})
+
+        # Maintenance notifications are disabled by default in underlying clients,
+        # but user can override this by providing their own config. A supplied
+        # pool keeps its own configuration.
+        if (
+            not config.from_pool
+            and "maint_notifications_config" not in config.client_kwargs
+        ):
+            config.client_kwargs["maint_notifications_config"] = (
+                MaintNotificationsConfig(enabled=False)
+            )
 
         if config.from_url:
             client = self._config.client_class.from_url(
@@ -422,6 +436,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         )
 
         if not is_healthy:
+            # The exception path is logged by the caller; a check that reports
+            # unhealthy without raising would otherwise open the circuit silently
+            logger.debug(f"Health check reported database unhealthy: {database}")
             if database.circuit.state != CBState.OPEN:
                 database.circuit.state = CBState.OPEN
             return is_healthy
@@ -471,7 +488,6 @@ class Pipeline(AsyncRedisModuleCommands, AsyncCoreCommands):
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         await self.reset()
-        await self._client.__aexit__(exc_type, exc_value, traceback)
 
     def __await__(self):
         return self._async_self().__await__()

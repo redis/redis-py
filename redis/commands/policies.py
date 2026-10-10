@@ -467,10 +467,7 @@ class AsyncStaticPolicyResolver(AsyncBasePolicyResolver):
                 used for resolving policies if static policies are inadequate.
             metadata_resolver (Optional[AsyncMetadataResolver]): The metadata resolver to
                 project the routing view of. Defaults to an ``AsyncStaticMetadataResolver``.
-                Mirrors ``StaticPolicyResolver`` - see its note. The async clients take no
-                ``metadata_resolver`` argument yet, because the async stack has no
-                client-side cache to be the second consumer, so nothing in the library passes
-                this; it exists so the two signatures stay aligned.
+                Mirrors ``StaticPolicyResolver`` - see its note.
         """
         if metadata_resolver is None:
             metadata_resolver = AsyncStaticMetadataResolver()

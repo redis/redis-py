@@ -1,10 +1,13 @@
+import datetime
 import socket
 import ssl
 from urllib.parse import urlparse
 
 import pytest
 import redis
+from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError, RedisError
+from redis.retry import Retry
 
 from .conftest import (
     skip_if_cryptography,
@@ -54,7 +57,9 @@ class TestSSL:
     def test_ssl_connection_without_ssl(self, request):
         ssl_url = request.config.option.redis_ssl_url
         p = urlparse(ssl_url)[1].split(":")
-        r = redis.Redis(host=p[0], port=p[1], ssl=False)
+        # the TLS port closes a plaintext connection every time, so skip the
+        # default backoff retries
+        r = redis.Redis(host=p[0], port=p[1], ssl=False, retry=Retry(NoBackoff(), 0))
 
         with pytest.raises(ConnectionError) as e:
             r.ping()
@@ -125,6 +130,8 @@ class TestSSL:
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers="foo:bar",
+            # an invalid cipher list never connects, so skip the backoff retries
+            retry=Retry(NoBackoff(), 0),
         )
         with pytest.raises(RedisError) as e:
             r.ping()
@@ -149,6 +156,8 @@ class TestSSL:
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers=ssl_ciphers,
+            # the cipher list is rejected on every attempt, so skip the backoff
+            retry=Retry(NoBackoff(), 0),
         )
         with pytest.raises(RedisError) as e:
             r.ping()
@@ -466,3 +475,88 @@ class TestSSL:
             assert r.acl_whoami() == CN_USERNAME
         finally:
             r.close()
+
+
+class TestOCSPCertificateBinding:
+    """An ocsp response is only about the certificate its CertID names."""
+
+    @staticmethod
+    def _certificates_and_responses():
+        """Build a CA, the certificate under check, an unrelated certificate
+        from the same issuer, and a GOOD ocsp response for each of them.
+        """
+        pytest.importorskip("cryptography")
+
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.x509 import ocsp
+        from cryptography.x509.oid import NameOID
+
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+        def certificate(common_name, serial, signing_key=None, ca=False):
+            key = ec.generate_private_key(ec.SECP256R1())
+            builder = (
+                x509.CertificateBuilder()
+                .subject_name(
+                    x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+                )
+                .issuer_name(
+                    x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Test CA")])
+                )
+                .public_key(key.public_key())
+                .serial_number(serial)
+                .not_valid_before(now - datetime.timedelta(days=1))
+                .not_valid_after(now + datetime.timedelta(days=365))
+            )
+            if ca:
+                builder = builder.add_extension(
+                    x509.BasicConstraints(ca=True, path_length=None), critical=True
+                )
+            return builder.sign(signing_key or key, hashes.SHA256()), key
+
+        ca, ca_key = certificate("Test CA", 1, ca=True)
+        cert, _ = certificate("node", 111, signing_key=ca_key)
+        other, _ = certificate("other", 999, signing_key=ca_key)
+
+        def good_response(target):
+            # this_update is a day back rather than an hour, so the naive local
+            # comparison in _check_certificate holds west of UTC too.
+            response = (
+                ocsp.OCSPResponseBuilder()
+                .add_response(
+                    cert=target,
+                    issuer=ca,
+                    algorithm=hashes.SHA256(),
+                    cert_status=ocsp.OCSPCertStatus.GOOD,
+                    this_update=now - datetime.timedelta(days=1),
+                    next_update=now + datetime.timedelta(days=1),
+                    revocation_time=None,
+                    revocation_reason=None,
+                )
+                .responder_id(ocsp.OCSPResponderEncoding.NAME, ca)
+                .sign(ca_key, hashes.SHA256())
+            )
+            return response.public_bytes(serialization.Encoding.DER)
+
+        return ca, cert, good_response(cert), good_response(other)
+
+    def test_check_certificate_accepts_matching_response(self):
+        from redis.ocsp import _check_certificate
+
+        ca, cert, good_for_cert, _ = self._certificates_and_responses()
+
+        assert _check_certificate(ca, cert, good_for_cert) is True
+
+    def test_check_certificate_rejects_response_for_other_serial(self):
+        # A validly signed GOOD response for a different, non-revoked
+        # certificate from the same issuer must not be accepted for the
+        # certificate under check.
+        from redis.ocsp import _check_certificate
+
+        ca, cert, _, good_for_other = self._certificates_and_responses()
+
+        with pytest.raises(ConnectionError) as e:
+            _check_certificate(ca, cert, good_for_other)
+        assert "serial number does not match" in str(e.value)
