@@ -4863,6 +4863,50 @@ class TestRedisCommands:
             b"place1",
         ]
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("3.2.0")
+    @pytest.mark.parametrize("destination", ["", b"", memoryview(b"")])
+    @pytest.mark.parametrize("store_option", ["store", "store_dist"])
+    @pytest.mark.parametrize("by_member", [False, True])
+    async def test_georadius_empty_store_key(
+        self, r, destination, store_option, by_member
+    ):
+        # 2026-10-09: Empty keys must retain GEO storage and integer responses.
+        await r.geoadd("barcelona", (2.1909389952632, 41.433791470673, "place1"))
+        options = {store_option: destination}
+        if by_member:
+            result = await r.georadiusbymember("barcelona", "place1", 1000, **options)
+        else:
+            result = await r.georadius("barcelona", 2.191, 41.433, 1000, **options)
+
+        assert result == 1
+        assert await r.zrange(destination, 0, -1) == [b"place1"]
+        stored_score = await r.zscore(destination, "place1")
+        if store_option == "store":
+            assert stored_score == await r.zscore("barcelona", "place1")
+        else:
+            assert 0 <= stored_score < 1000
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("3.2.0")
+    @pytest.mark.parametrize(
+        "store, store_dist", [("", "dist"), ("store", ""), ("", ""), (b"", b"")]
+    )
+    @pytest.mark.parametrize("by_member", [False, True])
+    async def test_georadius_empty_store_conflict(
+        self, r, store, store_dist, by_member
+    ):
+        # 2026-10-09: Both explicit storage options remain mutually exclusive.
+        await r.geoadd("barcelona", (2.1909389952632, 41.433791470673, "place1"))
+        options = {"store": store, "store_dist": store_dist}
+        with pytest.raises(
+            redis.DataError, match="store and store_dist can't be set together"
+        ):
+            if by_member:
+                await r.georadiusbymember("barcelona", "place1", 1000, **options)
+            else:
+                await r.georadius("barcelona", 2.191, 41.433, 1000, **options)
+
     @skip_if_server_version_lt("3.2.0")
     @pytest.mark.onlynoncluster
     async def test_georadius_store(self, r: redis.Redis):
