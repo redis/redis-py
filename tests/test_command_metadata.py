@@ -17,6 +17,7 @@ from redis.commands.metadata import (
     _DEFAULT_KEYLESS_METADATA,
     _MEMO_MAX_ENTRIES,
     _is_replica_safe,
+    _is_trackable_read,
     _METADATA_BY_REQUEST_POLICY,
     _STATIC_COMMAND_METADATA,
     PolicyRecords,
@@ -24,6 +25,7 @@ from redis.commands.metadata import (
     CommandMetadataRecordsCache,
     CommandPolicies,
     DynamicMetadataResolver,
+    MetadataResolver,
     RequestPolicy,
     ResponsePolicy,
     StaticMetadataResolver,
@@ -429,6 +431,62 @@ class TestIsClientSideCacheable:
             assert static_resolver.is_cacheable(name) is True, name
 
 
+class TestIsTrackableRead:
+    """
+    Whether the server would remember a command's keys: the ``readonly`` flag alone.
+
+    A different question from eligibility, and deliberately so. The server's own gate reads
+    the readonly flag and the key arguments of the invocation and nothing else, so every
+    negative signal that makes a command ineligible to *store* is irrelevant here. The verdict
+    never affects storage: it decides only whether an ``optout`` ``CLIENT CACHING NO`` in
+    front of a read is worth sending.
+
+    Only the sync suite covers it, for the reason given on ``TestIsClientSideCacheable``.
+    """
+
+    def test_a_readonly_command_is_trackable(self):
+        assert _is_trackable_read(CACHEABLE_KEYED) is True
+
+    def test_a_write_command_is_not_trackable(self):
+        assert _is_trackable_read(replace(CACHEABLE_KEYED, is_readonly=False)) is False
+
+    def test_an_unknown_command_is_not_trackable(self):
+        """What an exhausted resolver chain resolves to."""
+        assert _is_trackable_read(None) is False
+
+    def test_incomplete_metadata_is_still_trackable(self):
+        """
+        Unlike eligibility, which refuses an incomplete record. The readonly flag comes from
+        the command flags, which every ``COMMAND`` reply carries; only the tips can be
+        missing, and no tip enters the server's tracking gate.
+        """
+        metadata = replace(CACHEABLE_KEYED, has_complete_metadata=False)
+
+        assert _is_client_side_cacheable(metadata) is False
+        assert _is_trackable_read(metadata) is True
+
+    @pytest.mark.parametrize(
+        "field",
+        ["is_dont_cache", "has_nondeterministic_output", "is_script_runner"],
+    )
+    def test_the_negative_eligibility_signals_do_not_untrack(self, field):
+        """The server tracks XPENDING, TOUCH and EVAL_RO's own reads all the same."""
+        metadata = replace(CACHEABLE_KEYED, **{field: True})
+
+        assert _is_client_side_cacheable(metadata) is False
+        assert _is_trackable_read(metadata) is True
+
+    def test_a_keyless_read_is_trackable(self):
+        """
+        The server extracts the keys from the invocation itself, so a ``NO`` in front of a
+        keyless read is consumed with no effect. Approximating in this direction wastes one
+        command; approximating the other way would risk a stored, untracked reply.
+        """
+        assert _is_trackable_read(replace(CACHEABLE_KEYED, has_key_argument=False)) is (
+            True
+        )
+
+
 @pytest.mark.fixed_client
 class TestWithheldRoutingPolicies:
     """
@@ -819,17 +877,27 @@ class TestMemoBounds:
 
         assert len(resolver._cacheable) == _MEMO_MAX_ENTRIES
 
+    def test_the_trackable_read_memo_stops_at_the_cap(self):
+        resolver = StaticMetadataResolver()
+
+        self._fill_beyond_the_cap(resolver.is_trackable_read)
+
+        assert len(resolver._trackable_read) == _MEMO_MAX_ENTRIES
+
     def test_the_views_stay_correct_past_the_cap(self):
         """A capped memo recomputes; it never answers wrongly."""
         resolver = StaticMetadataResolver()
 
         self._fill_beyond_the_cap(resolver.resolve_policies)
         self._fill_beyond_the_cap(resolver.is_cacheable)
+        self._fill_beyond_the_cap(resolver.is_trackable_read)
 
         assert policy_pair(resolver.resolve_policies("get")) == KEYED_POLICIES
         assert resolver.is_cacheable("get") is True
+        assert resolver.is_trackable_read("get") is True
         assert resolver.resolve_policies("nosuchmodule.nosuchcommand") is None
         assert resolver.is_cacheable("nosuchmodule.nosuchcommand") is False
+        assert resolver.is_trackable_read("nosuchmodule.nosuchcommand") is False
 
 
 @pytest.mark.fixed_client
@@ -1220,6 +1288,77 @@ class TestBaseMetadataResolver:
             ValueError, match="Wrong command or module name: foo.bar.baz"
         ):
             static_resolver.resolve_policies("foo.bar.baz")
+
+    @pytest.mark.parametrize(
+        "command,trackable",
+        [
+            # Readonly and keyed: the server remembers every key of the invocation.
+            ("GET", True),
+            ("MGET", True),
+            # Readonly and keyed, but never eligible to store - which is exactly why optout
+            # wants to exempt them. TOUCH would be skipped if this read ``is_replica_safe``,
+            # which is pre-seeded with ``touch -> False``.
+            ("TOUCH", True),
+            ("XPENDING", True),
+            # Readonly but keyless, so the ``NO`` is a harmless no-op. Reported honestly
+            # rather than approximated, because trackability never affects storage.
+            ("KEYS", True),
+            # Readonly; the server does not remember a script runner's own key arguments,
+            # only the reads the script performs. Over-reporting costs one wasted command.
+            ("EVAL_RO", True),
+            # Absent from the shipped table, so undecidable: fails closed, which skips the
+            # ``NO``. Waste, never staleness.
+            ("SET", False),
+            ("DEL", False),
+            ("XREADGROUP", False),
+            ("NOSUCHCOMMAND", False),
+            ("NOSUCHMODULE.NOSUCHCOMMAND", False),
+        ],
+    )
+    def test_is_trackable_read_decides_from_the_readonly_flag(self, command, trackable):
+        assert StaticMetadataResolver().is_trackable_read(command) is trackable
+
+    @pytest.mark.parametrize(
+        "command",
+        ["a.b.c", b"GET", bytearray(b"GET"), memoryview(b"GET"), 1, None],
+        ids=["two-dots", "bytes", "bytearray", "memoryview", "int", "none"],
+    )
+    def test_is_trackable_read_fails_closed_on_an_undecidable_name(self, command):
+        """
+        Same contract as ``is_cacheable``: a raw command whose name cannot be decided must
+        still reach the server, so this never raises into the command execution path.
+        """
+        assert StaticMetadataResolver().is_trackable_read(command) is False
+
+    def test_is_trackable_read_is_case_insensitive(self):
+        resolver = StaticMetadataResolver()
+
+        for command in ("get", "GET", "Get"):
+            assert resolver.is_trackable_read(command) is True
+
+    def test_is_trackable_read_is_abstract_on_the_abc(self):
+        """
+        A ``MetadataResolver`` must implement ``is_trackable_read`` like its other views.
+        """
+
+        class ResolverWithoutTheView(MetadataResolver):
+            def resolve(self, command_name):
+                return None
+
+            def resolve_policies(self, command_name):
+                return None
+
+            def is_cacheable(self, command_name):
+                return False
+
+            def is_replica_safe(self, command_name):
+                return False
+
+            def with_fallback(self, fallback):
+                return self
+
+        with pytest.raises(TypeError, match="is_trackable_read"):
+            ResolverWithoutTheView()
 
     def test_the_views_are_case_insensitive(self):
         """

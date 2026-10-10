@@ -597,10 +597,11 @@ class _AsyncRESPBase(AsyncBaseParser):
         # has since closed the connection.
         if self._buffer:
             return True
-        if self._stream.at_eof():
+        if self._stream.at_eof() or self._stream.exception() is not None:
             # Raise like the sync SocketBuffer does on a server-closed
             # connection, so callers that tolerate pending data (push
             # notifications) can't mistake EOF for a readable connection.
+            # A reset (RST) leaves no EOF but an exception on the stream.
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         # asyncio.StreamReader has no public non-destructive API for checking
         # buffered bytes. Preserve dirty-connection detection for the Python

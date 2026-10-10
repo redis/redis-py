@@ -7068,6 +7068,8 @@ class TestRedisCommands:
         info = r.xinfo_stream(stream, full=True)
         consumer = info["groups"][0]["consumers"][0]
         assert isinstance(consumer, dict)
+        assert consumer["name"] == b"consumer"
+        assert consumer["pel-count"] == 1
 
     @skip_if_server_version_lt("8.5.0")
     def test_xinfo_stream_idempotent_fields(self, r):
@@ -7343,6 +7345,24 @@ class TestRedisCommands:
             r.xpending_range(
                 stream, group, min=None, max=None, count=None, consumername=0
             )
+
+    @skip_if_server_version_lt("5.0.0")
+    @pytest.mark.parametrize("consumer", ["", b"", "consumer1", b"consumer1"])
+    def test_xpending_range_consumer_filter(self, r, consumer):
+        stream, group = "stream", "group"
+        first = r.xadd(stream, {"foo": "bar"})
+        second = r.xadd(stream, {"foo": "baz"})
+        r.xgroup_create(stream, group, 0)
+        r.xreadgroup(group, consumer, streams={stream: ">"}, count=1)
+        r.xreadgroup(group, "other", streams={stream: ">"}, count=1)
+
+        pending = r.xpending_range(stream, group, "-", "+", 5)
+        assert [item["message_id"] for item in pending] == [first, second]
+
+        filtered = r.xpending_range(stream, group, "-", "+", 5, consumername=consumer)
+        assert [item["message_id"] for item in filtered] == [first]
+        expected_consumer = consumer.encode() if isinstance(consumer, str) else consumer
+        assert filtered[0]["consumer"] == expected_consumer
 
     @skip_if_server_version_lt("5.0.0")
     def test_xrange(self, r):
@@ -8523,11 +8543,11 @@ class TestRedisCommands:
     def test_module(self, stack_r):
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
             stack_r.module_load("/some/fake/path")
-            assert "Error loading the extension." in str(excinfo.value)
+        assert "Error loading the extension." in str(excinfo.value)
 
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
             stack_r.module_load("/some/fake/path", "arg1", "arg2", "arg3", "arg4")
-            assert "Error loading the extension." in str(excinfo.value)
+        assert "Error loading the extension." in str(excinfo.value)
 
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
@@ -8536,13 +8556,13 @@ class TestRedisCommands:
     def test_module_loadex(self, stack_r: redis.Redis):
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
             stack_r.module_loadex("/some/fake/path")
-            assert "Error loading the extension." in str(excinfo.value)
+        assert "Error loading the extension." in str(excinfo.value)
 
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
             stack_r.module_loadex(
                 "/some/fake/path", ["name", "value"], ["arg1", "arg2"]
             )
-            assert "Error loading the extension." in str(excinfo.value)
+        assert "Error loading the extension." in str(excinfo.value)
 
     @skip_if_server_version_lt("2.6.0")
     def test_restore(self, r):

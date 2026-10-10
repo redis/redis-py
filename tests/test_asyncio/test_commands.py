@@ -5223,6 +5223,8 @@ class TestRedisCommands:
         info = await r.xinfo_stream(stream, full=True)
         consumer = info["groups"][0]["consumers"][0]
         assert isinstance(consumer, dict)
+        assert consumer["name"] == b"consumer"
+        assert consumer["pel-count"] == 1
 
     @skip_if_server_version_lt("8.5.0")
     async def test_xinfo_stream_idempotent_fields(self, r: redis.Redis):
@@ -5444,6 +5446,26 @@ class TestRedisCommands:
         assert response[0]["consumer"] == consumer1.encode()
         assert response[1]["message_id"] == m2
         assert response[1]["consumer"] == consumer2.encode()
+
+    @skip_if_server_version_lt("5.0.0")
+    @pytest.mark.parametrize("consumer", ["", b"", "consumer1", b"consumer1"])
+    async def test_xpending_range_consumer_filter(self, r, consumer):
+        stream, group = "stream", "group"
+        first = await r.xadd(stream, {"foo": "bar"})
+        second = await r.xadd(stream, {"foo": "baz"})
+        await r.xgroup_create(stream, group, 0)
+        await r.xreadgroup(group, consumer, streams={stream: ">"}, count=1)
+        await r.xreadgroup(group, "other", streams={stream: ">"}, count=1)
+
+        pending = await r.xpending_range(stream, group, "-", "+", 5)
+        assert [item["message_id"] for item in pending] == [first, second]
+
+        filtered = await r.xpending_range(
+            stream, group, "-", "+", 5, consumername=consumer
+        )
+        assert [item["message_id"] for item in filtered] == [first]
+        expected_consumer = consumer.encode() if isinstance(consumer, str) else consumer
+        assert filtered[0]["consumer"] == expected_consumer
 
     @skip_if_server_version_lt("5.0.0")
     async def test_xrange(self, r: redis.Redis):

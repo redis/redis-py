@@ -1,4 +1,5 @@
 import asyncio
+import os
 import socket
 import ssl
 import types
@@ -17,7 +18,9 @@ from redis._parsers import (
 from redis._parsers.hiredis import NOT_ENOUGH_DATA
 from redis.asyncio import ConnectionPool, Redis
 from redis.asyncio.connection import (
+    BlockingConnectionPool,
     Connection,
+    HiredisRespSerializer,
     SSLConnection,
     UnixDomainSocketConnection,
     parse_url,
@@ -25,6 +28,7 @@ from redis.asyncio.connection import (
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
+from redis.observability.attributes import ConnectionState, get_pool_name
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
 
@@ -50,13 +54,17 @@ class DummyHiredisReader:
 
 
 class DummyAsyncStream:
-    def __init__(self, buffer=b"", eof=False):
+    def __init__(self, buffer=b"", eof=False, exception=None):
         self._buffer = bytearray(buffer)
         self.eof = eof
+        self._exception = exception
         self.read_called = False
 
     def at_eof(self):
         return self.eof and not self._buffer
+
+    def exception(self):
+        return self._exception
 
     async def read(self, _):
         self.read_called = True
@@ -89,6 +97,39 @@ def test_connection_default_parser_matches_default_protocol():
     assert conn.protocol == 3
 
 
+@pytest.mark.skipif(not HIREDIS_AVAILABLE, reason="hiredis is not installed")
+def test_connection_uses_hiredis_command_packer(monkeypatch):
+    calls = []
+
+    def pack_command(args):
+        calls.append(args)
+        return b"packed"
+
+    monkeypatch.setattr("redis.connection.hiredis.pack_command", pack_command)
+    connection = Connection()
+
+    assert isinstance(connection._command_packer, HiredisRespSerializer)
+    assert connection.pack_command("SET", "key", "value") == [b"packed"]
+    assert calls == [(b"SET", b"key", b"value")]
+
+
+def test_connection_uses_python_command_packer_without_hiredis(monkeypatch):
+    monkeypatch.setattr("redis.asyncio.connection.HIREDIS_AVAILABLE", False)
+    connection = Connection()
+
+    assert connection._command_packer is None
+    assert connection.pack_command("PING") == [b"*1\r\n$4\r\nPING\r\n"]
+
+
+@pytest.mark.parametrize("protocol", [2, 3])
+def test_async_pack_command_respects_connection_encoding(protocol):
+    connection = Connection(encoding="latin-1", protocol=protocol)
+
+    assert connection.pack_command("SET", "key", "café") == [
+        b"*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$4\r\ncaf\xe9\r\n"
+    ]
+
+
 @pytest.mark.parametrize(
     ("buffer", "expected"),
     [
@@ -108,6 +149,18 @@ async def test_async_hiredis_can_read_raises_on_eof():
     # a server-closed connection must raise like the sync SocketBuffer does,
     # not report readable data (#4252)
     stream = DummyAsyncStream(eof=True)
+    parser = make_async_hiredis_parser(stream)
+
+    with pytest.raises(ConnectionError):
+        await parser.can_read()
+    assert stream.read_called is False
+
+
+@pytest.mark.parametrize("buffer", [b"", b"+OK\r\n"])
+async def test_async_hiredis_can_read_raises_on_reset(buffer):
+    # a reset (RST) leaves no EOF but an exception on the stream, which
+    # asyncio raises before any buffered data, so it must raise like EOF
+    stream = DummyAsyncStream(buffer=buffer, exception=ConnectionResetError())
     parser = make_async_hiredis_parser(stream)
 
     with pytest.raises(ConnectionError):
@@ -198,6 +251,21 @@ async def test_async_resp_can_read_raises_on_eof(parser_class):
     # a server-closed connection must raise like the sync SocketBuffer does,
     # not report readable data (#4252)
     stream = DummyAsyncStream(eof=True)
+    parser = parser_class(socket_read_size=65536)
+    parser._connected = True
+    parser._stream = stream
+
+    with pytest.raises(ConnectionError):
+        await parser.can_read()
+    assert stream.read_called is False
+
+
+@pytest.mark.parametrize("buffer", [b"", b"+OK\r\n"])
+@pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
+async def test_async_resp_can_read_raises_on_reset(parser_class, buffer):
+    # a reset (RST) leaves no EOF but an exception on the stream, which
+    # asyncio raises before any buffered data, so it must raise like EOF
+    stream = DummyAsyncStream(buffer=buffer, exception=ConnectionResetError())
     parser = parser_class(socket_read_size=65536)
     parser._connected = True
     parser._stream = stream
@@ -1023,7 +1091,8 @@ async def test_format_error_message(conn, error, expected_message):
 async def test_network_connection_failure():
     exp_err = rf"^Error {ECONNREFUSED} connecting to 127.0.0.1:9999.(.+)$"
     with pytest.raises(ConnectionError, match=exp_err):
-        redis = Redis(host="127.0.0.1", port=9999)
+        # nothing listens on this port, so skip the default backoff retries
+        redis = Redis(host="127.0.0.1", port=9999, retry=Retry(NoBackoff(), 0))
         await redis.set("a", "b")
 
 
@@ -1031,7 +1100,10 @@ async def test_network_connection_failure():
 async def test_unix_socket_connection_failure():
     exp_err = "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
     with pytest.raises(ConnectionError, match=exp_err):
-        redis = Redis(unix_socket_path="unix:///tmp/a.sock")
+        # the socket file does not exist, so skip the default backoff retries
+        redis = Redis(
+            unix_socket_path="unix:///tmp/a.sock", retry=Retry(NoBackoff(), 0)
+        )
         await redis.set("a", "b")
 
 
@@ -1360,3 +1432,117 @@ class TestAsyncMalformedNumericFrameInvalidatesConnection:
         assert result == 42
         assert conn.is_connected is True
         await conn.disconnect()
+
+
+class _DummyAsyncConnection:
+    """Minimal async connection stub for pool metric tests (no real socket)."""
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.pid = os.getpid()
+        self._sock = None
+
+    async def connect(self):
+        self._sock = mock.MagicMock()
+
+    async def disconnect(self, *args, **kwargs):
+        self._sock = None
+
+    async def can_read(self, *args, **kwargs):
+        return False
+
+    def should_reconnect(self):
+        return False
+
+    def mark_for_reconnect(self):
+        pass
+
+    def set_re_auth_token(self, *args, **kwargs):
+        pass
+
+    async def re_auth(self, *args, **kwargs):
+        pass
+
+
+def _async_pool_metric_calls(mock_fn, pool_name):
+    """Extract (state, delta) tuples from record_connection_count calls for a pool."""
+    result = []
+    for c in mock_fn.call_args_list:
+        p = c.kwargs.get("pool_name", c.args[0] if c.args else None)
+        if p != pool_name:
+            continue
+        state = c.kwargs.get("connection_state", c.args[1] if len(c.args) > 1 else None)
+        counter = c.kwargs.get("counter", c.args[2] if len(c.args) > 2 else 1)
+        result.append((state, counter))
+    return result
+
+
+def _async_net(calls):
+    """Return (idle_net, used_net) from a list of (state, delta) tuples."""
+    idle = sum(d for s, d in calls if s == ConnectionState.IDLE)
+    used = sum(d for s, d in calls if s == ConnectionState.USED)
+    return idle, used
+
+
+class TestAsyncBlockingConnectionPoolMetricCount:
+    """db.client.connection.count accuracy for async BlockingConnectionPool.
+
+    get_connection() must record the acquire-side transition so it balances the
+    USED -1 / IDLE +1 recorded in release(). Without it, every acquire/release
+    cycle drifts USED -1 / IDLE +1 (regression: heavy async + Sentinel apps saw
+    the counter run to large -used / +idle values over time).
+    """
+
+    def _pool(self, max_connections=10):
+        return BlockingConnectionPool(
+            connection_class=_DummyAsyncConnection,
+            max_connections=max_connections,
+            timeout=0.1,
+        )
+
+    @patch("redis.asyncio.connection.record_connection_count")
+    async def test_new_connection_records_only_used(self, mock_rec):
+        pool = self._pool()
+        pn = get_pool_name(pool)
+        mock_rec.reset_mock()
+
+        conn = await pool.get_connection()
+
+        idle_net, used_net = _async_net(_async_pool_metric_calls(mock_rec, pn))
+        assert idle_net == 0, f"New conn should not touch IDLE, got {idle_net}"
+        assert used_net == 1
+        await pool.release(conn)
+
+    @patch("redis.asyncio.connection.record_connection_count")
+    async def test_reused_connection_transitions_idle_to_used(self, mock_rec):
+        pool = self._pool()
+        pn = get_pool_name(pool)
+        conn = await pool.get_connection()
+        await pool.release(conn)
+        mock_rec.reset_mock()
+
+        conn2 = await pool.get_connection()
+        assert conn2 is conn
+
+        idle_net, used_net = _async_net(_async_pool_metric_calls(mock_rec, pn))
+        assert idle_net == -1
+        assert used_net == 1
+        await pool.release(conn2)
+
+    @patch("redis.asyncio.connection.record_connection_count")
+    async def test_full_lifecycle_nets_to_zero(self, mock_rec):
+        """acquire -> release cycles must not drift the counter."""
+        pool = self._pool()
+        pn = get_pool_name(pool)
+        mock_rec.reset_mock()
+
+        for _ in range(5):
+            conn = await pool.get_connection()
+            await pool.release(conn)
+
+        idle_net, used_net = _async_net(_async_pool_metric_calls(mock_rec, pn))
+        # reset()/__del__ record IDLE -len(available) for the idle connections
+        # still pooled; account for that so the whole lifecycle nets to zero.
+        idle_net -= len(pool._available_connections)
+        assert idle_net == 0, f"Lifecycle IDLE should net 0, got {idle_net}"
+        assert used_net == 0, f"Lifecycle USED should net 0, got {used_net}"
