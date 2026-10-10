@@ -348,23 +348,29 @@ class TestConnectionPool:
         ],
     )
     @pytest.mark.parametrize("maint_notifications_enabled", [True, False])
+    @pytest.mark.parametrize("reset", [False, True])
     async def test_get_connection_replaces_closed_idle_connection(
-        self, maint_notifications_enabled, parser_class
+        self, maint_notifications_enabled, parser_class, reset
     ):
         """
         A pooled connection whose socket the server closed while it sat idle
         must be reconnected at checkout. Regression test for #4252: with
         maintenance notifications enabled, the pending-push-data exemption
         must not swallow the EOF signal and hand out the dead connection.
+        A reset (RST) leaves no EOF but an exception on the stream, and must
+        be detected the same way.
         """
         async with self.get_pool(connection_class=redis.Connection) as pool:
             conn = pool.make_connection()
             conn.set_parser(parser_class)
 
             # simulate a connection that was healthy when released to the
-            # pool but whose socket the server has since closed
+            # pool but whose socket the server has since closed or reset
             eof_stream = asyncio.StreamReader()
-            eof_stream.feed_eof()
+            if reset:
+                eof_stream.set_exception(ConnectionResetError())
+            else:
+                eof_stream.feed_eof()
             conn._parser._connected = True
             conn._parser._stream = eof_stream
             if parser_class is _AsyncHiredisParser:
