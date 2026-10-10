@@ -1,6 +1,8 @@
 import asyncio
+import copy
 import inspect
 import logging
+import time
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import List, Optional, Tuple, Type, Union
@@ -14,10 +16,19 @@ from redis.backoff import NoBackoff
 from redis.client import Redis as SyncRedis
 from redis.cluster import RedisCluster as SyncRedisCluster
 from redis.connection import SSLConnection as SyncSSLConnection
+from redis.event import (
+    EventDispatcher,
+    EventListenerInterface,
+    MaintenanceCompletedEvent,
+    MaintenanceEvent,
+    MaintenanceStartedEvent,
+)
 from redis.exceptions import ConnectionError, TimeoutError
 from redis.http.http_client import HttpClient
+from redis.maint_notifications import MaintenanceState, MaintNotificationsConfig
 from redis.multidb.exception import UnhealthyDatabaseException
 from redis.retry import Retry
+from redis.typing import Number
 
 # Type alias for async Redis clients (standalone or cluster)
 AsyncRedisClientT = Union[AsyncRedis, AsyncRedisCluster]
@@ -114,6 +125,130 @@ class HealthCheck(ABC):
         pass
 
 
+def relaxed_health_check_budget(
+    health_check: HealthCheck, relaxed_timeout: Number
+) -> float:
+    """
+    The budget of a health check while its database is under maintenance:
+    every probe allowed to take as long as the relaxed connection timeout,
+    plus the delays between them.
+    """
+    return health_check.health_check_probes * (
+        relaxed_timeout + health_check.health_check_delay
+    )
+
+
+def database_maint_notifications_config(client) -> Optional[MaintNotificationsConfig]:
+    """
+    The maintenance notifications config a database client was built with, or
+    None when its notifications are off.
+
+    The cluster clients hold the config as an attribute. The standalone clients
+    keep it on their pool's notifications handler, and in their connection
+    kwargs, only while the notifications are enabled: a disabled config is not
+    retained, so None also stands for a client that has them disabled.
+    """
+    config = getattr(client, "maint_notifications_config", None)
+    if config is None:
+        pool = getattr(client, "connection_pool", None)
+        handler = getattr(pool, "_maint_notifications_pool_handler", None)
+        config = getattr(handler, "config", None)
+    if config is None:
+        config = client.get_connection_kwargs().get("maint_notifications_config")
+    return config if isinstance(config, MaintNotificationsConfig) else None
+
+
+# How often a check that has outlived its plain budget re-evaluates the
+# maintenance windows relaxing it, so that a completed maintenance restores
+# the plain budget without waiting out the relaxed one
+MAINTENANCE_WINDOW_POLL_INTERVAL = 0.5
+
+
+class _MaintenanceWindow:
+    """One relaxation the probe client of a database is currently under."""
+
+    __slots__ = ("expire_at", "relaxed_timeout")
+
+    def __init__(self, expire_at: float, relaxed_timeout: Optional[Number]):
+        self.expire_at = expire_at
+        self.relaxed_timeout = relaxed_timeout
+
+
+class _MaintenanceWindowTracker:
+    """
+    Tracks the maintenance windows the probe client of one database is in,
+    keyed by the relaxed source: the pool for a handoff (MOVING), the
+    connection for a migration or failover (MAINTENANCE).
+
+    A window lasts, like the relaxation it tracks, until its completion event
+    arrives: the completion notification, the handoff's TTL cleanup, or the
+    disconnect of a connection still under maintenance all report one. A
+    blocking relaxation (``relaxed_timeout=None``) has no timeout of its own
+    to bound the budget with, so that window expires with the notification's
+    time-to-live instead.
+    """
+
+    def __init__(self):
+        self._windows: dict[tuple[MaintenanceState, int], _MaintenanceWindow] = {}
+
+    @staticmethod
+    def _key(event: MaintenanceEvent) -> tuple[MaintenanceState, int]:
+        source = (
+            event.connection_pool
+            if event.state is MaintenanceState.MOVING
+            else event.connection
+        )
+        return event.state, id(source)
+
+    def start(self, event: MaintenanceStartedEvent) -> None:
+        # A handoff is reported even when relaxation is disabled, for the
+        # proactive reconnect it drives; there is nothing to relax the budget to
+        if not event.config.is_relaxed_timeouts_enabled():
+            return
+
+        notification = event.notification
+        expire_at = (
+            notification.expire_at if notification is not None else time.monotonic()
+        )
+        self._windows[self._key(event)] = _MaintenanceWindow(
+            expire_at, event.config.relaxed_timeout
+        )
+
+    def complete(self, event: MaintenanceCompletedEvent) -> None:
+        self._windows.pop(self._key(event), None)
+
+    def active_windows(self) -> List[_MaintenanceWindow]:
+        now = time.monotonic()
+        expired = [
+            key
+            for key, window in self._windows.items()
+            if window.relaxed_timeout is None and window.expire_at <= now
+        ]
+        for key in expired:
+            del self._windows[key]
+        return list(self._windows.values())
+
+
+class _MaintenanceWindowListener(EventListenerInterface):
+    """Feeds the maintenance events of one probe client into its tracker."""
+
+    def __init__(self, tracker: _MaintenanceWindowTracker):
+        self._tracker = tracker
+
+    def listen(self, event: MaintenanceEvent):
+        if isinstance(event, MaintenanceStartedEvent):
+            self._tracker.start(event)
+        elif isinstance(event, MaintenanceCompletedEvent):
+            self._tracker.complete(event)
+        else:
+            return
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                f"Health check client {type(event).__name__}: state={event.state}, "
+                f"notification={event.notification}"
+            )
+
+
 class HealthCheckPolicy(ABC):
     """
     Health checks execution policy.
@@ -152,6 +287,10 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
     def __init__(self):
         # Single client per database, keyed by database id
         self._clients: dict[int, AsyncRedisClientT] = {}
+        # The maintenance windows each database's client is in, keyed by
+        # database id; only present for databases with maintenance
+        # notifications enabled
+        self._maintenance_trackers: dict[int, _MaintenanceWindowTracker] = {}
 
     async def execute(self, health_checks: List[HealthCheck], database) -> bool:
         """
@@ -162,16 +301,9 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
         propagate exceptions naturally.
         """
 
-        # Create wrapper tasks that apply individual timeouts
-        async def execute_with_timeout(health_check: HealthCheck):
-            return await asyncio.wait_for(
-                self._execute(health_check, database),
-                timeout=health_check.health_check_timeout,
-            )
-
         # Run all health checks concurrently and collect results/exceptions
         results = await asyncio.gather(
-            *[execute_with_timeout(hc) for hc in health_checks],
+            *[self._execute_with_budget(hc, database) for hc in health_checks],
             return_exceptions=True,
         )
 
@@ -185,6 +317,115 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
                 return False
 
         return True
+
+    async def _execute_with_budget(self, health_check: HealthCheck, database) -> bool:
+        """
+        Run one health check under its budget.
+
+        The budget is ``health_check_timeout``, relaxed while the database is
+        under a server maintenance: the probe client reports the maintenance
+        windows it is in, and a check that runs out of the plain budget inside
+        one is given the relaxed budget instead, measured from its start. The
+        windows are re-evaluated while the check is relaxed, so a maintenance
+        that completes restores the plain budget - a probe still hung after it
+        does not get to use up the relaxed one. A stall with no notification
+        behind it - an unplanned failure - keeps the plain budget.
+        """
+        task = asyncio.ensure_future(self._execute(health_check, database))
+        start = time.monotonic()
+        deadline = start + health_check.health_check_timeout
+
+        try:
+            while True:
+                done, _ = await asyncio.wait(
+                    {task}, timeout=max(deadline - time.monotonic(), 0)
+                )
+                if done:
+                    return task.result()
+
+                now = time.monotonic()
+                relaxed_deadline = self._relaxed_deadline(database, health_check, start)
+                if relaxed_deadline is not None and relaxed_deadline > now:
+                    deadline = min(
+                        relaxed_deadline, now + MAINTENANCE_WINDOW_POLL_INTERVAL
+                    )
+                    continue
+
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError as exc:
+                    raise asyncio.TimeoutError() from exc
+                # The check completed while being cancelled
+                return task.result()
+        except asyncio.CancelledError:
+            # Let the check's own cancellation cleanup finish before this call
+            # returns, as asyncio.wait_for would: a check still winding down
+            # after the policy has moved on could use a client closed since
+            task.cancel()
+            await asyncio.wait({task})
+            if not task.cancelled():
+                # Retrieve an exception the check raised while being cancelled
+                task.exception()
+            raise
+
+    def _relaxed_deadline(
+        self, database, health_check: HealthCheck, start: float
+    ) -> Optional[float]:
+        """
+        The deadline the active maintenance windows relax the check to, or
+        None when the database is not under maintenance.
+
+        The tracker is looked up here rather than when the check starts: the
+        first check of a database is what creates its client, and the tracker
+        with it, so a maintenance announced during that check would otherwise
+        go unnoticed.
+        """
+        tracker = self._maintenance_trackers.get(id(database))
+        if tracker is None:
+            return None
+
+        deadline = None
+        for window in tracker.active_windows():
+            if window.relaxed_timeout is None:
+                # Blocking sockets: the window's own expiry is the only bound
+                candidate = window.expire_at
+            else:
+                candidate = start + relaxed_health_check_budget(
+                    health_check, window.relaxed_timeout
+                )
+            if deadline is None or candidate > deadline:
+                deadline = candidate
+
+        return deadline
+
+    def _probe_maint_notifications_config(
+        self, db_id: int, client
+    ) -> MaintNotificationsConfig:
+        """
+        The maintenance notifications config for the health check client of a
+        database: a copy of the database client's config reporting the
+        maintenance windows the probe enters to this policy, when the
+        notifications are enabled; the database client's own config, or an
+        explicitly disabled one, otherwise. The probe must never enable what
+        the database client has not - without a config of its own it would
+        default to ``"auto"`` on RESP3. The database's config stays untouched.
+        """
+        source_config = database_maint_notifications_config(client)
+        if source_config is None or not source_config.enabled:
+            return source_config or MaintNotificationsConfig(enabled=False)
+
+        tracker = _MaintenanceWindowTracker()
+        listener = _MaintenanceWindowListener(tracker)
+        probe_config = copy.copy(source_config)
+        probe_config.event_dispatcher = EventDispatcher(
+            {
+                MaintenanceStartedEvent: [listener],
+                MaintenanceCompletedEvent: [listener],
+            }
+        )
+        self._maintenance_trackers[db_id] = tracker
+        return probe_config
 
     async def get_client(self, database) -> AsyncRedisClientT:
         """
@@ -208,6 +449,9 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
                     # drops, so without this the probe would speak plaintext
                     # to a TLS port and mark a healthy database unavailable.
                     filtered_kwargs["ssl"] = True
+                filtered_kwargs["maint_notifications_config"] = (
+                    self._probe_maint_notifications_config(db_id, database.client)
+                )
                 client = AsyncRedis(**filtered_kwargs)
             elif isinstance(database.client, (AsyncRedisCluster, SyncRedisCluster)):
                 # Cluster client - create a single cluster client that handles
@@ -219,6 +463,9 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
                     # above; the async cluster also represents TLS as
                     # connection_class=SSLConnection in its connection kwargs.
                     filtered_kwargs["ssl"] = True
+                filtered_kwargs["maint_notifications_config"] = (
+                    self._probe_maint_notifications_config(db_id, database.client)
+                )
                 startup_nodes = database.client.startup_nodes
                 if startup_nodes:
                     nodes_manager = database.client.nodes_manager
@@ -266,6 +513,7 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
             await asyncio.gather(*close_tasks, return_exceptions=True)
 
         self._clients.clear()
+        self._maintenance_trackers.clear()
 
     @abstractmethod
     async def _execute(self, health_check: HealthCheck, database) -> bool:

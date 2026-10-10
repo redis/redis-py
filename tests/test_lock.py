@@ -1,4 +1,5 @@
 import time
+import uuid
 
 import pytest
 from redis import lock as lock_module
@@ -52,6 +53,16 @@ class TestLock:
     def test_lock_token_thread_local_false(self, r):
         lock = self.get_lock(r, "foo", thread_local=False)
         self._test_lock_token(r, lock)
+
+    def test_default_token_is_random_uuid4(self, r):
+        # The default token should be random and should not embed host or
+        # time data: a v1 UUID writes the host MAC address and a clock
+        # reading into the key's value. A v4 UUID is random.
+        lock = self.get_lock(r, "foo")
+        assert lock.acquire(blocking=False)
+        token = lock.local.token
+        assert uuid.UUID(token.decode()).version == 4
+        lock.release()
 
     def _test_lock_token(self, r, lock):
         assert lock.acquire(blocking=False, token="test")

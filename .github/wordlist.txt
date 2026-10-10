@@ -21,6 +21,7 @@ config
 CoreCommands
 CSC
 DatabaseConfig
+desynchronises
 DNS
 EchoHealthCheck
 EntraID
@@ -39,6 +40,7 @@ INCR
 init
 IOError
 Instrumentations
+invalidations
 JSONCommands
 JSONPath
 Jaeger
@@ -49,8 +51,10 @@ MeterProvider
 MetricGroup
 millis
 MultiDbConfig
+MultiDB
 MultiDBClient
 McCurdy
+normalises
 NOSCRIPT
 NoValidDatabaseException
 NUMPAT
@@ -88,11 +92,15 @@ Solovyov
 SpanKind
 Specfiying
 StatusCode
+subclasses
 TCP
 TemporaryUnavailableException
 TLS
 TOPKCommands
 TimeSeriesCommands
+trackability
+trackable
+untracked
 Uptrace
 ValueError
 WATCHed
@@ -129,6 +137,7 @@ firsttimersonly
 fo
 formatter
 genindex
+geo
 gmail
 himport
 hiredis
@@ -181,6 +190,7 @@ pytest
 quickstart
 readonly
 readwrite
+rebalancing
 redis
 redismodules
 reinitialization

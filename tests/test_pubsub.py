@@ -2,6 +2,7 @@ import logging
 import platform
 import queue
 import socket
+import sys
 import threading
 import time
 import weakref
@@ -15,6 +16,7 @@ import pytest
 import redis
 from redis import Subscription
 from redis._parsers import Encoder
+from redis.backoff import NoBackoff
 from redis.client import PubSub
 from redis.cluster import ClusterPubSub
 from redis.crc import key_slot
@@ -29,6 +31,7 @@ from redis.exceptions import (
 from redis.observability import recorder
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
+from redis.retry import Retry
 from redis.utils import str_if_bytes
 
 from .conftest import (
@@ -1403,8 +1406,9 @@ class TestPubSubAutoDecoding:
 
 
 class TestPubSubRedisDown:
-    def test_channel_subscribe(self, r):
-        r = redis.Redis(host="localhost", port=6390)
+    def test_channel_subscribe(self):
+        # nothing listens on this port, so skip the default backoff retries
+        r = redis.Redis(host="localhost", port=6390, retry=Retry(NoBackoff(), 0))
         p = r.pubsub()
         with pytest.raises(ConnectionError):
             p.subscribe("foo")
@@ -2587,14 +2591,16 @@ class TestPubSubTimeoutPropagation:
         Test that timeout works correctly with pattern subscriptions.
         """
         p = r.pubsub()
-        p.psubscribe("foo*")
+        # A prefix no other test publishes to: on a cluster, a PUBLISH to "foo"
+        # from an earlier test can still be crossing the cluster bus.
+        p.psubscribe("timeout-pattern*")
         # Read subscription message
         msg = wait_for_message(p, timeout=1.0)
         assert msg is not None
         assert msg["type"] == "psubscribe"
 
         # Publish a message matching the pattern
-        r.publish("foobar", "hello")
+        r.publish("timeout-pattern-bar", "hello")
 
         # get_message with timeout should return the message
         msg = p.get_message(timeout=1.0)
@@ -3655,7 +3661,25 @@ class TestClusterPubSubSlotMigration:
             start_barrier.wait(timeout=2.0)
             pubsub.on_slots_changed()
 
-        with mock.patch.object(cluster_module, "ThreadPoolExecutor") as executor_cls:
+        # The patch is module-wide, so a ClusterPubSub left over from an earlier
+        # test that is finalized meanwhile (__del__ -> reset()) constructs one
+        # too, on any thread. Count only constructions made by the pubsub under
+        # test: the first frame outside unittest.mock is the constructing code.
+        own_constructions = []
+
+        def _record_own_construction(*args, **kwargs):
+            frame = sys._getframe(1)
+            while frame is not None and frame.f_code.co_filename == mock.__file__:
+                frame = frame.f_back
+            if frame is not None and frame.f_locals.get("self") is pubsub:
+                own_constructions.append(mock.call(*args, **kwargs))
+            return mock.DEFAULT
+
+        with mock.patch.object(
+            cluster_module,
+            "ThreadPoolExecutor",
+            side_effect=_record_own_construction,
+        ):
             with mock.patch.object(
                 pubsub, "reinitialize_shard_subscriptions", return_value=None
             ):
@@ -3668,7 +3692,7 @@ class TestClusterPubSubSlotMigration:
                         assert not t.is_alive()
                     self._drain_reconcile_worker(pubsub)
                     # Every caller used the one installed executor.
-                    executor_cls.assert_not_called()
+                    assert own_constructions == []
                     assert pubsub._reconcile_executor is installed
                 finally:
                     installed.shutdown(wait=False, cancel_futures=True)
