@@ -1819,11 +1819,10 @@ class PubSubWorkerThread(threading.Thread):
         self.exception_handler = exception_handler
         self.sharded_pubsub = sharded_pubsub
         self._running = threading.Event()
+        # Set before start() so run() cannot undo an early stop() request.
+        self._running.set()
 
     def run(self) -> None:
-        if self._running.is_set():
-            return
-        self._running.set()
         pubsub = self.pubsub
         sleep_time = self.sleep_time
         while self._running.is_set():

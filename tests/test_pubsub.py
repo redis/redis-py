@@ -1815,6 +1815,68 @@ class TestPubSubWorkerThread:
                 pubsub_thread.join(timeout=1.0)
         assert not pubsub_thread.is_alive()
 
+    @pytest.mark.parametrize("sharded_pubsub", [False, True])
+    @pytest.mark.parametrize("timeout", [None, 0.01])
+    def test_stop_before_run_does_not_restart_worker(self, sharded_pubsub, timeout):
+        entered = threading.Event()
+        release = threading.Event()
+        stopping = threading.Event()
+        finished = threading.Event()
+        pubsub = mock.Mock()
+        thread = redis.client.PubSubWorkerThread(
+            pubsub, sleep_time=0.01, sharded_pubsub=sharded_pubsub
+        )
+        original_run = thread.run
+        original_join = thread.join
+
+        def delayed_run():
+            entered.set()
+            release.wait(timeout=2.0)
+            original_run()
+
+        def observed_join(timeout=None):
+            stopping.set()
+            original_join(timeout)
+
+        def call_stop():
+            thread.stop(timeout=timeout)
+            finished.set()
+
+        stopper = threading.Thread(target=call_stop)
+        with (
+            mock.patch.object(thread, "run", side_effect=delayed_run),
+            mock.patch.object(thread, "join", side_effect=observed_join),
+        ):
+            thread.start()
+            try:
+                assert entered.wait(timeout=1.0)
+                stopper.start()
+                # stop() has cleared the flag and started waiting before run().
+                assert stopping.wait(timeout=1.0)
+                if timeout is None:
+                    assert not finished.wait(timeout=0.05)
+                else:
+                    assert finished.wait(timeout=1.0)
+                release.set()
+                assert finished.wait(timeout=1.0)
+                original_join(timeout=1.0)
+                assert not thread.is_alive()
+                pubsub.get_message.assert_not_called()
+                pubsub.get_sharded_message.assert_not_called()
+                pubsub.close.assert_called_once_with()
+            finally:
+                # Also shut down cleanly when the old code loses the stop request.
+                def stop_polling(**kwargs):
+                    thread._running.clear()
+
+                pubsub.get_message.side_effect = stop_polling
+                pubsub.get_sharded_message.side_effect = stop_polling
+                release.set()
+                thread._running.clear()
+                original_join(timeout=2.0)
+                if stopper.ident is not None:
+                    stopper.join(timeout=2.0)
+
     def test_stop_waits_for_worker_before_returning(self):
         entered = threading.Event()
         release = threading.Event()
