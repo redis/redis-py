@@ -176,6 +176,8 @@ class TestSSL:
             ssl_cert_reqs="required",
             ssl_ca_certs=self.client_certs.ca_certfile,
             ssl_validate_ocsp=True,
+            # OCSP validation fails on every attempt, so skip the backoff retries
+            retry=Retry(NoBackoff(), 0),
         )
         return r
 
@@ -269,12 +271,14 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_certfile=self.client_certs.cert,
+            ssl_certfile=self.client_certs.certfile,
             ssl_keyfile=self.client_certs.keyfile,
             ssl_cert_reqs="required",
             ssl_ca_certs=self.client_certs.ca_certfile,
             ssl_validate_ocsp=True,
             ssl_ocsp_context=p,  # just needs to not be none
+            # OCSP validation fails on every attempt, so skip the backoff retries
+            retry=Retry(NoBackoff(), 0),
         )
 
         with pytest.raises(RedisError):
@@ -282,20 +286,22 @@ class TestSSL:
         r.close()
 
         ctx = OpenSSL.SSL.Context(OpenSSL.SSL.SSLv23_METHOD)
-        ctx.use_certificate_file(self.client_certs.cert)
+        ctx.use_certificate_file(self.client_certs.certfile)
         ctx.use_privatekey_file(self.client_certs.keyfile)
 
         r = redis.Redis(
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_certfile=self.client_certs.cert,
+            ssl_certfile=self.client_certs.certfile,
             ssl_keyfile=self.client_certs.keyfile,
             ssl_cert_reqs="required",
             ssl_ca_certs=self.client_certs.ca_certfile,
             ssl_ocsp_context=ctx,
             ssl_ocsp_expected_cert=open(self.server_certs.ca_certfile, "rb").read(),
             ssl_validate_ocsp_stapled=True,
+            # no OCSP response is ever stapled, so skip the backoff retries
+            retry=Retry(NoBackoff(), 0),
         )
 
         with pytest.raises(ConnectionError) as e:
@@ -307,11 +313,13 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_certfile=self.client_certs.cert,
+            ssl_certfile=self.client_certs.certfile,
             ssl_keyfile=self.client_certs.keyfile,
             ssl_cert_reqs="required",
             ssl_ca_certs=self.client_certs.ca_certfile,
             ssl_validate_ocsp_stapled=True,
+            # no OCSP response is ever stapled, so skip the backoff retries
+            retry=Retry(NoBackoff(), 0),
         )
 
         with pytest.raises(ConnectionError) as e:

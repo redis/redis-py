@@ -1170,13 +1170,18 @@ class TestRedisClusterObj:
         node = r.get_node_from_key("foo")
         missing_slot = r.keyslot("foo")
         assert await r.set("foo", "bar") is True
+        orig_retry = r.retry
         try:
             assert all(await r.cluster_delslots(missing_slot))
+            # the slot stays uncovered, so retrying the command cannot succeed
+            r.set_retry(Retry(NoBackoff(), 0))
             with pytest.raises(ClusterDownError):
                 await r.exists("foo")
         except ResponseError as e:
             assert "CLUSTERDOWN" in str(e)
         finally:
+            # the recovery check below may still need retries
+            r.set_retry(orig_retry)
             try:
                 # Add back the missing slot
                 assert await r.cluster_addslots(node, missing_slot) is True
@@ -5137,6 +5142,8 @@ class TestClusterPipeline:
 
             parse_response_mock.side_effect = parse_response
 
+            # every attempt fails, so one retry is enough to test the count
+            r.set_retry(Retry(NoBackoff(), 1))
             # For each ClusterDownError, we launch 4 commands: INFO, CLUSTER SLOTS,
             # COMMAND, GET. Before any errors, the first 3 commands are already run
             async with r.pipeline() as pipe:
@@ -5187,6 +5194,8 @@ class TestClusterPipeline:
 
             parse_response_mock.side_effect = parse_response
 
+            # every GET fails, so skip the futile retries
+            r.set_retry(Retry(NoBackoff(), 0))
             async with r.pipeline() as pipe:
                 with pytest.raises(ConnectionError):
                     await pipe.get(key).get(key).execute(raise_on_error=True)
