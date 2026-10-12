@@ -1,6 +1,5 @@
 import math
 import time
-from time import sleep
 
 import pytest
 import redis
@@ -190,13 +189,12 @@ def test_madd_missing_timeseries(client):
 
 @pytest.mark.redismod
 def test_incrby_decrby(client):
-    for _ in range(100):
-        assert client.ts().incrby(1, 1)
-        sleep(0.001)
-    assert 100 == client.ts().get(1)[1]
-    for _ in range(100):
-        assert client.ts().decrby(1, 1)
-        sleep(0.001)
+    # explicit, increasing timestamps give each call its own sample
+    for ts in range(1, 6):
+        assert client.ts().incrby(1, 1, timestamp=ts)
+    assert 5 == client.ts().get(1)[1]
+    for ts in range(6, 11):
+        assert client.ts().decrby(1, 1, timestamp=ts)
     assert 0 == client.ts().get(1)[1]
 
     assert client.ts().incrby(2, 1.5, timestamp=5)

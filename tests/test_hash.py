@@ -9,6 +9,15 @@ from tests.conftest import skip_if_server_version_lt
 from tests.test_utils import redis_server_time
 
 
+def _wait_for_fields_expired(r, key, *fields, timeout=2.0):
+    """Poll until every field is gone, so short TTLs need no fixed sleep."""
+    deadline = time.monotonic() + timeout
+    for field in fields:
+        while r.hexists(key, field):
+            assert time.monotonic() < deadline, f"{field!r} did not expire"
+            time.sleep(0.01)
+
+
 @skip_if_server_version_lt("7.3.240")
 def test_hexpire_basic(r):
     r.delete("test:hash")
@@ -23,28 +32,26 @@ def test_hexpire_basic(r):
 def test_hexpire_with_timedelta(r):
     r.delete("test:hash")
     r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
-    assert r.hexpire("test:hash", timedelta(seconds=1), "field1") == [1]
-    time.sleep(1.1)
-    assert r.hexists("test:hash", "field1") is False
-    assert r.hexists("test:hash", "field2") is True
+    assert r.hexpire("test:hash", timedelta(seconds=10), "field1") == [1]
+    # test_hexpire_basic waits for a real expiry; here the stored TTL is enough
+    assert 0 < r.hpttl("test:hash", "field1")[0] <= 10000
+    assert r.httl("test:hash", "field2") == [-1]
 
 
 @skip_if_server_version_lt("7.3.240")
 def test_hexpire_conditions(r):
     r.delete("test:hash")
     r.hset("test:hash", mapping={"field1": "value1"})
-    assert r.hexpire("test:hash", 2, "field1", xx=True) == [0]
-    assert r.hexpire("test:hash", 2, "field1", nx=True) == [1]
-    assert r.hexpire("test:hash", 1, "field1", xx=True) == [1]
-    assert r.hexpire("test:hash", 2, "field1", nx=True) == [0]
-    time.sleep(1.1)
-    assert r.hexists("test:hash", "field1") is False
-    r.hset("test:hash", "field1", "value1")
-    r.hexpire("test:hash", 2, "field1")
-    assert r.hexpire("test:hash", 1, "field1", gt=True) == [0]
-    assert r.hexpire("test:hash", 1, "field1", lt=True) == [1]
-    time.sleep(1.1)
-    assert r.hexists("test:hash", "field1") is False
+    assert r.hexpire("test:hash", 20, "field1", xx=True) == [0]
+    assert r.hexpire("test:hash", 20, "field1", nx=True) == [1]
+    assert r.hexpire("test:hash", 10, "field1", xx=True) == [1]
+    assert r.hexpire("test:hash", 20, "field1", nx=True) == [0]
+    # the xx call lowered the TTL and the last nx call left it alone
+    assert 0 < r.hpttl("test:hash", "field1")[0] <= 10000
+    r.hexpire("test:hash", 20, "field1")
+    assert r.hexpire("test:hash", 10, "field1", gt=True) == [0]
+    assert r.hexpire("test:hash", 10, "field1", lt=True) == [1]
+    assert 0 < r.hpttl("test:hash", "field1")[0] <= 10000
 
 
 @skip_if_server_version_lt("7.3.240")
@@ -62,11 +69,11 @@ def test_hexpire_multiple_fields(r):
         "test:hash",
         mapping={"field1": "value1", "field2": "value2", "field3": "value3"},
     )
-    assert r.hexpire("test:hash", 1, "field1", "field2") == [1, 1]
-    time.sleep(1.1)
-    assert r.hexists("test:hash", "field1") is False
-    assert r.hexists("test:hash", "field2") is False
-    assert r.hexists("test:hash", "field3") is True
+    assert r.hexpire("test:hash", 10, "field1", "field2") == [1, 1]
+    ttl1, ttl2, ttl3 = r.hpttl("test:hash", "field1", "field2", "field3")
+    assert 0 < ttl1 <= 10000
+    assert 0 < ttl2 <= 10000
+    assert ttl3 == -1
 
 
 @skip_if_server_version_lt("7.3.240")
@@ -82,9 +89,8 @@ def test_hexpire_multiple_condition_flags_error(r):
 def test_hpexpire_basic(r):
     r.delete("test:hash")
     r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
-    assert r.hpexpire("test:hash", 500, "field1") == [1]
-    time.sleep(0.6)
-    assert r.hexists("test:hash", "field1") is False
+    assert r.hpexpire("test:hash", 50, "field1") == [1]
+    _wait_for_fields_expired(r, "test:hash", "field1")
     assert r.hexists("test:hash", "field2") is True
 
 
@@ -92,9 +98,8 @@ def test_hpexpire_basic(r):
 def test_hpexpire_with_timedelta(r):
     r.delete("test:hash")
     r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
-    assert r.hpexpire("test:hash", timedelta(milliseconds=500), "field1") == [1]
-    time.sleep(0.6)
-    assert r.hexists("test:hash", "field1") is False
+    assert r.hpexpire("test:hash", timedelta(milliseconds=50), "field1") == [1]
+    _wait_for_fields_expired(r, "test:hash", "field1")
     assert r.hexists("test:hash", "field2") is True
 
 
@@ -104,16 +109,15 @@ def test_hpexpire_conditions(r):
     r.hset("test:hash", mapping={"field1": "value1"})
     assert r.hpexpire("test:hash", 1500, "field1", xx=True) == [0]
     assert r.hpexpire("test:hash", 1500, "field1", nx=True) == [1]
-    assert r.hpexpire("test:hash", 500, "field1", xx=True) == [1]
     assert r.hpexpire("test:hash", 1500, "field1", nx=True) == [0]
-    time.sleep(0.6)
-    assert r.hexists("test:hash", "field1") is False
+    # lower the TTL last, so the field cannot expire before the nx check
+    assert r.hpexpire("test:hash", 50, "field1", xx=True) == [1]
+    _wait_for_fields_expired(r, "test:hash", "field1")
     r.hset("test:hash", "field1", "value1")
-    r.hpexpire("test:hash", 1000, "field1")
-    assert r.hpexpire("test:hash", 500, "field1", gt=True) == [0]
-    assert r.hpexpire("test:hash", 500, "field1", lt=True) == [1]
-    time.sleep(0.6)
-    assert r.hexists("test:hash", "field1") is False
+    r.hpexpire("test:hash", 1500, "field1")
+    assert r.hpexpire("test:hash", 50, "field1", gt=True) == [0]
+    assert r.hpexpire("test:hash", 50, "field1", lt=True) == [1]
+    _wait_for_fields_expired(r, "test:hash", "field1")
 
 
 @skip_if_server_version_lt("7.3.240")
@@ -131,10 +135,8 @@ def test_hpexpire_multiple_fields(r):
         "test:hash",
         mapping={"field1": "value1", "field2": "value2", "field3": "value3"},
     )
-    assert r.hpexpire("test:hash", 500, "field1", "field2") == [1, 1]
-    time.sleep(0.6)
-    assert r.hexists("test:hash", "field1") is False
-    assert r.hexists("test:hash", "field2") is False
+    assert r.hpexpire("test:hash", 50, "field1", "field2") == [1, 1]
+    _wait_for_fields_expired(r, "test:hash", "field1", "field2")
     assert r.hexists("test:hash", "field3") is True
 
 
@@ -151,22 +153,22 @@ def test_hpexpire_multiple_condition_flags_error(r):
 def test_hexpireat_basic(r):
     r.delete("test:hash")
     r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
-    exp_time = math.ceil((datetime.now() + timedelta(seconds=1)).timestamp())
+    exp_time = math.ceil((datetime.now() + timedelta(seconds=10)).timestamp())
     assert r.hexpireat("test:hash", exp_time, "field1") == [1]
-    time.sleep(2.1)
-    assert r.hexists("test:hash", "field1") is False
-    assert r.hexists("test:hash", "field2") is True
+    # the stored expire time is exact; test_hexpireat_conditions covers deletion
+    assert r.hexpiretime("test:hash", "field1", "field2") == [exp_time, -1]
 
 
 @skip_if_server_version_lt("7.3.240")
 def test_hexpireat_with_datetime(r):
     r.delete("test:hash")
     r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
-    exp_time = (datetime.now() + timedelta(seconds=2)).replace(microsecond=0)
+    exp_time = (datetime.now() + timedelta(seconds=10)).replace(microsecond=0)
     assert r.hexpireat("test:hash", exp_time, "field1") == [1]
-    time.sleep(2.1)
-    assert r.hexists("test:hash", "field1") is False
-    assert r.hexists("test:hash", "field2") is True
+    assert r.hexpiretime("test:hash", "field1", "field2") == [
+        int(exp_time.timestamp()),
+        -1,
+    ]
 
 
 @skip_if_server_version_lt("7.3.240")
@@ -198,12 +200,13 @@ def test_hexpireat_multiple_fields(r):
         "test:hash",
         mapping={"field1": "value1", "field2": "value2", "field3": "value3"},
     )
-    exp_time = math.ceil((datetime.now() + timedelta(seconds=1)).timestamp())
+    exp_time = math.ceil((datetime.now() + timedelta(seconds=10)).timestamp())
     assert r.hexpireat("test:hash", exp_time, "field1", "field2") == [1, 1]
-    time.sleep(2.1)
-    assert r.hexists("test:hash", "field1") is False
-    assert r.hexists("test:hash", "field2") is False
-    assert r.hexists("test:hash", "field3") is True
+    assert r.hexpiretime("test:hash", "field1", "field2", "field3") == [
+        exp_time,
+        exp_time,
+        -1,
+    ]
 
 
 @skip_if_server_version_lt("7.3.240")
@@ -220,22 +223,22 @@ def test_hexpireat_multiple_condition_flags_error(r):
 def test_hpexpireat_basic(r):
     r.delete("test:hash")
     r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
-    exp_time = int((datetime.now() + timedelta(milliseconds=400)).timestamp() * 1000)
+    exp_time = int((datetime.now() + timedelta(seconds=10)).timestamp() * 1000)
     assert r.hpexpireat("test:hash", exp_time, "field1") == [1]
-    time.sleep(0.5)
-    assert r.hexists("test:hash", "field1") is False
-    assert r.hexists("test:hash", "field2") is True
+    # the stored expire time is exact; test_hpexpireat_conditions covers deletion
+    assert r.hpexpiretime("test:hash", "field1", "field2") == [exp_time, -1]
 
 
 @skip_if_server_version_lt("7.3.240")
 def test_hpexpireat_with_datetime(r):
     r.delete("test:hash")
     r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
-    exp_time = datetime.now() + timedelta(milliseconds=400)
+    exp_time = datetime.now() + timedelta(seconds=10)
     assert r.hpexpireat("test:hash", exp_time, "field1") == [1]
-    time.sleep(0.5)
-    assert r.hexists("test:hash", "field1") is False
-    assert r.hexists("test:hash", "field2") is True
+    assert r.hpexpiretime("test:hash", "field1", "field2") == [
+        int(exp_time.timestamp() * 1000),
+        -1,
+    ]
 
 
 @skip_if_server_version_lt("7.3.240")
@@ -273,12 +276,13 @@ def test_hpexpireat_multiple_fields(r):
         "test:hash",
         mapping={"field1": "value1", "field2": "value2", "field3": "value3"},
     )
-    exp_time = int((datetime.now() + timedelta(milliseconds=400)).timestamp() * 1000)
+    exp_time = int((datetime.now() + timedelta(seconds=10)).timestamp() * 1000)
     assert r.hpexpireat("test:hash", exp_time, "field1", "field2") == [1, 1]
-    time.sleep(0.5)
-    assert r.hexists("test:hash", "field1") is False
-    assert r.hexists("test:hash", "field2") is False
-    assert r.hexists("test:hash", "field3") is True
+    assert r.hpexpiretime("test:hash", "field1", "field2", "field3") == [
+        exp_time,
+        exp_time,
+        -1,
+    ]
 
 
 @skip_if_server_version_lt("7.3.240")
@@ -442,8 +446,8 @@ def test_hgetex_validate_expired_fields_removed(r):
     test_keys = ["foo", "1", "3"]
     # test get multiple fields with expiration set
     # validate that expired fields are removed
-    assert r.hgetex("test:hash", *test_keys, ex=1) == [b"bar", b"1", b"three"]
-    time.sleep(1.1)
+    assert r.hgetex("test:hash", *test_keys, px=50) == [b"bar", b"1", b"three"]
+    _wait_for_fields_expired(r, "test:hash", *test_keys)
     assert r.hgetex("test:hash", *test_keys) == [None, None, None]
     assert r.httl("test:hash", *test_keys) == [-2, -2, -2]
     assert r.hgetex("test:hash", "4") == [b"four"]
@@ -502,10 +506,10 @@ def test_hsetex_expiration_ex_and_keepttl(r):
         b"11",
         b"22",
     ]
-    time.sleep(1.1)
-    # validate keepttl
+    time.sleep(0.01)
+    # validate keepttl: the TTL keeps counting down instead of being cleared
     assert r.hsetex("test:hash", "foo", "bar1", keepttl=True) == 1
-    assert r.httl("test:hash", "foo")[0] < 10
+    assert 0 < r.hpttl("test:hash", "foo")[0] < 10000
 
 
 @skip_if_server_version_lt("7.9.0")

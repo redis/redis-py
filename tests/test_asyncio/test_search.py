@@ -99,7 +99,7 @@ class AsyncSearchTestsBase:
 
     @staticmethod
     async def waitForIndex(env, idx, timeout=None):
-        delay = 0.1
+        delay = 0.02
         while True:
             try:
                 res = await env.execute_command("FT.INFO", idx)

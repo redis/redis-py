@@ -1017,12 +1017,9 @@ class TestAsyncSubkeyNotifications:
         await notifications.subscribe_subkeyspaceitem("test:hash8", "watched_field")
         await self._drain_subscribe_messages(notifications)
 
-        # Modify a different field — should NOT trigger a notification
+        # Modify a different field, then the watched one. Notifications arrive
+        # in order, so if the first write had notified, it would be read first.
         await r.hset("test:hash8", "other_field", "value")
-        msg = await notifications.get_message(timeout=1.0)
-        assert msg is None
-
-        # Modify the watched field — should trigger a notification
         await r.hset("test:hash8", "watched_field", "updated")
         msg = await notifications.get_message(timeout=2.0)
         assert msg is not None
@@ -1096,10 +1093,13 @@ class TestAsyncSubkeyNotifications:
             assert msg.key == "test:hash10"
             assert msg.event_type == "hset"
 
-        # A non-matching field should NOT produce a notification
+        # A non-matching field should NOT produce a notification. Write it
+        # before a matching one: if it notified, it would be read first.
         await r.hset("test:hash10", "other", "value")
-        msg = await notifications.get_message(timeout=1.0)
-        assert msg is None
+        await r.hset("test:hash10", "field4", "value4")
+        msg = await notifications.get_message(timeout=2.0)
+        assert msg is not None
+        assert msg.subkeys == ["field4"]
 
         await notifications.aclose()
         await r.delete("test:hash10")

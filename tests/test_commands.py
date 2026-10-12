@@ -1002,10 +1002,10 @@ class TestRedisCommands:
         r2 = _get_client(redis.Redis, request, flushdb=False)
         name = "target-foobar"
         r2.client_setname(name)
-        time.sleep(4)
+        time.sleep(1.5)
         initial_clients = [c["name"] for c in r.client_list()]
         assert name in initial_clients
-        r.client_kill_filter(maxage=2)
+        r.client_kill_filter(maxage=1)
         final_clients = [c["name"] for c in r.client_list()]
         assert name not in final_clients
 
@@ -2666,10 +2666,10 @@ class TestRedisCommands:
             assert pytest.approx(ttl) == 10
 
         assert r.mget(*all_test_keys) == [b"1", b"2"]
-        time.sleep(1.1)
-        # validate keepttl
+        time.sleep(0.01)
+        # validate keepttl: the TTL keeps counting down instead of being cleared
         assert r.msetex(mapping={"1:{test:1}": 11}, keepttl=True) == 1
-        assert r.ttl("1:{test:1}") < 10
+        assert 0 < r.pttl("1:{test:1}") < 10000
 
     @pytest.mark.onlycluster
     @skip_if_server_version_lt("8.3.224")
@@ -2828,10 +2828,10 @@ class TestRedisCommands:
             assert pytest.approx(ttl) == 10
 
         assert r.mget(*all_test_keys) == [b"1", b"2"]
-        time.sleep(1.1)
-        # validate keepttl
+        time.sleep(0.01)
+        # validate keepttl: the TTL keeps counting down instead of being cleared
         assert r.msetex(mapping={"1": 11}, keepttl=True) == 1
-        assert r.ttl("1") < 10
+        assert 0 < r.pttl("1") < 10000
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.3.224")
@@ -3457,7 +3457,7 @@ class TestRedisCommands:
         assert_resp_response(
             r, r.blpop(["b", "a"], timeout=1), (b"a", b"2"), [b"a", b"2"]
         )
-        assert r.blpop(["b", "a"], timeout=1) is None
+        assert r.blpop(["b", "a"], timeout=0.1) is None
         r.rpush("c", "1")
         assert_resp_response(r, r.blpop("c", timeout=1), (b"c", b"1"), [b"c", b"1"])
 
@@ -3477,7 +3477,7 @@ class TestRedisCommands:
         assert_resp_response(
             r, r.brpop(["b", "a"], timeout=1), (b"a", b"1"), [b"a", b"1"]
         )
-        assert r.brpop(["b", "a"], timeout=1) is None
+        assert r.brpop(["b", "a"], timeout=0.1) is None
         r.rpush("c", "1")
         assert_resp_response(r, r.brpop("c", timeout=1), (b"c", b"1"), [b"c", b"1"])
 
@@ -3487,7 +3487,7 @@ class TestRedisCommands:
         r.rpush("b", "3", "4")
         assert r.brpoplpush("a", "b") == b"2"
         assert r.brpoplpush("a", "b") == b"1"
-        assert r.brpoplpush("a", "b", timeout=1) is None
+        assert r.brpoplpush("a", "b", timeout=0.1) is None
         assert r.lrange("a", 0, -1) == []
         assert r.lrange("b", 0, -1) == [b"1", b"2", b"3", b"4"]
 
@@ -3506,7 +3506,7 @@ class TestRedisCommands:
             r.blmpop(1, "2", "b", "a", count=2)
         r.rpush("b", "6", "7", "8", "9")
         assert r.blmpop(0, "2", "b", "a", direction="LEFT") == [b"b", [b"6"]]
-        assert r.blmpop(1, "2", "foo", "bar", direction="RIGHT") is None
+        assert r.blmpop(0.1, "2", "foo", "bar", direction="RIGHT") is None
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
@@ -5059,7 +5059,7 @@ class TestRedisCommands:
         assert_resp_response(
             r, r.bzpopmax(["b", "a"], timeout=1), (b"a", b"a1", 1), [b"a", b"a1", 1]
         )
-        assert r.bzpopmax(["b", "a"], timeout=1) is None
+        assert r.bzpopmax(["b", "a"], timeout=0.1) is None
         r.zadd("c", {"c1": 100})
         assert_resp_response(
             r, r.bzpopmax("c", timeout=1), (b"c", b"c1", 100), [b"c", b"c1", 100]
@@ -5082,7 +5082,7 @@ class TestRedisCommands:
         assert_resp_response(
             r, r.bzpopmin(["b", "a"], timeout=1), (b"a", b"a2", 2), [b"a", b"a2", 2]
         )
-        assert r.bzpopmin(["b", "a"], timeout=1) is None
+        assert r.bzpopmin(["b", "a"], timeout=0.1) is None
         r.zadd("c", {"c1": 100})
         assert_resp_response(
             r, r.bzpopmin("c", timeout=1), (b"c", b"c1", 100), [b"c", b"c1", 100]
@@ -5127,7 +5127,7 @@ class TestRedisCommands:
             [b"b", [[b"b1", b"10"]]],
             [b"b", [[b"b1", 10.0]]],
         )
-        assert r.bzmpop(1, "2", ["foo", "bar"], max=True) is None
+        assert r.bzmpop(0.1, "2", ["foo", "bar"], max=True) is None
 
     def test_zrange(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})

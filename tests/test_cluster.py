@@ -1292,9 +1292,8 @@ class TestClusterRedisCommands:
         d = {"a": b"1", "b": b"2", "c": b"3", "d": b"4"}
         r.mset_nonatomic(d)
         assert r.unlink(*d.keys()) == len(d)
-        # Unlink is non-blocking so we sleep before
-        # verifying the deletion
-        sleep(0.1)
+        # UNLINK removes the keys from the keyspace right away; only the memory
+        # is reclaimed in the background
         assert r.unlink(*d.keys()) == 0
 
     def test_pubsub_channels_merge_results(self, r):
@@ -2141,7 +2140,7 @@ class TestClusterRedisCommands:
             (b"{foo}a", b"2"),
             [b"{foo}a", b"2"],
         )
-        assert r.blpop(["{foo}b", "{foo}a"], timeout=1) is None
+        assert r.blpop(["{foo}b", "{foo}a"], timeout=0.1) is None
         r.rpush("{foo}c", "1")
         assert_resp_response(
             r, r.blpop("{foo}c", timeout=1), (b"{foo}c", b"1"), [b"{foo}c", b"1"]
@@ -2174,7 +2173,7 @@ class TestClusterRedisCommands:
             (b"{foo}a", b"1"),
             [b"{foo}a", b"1"],
         )
-        assert r.brpop(["{foo}b", "{foo}a"], timeout=1) is None
+        assert r.brpop(["{foo}b", "{foo}a"], timeout=0.1) is None
         r.rpush("{foo}c", "1")
         assert_resp_response(
             r, r.brpop("{foo}c", timeout=1), (b"{foo}c", b"1"), [b"{foo}c", b"1"]
@@ -2185,7 +2184,7 @@ class TestClusterRedisCommands:
         r.rpush("{foo}b", "3", "4")
         assert r.brpoplpush("{foo}a", "{foo}b") == b"2"
         assert r.brpoplpush("{foo}a", "{foo}b") == b"1"
-        assert r.brpoplpush("{foo}a", "{foo}b", timeout=1) is None
+        assert r.brpoplpush("{foo}a", "{foo}b", timeout=0.1) is None
         assert r.lrange("{foo}a", 0, -1) == []
         assert r.lrange("{foo}b", 0, -1) == [b"1", b"2", b"3", b"4"]
 
@@ -2420,7 +2419,7 @@ class TestClusterRedisCommands:
             (b"{foo}a", b"a1", 1),
             [b"{foo}a", b"a1", 1],
         )
-        assert r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) is None
+        assert r.bzpopmax(["{foo}b", "{foo}a"], timeout=0.1) is None
         r.zadd("{foo}c", {"c1": 100})
         assert_resp_response(
             r,
@@ -2457,7 +2456,7 @@ class TestClusterRedisCommands:
             (b"{foo}a", b"a2", 2),
             [b"{foo}a", b"a2", 2],
         )
-        assert r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) is None
+        assert r.bzpopmin(["{foo}b", "{foo}a"], timeout=0.1) is None
         r.zadd("{foo}c", {"c1": 100})
         assert_resp_response(
             r,
@@ -5587,9 +5586,6 @@ class TestReadOnlyPipeline:
         ro = _get_client(RedisCluster, request, read_from_replicas=True)
         key = "bar"
         ro.set(key, "foo")
-        import time
-
-        time.sleep(0.2)
         with ro.pipeline() as readonly_pipe:
             mock_all_nodes_resp(ro, "MOCK_OK")
             assert readonly_pipe.read_from_replicas is True
@@ -5626,9 +5622,6 @@ class TestReadOnlyPipeline:
         )
         key = "bar"
         ro.set(key, "foo")
-        import time
-
-        time.sleep(0.2)
 
         with ro.pipeline() as readonly_pipe:
             mock_all_nodes_resp(ro, "MOCK_OK")

@@ -829,7 +829,9 @@ class TestClusterKeyspaceNotifications:
         r.delete("test:key2")
 
         # Wait for handlers to be called
-        time.sleep(1.0)
+        deadline = time.monotonic() + 5.0
+        while len(received) < 3 and time.monotonic() < deadline:
+            time.sleep(0.01)
 
         thread.stop()
         thread.join(timeout=1.0)  # Wait for thread to actually stop
@@ -1828,12 +1830,9 @@ class TestSubkeyNotifications:
         notifications.subscribe_subkeyspaceitem("test:hash8", "watched_field")
         self._drain_subscribe_messages(notifications)
 
-        # Modify a different field — should NOT trigger a notification
+        # Modify a different field, then the watched one. Notifications arrive
+        # in order, so if the first write had notified, it would be read first.
         r.hset("test:hash8", "other_field", "value")
-        msg = notifications.get_message(timeout=1.0)
-        assert msg is None
-
-        # Modify the watched field — should trigger a notification
         r.hset("test:hash8", "watched_field", "updated")
         msg = notifications.get_message(timeout=2.0)
         assert msg is not None
@@ -1903,10 +1902,13 @@ class TestSubkeyNotifications:
             assert msg.key == "test:hash10"
             assert msg.event_type == "hset"
 
-        # A non-matching field should NOT produce a notification
+        # A non-matching field should NOT produce a notification. Write it
+        # before a matching one: if it notified, it would be read first.
         r.hset("test:hash10", "other", "value")
-        msg = notifications.get_message(timeout=1.0)
-        assert msg is None
+        r.hset("test:hash10", "field4", "value4")
+        msg = notifications.get_message(timeout=2.0)
+        assert msg is not None
+        assert msg.subkeys == ["field4"]
 
         notifications.close()
         r.delete("test:hash10")

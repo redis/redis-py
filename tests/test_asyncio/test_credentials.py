@@ -1,6 +1,7 @@
 import functools
 import random
 import string
+import time
 from asyncio import Lock as AsyncLock
 from asyncio import sleep as async_sleep
 from typing import Optional, Tuple, Union
@@ -25,6 +26,19 @@ try:
     from redis_entraid.cred_provider import EntraIdCredentialsProvider
 except ImportError:
     EntraIdCredentialsProvider = None
+
+
+async def _wait_until_passes(check, timeout=5.0):
+    """Re-run ``check`` until its assertions pass, or re-raise at the deadline."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            check()
+            return
+        except AssertionError:
+            if time.monotonic() >= deadline:
+                raise
+            await async_sleep(0.01)
 
 
 @pytest.fixture()
@@ -370,14 +384,18 @@ class TestStreamingCredentialProvider:
         )
 
         await credential_provider.get_credentials_async()
-        await async_sleep(0.5)
 
-        mock_connection.send_command.assert_has_calls(
-            [call("AUTH", auth_token.try_get("oid"), auth_token.get_value())]
-        )
-        mock_another_connection.send_command.assert_has_calls(
-            [call("AUTH", auth_token.try_get("oid"), auth_token.get_value())]
-        )
+        # the re-auth runs in the background; poll instead of sleeping
+        def reauth_done():
+            assert auth_token is not None
+            mock_connection.send_command.assert_has_calls(
+                [call("AUTH", auth_token.try_get("oid"), auth_token.get_value())]
+            )
+            mock_another_connection.send_command.assert_has_calls(
+                [call("AUTH", auth_token.try_get("oid"), auth_token.get_value())]
+            )
+
+        await _wait_until_passes(reauth_done)
 
     @pytest.mark.parametrize(
         "credential_provider",
@@ -436,11 +454,16 @@ class TestStreamingCredentialProvider:
         )
 
         await credential_provider.get_credentials_async()
-        await async_sleep(0.5)
 
-        mock_connection.read_response.assert_has_calls([call()])
-        mock_another_connection.read_response.assert_has_calls([call()])
-        mock_failed_connection.read_response.assert_has_calls([call(), call(), call()])
+        # the re-auth runs in the background; poll instead of sleeping
+        def reauth_done():
+            mock_connection.read_response.assert_has_calls([call()])
+            mock_another_connection.read_response.assert_has_calls([call()])
+            mock_failed_connection.read_response.assert_has_calls(
+                [call(), call(), call()]
+            )
+
+        await _wait_until_passes(reauth_done)
 
     @pytest.mark.parametrize(
         "credential_provider",
@@ -503,17 +526,21 @@ class TestStreamingCredentialProvider:
         p = r.pubsub()
         await p.subscribe("test")
         await credential_provider.get_credentials_async()
-        await async_sleep(0.5)
 
-        mock_pubsub_connection.send_command.assert_has_calls(
-            [
-                call("SUBSCRIBE", "test", check_health=True),
-                call("AUTH", auth_token.try_get("oid"), auth_token.get_value()),
-            ]
-        )
-        mock_another_connection.send_command.assert_has_calls(
-            [call("AUTH", auth_token.try_get("oid"), auth_token.get_value())]
-        )
+        # the re-auth runs in the background; poll instead of sleeping
+        def reauth_done():
+            assert auth_token is not None
+            mock_pubsub_connection.send_command.assert_has_calls(
+                [
+                    call("SUBSCRIBE", "test", check_health=True),
+                    call("AUTH", auth_token.try_get("oid"), auth_token.get_value()),
+                ]
+            )
+            mock_another_connection.send_command.assert_has_calls(
+                [call("AUTH", auth_token.try_get("oid"), auth_token.get_value())]
+            )
+
+        await _wait_until_passes(reauth_done)
 
     @pytest.mark.parametrize(
         "credential_provider",
@@ -576,16 +603,20 @@ class TestStreamingCredentialProvider:
         p = r.pubsub()
         await p.subscribe("test")
         await credential_provider.get_credentials_async()
-        await async_sleep(0.5)
 
-        mock_pubsub_connection.send_command.assert_has_calls(
-            [
-                call("SUBSCRIBE", "test", check_health=True),
-            ]
-        )
-        mock_another_connection.send_command.assert_has_calls(
-            [call("AUTH", auth_token.try_get("oid"), auth_token.get_value())]
-        )
+        # the re-auth runs in the background; poll instead of sleeping
+        def reauth_done():
+            assert auth_token is not None
+            mock_pubsub_connection.send_command.assert_has_calls(
+                [
+                    call("SUBSCRIBE", "test", check_health=True),
+                ]
+            )
+            mock_another_connection.send_command.assert_has_calls(
+                [call("AUTH", auth_token.try_get("oid"), auth_token.get_value())]
+            )
+
+        await _wait_until_passes(reauth_done)
 
     @pytest.mark.parametrize(
         "credential_provider",

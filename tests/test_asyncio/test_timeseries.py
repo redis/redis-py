@@ -1,5 +1,4 @@
 import time
-from time import sleep
 
 import pytest
 import pytest_asyncio
@@ -198,13 +197,12 @@ async def test_madd(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 async def test_incrby_decrby(decoded_r: redis.Redis):
-    for _ in range(100):
-        assert await decoded_r.ts().incrby(KEY1, 1)
-        sleep(0.001)
-    assert 100 == (await decoded_r.ts().get(KEY1))[1]
-    for _ in range(100):
-        assert await decoded_r.ts().decrby(KEY1, 1)
-        sleep(0.001)
+    # explicit, increasing timestamps give each call its own sample
+    for ts in range(1, 6):
+        assert await decoded_r.ts().incrby(KEY1, 1, timestamp=ts)
+    assert 5 == (await decoded_r.ts().get(KEY1))[1]
+    for ts in range(6, 11):
+        assert await decoded_r.ts().decrby(KEY1, 1, timestamp=ts)
     assert 0 == (await decoded_r.ts().get(KEY1))[1]
 
     assert await decoded_r.ts().incrby(KEY2, 1.5, timestamp=5)

@@ -161,7 +161,10 @@ def _assert_connect(conn, server_address, **tcp_kw):
     else:
         server = _RedisTCPServer(server_address, _RedisRequestHandler, **tcp_kw)
     with server as aserver:
-        t = threading.Thread(target=aserver.serve_forever)
+        # the default 0.5 s poll interval would delay every shutdown
+        t = threading.Thread(
+            target=aserver.serve_forever, kwargs={"poll_interval": 0.05}
+        )
         t.start()
         try:
             aserver.wait_online()

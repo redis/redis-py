@@ -879,7 +879,7 @@ class TestPubSubSubscribeUnsubscribe:
         for func, channel in checks:
             assert await func(channel) is None
             assert p.subscribed is True
-            assert await wait_for_message(p) is None
+            assert await p.get_message(timeout=1) is None
         assert p.subscribed is False
         await p.aclose()
 
@@ -897,7 +897,7 @@ class TestPubSubSubscribeUnsubscribe:
         for func, channel in checks:
             assert await func(channel) is None
             assert p.subscribed is True
-            message = await wait_for_message(p, ignore_subscribe_messages=True)
+            message = await p.get_message(ignore_subscribe_messages=True, timeout=1)
             assert message is None
         assert p.subscribed is False
 
@@ -2009,7 +2009,7 @@ class TestAsyncPubSubBlockingListen:
     """
 
     SOCKET_TIMEOUT = 0.3
-    PUBLISH_DELAY = SOCKET_TIMEOUT * 3
+    PUBLISH_DELAY = SOCKET_TIMEOUT * 2
 
     async def _make_subscriber(self, create_redis):
         from redis.asyncio.retry import Retry
@@ -2091,7 +2091,8 @@ class TestAsyncPubSubBlockingListen:
         p = r.pubsub(ignore_subscribe_messages=True)
         await p.subscribe("foo")
         # Drain the subscribe ack before calling parse_response directly.
-        await wait_for_message(p, timeout=1.0)
+        # The ack is ignored, so get_message returns None as soon as it is read.
+        await p.get_message(timeout=1.0)
 
         async def publish_after_delay():
             await asyncio.sleep(self.PUBLISH_DELAY)

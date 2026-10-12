@@ -927,7 +927,7 @@ class TestPubSubSubscribeUnsubscribe:
         for func, channel, get_func in checks:
             assert func(channel) is None
             assert p.subscribed is True
-            assert wait_for_message(p, func=get_func) is None
+            assert get_func(timeout=1) is None
         assert p.subscribed is False
 
     @skip_if_server_version_lt("7.0.0")
@@ -947,7 +947,7 @@ class TestPubSubSubscribeUnsubscribe:
         for func, channel, get_func in checks:
             assert func(channel) is None
             assert p.subscribed is True
-            message = wait_for_message(p, ignore_subscribe_messages=True, func=get_func)
+            message = get_func(ignore_subscribe_messages=True, timeout=1)
             assert message is None
         assert p.subscribed is False
 
@@ -1118,9 +1118,9 @@ class TestPubSubMessages:
     def test_channel_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
         p.subscribe(foo=self.message_handler)
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         assert r.publish("foo", "test message") == 1
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         assert self.message == make_message("message", "foo", "test message")
 
     @pytest.mark.onlynoncluster
@@ -1142,9 +1142,9 @@ class TestPubSubMessages:
     def test_shard_channel_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
         p.ssubscribe(foo=self.message_handler)
-        assert wait_for_message(p, func=p.get_sharded_message) is None
+        assert p.get_sharded_message(timeout=1) is None
         assert r.spublish("foo", "test message") == 1
-        assert wait_for_message(p, func=p.get_sharded_message) is None
+        assert p.get_sharded_message(timeout=1) is None
         assert self.message == make_message("smessage", "foo", "test message")
 
     @skip_if_server_version_lt("7.0.0")
@@ -1166,9 +1166,9 @@ class TestPubSubMessages:
     def test_pattern_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
         p.psubscribe(**{"f*": self.message_handler})
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         assert r.publish("foo", "test message") == 1
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         assert self.message == make_message(
             "pmessage", "foo", "test message", pattern="f*"
         )
@@ -1194,9 +1194,9 @@ class TestPubSubMessages:
         channel = "uni" + chr(4456) + "code"
         channels = {channel: self.message_handler}
         p.subscribe(**channels)
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         assert r.publish(channel, "test message") == 1
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         assert self.message == make_message("message", channel, "test message")
 
     @skip_if_server_version_lt("7.0.0")
@@ -1205,9 +1205,9 @@ class TestPubSubMessages:
         channel = "uni" + chr(4456) + "code"
         channels = {channel: self.message_handler}
         p.ssubscribe(**channels)
-        assert wait_for_message(p, func=p.get_sharded_message) is None
+        assert p.get_sharded_message(timeout=1) is None
         assert r.spublish(channel, "test message") == 1
-        assert wait_for_message(p, func=p.get_sharded_message) is None
+        assert p.get_sharded_message(timeout=1) is None
         assert self.message == make_message("smessage", channel, "test message")
 
     @pytest.mark.onlynoncluster
@@ -1217,9 +1217,9 @@ class TestPubSubMessages:
         pattern = "uni" + chr(4456) + "*"
         channel = "uni" + chr(4456) + "code"
         p.psubscribe(**{pattern: self.message_handler})
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         assert r.publish(channel, "test message") == 1
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         assert self.message == make_message(
             "pmessage", channel, "test message", pattern=pattern
         )
@@ -1234,10 +1234,10 @@ class TestPubSubRESP3Handler:
             return
         p = r.pubsub(push_handler_func=self.my_handler)
         p.subscribe("foo")
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         assert self.message == ["my handler", [b"subscribe", b"foo", 1]]
         assert r.publish("foo", "test message") == 1
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         assert self.message == ["my handler", [b"message", b"foo", b"test message"]]
 
     @skip_if_server_version_lt("7.0.0")
@@ -1246,10 +1246,10 @@ class TestPubSubRESP3Handler:
             return
         p = r.pubsub(push_handler_func=self.my_handler)
         p.ssubscribe("foo")
-        assert wait_for_message(p, func=p.get_sharded_message) is None
+        assert p.get_sharded_message(timeout=1) is None
         assert self.message == ["my handler", [b"ssubscribe", b"foo", 1]]
         assert r.spublish("foo", "test message") == 1
-        assert wait_for_message(p, func=p.get_sharded_message) is None
+        assert p.get_sharded_message(timeout=1) is None
         assert self.message == ["my handler", [b"smessage", b"foo", b"test message"]]
 
 
@@ -1336,26 +1336,26 @@ class TestPubSubAutoDecoding:
     def test_channel_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
         p.subscribe(**{self.channel: self.message_handler})
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         r.publish(self.channel, self.data)
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         assert self.message == self.make_message("message", self.channel, self.data)
 
         # test that we reconnected to the correct channel
         self.message = None
         p.connection.disconnect()
-        assert wait_for_message(p) is None  # should reconnect
+        assert p.get_message(timeout=1) is None  # should reconnect
         new_data = self.data + "new data"
         r.publish(self.channel, new_data)
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         assert self.message == self.make_message("message", self.channel, new_data)
 
     def test_pattern_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
         p.psubscribe(**{self.pattern: self.message_handler})
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         r.publish(self.channel, self.data)
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         assert self.message == self.make_message(
             "pmessage", self.channel, self.data, pattern=self.pattern
         )
@@ -1363,10 +1363,10 @@ class TestPubSubAutoDecoding:
         # test that we reconnected to the correct pattern
         self.message = None
         p.connection.disconnect()
-        assert wait_for_message(p) is None  # should reconnect
+        assert p.get_message(timeout=1) is None  # should reconnect
         new_data = self.data + "new data"
         r.publish(self.channel, new_data)
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         assert self.message == self.make_message(
             "pmessage", self.channel, new_data, pattern=self.pattern
         )
@@ -1375,9 +1375,9 @@ class TestPubSubAutoDecoding:
     def test_shard_channel_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
         p.ssubscribe(**{self.channel: self.message_handler})
-        assert wait_for_message(p, func=p.get_sharded_message) is None
+        assert p.get_sharded_message(timeout=1) is None
         r.spublish(self.channel, self.data)
-        assert wait_for_message(p, func=p.get_sharded_message) is None
+        assert p.get_sharded_message(timeout=1) is None
         assert self.message == self.make_message("smessage", self.channel, self.data)
 
         # test that we reconnected to the correct channel
@@ -1389,10 +1389,10 @@ class TestPubSubAutoDecoding:
             # standalone mode
             p.connection.disconnect()
         # should reconnect
-        assert wait_for_message(p, func=p.get_sharded_message) is None
+        assert p.get_sharded_message(timeout=1) is None
         new_data = self.data + "new data"
         r.spublish(self.channel, new_data)
-        assert wait_for_message(p, func=p.get_sharded_message) is None
+        assert p.get_sharded_message(timeout=1) is None
         assert self.message == self.make_message("smessage", self.channel, new_data)
 
     def test_context_manager(self, r):
@@ -2637,7 +2637,7 @@ class TestPubSubBlockingListen:
     """
 
     SOCKET_TIMEOUT = 0.3
-    PUBLISH_DELAY = SOCKET_TIMEOUT * 3
+    PUBLISH_DELAY = SOCKET_TIMEOUT * 2
 
     def _make_client(self, request, no_retry=False, **kwargs):
         if no_retry:
@@ -2724,7 +2724,8 @@ class TestPubSubBlockingListen:
         p = r.pubsub(ignore_subscribe_messages=True)
         p.subscribe("foo")
         # Drain the subscribe ack before calling parse_response directly.
-        wait_for_message(p, timeout=1.0)
+        # The ack is ignored, so get_message returns None as soon as it is read.
+        p.get_message(timeout=1.0)
 
         def publish_after_delay():
             time.sleep(self.PUBLISH_DELAY)

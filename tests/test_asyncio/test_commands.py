@@ -1900,10 +1900,10 @@ class TestRedisCommands:
             assert pytest.approx(ttl) == 10
 
         assert await r.mget(*all_test_keys) == [b"1", b"2"]
-        await asyncio.sleep(1.1)
-        # validate keepttl
+        await asyncio.sleep(0.01)
+        # validate keepttl: the TTL keeps counting down instead of being cleared
         assert await r.msetex(mapping={"1:{test:1}": 11}, keepttl=True) == 1
-        assert await r.ttl("1:{test:1}") < 10
+        assert 0 < await r.pttl("1:{test:1}") < 10000
 
     @pytest.mark.onlycluster
     @skip_if_server_version_lt("8.3.224")
@@ -2073,10 +2073,10 @@ class TestRedisCommands:
             assert pytest.approx(ttl) == 10
 
         assert await r.mget(*all_test_keys) == [b"1", b"2"]
-        await asyncio.sleep(1.1)
-        # validate keepttl
+        await asyncio.sleep(0.01)
+        # validate keepttl: the TTL keeps counting down instead of being cleared
         assert await r.msetex(mapping={"1": 11}, keepttl=True) == 1
-        assert await r.ttl("1") < 10
+        assert 0 < await r.pttl("1") < 10000
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.3.224")
@@ -2532,7 +2532,7 @@ class TestRedisCommands:
         assert_resp_response(
             r, await r.blpop(["b", "a"], timeout=1), (b"a", b"2"), [b"a", b"2"]
         )
-        assert await r.blpop(["b", "a"], timeout=1) is None
+        assert await r.blpop(["b", "a"], timeout=0.1) is None
         await r.rpush("c", "1")
         assert_resp_response(
             r, await r.blpop("c", timeout=1), (b"c", b"1"), [b"c", b"1"]
@@ -2554,7 +2554,7 @@ class TestRedisCommands:
         assert_resp_response(
             r, await r.brpop(["b", "a"], timeout=1), (b"a", b"1"), [b"a", b"1"]
         )
-        assert await r.brpop(["b", "a"], timeout=1) is None
+        assert await r.brpop(["b", "a"], timeout=0.1) is None
         await r.rpush("c", "1")
         assert_resp_response(
             r, await r.brpop("c", timeout=1), (b"c", b"1"), [b"c", b"1"]
@@ -2566,7 +2566,7 @@ class TestRedisCommands:
         await r.rpush("b", "3", "4")
         assert await r.brpoplpush("a", "b") == b"2"
         assert await r.brpoplpush("a", "b") == b"1"
-        assert await r.brpoplpush("a", "b", timeout=1) is None
+        assert await r.brpoplpush("a", "b", timeout=0.1) is None
         assert await r.lrange("a", 0, -1) == []
         assert await r.lrange("b", 0, -1) == [b"1", b"2", b"3", b"4"]
 
@@ -3879,7 +3879,7 @@ class TestRedisCommands:
             (b"a", b"a1", 1),
             [b"a", b"a1", 1],
         )
-        assert await r.bzpopmax(["b", "a"], timeout=1) is None
+        assert await r.bzpopmax(["b", "a"], timeout=0.1) is None
         await r.zadd("c", {"c1": 100})
         assert_resp_response(
             r, await r.bzpopmax("c", timeout=1), (b"c", b"c1", 100), [b"c", b"c1", 100]
@@ -3914,7 +3914,7 @@ class TestRedisCommands:
             (b"a", b"a2", 2),
             [b"a", b"a2", 2],
         )
-        assert await r.bzpopmin(["b", "a"], timeout=1) is None
+        assert await r.bzpopmin(["b", "a"], timeout=0.1) is None
         await r.zadd("c", {"c1": 100})
         assert_resp_response(
             r, await r.bzpopmin("c", timeout=1), (b"c", b"c1", 100), [b"c", b"c1", 100]

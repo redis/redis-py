@@ -361,7 +361,6 @@ class TestTokenManager:
         config = TokenManagerConfig(exp_refresh_ratio, 0, 1000, retry_policy)
         mgr = TokenManager(mock_provider, config)
         mgr.start(mock_listener)
-        sleep(0.1)
 
         assert len(errors) == 0, f"Unexpected errors: {errors}"
         assert len(tokens) > 0
@@ -419,7 +418,6 @@ class TestTokenManager:
         config = TokenManagerConfig(exp_refresh_ratio, 0, 1000, retry_policy)
         mgr = TokenManager(mock_provider, config)
         await mgr.start_async(mock_listener, block_for_initial=True)
-        await asyncio.sleep(0.1)
 
         assert len(tokens) > 0
 
@@ -571,9 +569,6 @@ class TestTokenManager:
         config = TokenManagerConfig(1, 0, 1000, retry_policy)
         mgr = TokenManager(mock_provider, config)
         mgr.start(mock_listener)
-        # Should be less than a 0.1, or it will be flacky
-        # due to additional token renewal.
-        sleep(0.08)
 
         assert len(errors) == 0, f"Unexpected errors: {errors}"
         assert mock_provider.request_token.call_count > 0
@@ -613,9 +608,6 @@ class TestTokenManager:
         config = TokenManagerConfig(1, 0, 1000, retry_policy)
         mgr = TokenManager(mock_provider, config)
         await mgr.start_async(mock_listener, block_for_initial=True)
-        # Should be less than a 0.1, or it will be flacky
-        # due to additional token renewal.
-        await asyncio.sleep(0.08)
 
         assert len(errors) == 0, f"Unexpected errors: {errors}"
         assert mock_provider.request_token.call_count > 0
@@ -642,6 +634,7 @@ class TestTokenManager:
         config = TokenManagerConfig(0.9, 0, 1000, retry_policy)
         mgr = TokenManager(mock_provider, config)
         mgr.start(mock_listener)
+        # the next renewal is due at ~0.9 s; give an early one a chance to show
         sleep(0.2)
 
         assert len(tokens) == 1
@@ -668,6 +661,7 @@ class TestTokenManager:
         config = TokenManagerConfig(0.9, 0, 1000, retry_policy)
         mgr = TokenManager(mock_provider, config)
         await mgr.start_async(mock_listener, block_for_initial=True)
+        # the next renewal is due at ~0.9 s; give an early one a chance to show
         await asyncio.sleep(0.2)
 
         assert len(tokens) == 1
@@ -700,7 +694,6 @@ class TestTokenManager:
         config = TokenManagerConfig(1, 0, 1000, retry_policy)
         mgr = TokenManager(mock_provider, config)
         mgr.start(mock_listener)
-        sleep(0.1)
 
         assert mock_provider.request_token.call_count == 4
         assert len(tokens) == 0
@@ -735,7 +728,6 @@ class TestTokenManager:
         config = TokenManagerConfig(1, 0, 1000, retry_policy)
         mgr = TokenManager(mock_provider, config)
         await mgr.start_async(mock_listener, block_for_initial=True)
-        sleep(0.1)
 
         assert mock_provider.request_token.call_count == 4
         assert len(tokens) == 0

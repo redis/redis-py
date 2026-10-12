@@ -104,7 +104,7 @@ NON_ENGLISH_STEMMING_CASES = [
 class SearchTestsBase:
     @staticmethod
     def waitForIndex(env, idx, timeout=None):
-        delay = 0.1
+        delay = 0.02
         while True:
             try:
                 res = env.execute_command("FT.INFO", idx)
@@ -1207,9 +1207,9 @@ class TestBaseSearchFunctionality(SearchTestsBase):
         ttl = client.execute_command("ft.debug", "TTL", "idx")
         assert ttl > 2
 
-        while ttl > 2:
-            ttl = client.execute_command("ft.debug", "TTL", "idx")
-            time.sleep(0.01)
+        # the TTL has seconds granularity, so one second is enough to see it drop
+        time.sleep(1.1)
+        assert client.execute_command("ft.debug", "TTL", "idx") < ttl
 
     @pytest.mark.redismod
     def test_skip_initial_scan(self, client):
@@ -1614,16 +1614,22 @@ class TestBaseSearchFunctionality(SearchTestsBase):
             deadline = time.monotonic() + 0.5
             while time.monotonic() < deadline:
                 client.ft().search(Query("*")).docs[1]
-            time.sleep(1)
-            assert 2 == client.ft().search(Query("*")).total
+            # wait for the expired document to leave the index
+            deadline = time.monotonic() + 5
+            while client.ft().search(Query("*")).total != 2:
+                assert time.monotonic() < deadline, "hset:2 was not expired"
+                time.sleep(0.01)
         elif expects_resp3_shape(client):
             assert 3 == client.ft().search(Query("*"))["total_results"]
             client.pexpire("hset:2", 300)
             deadline = time.monotonic() + 0.5
             while time.monotonic() < deadline:
                 client.ft().search(Query("*"))["results"][1]
-            time.sleep(1)
-            assert 2 == client.ft().search(Query("*"))["total_results"]
+            # wait for the expired document to leave the index
+            deadline = time.monotonic() + 5
+            while client.ft().search(Query("*"))["total_results"] != 2:
+                assert time.monotonic() < deadline, "hset:2 was not expired"
+                time.sleep(0.01)
 
     @pytest.mark.redismod
     @pytest.mark.experimental

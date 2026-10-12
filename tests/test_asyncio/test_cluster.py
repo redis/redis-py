@@ -1401,9 +1401,8 @@ class TestClusterRedisCommands:
         d = {"a": b"1", "b": b"2", "c": b"3", "d": b"4"}
         await r.mset_nonatomic(d)
         assert await r.unlink(*d.keys()) == len(d)
-        # Unlink is non-blocking so we sleep before
-        # verifying the deletion
-        await asyncio.sleep(0.1)
+        # UNLINK removes the keys from the keyspace right away; only the memory
+        # is reclaimed in the background
         assert await r.unlink(*d.keys()) == 0
 
     async def test_initialize_before_execute_multi_key_command(
@@ -2096,7 +2095,7 @@ class TestClusterRedisCommands:
             (b"{foo}a", b"2"),
             [b"{foo}a", b"2"],
         )
-        assert await r.blpop(["{foo}b", "{foo}a"], timeout=1) is None
+        assert await r.blpop(["{foo}b", "{foo}a"], timeout=0.1) is None
         await r.rpush("{foo}c", "1")
         assert_resp_response(
             r, await r.blpop("{foo}c", timeout=1), (b"{foo}c", b"1"), [b"{foo}c", b"1"]
@@ -2129,7 +2128,7 @@ class TestClusterRedisCommands:
             (b"{foo}a", b"1"),
             [b"{foo}a", b"1"],
         )
-        assert await r.brpop(["{foo}b", "{foo}a"], timeout=1) is None
+        assert await r.brpop(["{foo}b", "{foo}a"], timeout=0.1) is None
         await r.rpush("{foo}c", "1")
         assert_resp_response(
             r, await r.brpop("{foo}c", timeout=1), (b"{foo}c", b"1"), [b"{foo}c", b"1"]
@@ -2140,7 +2139,7 @@ class TestClusterRedisCommands:
         await r.rpush("{foo}b", "3", "4")
         assert await r.brpoplpush("{foo}a", "{foo}b") == b"2"
         assert await r.brpoplpush("{foo}a", "{foo}b") == b"1"
-        assert await r.brpoplpush("{foo}a", "{foo}b", timeout=1) is None
+        assert await r.brpoplpush("{foo}a", "{foo}b", timeout=0.1) is None
         assert await r.lrange("{foo}a", 0, -1) == []
         assert await r.lrange("{foo}b", 0, -1) == [b"1", b"2", b"3", b"4"]
 
@@ -2380,7 +2379,7 @@ class TestClusterRedisCommands:
             (b"{foo}a", b"a1", 1),
             [b"{foo}a", b"a1", 1],
         )
-        assert await r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) is None
+        assert await r.bzpopmax(["{foo}b", "{foo}a"], timeout=0.1) is None
         await r.zadd("{foo}c", {"c1": 100})
         assert_resp_response(
             r,
@@ -2417,7 +2416,7 @@ class TestClusterRedisCommands:
             (b"{foo}a", b"a2", 2),
             [b"{foo}a", b"a2", 2],
         )
-        assert await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) is None
+        assert await r.bzpopmin(["{foo}b", "{foo}a"], timeout=0.1) is None
         await r.zadd("{foo}c", {"c1": 100})
         assert_resp_response(
             r,
@@ -6328,12 +6327,12 @@ class TestClusterPubSub:
                 await p.subscribe(channel)
                 b_channel = channel.encode("utf-8")
                 channels.append(b_channel)
-                # Read subscription confirmation
-                await self.wait_for_message(p, timeout=1.0)
+                # Read the subscribe ack, so the server has processed SUBSCRIBE
+                # before PUBSUB runs; the wait ends as soon as the ack arrives
+                assert await self.wait_for_message(p, timeout=5.0) is not None
                 i += 1
 
             # Assert that the cluster's pubsub_channels function returns ALL channels
-            await asyncio.sleep(0.3)  # Allow time for subscriptions to propagate
             result = await r.pubsub_channels(target_nodes="all")
             result.sort()
             channels.sort()
@@ -6357,11 +6356,11 @@ class TestClusterPubSub:
                 p = r.pubsub(node=node)
                 pubsub_nodes.append(p)
                 await p.subscribe(channel)
-                # Read subscription confirmation
-                await self.wait_for_message(p, timeout=1.0)
+                # Read the subscribe ack, so the server has processed SUBSCRIBE
+                # before PUBSUB runs; the wait ends as soon as the ack arrives
+                assert await self.wait_for_message(p, timeout=5.0) is not None
 
             # Assert cluster's pubsub_numsub returns ALL clients
-            await asyncio.sleep(0.3)  # Allow time for subscriptions to propagate
             result = await r.pubsub_numsub(channel, target_nodes="all")
             assert result == [(b_channel, len(nodes))]
         finally:
@@ -6382,11 +6381,11 @@ class TestClusterPubSub:
                 p = r.pubsub(node=node)
                 pubsub_nodes.append(p)
                 await p.psubscribe(pattern)
-                # Read subscription confirmation
-                await self.wait_for_message(p, timeout=1.0)
+                # Read the subscribe ack, so the server has processed SUBSCRIBE
+                # before PUBSUB runs; the wait ends as soon as the ack arrives
+                assert await self.wait_for_message(p, timeout=5.0) is not None
 
             # Assert cluster's pubsub_numpat returns ALL pattern subscriptions
-            await asyncio.sleep(0.3)  # Allow time for subscriptions to propagate
             result = await r.pubsub_numpat(target_nodes="all")
             assert result == len(nodes)
         finally:
