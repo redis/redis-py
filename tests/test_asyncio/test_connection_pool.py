@@ -923,6 +923,15 @@ class TestConnectionPoolUnixSocketURLParsing:
             pool.connection_kwargs, {"path": "/socket", "a": "1", "b": "2"}
         )
 
+    def test_connection_class_override(self):
+        class MyConnection(redis.UnixDomainSocketConnection):
+            pass
+
+        pool = redis.ConnectionPool.from_url(
+            "unix:///socket", connection_class=MyConnection
+        )
+        assert pool.connection_class == MyConnection
+
 
 @pytest.mark.fixed_client
 class TestSSLConnectionURLParsing:
@@ -930,6 +939,15 @@ class TestSSLConnectionURLParsing:
         pool = redis.ConnectionPool.from_url("rediss://my.host")
         assert pool.connection_class == redis.SSLConnection
         assert_kwargs_subset(pool.connection_kwargs, {"host": "my.host"})
+
+    def test_connection_class_override(self):
+        class MyConnection(redis.SSLConnection):
+            pass
+
+        pool = redis.ConnectionPool.from_url(
+            "rediss://my.host", connection_class=MyConnection
+        )
+        assert pool.connection_class == MyConnection
 
     def test_cert_reqs_options(self):
         import ssl
