@@ -983,6 +983,20 @@ class TestRecordConnectionCount:
         """Create a config with CONNECTION_BASIC enabled."""
         return OTelConfig(metric_groups=[MetricGroup.CONNECTION_BASIC])
 
+    @staticmethod
+    def _calls_for(mock_counter, pool_name):
+        """The add() calls for ``pool_name`` only.
+
+        Other code in the process (a pool from an earlier test being collected,
+        for instance) can record connection counts on the patched collector while
+        a test runs, so a test counts only the calls for the pool it uses.
+        """
+        return [
+            c
+            for c in mock_counter.add.call_args_list
+            if c[1]["attributes"].get(DB_CLIENT_CONNECTION_POOL_NAME) == pool_name
+        ]
+
     @pytest.fixture
     def setup_connection_count_recorder(
         self,
@@ -1017,9 +1031,8 @@ class TestRecordConnectionCount:
             counter=1,
         )
 
-        assert mock_up_down_counter.add.call_count == 1
-
-        calls = mock_up_down_counter.add.call_args_list
+        calls = self._calls_for(mock_up_down_counter, "localhost:6379_abc123")
+        assert len(calls) == 1
         assert calls[0][0][0] == 1
         assert (
             calls[0][1]["attributes"][DB_CLIENT_CONNECTION_POOL_NAME]
@@ -1037,9 +1050,8 @@ class TestRecordConnectionCount:
             counter=-1,
         )
 
-        assert mock_up_down_counter.add.call_count == 1
-
-        calls = mock_up_down_counter.add.call_args_list
+        calls = self._calls_for(mock_up_down_counter, "localhost:6379_abc123")
+        assert len(calls) == 1
         assert calls[0][0][0] == -1
         assert (
             calls[0][1]["attributes"][DB_CLIENT_CONNECTION_POOL_NAME]
@@ -1057,9 +1069,8 @@ class TestRecordConnectionCount:
             counter=-5,
         )
 
-        assert mock_up_down_counter.add.call_count == 1
-
-        calls = mock_up_down_counter.add.call_args_list
+        calls = self._calls_for(mock_up_down_counter, "localhost:6379_abc123")
+        assert len(calls) == 1
         assert calls[0][0][0] == -5
         assert calls[0][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "idle"
 
@@ -1106,9 +1117,8 @@ class TestRecordConnectionCount:
         )
 
         # Total calls: 6
-        assert mock_up_down_counter.add.call_count == 6
-
-        calls = mock_up_down_counter.add.call_args_list
+        calls = self._calls_for(mock_up_down_counter, "pool1")
+        assert len(calls) == 6
 
         # Step 1: IDLE +1 (creation)
         assert calls[0][0][0] == 1
