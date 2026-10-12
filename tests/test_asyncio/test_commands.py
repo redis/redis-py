@@ -3431,6 +3431,8 @@ class TestRedisCommands:
         assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         _, dic = await r.hscan("a", match="a")
         assert dic == {b"a": b"1"}
+        _, dic = await r.hscan("a", no_values=False)
+        assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         _, dic = await r.hscan("a_notset", match="a")
         assert dic == {}
 
@@ -3452,6 +3454,8 @@ class TestRedisCommands:
         assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         dic = {k: v async for k, v in r.hscan_iter("a", match="a")}
         assert dic == {b"a": b"1"}
+        dic = {k: v async for k, v in r.hscan_iter("a", no_values=False)}
+        assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         dic = {k: v async for k, v in r.hscan_iter("a_notset", match="a")}
         assert dic == {}
 

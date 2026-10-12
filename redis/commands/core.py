@@ -6321,7 +6321,7 @@ class ScanCommands(CommandsProtocol):
             pieces.extend([b"MATCH", match])
         if count is not None:
             pieces.extend([b"COUNT", count])
-        if no_values is not None:
+        if no_values:
             pieces.extend([b"NOVALUES"])
         return self.execute_command("HSCAN", *pieces, no_values=no_values)
 
