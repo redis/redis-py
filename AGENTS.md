@@ -24,7 +24,7 @@ pytest tests/test_asyncio/test_commands.py -k "test_set and not cluster"
 pytest --redis-url=redis://localhost:16379/0 -m onlycluster tests/test_cluster.py
 ```
 
-The pytest plugin in `tests/conftest.py` adds these options (also exposed via invoke wrappers): `--redis-url`, `--redis-ssl-url`, `--redis-mod-url`, `--protocol` (`""` = library default, currently RESP3), `--legacy-responses` (`true|false|default`), `--redis-cluster-nodes`, `--uvloop`.
+The pytest plugin in `tests/conftest.py` adds these options (also exposed via invoke wrappers): `--redis-url`, `--redis-ssl-url`, `--redis-mod-url`, `--protocol` (`""` = library default, currently RESP3), `--legacy-responses` (`true|false|default`), `--redis-cluster-nodes`, `--uvloop`. It also adds `--tracemalloc` (off by default, not exposed via invoke), which traces allocations so `ResourceWarning`s include allocation tracebacks; it makes cluster client setup several times slower.
 
 ### pytest markers
 
