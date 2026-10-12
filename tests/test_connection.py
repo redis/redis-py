@@ -3849,10 +3849,16 @@ class TestDeeplyNestedReplyInvalidatesConnection:
 
     PUBSUB_KWARGS = dict(disconnect_on_error=False, push_request=True)
 
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="PyPy bounds recursion by stack bytes; unwinding the overflow can "
+        "abort the interpreter (#4144 replaces the RecursionError)",
+    )
     def test_python_parser_recursion_error_disconnects(self):
-        # PyPy bounds recursion by stack bytes, not frames, and its JIT-compiled
-        # parser frames are small enough to fit 3000 levels; 100_000 cannot fit.
-        conn = _connection_with_stream(_deeply_nested_reply(100_000), _RESP2Parser)
+        # 3000 levels exceed CPython's recursion limit. PyPy, which would need far
+        # more, is skipped: unwinding the RecursionError from a native stack
+        # overflow through its JIT frames intermittently aborts the interpreter.
+        conn = _connection_with_stream(_deeply_nested_reply(3000), _RESP2Parser)
 
         # A GC pass at the recursion limit would run finalizers of garbage left
         # by earlier tests with no stack left to report their errors, so collect

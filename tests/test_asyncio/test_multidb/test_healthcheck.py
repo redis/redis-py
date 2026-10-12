@@ -62,7 +62,7 @@ def _maintenance_event(
     event_cls,
     source,
     state=MaintenanceState.MAINTENANCE,
-    relaxed_timeout=0.5,
+    relaxed_timeout=5.0,
     notification=None,
 ):
     """
@@ -188,6 +188,10 @@ class TestMaintenanceAwareBudget:
     """
     The health check budget follows the maintenance windows the probe client
     reports: relaxed while a window is active, plain otherwise.
+
+    Success paths and upper-bound assertions have wide margins, so a stalled
+    runner cannot fail them: a probe meant to finish does so seconds inside its
+    relaxed budget, and elapsed-time bounds sit seconds above the expected cutoff.
     """
 
     def _policy_with_tracker(self, database):
@@ -214,10 +218,10 @@ class TestMaintenanceAwareBudget:
         mock_db = Mock(spec=Database)
         policy, listener = self._policy_with_tracker(mock_db)
         listener.listen(
-            _maintenance_event(MaintenanceStartedEvent, object(), relaxed_timeout=0.5)
+            _maintenance_event(MaintenanceStartedEvent, object(), relaxed_timeout=5.0)
         )
 
-        # Sleeps past the 0.1 s budget, within the relaxed 1 * (0.5 + 0.01) s
+        # Sleeps past the 0.1 s budget, within the relaxed 1 * (5 + 0.01) s
         assert await policy.execute([self._slow_check(0.3)], mock_db) is True
 
     @pytest.mark.asyncio
@@ -226,7 +230,7 @@ class TestMaintenanceAwareBudget:
         mock_db = Mock(spec=Database)
         policy, listener = self._policy_with_tracker(mock_db)
         started = _maintenance_event(
-            MaintenanceStartedEvent, object(), relaxed_timeout=0.5
+            MaintenanceStartedEvent, object(), relaxed_timeout=5.0
         )
 
         async def stalled_probe(database, client=None):
@@ -248,7 +252,7 @@ class TestMaintenanceAwareBudget:
         mock_db = Mock(spec=Database)
         policy = HealthyAllPolicy()
         started = _maintenance_event(
-            MaintenanceStartedEvent, object(), relaxed_timeout=0.5
+            MaintenanceStartedEvent, object(), relaxed_timeout=5.0
         )
 
         async def get_client_creating_tracker(database):
@@ -272,35 +276,40 @@ class TestMaintenanceAwareBudget:
         start = time.monotonic()
         with pytest.raises(UnhealthyDatabaseException) as exc_info:
             # Sleeps past the relaxed 1 * (0.2 + 0.01) s budget as well
-            await policy.execute([self._slow_check(2.0)], mock_db)
+            await policy.execute([self._slow_check(10.0)], mock_db)
 
         assert isinstance(exc_info.value.original_exception, asyncio.TimeoutError)
-        assert time.monotonic() - start < 1.0
+        assert time.monotonic() - start < 5.0
 
     @pytest.mark.asyncio
     async def test_blocking_relaxed_timeout_relaxes_until_window_expires(self):
         """With blocking sockets the notification's expiry is the only bound."""
         mock_db = Mock(spec=Database)
         policy, listener = self._policy_with_tracker(mock_db)
-        notification = NodeMigratingNotification(id=1, ttl=5)
-        notification.expire_at = time.monotonic() + 1.0
-        listener.listen(
-            _maintenance_event(
+        source = object()
+
+        def blocking_window(expires_in):
+            notification = NodeMigratingNotification(id=1, ttl=5)
+            notification.expire_at = time.monotonic() + expires_in
+            return _maintenance_event(
                 MaintenanceStartedEvent,
-                object(),
+                source,
                 relaxed_timeout=None,
                 notification=notification,
             )
-        )
 
+        # far off, so only the shorter window announced below can end a check early
+        listener.listen(blocking_window(30.0))
         assert await policy.execute([self._slow_check(0.2)], mock_db) is True
 
+        # the same source announces a window that is about to expire
+        listener.listen(blocking_window(0.5))
         start = time.monotonic()
         with pytest.raises(UnhealthyDatabaseException) as exc_info:
-            await policy.execute([self._slow_check(3.0)], mock_db)
+            await policy.execute([self._slow_check(30.0)], mock_db)
 
         assert isinstance(exc_info.value.original_exception, asyncio.TimeoutError)
-        assert time.monotonic() - start < 2.0
+        assert time.monotonic() - start < 5.0
 
     @pytest.mark.asyncio
     async def test_window_outlives_notification_ttl_until_completed(self):
@@ -314,7 +323,7 @@ class TestMaintenanceAwareBudget:
             _maintenance_event(
                 MaintenanceStartedEvent,
                 object(),
-                relaxed_timeout=0.5,
+                relaxed_timeout=5.0,
                 notification=NodeMigratingNotification(id=1, ttl=0),
             )
         )
@@ -351,7 +360,7 @@ class TestMaintenanceAwareBudget:
         policy, listener = self._policy_with_tracker(mock_db)
         source = object()
         listener.listen(
-            _maintenance_event(MaintenanceStartedEvent, source, relaxed_timeout=5)
+            _maintenance_event(MaintenanceStartedEvent, source, relaxed_timeout=50)
         )
 
         async def complete_soon():
@@ -361,12 +370,12 @@ class TestMaintenanceAwareBudget:
         completion = asyncio.create_task(complete_soon())
         start = time.monotonic()
         with pytest.raises(UnhealthyDatabaseException) as exc_info:
-            # Would be allowed 1 * (5 + 0.01) s while the window is active
-            await policy.execute([self._slow_check(3.0)], mock_db)
+            # Would be allowed 1 * (50 + 0.01) s while the window is active
+            await policy.execute([self._slow_check(30.0)], mock_db)
         await completion
 
         assert isinstance(exc_info.value.original_exception, asyncio.TimeoutError)
-        assert time.monotonic() - start < 1.5
+        assert time.monotonic() - start < 5.0
 
     @pytest.mark.asyncio
     async def test_completed_window_restores_budget(self):
@@ -414,10 +423,11 @@ class TestMaintenanceAwareBudget:
 
         start = time.monotonic()
         with pytest.raises(UnhealthyDatabaseException) as exc_info:
-            await policy.execute([self._slow_check(0.5)], mock_db)
+            await policy.execute([self._slow_check(5.0)], mock_db)
 
         assert isinstance(exc_info.value.original_exception, asyncio.TimeoutError)
-        assert time.monotonic() - start < 0.4
+        # the plain 0.1 s budget applied, not the 5 s the probe would take
+        assert time.monotonic() - start < 1.0
 
     @pytest.mark.asyncio
     async def test_outer_cancellation_cancels_health_check(self):
