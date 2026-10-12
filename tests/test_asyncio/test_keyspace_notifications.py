@@ -738,12 +738,13 @@ class TestAsyncSubkeyNotifications:
             else [notifications._pubsub]
         )
         for pubsub in pubsubs:
-            while True:
-                msg = await pubsub.get_message(timeout=0.05)
-                if msg is None:
-                    break
-                if msg["type"] not in ("subscribe", "psubscribe"):
-                    break
+            # One ack per subscribed channel or pattern. Reading exactly that
+            # many, each with a generous timeout, cannot stop early on a slow
+            # runner and leave an ack for the test to read.
+            for _ in range(len(pubsub.channels) + len(pubsub.patterns)):
+                msg = await pubsub.get_message(timeout=2.0)
+                assert msg is not None, "subscribe ack not received"
+                assert msg["type"] in ("subscribe", "psubscribe"), msg
 
     @pytest.mark.asyncio
     async def test_create_hash_field_subkeyspace_notification(

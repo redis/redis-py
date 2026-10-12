@@ -1,7 +1,7 @@
 import asyncio
 import threading
 from datetime import datetime, timezone
-from time import sleep
+from time import monotonic, sleep
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -491,7 +491,10 @@ class TestTokenManager:
         mgr.start(mock_listener, skip_initial=True)
         assert len(tokens) == 0
 
-        sleep(0.6)
+        # the renewal is due at ~0.5 s; poll so a stalled runner gets more time
+        deadline = monotonic() + 3
+        while not tokens and monotonic() < deadline:
+            sleep(0.01)
 
         assert len(tokens) > 0
 
@@ -533,7 +536,10 @@ class TestTokenManager:
         await mgr.start_async(mock_listener, skip_initial=True)
         assert len(tokens) == 0
 
-        await asyncio.sleep(0.6)
+        # the renewal is due at ~0.5 s; poll so a stalled runner gets more time
+        deadline = monotonic() + 3
+        while not tokens and monotonic() < deadline:
+            await asyncio.sleep(0.01)
         assert len(tokens) > 0
 
     def test_success_token_renewal_with_retry(self):

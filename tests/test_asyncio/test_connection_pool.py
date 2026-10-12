@@ -22,7 +22,7 @@ from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
 from .compat import aclosing
 from .conftest import asynccontextmanager
-from .test_pubsub import wait_for_message
+from .test_pubsub import EVENT_LOOP_TIMER_SLACK, wait_for_message
 
 
 def assert_kwargs_subset(actual, expected):
@@ -295,40 +295,38 @@ class TestConnectionPool:
         Test that multiple concurrent connection acquisitions don't block
         each other during connection establishment.
         """
-        connection_delay = 0.05
         num_connections = 3
+        started = 0
+        all_started = asyncio.Event()
 
         class SlowConnectConnection(DummyConnection):
-            """Connection that simulates slow connection establishment"""
+            """Connection whose connect() finishes only once every connect started"""
 
             async def connect(self):
-                # Simulate slow connection (e.g., network latency, TLS handshake)
-                await asyncio.sleep(connection_delay)
+                nonlocal started
+                started += 1
+                if started == num_connections:
+                    all_started.set()
+                await all_started.wait()
                 self._connected = True
 
         async with self.get_pool(
             connection_class=SlowConnectConnection, max_connections=10
         ) as pool:
-            # Start acquiring multiple connections concurrently
-            start_time = asyncio.get_running_loop().time()
-
-            # Try to get connections concurrently
-            connections = await asyncio.gather(
-                *[pool.get_connection() for _ in range(num_connections)]
-            )
-
-            elapsed_time = asyncio.get_running_loop().time() - start_time
-
-            # With proper lock handling, these should complete mostly in parallel
-            # If the lock was held during connect(), it would take num_connections * connection_delay
-            # With lock only during pop, it should take ~connection_delay (connections in parallel)
-            # We allow 2.5x overhead for system variance
-            max_allowed_time = connection_delay * 2.5
-            assert elapsed_time < max_allowed_time, (
-                f"Concurrent connections took {elapsed_time:.3f}s, "
-                f"expected < {max_allowed_time:.3f}s. "
-                f"This suggests lock was held during connection establishment."
-            )
+            # If the lock were held during connect(), the second connect() could
+            # not start, the first would wait forever, and wait_for would time out.
+            try:
+                connections = await asyncio.wait_for(
+                    asyncio.gather(
+                        *[pool.get_connection() for _ in range(num_connections)]
+                    ),
+                    timeout=5,
+                )
+            except asyncio.TimeoutError:
+                pytest.fail(
+                    f"only {started} of {num_connections} connect() calls started; "
+                    "the lock was held during connection establishment"
+                )
 
             # Clean up
             for conn in connections:
@@ -508,9 +506,13 @@ class TestBlockingConnectionPool:
                 await pool.release(c1)
 
             start = asyncio.get_running_loop().time()
-            await asyncio.gather(target(), pool.get_connection())
-            stop = asyncio.get_running_loop().time()
-            assert (stop - start) <= 0.2
+            release = asyncio.create_task(target())
+            # time get_connection alone: it must block until the release
+            await pool.get_connection()
+            assert asyncio.get_running_loop().time() - start >= (
+                0.1 - EVENT_LOOP_TIMER_SLACK
+            )
+            await release
 
     async def test_reuse_previously_released_connection(self, master_host):
         connection_kwargs = {"host": master_host[0]}
@@ -1258,7 +1260,7 @@ class TestHealthCheck:
 
             subscribe_message = await wait_for_message(p)
             assert subscribe_message["type"] == "subscribe"
-            assert await wait_for_message(p) is None
+            assert await p.get_message(timeout=1) is None
             # now that the connection is subscribed, the pubsub health
             # check should have taken over and include the HEALTH_CHECK_MESSAGE
             m.assert_any_call("PING", p.HEALTH_CHECK_MESSAGE, check_health=False)
@@ -1283,7 +1285,8 @@ class TestHealthCheck:
             # doesn't result in another health check
             m.reset_mock()
             next_health_check = p.connection.next_health_check
-            assert await wait_for_message(p) is None
+            # one poll is enough: every get_message runs check_health first
+            assert await p.get_message(timeout=0) is None
             assert p.connection.next_health_check == next_health_check
             m.assert_not_called()
 
@@ -1291,7 +1294,7 @@ class TestHealthCheck:
             # we should not receive a pong message, but the next_health_check
             # should be advanced
             p.connection.next_health_check = 0
-            assert await wait_for_message(p) is None
+            assert await p.get_message(timeout=1) is None
             m.assert_called_with("PING", p.HEALTH_CHECK_MESSAGE, check_health=False)
             self.assert_interval_advanced(p.connection)
 

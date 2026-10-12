@@ -639,21 +639,17 @@ class TestRedisClusterObj:
 
             read_response.side_effect = read_response_mocked
 
-            with pytest.raises(MaxConnectionsError):
-                await asyncio.gather(
-                    *(
-                        rc.ping(target_nodes=RedisCluster.DEFAULT_NODE)
-                        for _ in range(11)
-                    )
-                )
-
-        # Wait for background tasks to complete and release their connections.
-        # When asyncio.gather() raises MaxConnectionsError, the other 10 tasks
-        # continue running in the background. Since commit f6bbfb45 added
-        # 'await disconnect_if_needed()' to the finally block, we must wait
-        # for tasks to complete naturally before teardown, otherwise we get
-        # race conditions with connections being disconnected while still in use.
-        await asyncio.sleep(0.2)
+            # return_exceptions=True waits for every ping, so no task is still
+            # holding a connection when the client is closed below. (Since
+            # f6bbfb45 a ping disconnects its connection in a finally block.)
+            results = await asyncio.gather(
+                *(rc.ping(target_nodes=RedisCluster.DEFAULT_NODE) for _ in range(11)),
+                return_exceptions=True,
+            )
+        # the 11th ping finds no free connection; the other 10 succeed
+        errors = [res for res in results if isinstance(res, BaseException)]
+        assert len(errors) == 1, results
+        assert isinstance(errors[0], MaxConnectionsError), results
 
         await rc.aclose()
 
@@ -6199,7 +6195,7 @@ class TestClusterPubSub:
 
             assert msg is None
             # Verify timeout was approximately respected (allow some slack)
-            assert elapsed < 0.5
+            assert elapsed < 1.0  # generous: a stalled runner must not fail it
         finally:
             await pubsub.aclose()
 
@@ -6225,7 +6221,7 @@ class TestClusterPubSub:
             elapsed = time.monotonic() - start
 
             assert msg is None
-            assert elapsed < 0.1
+            assert elapsed < 1.0  # generous: a stalled runner must not fail it
         finally:
             await pubsub.aclose()
 

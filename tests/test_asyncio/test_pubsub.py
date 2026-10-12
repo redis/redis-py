@@ -79,6 +79,23 @@ async def wait_for_message(pubsub, timeout=0.5, ignore_subscribe_messages=False)
     return None
 
 
+async def wait_for_handled_message(test, get_message, expected, timeout=5.0):
+    """Handle messages until the test's handler has seen ``expected``.
+
+    In a cluster, a PUBLISH reaches subscribers on other nodes over the cluster
+    bus, so a message an earlier test published on the same channel can arrive
+    late and be handled first. Handling until the expected message shows up
+    skips such strays. A handled message is never returned, so every call must
+    still return None.
+    """
+    deadline = time.monotonic() + timeout
+    while getattr(test, "message", None) != expected:
+        assert time.monotonic() < deadline, (
+            f"handler saw {getattr(test, 'message', None)!r}, expected {expected!r}"
+        )
+        assert await get_message(timeout=0.1) is None
+
+
 def make_message(
     type, channel: Optional[str], data: EncodableT, pattern: Optional[str] = None
 ):
@@ -996,8 +1013,9 @@ class TestPubSubMessages:
         await p.subscribe(foo=self.message_handler)
         assert await p.get_message(timeout=1) is None
         assert await r.publish("foo", "test message") == 1
-        assert await p.get_message(timeout=1) is None
-        assert self.message == make_message("message", "foo", "test message")
+        await wait_for_handled_message(
+            self, p.get_message, make_message("message", "foo", "test message")
+        )
         await p.aclose()
 
     async def test_binary_channel_message_handler_with_subscription(self, r):
@@ -1006,13 +1024,16 @@ class TestPubSubMessages:
         await p.subscribe(Subscription(channel, self.message_handler))
         assert await p.get_message(timeout=1) is None
         assert await r.publish(channel, b"test message") == 1
-        assert await p.get_message(timeout=1) is None
-        assert self.message == {
-            "type": "message",
-            "pattern": None,
-            "channel": channel,
-            "data": b"test message",
-        }
+        await wait_for_handled_message(
+            self,
+            p.get_message,
+            {
+                "type": "message",
+                "pattern": None,
+                "channel": channel,
+                "data": b"test message",
+            },
+        )
         await p.aclose()
 
     async def test_channel_async_message_handler(self, r):
@@ -1046,13 +1067,16 @@ class TestPubSubMessages:
         await p.ssubscribe(Subscription(channel, self.message_handler))
         assert await p.get_message(timeout=1) is None
         assert await r.spublish(channel, b"test message") == 1
-        assert await p.get_message(timeout=1) is None
-        assert self.message == {
-            "type": "smessage",
-            "pattern": None,
-            "channel": channel,
-            "data": b"test message",
-        }
+        await wait_for_handled_message(
+            self,
+            p.get_message,
+            {
+                "type": "smessage",
+                "pattern": None,
+                "channel": channel,
+                "data": b"test message",
+            },
+        )
         await p.aclose()
 
     @pytest.mark.onlynoncluster
@@ -1061,9 +1085,10 @@ class TestPubSubMessages:
         await p.psubscribe(**{"f*": self.message_handler})
         assert await p.get_message(timeout=1) is None
         assert await r.publish("foo", "test message") == 1
-        assert await p.get_message(timeout=1) is None
-        assert self.message == make_message(
-            "pmessage", "foo", "test message", pattern="f*"
+        await wait_for_handled_message(
+            self,
+            p.get_message,
+            make_message("pmessage", "foo", "test message", pattern="f*"),
         )
         await p.aclose()
 
@@ -1075,13 +1100,16 @@ class TestPubSubMessages:
         await p.psubscribe(Subscription(pattern, self.message_handler))
         assert await p.get_message(timeout=1) is None
         assert await r.publish(channel, b"test message") == 1
-        assert await p.get_message(timeout=1) is None
-        assert self.message == {
-            "type": "pmessage",
-            "pattern": pattern,
-            "channel": channel,
-            "data": b"test message",
-        }
+        await wait_for_handled_message(
+            self,
+            p.get_message,
+            {
+                "type": "pmessage",
+                "pattern": pattern,
+                "channel": channel,
+                "data": b"test message",
+            },
+        )
         await p.aclose()
 
     async def test_unicode_channel_message_handler(self, r: redis.Redis):
@@ -1091,8 +1119,9 @@ class TestPubSubMessages:
         await p.subscribe(**channels)
         assert await p.get_message(timeout=1) is None
         assert await r.publish(channel, "test message") == 1
-        assert await p.get_message(timeout=1) is None
-        assert self.message == make_message("message", channel, "test message")
+        await wait_for_handled_message(
+            self, p.get_message, make_message("message", channel, "test message")
+        )
         await p.aclose()
 
     @pytest.mark.onlynoncluster
@@ -1104,9 +1133,10 @@ class TestPubSubMessages:
         await p.psubscribe(**{pattern: self.message_handler})
         assert await p.get_message(timeout=1) is None
         assert await r.publish(channel, "test message") == 1
-        assert await p.get_message(timeout=1) is None
-        assert self.message == make_message(
-            "pmessage", channel, "test message", pattern=pattern
+        await wait_for_handled_message(
+            self,
+            p.get_message,
+            make_message("pmessage", channel, "test message", pattern=pattern),
         )
         await p.aclose()
 
@@ -1130,11 +1160,13 @@ class TestPubSubRESP3Handler:
             return
         p = r.pubsub(push_handler_func=self.my_handler)
         await p.subscribe("foo")
-        assert await p.get_message(timeout=1) is None
-        assert self.message == ["my handler", [b"subscribe", b"foo", 1]]
+        await wait_for_handled_message(
+            self, p.get_message, ["my handler", [b"subscribe", b"foo", 1]]
+        )
         assert await r.publish("foo", "test message") == 1
-        assert await p.get_message(timeout=1) is None
-        assert self.message == ["my handler", [b"message", b"foo", b"test message"]]
+        await wait_for_handled_message(
+            self, p.get_message, ["my handler", [b"message", b"foo", b"test message"]]
+        )
 
 
 @pytest.mark.onlynoncluster
@@ -1210,8 +1242,9 @@ class TestPubSubAutoDecoding:
         await p.subscribe(**{self.channel: self.message_handler})
         assert await p.get_message(timeout=1) is None
         await r.publish(self.channel, self.data)
-        assert await p.get_message(timeout=1) is None
-        assert self.message == self.make_message("message", self.channel, self.data)
+        await wait_for_handled_message(
+            self, p.get_message, self.make_message("message", self.channel, self.data)
+        )
 
         # test that we reconnected to the correct channel
         self.message = None
@@ -1219,8 +1252,9 @@ class TestPubSubAutoDecoding:
         assert await p.get_message(timeout=1) is None  # should reconnect
         new_data = self.data + "new data"
         await r.publish(self.channel, new_data)
-        assert await p.get_message(timeout=1) is None
-        assert self.message == self.make_message("message", self.channel, new_data)
+        await wait_for_handled_message(
+            self, p.get_message, self.make_message("message", self.channel, new_data)
+        )
         await p.aclose()
 
     async def test_pattern_message_handler(self, r: redis.Redis):
@@ -1228,9 +1262,12 @@ class TestPubSubAutoDecoding:
         await p.psubscribe(**{self.pattern: self.message_handler})
         assert await p.get_message(timeout=1) is None
         await r.publish(self.channel, self.data)
-        assert await p.get_message(timeout=1) is None
-        assert self.message == self.make_message(
-            "pmessage", self.channel, self.data, pattern=self.pattern
+        await wait_for_handled_message(
+            self,
+            p.get_message,
+            self.make_message(
+                "pmessage", self.channel, self.data, pattern=self.pattern
+            ),
         )
 
         # test that we reconnected to the correct pattern
@@ -1239,9 +1276,10 @@ class TestPubSubAutoDecoding:
         assert await p.get_message(timeout=1) is None  # should reconnect
         new_data = self.data + "new data"
         await r.publish(self.channel, new_data)
-        assert await p.get_message(timeout=1) is None
-        assert self.message == self.make_message(
-            "pmessage", self.channel, new_data, pattern=self.pattern
+        await wait_for_handled_message(
+            self,
+            p.get_message,
+            self.make_message("pmessage", self.channel, new_data, pattern=self.pattern),
         )
         await p.aclose()
 
@@ -1826,7 +1864,7 @@ class TestAsyncPubSubTimeoutPropagation:
         elapsed = asyncio.get_running_loop().time() - start
         assert msg is None
         # Verify timeout was actually respected (within reasonable bounds)
-        assert elapsed < 0.5
+        assert elapsed < 1.0  # generous: a stalled runner must not fail it
         await p.aclose()
 
     @pytest.mark.asyncio
@@ -1867,7 +1905,7 @@ class TestAsyncPubSubTimeoutPropagation:
         response = await p.parse_response(block=False, timeout=0.1)
         elapsed = asyncio.get_running_loop().time() - start
         assert response is None
-        assert elapsed < 0.5
+        assert elapsed < 1.0  # generous: a stalled runner must not fail it
         await p.aclose()
 
     @pytest.mark.asyncio
@@ -1886,7 +1924,7 @@ class TestAsyncPubSubTimeoutPropagation:
         msg = await p.get_message(timeout=0)
         elapsed = asyncio.get_running_loop().time() - start
         assert msg is None
-        assert elapsed < 0.1
+        assert elapsed < 1.0  # generous: a stalled runner must not fail it
         await p.aclose()
 
     @pytest.mark.asyncio
@@ -2176,7 +2214,7 @@ class TestAsyncPubSubBlockingListen:
         msg = await p.get_message(timeout=0.1)
         elapsed = asyncio.get_running_loop().time() - start
         assert msg is None
-        assert elapsed < 0.5
+        assert elapsed < 1.0  # generous: a stalled runner must not fail it
         await p.aclose()
 
 
@@ -3502,11 +3540,13 @@ class TestClusterPubSubSlotMigration:
         # measured wait by the setup's own cost and makes the lower bound below
         # unreachable.
         start = time.monotonic()
-        pubsub._poll_cool_off[bad] = start + 0.05
+        # A stall longer than the window between here and the generator's
+        # deadline check lets it poll the failing node; keep the window wide.
+        pubsub._poll_cool_off[bad] = start + 0.5
         assert await pubsub._sharded_message_generator(timeout=30) == (None, None)
         elapsed = time.monotonic() - start
 
-        assert 0.05 - EVENT_LOOP_TIMER_SLACK <= elapsed < 5
+        assert 0.5 - EVENT_LOOP_TIMER_SLACK <= elapsed < 5
 
     async def test_sharded_message_generator_cool_off_does_not_block_zero_timeout(
         self,

@@ -1359,7 +1359,7 @@ class TestHealthCheck:
 
             subscribe_message = wait_for_message(p)
             assert subscribe_message["type"] == "subscribe"
-            assert wait_for_message(p) is None
+            assert p.get_message(timeout=1) is None
             # now that the connection is subscribed, the pubsub health
             # check should have taken over and include the HEALTH_CHECK_MESSAGE
             m.assert_any_call("PING", p.HEALTH_CHECK_MESSAGE, check_health=False)
@@ -1384,7 +1384,8 @@ class TestHealthCheck:
             # doesn't result in another health check
             m.reset_mock()
             next_health_check = p.connection.next_health_check
-            assert wait_for_message(p) is None
+            # one poll is enough: every get_message runs check_health first
+            assert p.get_message(timeout=0) is None
             assert p.connection.next_health_check == next_health_check
             m.assert_not_called()
 
@@ -1392,7 +1393,7 @@ class TestHealthCheck:
             # we should not receive a pong message, but the next_health_check
             # should be advanced
             p.connection.next_health_check = 0
-            assert wait_for_message(p) is None
+            assert p.get_message(timeout=1) is None
             m.assert_called_with("PING", p.HEALTH_CHECK_MESSAGE, check_health=False)
             self.assert_interval_advanced(p.connection)
 

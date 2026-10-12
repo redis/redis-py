@@ -109,6 +109,22 @@ def make_hiredis_parser(
     return parser
 
 
+def _wait_for_peer_close(sock, timeout=5.0):
+    """Poll until the peer's FIN shows up in the socket's poll flags.
+
+    Readability alone is not enough: data sent before the close makes the socket
+    readable before the FIN arrives. macOS reports POLLHUP, Linux POLLRDHUP.
+    """
+    closed_flags = select.POLLHUP | getattr(select, "POLLRDHUP", 0)
+    poller = select.poll()
+    poller.register(sock, select.POLLIN | closed_flags)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if any(events & closed_flags for _, events in poller.poll(50)):
+            return
+    raise AssertionError("the peer close did not reach the socket in time")
+
+
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
 def test_invalid_response(r):
@@ -181,7 +197,7 @@ def test_hiredis_can_read_consumes_pending_push_before_reporting_closed():
     try:
         server.sendall(b">3\r\n$7\r\nmessage\r\n$2\r\nch\r\n$5\r\nhello\r\n")
         server.close()  # graceful FIN with the push message still buffered
-        time.sleep(0.1)
+        _wait_for_peer_close(client)
 
         assert parser.can_read(timeout=0) is True
         assert parser.read_response(push_request=True) == [b"message", b"ch", b"hello"]
@@ -347,7 +363,7 @@ def test_socket_is_closed_detects_tcp_peer_half_close():
     try:
         assert _socket_is_closed(client) is False
         server.close()  # graceful FIN
-        time.sleep(0.1)
+        _wait_for_peer_close(client)
         assert _socket_is_closed(client) is True
     finally:
         client.close()
@@ -371,7 +387,7 @@ def test_socket_is_closed_defers_close_until_pending_data_is_read():
     try:
         server.sendall(b"pending invalidation")
         server.close()  # graceful FIN with data still buffered
-        time.sleep(0.1)
+        _wait_for_peer_close(client)
 
         assert _socket_is_closed(client) is False
         # the MSG_PEEK confirmation must not consume the pending data

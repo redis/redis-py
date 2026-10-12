@@ -1310,13 +1310,12 @@ class TestClusterRedisCommands:
             p.subscribe(channel)
             b_channel = channel.encode("utf-8")
             channels.append(b_channel)
+            # Read the subscribe ack, so the server has processed it before the
+            # node is queried; the wait ends as soon as the ack arrives
+            ack = wait_for_message(p, timeout=5.0)
+            assert ack is not None and ack["type"] == "subscribe", ack
             # Assert that each node returns only the channel it subscribed to
-            sub_channels = node.redis_connection.pubsub_channels()
-            if not sub_channels:
-                # Try again after a short sleep
-                sleep(0.3)
-                sub_channels = node.redis_connection.pubsub_channels()
-            assert sub_channels == [b_channel]
+            assert node.redis_connection.pubsub_channels() == [b_channel]
             i += 1
         # Assert that the cluster's pubsub_channels function returns ALL of
         # the cluster's channels
@@ -1335,12 +1334,12 @@ class TestClusterRedisCommands:
             p = r.pubsub(node)
             pubsub_nodes.append(p)
             p.subscribe(channel)
+            # Read the subscribe ack, so the server has processed it before the
+            # node is queried; the wait ends as soon as the ack arrives
+            ack = wait_for_message(p, timeout=5.0)
+            assert ack is not None and ack["type"] == "subscribe", ack
             # Assert that each node returns that only one client is subscribed
-            sub_chann_num = node.redis_connection.pubsub_numsub(channel)
-            if sub_chann_num == [(b_channel, 0)]:
-                sleep(0.3)
-                sub_chann_num = node.redis_connection.pubsub_numsub(channel)
-            assert sub_chann_num == [(b_channel, 1)]
+            assert node.redis_connection.pubsub_numsub(channel) == [(b_channel, 1)]
         # Assert that the cluster's pubsub_numsub function returns ALL clients
         # subscribed to this channel in the entire cluster
         assert r.pubsub_numsub(channel, target_nodes="all") == [(b_channel, len(nodes))]
@@ -1355,12 +1354,12 @@ class TestClusterRedisCommands:
             p = r.pubsub(node)
             pubsub_nodes.append(p)
             p.psubscribe(pattern)
+            # Read the psubscribe ack, so the server has processed it before the
+            # node is queried; the wait ends as soon as the ack arrives
+            ack = wait_for_message(p, timeout=5.0)
+            assert ack is not None and ack["type"] == "psubscribe", ack
             # Assert that each node returns that only one client is subscribed
-            sub_num_pat = node.redis_connection.pubsub_numpat()
-            if sub_num_pat == 0:
-                sleep(0.3)
-                sub_num_pat = node.redis_connection.pubsub_numpat()
-            assert sub_num_pat == 1
+            assert node.redis_connection.pubsub_numpat() == 1
         # Assert that the cluster's pubsub_numsub function returns ALL clients
         # subscribed to this channel in the entire cluster
         assert r.pubsub_numpat(target_nodes="all") == len(nodes)
