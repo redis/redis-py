@@ -3266,7 +3266,7 @@ class PipelineStrategy(AbstractStrategy):
                         msg = (
                             f"Command # {cmd.position + 1} "
                             f"({truncate_text(command)}) "
-                            f"of pipeline caused error: {result.args}"
+                            f"of pipeline caused error: {result.args[0]}"
                         )
                         result.args = (msg,) + result.args[1:]
                         raise result
