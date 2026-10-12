@@ -5216,6 +5216,31 @@ class TestClusterPipelineMocked:
         finally:
             await r.aclose()
 
+    async def test_redirect_retry_error_without_args_is_raised(self) -> None:
+        """An argless error from the redirect retry keeps its type when raised."""
+        r = await get_mocked_redis_client(
+            host=default_host, port=default_port, retry=Retry(NoBackoff(), 0)
+        )
+        try:
+            key = "foo"
+            first_node = r.get_node_from_key(key)
+            ask_node = next(n for n in r.get_nodes() if n != first_node)
+            ask_msg = f"{r.keyslot(key)} {ask_node.host}:{ask_node.port}"
+            mock_node_resp_exc(first_node, AskError(ask_msg))
+            # Exhaust the redirect target's pool so the retry raises an
+            # argless MaxConnectionsError() from acquire_connection().
+            ask_node._free.clear()
+            ask_node.max_connections = 0
+
+            async with r.pipeline() as pipe:
+                with pytest.raises(MaxConnectionsError) as ex:
+                    await pipe.get(key).execute()
+            assert str(ex.value) == (
+                "Command # 1 (GET foo) of pipeline caused error: MaxConnectionsError"
+            )
+        finally:
+            await r.aclose()
+
     async def test_evalsha_zero_keys_reuses_slot_in_transaction(self) -> None:
         """Zero-key EVALSHA in a transactional async pipeline reuses one slot."""
         r = await get_mocked_redis_client(host=default_host, port=default_port)
