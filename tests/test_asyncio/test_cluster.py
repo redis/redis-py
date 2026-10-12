@@ -2763,14 +2763,23 @@ class TestClusterRedisCommands:
     async def test_cluster_scan_iter(self, r: RedisCluster) -> None:
         keys_all = []
         keys_1 = []
+        # one MSET per slot, pipelined per node, instead of 100 SETs
+        await r.mset_nonatomic({str(i): 1 for i in range(100)})
         for i in range(100):
             s = str(i)
-            await r.set(s, 1)
             keys_all.append(s.encode("utf-8"))
             if s.startswith("1"):
                 keys_1.append(s.encode("utf-8"))
         keys_all.sort()
         keys_1.sort()
+
+        # the replicas are scanned below; poll until they have every key
+        deadline = asyncio.get_running_loop().time() + 5
+        while (
+            sorted([k async for k in r.scan_iter(target_nodes="replicas")]) != keys_all
+        ):
+            assert asyncio.get_running_loop().time() < deadline, "replicas lag behind"
+            await asyncio.sleep(0.01)
 
         for target_nodes in ["primaries", "replicas"]:
             keys = [key async for key in r.scan_iter(target_nodes=target_nodes)]
@@ -2806,9 +2815,9 @@ class TestClusterRedisCommands:
     @skip_if_server_version_lt("8.11.0")
     async def test_cluster_bless_scan_iter(self, r: RedisCluster) -> None:
         keys_blessed = []
+        await r.mset_nonatomic({str(i): 1 for i in range(100)})
         for i in range(100):
             s = str(i)
-            await r.set(s, 1)
             if s.startswith("1"):
                 await r.bless_set(s, "NO-EVICT")
                 keys_blessed.append(s.encode("utf-8"))

@@ -234,9 +234,11 @@ async def test_create_and_delete_rule(decoded_r: redis.Redis):
     await decoded_r.ts().create(KEY1)
     await decoded_r.ts().create(KEY2)
     await decoded_r.ts().createrule(KEY1, KEY2, "avg", 100)
+    pipe = decoded_r.pipeline(transaction=False)
     for i in range(50):
-        await decoded_r.ts().add(KEY1, time + i * 2, 1)
-        await decoded_r.ts().add(KEY1, time + i * 2 + 1, 2)
+        pipe.execute_command("TS.ADD", KEY1, time + i * 2, 1)
+        pipe.execute_command("TS.ADD", KEY1, time + i * 2 + 1, 2)
+    await pipe.execute()
     await decoded_r.ts().add(KEY1, time * 2, 1.5)
     assert round((await decoded_r.ts().get(KEY2))[1], 5) == 1.5
     info = await decoded_r.ts().info(KEY1)
@@ -259,8 +261,10 @@ async def test_del_range(decoded_r: redis.Redis):
     except Exception as e:
         assert e.__str__() != ""
 
+    pipe = decoded_r.pipeline(transaction=False)
     for i in range(100):
-        await decoded_r.ts().add(KEY1, i, i % 7)
+        pipe.execute_command("TS.ADD", KEY1, i, i % 7)
+    await pipe.execute()
     assert 22 == await decoded_r.ts().delete(KEY1, 0, 21)
     assert [] == await decoded_r.ts().range(KEY1, 0, 21)
     assert_resp_response(
@@ -273,11 +277,15 @@ async def test_del_range(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 async def test_range(decoded_r: redis.Redis):
+    pipe = decoded_r.pipeline(transaction=False)
     for i in range(100):
-        await decoded_r.ts().add(KEY1, i, i % 7)
+        pipe.execute_command("TS.ADD", KEY1, i, i % 7)
+    await pipe.execute()
     assert 100 == len(await decoded_r.ts().range(KEY1, 0, 200))
+    pipe = decoded_r.pipeline(transaction=False)
     for i in range(100):
-        await decoded_r.ts().add(KEY1, i + 200, i % 7)
+        pipe.execute_command("TS.ADD", KEY1, i + 200, i % 7)
+    await pipe.execute()
     assert 200 == len(await decoded_r.ts().range(KEY1, 0, 500))
     # last sample isn't returned
     assert 20 == len(
@@ -291,9 +299,11 @@ async def test_range(decoded_r: redis.Redis):
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.10.0", "timeseries")
 async def test_range_advanced(decoded_r: redis.Redis):
+    pipe = decoded_r.pipeline(transaction=False)
     for i in range(100):
-        await decoded_r.ts().add(KEY1, i, i % 7)
-        await decoded_r.ts().add(KEY1, i + 200, i % 7)
+        pipe.execute_command("TS.ADD", KEY1, i, i % 7)
+        pipe.execute_command("TS.ADD", KEY1, i + 200, i % 7)
+    await pipe.execute()
 
     assert 2 == len(
         await decoded_r.ts().range(
@@ -322,11 +332,15 @@ async def test_range_advanced(decoded_r: redis.Redis):
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.10.0", "timeseries")
 async def test_rev_range(decoded_r: redis.Redis):
+    pipe = decoded_r.pipeline(transaction=False)
     for i in range(100):
-        await decoded_r.ts().add(KEY1, i, i % 7)
+        pipe.execute_command("TS.ADD", KEY1, i, i % 7)
+    await pipe.execute()
     assert 100 == len(await decoded_r.ts().range(KEY1, 0, 200))
+    pipe = decoded_r.pipeline(transaction=False)
     for i in range(100):
-        await decoded_r.ts().add(KEY1, i + 200, i % 7)
+        pipe.execute_command("TS.ADD", KEY1, i + 200, i % 7)
+    await pipe.execute()
     assert 200 == len(await decoded_r.ts().range(KEY1, 0, 500))
     # first sample isn't returned
     assert 20 == len(
@@ -480,9 +494,11 @@ async def test_multi_range(decoded_r: redis.Redis):
     await decoded_r.ts().create(
         KEY2, labels={"Test": "This", "Taste": "That", "team": "sf"}
     )
+    pipe = decoded_r.pipeline(transaction=False)
     for i in range(100):
-        await decoded_r.ts().add(KEY1, i, i % 7)
-        await decoded_r.ts().add(KEY2, i, i % 11)
+        pipe.execute_command("TS.ADD", KEY1, i, i % 7)
+        pipe.execute_command("TS.ADD", KEY2, i, i % 11)
+    await pipe.execute()
 
     res = await decoded_r.ts().mrange(0, 200, filters=["Test=This"])
     assert res is not None
@@ -494,8 +510,10 @@ async def test_multi_range(decoded_r: redis.Redis):
         assert res is not None
         assert 10 == len(res[0][KEY1][1])
 
+        pipe = decoded_r.pipeline(transaction=False)
         for i in range(100):
-            await decoded_r.ts().add(KEY1, i + 200, i % 7)
+            pipe.execute_command("TS.ADD", KEY1, i + 200, i % 7)
+        await pipe.execute()
         res = await decoded_r.ts().mrange(
             0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
         )
@@ -517,8 +535,10 @@ async def test_multi_range(decoded_r: redis.Redis):
         assert res is not None
         assert 10 == len(res[KEY1][2])
 
+        pipe = decoded_r.pipeline(transaction=False)
         for i in range(100):
-            await decoded_r.ts().add(KEY1, i + 200, i % 7)
+            pipe.execute_command("TS.ADD", KEY1, i + 200, i % 7)
+        await pipe.execute()
         res = await decoded_r.ts().mrange(
             0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
         )
@@ -667,9 +687,11 @@ async def test_multi_range_advanced(decoded_r: redis.Redis):
     await decoded_r.ts().create(
         KEY2, labels={"Test": "This", "Taste": "That", "team": "sf"}
     )
+    pipe = decoded_r.pipeline(transaction=False)
     for i in range(100):
-        await decoded_r.ts().add(KEY1, i, i % 7)
-        await decoded_r.ts().add(KEY2, i, i % 11)
+        pipe.execute_command("TS.ADD", KEY1, i, i % 7)
+        pipe.execute_command("TS.ADD", KEY2, i, i % 11)
+    await pipe.execute()
 
     # test with selected labels
     res = await decoded_r.ts().mrange(
@@ -816,9 +838,11 @@ async def test_multi_reverse_range(decoded_r: redis.Redis):
     await decoded_r.ts().create(
         KEY2, labels={"Test": "This", "Taste": "That", "team": "sf"}
     )
+    pipe = decoded_r.pipeline(transaction=False)
     for i in range(100):
-        await decoded_r.ts().add(KEY1, i, i % 7)
-        await decoded_r.ts().add(KEY2, i, i % 11)
+        pipe.execute_command("TS.ADD", KEY1, i, i % 7)
+        pipe.execute_command("TS.ADD", KEY2, i, i % 11)
+    await pipe.execute()
 
     # ``expected_response_shape`` is ``"unified"`` for
     # ``legacy_responses=False`` (any protocol) and ``"legacy_resp3"`` for
@@ -838,8 +862,10 @@ async def test_multi_reverse_range(decoded_r: redis.Redis):
         assert res is not None
         assert 10 == len(res[0][KEY1][1])
 
+        pipe = decoded_r.pipeline(transaction=False)
         for i in range(100):
-            await decoded_r.ts().add(KEY1, i + 200, i % 7)
+            pipe.execute_command("TS.ADD", KEY1, i + 200, i % 7)
+        await pipe.execute()
         res = await decoded_r.ts().mrevrange(
             0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
         )
@@ -922,8 +948,10 @@ async def test_multi_reverse_range(decoded_r: redis.Redis):
         assert res is not None
         assert 10 == len(res[KEY1][2])
 
+        pipe = decoded_r.pipeline(transaction=False)
         for i in range(100):
-            await decoded_r.ts().add(KEY1, i + 200, i % 7)
+            pipe.execute_command("TS.ADD", KEY1, i + 200, i % 7)
+        await pipe.execute()
         res = await decoded_r.ts().mrevrange(
             0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
         )

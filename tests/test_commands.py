@@ -1581,11 +1581,14 @@ class TestRedisCommands:
         )
 
         # Perform operations to generate data
+        # one round trip; plain strings, so "{3}" stays a hashtag in the GETs
+        pipe = r.pipeline(transaction=False)
         for i in range(20):
-            r.set("anyprefix:{3}:key", f"value{i}")
-            r.get(f"anyprefix:{3}:key")
-            r.set("anyprefix:{1}:key", f"value{i}")
-            r.get(f"anyprefix:{1}:key")
+            pipe.set("anyprefix:{3}:key", f"value{i}")
+            pipe.get("anyprefix:{3}:key")
+            pipe.set("anyprefix:{1}:key", f"value{i}")
+            pipe.get("anyprefix:{1}:key")
+        pipe.execute()
 
         # Stop the session
         r.hotkeys_stop()
@@ -1633,11 +1636,14 @@ class TestRedisCommands:
         )
 
         # Perform operations to generate data
+        # one round trip; plain strings, so "{3}" stays a hashtag in the GETs
+        pipe = decoded_r.pipeline(transaction=False)
         for i in range(20):
-            decoded_r.set("anyprefix:{3}:key", f"value{i}")
-            decoded_r.get(f"anyprefix:{3}:key")
-            decoded_r.set("anyprefix:{1}:key", f"value{i}")
-            decoded_r.get(f"anyprefix:{1}:key")
+            pipe.set("anyprefix:{3}:key", f"value{i}")
+            pipe.get("anyprefix:{3}:key")
+            pipe.set("anyprefix:{1}:key", f"value{i}")
+            pipe.get("anyprefix:{1}:key")
+        pipe.execute()
 
         # Stop the session
         decoded_r.hotkeys_stop()

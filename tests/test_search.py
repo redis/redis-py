@@ -186,8 +186,11 @@ class SearchTestsBase:
         assert isinstance(indexer, Search.BatchIndexer)
         assert 50 == indexer.chunk_size
 
+        # one round trip for all documents, not one HSET each
+        pipe = indexer.client.client.pipeline(transaction=False)
         for key, doc in chapters.items():
-            indexer.client.client.hset(key, mapping=doc)
+            pipe.hset(key, mapping=doc)
+        pipe.execute()
         indexer.commit()
 
     @pytest.fixture
@@ -4110,8 +4113,10 @@ class TestSearchWithVamana(SearchTestsBase):
         # L2 distance test vectors
         vectors = [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 1.0, 0.0], [5.0, 0.0, 0.0]]
 
+        pipe = client.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 3 @v $vec as score]").sort_by("score").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -4145,8 +4150,10 @@ class TestSearchWithVamana(SearchTestsBase):
             [-1.0, 0.0, 0.0],
         ]
 
+        pipe = client.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 3 @v $vec as score]").sort_by("score").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -4175,8 +4182,10 @@ class TestSearchWithVamana(SearchTestsBase):
 
         vectors = [[1.0, 2.0, 3.0], [2.0, 1.0, 1.0], [3.0, 3.0, 3.0], [0.1, 0.1, 0.1]]
 
+        pipe = client.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 3 @v $vec as score]").sort_by("score").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -4210,8 +4219,10 @@ class TestSearchWithVamana(SearchTestsBase):
             [10.0, 11.0, 12.0, 13.0],
         ]
 
+        pipe = client.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         query = "*=>[KNN 3 @v $vec]"
         q = Query(query).return_field("__v_score").sort_by("__v_score", True)
@@ -4244,8 +4255,10 @@ class TestSearchWithVamana(SearchTestsBase):
 
         vectors = [[1.5, 2.5, 3.5, 4.5], [2.5, 3.5, 4.5, 5.5], [3.5, 4.5, 5.5, 6.5]]
 
+        pipe = client.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float16).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float16).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 2 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float16).tobytes()}
@@ -4274,8 +4287,10 @@ class TestSearchWithVamana(SearchTestsBase):
 
         vectors = [[1.0, 2.0, 3.0, 4.0], [2.0, 3.0, 4.0, 5.0], [3.0, 4.0, 5.0, 6.0]]
 
+        pipe = client.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 2 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -4357,10 +4372,12 @@ class TestSearchWithVamana(SearchTestsBase):
         )
 
         vectors = []
+        pipe = client.pipeline(transaction=False)
         for i in range(20):
             vec = [float(i + j) for j in range(8)]
             vectors.append(vec)
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 5 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -4412,10 +4429,12 @@ class TestSearchWithVamana(SearchTestsBase):
         )
 
         # Add data to both indices
+        pipe = client.pipeline(transaction=False)
         for i in range(15):
             vec = [float(i + j) for j in range(8)]
-            client.hset(f"doc16_{i}", "v16", np.array(vec, dtype=np.float16).tobytes())
-            client.hset(f"doc32_{i}", "v32", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc16_{i}", "v16", np.array(vec, dtype=np.float16).tobytes())
+            pipe.hset(f"doc32_{i}", "v32", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         # Test both indices
         query = Query("*=>[KNN 3 @v16 $vec as score]").no_content()
@@ -4465,10 +4484,12 @@ class TestSearchWithVamana(SearchTestsBase):
         )
 
         vectors = []
+        pipe = client.pipeline(transaction=False)
         for i in range(20):
             vec = [float(i + j) for j in range(6)]
             vectors.append(vec)
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 5 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -4501,10 +4522,12 @@ class TestSearchWithVamana(SearchTestsBase):
         )
 
         vectors = []
+        pipe = client.pipeline(transaction=False)
         for i in range(25):
             vec = [float(i + j) for j in range(6)]
             vectors.append(vec)
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 6 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -4537,10 +4560,12 @@ class TestSearchWithVamana(SearchTestsBase):
         )
 
         vectors = []
+        pipe = client.pipeline(transaction=False)
         for i in range(30):
             vec = [float(i + j) for j in range(6)]
             vectors.append(vec)
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 8 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -4573,10 +4598,12 @@ class TestSearchWithVamana(SearchTestsBase):
         )
 
         vectors = []
+        pipe = client.pipeline(transaction=False)
         for i in range(20):
             vec = [float(i + j) for j in range(6)]
             vectors.append(vec)
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 5 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -4612,10 +4639,12 @@ class TestSearchWithVamana(SearchTestsBase):
         )
 
         vectors = []
+        pipe = client.pipeline(transaction=False)
         for i in range(35):
             vec = [float(i + j) for j in range(8)]
             vectors.append(vec)
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 7 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -4656,10 +4685,12 @@ class TestSearchWithVamana(SearchTestsBase):
         )
 
         vectors = []
+        pipe = client.pipeline(transaction=False)
         for i in range(60):
             vec = [float(i + j) for j in range(32)]
             vectors.append(vec)
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float16).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float16).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 10 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float16).tobytes()}
@@ -4717,8 +4748,9 @@ class TestSearchWithVamana(SearchTestsBase):
             },
         ]
 
+        pipe = client.pipeline(transaction=False)
         for i, doc in enumerate(docs):
-            client.hset(
+            pipe.hset(
                 f"doc{i}",
                 mapping={
                     "title": doc["title"],
@@ -4726,6 +4758,7 @@ class TestSearchWithVamana(SearchTestsBase):
                     "embedding": np.array(doc["embedding"], dtype=np.float32).tobytes(),
                 },
             )
+        pipe.execute()
 
         # Hybrid query - text filter + vector similarity
         query = "(@title:AI|@content:machine)=>[KNN 2 @embedding $vec]"
@@ -4774,10 +4807,12 @@ class TestSearchWithVamana(SearchTestsBase):
         )
 
         vectors = []
+        pipe = client.pipeline(transaction=False)
         for i in range(10):
             vec = [float(i + j) for j in range(512)]
             vectors.append(vec)
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 5 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -4846,10 +4881,12 @@ class TestSearchWithVamana(SearchTestsBase):
         )
 
         vectors = []
+        pipe = client.pipeline(transaction=False)
         for i in range(25):
             vec = [float(i + j) for j in range(6)]
             vectors.append(vec)
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         for k in [1, 3, 5, 10, 15]:
             query = Query(f"*=>[KNN {k} @v $vec as score]").no_content()
@@ -5060,7 +5097,10 @@ class TestHybridSearch(SearchTestsBase):
             np.full(self._HYBRID_TIMEOUT_DIM, value, dtype=np.float32).tobytes()
             for value in (0.1, 0.2, 0.3, 0.4, 0.5)
         ]
-        pipeline = client.pipeline()
+        pipeline = client.pipeline(transaction=False)
+        # the documents are independent, so no MULTI/EXEC. Each carries a 32 KB
+        # vector and is indexed as it is read; keep batches small so one async
+        # pipeline write (bounded by socket_timeout) stays short on slow runners
         batch_size = 250
         for i in range(self._HYBRID_TIMEOUT_DOCS):
             pipeline.hset(
@@ -5072,7 +5112,7 @@ class TestHybridSearch(SearchTestsBase):
             )
             if (i + 1) % batch_size == 0:
                 pipeline.execute()
-                pipeline = client.pipeline()
+                pipeline = client.pipeline(transaction=False)
         pipeline.execute()
 
     @staticmethod
@@ -5121,7 +5161,7 @@ class TestHybridSearch(SearchTestsBase):
         items = items * items_sets
 
         batch_size = 1000
-        pipeline = client.pipeline()
+        pipeline = client.pipeline(transaction=False)
         for i, vec in enumerate(items):
             vec, description = vec
             mapping = {
@@ -5144,7 +5184,7 @@ class TestHybridSearch(SearchTestsBase):
             )
             if (i + 1) % batch_size == 0:
                 pipeline.execute()
-                pipeline = client.pipeline()
+                pipeline = client.pipeline(transaction=False)
         pipeline.execute()  # Execute remaining
 
     @staticmethod

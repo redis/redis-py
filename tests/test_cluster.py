@@ -2786,14 +2786,21 @@ class TestClusterRedisCommands:
     def test_cluster_scan_iter(self, r):
         keys_all = []
         keys_1 = []
+        # one MSET per slot, pipelined per node, instead of 100 SETs
+        r.mset_nonatomic({str(i): 1 for i in range(100)})
         for i in range(100):
             s = str(i)
-            r.set(s, 1)
             keys_all.append(s.encode("utf-8"))
             if s.startswith("1"):
                 keys_1.append(s.encode("utf-8"))
         keys_all.sort()
         keys_1.sort()
+
+        # the replicas are scanned below; poll until they have every key
+        deadline = monotonic() + 5
+        while sorted(r.scan_iter(target_nodes="replicas")) != keys_all:
+            assert monotonic() < deadline, "replicas lag behind"
+            sleep(0.01)
 
         for target_nodes in ["primaries", "replicas"]:
             keys = r.scan_iter(target_nodes=target_nodes)
@@ -2827,9 +2834,9 @@ class TestClusterRedisCommands:
     @skip_if_server_version_lt("8.11.0")
     def test_cluster_bless_scan_iter(self, r):
         keys_blessed = []
+        r.mset_nonatomic({str(i): 1 for i in range(100)})
         for i in range(100):
             s = str(i)
-            r.set(s, 1)
             if s.startswith("1"):
                 r.bless_set(s, "NO-EVICT")
                 keys_blessed.append(s.encode("utf-8"))

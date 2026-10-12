@@ -222,9 +222,11 @@ def test_create_and_delete_rule(client):
     client.ts().create(1)
     client.ts().create(2)
     client.ts().createrule(1, 2, "avg", 100)
+    pipe = client.pipeline(transaction=False)
     for i in range(50):
-        client.ts().add(1, time + i * 2, 1)
-        client.ts().add(1, time + i * 2 + 1, 2)
+        pipe.execute_command("TS.ADD", 1, time + i * 2, 1)
+        pipe.execute_command("TS.ADD", 1, time + i * 2 + 1, 2)
+    pipe.execute()
     client.ts().add(1, time * 2, 1.5)
     assert round(client.ts().get(2)[1], 5) == 1.5
     info = client.ts().info(1)
@@ -247,8 +249,10 @@ def test_del_range(client):
     except redis.ResponseError as e:
         assert "key does not exist" in str(e)
 
+    pipe = client.pipeline(transaction=False)
     for i in range(100):
-        client.ts().add(1, i, i % 7)
+        pipe.execute_command("TS.ADD", 1, i, i % 7)
+    pipe.execute()
     assert 22 == client.ts().delete(1, 0, 21)
     assert [] == client.ts().range(1, 0, 21)
     assert_resp_response(client, client.ts().range(1, 22, 22), [(22, 1.0)], [[22, 1.0]])
@@ -256,11 +260,15 @@ def test_del_range(client):
 
 @pytest.mark.redismod
 def test_range(client):
+    pipe = client.pipeline(transaction=False)
     for i in range(100):
-        client.ts().add(1, i, i % 7)
+        pipe.execute_command("TS.ADD", 1, i, i % 7)
+    pipe.execute()
     assert 100 == len(client.ts().range(1, 0, 200))
+    pipe = client.pipeline(transaction=False)
     for i in range(100):
-        client.ts().add(1, i + 200, i % 7)
+        pipe.execute_command("TS.ADD", 1, i + 200, i % 7)
+    pipe.execute()
     assert 200 == len(client.ts().range(1, 0, 500))
     # last sample isn't returned
     assert 20 == len(
@@ -272,9 +280,11 @@ def test_range(client):
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.10.0", "timeseries")
 def test_range_advanced(client):
+    pipe = client.pipeline(transaction=False)
     for i in range(100):
-        client.ts().add(1, i, i % 7)
-        client.ts().add(1, i + 200, i % 7)
+        pipe.execute_command("TS.ADD", 1, i, i % 7)
+        pipe.execute_command("TS.ADD", 1, i + 200, i % 7)
+    pipe.execute()
 
     assert 2 == len(
         client.ts().range(
@@ -406,11 +416,15 @@ def test_range_empty(client: redis.Redis):
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.10.0", "timeseries")
 def test_rev_range(client):
+    pipe = client.pipeline(transaction=False)
     for i in range(100):
-        client.ts().add(1, i, i % 7)
+        pipe.execute_command("TS.ADD", 1, i, i % 7)
+    pipe.execute()
     assert 100 == len(client.ts().range(1, 0, 200))
+    pipe = client.pipeline(transaction=False)
     for i in range(100):
-        client.ts().add(1, i + 200, i % 7)
+        pipe.execute_command("TS.ADD", 1, i + 200, i % 7)
+    pipe.execute()
     assert 200 == len(client.ts().range(1, 0, 500))
     # first sample isn't returned
     assert 20 == len(
@@ -661,9 +675,11 @@ def test_read_block_min_count_requires_milliseconds(client):
 def test_mrange(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
     client.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
+    pipe = client.pipeline(transaction=False)
     for i in range(100):
-        client.ts().add(1, i, i % 7)
-        client.ts().add(2, i, i % 11)
+        pipe.execute_command("TS.ADD", 1, i, i % 7)
+        pipe.execute_command("TS.ADD", 2, i, i % 11)
+    pipe.execute()
 
     res = client.ts().mrange(0, 200, filters=["Test=This"])
     assert 2 == len(res)
@@ -673,8 +689,10 @@ def test_mrange(client):
         res = client.ts().mrange(0, 200, filters=["Test=This"], count=10)
         assert 10 == len(res[0]["1"][1])
 
+        pipe = client.pipeline(transaction=False)
         for i in range(100):
-            client.ts().add(1, i + 200, i % 7)
+            pipe.execute_command("TS.ADD", 1, i + 200, i % 7)
+        pipe.execute()
         res = client.ts().mrange(
             0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
         )
@@ -691,8 +709,10 @@ def test_mrange(client):
         res = client.ts().mrange(0, 200, filters=["Test=This"], count=10)
         assert 10 == len(res["1"][2])
 
+        pipe = client.pipeline(transaction=False)
         for i in range(100):
-            client.ts().add(1, i + 200, i % 7)
+            pipe.execute_command("TS.ADD", 1, i + 200, i % 7)
+        pipe.execute()
         res = client.ts().mrange(
             0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
         )
@@ -829,9 +849,11 @@ def test_mrange_exclude_empty_with_groupby_raises(client):
 def test_multi_range_advanced(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
     client.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
+    pipe = client.pipeline(transaction=False)
     for i in range(100):
-        client.ts().add(1, i, i % 7)
-        client.ts().add(2, i, i % 11)
+        pipe.execute_command("TS.ADD", 1, i, i % 7)
+        pipe.execute_command("TS.ADD", 2, i, i % 11)
+    pipe.execute()
 
     # test with selected labels
     res = client.ts().mrange(0, 200, filters=["Test=This"], select_labels=["team"])
@@ -992,9 +1014,11 @@ def test_mrange_latest(client: redis.Redis):
 def test_multi_reverse_range(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
     client.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
+    pipe = client.pipeline(transaction=False)
     for i in range(100):
-        client.ts().add(1, i, i % 7)
-        client.ts().add(2, i, i % 11)
+        pipe.execute_command("TS.ADD", 1, i, i % 7)
+        pipe.execute_command("TS.ADD", 2, i, i % 11)
+    pipe.execute()
 
     # ``expected_response_shape`` is ``"unified"`` for
     # ``legacy_responses=False`` (any protocol) and ``"legacy_resp3"`` for
@@ -1017,8 +1041,10 @@ def test_multi_reverse_range(client):
     else:
         assert 10 == len(res["1"][2])
 
+    pipe = client.pipeline(transaction=False)
     for i in range(100):
-        client.ts().add(1, i + 200, i % 7)
+        pipe.execute_command("TS.ADD", 1, i + 200, i % 7)
+    pipe.execute()
     res = client.ts().mrevrange(
         0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
     )

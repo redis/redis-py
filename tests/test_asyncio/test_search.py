@@ -168,8 +168,11 @@ class AsyncSearchTestsBase:
         assert isinstance(indexer, AsyncSearch.BatchIndexer)
         assert 50 == indexer.chunk_size
 
+        # one round trip for all documents, not one HSET each
+        pipe = indexer.client.client.pipeline(transaction=False)
         for key, doc in chapters.items():
-            await indexer.client.client.hset(key, mapping=doc)
+            pipe.hset(key, mapping=doc)
+        await pipe.execute()
         await indexer.commit()
 
 
@@ -2768,15 +2771,17 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
             )
         )
 
+        pipe = decoded_r.pipeline(transaction=False)
         for i in range(20):
             vec = np.array([float(i + j) for j in range(8)], dtype=np.float32)
-            await decoded_r.hset(
+            pipe.hset(
                 f"doc{i}",
                 mapping={
                     "sq8": vec.tobytes(),
                     "sq8_default": vec.astype(np.float16).tobytes(),
                 },
             )
+        await pipe.execute()
 
         query = Query("*=>[KNN 5 @sq8 $vec as score]").no_content()
         query_params = {"vec": np.arange(8, dtype=np.float32).tobytes()}
@@ -2863,10 +2868,10 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
             [10.0, 11.0, 12.0, 13.0],
         ]
 
+        pipe = decoded_r.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            await decoded_r.hset(
-                f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes()
-            )
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        await pipe.execute()
 
         query = "*=>[KNN 3 @v $vec]"
         q = Query(query).return_field("__v_score").sort_by("__v_score", True)
@@ -2902,10 +2907,10 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
             [-1.0, 0.0, 0.0],
         ]
 
+        pipe = decoded_r.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            await decoded_r.hset(
-                f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes()
-            )
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        await pipe.execute()
 
         query = Query("*=>[KNN 2 @v $vec as score]").sort_by("score").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -2934,10 +2939,10 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
 
         vectors = [[1.5, 2.5, 3.5, 4.5], [2.5, 3.5, 4.5, 5.5], [3.5, 4.5, 5.5, 6.5]]
 
+        pipe = decoded_r.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            await decoded_r.hset(
-                f"doc16_{i}", "v16", np.array(vec, dtype=np.float16).tobytes()
-            )
+            pipe.hset(f"doc16_{i}", "v16", np.array(vec, dtype=np.float16).tobytes())
+        await pipe.execute()
 
         query = Query("*=>[KNN 2 @v16 $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float16).tobytes()}
@@ -2970,12 +2975,12 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
         )
 
         vectors = []
+        pipe = decoded_r.pipeline(transaction=False)
         for i in range(20):
             vec = [float(i + j) for j in range(8)]
             vectors.append(vec)
-            await decoded_r.hset(
-                f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes()
-            )
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        await pipe.execute()
 
         query = Query("*=>[KNN 5 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -3010,12 +3015,12 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
         )
 
         vectors = []
+        pipe = decoded_r.pipeline(transaction=False)
         for i in range(15):
             vec = [float(i + j) for j in range(6)]
             vectors.append(vec)
-            await decoded_r.hset(
-                f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes()
-            )
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        await pipe.execute()
 
         query = Query("*=>[KNN 3 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -3114,7 +3119,10 @@ class TestHybridSearch(AsyncSearchTestsBase):
             np.full(self._HYBRID_TIMEOUT_DIM, value, dtype=np.float32).tobytes()
             for value in (0.1, 0.2, 0.3, 0.4, 0.5)
         ]
-        pipeline = decoded_r.pipeline()
+        pipeline = decoded_r.pipeline(transaction=False)
+        # the documents are independent, so no MULTI/EXEC. Each carries a 32 KB
+        # vector and is indexed as it is read; keep batches small so one async
+        # pipeline write (bounded by socket_timeout) stays short on slow runners
         batch_size = 250
         for i in range(self._HYBRID_TIMEOUT_DOCS):
             pipeline.hset(
@@ -3126,7 +3134,7 @@ class TestHybridSearch(AsyncSearchTestsBase):
             )
             if (i + 1) % batch_size == 0:
                 await pipeline.execute()
-                pipeline = decoded_r.pipeline()
+                pipeline = decoded_r.pipeline(transaction=False)
         await pipeline.execute()
 
     @staticmethod
@@ -3174,7 +3182,7 @@ class TestHybridSearch(AsyncSearchTestsBase):
             ]
         items = items * items_sets
         batch_size = 1000
-        pipeline = client.pipeline()
+        pipeline = client.pipeline(transaction=False)
         for i, vec in enumerate(items):
             vec, description = vec
             mapping = {
@@ -3193,7 +3201,7 @@ class TestHybridSearch(AsyncSearchTestsBase):
             pipeline.hset(f"item:{i}", mapping=mapping)
             if (i + 1) % batch_size == 0:
                 await pipeline.execute()
-                pipeline = client.pipeline()
+                pipeline = client.pipeline(transaction=False)
         await pipeline.execute()  # Execute remaining
 
     @staticmethod
