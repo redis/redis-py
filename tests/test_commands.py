@@ -5245,7 +5245,6 @@ class TestRedisCommands:
     @skip_if_server_version_lt("6.2.0")
     @pytest.mark.parametrize("dest", ["", b"", memoryview(b"")])
     def test_zrangestore_empty_destination(self, r, dest):
-        # 2026-10-09: Empty destination keys must retain the sorted-set range.
         r.zadd("source", {"a": 1, "b": 2, "c": 3})
         assert r.zrangestore(dest, "source", 0, 1) == 2
         assert r.zrange(dest, 0, -1) == [b"a", b"b"]
