@@ -310,10 +310,12 @@ class TestBlockingConnectionPool:
         pool.get_connection()
 
         start = time.monotonic()
-        with pytest.raises(redis.ConnectionError):
-            pool.get_connection()
+        with mock.patch("redis.connection.record_connection_timeout") as record:
+            with pytest.raises(redis.ConnectionError):
+                pool.get_connection()
         # we should have waited at least 0.1 seconds
         assert time.monotonic() - start >= 0.1
+        record.assert_called_once()
 
     def test_connection_pool_blocks_until_conn_available(self, master_host):
         """

@@ -20,6 +20,7 @@ from redis.asyncio import ConnectionPool, Redis
 from redis.asyncio.connection import (
     BlockingConnectionPool,
     Connection,
+    HiredisRespSerializer,
     SSLConnection,
     UnixDomainSocketConnection,
     parse_url,
@@ -53,13 +54,17 @@ class DummyHiredisReader:
 
 
 class DummyAsyncStream:
-    def __init__(self, buffer=b"", eof=False):
+    def __init__(self, buffer=b"", eof=False, exception=None):
         self._buffer = bytearray(buffer)
         self.eof = eof
+        self._exception = exception
         self.read_called = False
 
     def at_eof(self):
         return self.eof and not self._buffer
+
+    def exception(self):
+        return self._exception
 
     async def read(self, _):
         self.read_called = True
@@ -92,6 +97,39 @@ def test_connection_default_parser_matches_default_protocol():
     assert conn.protocol == 3
 
 
+@pytest.mark.skipif(not HIREDIS_AVAILABLE, reason="hiredis is not installed")
+def test_connection_uses_hiredis_command_packer(monkeypatch):
+    calls = []
+
+    def pack_command(args):
+        calls.append(args)
+        return b"packed"
+
+    monkeypatch.setattr("redis.connection.hiredis.pack_command", pack_command)
+    connection = Connection()
+
+    assert isinstance(connection._command_packer, HiredisRespSerializer)
+    assert connection.pack_command("SET", "key", "value") == [b"packed"]
+    assert calls == [(b"SET", b"key", b"value")]
+
+
+def test_connection_uses_python_command_packer_without_hiredis(monkeypatch):
+    monkeypatch.setattr("redis.asyncio.connection.HIREDIS_AVAILABLE", False)
+    connection = Connection()
+
+    assert connection._command_packer is None
+    assert connection.pack_command("PING") == [b"*1\r\n$4\r\nPING\r\n"]
+
+
+@pytest.mark.parametrize("protocol", [2, 3])
+def test_async_pack_command_respects_connection_encoding(protocol):
+    connection = Connection(encoding="latin-1", protocol=protocol)
+
+    assert connection.pack_command("SET", "key", "café") == [
+        b"*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$4\r\ncaf\xe9\r\n"
+    ]
+
+
 @pytest.mark.parametrize(
     ("buffer", "expected"),
     [
@@ -111,6 +149,18 @@ async def test_async_hiredis_can_read_raises_on_eof():
     # a server-closed connection must raise like the sync SocketBuffer does,
     # not report readable data (#4252)
     stream = DummyAsyncStream(eof=True)
+    parser = make_async_hiredis_parser(stream)
+
+    with pytest.raises(ConnectionError):
+        await parser.can_read()
+    assert stream.read_called is False
+
+
+@pytest.mark.parametrize("buffer", [b"", b"+OK\r\n"])
+async def test_async_hiredis_can_read_raises_on_reset(buffer):
+    # a reset (RST) leaves no EOF but an exception on the stream, which
+    # asyncio raises before any buffered data, so it must raise like EOF
+    stream = DummyAsyncStream(buffer=buffer, exception=ConnectionResetError())
     parser = make_async_hiredis_parser(stream)
 
     with pytest.raises(ConnectionError):
@@ -201,6 +251,21 @@ async def test_async_resp_can_read_raises_on_eof(parser_class):
     # a server-closed connection must raise like the sync SocketBuffer does,
     # not report readable data (#4252)
     stream = DummyAsyncStream(eof=True)
+    parser = parser_class(socket_read_size=65536)
+    parser._connected = True
+    parser._stream = stream
+
+    with pytest.raises(ConnectionError):
+        await parser.can_read()
+    assert stream.read_called is False
+
+
+@pytest.mark.parametrize("buffer", [b"", b"+OK\r\n"])
+@pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
+async def test_async_resp_can_read_raises_on_reset(parser_class, buffer):
+    # a reset (RST) leaves no EOF but an exception on the stream, which
+    # asyncio raises before any buffered data, so it must raise like EOF
+    stream = DummyAsyncStream(buffer=buffer, exception=ConnectionResetError())
     parser = parser_class(socket_read_size=65536)
     parser._connected = True
     parser._stream = stream
