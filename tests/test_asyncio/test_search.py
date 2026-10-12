@@ -2295,6 +2295,7 @@ class TestAggregations(AsyncSearchTestsBase):
         assert all(entry == {"color": "red"} for entry in groups["red"])
         assert all(entry == {"color": "yellow"} for entry in groups["yellow"])
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize(
         "bad_fields",
         [[], (), "", "   ", ["   "], ["name", ""], ["name", "   "]],
@@ -3036,6 +3037,7 @@ class TestHybridSearch(AsyncSearchTestsBase):
     # the timeout reliably triggers across hardware.
     _HYBRID_TIMEOUT_DOCS = 6000
 
+    @pytest.mark.fixed_client
     async def test_hybrid_search_forwards_zero_timeout(self):
         # Async mirror of the sync test with the same name. TIMEOUT 0 means
         # "no timeout" and must reach the wire instead of being dropped like

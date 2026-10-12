@@ -59,6 +59,7 @@ REDIS_6_VERSION = "5.9.0"
 ClientT = redis.Redis | redis.RedisCluster
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_server_deprecated_commands_do_not_emit_python_warnings():
     client = redis.Redis()
@@ -601,8 +602,9 @@ class TestRedisCommands:
         assert info["lib-ver"] == "1234"
         await r2.aclose()
 
+    @pytest.mark.fixed_client
     @skip_if_server_version_lt("7.2.0")
-    async def test_client_setinfo_with_driver_info(self, r: redis.Redis):
+    async def test_client_setinfo_with_driver_info(self):
         from redis import DriverInfo
         from redis.utils import get_lib_version
 
@@ -4930,6 +4932,7 @@ class TestRedisCommands:
             ],
         ]
 
+    @pytest.mark.fixed_client
     async def test_geosearch_forwards_zero_numeric_arguments(self):
         # Async mirror of TestRedisCommands.test_geosearch_forwards_zero_numeric_arguments.
         # GeoCommands is shared, but execute_command is awaited on this stack.
@@ -6657,7 +6660,8 @@ class TestBinarySave:
         for key, value in mapping.items():
             assert await r.lrange(key, 0, -1) == value
 
-    async def test_22_info(self, r: redis.Redis):
+    @pytest.mark.fixed_client
+    async def test_22_info(self):
         """
         Older Redis versions contained 'allocation_stats' in INFO that
         was the cause of a number of bugs when parsing.

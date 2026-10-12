@@ -74,6 +74,7 @@ def get_stream_message(client, stream, message_id):
     return response[0]
 
 
+@pytest.mark.fixed_client
 def test_server_deprecated_commands_do_not_emit_python_warnings():
     client = redis.Redis()
     with patch.object(client, "execute_command", return_value=True) as execute_command:
@@ -86,6 +87,7 @@ def test_server_deprecated_commands_do_not_emit_python_warnings():
     execute_command.assert_any_call("HMSET", "a", "field", "value")
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "call,expected",
     [
@@ -841,11 +843,12 @@ class TestRedisCommands:
         assert info["lib-name"] == "test2"
         assert info["lib-ver"] == "1234"
 
+    @pytest.mark.fixed_client
     @skip_if_server_version_lt("7.2.0")
     # Exercises a default localhost client, which cannot target a remote managed
     # Redis Enterprise endpoint.
     @skip_if_redis_enterprise()
-    def test_client_setinfo_with_driver_info(self, r: redis.Redis):
+    def test_client_setinfo_with_driver_info(self):
         from redis import DriverInfo
         from redis.utils import get_lib_version
 
@@ -2288,6 +2291,7 @@ class TestRedisCommands:
         assert len(res_local) == 16
         assert res_server == res_local
 
+    @pytest.mark.fixed_client
     @pytest.mark.skipif(not HAS_XXHASH, reason="xxhash is not installed")
     def test_local_digest_encodes_with_the_client_encoding(self):
         """
@@ -4514,6 +4518,7 @@ class TestRedisCommands:
         else:
             assert set(pairs) == {(b"a", 1)}
 
+    @pytest.mark.fixed_client
     def test_zscan_score_cast_scientific_notation(self):
         """score_cast_func=int handles scientific notation scores (issue #4000)."""
         response = (b"0", [b"member1", b"1.7732526297292595e+18"])
@@ -5158,6 +5163,7 @@ class TestRedisCommands:
             [[b"a1", "1.0"], [b"a2", "2.0"]],
         )
 
+    @pytest.mark.fixed_client
     def test_zrange_score_cast_scientific_notation(self):
         """score_cast_func=int handles scientific notation scores (issue #4000)."""
         # Simulates RESP2 response with large score in scientific notation
@@ -5289,6 +5295,7 @@ class TestRedisCommands:
             [[b"a2", "2.0"], [b"a3", "3.0"], [b"a4", "4.0"]],
         )
 
+    @pytest.mark.fixed_client
     def test_zrangebyscore_score_cast_scientific_notation(self):
         """score_cast_func=int handles scientific notation scores (issue #4000)."""
         response = [b"a1", b"1.7732526297292595e+18", b"a2", b"2.5"]
@@ -5434,6 +5441,7 @@ class TestRedisCommands:
             [2, "3.0"],
         )
 
+    @pytest.mark.fixed_client
     def test_zrevrank_score_cast_scientific_notation(self):
         """score_cast_func=int handles scientific notation scores (issue #4000)."""
         response = [2, b"1.7732526297292595e+18"]
@@ -6354,6 +6362,7 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             assert r.geosearch("barcelona", member="place3", radius=100, any=1)
 
+    @pytest.mark.fixed_client
     def test_geosearch_forwards_zero_numeric_arguments(self):
         # GEOSEARCH zero arguments must be forwarded for server validation.
         # Truthiness guards dropped those values, so the
@@ -8768,7 +8777,8 @@ class TestBinarySave:
         for key, value in mapping.items():
             assert r.lrange(key, 0, -1) == value
 
-    def test_22_info(self, r):
+    @pytest.mark.fixed_client
+    def test_22_info(self):
         """
         Older Redis versions contained 'allocation_stats' in INFO that
         was the cause of a number of bugs when parsing.

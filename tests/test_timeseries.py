@@ -2115,6 +2115,7 @@ def test_nrange_aggregator_count_mismatch_raises(client):
         )
 
 
+@pytest.mark.fixed_client
 def test_nrange_aggregation_builds_one_spec_token_per_key():
     # Server-free: each per-key spec is its own token and may hold multiple
     # comma-separated aggregators -> AGGREGATION avg,max sum 1000 for two keys
@@ -2124,6 +2125,7 @@ def test_nrange_aggregation_builds_one_spec_token_per_key():
     assert params == ["AGGREGATION", "avg,max", "sum", 1000]
 
 
+@pytest.mark.fixed_client
 def test_nrange_aggregation_single_key_single_spec():
     # Server-free: a bare string is the single-key spec (may be comma-joined).
     params = []

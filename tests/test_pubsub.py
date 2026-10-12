@@ -2079,6 +2079,7 @@ class TestBaseException:
         assert is_connected()
 
 
+@pytest.mark.fixed_client
 class TestPubSubMetricsRecording:
     """
     Unit tests that verify metrics are properly recorded from PubSub operations

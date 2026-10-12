@@ -370,6 +370,7 @@ class TestRedisClusterObj:
     Tests for the RedisCluster class
     """
 
+    @pytest.mark.fixed_client
     def test_host_port_startup_node(self):
         """
         Test that it is possible to use host & port arguments as startup node
@@ -378,6 +379,7 @@ class TestRedisClusterObj:
         cluster = get_mocked_redis_client(host=default_host, port=default_port)
         assert cluster.get_node(host=default_host, port=default_port) is not None
 
+    @pytest.mark.fixed_client
     def test_startup_nodes(self):
         """
         Test that it is possible to use startup_nodes
@@ -395,6 +397,7 @@ class TestRedisClusterObj:
             and cluster.get_node(host=default_host, port=port_2) is not None
         )
 
+    @pytest.mark.fixed_client
     def test_empty_startup_nodes(self):
         """
         Test that exception is raised when empty providing empty startup_nodes
@@ -727,6 +730,7 @@ class TestRedisClusterObj:
                         assert parse_response.failed_calls == 1
                         assert parse_response.successful_calls == 1
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize(
         "read_from_replicas,load_balancing_strategy,mocks_srv_ports",
         [
@@ -863,6 +867,7 @@ class TestRedisClusterObj:
         assert r.keyslot(1337) == r.keyslot("1337")
         assert r.keyslot(b"abc") == r.keyslot("abc")
 
+    @pytest.mark.fixed_client
     def test_get_node_name(self):
         assert (
             get_node_name(default_host, default_port)
@@ -892,6 +897,7 @@ class TestRedisClusterObj:
         for node in r.get_primaries():
             assert node in nodes
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize("error", RedisCluster.ERRORS_ALLOW_RETRY)
     def test_cluster_down_overreaches_retry_attempts(self, error):
         """
@@ -1473,6 +1479,7 @@ class TestClusterRedisCommands:
         mock_all_nodes_resp(r, 0)
         assert r.cluster_count_failure_report("node_0") == 0
 
+    @pytest.mark.fixed_client
     @skip_if_redis_enterprise()
     def test_cluster_delslots(self):
         cluster_slots = [
@@ -1489,6 +1496,7 @@ class TestClusterRedisCommands:
         assert node0.redis_connection.connection.read_response.called
         assert node1.redis_connection.connection.read_response.called
 
+    @pytest.mark.fixed_client
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
     def test_cluster_delslotsrange(self):
@@ -1727,6 +1735,7 @@ class TestClusterRedisCommands:
         with pytest.raises(NotImplementedError):
             r.cluster_bumpepoch()
 
+    @pytest.mark.fixed_client
     @skip_if_redis_enterprise()
     def test_readonly(self):
         r = get_mocked_redis_client(host=default_host, port=default_port)
@@ -1738,6 +1747,7 @@ class TestClusterRedisCommands:
         for replica in r.get_replicas():
             assert replica.redis_connection.connection.read_response.called
 
+    @pytest.mark.fixed_client
     @skip_if_redis_enterprise()
     def test_readwrite(self):
         r = get_mocked_redis_client(host=default_host, port=default_port)
@@ -4766,7 +4776,7 @@ class TestClusterPubSubObject:
         mock_node_conn.disconnect.assert_called_once()
 
 
-@pytest.mark.onlycluster
+@pytest.mark.fixed_client
 def test_client_list_iter_blocked_on_cluster_pipeline():
     """
     client_list_iter sends the same CLIENT LIST command as client_list, which
@@ -4784,13 +4794,13 @@ def test_client_list_iter_blocked_on_cluster_pipeline():
         r.close()
 
 
-@pytest.mark.onlycluster
+@pytest.mark.fixed_client
 def test_evalsha_not_in_pipeline_blocked_commands():
     """EVALSHA must be usable in ClusterPipeline (see #2914)."""
     assert "EVALSHA" not in PIPELINE_BLOCKED_COMMANDS
 
 
-@pytest.mark.onlycluster
+@pytest.mark.fixed_client
 def test_evalsha_can_be_queued_on_cluster_pipeline():
     """
     Queuing EVALSHA on a ClusterPipeline must not raise the historical
@@ -4813,7 +4823,7 @@ def test_evalsha_can_be_queued_on_cluster_pipeline():
         r.close()
 
 
-@pytest.mark.onlycluster
+@pytest.mark.fixed_client
 def test_script_queues_evalsha_on_cluster_pipeline():
     """Script must queue EVALSHA on ClusterPipeline without calling script_load."""
     r = get_mocked_redis_client(host=default_host, port=default_port)
@@ -4829,7 +4839,7 @@ def test_script_queues_evalsha_on_cluster_pipeline():
         r.close()
 
 
-@pytest.mark.onlycluster
+@pytest.mark.fixed_client
 def test_evalsha_zero_keys_pipeline_execute_skips_get_command_keys():
     """
     Sync ClusterPipeline must route EVALSHA via determine_slot, not
@@ -4853,7 +4863,7 @@ def test_evalsha_zero_keys_pipeline_execute_skips_get_command_keys():
         r.close()
 
 
-@pytest.mark.onlycluster
+@pytest.mark.fixed_client
 def test_evalsha_zero_keys_reuses_slot_in_transaction():
     """
     Zero-key EVALSHA in a transactional pipeline must reuse one slot so
@@ -4878,7 +4888,7 @@ def test_evalsha_zero_keys_reuses_slot_in_transaction():
         r.close()
 
 
-@pytest.mark.onlycluster
+@pytest.mark.fixed_client
 def test_evalsha_zero_keys_follows_keyed_slot_in_transaction():
     """Zero-key EVALSHA after a keyed slot is fixed reuses that slot."""
     r = get_mocked_redis_client(host=default_host, port=default_port)
@@ -4894,7 +4904,7 @@ def test_evalsha_zero_keys_follows_keyed_slot_in_transaction():
         r.close()
 
 
-@pytest.mark.onlycluster
+@pytest.mark.fixed_client
 def test_slotless_command_does_not_lock_keyed_slot_flag():
     """Slotless commands must not block later keyed retargeting."""
     r = get_mocked_redis_client(host=default_host, port=default_port)
@@ -4917,7 +4927,7 @@ def test_slotless_command_does_not_lock_keyed_slot_flag():
         r.close()
 
 
-@pytest.mark.onlycluster
+@pytest.mark.fixed_client
 def test_evalsha_zero_keys_then_cross_slot_raises_at_execute():
     """
     Zero-key EVALSHA retarget must not swallow a later true cross-slot

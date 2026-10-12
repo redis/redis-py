@@ -338,6 +338,7 @@ class TestUsernamePasswordCredentialProvider:
         assert await r2.ping() is True
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 @pytest.mark.onlynoncluster
 @pytest.mark.skipif(not EntraIdCredentialsProvider, reason="requires redis-entraid")

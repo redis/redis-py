@@ -39,12 +39,14 @@ def uds_address(tmpdir):
     return tmpdir / "uds.sock"
 
 
+@pytest.mark.fixed_client
 async def test_tcp_connect(tcp_address):
     host, port = tcp_address
     conn = Connection(host=host, port=port, client_name=_CLIENT_NAME, socket_timeout=10)
     await _assert_connect(conn, tcp_address)
 
 
+@pytest.mark.fixed_client
 async def test_uds_connect(uds_address):
     path = str(uds_address)
     conn = UnixDomainSocketConnection(
@@ -53,6 +55,7 @@ async def test_uds_connect(uds_address):
     await _assert_connect(conn, path)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.ssl
 @pytest.mark.parametrize(
     "ssl_ciphers",
@@ -86,6 +89,7 @@ async def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
     await conn.disconnect()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.ssl
 @pytest.mark.parametrize(
     "ssl_min_version",
@@ -123,6 +127,7 @@ async def test_tcp_ssl_connect(tcp_address, ssl_min_version):
     await conn.disconnect()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.ssl
 @pytest.mark.skipif(not ssl.HAS_TLSv1_3, reason="requires TLSv1.3")
 async def test_tcp_ssl_version_mismatch(tcp_address):

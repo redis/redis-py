@@ -197,6 +197,7 @@ class TestSSL:
         assert "No AIA information present in ssl certificate" in str(e.value)
         r.close()
 
+    @pytest.mark.fixed_client
     @skip_if_nocryptography()
     def test_valid_ocsp_cert_http(self):
         from redis.ocsp import OCSPVerifier
@@ -209,6 +210,7 @@ class TestSSL:
                     ocsp = OCSPVerifier(wrapped, hostname, 443)
                     assert ocsp.is_valid()
 
+    @pytest.mark.fixed_client
     @skip_if_nocryptography()
     def test_revoked_ocsp_certificate(self):
         from redis.ocsp import OCSPVerifier
@@ -222,6 +224,7 @@ class TestSSL:
                     assert ocsp.is_valid()
                 assert "REVOKED" in str(e.value)
 
+    @pytest.mark.fixed_client
     @skip_if_nocryptography()
     def test_unauthorized_ocsp(self):
         from redis.ocsp import OCSPVerifier
@@ -234,6 +237,7 @@ class TestSSL:
                 with pytest.raises(ConnectionError):
                     ocsp.is_valid()
 
+    @pytest.mark.fixed_client
     @skip_if_nocryptography()
     def test_ocsp_not_present_in_response(self):
         from redis.ocsp import OCSPVerifier
@@ -247,6 +251,7 @@ class TestSSL:
                     assert ocsp.is_valid()
                 assert "from the" in str(e.value)
 
+    @pytest.mark.fixed_client
     @skip_if_nocryptography()
     def test_unauthorized_then_direct(self):
         from redis.ocsp import OCSPVerifier
@@ -485,6 +490,7 @@ class TestSSL:
             r.close()
 
 
+@pytest.mark.fixed_client
 class TestOCSPCertificateBinding:
     """An ocsp response is only about the certificate its CertID names."""
 

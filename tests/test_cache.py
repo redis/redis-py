@@ -2324,6 +2324,7 @@ class TestSSLCache:
         )
 
 
+@pytest.mark.fixed_client
 class TestUnitDefaultCache:
     def test_get_eviction_policy(self):
         cache = DefaultCache(CacheConfig(max_size=5))
@@ -2613,6 +2614,7 @@ class TestUnitDefaultCache:
         assert len(cache.collection) == 0
 
 
+@pytest.mark.fixed_client
 class TestCacheReverseIndex:
     """
     The reverse index from Redis key to the entries holding it.
@@ -2812,6 +2814,7 @@ class TestCacheReverseIndex:
         assert actual == expected
 
 
+@pytest.mark.fixed_client
 class TestUnitLRUPolicy:
     def test_type(self):
         policy = LRUPolicy()
@@ -2956,6 +2959,7 @@ class TestUnitLRUPolicy:
             policy.evict_next()
 
 
+@pytest.mark.fixed_client
 class TestUnitCacheConfiguration:
     MAX_SIZE = 100
     EVICTION_POLICY = EvictionPolicy.LRU
@@ -3176,6 +3180,7 @@ class TestUnitCacheConfiguration:
         assert config.is_trackable_read("GET") is False
 
 
+@pytest.mark.fixed_client
 class TestUnitCacheProxy:
     """Unit tests for CacheProxy class with mocked event dispatcher."""
 
@@ -3405,6 +3410,7 @@ class TestUnitCacheProxy:
         assert proxy.is_cachable(cache_key) is False
 
 
+@pytest.mark.fixed_client
 class TestUnitCacheProxyConnectionInvalidations:
     """A framing violation while draining invalidations now disconnects the raw
     connection (see #4291). That disconnect skips CacheProxyConnection.disconnect(),

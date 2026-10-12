@@ -1178,6 +1178,7 @@ class TestBaseSearchFunctionality(SearchTestsBase):
 
         self.createIndex(client.ft(), num_docs=500, definition=definition)
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize(
         "prefix",
         [
@@ -1192,6 +1193,7 @@ class TestBaseSearchFunctionality(SearchTestsBase):
 
         assert ["PREFIX", 1, prefix] == definition.args
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize("prefix", [["hset:", "henry"], ("hset:", "henry")])
     def test_index_definition_prefix_list_or_tuple(self, prefix):
         definition = IndexDefinition(prefix=prefix, score=None)
@@ -1476,6 +1478,7 @@ class TestBaseSearchFunctionality(SearchTestsBase):
             "The text field is not decoded correctly"
         )
 
+    @pytest.mark.fixed_client
     def test_return_field_encoding_is_keyed_by_alias(self):
         # The server returns an aliased field under its alias, so that is the
         # name the response is looked up under when decoding.
@@ -2868,6 +2871,7 @@ class TestAggregations(SearchTestsBase):
         assert all(entry == {"color": "red"} for entry in groups["red"])
         assert all(entry == {"color": "yellow"} for entry in groups["yellow"])
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize(
         "bad_fields",
         [[], (), "", "   ", ["   "], ["name", ""], ["name", "   "]],
@@ -4311,10 +4315,9 @@ class TestSearchWithVamana(SearchTestsBase):
         elif expects_resp3_shape(client):
             assert res["total_results"] == 2
 
-    @pytest.mark.redismod
-    @skip_ifmodversion_lt("2.4.3", "search")
-    @skip_if_server_version_lt("8.1.224")
+    @pytest.mark.fixed_client
     def test_svs_vamana_vector_field_basic(self):
+        # builds the field arguments only, so it needs no server or module
         field = VectorField(
             "v",
             "SVS-VAMANA",
@@ -4978,6 +4981,7 @@ class TestHybridSearch(SearchTestsBase):
     # the timeout reliably triggers across hardware.
     _HYBRID_TIMEOUT_DOCS = 6000
 
+    @pytest.mark.fixed_client
     def test_hybrid_search_forwards_zero_timeout(self):
         # TIMEOUT 0 means "no timeout" and is a value the server accepts for
         # FT.HYBRID, so it must reach the wire. Guarding the argument with a

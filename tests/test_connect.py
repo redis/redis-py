@@ -36,18 +36,21 @@ def uds_address(tmpdir):
     return tmpdir / "uds.sock"
 
 
+@pytest.mark.fixed_client
 def test_tcp_connect(tcp_address):
     host, port = tcp_address
     conn = Connection(host=host, port=port, client_name=_CLIENT_NAME, socket_timeout=10)
     _assert_connect(conn, tcp_address)
 
 
+@pytest.mark.fixed_client
 def test_uds_connect(uds_address):
     path = str(uds_address)
     conn = UnixDomainSocketConnection(path, client_name=_CLIENT_NAME, socket_timeout=10)
     _assert_connect(conn, path)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.ssl
 @pytest.mark.parametrize(
     "ssl_min_version",
@@ -81,6 +84,7 @@ def test_tcp_ssl_connect(tcp_address, ssl_min_version):
     )
 
 
+@pytest.mark.fixed_client
 @pytest.mark.ssl
 @pytest.mark.parametrize(
     "ssl_ciphers",
@@ -119,6 +123,7 @@ class did override the initialization of the socket_timeout parameter.
 """
 
 
+@pytest.mark.fixed_client
 def test_unix_socket_with_timeout():
     conn = UnixDomainSocketConnection(socket_timeout=1000)
 
@@ -130,6 +135,7 @@ def test_unix_socket_with_timeout():
     assert conn.path == ""
 
 
+@pytest.mark.fixed_client
 @pytest.mark.ssl
 @pytest.mark.skipif(not ssl.HAS_TLSv1_3, reason="requires TLSv1.3")
 def test_tcp_ssl_version_mismatch(tcp_address):

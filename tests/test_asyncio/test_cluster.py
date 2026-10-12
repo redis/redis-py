@@ -431,6 +431,7 @@ class TestRedisClusterObj:
     Tests for the RedisCluster class
     """
 
+    @pytest.mark.fixed_client
     async def test_host_port_startup_node(self) -> None:
         """
         Test that it is possible to use host & port arguments as startup node
@@ -441,6 +442,7 @@ class TestRedisClusterObj:
 
         await cluster.aclose()
 
+    @pytest.mark.fixed_client
     async def test_aclosing(self) -> None:
         cluster = await get_mocked_redis_client(host=default_host, port=default_port)
         called = 0
@@ -455,6 +457,7 @@ class TestRedisClusterObj:
             assert called == 1
         await cluster.aclose()
 
+    @pytest.mark.fixed_client
     async def test_close_is_aclose(self) -> None:
         """
         Test that it is possible to use host & port arguments as startup node
@@ -604,6 +607,7 @@ class TestRedisClusterObj:
                 assert info["lib-ver"] == "1234"
                 assert info["lib-name"] == "test2"
 
+    @pytest.mark.fixed_client
     async def test_empty_startup_nodes(self) -> None:
         """
         Test that exception is raised when empty providing empty startup_nodes
@@ -934,6 +938,7 @@ class TestRedisClusterObj:
                         assert execute_command.failed_calls == 1
                         assert execute_command.successful_calls == 1
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize(
         "read_from_replicas,load_balancing_strategy,mocks_srv_ports",
         [
@@ -1055,6 +1060,7 @@ class TestRedisClusterObj:
         assert r.keyslot(1337) == r.keyslot("1337")
         assert r.keyslot(b"abc") == r.keyslot("abc")
 
+    @pytest.mark.fixed_client
     async def test_get_node_name(self) -> None:
         assert (
             get_node_name(default_host, default_port)
@@ -1084,6 +1090,7 @@ class TestRedisClusterObj:
         for node in r.get_primaries():
             assert node in nodes
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize("error", RedisCluster.ERRORS_ALLOW_RETRY)
     async def test_cluster_down_overreaches_retry_attempts(
         self,
@@ -1455,6 +1462,7 @@ class TestClusterRedisCommands:
         mock_all_nodes_resp(r, 0)
         assert await r.cluster_count_failure_report("node_0") == 0
 
+    @pytest.mark.fixed_client
     @skip_if_redis_enterprise()
     async def test_cluster_delslots(self) -> None:
         cluster_slots = [
@@ -1473,6 +1481,7 @@ class TestClusterRedisCommands:
 
         await r.aclose()
 
+    @pytest.mark.fixed_client
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
     async def test_cluster_delslotsrange(self):
@@ -1691,6 +1700,7 @@ class TestClusterRedisCommands:
             for i in range(0, len(res) - 1, 2):
                 assert res[i][b"node"] == res[i + 1][b"node"]
 
+    @pytest.mark.fixed_client
     @skip_if_redis_enterprise()
     async def test_readonly(self) -> None:
         r = await get_mocked_redis_client(host=default_host, port=default_port)
@@ -1704,6 +1714,7 @@ class TestClusterRedisCommands:
 
         await r.aclose()
 
+    @pytest.mark.fixed_client
     @skip_if_redis_enterprise()
     async def test_readwrite(self) -> None:
         r = await get_mocked_redis_client(host=default_host, port=default_port)
@@ -3519,6 +3530,7 @@ class TestNodesManager:
     Tests for the NodesManager class
     """
 
+    @pytest.mark.fixed_client
     async def test_get_node_from_slot_with_missing_slot(self) -> None:
         nodes_manager = NodesManager([], False, {})
 
@@ -4782,6 +4794,7 @@ class TestClusterConnectionErrorHandling:
 class TestClusterPipeline:
     """Tests for the ClusterPipeline class."""
 
+    @pytest.mark.fixed_client
     async def test_pipeline_nodes_manager_property(self) -> None:
         """
         Test that ClusterPipeline exposes nodes_manager property
@@ -4798,6 +4811,7 @@ class TestClusterPipeline:
         finally:
             await r.aclose()
 
+    @pytest.mark.fixed_client
     async def test_pipeline_set_response_callback(self) -> None:
         """
         Test that ClusterPipeline exposes set_response_callback method
@@ -4844,6 +4858,7 @@ class TestClusterPipeline:
                 "when running redis in cluster mode..."
             )
 
+    @pytest.mark.fixed_client
     async def test_client_list_iter_blocked_on_cluster_pipeline(self) -> None:
         """
         client_list_iter sends the same CLIENT LIST command as client_list,
@@ -4861,6 +4876,7 @@ class TestClusterPipeline:
         finally:
             await r.aclose()
 
+    @pytest.mark.fixed_client
     async def test_evalsha_not_blocked_on_cluster_pipeline(self) -> None:
         """EVALSHA must be usable on async ClusterPipeline (see #2914)."""
         assert "EVALSHA" not in PIPELINE_BLOCKED_COMMANDS
@@ -4876,6 +4892,7 @@ class TestClusterPipeline:
         finally:
             await r.aclose()
 
+    @pytest.mark.fixed_client
     async def test_evalsha_zero_keys_pipeline_execute(self) -> None:
         """Async ClusterPipeline must execute EVALSHA with numkeys=0."""
         r = await get_mocked_redis_client(host=default_host, port=default_port)
@@ -4888,6 +4905,7 @@ class TestClusterPipeline:
         finally:
             await r.aclose()
 
+    @pytest.mark.fixed_client
     async def test_evalsha_zero_keys_reuses_slot_in_transaction(self) -> None:
         """Zero-key EVALSHA in a transactional async pipeline reuses one slot."""
         r = await get_mocked_redis_client(host=default_host, port=default_port)
@@ -4915,6 +4933,7 @@ class TestClusterPipeline:
         finally:
             await r.aclose()
 
+    @pytest.mark.fixed_client
     async def test_evalsha_zero_keys_follows_keyed_slot_in_transaction(self) -> None:
         """Zero-key EVALSHA after a keyed slot is fixed reuses that slot."""
         r = await get_mocked_redis_client(host=default_host, port=default_port)
@@ -4929,6 +4948,7 @@ class TestClusterPipeline:
         finally:
             await r.aclose()
 
+    @pytest.mark.fixed_client
     async def test_slotless_command_does_not_lock_keyed_slot_flag(self) -> None:
         """Slotless commands must not block later keyed retargeting."""
         r = await get_mocked_redis_client(host=default_host, port=default_port)
@@ -4965,6 +4985,7 @@ class TestClusterPipeline:
         finally:
             await r.aclose()
 
+    @pytest.mark.fixed_client
     async def test_evalsha_zero_keys_then_cross_slot_raises_at_execute(self) -> None:
         """
         Zero-key EVALSHA retarget must not swallow a later true cross-slot
@@ -5002,6 +5023,7 @@ class TestClusterPipeline:
         finally:
             await r.aclose()
 
+    @pytest.mark.fixed_client
     async def test_async_script_queues_evalsha_on_cluster_pipeline(self) -> None:
         """AsyncScript must queue EVALSHA on ClusterPipeline without dropping it."""
         r = await get_mocked_redis_client(host=default_host, port=default_port)

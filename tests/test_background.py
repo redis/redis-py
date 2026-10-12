@@ -28,6 +28,7 @@ async def _wait_until_async(predicate, timeout=5.0):
         await asyncio.sleep(0.002)
 
 
+@pytest.mark.fixed_client
 class TestBackgroundScheduler:
     def test_run_once(self):
         execute_counter = 0

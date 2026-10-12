@@ -2218,6 +2218,7 @@ class TestAsyncPubSubBlockingListen:
         await p.aclose()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestPubSubHandleMessageMetrics:
     """Tests for handle_message recording pubsub metrics."""

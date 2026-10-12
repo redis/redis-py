@@ -51,12 +51,14 @@ class DummyConnection(ConnectionInterface):
         return "PONG"
 
 
+@pytest.mark.fixed_client
 @pytest.mark.onlynoncluster
 def test_max_connections_error_inheritance():
     """Test that MaxConnectionsError is a subclass of ConnectionError"""
     assert issubclass(redis.MaxConnectionsError, redis.ConnectionError)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.onlynoncluster
 def test_connection_pool_raises_max_connections_error():
     """Test that ConnectionPool raises MaxConnectionsError and not ConnectionError"""
@@ -68,6 +70,7 @@ def test_connection_pool_raises_max_connections_error():
         pool.get_connection()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.skipif(
     not hasattr(redis, "RedisCluster"), reason="RedisCluster not available"
 )

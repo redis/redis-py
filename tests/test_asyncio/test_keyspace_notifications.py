@@ -20,6 +20,7 @@ from redis.keyspace_notifications import (
 )
 
 
+@pytest.mark.fixed_client
 class TestAsyncStandaloneKeyspaceNotificationsMocked:
     """
     Mock-based unit tests for AsyncKeyspaceNotifications (standalone Redis).
@@ -344,6 +345,7 @@ class TestAsyncStandaloneKeyspaceNotificationsMocked:
         await notifications.aclose()
 
 
+@pytest.mark.fixed_client
 class TestAsyncClusterKeyspaceNotificationsMocked:
     """
     Mock-based unit tests for AsyncClusterKeyspaceNotifications.

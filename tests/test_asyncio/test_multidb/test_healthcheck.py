@@ -89,6 +89,7 @@ def _sleeping_health_check(seconds):
     return check_health
 
 
+@pytest.mark.fixed_client
 @pytest.mark.onlynoncluster
 class TestHealthyAllPolicy:
     @pytest.mark.asyncio
@@ -183,6 +184,7 @@ class TestHealthyAllPolicy:
         assert result is True
 
 
+@pytest.mark.fixed_client
 @pytest.mark.onlynoncluster
 class TestMaintenanceAwareBudget:
     """
@@ -461,6 +463,7 @@ class TestMaintenanceAwareBudget:
         assert cleanup_done.is_set()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.onlynoncluster
 class TestDatabaseMaintNotificationsConfig:
     """The config is resolved the way each client type carries it."""
@@ -494,6 +497,7 @@ class TestDatabaseMaintNotificationsConfig:
         assert database_maint_notifications_config(client) is None
 
 
+@pytest.mark.fixed_client
 @pytest.mark.onlynoncluster
 class TestHealthyMajorityPolicy:
     @pytest.mark.asyncio
@@ -581,6 +585,7 @@ class TestHealthyMajorityPolicy:
             await policy.execute([mock_hc1, mock_hc2], mock_db)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.onlynoncluster
 class TestHealthyAnyPolicy:
     @pytest.mark.asyncio
@@ -636,6 +641,7 @@ class TestHealthyAnyPolicy:
             await policy.execute([mock_hc1, mock_hc2], mock_db)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.onlynoncluster
 class TestPingHealthCheck:
     """Tests for PingHealthCheck with standalone and cluster clients."""
@@ -891,6 +897,7 @@ class TestPingHealthCheck:
         mock_hc_client.aclose.assert_not_awaited()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.onlynoncluster
 class TestLagAwareHealthCheck:
     @pytest.mark.asyncio
@@ -1191,6 +1198,7 @@ class TestLagAwareHealthCheck:
         ]
 
 
+@pytest.mark.fixed_client
 @pytest.mark.onlynoncluster
 @pytest.mark.no_mock_connections
 class TestAbstractHealthCheckPolicy:

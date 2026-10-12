@@ -28,6 +28,7 @@ from redis.keyspace_notifications import (
 )
 
 
+@pytest.mark.fixed_client
 class TestEventType:
     """Tests for EventType constants."""
 
@@ -40,6 +41,7 @@ class TestEventType:
         assert EventType.LPUSH == "lpush"
 
 
+@pytest.mark.fixed_client
 class TestPatternDetection:
     """Tests for pattern detection function."""
 
@@ -77,6 +79,7 @@ class TestPatternDetection:
         assert _is_pattern(b"user:123") is False
 
 
+@pytest.mark.fixed_client
 class TestKeyspaceChannelClass:
     """Tests for KeyspaceChannel class."""
 
@@ -114,6 +117,7 @@ class TestKeyspaceChannelClass:
         assert channel1 != channel3
 
 
+@pytest.mark.fixed_client
 class TestKeyeventChannelClass:
     """Tests for KeyeventChannel class."""
 
@@ -178,6 +182,7 @@ class TestKeyeventChannelClass:
         assert channel1 != channel3
 
 
+@pytest.mark.fixed_client
 class TestChannelDetection:
     """Tests for channel type detection using get_channel_type()."""
 
@@ -208,6 +213,7 @@ class TestChannelDetection:
         assert get_channel_type(b"regular_channel") is None
 
 
+@pytest.mark.fixed_client
 class TestKeyNotification:
     """Tests for KeyNotification class."""
 
@@ -360,6 +366,7 @@ class TestKeyNotification:
         assert isinstance(notification.event_type, str)
 
 
+@pytest.mark.fixed_client
 class TestClusterKeyspaceNotificationsMocked:
     """
     Mock-based unit tests for ClusterKeyspaceNotifications.
@@ -861,6 +868,7 @@ class TestClusterKeyspaceNotifications:
         notifications.close()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.onlynoncluster
 class TestStandaloneClientKeyspaceNotificationsMocked:
     """
@@ -1119,6 +1127,7 @@ class TestStandaloneClientKeyspaceNotificationsMocked:
         notifications.close()
 
 
+@pytest.mark.fixed_client
 class TestParseLengthPrefixedSubkeys:
     """Tests for _parse_length_prefixed_subkeys helper."""
 
@@ -1159,6 +1168,7 @@ class TestParseLengthPrefixedSubkeys:
         ]
 
 
+@pytest.mark.fixed_client
 class TestSubkeyspaceChannelClass:
     """Tests for SubkeyspaceChannel class."""
 
@@ -1208,6 +1218,7 @@ class TestSubkeyspaceChannelClass:
         assert str(channel) == "__subkeyspace@5__:myhash"
 
 
+@pytest.mark.fixed_client
 class TestSubkeyeventChannelClass:
     """Tests for SubkeyeventChannel class."""
 
@@ -1255,6 +1266,7 @@ class TestSubkeyeventChannelClass:
         assert repr(channel) == "SubkeyeventChannel('hset', db=1)"
 
 
+@pytest.mark.fixed_client
 class TestSubkeyspaceitemChannelClass:
     """Tests for SubkeyspaceitemChannel class."""
 
@@ -1297,6 +1309,7 @@ class TestSubkeyspaceitemChannelClass:
         assert repr(channel) == "SubkeyspaceitemChannel('myhash', 'myfield', db=2)"
 
 
+@pytest.mark.fixed_client
 class TestSubkeyspaceeventChannelClass:
     """Tests for SubkeyspaceeventChannel class."""
 
@@ -1339,6 +1352,7 @@ class TestSubkeyspaceeventChannelClass:
         assert repr(channel) == "SubkeyspaceeventChannel('hset', 'myhash', db=1)"
 
 
+@pytest.mark.fixed_client
 class TestSubkeyChannelDetection:
     """Tests for get_channel_type() with subkey channel types."""
 
@@ -1375,6 +1389,7 @@ class TestSubkeyChannelDetection:
         assert get_channel_type("__keyevent@0__:set") == ChannelType.KEYEVENT
 
 
+@pytest.mark.fixed_client
 class TestSubkeyNotificationParsing:
     """Tests for KeyNotification parsing of subkey channels."""
 
