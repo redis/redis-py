@@ -8,9 +8,9 @@ import datetime
 import re
 import sys
 import warnings
-from collections import ChainMap, UserDict  # 2026-10-09
+from collections import ChainMap, UserDict
 from string import ascii_letters
-from types import MappingProxyType  # 2026-10-09
+from types import MappingProxyType
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -3759,7 +3759,7 @@ class TestRedisCommands:
     async def test_zaggregate_mapping_weights(
         self, r: redis.Redis, keys_factory, command, expected
     ):
-        # 2026-10-09: Mapping wrappers must retain weights and the resulting rank order.
+        # Mapping wrappers must retain weights and the resulting rank order.
         await r.zadd("a", {"shared": 2, "left": 3})
         await r.zadd("b", {"shared": 5, "right": 7})
         keys = keys_factory({"a": 2, "b": -1})

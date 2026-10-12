@@ -5,9 +5,9 @@ import threading
 import time
 import warnings
 from asyncio import CancelledError
-from collections import ChainMap, UserDict  # 2026-10-09
+from collections import ChainMap, UserDict
 from string import ascii_letters
-from types import MappingProxyType  # 2026-10-09
+from types import MappingProxyType
 from unittest import mock
 from unittest.mock import patch
 
@@ -4852,7 +4852,7 @@ class TestRedisCommands:
         ],
     )
     def test_zaggregate_mapping_weights(self, r, keys_factory, command, expected):
-        # 2026-10-09: Mapping wrappers must retain weights and the resulting rank order.
+        # Mapping wrappers must retain weights and the resulting rank order.
         r.zadd("a", {"shared": 2, "left": 3})
         r.zadd("b", {"shared": 5, "right": 7})
         keys = keys_factory({"a": 2, "b": -1})
