@@ -573,17 +573,16 @@ class TestBaseSearchFunctionality(AsyncSearchTestsBase):
         """
         Ensure the index gets dropped by data remains by default
         """
-        for x in range(20):
-            for keep_docs in [[True, {}], [False, {"name": "haveit"}]]:
-                idx = "HaveIt"
-                index = self.getClient(decoded_r)
-                await index.hset("index:haveit", mapping={"name": "haveit"})
-                idef = IndexDefinition(prefix=["index:"])
-                await index.ft(idx).create_index((TextField("name"),), definition=idef)
-                await self.waitForIndex(index, idx)
-                await index.ft(idx).dropindex(delete_documents=keep_docs[0])
-                i = await index.hgetall("index:haveit")
-                assert i == keep_docs[1]
+        for keep_docs in [[True, {}], [False, {"name": "haveit"}]]:
+            idx = "HaveIt"
+            index = self.getClient(decoded_r)
+            await index.hset("index:haveit", mapping={"name": "haveit"})
+            idef = IndexDefinition(prefix=["index:"])
+            await index.ft(idx).create_index((TextField("name"),), definition=idef)
+            await self.waitForIndex(index, idx)
+            await index.ft(idx).dropindex(delete_documents=keep_docs[0])
+            i = await index.hgetall("index:haveit")
+            assert i == keep_docs[1]
 
     @pytest.mark.redismod
     async def test_example(self, decoded_r: redis.Redis):

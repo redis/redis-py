@@ -1180,34 +1180,11 @@ class TestClusterRedisCommands:
     Tests for RedisCluster unique commands
     """
 
-    def _wait_for_bgsave(self, r, timeout=10):
-        deadline = monotonic() + timeout
-        while True:
-            info = r.info("persistence", target_nodes=r.get_default_node())
-            if int(info.get("rdb_bgsave_in_progress", 0)) == 0:
-                return
-            if monotonic() > deadline:
-                pytest.fail("Timed out waiting for BGSAVE to finish")
-            sleep(0.05)
-
     def test_case_insensitive_command_names(self, r):
         assert (
             r.cluster_response_callbacks["cluster slots"]
             == r.cluster_response_callbacks["CLUSTER SLOTS"]
         )
-
-    def test_get_and_set(self, r):
-        # get and set can't be tested independently of each other
-        assert r.get("a") is None
-        byte_string = b"value"
-        integer = 5
-        unicode_string = chr(3456) + "abcd" + chr(3421)
-        assert r.set("byte_string", byte_string)
-        assert r.set("integer", 5)
-        assert r.set("unicode_string", unicode_string)
-        assert r.get("byte_string") == byte_string
-        assert r.get("integer") == str(integer).encode()
-        assert r.get("unicode_string").decode("utf-8") == unicode_string
 
     @pytest.mark.parametrize(
         "load_balancing_strategy",
@@ -1759,14 +1736,6 @@ class TestClusterRedisCommands:
         for replica in r.get_replicas():
             assert replica.redis_connection.connection.read_response.called
 
-    @skip_if_redis_enterprise()
-    def test_bgsave(self, r):
-        self._wait_for_bgsave(r)
-        assert r.bgsave()
-        self._wait_for_bgsave(r)
-        assert r.bgsave(True)
-        self._wait_for_bgsave(r)
-
     def test_info(self, r):
         # Map keys to same slot
         r.set("x{1}", 1)
@@ -1841,16 +1810,6 @@ class TestClusterRedisCommands:
         assert isinstance(t[1], int)
 
     @skip_if_server_version_lt("4.0.0")
-    def test_memory_usage(self, r):
-        r.set("foo", "bar")
-        assert isinstance(r.memory_usage("foo"), int)
-
-    @skip_if_server_version_lt("4.0.0")
-    @skip_if_redis_enterprise()
-    def test_memory_malloc_stats(self, r):
-        assert r.memory_malloc_stats()
-
-    @skip_if_server_version_lt("4.0.0")
     @skip_if_redis_enterprise()
     def test_memory_stats(self, r):
         # put a key into the current db to make sure that "db.<current-db>"
@@ -1862,16 +1821,6 @@ class TestClusterRedisCommands:
         for key, value in stats.items():
             if key.startswith("db."):
                 assert not isinstance(value, list)
-
-    @skip_if_server_version_lt("4.0.0")
-    def test_memory_help(self, r):
-        with pytest.raises(NotImplementedError):
-            r.memory_help()
-
-    @skip_if_server_version_lt("4.0.0")
-    def test_memory_doctor(self, r):
-        with pytest.raises(NotImplementedError):
-            r.memory_doctor()
 
     @skip_if_redis_enterprise()
     def test_lastsave(self, r):

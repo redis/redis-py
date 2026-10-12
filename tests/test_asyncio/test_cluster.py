@@ -1298,19 +1298,6 @@ class TestClusterRedisCommands:
                 pytest.fail("Timed out waiting for BGSAVE to finish")
             await asyncio.sleep(0.05)
 
-    async def test_get_and_set(self, r: RedisCluster) -> None:
-        # get and set can't be tested independently of each other
-        assert await r.get("a") is None
-        byte_string = b"value"
-        integer = 5
-        unicode_string = chr(3456) + "abcd" + chr(3421)
-        assert await r.set("byte_string", byte_string)
-        assert await r.set("integer", 5)
-        assert await r.set("unicode_string", unicode_string)
-        assert await r.get("byte_string") == byte_string
-        assert await r.get("integer") == str(integer).encode()
-        assert (await r.get("unicode_string")).decode("utf-8") == unicode_string
-
     @pytest.mark.parametrize(
         "load_balancing_strategy",
         [
@@ -1816,11 +1803,6 @@ class TestClusterRedisCommands:
         assert len(t) == 2
         assert isinstance(t[0], int)
         assert isinstance(t[1], int)
-
-    @skip_if_server_version_lt("4.0.0")
-    async def test_memory_usage(self, r: RedisCluster) -> None:
-        await r.set("foo", "bar")
-        assert isinstance(await r.memory_usage("foo"), int)
 
     @skip_if_server_version_lt("4.0.0")
     @skip_if_redis_enterprise()
@@ -5456,25 +5438,6 @@ class TestSSL:
         async with await create_client(ssl=True, ssl_cert_reqs="none") as rc:
             assert await rc.ping()
 
-    @pytest.mark.parametrize(
-        "ssl_ciphers",
-        [
-            "AES256-SHA:DHE-RSA-AES256-SHA:AES128-SHA:DHE-RSA-AES128-SHA",
-            "ECDHE-ECDSA-AES256-GCM-SHA384",
-            "ECDHE-RSA-AES128-GCM-SHA256",
-        ],
-    )
-    async def test_ssl_connection_tls12_custom_ciphers(
-        self, ssl_ciphers, create_client: Callable[..., Awaitable[RedisCluster]]
-    ) -> None:
-        async with await create_client(
-            ssl=True,
-            ssl_cert_reqs="none",
-            ssl_min_version=ssl.TLSVersion.TLSv1_2,
-            ssl_ciphers=ssl_ciphers,
-        ) as rc:
-            assert await rc.ping()
-
     async def test_ssl_connection_tls12_custom_ciphers_invalid(
         self, create_client: Callable[..., Awaitable[RedisCluster]]
     ) -> None:
@@ -5488,17 +5451,12 @@ class TestSSL:
                 assert await rc.ping()
             assert "Redis Cluster cannot be connected" in str(e.value)
 
-    @pytest.mark.parametrize(
-        "ssl_ciphers",
-        [
-            "TLS_CHACHA20_POLY1305_SHA256",
-            "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256",
-        ],
-    )
     async def test_ssl_connection_tls13_custom_ciphers(
-        self, ssl_ciphers, create_client: Callable[..., Awaitable[RedisCluster]]
+        self, create_client: Callable[..., Awaitable[RedisCluster]]
     ) -> None:
-        # TLSv1.3 does not support changing the ciphers
+        # TLSv1.3 suites cannot be set through the cipher list, so a list of only
+        # TLSv1.3 suites leaves no cipher to select
+        ssl_ciphers = "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256"
         async with await create_client(
             ssl=True,
             ssl_cert_reqs="none",

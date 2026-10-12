@@ -2196,7 +2196,6 @@ class TestRedisCommands:
             None,
         ]
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.3.224")
     async def test_msetex_invalid_inputs(self, r):
         mapping = {"1": 1, "2": "2"}

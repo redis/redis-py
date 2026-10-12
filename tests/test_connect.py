@@ -6,7 +6,7 @@ import threading
 
 import pytest
 from redis.connection import Connection, SSLConnection, UnixDomainSocketConnection
-from redis.exceptions import RedisError
+from redis.exceptions import ConnectionError, RedisError
 
 from .ssl_utils import CertificateType, get_tls_certificates
 
@@ -87,14 +87,15 @@ def test_tcp_ssl_connect(tcp_address, ssl_min_version):
 @pytest.mark.fixed_client
 @pytest.mark.ssl
 @pytest.mark.parametrize(
-    "ssl_ciphers",
+    "ssl_ciphers,connects",
     [
-        "AES256-SHA:DHE-RSA-AES256-SHA:AES128-SHA:DHE-RSA-AES128-SHA",
-        "ECDHE-ECDSA-AES256-GCM-SHA384",
-        "ECDHE-RSA-AES128-GCM-SHA256",
+        ("ECDHE-RSA-AES128-GCM-SHA256", True),
+        ("ECDHE-RSA-AES256-GCM-SHA384", True),
+        # the server certificate is RSA, so an ECDSA-only list cannot connect
+        ("ECDHE-ECDSA-AES256-GCM-SHA384", False),
     ],
 )
-def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
+def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers, connects):
     host, port = tcp_address
 
     # in order to have working hostname verification, we need to use "localhost"
@@ -112,9 +113,23 @@ def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
         ssl_min_version=ssl.TLSVersion.TLSv1_2,
         ssl_ciphers=ssl_ciphers,
     )
-    _assert_connect(
-        conn, tcp_address, certfile=server_certs.certfile, keyfile=server_certs.keyfile
-    )
+
+    # pin the server to TLS 1.2: under TLS 1.3 the cipher list is not used at
+    # all, so only then does the list decide whether the handshake succeeds
+    def assert_connect():
+        _assert_connect(
+            conn,
+            tcp_address,
+            certfile=server_certs.certfile,
+            keyfile=server_certs.keyfile,
+            maximum_ssl_version=ssl.TLSVersion.TLSv1_2,
+        )
+
+    if connects:
+        assert_connect()
+    else:
+        with pytest.raises(ConnectionError):
+            assert_connect()
 
 
 """
