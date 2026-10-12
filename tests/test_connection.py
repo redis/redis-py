@@ -114,13 +114,20 @@ def _wait_for_peer_close(sock, timeout=5.0):
 
     Readability alone is not enough: data sent before the close makes the socket
     readable before the FIN arrives. macOS reports POLLHUP, Linux POLLRDHUP.
+    Without POLLRDHUP (PyPy) a Linux FIN shows only as POLLIN, which buffered data
+    hides, so there the wait ends once the socket is readable plus a short grace.
     """
-    closed_flags = select.POLLHUP | getattr(select, "POLLRDHUP", 0)
+    rdhup = getattr(select, "POLLRDHUP", None)
+    closed_flags = select.POLLHUP | (rdhup or 0)
     poller = select.poll()
     poller.register(sock, select.POLLIN | closed_flags)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if any(events & closed_flags for _, events in poller.poll(50)):
+        events = [ev for _, ev in poller.poll(50)]
+        if any(ev & closed_flags for ev in events):
+            return
+        if events and rdhup is None:
+            time.sleep(0.1)
             return
     raise AssertionError("the peer close did not reach the socket in time")
 
