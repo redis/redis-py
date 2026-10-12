@@ -335,15 +335,25 @@ Refresh is best effort, and has costs to weigh before turning it on:
 
 Refreshes show up in the cache metrics:
 
-- In ``redis.client.csc.requests``, each refresh is counted like an application read,
-  normally as a miss.
+- A refresh is not a read, so ``redis.client.csc.requests`` counts it neither as a hit
+  nor as a miss.
 - In ``redis.client.csc.evictions``, the invalidated entry is still counted, with reason
   ``invalidation``.
-- In ``redis.client.csc.refreshes``, each refresh that reached the server is counted as
-  ``success`` when it was answered, stored or not, or ``failure`` when it raised. Each one
-  that found the queue full, or was skipped because the pool had no free connection, is
-  counted as ``rejected``. A refresh skipped because a read already re-fetched the key, or
-  dropped by a flush, is not counted.
+- Each refresh outcome has its own counter, with the names every Redis client uses:
+
+  - ``redis.client.csc.refresh.success`` - the reply was stored.
+  - ``redis.client.csc.refresh.failure`` - the re-read failed: an error reply, a
+    connection error or a timeout, counted per key.
+  - ``redis.client.csc.refresh.discarded`` - the re-read was answered but not stored:
+    the key was invalidated again while it was in flight, the reply was nil, or the
+    ``cache_predicate`` did not select it.
+  - ``redis.client.csc.refresh.rejected`` - no re-read ran, because the queue was full or
+    the pool had no free connection.
+  - ``redis.client.csc.refresh.rate_limited`` - reserved for the refresh rate limit, and
+    not recorded yet.
+
+  A refresh skipped because a read already re-fetched the key, or dropped by a flush, is
+  not counted.
 
 Async clients
 ~~~~~~~~~~~~~

@@ -3548,6 +3548,9 @@ class _FakePool:
     def __init__(self, cache=None):
         self.cache = cache if cache is not None else DefaultCache(CacheConfig())
         self.connection = MagicMock()
+        self.connection._refresh_entry.side_effect = self._refresh_entry
+        # What the connection reports for a refresh that did not raise.
+        self.refresh_result = CSCRefreshResult.SUCCESS
         self.get_connection_error = None
         # Every connection in use and the pool at its limit.
         self.full = False
@@ -3564,6 +3567,12 @@ class _FakePool:
 
     def release(self, connection):
         self.released.append(connection)
+
+    def _refresh_entry(self, cache_key):
+        # The proxy's round trip, so tests can hold or fail it through these two mocks.
+        self.connection.send_command(*cache_key.redis_args, keys=cache_key.redis_keys)
+        self.connection.read_response()
+        return self.refresh_result
 
 
 def _sent_keys(connection):
@@ -3627,10 +3636,7 @@ class TestCacheRefresher:
         assert refresher.submit([key]) == []
         self._idle(refresher)
 
-        pool.connection.send_command.assert_called_once_with(
-            "GET", "foo", "bar", keys=("foo", "bar")
-        )
-        pool.connection.read_response.assert_called_once_with()
+        pool.connection._refresh_entry.assert_called_once_with(key)
         assert pool.released == [pool.connection]
 
     def test_keys_over_the_bound_are_rejected(self, make_refresher, pool, gate):
@@ -3970,15 +3976,32 @@ class TestCacheRefresher:
         ):
             yield calls
 
-    def test_an_answered_refresh_records_a_success(
-        self, make_refresher, pool, recorded
+    @pytest.mark.parametrize(
+        "result", [CSCRefreshResult.SUCCESS, CSCRefreshResult.DISCARDED]
+    )
+    def test_a_completed_refresh_records_what_the_connection_reports(
+        self, make_refresher, pool, recorded, result
     ):
+        pool.refresh_result = result
         refresher = make_refresher(pool, 4)
 
         refresher.submit([_get_cache_key("foo")])
         self._idle(refresher)
 
-        assert recorded == [(CSCRefreshResult.SUCCESS, 1)]
+        assert recorded == [(result, 1)]
+
+    def test_a_refresh_that_sent_nothing_records_nothing(
+        self, make_refresher, pool, recorded
+    ):
+        # A read stored the entry between the refresher's check and the send.
+        pool.refresh_result = None
+        refresher = make_refresher(pool, 4)
+
+        refresher.submit([_get_cache_key("foo")])
+        self._idle(refresher)
+
+        assert pool.released == [pool.connection]
+        assert recorded == []
 
     @pytest.mark.parametrize(
         "error",

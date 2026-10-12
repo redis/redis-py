@@ -90,6 +90,7 @@ from .observability.attributes import (
     AttributeBuilder,
     ConnectionState,
     CSCReason,
+    CSCRefreshResult,
     CSCResult,
     get_pool_name,
 )
@@ -2084,6 +2085,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         # A reply ``send_command`` resolved from the cache, waiting for ``read_response`` to
         # hand it back. Set means nothing was written, so there is no reply on the socket.
         self._pending_cache_hit = _NO_PENDING_HIT
+        # The command in flight is a refresh, which is not a read: it records no cache
+        # request.
+        self._refresh_in_progress = False
         self.register_connect_callback(self._enable_tracking_callback)
 
         if isinstance(self._conn, MaintNotificationsAbstractConnection):
@@ -2400,7 +2404,10 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             )
             return response
 
-        if self._current_command_cache_key is not None:
+        if (
+            self._current_command_cache_key is not None
+            and not self._refresh_in_progress
+        ):
             # A key is still set, so ``send_command`` decided to store this reply and sent the
             # command: by construction a miss.
             record_csc_request(
@@ -2461,6 +2468,60 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             self._current_command_cache_key = None
 
         return response
+
+    def _refresh_entry(self, cache_key: CacheKey) -> CSCRefreshResult | None:
+        """
+        Re-read one invalidated entry, for the cache refresher.
+
+        Runs the normal miss path - ``send_command`` then ``read_response`` - so the reply is
+        staked, tracked and stored exactly as a read's would be. A refresh is not a read,
+        though, so it records no cache request, neither a hit nor a miss.
+
+        Args:
+            cache_key: The key of the entry the invalidation removed. It holds the whole
+                command, so this replays the original read.
+
+        Returns:
+            CSCRefreshResult | None: ``SUCCESS`` when the reply was stored, ``DISCARDED``
+            when it was answered but not stored - the entry was invalidated again in
+            flight, the reply was nil, or the cache predicate did not select it - and None
+            when nothing was sent, because a read stored the entry in the meantime.
+
+        Raises:
+            Whatever the round trip raises.
+        """
+        self._refresh_in_progress = True
+        try:
+            # Read with default decoding: the decode mode is not part of the cache key, and
+            # no cacheable command needs ``NEVER_DECODE``.
+            self.send_command(*cache_key.redis_args, keys=cache_key.redis_keys)
+            if self._pending_cache_hit is not _NO_PENDING_HIT:
+                # Served from an entry a read stored since the refresher checked: nothing
+                # was written, so there is no reply to read.
+                self._pending_cache_hit = _NO_PENDING_HIT
+                return None
+
+            # The placeholder this read staked, if any. ``read_response`` promotes it in
+            # place, so its status afterwards tells whether the reply was stored, even if
+            # the entry has been invalidated again since.
+            placeholder = None
+            if self._current_command_cache_key is not None:
+                with self._cache_lock:
+                    entry = self._cache.get(self._current_command_cache_key)
+                if (
+                    entry is not None
+                    and entry.status == CacheEntryStatus.IN_PROGRESS
+                    and entry.connection_ref is self._conn
+                ):
+                    placeholder = entry
+
+            self.read_response()
+        finally:
+            self._refresh_in_progress = False
+
+        if placeholder is not None and placeholder.status == CacheEntryStatus.VALID:
+            return CSCRefreshResult.SUCCESS
+        return CSCRefreshResult.DISCARDED
 
     def _drop_own_placeholder(self) -> None:
         """

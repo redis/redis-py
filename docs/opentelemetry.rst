@@ -167,8 +167,14 @@ The following metrics are collected based on enabled metric groups:
 - ``redis.client.csc.requests`` - Cache requests with hit/miss result (counter)
 - ``redis.client.csc.evictions`` - Cache evictions (counter)
 - ``redis.client.csc.network_saved`` - Bytes saved by caching (counter)
-- ``redis.client.csc.refreshes`` - Refresh attempts after an invalidation, with a
-  success/failure/rejected result (counter)
+- ``redis.client.csc.refresh.success`` - Refreshes after an invalidation whose reply was
+  stored (counter)
+- ``redis.client.csc.refresh.failure`` - Refreshes that failed (counter)
+- ``redis.client.csc.refresh.discarded`` - Refreshes answered but not stored (counter)
+- ``redis.client.csc.refresh.rejected`` - Refreshes not run for lack of queue room or of a
+  free connection (counter)
+- ``redis.client.csc.refresh.rate_limited`` - Invalidations absorbed by the refresh rate
+  limit (counter)
 - ``redis.client.csc.items`` - Current cache size (observable gauge)
 
 Custom Histogram Buckets

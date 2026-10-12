@@ -41,6 +41,7 @@ from redis.cache import (
     _CacheRefresher,
 )
 from redis.connection import (
+    _NO_PENDING_HIT,
     CacheProxyConnection,
     Connection,
     HiredisRespSerializer,
@@ -65,6 +66,7 @@ from redis.exceptions import (
 )
 from redis.observability.attributes import (
     CSCReason,
+    CSCRefreshResult,
     CSCResult,
     DB_CLIENT_CONNECTION_POOL_NAME,
     DB_CLIENT_CONNECTION_STATE,
@@ -2622,6 +2624,154 @@ class TestCacheProxyRefresh:
         inner.disconnect.assert_called_once()
         # A closed caching connection empties the shared cache, refresh or not.
         assert cache.size == 0
+
+    @pytest.fixture
+    def requests_recorded(self):
+        """The cache requests the proxy records, as ``CSCResult`` values."""
+        calls = []
+        with patch(
+            "redis.connection.record_csc_request",
+            side_effect=lambda result: calls.append(result),
+        ):
+            yield calls
+
+    def test_a_stored_refresh_reports_success_and_records_no_request(
+        self, proxy, cache, requests_recorded
+    ):
+        key = _refresh_key("foo")
+        proxy._conn.read_response.return_value = b"new"
+
+        assert proxy._refresh_entry(key) is CSCRefreshResult.SUCCESS
+
+        proxy._conn.send_command.assert_called_once_with("GET", "foo", keys=("foo",))
+        assert cache.get(key).cache_value == b"new"
+        # A refresh is not a read: neither a hit nor a miss.
+        assert requests_recorded == []
+
+    def test_a_refresh_invalidated_in_flight_reports_discarded(
+        self, proxy, cache, requests_recorded
+    ):
+        key = _refresh_key("foo")
+
+        def invalidated_mid_flight(*args, **kwargs):
+            cache.delete_by_redis_keys([b"foo"])
+            return b"new"
+
+        proxy._conn.read_response.side_effect = invalidated_mid_flight
+
+        assert proxy._refresh_entry(key) is CSCRefreshResult.DISCARDED
+        assert cache.get(key) is None
+        assert requests_recorded == []
+
+    def test_a_refresh_stored_then_invalidated_still_reports_success(
+        self, proxy, cache
+    ):
+        # Stored is what counts, even if the entry is already gone again.
+        key = _refresh_key("foo")
+        proxy._conn.read_response.return_value = b"new"
+        original_set = cache.set
+
+        def set_then_invalidate(entry):
+            stored = original_set(entry)
+            if entry.status == CacheEntryStatus.VALID:
+                cache.delete_by_redis_keys([b"foo"])
+            return stored
+
+        with patch.object(cache, "set", side_effect=set_then_invalidate):
+            assert proxy._refresh_entry(key) is CSCRefreshResult.SUCCESS
+        assert cache.get(key) is None
+
+    def test_a_nil_refresh_reports_discarded(self, proxy, cache):
+        key = _refresh_key("foo")
+        proxy._conn.read_response.return_value = None
+
+        assert proxy._refresh_entry(key) is CSCRefreshResult.DISCARDED
+        assert cache.get(key) is None
+
+    def test_a_refresh_the_predicate_does_not_select_reports_discarded(self):
+        cache = DefaultCache(
+            CacheConfig(
+                tracking_mode=TrackingMode.OPTIN,
+                cache_predicate=_cache_nothing,
+                invalidation_policy=InvalidationPolicy.REFRESH,
+            )
+        )
+        proxy = CacheProxyConnection(
+            _refresh_inner_connection(), cache, threading.RLock()
+        )
+        proxy._conn.read_response.return_value = b"new"
+
+        assert proxy._refresh_entry(_refresh_key("foo")) is CSCRefreshResult.DISCARDED
+        assert cache.size == 0
+
+    def test_a_refresh_of_an_entry_already_stored_sends_nothing(
+        self, proxy, cache, requests_recorded
+    ):
+        # A read stored the entry after the refresher checked for it. Its owner has
+        # nothing pending, so the hit's drain reads nothing.
+        key = _refresh_key("foo")
+        cache.set(
+            CacheEntry(
+                cache_key=key,
+                cache_value=b"read",
+                status=CacheEntryStatus.VALID,
+                connection_ref=_refresh_inner_connection(),
+            )
+        )
+
+        assert proxy._refresh_entry(key) is None
+
+        proxy._conn.send_command.assert_not_called()
+        proxy._conn.read_response.assert_not_called()
+        assert proxy._pending_cache_hit is _NO_PENDING_HIT
+        assert requests_recorded == []
+
+    def test_a_read_after_a_failed_refresh_records_its_miss(
+        self, proxy, requests_recorded
+    ):
+        proxy._conn.read_response.side_effect = ResponseError("WRONGTYPE")
+        with pytest.raises(ResponseError):
+            proxy._refresh_entry(_refresh_key("foo"))
+        assert requests_recorded == []
+
+        proxy._conn.read_response.side_effect = None
+        proxy._conn.read_response.return_value = b"value"
+        proxy.send_command("GET", "bar", keys=("bar",))
+        proxy.read_response()
+
+        assert requests_recorded == [CSCResult.MISS]
+
+    def test_the_refresher_records_the_reported_outcome(self, cache, live):
+        proxy = CacheProxyConnection(
+            _refresh_inner_connection(),
+            cache,
+            threading.RLock(),
+            refresher=live.refresher,
+        )
+        self._store(cache, _refresh_key("foo"))
+        self._store(cache, _refresh_key("bar"))
+
+        def read_response(*args, **kwargs):
+            # bar changes again while its re-read is in flight.
+            if live.inner.send_command.call_args.kwargs["keys"] == ("bar",):
+                proxy._on_invalidation_callback([b"invalidate", [b"bar"]])
+            return b"new"
+
+        live.inner.read_response.side_effect = read_response
+        recorded = []
+        with patch(
+            "redis.cache.record_csc_refresh",
+            side_effect=lambda result, count=1: recorded.append((result, count)),
+        ):
+            proxy._on_invalidation_callback([b"invalidate", [b"foo"]])
+            self._idle(live.refresher)
+            proxy._on_invalidation_callback([b"invalidate", [b"bar"]])
+            self._idle(live.refresher)
+
+        assert recorded == [
+            (CSCRefreshResult.SUCCESS, 1),
+            (CSCRefreshResult.DISCARDED, 1),
+        ]
 
     def test_an_optin_refresh_is_paired_with_client_caching_yes(self):
         predicate = Mock(side_effect=lambda command, keys: keys == ("foo",))

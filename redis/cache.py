@@ -1162,11 +1162,7 @@ class _CacheRefresher:
             # still refresh nothing.
             if not self._is_current(generation):
                 return
-            # The cache key holds the whole command, so this replays the original read.
-            # Read with default decoding: the decode mode is not part of the cache key, and
-            # no cacheable command needs ``NEVER_DECODE``.
-            conn.send_command(*cache_key.redis_args, keys=cache_key.redis_keys)
-            conn.read_response()
+            result = conn._refresh_entry(cache_key)
         except (ConnectionError, TimeoutError, OSError) as e:
             # The socket is in an unknown state, so it is closed, as the client's own error
             # path does. Closing a caching connection flushes the cache.
@@ -1179,8 +1175,9 @@ class _CacheRefresher:
             logger.debug("Client-side cache refresh failed: %r", e)
             record_csc_refresh(result=CSCRefreshResult.FAILURE)
         else:
-            # Answered, whether or not the reply was stored: a nil reply, or one the cache
-            # predicate does not select, is a completed refresh that leaves nothing behind.
-            record_csc_refresh(result=CSCRefreshResult.SUCCESS)
+            # None: a read stored the entry before this refresh sent anything, so, like the
+            # check above, it is not a refresh outcome.
+            if result is not None:
+                record_csc_refresh(result=result)
         finally:
             pool.release(conn)

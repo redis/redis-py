@@ -801,9 +801,11 @@ def record_csc_refresh(
     Record Client Side Caching (CSC) refreshes with the same outcome.
 
     Args:
-        result: Refresh outcome: ``SUCCESS`` when the re-read was answered, ``FAILURE``
-            when it raised, ``REJECTED`` when the refresh queue was full or the pool had no
-            free connection
+        result: Refresh outcome, recorded on ``redis.client.csc.refresh.<value>``:
+            ``SUCCESS`` when the reply was stored, ``FAILURE`` when the re-read raised,
+            ``DISCARDED`` when it was answered but not stored, ``REJECTED`` when the
+            refresh queue was full or the pool had no free connection, ``RATE_LIMITED``
+            when the rate limit absorbed the invalidation
         count: Number of refreshes
     """
     global _metrics_collector
