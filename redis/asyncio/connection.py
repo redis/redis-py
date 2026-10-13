@@ -1967,7 +1967,6 @@ class UnixDomainSocketConnection(AbstractConnection):
             reader, writer = await asyncio.open_unix_connection(path=self.path)
         self._reader = reader
         self._writer = writer
-        await self.on_connect()
 
     def _host_error(self) -> str:
         return self.path
