@@ -108,7 +108,7 @@ jobs:
         event-loop: ['asyncio']
         # One job per protocol and response shape, running the standalone and
         # the cluster tests; the fixed client tests run in the
-        # default-legacy_responses job (see run-fixed-clients).
+        # default-legacy_responses job (see run-fixed-clients and the job name).
         test-config:
           - default-legacy_responses
           - default-unified_responses
@@ -118,7 +118,7 @@ jobs:
           - 3-unified_responses
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}${{ matrix.test-config == 'default-legacy_responses' && ' + fixed-clients' || '' }}
     steps:
       - uses: actions/checkout@v7
       - name: Run tests
@@ -149,7 +149,7 @@ jobs:
         event-loop: [ 'asyncio' ]
         # One job per protocol and response shape, running the standalone and
         # the cluster tests; the fixed client tests run in the
-        # default-legacy_responses job (see run-fixed-clients).
+        # default-legacy_responses job (see run-fixed-clients and the job name).
         test-config:
           - default-legacy_responses
           - default-unified_responses
@@ -159,7 +159,7 @@ jobs:
           - 3-unified_responses
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}${{ matrix.test-config == 'default-legacy_responses' && ' + fixed-clients' || '' }}
     steps:
       - uses: actions/checkout@v7
       - name: Run tests
@@ -174,9 +174,9 @@ jobs:
   pypy-compatibility-tests:
     runs-on: ubuntu-latest
     needs: [ redis_version ]
-    # in pipeline ofter these pypy jobs hang, so their timeout is set
-    # to just 50 minutes - close to the max time the jobs are running at the moment
-    # adding more tests will make them even slower, and we will need to adjust the timeout
+    # PyPy jobs sometimes hang, and the timeout ends them. Each job runs the
+    # standalone and cluster tests in about 10 minutes, so the limit leaves room
+    # to grow.
     timeout-minutes: 60
     strategy:
       max-parallel: 30
@@ -188,7 +188,7 @@ jobs:
         event-loop: [ 'asyncio' ]
         # One job per protocol and response shape, running the standalone and
         # the cluster tests; the fixed client tests run in the
-        # default-legacy_responses job (see run-fixed-clients).
+        # default-legacy_responses job (see run-fixed-clients and the job name).
         test-config:
           - default-legacy_responses
           - default-unified_responses
@@ -198,7 +198,7 @@ jobs:
           - 3-unified_responses
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: PyPy Redis ${{ matrix.redis-version }}; ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
+    name: PyPy Redis ${{ matrix.redis-version }}; ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}${{ matrix.test-config == 'default-legacy_responses' && ' + fixed-clients' || '' }}
     steps:
       - uses: actions/checkout@v7
       - name: Run tests
@@ -225,7 +225,7 @@ jobs:
         event-loop: [ 'asyncio' ]
         # One job per protocol and response shape, running the standalone and
         # the cluster tests; the fixed client tests run in the
-        # default-legacy_responses job (see run-fixed-clients).
+        # default-legacy_responses job (see run-fixed-clients and the job name).
         test-config:
           - default-legacy_responses
           - default-unified_responses
@@ -235,7 +235,7 @@ jobs:
           - 3-unified_responses
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}} (${{ matrix.hiredis-version }}); EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}} (${{ matrix.hiredis-version }}); EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}${{ matrix.test-config == 'default-legacy_responses' && ' + fixed-clients' || '' }}
     steps:
       - uses: actions/checkout@v7
       - name: Run tests
@@ -262,7 +262,7 @@ jobs:
         event-loop: [ 'uvloop' ]
         # One job per protocol and response shape, running the standalone and
         # the cluster tests; the fixed client tests run in the
-        # default-legacy_responses job (see run-fixed-clients).
+        # default-legacy_responses job (see run-fixed-clients and the job name).
         test-config:
           - default-legacy_responses
           - default-unified_responses
@@ -272,7 +272,7 @@ jobs:
           - 3-unified_responses
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}${{ matrix.test-config == 'default-legacy_responses' && ' + fixed-clients' || '' }}
     steps:
       - uses: actions/checkout@v7
       - name: Run tests

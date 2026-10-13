@@ -335,7 +335,9 @@ class TestBlockingConnectionPool:
         start = time.monotonic()
         Thread(target=target).start()
         pool.get_connection()
-        assert time.monotonic() - start >= 0.1
+        elapsed = time.monotonic() - start
+        # block until the release and wake on it, well before the 2 s pool timeout
+        assert 0.1 <= elapsed < 1.0
 
     def test_reuse_previously_released_connection(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}

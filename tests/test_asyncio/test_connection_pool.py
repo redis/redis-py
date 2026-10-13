@@ -509,9 +509,9 @@ class TestBlockingConnectionPool:
             release = asyncio.create_task(target())
             # time get_connection alone: it must block until the release
             await pool.get_connection()
-            assert asyncio.get_running_loop().time() - start >= (
-                0.1 - EVENT_LOOP_TIMER_SLACK
-            )
+            elapsed = asyncio.get_running_loop().time() - start
+            # and wake on it, well before the 2 s pool timeout
+            assert 0.1 - EVENT_LOOP_TIMER_SLACK <= elapsed < 1.0
             await release
 
     async def test_reuse_previously_released_connection(self, master_host):

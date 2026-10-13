@@ -2601,7 +2601,7 @@ class TestPubSubTimeoutPropagation:
         msg = p.get_message(timeout=0)
         elapsed = time.monotonic() - start
         assert msg is None
-        assert elapsed < 1.0  # generous: a stalled runner must not fail it
+        assert elapsed < 0.5  # well below any blocking wait, above a runner stall
 
     def test_get_message_timeout_none_blocks(self, r):
         """
@@ -2895,7 +2895,7 @@ class TestClusterPubSubTimeoutPropagation:
         msg = pubsub.get_sharded_message(timeout=0)
         elapsed = time.monotonic() - start
         assert msg is None
-        assert elapsed < 1.0  # generous: a stalled runner must not fail it
+        assert elapsed < 0.5  # well below any blocking wait, above a runner stall
         pubsub.close()
 
     @pytest.mark.onlycluster

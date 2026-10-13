@@ -604,6 +604,9 @@ class TestRedisCommands:
 
     @pytest.mark.fixed_client
     @skip_if_server_version_lt("7.2.0")
+    # Exercises a default localhost client, which cannot target a remote managed
+    # Redis Enterprise endpoint.
+    @skip_if_redis_enterprise()
     async def test_client_setinfo_with_driver_info(self):
         from redis import DriverInfo
         from redis.utils import get_lib_version
