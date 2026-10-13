@@ -613,6 +613,20 @@ async def test_socket_param_regression(r):
     _ = await conn.disconnect() is True
 
 
+async def test_unix_domain_socket_connect_runs_handshake_once():
+    """connect() runs the handshake, so _connect() must not run it as well"""
+    conn = UnixDomainSocketConnection(path="/tmp/redis.sock")
+    with (
+        patch(
+            "asyncio.open_unix_connection",
+            mock.AsyncMock(return_value=(mock.Mock(), mock.Mock())),
+        ),
+        patch.object(conn, "on_connect_check_health", mock.AsyncMock()) as handshake,
+    ):
+        await conn.connect()
+    handshake.assert_awaited_once()
+
+
 async def test_can_run_concurrent_commands(r):
     if getattr(r, "connection", None) is not None:
         # Concurrent commands are only supported on pooled or cluster connections
