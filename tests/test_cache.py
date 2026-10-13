@@ -53,9 +53,13 @@ WRITE_KEYED = CommandMetadata(
 )
 
 
-def wait_for_invalidated_value(client, key, expected, timeout=3.0, interval=0.05):
+def wait_for_invalidated_value(
+    client, key, expected, timeout=3.0, interval=0.05, read=None
+):
     """
     Reads ``key`` until the client stops serving the value it cached before invalidation.
+
+    ``read`` replaces the default ``client.get(key)`` for keys of other types.
 
     Server-assisted invalidation arrives on its own push message, so a read taken straight
     after another client's write is a race. A fixed sleep answers that race badly in both
@@ -64,11 +68,16 @@ def wait_for_invalidated_value(client, key, expected, timeout=3.0, interval=0.05
     the deadline and returns the last value read, so the caller's own assertion is what
     reports the failure if the invalidation never lands.
     """
+    if read is None:
+
+        def read():
+            return client.get(key)
+
     deadline = time.monotonic() + timeout
-    value = client.get(key)
+    value = read()
     while value not in expected and time.monotonic() < deadline:
         time.sleep(interval)
-        value = client.get(key)
+        value = read()
 
     return value
 
@@ -188,11 +197,11 @@ class TestCache:
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
 
-        # Add a small delay to allow invalidation to be processed
-        time.sleep(0.1)
-
         # Retrieves a new value from server and cache it
-        assert r.get("foo") in [b"barbar", "barbar"]
+        assert wait_for_invalidated_value(r, "foo", [b"barbar", "barbar"]) in [
+            b"barbar",
+            "barbar",
+        ]
         # Make sure that new value was cached
         assert cache.get(
             CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
@@ -237,10 +246,14 @@ class TestCache:
         assert cache.get(cache_key) is not None
         # change the sorted set from a second client (causes invalidation)
         r2.zadd("myzset", {"c": 3})
-        # Add a small delay to allow invalidation to be processed
-        time.sleep(0.1)
         # a fresh value is fetched and re-cached
-        assert r.zrevrange("myzset", 0, -1) == [b"c", b"b", b"a"]
+        expected = [b"c", b"b", b"a"]
+        assert (
+            wait_for_invalidated_value(
+                r, "myzset", [expected], read=lambda: r.zrevrange("myzset", 0, -1)
+            )
+            == expected
+        )
 
     @pytest.mark.parametrize(
         "r",
@@ -299,11 +312,10 @@ class TestCache:
         # change key in redis (cause invalidation)
         r2.hset(hash_key, field_1, "barbar")
 
-        # Add a small delay to allow invalidation to be processed
-        time.sleep(0.1)
-
         # Retrieves a new value from server and cache it
-        assert r.hget(hash_key, field_1) in [b"barbar", "barbar"]
+        assert wait_for_invalidated_value(
+            r, hash_key, [b"barbar", "barbar"], read=lambda: r.hget(hash_key, field_1)
+        ) in [b"barbar", "barbar"]
         # Make sure that new value was cached
         assert cache.get(
             CacheKey(
@@ -368,11 +380,11 @@ class TestCache:
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
 
-        # Add a small delay to allow invalidation to be processed
-        time.sleep(0.1)
-
         # Retrieves a new value from server and cache it
-        assert r.get("foo") in [b"barbar", "barbar"]
+        assert wait_for_invalidated_value(r, "foo", [b"barbar", "barbar"]) in [
+            b"barbar",
+            "barbar",
+        ]
         # Make sure that new value was cached
         assert cache.get(
             CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
@@ -2175,11 +2187,12 @@ class TestSSLCache:
         ]
         # change key in redis (cause invalidation)
         assert r2.set("foo", "barbar")
-        # Timeout needed for SSL connection because there's timeout
-        # between data appears in socket buffer
-        time.sleep(0.1)
-        # Retrieves a new value from server and cache_data it
-        assert r.get("foo") in [b"barbar", "barbar"]
+        # Retrieves a new value from server and cache_data it, once the
+        # invalidation has arrived (over SSL it can trail the write)
+        assert wait_for_invalidated_value(r, "foo", [b"barbar", "barbar"]) in [
+            b"barbar",
+            "barbar",
+        ]
         # Make sure that new value was cached
         assert cache.get(
             CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
@@ -2291,10 +2304,8 @@ class TestSSLCache:
         # Invalidate one of the keys and make sure
         # that all associated cached entries was removed
         assert r.set("foo", "baz")
-        # Timeout needed for SSL connection because there's timeout
-        # between data appears in socket buffer
-        time.sleep(0.1)
-        assert r.get("foo") == b"baz"
+        # the invalidation can trail the write (over SSL especially)
+        assert wait_for_invalidated_value(r, "foo", [b"baz"]) == b"baz"
         assert (
             cache.get(
                 CacheKey(
@@ -2313,6 +2324,7 @@ class TestSSLCache:
         )
 
 
+@pytest.mark.fixed_client
 class TestUnitDefaultCache:
     def test_get_eviction_policy(self):
         cache = DefaultCache(CacheConfig(max_size=5))
@@ -2602,6 +2614,7 @@ class TestUnitDefaultCache:
         assert len(cache.collection) == 0
 
 
+@pytest.mark.fixed_client
 class TestCacheReverseIndex:
     """
     The reverse index from Redis key to the entries holding it.
@@ -2801,6 +2814,7 @@ class TestCacheReverseIndex:
         assert actual == expected
 
 
+@pytest.mark.fixed_client
 class TestUnitLRUPolicy:
     def test_type(self):
         policy = LRUPolicy()
@@ -2945,6 +2959,7 @@ class TestUnitLRUPolicy:
             policy.evict_next()
 
 
+@pytest.mark.fixed_client
 class TestUnitCacheConfiguration:
     MAX_SIZE = 100
     EVICTION_POLICY = EvictionPolicy.LRU
@@ -3165,6 +3180,7 @@ class TestUnitCacheConfiguration:
         assert config.is_trackable_read("GET") is False
 
 
+@pytest.mark.fixed_client
 class TestUnitCacheProxy:
     """Unit tests for CacheProxy class with mocked event dispatcher."""
 
@@ -3394,6 +3410,7 @@ class TestUnitCacheProxy:
         assert proxy.is_cachable(cache_key) is False
 
 
+@pytest.mark.fixed_client
 class TestUnitCacheProxyConnectionInvalidations:
     """A framing violation while draining invalidations now disconnects the raw
     connection (see #4291). That disconnect skips CacheProxyConnection.disconnect(),

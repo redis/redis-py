@@ -431,6 +431,7 @@ class TestIsClientSideCacheable:
             assert static_resolver.is_cacheable(name) is True, name
 
 
+@pytest.mark.fixed_client
 class TestIsTrackableRead:
     """
     Whether the server would remember a command's keys: the ``readonly`` flag alone.

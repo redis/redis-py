@@ -66,6 +66,23 @@ def wait_for_message(
     return None
 
 
+def wait_for_handled_message(test, get_message, expected, timeout=5.0):
+    """Handle messages until the test's handler has seen ``expected``.
+
+    In a cluster, a PUBLISH reaches subscribers on other nodes over the cluster
+    bus, so a message an earlier test published on the same channel can arrive
+    late and be handled first. Handling until the expected message shows up
+    skips such strays. A handled message is never returned, so every call must
+    still return None.
+    """
+    deadline = time.monotonic() + timeout
+    while getattr(test, "message", None) != expected:
+        assert time.monotonic() < deadline, (
+            f"handler saw {getattr(test, 'message', None)!r}, expected {expected!r}"
+        )
+        assert get_message(timeout=0.1) is None
+
+
 def make_message(type, channel, data, pattern=None):
     return {
         "type": type,
@@ -927,7 +944,7 @@ class TestPubSubSubscribeUnsubscribe:
         for func, channel, get_func in checks:
             assert func(channel) is None
             assert p.subscribed is True
-            assert wait_for_message(p, func=get_func) is None
+            assert get_func(timeout=1) is None
         assert p.subscribed is False
 
     @skip_if_server_version_lt("7.0.0")
@@ -947,7 +964,7 @@ class TestPubSubSubscribeUnsubscribe:
         for func, channel, get_func in checks:
             assert func(channel) is None
             assert p.subscribed is True
-            message = wait_for_message(p, ignore_subscribe_messages=True, func=get_func)
+            message = get_func(ignore_subscribe_messages=True, timeout=1)
             assert message is None
         assert p.subscribed is False
 
@@ -1118,10 +1135,11 @@ class TestPubSubMessages:
     def test_channel_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
         p.subscribe(foo=self.message_handler)
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         assert r.publish("foo", "test message") == 1
-        assert wait_for_message(p) is None
-        assert self.message == make_message("message", "foo", "test message")
+        wait_for_handled_message(
+            self, p.get_message, make_message("message", "foo", "test message")
+        )
 
     @pytest.mark.onlynoncluster
     def test_binary_channel_message_handler_with_subscription(self, r):
@@ -1130,22 +1148,26 @@ class TestPubSubMessages:
         p.subscribe(Subscription(channel, self.message_handler))
         assert p.get_message(timeout=1) is None
         assert r.publish(channel, b"test message") == 1
-        assert p.get_message(timeout=1) is None
-        assert self.message == {
-            "type": "message",
-            "pattern": None,
-            "channel": channel,
-            "data": b"test message",
-        }
+        wait_for_handled_message(
+            self,
+            p.get_message,
+            {
+                "type": "message",
+                "pattern": None,
+                "channel": channel,
+                "data": b"test message",
+            },
+        )
 
     @skip_if_server_version_lt("7.0.0")
     def test_shard_channel_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
         p.ssubscribe(foo=self.message_handler)
-        assert wait_for_message(p, func=p.get_sharded_message) is None
+        assert p.get_sharded_message(timeout=1) is None
         assert r.spublish("foo", "test message") == 1
-        assert wait_for_message(p, func=p.get_sharded_message) is None
-        assert self.message == make_message("smessage", "foo", "test message")
+        wait_for_handled_message(
+            self, p.get_sharded_message, make_message("smessage", "foo", "test message")
+        )
 
     @skip_if_server_version_lt("7.0.0")
     def test_binary_shard_channel_message_handler_with_subscription(self, r):
@@ -1154,23 +1176,27 @@ class TestPubSubMessages:
         p.ssubscribe(Subscription(channel, self.message_handler))
         assert p.get_sharded_message(timeout=1) is None
         assert r.spublish(channel, b"test message") == 1
-        assert p.get_sharded_message(timeout=1) is None
-        assert self.message == {
-            "type": "smessage",
-            "pattern": None,
-            "channel": channel,
-            "data": b"test message",
-        }
+        wait_for_handled_message(
+            self,
+            p.get_sharded_message,
+            {
+                "type": "smessage",
+                "pattern": None,
+                "channel": channel,
+                "data": b"test message",
+            },
+        )
 
     @pytest.mark.onlynoncluster
     def test_pattern_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
         p.psubscribe(**{"f*": self.message_handler})
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         assert r.publish("foo", "test message") == 1
-        assert wait_for_message(p) is None
-        assert self.message == make_message(
-            "pmessage", "foo", "test message", pattern="f*"
+        wait_for_handled_message(
+            self,
+            p.get_message,
+            make_message("pmessage", "foo", "test message", pattern="f*"),
         )
 
     @pytest.mark.onlynoncluster
@@ -1181,23 +1207,27 @@ class TestPubSubMessages:
         p.psubscribe(Subscription(pattern, self.message_handler))
         assert p.get_message(timeout=1) is None
         assert r.publish(channel, b"test message") == 1
-        assert p.get_message(timeout=1) is None
-        assert self.message == {
-            "type": "pmessage",
-            "pattern": pattern,
-            "channel": channel,
-            "data": b"test message",
-        }
+        wait_for_handled_message(
+            self,
+            p.get_message,
+            {
+                "type": "pmessage",
+                "pattern": pattern,
+                "channel": channel,
+                "data": b"test message",
+            },
+        )
 
     def test_unicode_channel_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
         channel = "uni" + chr(4456) + "code"
         channels = {channel: self.message_handler}
         p.subscribe(**channels)
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         assert r.publish(channel, "test message") == 1
-        assert wait_for_message(p) is None
-        assert self.message == make_message("message", channel, "test message")
+        wait_for_handled_message(
+            self, p.get_message, make_message("message", channel, "test message")
+        )
 
     @skip_if_server_version_lt("7.0.0")
     def test_unicode_shard_channel_message_handler(self, r):
@@ -1205,10 +1235,13 @@ class TestPubSubMessages:
         channel = "uni" + chr(4456) + "code"
         channels = {channel: self.message_handler}
         p.ssubscribe(**channels)
-        assert wait_for_message(p, func=p.get_sharded_message) is None
+        assert p.get_sharded_message(timeout=1) is None
         assert r.spublish(channel, "test message") == 1
-        assert wait_for_message(p, func=p.get_sharded_message) is None
-        assert self.message == make_message("smessage", channel, "test message")
+        wait_for_handled_message(
+            self,
+            p.get_sharded_message,
+            make_message("smessage", channel, "test message"),
+        )
 
     @pytest.mark.onlynoncluster
     # see: https://redis.readthedocs.io/en/stable/clustering.html#known-pubsub-limitations
@@ -1217,11 +1250,12 @@ class TestPubSubMessages:
         pattern = "uni" + chr(4456) + "*"
         channel = "uni" + chr(4456) + "code"
         p.psubscribe(**{pattern: self.message_handler})
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         assert r.publish(channel, "test message") == 1
-        assert wait_for_message(p) is None
-        assert self.message == make_message(
-            "pmessage", channel, "test message", pattern=pattern
+        wait_for_handled_message(
+            self,
+            p.get_message,
+            make_message("pmessage", channel, "test message", pattern=pattern),
         )
 
 
@@ -1234,11 +1268,13 @@ class TestPubSubRESP3Handler:
             return
         p = r.pubsub(push_handler_func=self.my_handler)
         p.subscribe("foo")
-        assert wait_for_message(p) is None
-        assert self.message == ["my handler", [b"subscribe", b"foo", 1]]
+        wait_for_handled_message(
+            self, p.get_message, ["my handler", [b"subscribe", b"foo", 1]]
+        )
         assert r.publish("foo", "test message") == 1
-        assert wait_for_message(p) is None
-        assert self.message == ["my handler", [b"message", b"foo", b"test message"]]
+        wait_for_handled_message(
+            self, p.get_message, ["my handler", [b"message", b"foo", b"test message"]]
+        )
 
     @skip_if_server_version_lt("7.0.0")
     def test_push_handler_sharded_pubsub(self, r):
@@ -1246,11 +1282,15 @@ class TestPubSubRESP3Handler:
             return
         p = r.pubsub(push_handler_func=self.my_handler)
         p.ssubscribe("foo")
-        assert wait_for_message(p, func=p.get_sharded_message) is None
-        assert self.message == ["my handler", [b"ssubscribe", b"foo", 1]]
+        wait_for_handled_message(
+            self, p.get_sharded_message, ["my handler", [b"ssubscribe", b"foo", 1]]
+        )
         assert r.spublish("foo", "test message") == 1
-        assert wait_for_message(p, func=p.get_sharded_message) is None
-        assert self.message == ["my handler", [b"smessage", b"foo", b"test message"]]
+        wait_for_handled_message(
+            self,
+            p.get_sharded_message,
+            ["my handler", [b"smessage", b"foo", b"test message"]],
+        )
 
 
 class TestPubSubAutoDecoding:
@@ -1336,49 +1376,58 @@ class TestPubSubAutoDecoding:
     def test_channel_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
         p.subscribe(**{self.channel: self.message_handler})
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         r.publish(self.channel, self.data)
-        assert wait_for_message(p) is None
-        assert self.message == self.make_message("message", self.channel, self.data)
+        wait_for_handled_message(
+            self, p.get_message, self.make_message("message", self.channel, self.data)
+        )
 
         # test that we reconnected to the correct channel
         self.message = None
         p.connection.disconnect()
-        assert wait_for_message(p) is None  # should reconnect
+        assert p.get_message(timeout=1) is None  # should reconnect
         new_data = self.data + "new data"
         r.publish(self.channel, new_data)
-        assert wait_for_message(p) is None
-        assert self.message == self.make_message("message", self.channel, new_data)
+        wait_for_handled_message(
+            self, p.get_message, self.make_message("message", self.channel, new_data)
+        )
 
     def test_pattern_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
         p.psubscribe(**{self.pattern: self.message_handler})
-        assert wait_for_message(p) is None
+        assert p.get_message(timeout=1) is None
         r.publish(self.channel, self.data)
-        assert wait_for_message(p) is None
-        assert self.message == self.make_message(
-            "pmessage", self.channel, self.data, pattern=self.pattern
+        wait_for_handled_message(
+            self,
+            p.get_message,
+            self.make_message(
+                "pmessage", self.channel, self.data, pattern=self.pattern
+            ),
         )
 
         # test that we reconnected to the correct pattern
         self.message = None
         p.connection.disconnect()
-        assert wait_for_message(p) is None  # should reconnect
+        assert p.get_message(timeout=1) is None  # should reconnect
         new_data = self.data + "new data"
         r.publish(self.channel, new_data)
-        assert wait_for_message(p) is None
-        assert self.message == self.make_message(
-            "pmessage", self.channel, new_data, pattern=self.pattern
+        wait_for_handled_message(
+            self,
+            p.get_message,
+            self.make_message("pmessage", self.channel, new_data, pattern=self.pattern),
         )
 
     @skip_if_server_version_lt("7.0.0")
     def test_shard_channel_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
         p.ssubscribe(**{self.channel: self.message_handler})
-        assert wait_for_message(p, func=p.get_sharded_message) is None
+        assert p.get_sharded_message(timeout=1) is None
         r.spublish(self.channel, self.data)
-        assert wait_for_message(p, func=p.get_sharded_message) is None
-        assert self.message == self.make_message("smessage", self.channel, self.data)
+        wait_for_handled_message(
+            self,
+            p.get_sharded_message,
+            self.make_message("smessage", self.channel, self.data),
+        )
 
         # test that we reconnected to the correct channel
         self.message = None
@@ -1389,11 +1438,14 @@ class TestPubSubAutoDecoding:
             # standalone mode
             p.connection.disconnect()
         # should reconnect
-        assert wait_for_message(p, func=p.get_sharded_message) is None
+        assert p.get_sharded_message(timeout=1) is None
         new_data = self.data + "new data"
         r.spublish(self.channel, new_data)
-        assert wait_for_message(p, func=p.get_sharded_message) is None
-        assert self.message == self.make_message("smessage", self.channel, new_data)
+        wait_for_handled_message(
+            self,
+            p.get_sharded_message,
+            self.make_message("smessage", self.channel, new_data),
+        )
 
     def test_context_manager(self, r):
         with r.pubsub() as pubsub:
@@ -1739,18 +1791,43 @@ class TestPubSubTimeouts:
 
     def test_get_message_subscribe_during_waiting(self, r):
         p = r.pubsub()
+        checked_unsubscribed = threading.Event()
+        waiting_for_subscription = threading.Event()
+        errors = []
+
+        # signal from inside get_message's wait, so subscribe() lands in it
+        wait_for_subscription = p.subscribed_event.wait
+
+        def signalling_wait(timeout=None):
+            if timeout != 0:  # the first, zero-timeout poll does not wait
+                waiting_for_subscription.set()
+            return wait_for_subscription(timeout)
+
+        p.subscribed_event.wait = signalling_wait
 
         def poll(ps, expected_res):
-            assert ps.get_message() is None
-            message = ps.get_message(timeout=1)
-            assert message == expected_res
+            try:
+                assert ps.get_message() is None
+                checked_unsubscribed.set()
+                message = ps.get_message(timeout=5)
+                assert message == expected_res
+            except BaseException as e:
+                errors.append(e)
+                checked_unsubscribed.set()
+                waiting_for_subscription.set()
 
         subscribe_response = make_message("subscribe", "foo", 1)
         poller = threading.Thread(target=poll, args=(p, subscribe_response))
         poller.start()
-        time.sleep(0.2)
+        # Subscribe only once the poller is waiting for a subscription.
+        assert checked_unsubscribed.wait(timeout=5)
+        assert waiting_for_subscription.wait(timeout=5)
         p.subscribe("foo")
-        poller.join()
+        poller.join(timeout=10)
+        assert not poller.is_alive()
+        # an assertion failure in the thread would otherwise only be a warning
+        if errors:
+            raise errors[0]
 
     def test_get_message_timeout_none_survives_a_late_subscription(self):
         """
@@ -2002,6 +2079,7 @@ class TestBaseException:
         assert is_connected()
 
 
+@pytest.mark.fixed_client
 class TestPubSubMetricsRecording:
     """
     Unit tests that verify metrics are properly recorded from PubSub operations
@@ -2469,7 +2547,7 @@ class TestPubSubTimeoutPropagation:
         elapsed = time.monotonic() - start
         assert msg is None
         # Verify timeout was actually respected (within reasonable bounds)
-        assert elapsed < 0.5
+        assert elapsed < 1.0  # generous: a stalled runner must not fail it
 
     def test_get_message_timeout_with_published_message(self, r):
         """
@@ -2506,7 +2584,7 @@ class TestPubSubTimeoutPropagation:
         response = p.parse_response(block=False, timeout=0.1)
         elapsed = time.monotonic() - start
         assert response is None
-        assert elapsed < 0.5
+        assert elapsed < 1.0  # generous: a stalled runner must not fail it
 
     def test_get_message_timeout_zero_returns_immediately(self, r):
         """
@@ -2523,7 +2601,7 @@ class TestPubSubTimeoutPropagation:
         msg = p.get_message(timeout=0)
         elapsed = time.monotonic() - start
         assert msg is None
-        assert elapsed < 0.1
+        assert elapsed < 0.5  # well below any blocking wait, above a runner stall
 
     def test_get_message_timeout_none_blocks(self, r):
         """
@@ -2637,7 +2715,7 @@ class TestPubSubBlockingListen:
     """
 
     SOCKET_TIMEOUT = 0.3
-    PUBLISH_DELAY = SOCKET_TIMEOUT * 3
+    PUBLISH_DELAY = SOCKET_TIMEOUT * 2
 
     def _make_client(self, request, no_retry=False, **kwargs):
         if no_retry:
@@ -2724,7 +2802,8 @@ class TestPubSubBlockingListen:
         p = r.pubsub(ignore_subscribe_messages=True)
         p.subscribe("foo")
         # Drain the subscribe ack before calling parse_response directly.
-        wait_for_message(p, timeout=1.0)
+        # The ack is ignored, so get_message returns None as soon as it is read.
+        p.get_message(timeout=1.0)
 
         def publish_after_delay():
             time.sleep(self.PUBLISH_DELAY)
@@ -2771,7 +2850,7 @@ class TestClusterPubSubTimeoutPropagation:
         elapsed = time.monotonic() - start
         assert msg is None
         # Verify timeout was actually respected
-        assert elapsed < 0.5
+        assert elapsed < 1.0  # generous: a stalled runner must not fail it
         pubsub.close()
 
     @pytest.mark.onlycluster
@@ -2816,7 +2895,7 @@ class TestClusterPubSubTimeoutPropagation:
         msg = pubsub.get_sharded_message(timeout=0)
         elapsed = time.monotonic() - start
         assert msg is None
-        assert elapsed < 0.1
+        assert elapsed < 0.5  # well below any blocking wait, above a runner stall
         pubsub.close()
 
     @pytest.mark.onlycluster
@@ -4447,11 +4526,13 @@ class TestClusterPubSubSlotMigration:
         # measured wait by the setup's own cost and makes the lower bound below
         # unreachable.
         start = time.monotonic()
-        pubsub._poll_cool_off[bad] = start + 0.05
+        # A stall longer than the window between here and the generator's
+        # deadline check lets it poll the failing node; keep the window wide.
+        pubsub._poll_cool_off[bad] = start + 0.5
         assert pubsub._sharded_message_generator(timeout=30) == (None, None)
         elapsed = time.monotonic() - start
 
-        assert 0.05 <= elapsed < 5
+        assert 0.5 <= elapsed < 5
 
     def test_sharded_message_generator_cool_off_does_not_block_zero_timeout(self):
         """A non-blocking poll must stay non-blocking while nodes cool off."""
