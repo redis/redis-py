@@ -234,9 +234,9 @@ def deprecated_args(
     Decorator to mark specified args of a function as deprecated.
     If '*' is in args_to_warn, all arguments will be marked as deprecated.
     """
-    if args_to_warn is None:
-        args_to_warn = ["*"]
-    allowed_set = set(allowed_args or [])
+    args_to_warn = tuple(args_to_warn) if args_to_warn is not None else ("*",)
+    allowed_args = tuple(allowed_args) if allowed_args is not None else ()
+    allowed_set = set(allowed_args)
     is_wildcard = "*" in args_to_warn
     warn_set = set(args_to_warn) - allowed_set
 
@@ -619,8 +619,7 @@ def experimental_args(
     Decorator to mark specified args of a function as experimental.
     If '*' is in args_to_warn, all arguments will be marked as experimental.
     """
-    if args_to_warn is None:
-        args_to_warn = ["*"]
+    args_to_warn = tuple(args_to_warn) if args_to_warn is not None else ("*",)
     is_wildcard = "*" in args_to_warn
     warn_set = set(args_to_warn)
 
