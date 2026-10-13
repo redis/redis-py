@@ -236,8 +236,9 @@ def deprecated_args(
     """
     if args_to_warn is None:
         args_to_warn = ["*"]
-    if allowed_args is None:
-        allowed_args = []
+    allowed_set = set(allowed_args or [])
+    is_wildcard = "*" in args_to_warn
+    warn_set = set(args_to_warn) - allowed_set
 
     def _check_deprecated_args(func, filterable_args):
         """Check and warn about deprecated arguments."""
@@ -256,24 +257,134 @@ def deprecated_args(
                 )
 
     def decorator(func: C) -> C:
-        if inspect.iscoroutinefunction(func):
+        if not hasattr(func, "__code__"):
+            # Fallback for callables without a code object
+            if inspect.iscoroutinefunction(func):
 
-            @wraps(func)
-            async def async_wrapper(*args, **kwargs):
-                filterable_args = _get_filterable_args(func, args, kwargs, allowed_args)
-                _check_deprecated_args(func, filterable_args)
-                return await func(*args, **kwargs)
+                @wraps(func)
+                async def async_wrapper(*args, **kwargs):
+                    filterable_args = _get_filterable_args(
+                        func, args, kwargs, allowed_args
+                    )
+                    if filterable_args:
+                        _check_deprecated_args(func, filterable_args)
+                    return await func(*args, **kwargs)
 
-            return async_wrapper
+                return async_wrapper
+            else:
+
+                @wraps(func)
+                def wrapper(*args, **kwargs):
+                    filterable_args = _get_filterable_args(
+                        func, args, kwargs, allowed_args
+                    )
+                    if filterable_args:
+                        _check_deprecated_args(func, filterable_args)
+                    return func(*args, **kwargs)
+
+                return wrapper
+
+        pos_names = func.__code__.co_varnames[: func.__code__.co_argcount]
+
+        if is_wildcard:
+            disallowed_indices = [
+                i
+                for i, name in enumerate(pos_names)
+                if name != "self" and name not in allowed_set
+            ]
+            min_disallowed_pos_idx = (
+                min(disallowed_indices) if disallowed_indices else None
+            )
+
+            if inspect.iscoroutinefunction(func):
+
+                @wraps(func)
+                async def async_wrapper(*args, **kwargs):
+                    if (
+                        kwargs
+                        and any(k != "self" and k not in allowed_set for k in kwargs)
+                    ) or (
+                        min_disallowed_pos_idx is not None
+                        and len(args) > min_disallowed_pos_idx
+                    ):
+                        filterable_args = _get_filterable_args(
+                            func, args, kwargs, allowed_args
+                        )
+                        _check_deprecated_args(func, filterable_args)
+                    return await func(*args, **kwargs)
+
+                return async_wrapper
+            else:
+
+                @wraps(func)
+                def wrapper(*args, **kwargs):
+                    if (
+                        kwargs
+                        and any(k != "self" and k not in allowed_set for k in kwargs)
+                    ) or (
+                        min_disallowed_pos_idx is not None
+                        and len(args) > min_disallowed_pos_idx
+                    ):
+                        filterable_args = _get_filterable_args(
+                            func, args, kwargs, allowed_args
+                        )
+                        _check_deprecated_args(func, filterable_args)
+                    return func(*args, **kwargs)
+
+                return wrapper
         else:
+            if not warn_set:
+                return func
 
-            @wraps(func)
-            def wrapper(*args, **kwargs):
-                filterable_args = _get_filterable_args(func, args, kwargs, allowed_args)
-                _check_deprecated_args(func, filterable_args)
-                return func(*args, **kwargs)
+            warn_indices = [
+                i
+                for i, name in enumerate(pos_names)
+                if name in warn_set and name != "self"
+            ]
+            min_warn_pos_idx = min(warn_indices) if warn_indices else None
 
-            return wrapper
+            if len(warn_set) == 1:
+                single_warn = next(iter(warn_set))
+
+                def _has_warn(args, kwargs):
+                    return (single_warn in kwargs) or (
+                        min_warn_pos_idx is not None
+                        and len(args) > min_warn_pos_idx
+                    )
+            else:
+
+                def _has_warn(args, kwargs):
+                    return (
+                        bool(kwargs) and any(k in warn_set for k in kwargs)
+                    ) or (
+                        min_warn_pos_idx is not None
+                        and len(args) > min_warn_pos_idx
+                    )
+
+            if inspect.iscoroutinefunction(func):
+
+                @wraps(func)
+                async def async_wrapper(*args, **kwargs):
+                    if _has_warn(args, kwargs):
+                        filterable_args = _get_filterable_args(
+                            func, args, kwargs, allowed_args
+                        )
+                        _check_deprecated_args(func, filterable_args)
+                    return await func(*args, **kwargs)
+
+                return async_wrapper
+            else:
+
+                @wraps(func)
+                def wrapper(*args, **kwargs):
+                    if _has_warn(args, kwargs):
+                        filterable_args = _get_filterable_args(
+                            func, args, kwargs, allowed_args
+                        )
+                        _check_deprecated_args(func, filterable_args)
+                    return func(*args, **kwargs)
+
+                return wrapper
 
     return decorator
 
@@ -510,6 +621,8 @@ def experimental_args(
     """
     if args_to_warn is None:
         args_to_warn = ["*"]
+    is_wildcard = "*" in args_to_warn
+    warn_set = set(args_to_warn)
 
     def _check_experimental_args(func, filterable_args):
         """Check and warn about experimental arguments."""
@@ -522,25 +635,118 @@ def experimental_args(
                 warn_experimental_arg_usage(arg, func.__name__, stacklevel=4)
 
     def decorator(func: C) -> C:
-        if inspect.iscoroutinefunction(func):
+        if not hasattr(func, "__code__"):
+            # Fallback for callables without a code object
+            if inspect.iscoroutinefunction(func):
 
-            @wraps(func)
-            async def async_wrapper(*args, **kwargs):
-                filterable_args = _get_filterable_args(func, args, kwargs)
-                if len(filterable_args) > 0:
-                    _check_experimental_args(func, filterable_args)
-                return await func(*args, **kwargs)
+                @wraps(func)
+                async def async_wrapper(*args, **kwargs):
+                    filterable_args = _get_filterable_args(func, args, kwargs)
+                    if len(filterable_args) > 0:
+                        _check_experimental_args(func, filterable_args)
+                    return await func(*args, **kwargs)
 
-            return async_wrapper
+                return async_wrapper
+            else:
+
+                @wraps(func)
+                def wrapper(*args, **kwargs):
+                    filterable_args = _get_filterable_args(func, args, kwargs)
+                    if len(filterable_args) > 0:
+                        _check_experimental_args(func, filterable_args)
+                    return func(*args, **kwargs)
+
+                return wrapper
+
+        pos_names = func.__code__.co_varnames[: func.__code__.co_argcount]
+
+        if is_wildcard:
+            disallowed_indices = [
+                i for i, name in enumerate(pos_names) if name != "self"
+            ]
+            min_disallowed_pos_idx = (
+                min(disallowed_indices) if disallowed_indices else None
+            )
+
+            if inspect.iscoroutinefunction(func):
+
+                @wraps(func)
+                async def async_wrapper(*args, **kwargs):
+                    if (
+                        kwargs and any(k != "self" for k in kwargs)
+                    ) or (
+                        min_disallowed_pos_idx is not None
+                        and len(args) > min_disallowed_pos_idx
+                    ):
+                        filterable_args = _get_filterable_args(func, args, kwargs)
+                        if len(filterable_args) > 0:
+                            _check_experimental_args(func, filterable_args)
+                    return await func(*args, **kwargs)
+
+                return async_wrapper
+            else:
+
+                @wraps(func)
+                def wrapper(*args, **kwargs):
+                    if (
+                        kwargs and any(k != "self" for k in kwargs)
+                    ) or (
+                        min_disallowed_pos_idx is not None
+                        and len(args) > min_disallowed_pos_idx
+                    ):
+                        filterable_args = _get_filterable_args(func, args, kwargs)
+                        if len(filterable_args) > 0:
+                            _check_experimental_args(func, filterable_args)
+                    return func(*args, **kwargs)
+
+                return wrapper
         else:
+            warn_indices = [
+                i
+                for i, name in enumerate(pos_names)
+                if name in warn_set and name != "self"
+            ]
+            min_warn_pos_idx = min(warn_indices) if warn_indices else None
 
-            @wraps(func)
-            def wrapper(*args, **kwargs):
-                filterable_args = _get_filterable_args(func, args, kwargs)
-                if len(filterable_args) > 0:
-                    _check_experimental_args(func, filterable_args)
-                return func(*args, **kwargs)
+            if len(warn_set) == 1:
+                single_warn = next(iter(warn_set))
 
-            return wrapper
+                def _has_warn(args, kwargs):
+                    return (single_warn in kwargs) or (
+                        min_warn_pos_idx is not None
+                        and len(args) > min_warn_pos_idx
+                    )
+            else:
+
+                def _has_warn(args, kwargs):
+                    return (
+                        bool(kwargs) and any(k in warn_set for k in kwargs)
+                    ) or (
+                        min_warn_pos_idx is not None
+                        and len(args) > min_warn_pos_idx
+                    )
+
+            if inspect.iscoroutinefunction(func):
+
+                @wraps(func)
+                async def async_wrapper(*args, **kwargs):
+                    if _has_warn(args, kwargs):
+                        filterable_args = _get_filterable_args(func, args, kwargs)
+                        if len(filterable_args) > 0:
+                            _check_experimental_args(func, filterable_args)
+                    return await func(*args, **kwargs)
+
+                return async_wrapper
+            else:
+
+                @wraps(func)
+                def wrapper(*args, **kwargs):
+                    if _has_warn(args, kwargs):
+                        filterable_args = _get_filterable_args(func, args, kwargs)
+                        if len(filterable_args) > 0:
+                            _check_experimental_args(func, filterable_args)
+                    return func(*args, **kwargs)
+
+                return wrapper
 
     return decorator
