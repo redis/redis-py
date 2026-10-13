@@ -1,7 +1,8 @@
-from datetime import datetime, timedelta, timezone
 import warnings
+from datetime import datetime, timedelta, timezone
 import pytest
 from redis.exceptions import DataError
+import redis.utils as ru
 from redis.utils import (
     check_protocol_version,
     compare_versions,
@@ -221,7 +222,6 @@ class TestDeprecatedArgs:
             assert len(w) == 0
 
     def test_fast_path_bypasses_filterable_args_construction(self, monkeypatch):
-        import redis.utils as ru
         called = False
         orig_get = ru._get_filterable_args
 
@@ -238,6 +238,34 @@ class TestDeprecatedArgs:
 
         assert record_metric("GET", 0.001, "localhost", 6379) == ("GET", 0.001)
         assert not called, "_get_filterable_args should not be called on clean hot path"
+
+    def test_mutable_args_input_snapshotting(self):
+        # Mutating the list passed to args_to_warn or allowed_args after decorator
+        # definition should not desynchronize the decorator configuration.
+        warn_list = ["old_param"]
+        allowed_list = ["allowed_param"]
+
+        @deprecated_args(args_to_warn=warn_list, allowed_args=allowed_list)
+        def func(allowed_param=None, old_param=None, new_param=None):
+            return (allowed_param, old_param, new_param)
+
+        warn_list.append("new_param")
+        allowed_list.clear()
+
+        # allowed_param remains allowed because allowed_list was snapshotted
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            res = func(allowed_param="val")
+            assert res == ("val", None, None)
+            assert len(w) == 0
+
+        # old_param still triggers deprecation warning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            res = func(old_param="val")
+            assert res == (None, "val", None)
+            assert len(w) == 1
+            assert "old_param" in str(w[0].message)
 
 
 # Tests for experimental_method decorator
@@ -310,7 +338,6 @@ class TestExperimentalArgs:
             assert "beta_param" in str(w[0].message)
 
     def test_experimental_fast_path_bypasses_filterable_args(self, monkeypatch):
-        import redis.utils as ru
         called = False
         orig_get = ru._get_filterable_args
 
