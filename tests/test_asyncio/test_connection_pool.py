@@ -1109,7 +1109,9 @@ class TestMultiConnectionClient:
 
 
 @pytest.mark.onlynoncluster
-@pytest.mark.xfail(strict=False)
+# r.connection is the connection under test, as in the sync tests, so only the
+# single-connection variant of create_redis applies
+@pytest.mark.parametrize("create_redis", [(True,)], ids=["single"], indirect=True)
 class TestHealthCheck:
     interval = 60
 
@@ -1119,47 +1121,49 @@ class TestHealthCheck:
         yield redis
         await redis.flushall()
 
-    def assert_interval_advanced(self, connection):
-        diff = connection.next_health_check - asyncio.get_running_loop().time()
-        assert self.interval >= diff > (self.interval - 1)
+    def assert_interval_advanced(self, connection, start):
+        # next_health_check is set from the clock when a reply is read,
+        # which happens between `start` and now
+        now = asyncio.get_running_loop().time()
+        assert (
+            start + self.interval <= connection.next_health_check <= now + self.interval
+        )
 
     async def test_health_check_runs(self, r):
-        if r.connection:
-            r.connection.next_health_check = asyncio.get_running_loop().time() - 1
-            await r.connection.check_health()
-            self.assert_interval_advanced(r.connection)
+        r.connection.next_health_check = asyncio.get_running_loop().time() - 1
+        start = asyncio.get_running_loop().time()
+        await r.connection.check_health()
+        self.assert_interval_advanced(r.connection, start)
 
     async def test_arbitrary_command_invokes_health_check(self, r):
         # invoke a command to make sure the connection is entirely setup
-        if r.connection:
+        await r.get("foo")
+        r.connection.next_health_check = asyncio.get_running_loop().time() - 1
+        start = asyncio.get_running_loop().time()
+        with mock.patch.object(
+            r.connection, "send_command", wraps=r.connection.send_command
+        ) as m:
             await r.get("foo")
-            r.connection.next_health_check = asyncio.get_running_loop().time()
-            with mock.patch.object(
-                r.connection, "send_command", wraps=r.connection.send_command
-            ) as m:
-                await r.get("foo")
-                m.assert_called_with("PING", check_health=False)
+            m.assert_called_with("PING", check_health=False)
 
-            self.assert_interval_advanced(r.connection)
+        self.assert_interval_advanced(r.connection, start)
 
     async def test_arbitrary_command_advances_next_health_check(self, r):
-        if r.connection:
-            await r.get("foo")
-            next_health_check = r.connection.next_health_check
-            # ensure that the event loop's `time()` advances a bit
-            await asyncio.sleep(0.001)
-            await r.get("foo")
-            assert next_health_check < r.connection.next_health_check
+        await r.get("foo")
+        next_health_check = r.connection.next_health_check
+        # ensure that the event loop's `time()` advances a bit
+        await asyncio.sleep(0.001)
+        await r.get("foo")
+        assert next_health_check < r.connection.next_health_check
 
     async def test_health_check_not_invoked_within_interval(self, r):
-        if r.connection:
+        await r.get("foo")
+        with mock.patch.object(
+            r.connection, "send_command", wraps=r.connection.send_command
+        ) as m:
             await r.get("foo")
-            with mock.patch.object(
-                r.connection, "send_command", wraps=r.connection.send_command
-            ) as m:
-                await r.get("foo")
-                ping_call_spec = (("PING",), {"check_health": False})
-                assert ping_call_spec not in m.call_args_list
+            ping_call_spec = (("PING",), {"check_health": False})
+            assert ping_call_spec not in m.call_args_list
 
     async def test_health_check_in_pipeline(self, r):
         async with r.pipeline(transaction=False) as pipe:
@@ -1191,10 +1195,11 @@ class TestHealthCheck:
             with mock.patch.object(
                 pipe.connection, "send_command", wraps=pipe.connection.send_command
             ) as m:
+                start = asyncio.get_running_loop().time()
                 await pipe.watch("foo")
                 # the health check should be called when watching
                 m.assert_called_with("PING", check_health=False)
-                self.assert_interval_advanced(pipe.connection)
+                self.assert_interval_advanced(pipe.connection, start)
                 assert await pipe.get("foo") == b"bar"
 
                 # reset the mock to clear the call list and schedule another
@@ -1216,12 +1221,13 @@ class TestHealthCheck:
             p.connection, "send_command", wraps=p.connection.send_command
         ) as m:
             assert not p.subscribed
+            start = asyncio.get_running_loop().time()
             await p.subscribe("foo")
             # the connection is not yet in pubsub mode, so the normal
             # ping/pong within connection.send_command should check
             # the health of the connection
             m.assert_any_call("PING", check_health=False)
-            self.assert_interval_advanced(p.connection)
+            self.assert_interval_advanced(p.connection, start)
 
             subscribe_message = await wait_for_message(p)
             assert subscribe_message["type"] == "subscribe"
@@ -1237,10 +1243,11 @@ class TestHealthCheck:
         with mock.patch.object(
             p.connection, "send_command", wraps=p.connection.send_command
         ) as m:
+            start = asyncio.get_running_loop().time()
             await p.subscribe("foo")
             subscribe_message = await wait_for_message(p)
             assert subscribe_message["type"] == "subscribe"
-            self.assert_interval_advanced(p.connection)
+            self.assert_interval_advanced(p.connection, start)
             # because we weren't subscribed when sending the subscribe
             # message to 'foo', the connection's standard check_health ran
             # prior to subscribing.
@@ -1249,6 +1256,7 @@ class TestHealthCheck:
             p.connection.next_health_check = 0
             m.reset_mock()
 
+            start = asyncio.get_running_loop().time()
             await p.subscribe("bar")
             # the second subscribe issues exactly only command (the subscribe)
             # and the health check is not invoked
@@ -1264,7 +1272,7 @@ class TestHealthCheck:
             # now that the connection is subscribed, the pubsub health
             # check should have taken over and include the HEALTH_CHECK_MESSAGE
             m.assert_any_call("PING", p.HEALTH_CHECK_MESSAGE, check_health=False)
-            self.assert_interval_advanced(p.connection)
+            self.assert_interval_advanced(p.connection, start)
 
     async def test_health_check_in_pubsub_poll(self, r):
         """
@@ -1276,10 +1284,11 @@ class TestHealthCheck:
         with mock.patch.object(
             p.connection, "send_command", wraps=p.connection.send_command
         ) as m:
+            start = asyncio.get_running_loop().time()
             await p.subscribe("foo")
             subscribe_message = await wait_for_message(p)
             assert subscribe_message["type"] == "subscribe"
-            self.assert_interval_advanced(p.connection)
+            self.assert_interval_advanced(p.connection, start)
 
             # polling the connection before the health check interval
             # doesn't result in another health check
@@ -1294,9 +1303,10 @@ class TestHealthCheck:
             # we should not receive a pong message, but the next_health_check
             # should be advanced
             p.connection.next_health_check = 0
+            start = asyncio.get_running_loop().time()
             assert await p.get_message(timeout=1) is None
             m.assert_called_with("PING", p.HEALTH_CHECK_MESSAGE, check_health=False)
-            self.assert_interval_advanced(p.connection)
+            self.assert_interval_advanced(p.connection, start)
 
 
 @pytest.mark.fixed_client
