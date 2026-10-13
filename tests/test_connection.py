@@ -2720,7 +2720,9 @@ class TestCacheProxyRefresh:
         proxy._conn.read_response.return_value = b"new"
         assert proxy._refresh_entry(key) is CSCRefreshResult.SUCCESS
 
-    def test_a_refresh_asks_whether_it_is_current_once_staked(self, proxy, cache):
+    def test_a_refresh_asks_whether_it_is_current_once_staked_and_once_stored(
+        self, proxy, cache
+    ):
         key = get_cache_key("foo")
         seen = []
 
@@ -2733,7 +2735,31 @@ class TestCacheProxyRefresh:
         assert proxy._refresh_entry(key, is_current=is_current) is (
             CSCRefreshResult.SUCCESS
         )
-        assert seen == [CacheEntryStatus.IN_PROGRESS]
+        assert seen == [CacheEntryStatus.IN_PROGRESS, CacheEntryStatus.VALID]
+
+    def test_a_flush_between_the_promote_check_and_the_store_keeps_nothing(
+        self, proxy, cache
+    ):
+        # Another connection's flush takes its own cache lock, so it can land after
+        # ``read_response`` found the placeholder and before it stores the reply.
+        key = get_cache_key("foo")
+        current = [True]
+        original_get = cache.get
+
+        def flush_after_the_promote_check(cache_key):
+            entry = original_get(cache_key)
+            if entry is not None and proxy._conn.read_response.called and current[0]:
+                # What ``_flush_cache`` does: the refresher first, then the cache.
+                current[0] = False
+                cache.flush()
+            return entry
+
+        proxy._conn.read_response.return_value = b"new"
+        with patch.object(cache, "get", side_effect=flush_after_the_promote_check):
+            result = proxy._refresh_entry(key, is_current=lambda: current[0])
+
+        assert result is CSCRefreshResult.DISCARDED
+        assert cache.size == 0
 
     def test_a_flush_tells_the_refresher_before_emptying_the_cache(
         self, proxy, cache, refresher

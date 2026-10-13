@@ -2098,10 +2098,11 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         # The command in flight is a refresh, which is not a read: it records no cache
         # request.
         self._refresh_in_progress = False
-        # Asked by a refresh once its placeholder is staked: False means the cache was
-        # flushed since the refresh was queued.
+        # Asked by a refresh once its placeholder is staked and once its reply is stored:
+        # False means the cache was flushed since the refresh was queued.
         self._refresh_is_current: Callable[[], bool] | None = None
-        # Set when ``send_command`` dropped a refresh for that reason and sent nothing.
+        # Set when a refresh was dropped for that reason: by ``send_command`` before
+        # anything was sent, or by ``read_response`` after its reply was stored.
         self._refresh_cancelled = False
         self.register_connect_callback(self._enable_tracking_callback)
 
@@ -2488,6 +2489,20 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 cache_entry.cache_value = response
                 self._cache.set(cache_entry)
 
+                # Another connection's flush takes its own cache lock, not this one, so it
+                # can land between the ``get`` and the ``set`` above. The refresher counts a
+                # flush before it empties the cache, so asking after the ``set`` catches
+                # every flush the placeholder did not go with: a flush refreshes nothing.
+                if (
+                    self._refresh_is_current is not None
+                    and not self._refresh_is_current()
+                ):
+                    if self._cache.get(self._current_command_cache_key) is cache_entry:
+                        self._cache.delete_by_cache_keys(
+                            [self._current_command_cache_key]
+                        )
+                    self._refresh_cancelled = True
+
             self._current_command_cache_key = None
 
         return response
@@ -2507,8 +2522,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         Args:
             cache_key: The key of the entry the invalidation removed. It holds the whole
                 command, so this replays the original read.
-            is_current: Asked once the placeholder is staked. False means the cache was
-                flushed since the refresh was queued, and nothing is sent.
+            is_current: Asked once the placeholder is staked, and again once the reply is
+                stored. False means the cache was flushed since the refresh was queued:
+                nothing is sent, or the stored reply is removed.
 
         Returns:
             CSCRefreshResult | None: ``SUCCESS`` when the reply was stored, ``DISCARDED``
@@ -2549,12 +2565,18 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                     placeholder = entry
 
             self.read_response()
+            # Stored, then removed again because the cache was flushed meanwhile.
+            flushed = self._refresh_cancelled
         finally:
             self._refresh_in_progress = False
             self._refresh_is_current = None
             self._refresh_cancelled = False
 
-        if placeholder is not None and placeholder.status == CacheEntryStatus.VALID:
+        if (
+            placeholder is not None
+            and placeholder.status == CacheEntryStatus.VALID
+            and not flushed
+        ):
             return CSCRefreshResult.SUCCESS
         return CSCRefreshResult.DISCARDED
 

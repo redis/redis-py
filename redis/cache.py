@@ -1074,9 +1074,10 @@ class CacheRefresher:
         refilled by work queued before it was emptied. The queued jobs are removed, so the
         queue never holds more than ``max_inflight`` keys, however often the cache is
         flushed while the worker is busy. The job the worker holds checks the generation
-        once it has a connection, and again when ``send_command`` has staked its
-        placeholder: a flush before that point stops it, and a flush after it removes the
-        placeholder, so its reply is not stored.
+        once it has a connection, again when ``send_command`` has staked its placeholder,
+        and again when ``read_response`` has stored its reply: a flush before the second
+        check stops it, and a flush after it either removes the placeholder or is seen by
+        the third check, which removes the stored reply.
 
         Does no I/O and takes no lock but ``_lock``, like ``submit``: it is called under a
         connection's cache lock.
