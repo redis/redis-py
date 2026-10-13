@@ -336,6 +336,57 @@ class TestTransaction:
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
             (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    def test_transaction_forwards_watches_and_options(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+
+        with (
+            patch.object(mock_multi_db_config, "databases", return_value=databases),
+            patch.object(
+                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
+            ),
+        ):
+            mock_db1.client.transaction.return_value = ["OK1", "value1"]
+
+            mock_hc.check_health.return_value = True
+
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+
+                def callback(pipe: Pipeline):
+                    pipe.set("key1", "value1")
+                    pipe.get("key1")
+
+                assert client.transaction(
+                    callback,
+                    "watched-key",
+                    value_from_callable=True,
+                    watch_delay=2.5,
+                ) == ["OK1", "value1"]
+                # watched keys must stay positional; transaction options
+                # must reach the active client as keyword arguments
+                mock_db1.client.transaction.assert_called_once_with(
+                    callback,
+                    "watched-key",
+                    value_from_callable=True,
+                    watch_delay=2.5,
+                )
+            finally:
+                client.close()
+
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
                 {"initial_health_check_policy": InitialHealthCheck.MAJORITY_AVAILABLE},
                 {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},

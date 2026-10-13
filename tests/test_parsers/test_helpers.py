@@ -1,3 +1,5 @@
+import inspect
+
 import pytest
 
 from redis._parsers.helpers import (
@@ -5,6 +7,7 @@ from redis._parsers.helpers import (
     pairs_to_dict_typed,
     parse_acl_log,
     parse_acl_log_resp3_to_resp2_legacy,
+    parse_client_info,
     parse_client_list,
     parse_command,
     parse_info,
@@ -97,6 +100,60 @@ def test_parse_client_list():
     ]
     clients = parse_client_list(response)
     assert clients == expected
+
+
+@pytest.mark.fixed_client
+def test_parse_client_list_as_iter():
+    # ``as_iter=True`` (client_list_iter's opt-in path) must yield the same
+    # records as the eager list form, just lazily and one at a time.
+    response = "id=1 addr=127.0.0.1:1\nid=2 addr=127.0.0.1:2"
+    result = parse_client_list(response, as_iter=True)
+    assert inspect.isgenerator(result)
+    assert list(result) == parse_client_list(response)
+
+
+@pytest.mark.fixed_client
+def test_parse_client_info():
+    # A CLIENT INFO value can contain both a space (a unix-socket addr such as
+    # "/tmp/redis sock/redis.sock") and an "=" (a client name like
+    # "test=_complex_[name]"), the same tricky data parse_client_list handles.
+    # Int-typed fields are additionally coerced to int.
+    info = (
+        "id=7 addr=/tmp/redis sock/redis.sock:0 name=test=_complex_[name] "
+        "age=-1 db=0 lib-ver="
+    )
+    assert parse_client_info(info) == {
+        "id": 7,
+        "addr": "/tmp/redis sock/redis.sock:0",
+        "name": "test=_complex_[name]",
+        "age": -1,
+        "db": 0,
+        "lib-ver": "",
+    }
+
+
+@pytest.mark.fixed_client
+def test_parse_client_info_empty():
+    # An empty or whitespace-only client-info stays an empty dict rather than
+    # raising. ACL LOG entries omit client-info as "" (see parse_acl_log), so
+    # this path must not crash.
+    assert parse_client_info("") == {}
+    assert parse_client_info("   ") == {}
+
+
+@pytest.mark.fixed_client
+def test_parse_client_list_shares_guard():
+    # parse_client_list and parse_client_info parse the same server blob and
+    # now share one tokenizer, so the leading-token guard added for CLIENT INFO
+    # also protects CLIENT LIST. A line whose first token has no "=" (only
+    # possible with malformed input) is skipped instead of raising KeyError.
+    assert parse_client_list("junk id=3") == [{"id": "3"}]
+    # Consecutive spaces inside a value round-trip verbatim: a unix-socket
+    # path can contain two or more spaces in a row, and CLIENT LIST on master
+    # preserves them, so the shared tokenizer must not collapse them.
+    assert parse_client_list("id=1 addr=/tmp/a  b/r.sock:0 fd=9") == [
+        {"id": "1", "addr": "/tmp/a  b/r.sock:0", "fd": "9"}
+    ]
 
 
 @pytest.mark.fixed_client

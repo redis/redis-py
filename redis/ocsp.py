@@ -47,7 +47,7 @@ def _verify_response(issuer_cert, ocsp_response):
         raise ConnectionError("failed to valid ocsp response")
 
 
-def _check_certificate(issuer_cert, ocsp_bytes, validate=True):
+def _check_certificate(issuer_cert, cert, ocsp_bytes, validate=True):
     """A wrapper the return the validity of a known ocsp certificate"""
 
     ocsp_response = ocsp.load_der_ocsp_response(ocsp_bytes)
@@ -55,6 +55,14 @@ def _check_certificate(issuer_cert, ocsp_bytes, validate=True):
     if ocsp_response.response_status == ocsp.OCSPResponseStatus.UNAUTHORIZED:
         raise AuthorizationError("you are not authorized to view this ocsp certificate")
     if ocsp_response.response_status == ocsp.OCSPResponseStatus.SUCCESSFUL:
+        # Bind the response to the certificate we are validating. A response is
+        # only about the serial it names, so a validly signed GOOD response for
+        # a different (non-revoked) certificate from the same issuer must not be
+        # accepted in place of the one under check.
+        if ocsp_response.serial_number != cert.serial_number:
+            raise ConnectionError(
+                "ocsp response serial number does not match the certificate"
+            )
         if ocsp_response.certificate_status != ocsp.OCSPCertStatus.GOOD:
             raise ConnectionError(
                 f"Received an {str(ocsp_response.certificate_status).split('.')[1]} "
@@ -164,7 +172,7 @@ def ocsp_staple_verifier(con, ocsp_bytes, expected=None):
         if peer_cert != e:
             raise ConnectionError("received and expected certificates do not match")
 
-    return _check_certificate(issuer_cert, ocsp_bytes)
+    return _check_certificate(issuer_cert, peer_cert, ocsp_bytes)
 
 
 class OCSPVerifier:
@@ -285,7 +293,7 @@ class OCSPVerifier:
         r = requests.get(ocsp_url, headers=header)
         if not r.ok:
             raise ConnectionError("failed to fetch ocsp certificate")
-        return _check_certificate(issuer_cert, r.content, True)
+        return _check_certificate(issuer_cert, cert, r.content, True)
 
     def is_valid(self):
         """Returns the validity of the certificate wrapping our socket.

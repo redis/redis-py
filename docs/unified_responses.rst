@@ -330,6 +330,22 @@ Probabilistic
      - ``"42"`` could become ``42``
      - ``"42"`` stays ``"42"``
 
+Vector Sets
+^^^^^^^^^^^
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 32 22 22
+
+   * - Command
+     - Change
+     - RESP2 legacy example
+     - Unified example
+   * - ``VEMB``
+     - Vector components are always floats, as on RESP3.
+     - ``[1, 0.5, 0]``
+     - ``[1.0, 0.5, 0.0]``
+
 
 RESP3 Legacy to Unified
 -----------------------

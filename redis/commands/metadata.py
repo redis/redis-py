@@ -352,6 +352,27 @@ class MetadataResolver(ABC):
         pass
 
     @abstractmethod
+    def is_trackable_read(self, command_name: str) -> bool:
+        """
+        Determines whether the server would remember this command's keys while tracking.
+
+        The server-side-tracking view of :meth:`resolve`, decided by
+        :func:`_is_trackable_read`. Never affects what may be stored: it only decides whether
+        a ``CLIENT CACHING NO`` in front of a read is worth sending under ``optout`` tracking.
+        When in doubt it returns False, so the ``NO`` is skipped and the server keeps
+        tracking the keys. That is the safe side: an extra tracked key only costs an entry in
+        the server's invalidation table, but a stored reply that the server does not track is
+        never invalidated and can go stale.
+
+        Args:
+            command_name: The name of the command to check, in any case.
+
+        Returns:
+            bool: True only when the command carries the ``readonly`` command flag.
+        """
+        pass
+
+    @abstractmethod
     def with_fallback(self, fallback: "MetadataResolver") -> "MetadataResolver":
         """
         Factory method to instantiate a metadata resolver with a fallback resolver.
@@ -429,6 +450,27 @@ class AsyncMetadataResolver(ABC):
         pass
 
     @abstractmethod
+    async def is_trackable_read(self, command_name: str) -> bool:
+        """
+        Determines whether the server would remember this command's keys while tracking.
+
+        The server-side-tracking view of :meth:`resolve`, decided by
+        :func:`_is_trackable_read`. Never affects what may be stored: it only decides whether
+        a ``CLIENT CACHING NO`` in front of a read is worth sending under ``optout`` tracking.
+        When in doubt it returns False, so the ``NO`` is skipped and the server keeps
+        tracking the keys. That is the safe side: an extra tracked key only costs an entry in
+        the server's invalidation table, but a stored reply that the server does not track is
+        never invalidated and can go stale.
+
+        Args:
+            command_name: The name of the command to check, in any case.
+
+        Returns:
+            bool: True only when the command carries the ``readonly`` command flag.
+        """
+        pass
+
+    @abstractmethod
     def with_fallback(
         self, fallback: "AsyncMetadataResolver"
     ) -> "AsyncMetadataResolver":
@@ -477,6 +519,10 @@ class BaseMetadataResolver(MetadataResolver):
         self._replica_safe: dict[str, bool] = {
             cmd: False for cmd in _REPLICA_UNSAFE_COMMANDS
         }
+        # No ``_REPLICA_UNSAFE_COMMANDS`` pre-seed: trackability is the readonly flag alone,
+        # and TOUCH - the one command that seed excludes - is precisely the trackable read
+        # ``optout`` most wants to exempt.
+        self._trackable_read: dict[str, bool] = {}
 
     def resolve(self, command_name: str) -> CommandMetadata | None:
         module, command = _split_command_name(command_name)
@@ -566,6 +612,29 @@ class BaseMetadataResolver(MetadataResolver):
 
         return replica_safe
 
+    def is_trackable_read(self, command_name: str) -> bool:
+        if not isinstance(command_name, str):
+            return False
+
+        memo_key = command_name.lower()
+
+        try:
+            return self._trackable_read[memo_key]
+        except KeyError:
+            pass
+
+        try:
+            metadata = self.resolve(command_name)
+        except ValueError:
+            metadata = None
+
+        trackable_read = _is_trackable_read(metadata)
+
+        if len(self._trackable_read) < _MEMO_MAX_ENTRIES:
+            self._trackable_read[memo_key] = trackable_read
+
+        return trackable_read
+
     @abstractmethod
     def with_fallback(self, fallback: "MetadataResolver") -> "MetadataResolver":
         pass
@@ -604,6 +673,10 @@ class AsyncBaseMetadataResolver(AsyncMetadataResolver):
         self._replica_safe: dict[str, bool] = {
             cmd: False for cmd in _REPLICA_UNSAFE_COMMANDS
         }
+        # No ``_REPLICA_UNSAFE_COMMANDS`` pre-seed: trackability is the readonly flag alone,
+        # and TOUCH - the one command that seed excludes - is precisely the trackable read
+        # ``optout`` most wants to exempt.
+        self._trackable_read: dict[str, bool] = {}
 
     async def resolve(self, command_name: str) -> CommandMetadata | None:
         module, command = _split_command_name(command_name)
@@ -692,6 +765,29 @@ class AsyncBaseMetadataResolver(AsyncMetadataResolver):
             self._replica_safe[memo_key] = replica_safe
 
         return replica_safe
+
+    async def is_trackable_read(self, command_name: str) -> bool:
+        if not isinstance(command_name, str):
+            return False
+
+        memo_key = command_name.lower()
+
+        try:
+            return self._trackable_read[memo_key]
+        except KeyError:
+            pass
+
+        try:
+            metadata = await self.resolve(command_name)
+        except ValueError:
+            metadata = None
+
+        trackable_read = _is_trackable_read(metadata)
+
+        if len(self._trackable_read) < _MEMO_MAX_ENTRIES:
+            self._trackable_read[memo_key] = trackable_read
+
+        return trackable_read
 
     @abstractmethod
     def with_fallback(
@@ -875,6 +971,29 @@ def _is_replica_safe(metadata: CommandMetadata | None) -> bool:
 
     Takes ``None`` - what an exhausted resolver chain resolves to - so the
     unknown-command case is decided here as well.
+    """
+    if metadata is None:
+        return False
+
+    return metadata.is_readonly
+
+
+def _is_trackable_read(metadata: CommandMetadata | None) -> bool:
+    """
+    Decide whether the server would remember the keys of the command a record describes.
+
+    The ``readonly`` command flag alone, because that plus the key names of the invocation is
+    the whole gate the server applies before it records a read against a tracking client. The
+    negative signals that make a command ineligible to store do not enter it: ``XPENDING`` is
+    tipped ``nondeterministic_output`` and ``TOUCH`` is tipped ``dont_cache``, and the server
+    tracks both.
+
+    Deliberately does not require ``has_complete_metadata``, unlike
+    :func:`_is_client_side_cacheable`: the readonly flag comes from the command flags, which
+    every ``COMMAND`` reply carries, and only the tips can be missing.
+
+    Takes ``None`` - what an exhausted resolver chain resolves to - so the unknown-command
+    case is decided here as well.
     """
     if metadata is None:
         return False
@@ -1169,7 +1288,9 @@ _DONT_CACHE_WRITE_KEYED = replace(_WRITE_KEYED, is_dont_cache=True)
 # Every entry below was validated against a live ``COMMAND`` reply from Redis 8.10.0 with
 # search, timeseries, ReJSON, bf and vectorset loaded (the ``redislabs/client-libs-test``
 # stack image), with the core entries also compared against 7.4.2 to ensure the minimum
-# supported version does not disagree on the fields that decide cacheability.
+# supported version does not disagree on the fields that decide cacheability. The one
+# exception is the ``bless`` container, which first ships in 8.11 and was validated against
+# that release's ``COMMAND INFO`` reply.
 #
 # The table is not exhaustive: on 8.10.0 the server reports 127 cacheable commands and this
 # covers 80 of them. The count is version-qualified because it moves between releases - a
@@ -1196,9 +1317,9 @@ _DONT_CACHE_WRITE_KEYED = replace(_WRITE_KEYED, is_dont_cache=True)
 # recorded ``nondeterministic_output`` where the server tips it nothing. The ``movablekeys``
 # reads - ``eval_ro``, ``evalsha_ro``, ``fcall_ro``, ``sdiffcard``, ``sintercard``,
 # ``sunioncard``, ``xread``, ``zdiff``, ``zinter``, ``zintercard`` and ``zunion`` - plus
-# ``command``, ``dbsize``, ``keys``, ``randomkey``, ``scan``, ``touch`` and ``vrandmember``
-# withhold their routing policies entirely, so the cluster client keeps resolving their
-# targets itself. Their cacheability inputs are unaffected.
+# ``bless scan``, ``command``, ``dbsize``, ``keys``, ``randomkey``, ``scan``, ``touch`` and
+# ``vrandmember`` withhold their routing policies entirely, so the cluster client keeps
+# resolving their targets itself. Their cacheability inputs are unaffected.
 _STATIC_COMMAND_METADATA: CommandMetadataRecordsCache = MappingProxyType(
     {
         "core": MappingProxyType(
@@ -1206,6 +1327,33 @@ _STATIC_COMMAND_METADATA: CommandMetadataRecordsCache = MappingProxyType(
                 "bitcount": _CACHEABLE_KEYED,
                 "bitfield_ro": _CACHEABLE_KEYED,
                 "bitpos": _CACHEABLE_KEYED,
+                # The BLESS container, keyed by subcommand the way ``execute_command``
+                # receives it. Validated against the 8.11 ``COMMAND INFO`` reply, the first
+                # release that reports it.
+                "bless clear": _WRITE_KEYED,
+                # Not cacheable and not replica-eligible: the server flags BLESS GET ``fast``
+                # only - neither ``readonly`` nor ``write`` - and ``is_readonly`` records the
+                # command flag, not the ``RO`` key spec, so it fails closed on both counts.
+                # Recorded with the write shape for the same reason ``command`` is below.
+                "bless get": _WRITE_KEYED,
+                # Keyless, tipped nondeterministic_output and request_policy:special /
+                # response_policy:special, exactly like SCAN. Routing policies are withheld
+                # for the same reason as SCAN: the cluster client routes BLESS SCAN to all
+                # primary nodes (PRIMARIES) through its COMMAND_FLAGS entry and merges the
+                # per-node cursors. Unlike SCAN the server reports no flags at all, so it is
+                # not readonly.
+                "bless scan": CommandMetadata(
+                    request_policy=None,
+                    response_policy=None,
+                    is_readonly=False,
+                    is_blocking=False,
+                    has_key_argument=False,
+                    has_nondeterministic_output=True,
+                    is_script_runner=False,
+                    is_dont_cache=False,
+                    has_complete_metadata=True,
+                ),
+                "bless set": _WRITE_KEYED,
                 # From STATIC_POLICIES. COMMAND is flagged loading/stale, not readonly,
                 # and takes no keys. Routing policies are withheld so the cluster client preserves
                 # the 2-word COMMAND COUNT, COMMAND LIST, COMMAND GETKEYS default-node flags.

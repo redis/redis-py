@@ -643,6 +643,29 @@ async def test_vemb_unexisting(d_client):
 
 
 @skip_if_server_version_lt("7.9.0")
+async def test_vemb_unified_responses_return_floats_on_both_protocols(
+    create_redis, redis_url
+):
+    vector = [1, 0.5, 0]
+    embs = {}
+    for protocol in (2, 3):
+        r = await create_redis(
+            url=redis_url,
+            decode_responses=True,
+            protocol=protocol,
+            legacy_responses=False,
+        )
+        await r.delete("myset")
+        await r.vset().vadd(
+            "myset", vector, "elem", quantization=QuantizationOptions.NOQUANT
+        )
+        embs[protocol] = await r.vset().vemb("myset", "elem")
+
+    assert all(isinstance(value, float) for value in embs[2] + embs[3])
+    assert embs[2] == embs[3] == [1.0, 0.5, 0.0]
+
+
+@skip_if_server_version_lt("7.9.0")
 async def test_vlinks(d_client):
     elements_count = 100
     vector_dim = 800

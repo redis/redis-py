@@ -629,6 +629,26 @@ def test_read_block(client):
 
 
 @pytest.mark.redismod
+def test_range_filter_by_value_requires_both_bounds(client):
+    client.ts().add(1, 100, 1)
+    client.ts().add(1, 200, 5)
+
+    for cmd in (client.ts().range, client.ts().revrange):
+        with pytest.raises(
+            redis.exceptions.DataError,
+            match="filter_by_min_value and filter_by_max_value must be set together",
+        ):
+            cmd(1, 0, 500, filter_by_min_value=1)
+        with pytest.raises(
+            redis.exceptions.DataError,
+            match="filter_by_min_value and filter_by_max_value must be set together",
+        ):
+            cmd(1, 0, 500, filter_by_max_value=5)
+        # Both bounds still emit FILTER_BY_VALUE and filter server-side.
+        assert 1 == len(cmd(1, 0, 500, filter_by_min_value=1, filter_by_max_value=1))
+
+
+@pytest.mark.redismod
 @skip_if_server_version_lt("8.9.0")
 def test_read_block_min_count_requires_milliseconds(client):
     # BLOCK is all-or-nothing: min_count without milliseconds is invalid usage.

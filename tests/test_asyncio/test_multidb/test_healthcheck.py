@@ -1,4 +1,5 @@
 import asyncio
+import time
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -15,8 +16,18 @@ from redis.asyncio.multidb.healthcheck import (
     HealthyAllPolicy,
     HealthyMajorityPolicy,
     HealthyAnyPolicy,
+    relaxed_health_check_budget,
+    database_maint_notifications_config,
+    _MaintenanceWindowListener,
+    _MaintenanceWindowTracker,
 )
+from redis.event import MaintenanceCompletedEvent, MaintenanceStartedEvent
 from redis.http.http_client import HttpError
+from redis.maint_notifications import (
+    MaintenanceState,
+    MaintNotificationsConfig,
+    NodeMigratingNotification,
+)
 from redis.multidb.circuit import State as CBState
 from redis.exceptions import ConnectionError, ResponseError
 from redis.multidb.exception import UnhealthyDatabaseException
@@ -45,6 +56,37 @@ def _configure_mock_health_check(mock_hc, probes=3, delay=0.01, timeout=1.0):
     # check_health is async, use AsyncMock
     mock_hc.check_health = AsyncMock(return_value=True)
     return mock_hc
+
+
+def _maintenance_event(
+    event_cls,
+    source,
+    state=MaintenanceState.MAINTENANCE,
+    relaxed_timeout=0.5,
+    notification=None,
+):
+    """
+    The event a maintenance handler dispatches for ``source``: a pool for a
+    MOVING window, a connection for a MAINTENANCE one.
+    """
+    if notification is None:
+        notification = NodeMigratingNotification(id=1, ttl=5)
+    is_moving = state is MaintenanceState.MOVING
+    return event_cls(
+        connection_pool=source if is_moving else None,
+        connection=None if is_moving else source,
+        state=state,
+        notification=notification,
+        config=MaintNotificationsConfig(enabled=True, relaxed_timeout=relaxed_timeout),
+    )
+
+
+def _sleeping_health_check(seconds):
+    async def check_health(database, client=None):
+        await asyncio.sleep(seconds)
+        return True
+
+    return check_health
 
 
 @pytest.mark.onlynoncluster
@@ -139,6 +181,307 @@ class TestHealthyAllPolicy:
         policy = HealthyAllPolicy()
         result = await policy.execute([mock_hc], mock_db)
         assert result is True
+
+
+@pytest.mark.onlynoncluster
+class TestMaintenanceAwareBudget:
+    """
+    The health check budget follows the maintenance windows the probe client
+    reports: relaxed while a window is active, plain otherwise.
+    """
+
+    def _policy_with_tracker(self, database):
+        policy = HealthyAllPolicy()
+        tracker = _MaintenanceWindowTracker()
+        policy._maintenance_trackers[id(database)] = tracker
+        return policy, _MaintenanceWindowListener(tracker)
+
+    def _slow_check(self, sleep, timeout=0.1):
+        mock_hc = _configure_mock_health_check(
+            Mock(spec=HealthCheck), probes=1, delay=0.01, timeout=timeout
+        )
+        mock_hc.check_health.side_effect = _sleeping_health_check(sleep)
+        return mock_hc
+
+    def test_relaxed_health_check_budget_holds_every_probe_at_relaxed_length(self):
+        mock_hc = _configure_mock_health_check(
+            Mock(spec=HealthCheck), probes=3, delay=0.5
+        )
+        assert relaxed_health_check_budget(mock_hc, 10) == pytest.approx(31.5)
+
+    @pytest.mark.asyncio
+    async def test_active_window_extends_budget(self):
+        mock_db = Mock(spec=Database)
+        policy, listener = self._policy_with_tracker(mock_db)
+        listener.listen(
+            _maintenance_event(MaintenanceStartedEvent, object(), relaxed_timeout=0.5)
+        )
+
+        # Sleeps past the 0.1 s budget, within the relaxed 1 * (0.5 + 0.01) s
+        assert await policy.execute([self._slow_check(0.3)], mock_db) is True
+
+    @pytest.mark.asyncio
+    async def test_window_started_during_probe_extends_budget(self):
+        """The notification arrives inside the stalled probe, as a push does."""
+        mock_db = Mock(spec=Database)
+        policy, listener = self._policy_with_tracker(mock_db)
+        started = _maintenance_event(
+            MaintenanceStartedEvent, object(), relaxed_timeout=0.5
+        )
+
+        async def stalled_probe(database, client=None):
+            listener.listen(started)
+            await asyncio.sleep(0.3)
+            return True
+
+        mock_hc = self._slow_check(0.3)
+        mock_hc.check_health.side_effect = stalled_probe
+
+        assert await policy.execute([mock_hc], mock_db) is True
+
+    @pytest.mark.asyncio
+    async def test_window_started_during_first_probe_is_honoured(self):
+        """
+        The first check of a database is what creates its client, and the
+        tracker with it; a notification arriving during that check must count.
+        """
+        mock_db = Mock(spec=Database)
+        policy = HealthyAllPolicy()
+        started = _maintenance_event(
+            MaintenanceStartedEvent, object(), relaxed_timeout=0.5
+        )
+
+        async def get_client_creating_tracker(database):
+            tracker = _MaintenanceWindowTracker()
+            policy._maintenance_trackers[id(database)] = tracker
+            _MaintenanceWindowListener(tracker).listen(started)
+            return AsyncMock()
+
+        policy.get_client = get_client_creating_tracker
+
+        assert await policy.execute([self._slow_check(0.3)], mock_db) is True
+
+    @pytest.mark.asyncio
+    async def test_relaxed_budget_is_bounded(self):
+        mock_db = Mock(spec=Database)
+        policy, listener = self._policy_with_tracker(mock_db)
+        listener.listen(
+            _maintenance_event(MaintenanceStartedEvent, object(), relaxed_timeout=0.2)
+        )
+
+        start = time.monotonic()
+        with pytest.raises(UnhealthyDatabaseException) as exc_info:
+            # Sleeps past the relaxed 1 * (0.2 + 0.01) s budget as well
+            await policy.execute([self._slow_check(2.0)], mock_db)
+
+        assert isinstance(exc_info.value.original_exception, asyncio.TimeoutError)
+        assert time.monotonic() - start < 1.0
+
+    @pytest.mark.asyncio
+    async def test_blocking_relaxed_timeout_relaxes_until_window_expires(self):
+        """With blocking sockets the notification's expiry is the only bound."""
+        mock_db = Mock(spec=Database)
+        policy, listener = self._policy_with_tracker(mock_db)
+        notification = NodeMigratingNotification(id=1, ttl=5)
+        notification.expire_at = time.monotonic() + 1.0
+        listener.listen(
+            _maintenance_event(
+                MaintenanceStartedEvent,
+                object(),
+                relaxed_timeout=None,
+                notification=notification,
+            )
+        )
+
+        assert await policy.execute([self._slow_check(0.2)], mock_db) is True
+
+        start = time.monotonic()
+        with pytest.raises(UnhealthyDatabaseException) as exc_info:
+            await policy.execute([self._slow_check(3.0)], mock_db)
+
+        assert isinstance(exc_info.value.original_exception, asyncio.TimeoutError)
+        assert time.monotonic() - start < 2.0
+
+    @pytest.mark.asyncio
+    async def test_window_outlives_notification_ttl_until_completed(self):
+        """
+        The connection stays relaxed until the completion arrives, however long
+        the maintenance outruns its announced time-to-live; so does the budget.
+        """
+        mock_db = Mock(spec=Database)
+        policy, listener = self._policy_with_tracker(mock_db)
+        listener.listen(
+            _maintenance_event(
+                MaintenanceStartedEvent,
+                object(),
+                relaxed_timeout=0.5,
+                notification=NodeMigratingNotification(id=1, ttl=0),
+            )
+        )
+
+        assert await policy.execute([self._slow_check(0.3)], mock_db) is True
+
+    @pytest.mark.asyncio
+    async def test_window_with_relaxation_disabled_does_not_extend_budget(self):
+        """A handoff is still reported with relaxed_timeout=-1, for the reconnect."""
+        mock_db = Mock(spec=Database)
+        policy, listener = self._policy_with_tracker(mock_db)
+        listener.listen(
+            _maintenance_event(
+                MaintenanceStartedEvent,
+                object(),
+                state=MaintenanceState.MOVING,
+                relaxed_timeout=-1,
+            )
+        )
+
+        assert policy._maintenance_trackers[id(mock_db)].active_windows() == []
+        with pytest.raises(UnhealthyDatabaseException) as exc_info:
+            await policy.execute([self._slow_check(0.5)], mock_db)
+
+        assert isinstance(exc_info.value.original_exception, asyncio.TimeoutError)
+
+    @pytest.mark.asyncio
+    async def test_completed_window_restores_plain_budget_mid_check(self):
+        """
+        A probe still hung once the maintenance has completed must not get to
+        use up the relaxed budget: the plain one applies again.
+        """
+        mock_db = Mock(spec=Database)
+        policy, listener = self._policy_with_tracker(mock_db)
+        source = object()
+        listener.listen(
+            _maintenance_event(MaintenanceStartedEvent, source, relaxed_timeout=5)
+        )
+
+        async def complete_soon():
+            await asyncio.sleep(0.3)
+            listener.listen(_maintenance_event(MaintenanceCompletedEvent, source))
+
+        completion = asyncio.create_task(complete_soon())
+        start = time.monotonic()
+        with pytest.raises(UnhealthyDatabaseException) as exc_info:
+            # Would be allowed 1 * (5 + 0.01) s while the window is active
+            await policy.execute([self._slow_check(3.0)], mock_db)
+        await completion
+
+        assert isinstance(exc_info.value.original_exception, asyncio.TimeoutError)
+        assert time.monotonic() - start < 1.5
+
+    @pytest.mark.asyncio
+    async def test_completed_window_restores_budget(self):
+        mock_db = Mock(spec=Database)
+        policy, listener = self._policy_with_tracker(mock_db)
+        source = object()
+        listener.listen(_maintenance_event(MaintenanceStartedEvent, source))
+        listener.listen(_maintenance_event(MaintenanceCompletedEvent, source))
+
+        with pytest.raises(UnhealthyDatabaseException) as exc_info:
+            await policy.execute([self._slow_check(0.5)], mock_db)
+
+        assert isinstance(exc_info.value.original_exception, asyncio.TimeoutError)
+
+    @pytest.mark.asyncio
+    async def test_moving_and_maintenance_windows_are_independent(self):
+        mock_db = Mock(spec=Database)
+        policy, listener = self._policy_with_tracker(mock_db)
+        pool, connection = object(), object()
+        listener.listen(
+            _maintenance_event(
+                MaintenanceStartedEvent, pool, state=MaintenanceState.MOVING
+            )
+        )
+        listener.listen(_maintenance_event(MaintenanceStartedEvent, connection))
+
+        # The handoff completes while the migration is still on
+        listener.listen(
+            _maintenance_event(
+                MaintenanceCompletedEvent, pool, state=MaintenanceState.MOVING
+            )
+        )
+        assert await policy.execute([self._slow_check(0.3)], mock_db) is True
+
+        listener.listen(_maintenance_event(MaintenanceCompletedEvent, connection))
+        with pytest.raises(UnhealthyDatabaseException):
+            await policy.execute([self._slow_check(0.5)], mock_db)
+
+    @pytest.mark.asyncio
+    async def test_database_without_maintenance_notifications_keeps_plain_budget(
+        self,
+    ):
+        mock_db = Mock(spec=Database)
+        policy = HealthyAllPolicy()
+
+        start = time.monotonic()
+        with pytest.raises(UnhealthyDatabaseException) as exc_info:
+            await policy.execute([self._slow_check(0.5)], mock_db)
+
+        assert isinstance(exc_info.value.original_exception, asyncio.TimeoutError)
+        assert time.monotonic() - start < 0.4
+
+    @pytest.mark.asyncio
+    async def test_outer_cancellation_cancels_health_check(self):
+        """
+        Cancelling the policy cancels the running check and waits for its
+        cleanup to finish, so the check cannot outlive the policy call.
+        """
+        mock_db = Mock(spec=Database)
+        policy = HealthyAllPolicy()
+        cleanup_done = asyncio.Event()
+
+        async def hanging_probe(database, client=None):
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                # Cleanup that takes a moment, as closing a connection would
+                await asyncio.sleep(0.05)
+                cleanup_done.set()
+                raise
+            return True
+
+        mock_hc = self._slow_check(10, timeout=5.0)
+        mock_hc.check_health.side_effect = hanging_probe
+
+        task = asyncio.create_task(policy.execute([mock_hc], mock_db))
+        await asyncio.sleep(0.05)
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert cleanup_done.is_set()
+
+
+@pytest.mark.onlynoncluster
+class TestDatabaseMaintNotificationsConfig:
+    """The config is resolved the way each client type carries it."""
+
+    def test_standalone_client_carries_it_in_connection_kwargs(self):
+        config = MaintNotificationsConfig(enabled=True)
+        client = Mock(spec=Redis)
+        client.get_connection_kwargs.return_value = {
+            "maint_notifications_config": config
+        }
+        assert database_maint_notifications_config(client) is config
+
+    def test_cluster_client_carries_it_as_an_attribute(self):
+        config = MaintNotificationsConfig(enabled=True)
+        client = Mock(spec=AsyncRedisCluster)
+        client.maint_notifications_config = config
+        client.get_connection_kwargs.return_value = {}
+        assert database_maint_notifications_config(client) is config
+
+    def test_standalone_client_carries_it_on_the_pool_handler(self):
+        config = MaintNotificationsConfig(enabled=True)
+        client = Mock(spec=Redis)
+        client.connection_pool = Mock()
+        client.connection_pool._maint_notifications_pool_handler.config = config
+        client.get_connection_kwargs.return_value = {}
+        assert database_maint_notifications_config(client) is config
+
+    def test_client_without_config(self):
+        client = Mock(spec=Redis)
+        client.get_connection_kwargs.return_value = {}
+        assert database_maint_notifications_config(client) is None
 
 
 @pytest.mark.onlynoncluster
@@ -700,7 +1043,7 @@ class TestLagAwareHealthCheck:
 
         with pytest.raises(HttpError, match="busy") as e:
             await hc.check_health(db, mock_hc_client)
-            assert e.status == 503
+        assert e.value.status == 503
 
         # Ensure both calls were attempted
         assert mock_http.get.call_count == 2
@@ -981,6 +1324,131 @@ class TestAbstractHealthCheckPolicy:
             assert (
                 client.connection_kwargs.get("connection_class") is AsyncSSLConnection
             )
+        finally:
+            await policy.close()
+
+    @pytest.mark.asyncio
+    async def test_get_client_reports_maintenance_windows_for_standalone(self):
+        """
+        The probe client gets a copy of the database's maintenance config that
+        reports its windows to the policy; the database's config is untouched.
+        """
+        config = MaintNotificationsConfig(enabled=True, relaxed_timeout=7)
+        mock_db = Mock(spec=Database)
+        mock_db.client = Redis(protocol=3, maint_notifications_config=config)
+        policy = HealthyAllPolicy()
+
+        try:
+            client = await policy.get_client(mock_db)
+            probe_config = client.connection_pool.connection_kwargs[
+                "maint_notifications_config"
+            ]
+
+            assert probe_config is not config
+            assert probe_config.enabled is True
+            assert probe_config.relaxed_timeout == 7
+            assert config.event_dispatcher is None
+            assert (
+                client.connection_pool._maint_notifications_pool_handler.config
+                is probe_config
+            )
+
+            listeners = probe_config.event_dispatcher._event_listeners_mapping
+            assert [type(lst) for lst in listeners[MaintenanceStartedEvent]] == [
+                _MaintenanceWindowListener
+            ]
+            assert (
+                listeners[MaintenanceStartedEvent]
+                == listeners[MaintenanceCompletedEvent]
+            )
+
+            # What the probe's handlers dispatch reaches this database's tracker
+            tracker = policy._maintenance_trackers[id(mock_db)]
+            probe_config.event_dispatcher.dispatch(
+                _maintenance_event(MaintenanceStartedEvent, object(), relaxed_timeout=7)
+            )
+            assert len(tracker.active_windows()) == 1
+        finally:
+            await policy.close()
+
+        assert policy._maintenance_trackers == {}
+
+    @pytest.mark.asyncio
+    async def test_get_client_reports_maintenance_windows_for_cluster(self):
+        config = MaintNotificationsConfig(enabled=True, relaxed_timeout=7)
+        mock_db = Mock(spec=Database)
+        mock_db.client = AsyncRedisCluster(
+            startup_nodes=[
+                AsyncClusterNode("localhost", 7000),
+                AsyncClusterNode("localhost", 7001),
+            ],
+            maint_notifications_config=config,
+        )
+        policy = HealthyAllPolicy()
+
+        try:
+            client = await policy.get_client(mock_db)
+            probe_config = client.nodes_manager.connection_kwargs[
+                "maint_notifications_config"
+            ]
+
+            assert probe_config is not config
+            assert probe_config.event_dispatcher is not None
+            assert config.event_dispatcher is None
+            assert client.maint_notifications_config is probe_config
+            for node in client.nodes_manager.startup_nodes.values():
+                assert (
+                    node.connection_kwargs["maint_notifications_config"] is probe_config
+                )
+            assert id(mock_db) in policy._maintenance_trackers
+        finally:
+            await policy.close()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "client_kwargs",
+        [
+            {"protocol": 2},
+            {
+                "protocol": 3,
+                "maint_notifications_config": MaintNotificationsConfig(enabled=False),
+            },
+        ],
+        ids=["no_config", "disabled"],
+    )
+    async def test_get_client_without_maintenance_notifications_tracks_nothing(
+        self, client_kwargs
+    ):
+        """
+        The probe must not enable notifications the database client has not:
+        it gets an explicitly disabled config, not the RESP3 default of "auto".
+        """
+        mock_db = Mock(spec=Database)
+        mock_db.client = Redis(**client_kwargs)
+        policy = HealthyAllPolicy()
+
+        try:
+            client = await policy.get_client(mock_db)
+            assert id(mock_db) not in policy._maintenance_trackers
+            assert client.connection_pool._maint_notifications_pool_handler is None
+            assert not client.connection_pool.maint_notifications_enabled()
+        finally:
+            await policy.close()
+
+    @pytest.mark.asyncio
+    async def test_get_client_keeps_cluster_notifications_disabled(self):
+        """A cluster client keeps a disabled config as an attribute only."""
+        mock_db = Mock(spec=Database)
+        mock_db.client = AsyncRedisCluster(
+            startup_nodes=[AsyncClusterNode("localhost", 7000)],
+            maint_notifications_config=MaintNotificationsConfig(enabled=False),
+        )
+        policy = HealthyAllPolicy()
+
+        try:
+            client = await policy.get_client(mock_db)
+            assert id(mock_db) not in policy._maintenance_trackers
+            assert client.maint_notifications_config.enabled is False
         finally:
             await policy.close()
 

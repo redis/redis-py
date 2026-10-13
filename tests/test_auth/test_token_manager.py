@@ -1,7 +1,8 @@
 import asyncio
+import threading
 from datetime import datetime, timezone
 from time import sleep
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from redis.auth.err import RequestTokenErr, TokenRenewalErr
@@ -15,8 +16,309 @@ from redis.auth.token_manager import (
 )
 
 
+@pytest.fixture
+def sync_token_manager():
+    now = datetime.now(timezone.utc).timestamp() * 1000
+    token = SimpleToken("value", now + 60000, now, {"oid": "test"})
+    provider = Mock(spec=IdentityProviderInterface)
+    provider.request_token.return_value = token
+    config = TokenManagerConfig(0.9, 0, 1000, RetryPolicy(1, 10))
+    manager = TokenManager(provider, config)
+    workers = []
+
+    def on_next(token):
+        workers.append((asyncio.get_running_loop(), threading.current_thread()))
+
+    listener = CredentialsListener()
+    listener.on_next = Mock(side_effect=on_next)
+    listener.on_error = Mock()
+    try:
+        yield manager, listener, workers
+    finally:
+        manager.stop()
+        for loop, thread in workers:
+            # Also release resources if a shutdown assertion fails.
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(loop.stop)
+            thread.join(timeout=1)
+            if not thread.is_alive() and not loop.is_closed():
+                loop.close()
+
+
 @pytest.mark.fixed_client
 class TestTokenManager:
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(5)
+    @pytest.mark.parametrize("skip_initial", [False, True])
+    async def test_sync_start_with_running_event_loop(self, skip_initial):
+        now = datetime.now(timezone.utc).timestamp() * 1000
+        token = SimpleToken("value", now + 60000, now, {"oid": "test"})
+        mock_provider = Mock(spec=IdentityProviderInterface)
+        mock_provider.request_token.return_value = token
+        listener = CredentialsListener()
+        listener.on_next = Mock()
+        listener.on_error = Mock()
+        config = TokenManagerConfig(0.9, 0, 1000, RetryPolicy(1, 10))
+        mgr = TokenManager(mock_provider, config)
+        heartbeat = asyncio.Event()
+        asyncio.get_running_loop().call_soon(heartbeat.set)
+
+        try:
+            stop = mgr.start(listener, skip_initial=skip_initial)
+
+            assert stop == mgr.stop
+            mock_provider.request_token.assert_called_once_with(True)
+            if skip_initial:
+                listener.on_next.assert_not_called()
+            else:
+                listener.on_next.assert_called_once_with(token)
+            listener.on_error.assert_not_called()
+            await asyncio.wait_for(heartbeat.wait(), timeout=1)
+        finally:
+            mgr.stop()
+
+    @pytest.mark.timeout(10)
+    @pytest.mark.parametrize("running_loop", [False, True])
+    @pytest.mark.parametrize("stop_between_starts", [False, True])
+    def test_sync_stop_closes_background_event_loop(
+        self, sync_token_manager, running_loop, stop_between_starts
+    ):
+        manager, listener, workers = sync_token_manager
+
+        def check_stopped(worker):
+            loop, thread = worker
+            thread.join(timeout=1)
+            assert not thread.is_alive()
+            assert loop.is_closed()
+
+        def start_and_stop():
+            for _ in range(3):
+                stop = manager.start(listener)
+                if len(workers) > 1:
+                    check_stopped(workers[-2])
+                if stop_between_starts:
+                    stop()
+                    stop()
+                    check_stopped(workers[-1])
+            stop()
+            check_stopped(workers[-1])
+            listener.on_error.assert_not_called()
+            assert len(workers) == 3
+
+        async def run_in_loop():
+            start_and_stop()
+            heartbeat = asyncio.Event()
+            asyncio.get_running_loop().call_soon(heartbeat.set)
+            await asyncio.wait_for(heartbeat.wait(), timeout=1)
+
+        if running_loop:
+            asyncio.run(run_in_loop())
+        else:
+            start_and_stop()
+
+    @pytest.mark.timeout(5)
+    @pytest.mark.parametrize("callback", ["on_next", "on_error"])
+    def test_sync_stop_from_callback(self, sync_token_manager, callback):
+        manager, listener, workers = sync_token_manager
+        capture_worker = listener.on_next.side_effect
+
+        def stop_from_callback(value):
+            capture_worker(value)
+            manager.stop()
+
+        getattr(listener, callback).side_effect = stop_from_callback
+        if callback == "on_error":
+            listener.on_next.side_effect = ValueError("callback failed")
+
+        stop = manager.start(listener)
+        loop, thread = workers[0]
+        thread.join(timeout=1)
+        assert not thread.is_alive()
+        assert loop.is_closed()
+        getattr(listener, callback).assert_called_once()
+        stop()
+
+    @pytest.mark.timeout(15)
+    def test_sync_stop_releases_pending_start(self, sync_token_manager, monkeypatch):
+        manager, listener, workers = sync_token_manager
+        release_loop = threading.Event()
+        init_waiting = threading.Event()
+        waiting_events = []
+        results = []
+        errors = []
+        loop = asyncio.new_event_loop()
+
+        def block_loop():
+            workers.append((loop, threading.current_thread()))
+            release_loop.wait(timeout=5)
+
+        def start_manager():
+            try:
+                results.append(manager.start(listener))
+            except BaseException as error:
+                errors.append(error)
+
+        starter = threading.Thread(target=start_manager, daemon=True)
+        original_wait = threading.Event.wait
+
+        def wait(event, timeout=None):
+            if (
+                threading.current_thread() is starter
+                and manager._init_timer is not None
+            ):
+                waiting_events.append(event)
+                init_waiting.set()
+            return original_wait(event, timeout)
+
+        loop.call_soon(block_loop)
+        monkeypatch.setattr(asyncio, "new_event_loop", lambda: loop)
+        monkeypatch.setattr(threading.Event, "wait", wait)
+        try:
+            starter.start()
+            assert init_waiting.wait(timeout=5)
+            manager.stop()
+            release_loop.set()
+            starter.join(timeout=5)
+            assert not starter.is_alive()
+            assert not errors
+            assert results == [manager.stop]
+            listener.on_next.assert_not_called()
+            listener.on_error.assert_not_called()
+            worker = workers[0][1]
+            worker.join(timeout=1)
+            assert not worker.is_alive()
+            assert loop.is_closed()
+        finally:
+            release_loop.set()
+            for event in waiting_events:
+                event.set()
+            starter.join(timeout=1)
+
+    @pytest.mark.timeout(15)
+    @pytest.mark.parametrize("skip_initial", [False, True])
+    def test_sync_stop_before_initial_scheduling(
+        self, sync_token_manager, monkeypatch, skip_initial
+    ):
+        manager, listener, workers = sync_token_manager
+        scheduling = threading.Event()
+        resume_start = threading.Event()
+        worker_ready = threading.Event()
+        results = []
+        errors = []
+        loop = asyncio.new_event_loop()
+
+        def record_worker():
+            workers.append((loop, threading.current_thread()))
+            worker_ready.set()
+
+        def start_manager():
+            try:
+                results.append(manager.start(listener, skip_initial=skip_initial))
+            except BaseException as error:
+                errors.append(error)
+
+        starter = threading.Thread(target=start_manager, daemon=True)
+        original_schedule = loop.call_soon_threadsafe
+
+        def pause_scheduling(callback, *args, **kwargs):
+            if threading.current_thread() is starter:
+                scheduling.set()
+                assert resume_start.wait(timeout=5)
+            return original_schedule(callback, *args, **kwargs)
+
+        loop.call_soon(record_worker)
+        monkeypatch.setattr(asyncio, "new_event_loop", lambda: loop)
+        monkeypatch.setattr(loop, "call_soon_threadsafe", pause_scheduling)
+        try:
+            starter.start()
+            assert scheduling.wait(timeout=5)
+            assert manager._init_timer is None
+            manager.stop()
+            assert worker_ready.wait(timeout=5)
+            worker = workers[0][1]
+            worker.join(timeout=5)
+            assert not worker.is_alive()
+            assert loop.is_closed()
+
+            resume_start.set()
+            starter.join(timeout=5)
+            assert not starter.is_alive()
+            assert not errors
+            assert results == [manager.stop]
+            manager._idp.request_token.assert_not_called()
+            listener.on_next.assert_not_called()
+            listener.on_error.assert_not_called()
+        finally:
+            resume_start.set()
+            manager.stop()
+            starter.join(timeout=1)
+
+    @pytest.mark.timeout(5)
+    def test_sync_start_preserves_initial_scheduling_error(
+        self, sync_token_manager, monkeypatch
+    ):
+        manager, listener, workers = sync_token_manager
+        loop = asyncio.new_event_loop()
+        original_schedule = loop.call_soon_threadsafe
+        error = RuntimeError("initial scheduling failed")
+
+        def fail_scheduling(callback, *args, **kwargs):
+            if callback == loop.stop:
+                return original_schedule(callback, *args, **kwargs)
+            raise error
+
+        def record_worker():
+            workers.append((loop, threading.current_thread()))
+
+        loop.call_soon(record_worker)
+        monkeypatch.setattr(asyncio, "new_event_loop", lambda: loop)
+        monkeypatch.setattr(loop, "call_soon_threadsafe", fail_scheduling)
+        with pytest.raises(RuntimeError) as exc:
+            manager.start(listener)
+
+        assert exc.value is error
+        assert not loop.is_closed()
+        manager._idp.request_token.assert_not_called()
+        listener.on_next.assert_not_called()
+        listener.on_error.assert_not_called()
+
+    def test_sync_start_closes_loop_on_thread_start_failure(
+        self, sync_token_manager, monkeypatch
+    ):
+        manager, listener, workers = sync_token_manager
+        loop = asyncio.new_event_loop()
+        monkeypatch.setattr(asyncio, "new_event_loop", lambda: loop)
+        monkeypatch.setattr(
+            threading.Thread, "start", Mock(side_effect=RuntimeError("no threads"))
+        )
+
+        try:
+            with pytest.raises(RuntimeError, match="no threads"):
+                manager.start(listener)
+            assert loop.is_closed()
+            assert not workers
+        finally:
+            loop.close()
+
+    @pytest.mark.asyncio
+    async def test_async_stop_preserves_callers_loop(self, sync_token_manager):
+        manager, listener, workers = sync_token_manager
+        listener.on_next = AsyncMock()
+        listener.on_error = AsyncMock()
+        loop = asyncio.get_running_loop()
+
+        stop = await manager.start_async(listener, block_for_initial=True)
+        stop()
+        heartbeat = asyncio.Event()
+        loop.call_soon(heartbeat.set)
+        await asyncio.wait_for(heartbeat.wait(), timeout=1)
+
+        assert not workers
+        assert loop.is_running()
+        assert not loop.is_closed()
+        listener.on_next.assert_awaited_once()
+        listener.on_error.assert_not_called()
+
     @pytest.mark.parametrize(
         "exp_refresh_ratio",
         [

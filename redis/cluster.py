@@ -511,6 +511,7 @@ class AbstractRedisCluster:
         ),
         list_keys_to_dict(
             [
+                "BLESS SCAN",
                 "FLUSHALL",
                 "FLUSHDB",
                 "FUNCTION DELETE",
@@ -612,7 +613,7 @@ class AbstractRedisCluster:
         list_keys_to_dict(
             ["CLIENT UNBLOCK"], lambda command, res: 1 if sum(res.values()) > 0 else 0
         ),
-        list_keys_to_dict(["SCAN"], parse_scan_result),
+        list_keys_to_dict(["BLESS SCAN", "SCAN"], parse_scan_result),
         list_keys_to_dict(
             ["SCRIPT LOAD"], lambda command, res: list(res.values()).pop()
         ),
@@ -905,7 +906,7 @@ class RedisCluster(
             # No startup node was provided
             raise RedisClusterException(
                 "RedisCluster requires at least one node to discover the "
-                "cluster. Please provide one of the followings:\n"
+                "cluster. Please provide one of the following:\n"
                 "1. host and port, for example:\n"
                 " RedisCluster(host='localhost', port=6379)\n"
                 "2. list of startup nodes, for example:\n"
@@ -1775,7 +1776,13 @@ class RedisCluster(
         is_default_node = False
         target_nodes = None
         passed_targets = kwargs.pop("target_nodes", None)
-        if passed_targets is not None and not self._is_nodes_flag(passed_targets):
+        if (
+            passed_targets is not None
+            and not self._is_nodes_flag(passed_targets)
+            and not (
+                isinstance(passed_targets, (list, dict, str)) and not passed_targets
+            )
+        ):
             target_nodes = self._parse_target_nodes(passed_targets)
             target_nodes_specified = True
 
@@ -4732,6 +4739,7 @@ PIPELINE_BLOCKED_COMMANDS = (
     "BGREWRITEAOF",
     "BGSAVE",
     "BITOP",
+    "BLESS SCAN",
     "BRPOPLPUSH",
     "CLIENT GETNAME",
     "CLIENT KILL",
@@ -4803,6 +4811,13 @@ for command in PIPELINE_BLOCKED_COMMANDS:
     command = command.replace(" ", "_").lower()
 
     setattr(ClusterPipeline, command, block_pipeline_command(command))
+
+# client_list_iter has no wire command of its own to add to
+# PIPELINE_BLOCKED_COMMANDS - it sends CLIENT LIST, blocked above under its
+# own name - so block it explicitly here too, or it would fall through to
+# the inherited implementation and queue CLIENT LIST like a real pipelined
+# command instead of raising.
+setattr(ClusterPipeline, "client_list_iter", block_pipeline_command("client_list_iter"))
 
 
 class PipelineCommand:
