@@ -90,7 +90,6 @@ def _sleeping_health_check(seconds):
 
 
 @pytest.mark.fixed_client
-@pytest.mark.onlynoncluster
 class TestHealthyAllPolicy:
     @pytest.mark.asyncio
     async def test_policy_returns_true_for_all_successful_probes(self):
@@ -185,7 +184,6 @@ class TestHealthyAllPolicy:
 
 
 @pytest.mark.fixed_client
-@pytest.mark.onlynoncluster
 class TestMaintenanceAwareBudget:
     """
     The health check budget follows the maintenance windows the probe client
@@ -464,7 +462,6 @@ class TestMaintenanceAwareBudget:
 
 
 @pytest.mark.fixed_client
-@pytest.mark.onlynoncluster
 class TestDatabaseMaintNotificationsConfig:
     """The config is resolved the way each client type carries it."""
 
@@ -498,7 +495,6 @@ class TestDatabaseMaintNotificationsConfig:
 
 
 @pytest.mark.fixed_client
-@pytest.mark.onlynoncluster
 class TestHealthyMajorityPolicy:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -586,7 +582,6 @@ class TestHealthyMajorityPolicy:
 
 
 @pytest.mark.fixed_client
-@pytest.mark.onlynoncluster
 class TestHealthyAnyPolicy:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -642,7 +637,6 @@ class TestHealthyAnyPolicy:
 
 
 @pytest.mark.fixed_client
-@pytest.mark.onlynoncluster
 class TestPingHealthCheck:
     """Tests for PingHealthCheck with standalone and cluster clients."""
 
@@ -898,7 +892,6 @@ class TestPingHealthCheck:
 
 
 @pytest.mark.fixed_client
-@pytest.mark.onlynoncluster
 class TestLagAwareHealthCheck:
     @pytest.mark.asyncio
     async def test_database_is_healthy_when_bdb_matches_by_dns_name(
@@ -1199,7 +1192,6 @@ class TestLagAwareHealthCheck:
 
 
 @pytest.mark.fixed_client
-@pytest.mark.onlynoncluster
 @pytest.mark.no_mock_connections
 class TestAbstractHealthCheckPolicy:
     """

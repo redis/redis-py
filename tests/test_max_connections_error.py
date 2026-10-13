@@ -52,14 +52,12 @@ class DummyConnection(ConnectionInterface):
 
 
 @pytest.mark.fixed_client
-@pytest.mark.onlynoncluster
 def test_max_connections_error_inheritance():
     """Test that MaxConnectionsError is a subclass of ConnectionError"""
     assert issubclass(redis.MaxConnectionsError, redis.ConnectionError)
 
 
 @pytest.mark.fixed_client
-@pytest.mark.onlynoncluster
 def test_connection_pool_raises_max_connections_error():
     """Test that ConnectionPool raises MaxConnectionsError and not ConnectionError"""
     # Use a dummy connection class that doesn't try to connect to a real Redis server

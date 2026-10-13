@@ -869,7 +869,6 @@ class TestClusterKeyspaceNotifications:
 
 
 @pytest.mark.fixed_client
-@pytest.mark.onlynoncluster
 class TestStandaloneClientKeyspaceNotificationsMocked:
     """
     Mock-based unit tests for KeyspaceNotifications (standalone Redis).

@@ -340,7 +340,6 @@ class TestUsernamePasswordCredentialProvider:
 
 @pytest.mark.fixed_client
 @pytest.mark.asyncio
-@pytest.mark.onlynoncluster
 @pytest.mark.skipif(not EntraIdCredentialsProvider, reason="requires redis-entraid")
 class TestStreamingCredentialProvider:
     @pytest.mark.parametrize(

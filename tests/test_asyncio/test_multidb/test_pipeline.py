@@ -23,7 +23,6 @@ def mock_pipe() -> Pipeline:
 
 
 @pytest.mark.fixed_client
-@pytest.mark.onlynoncluster
 class TestPipeline:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("raise_error", [False, True])
@@ -386,7 +385,6 @@ class TestPipeline:
 
 
 @pytest.mark.fixed_client
-@pytest.mark.onlynoncluster
 class TestTransaction:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -677,7 +675,6 @@ class TestTransaction:
 
 
 @pytest.mark.fixed_client
-@pytest.mark.onlynoncluster
 class TestPipelineHImportUnsupported:
     """HIMPORT is unsupported on the multi-database client. The lifecycle methods
     are blocked on ``MultiDBClient``; the pipeline inherits ``himport_set`` from

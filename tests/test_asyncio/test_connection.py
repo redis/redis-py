@@ -742,7 +742,6 @@ async def test_connection_parse_response_resume(r: redis.Redis):
 
 
 @pytest.mark.fixed_client
-@pytest.mark.onlynoncluster
 @pytest.mark.parametrize(
     "parser_class",
     [_AsyncRESP2Parser, _AsyncRESP3Parser, _AsyncHiredisParser],
@@ -852,7 +851,6 @@ async def test_pool_auto_close(request, from_url):
     await r1.aclose()
 
 
-@pytest.mark.onlynoncluster
 @pytest.mark.fixed_client
 @skip_if_server_version_lt("5.0.0")
 async def test_pool_replaces_connection_killed_while_idle(request):

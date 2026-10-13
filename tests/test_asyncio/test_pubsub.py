@@ -654,107 +654,6 @@ class TestPubSubSubscribeUnsubscribe:
             }
         ]
 
-    @pytest.mark.fixed_client
-    async def test_resubscribe_binary_handler_uses_subscription(self):
-        pool = MagicMock()
-        encoder = Encoder(
-            encoding="utf-8", encoding_errors="strict", decode_responses=False
-        )
-        p = PubSub(connection_pool=pool, encoder=encoder)
-        binary_channel = b"\x80\x81\x82"
-        handler = MagicMock()
-        p.channels = {binary_channel: handler}
-
-        calls = []
-
-        async def fake_subscribe(*args, **kwargs):
-            calls.append((tuple(args), dict(kwargs)))
-
-        with mock.patch.object(p, "subscribe", side_effect=fake_subscribe):
-            await p._resubscribe(p.channels, p.subscribe)
-
-        assert calls == [((Subscription(binary_channel, handler),), {})]
-
-    @pytest.mark.fixed_client
-    async def test_cluster_pubsub_resubscribe_shard_channels_groups_by_slot(self):
-        """The cluster-aware ``_resubscribe_shard_channels`` must group shard
-        channels by hash slot on reconnect. A cluster node can own multiple
-        slot ranges, so a single batched SSUBSCRIBE across different slots
-        would be rejected by Redis with CROSSSLOT and resubscription would
-        fail silently. The same method is bound to the per-node PubSub
-        instances managed by ``ClusterPubSub``.
-        """
-        # Pure client-side logic: mock the pool, use a real encoder, no
-        # server needed. ``key_slot`` is client-side CRC16, so slot
-        # assignments are deterministic without a cluster.
-        pool = MagicMock()
-        encoder = Encoder(
-            encoding="utf-8", encoding_errors="strict", decode_responses=False
-        )
-        p = PubSub(connection_pool=pool, encoder=encoder)
-
-        # Two channels share a hash tag (same slot); a third hashes to a
-        # different slot.
-        ch_a1 = b"{slot-a}-one"
-        ch_a2 = b"{slot-a}-two"
-        ch_b = b"{slot-b}-one"
-        assert key_slot(ch_a1) == key_slot(ch_a2)
-        assert key_slot(ch_a1) != key_slot(ch_b)
-
-        # Populate state as if previously subscribed, without going to the wire.
-        p.shard_channels = {ch_a1: None, ch_a2: None, ch_b: None}
-
-        calls = []
-
-        async def fake_ssubscribe(*args, **kwargs):
-            calls.append((tuple(args), dict(kwargs)))
-
-        with mock.patch.object(p, "ssubscribe", side_effect=fake_ssubscribe):
-            await ClusterPubSub._resubscribe_shard_channels(p)
-
-        # Every ssubscribe call must target exactly one slot.
-        slots_per_call = []
-        all_channels = set()
-        for args, kwargs in calls:
-            channels = set(args) | set(
-                k.encode() if isinstance(k, str) else k for k in kwargs
-            )
-            assert channels, "ssubscribe called with no channels"
-            call_slots = {key_slot(c) for c in channels}
-            assert len(call_slots) == 1, (
-                f"ssubscribe grouped channels from multiple slots: {call_slots}"
-            )
-            slots_per_call.append(next(iter(call_slots)))
-            all_channels.update(channels)
-
-        # All original channels must be resubscribed, across exactly two
-        # distinct slot groups.
-        assert all_channels == {ch_a1, ch_a2, ch_b}
-        assert set(slots_per_call) == {key_slot(ch_a1), key_slot(ch_b)}
-        # Channels sharing a slot are batched: two unique slots => two calls.
-        assert len(calls) == 2
-
-    @pytest.mark.fixed_client
-    async def test_cluster_pubsub_resubscribe_binary_shard_channel_with_handler(self):
-        pool = MagicMock()
-        encoder = Encoder(
-            encoding="utf-8", encoding_errors="strict", decode_responses=False
-        )
-        p = PubSub(connection_pool=pool, encoder=encoder)
-        binary_channel = b"\x80\x81\x82"
-        handler = MagicMock()
-        p.shard_channels = {binary_channel: handler}
-
-        calls = []
-
-        async def fake_ssubscribe(*args, **kwargs):
-            calls.append((tuple(args), dict(kwargs)))
-
-        with mock.patch.object(p, "ssubscribe", side_effect=fake_ssubscribe):
-            await ClusterPubSub._resubscribe_shard_channels(p)
-
-        assert calls == [((Subscription(binary_channel, handler),), {})]
-
     @skip_if_server_version_lt("7.0.0")
     async def test_standalone_pubsub_on_connect_batches_shard_channels(self, pubsub):
         """The standalone PubSub has no notion of slots and must keep
@@ -962,6 +861,109 @@ class TestPubSubSubscribeUnsubscribe:
         assert await wait_for_message(p) == make_message(unsub_type, key, 0)
         assert await wait_for_message(p) == make_message(sub_type, key, 1)
         assert p.subscribed is True
+
+
+@pytest.mark.fixed_client
+class TestPubSubResubscribeMocked:
+    """Resubscribe handling checked against mocked connections; no server needed."""
+
+    async def test_cluster_pubsub_resubscribe_binary_shard_channel_with_handler(self):
+        pool = MagicMock()
+        encoder = Encoder(
+            encoding="utf-8", encoding_errors="strict", decode_responses=False
+        )
+        p = PubSub(connection_pool=pool, encoder=encoder)
+        binary_channel = b"\x80\x81\x82"
+        handler = MagicMock()
+        p.shard_channels = {binary_channel: handler}
+
+        calls = []
+
+        async def fake_ssubscribe(*args, **kwargs):
+            calls.append((tuple(args), dict(kwargs)))
+
+        with mock.patch.object(p, "ssubscribe", side_effect=fake_ssubscribe):
+            await ClusterPubSub._resubscribe_shard_channels(p)
+
+        assert calls == [((Subscription(binary_channel, handler),), {})]
+
+    async def test_cluster_pubsub_resubscribe_shard_channels_groups_by_slot(self):
+        """The cluster-aware ``_resubscribe_shard_channels`` must group shard
+        channels by hash slot on reconnect. A cluster node can own multiple
+        slot ranges, so a single batched SSUBSCRIBE across different slots
+        would be rejected by Redis with CROSSSLOT and resubscription would
+        fail silently. The same method is bound to the per-node PubSub
+        instances managed by ``ClusterPubSub``.
+        """
+        # Pure client-side logic: mock the pool, use a real encoder, no
+        # server needed. ``key_slot`` is client-side CRC16, so slot
+        # assignments are deterministic without a cluster.
+        pool = MagicMock()
+        encoder = Encoder(
+            encoding="utf-8", encoding_errors="strict", decode_responses=False
+        )
+        p = PubSub(connection_pool=pool, encoder=encoder)
+
+        # Two channels share a hash tag (same slot); a third hashes to a
+        # different slot.
+        ch_a1 = b"{slot-a}-one"
+        ch_a2 = b"{slot-a}-two"
+        ch_b = b"{slot-b}-one"
+        assert key_slot(ch_a1) == key_slot(ch_a2)
+        assert key_slot(ch_a1) != key_slot(ch_b)
+
+        # Populate state as if previously subscribed, without going to the wire.
+        p.shard_channels = {ch_a1: None, ch_a2: None, ch_b: None}
+
+        calls = []
+
+        async def fake_ssubscribe(*args, **kwargs):
+            calls.append((tuple(args), dict(kwargs)))
+
+        with mock.patch.object(p, "ssubscribe", side_effect=fake_ssubscribe):
+            await ClusterPubSub._resubscribe_shard_channels(p)
+
+        # Every ssubscribe call must target exactly one slot.
+        slots_per_call = []
+        all_channels = set()
+        for args, kwargs in calls:
+            channels = set(args) | set(
+                k.encode() if isinstance(k, str) else k for k in kwargs
+            )
+            assert channels, "ssubscribe called with no channels"
+            call_slots = {key_slot(c) for c in channels}
+            assert len(call_slots) == 1, (
+                f"ssubscribe grouped channels from multiple slots: {call_slots}"
+            )
+            slots_per_call.append(next(iter(call_slots)))
+            all_channels.update(channels)
+
+        # All original channels must be resubscribed, across exactly two
+        # distinct slot groups.
+        assert all_channels == {ch_a1, ch_a2, ch_b}
+        assert set(slots_per_call) == {key_slot(ch_a1), key_slot(ch_b)}
+        # Channels sharing a slot are batched: two unique slots => two calls.
+        assert len(calls) == 2
+
+    async def test_resubscribe_binary_handler_uses_subscription(self):
+        pool = MagicMock()
+        encoder = Encoder(
+            encoding="utf-8", encoding_errors="strict", decode_responses=False
+        )
+        p = PubSub(connection_pool=pool, encoder=encoder)
+        binary_channel = b"\x80\x81\x82"
+        handler = MagicMock()
+        p.channels = {binary_channel: handler}
+
+        calls = []
+
+        async def fake_subscribe(*args, **kwargs):
+            calls.append((tuple(args), dict(kwargs)))
+
+        with mock.patch.object(p, "subscribe", side_effect=fake_subscribe):
+            await p._resubscribe(p.channels, p.subscribe)
+
+        assert calls == [((Subscription(binary_channel, handler),), {})]
 
 
 @pytest.mark.onlynoncluster

@@ -8783,7 +8783,28 @@ class TestBinarySave:
         for key, value in mapping.items():
             assert r.lrange(key, 0, -1) == value
 
-    @pytest.mark.fixed_client
+    @skip_if_redis_enterprise()
+    def test_large_responses(self, r):
+        "The PythonParser has some special cases for return values > 1MB"
+        # load up 5MB of data into a key
+        data = "".join([ascii_letters] * (5000000 // len(ascii_letters)))
+        r["a"] = data
+        assert r["a"] == data.encode()
+
+    def test_floating_point_encoding(self, r):
+        """
+        High precision floating point values sent to the server should keep
+        precision.
+        """
+        timestamp = 1349673917.939762
+        r.zadd("a", {"a1": timestamp})
+        assert r.zscore("a", "a1") == timestamp
+
+
+@pytest.mark.fixed_client
+class TestInfoParsing:
+    """INFO reply parsing on canned replies; no server needed."""
+
     def test_22_info(self):
         """
         Older Redis versions contained 'allocation_stats' in INFO that
@@ -8819,20 +8840,3 @@ class TestBinarySave:
         assert "allocation_stats" in parsed
         assert "6" in parsed["allocation_stats"]
         assert ">=256" in parsed["allocation_stats"]
-
-    @skip_if_redis_enterprise()
-    def test_large_responses(self, r):
-        "The PythonParser has some special cases for return values > 1MB"
-        # load up 5MB of data into a key
-        data = "".join([ascii_letters] * (5000000 // len(ascii_letters)))
-        r["a"] = data
-        assert r["a"] == data.encode()
-
-    def test_floating_point_encoding(self, r):
-        """
-        High precision floating point values sent to the server should keep
-        precision.
-        """
-        timestamp = 1349673917.939762
-        r.zadd("a", {"a1": timestamp})
-        assert r.zscore("a", "a1") == timestamp

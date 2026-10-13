@@ -6665,7 +6665,27 @@ class TestBinarySave:
         for key, value in mapping.items():
             assert await r.lrange(key, 0, -1) == value
 
-    @pytest.mark.fixed_client
+    async def test_large_responses(self, r: redis.Redis):
+        """The PythonParser has some special cases for return values > 1MB"""
+        # load up 5MB of data into a key
+        data = "".join([ascii_letters] * (5000000 // len(ascii_letters)))
+        await r.set("a", data)
+        assert await r.get("a") == data.encode()
+
+    async def test_floating_point_encoding(self, r: redis.Redis):
+        """
+        High precision floating point values sent to the server should keep
+        precision.
+        """
+        timestamp = 1349673917.939762
+        await r.zadd("a", {"a1": timestamp})
+        assert await r.zscore("a", "a1") == timestamp
+
+
+@pytest.mark.fixed_client
+class TestInfoParsing:
+    """INFO reply parsing on canned replies; no server needed."""
+
     async def test_22_info(self):
         """
         Older Redis versions contained 'allocation_stats' in INFO that
@@ -6701,22 +6721,6 @@ class TestBinarySave:
         assert "allocation_stats" in parsed
         assert "6" in parsed["allocation_stats"]
         assert ">=256" in parsed["allocation_stats"]
-
-    async def test_large_responses(self, r: redis.Redis):
-        """The PythonParser has some special cases for return values > 1MB"""
-        # load up 5MB of data into a key
-        data = "".join([ascii_letters] * (5000000 // len(ascii_letters)))
-        await r.set("a", data)
-        assert await r.get("a") == data.encode()
-
-    async def test_floating_point_encoding(self, r: redis.Redis):
-        """
-        High precision floating point values sent to the server should keep
-        precision.
-        """
-        timestamp = 1349673917.939762
-        await r.zadd("a", {"a1": timestamp})
-        assert await r.zscore("a", "a1") == timestamp
 
 
 @pytest.mark.asyncio

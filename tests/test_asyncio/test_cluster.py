@@ -431,51 +431,6 @@ class TestRedisClusterObj:
     Tests for the RedisCluster class
     """
 
-    @pytest.mark.fixed_client
-    async def test_host_port_startup_node(self) -> None:
-        """
-        Test that it is possible to use host & port arguments as startup node
-        args
-        """
-        cluster = await get_mocked_redis_client(host=default_host, port=default_port)
-        assert cluster.get_node(host=default_host, port=default_port) is not None
-
-        await cluster.aclose()
-
-    @pytest.mark.fixed_client
-    async def test_aclosing(self) -> None:
-        cluster = await get_mocked_redis_client(host=default_host, port=default_port)
-        called = 0
-
-        async def mock_aclose():
-            nonlocal called
-            called += 1
-
-        with mock.patch.object(cluster, "aclose", mock_aclose):
-            async with aclosing(cluster):
-                pass
-            assert called == 1
-        await cluster.aclose()
-
-    @pytest.mark.fixed_client
-    async def test_close_is_aclose(self) -> None:
-        """
-        Test that it is possible to use host & port arguments as startup node
-        args
-        """
-        cluster = await get_mocked_redis_client(host=default_host, port=default_port)
-        called = 0
-
-        async def mock_aclose():
-            nonlocal called
-            called += 1
-
-        with mock.patch.object(cluster, "aclose", mock_aclose):
-            with pytest.warns(DeprecationWarning, match=r"Use aclose\(\) instead"):
-                await cluster.close()
-            assert called == 1
-        await cluster.aclose()
-
     async def test_startup_nodes(self) -> None:
         """
         Test that it is possible to use startup_nodes
@@ -606,18 +561,6 @@ class TestRedisClusterObj:
                 info = await cluster.client_info()
                 assert info["lib-ver"] == "1234"
                 assert info["lib-name"] == "test2"
-
-    @pytest.mark.fixed_client
-    async def test_empty_startup_nodes(self) -> None:
-        """
-        Test that exception is raised when empty providing empty startup_nodes
-        """
-        with pytest.raises(RedisClusterException) as ex:
-            RedisCluster(startup_nodes=[])
-
-        assert str(ex.value).startswith(
-            "RedisCluster requires at least one node to discover the cluster"
-        ), str_if_bytes(ex.value)
 
     async def test_from_url(self, request: FixtureRequest) -> None:
         url = request.config.getoption("--redis-url")
@@ -938,111 +881,6 @@ class TestRedisClusterObj:
                         assert execute_command.failed_calls == 1
                         assert execute_command.successful_calls == 1
 
-    @pytest.mark.fixed_client
-    @pytest.mark.parametrize(
-        "read_from_replicas,load_balancing_strategy,mocks_srv_ports",
-        [
-            (True, None, [7001, 7002, 7001]),
-            (True, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
-            (True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
-            (True, LoadBalancingStrategy.RANDOM, [7002, 7001, 7002]),
-            (True, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
-            (False, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
-            (False, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
-            (False, LoadBalancingStrategy.RANDOM, [7002, 7001, 7002]),
-            (False, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
-        ],
-    )
-    async def test_reading_with_load_balancing_strategies(
-        self,
-        read_from_replicas: bool,
-        load_balancing_strategy: LoadBalancingStrategy,
-        mocks_srv_ports: List[int],
-    ) -> None:
-        def _make_mock_randint():
-            _state = (
-                1  # Start with 1 so we have clearly different results from round robin
-            )
-
-            def _mock_randint(lower: int, upper: int) -> int:
-                """
-                Return a controlled sequence of numbers when called repeatedly
-                """
-                if lower == upper:
-                    return lower
-
-                nonlocal _state
-                res = _state + lower
-                _state ^= 1
-                return res
-
-            return _mock_randint
-
-        mock_randint = _make_mock_randint()
-
-        with mock.patch.multiple(
-            Connection,
-            send_command=mock.DEFAULT,
-            read_response=mock.DEFAULT,
-            _connect=mock.DEFAULT,
-            can_read_destructive=mock.DEFAULT,
-            on_connect=mock.DEFAULT,
-        ) as mocks:
-            with (
-                mock.patch.object(
-                    ClusterNode, "execute_command", autospec=True
-                ) as execute_command,
-                patch("random.randint", wraps=mock_randint),
-            ):
-
-                async def execute_command_mock_first(self, *args, **options):
-                    await self.connection_class(**self.connection_kwargs).connect()
-                    # Primary
-                    assert self.port == mocks_srv_ports[0]
-                    execute_command.side_effect = execute_command_mock_second
-                    return "MOCK_OK"
-
-                def execute_command_mock_second(self, *args, **options):
-                    # Replica
-                    assert self.port == mocks_srv_ports[1]
-                    execute_command.side_effect = execute_command_mock_third
-                    return "MOCK_OK"
-
-                def execute_command_mock_third(self, *args, **options):
-                    # Primary
-                    assert self.port == mocks_srv_ports[2]
-                    return "MOCK_OK"
-
-                # We don't need to create a real cluster connection but we
-                # do want RedisCluster.on_connect function to get called,
-                # so we'll mock some of the Connection's functions to allow it
-                execute_command.side_effect = execute_command_mock_first
-                mocks["send_command"].return_value = True
-                mocks["read_response"].return_value = "OK"
-                mocks["_connect"].return_value = True
-                mocks["can_read_destructive"].return_value = False
-                mocks["on_connect"].return_value = True
-
-                # Create a cluster with reading from replications
-                read_cluster = await get_mocked_redis_client(
-                    host=default_host,
-                    port=default_port,
-                    read_from_replicas=read_from_replicas,
-                    load_balancing_strategy=load_balancing_strategy,
-                )
-                assert read_cluster.read_from_replicas is read_from_replicas
-                assert read_cluster.load_balancing_strategy is load_balancing_strategy
-                # Check that we read from the slot's nodes in a round robin
-                # matter.
-                # 'foo' belongs to slot 12182 and the slot's nodes are:
-                # [(127.0.0.1,7001,primary), (127.0.0.1,7002,replica)]
-                await read_cluster.get("foo")
-                await read_cluster.get("foo")
-                await read_cluster.get("foo")
-                mocks["send_command"].assert_has_calls([mock.call("READONLY")])
-
-                await read_cluster.aclose()
-
     async def test_keyslot(self, r: RedisCluster) -> None:
         """
         Test that method will compute correct key in all supported cases
@@ -1059,13 +897,6 @@ class TestRedisClusterObj:
         assert r.keyslot(1337.1234) == r.keyslot("1337.1234")
         assert r.keyslot(1337) == r.keyslot("1337")
         assert r.keyslot(b"abc") == r.keyslot("abc")
-
-    @pytest.mark.fixed_client
-    async def test_get_node_name(self) -> None:
-        assert (
-            get_node_name(default_host, default_port)
-            == f"{default_host}:{default_port}"
-        )
 
     async def test_all_nodes(self, r: RedisCluster) -> None:
         """
@@ -1089,37 +920,6 @@ class TestRedisClusterObj:
 
         for node in r.get_primaries():
             assert node in nodes
-
-    @pytest.mark.fixed_client
-    @pytest.mark.parametrize("error", RedisCluster.ERRORS_ALLOW_RETRY)
-    async def test_cluster_down_overreaches_retry_attempts(
-        self,
-        error: Union[Type[TimeoutError], Type[ClusterDownError], Type[ConnectionError]],
-    ) -> None:
-        """
-        When error that allows retry is thrown, test that we retry executing
-        the command as many times as configured in cluster_error_retry_attempts
-        and then raise the exception
-        """
-        with mock.patch.object(RedisCluster, "_execute_command") as execute_command:
-
-            def raise_error(target_node, *args, **kwargs):
-                execute_command.failed_calls += 1
-                raise error("mocked error")
-
-            execute_command.side_effect = raise_error
-            # Without this the attribute is a MagicMock, so the comparison below
-            # is never an integer comparison.
-            execute_command.failed_calls = 0
-
-            rc = await get_mocked_redis_client(host=default_host, port=default_port)
-
-            with pytest.raises(error):
-                await rc.get("bar")
-            # retry counts retries, so the first attempt is one more.
-            assert execute_command.failed_calls == rc.retry.get_retries() + 1
-
-            await rc.aclose()
 
     async def test_set_default_node_success(self, r: RedisCluster) -> None:
         """
@@ -1279,6 +1079,204 @@ class TestRedisClusterObj:
         # verify that the proxies were indeed used
         n_used = sum((1 if p.n_connections else 0) for p in proxies)
         assert n_used > 1
+
+
+@pytest.mark.fixed_client
+class TestRedisClusterObjMocked:
+    """RedisCluster behaviour checked against mocked nodes; no server needed."""
+
+    async def test_aclosing(self) -> None:
+        cluster = await get_mocked_redis_client(host=default_host, port=default_port)
+        called = 0
+
+        async def mock_aclose():
+            nonlocal called
+            called += 1
+
+        with mock.patch.object(cluster, "aclose", mock_aclose):
+            async with aclosing(cluster):
+                pass
+            assert called == 1
+        await cluster.aclose()
+
+    async def test_close_is_aclose(self) -> None:
+        """
+        Test that it is possible to use host & port arguments as startup node
+        args
+        """
+        cluster = await get_mocked_redis_client(host=default_host, port=default_port)
+        called = 0
+
+        async def mock_aclose():
+            nonlocal called
+            called += 1
+
+        with mock.patch.object(cluster, "aclose", mock_aclose):
+            with pytest.warns(DeprecationWarning, match=r"Use aclose\(\) instead"):
+                await cluster.close()
+            assert called == 1
+        await cluster.aclose()
+
+    @pytest.mark.parametrize("error", RedisCluster.ERRORS_ALLOW_RETRY)
+    async def test_cluster_down_overreaches_retry_attempts(
+        self,
+        error: Union[Type[TimeoutError], Type[ClusterDownError], Type[ConnectionError]],
+    ) -> None:
+        """
+        When error that allows retry is thrown, test that we retry executing
+        the command as many times as configured in cluster_error_retry_attempts
+        and then raise the exception
+        """
+        with mock.patch.object(RedisCluster, "_execute_command") as execute_command:
+
+            def raise_error(target_node, *args, **kwargs):
+                execute_command.failed_calls += 1
+                raise error("mocked error")
+
+            execute_command.side_effect = raise_error
+            # Without this the attribute is a MagicMock, so the comparison below
+            # is never an integer comparison.
+            execute_command.failed_calls = 0
+
+            rc = await get_mocked_redis_client(host=default_host, port=default_port)
+
+            with pytest.raises(error):
+                await rc.get("bar")
+            # retry counts retries, so the first attempt is one more.
+            assert execute_command.failed_calls == rc.retry.get_retries() + 1
+
+            await rc.aclose()
+
+    async def test_empty_startup_nodes(self) -> None:
+        """
+        Test that exception is raised when empty providing empty startup_nodes
+        """
+        with pytest.raises(RedisClusterException) as ex:
+            RedisCluster(startup_nodes=[])
+
+        assert str(ex.value).startswith(
+            "RedisCluster requires at least one node to discover the cluster"
+        ), str_if_bytes(ex.value)
+
+    async def test_get_node_name(self) -> None:
+        assert (
+            get_node_name(default_host, default_port)
+            == f"{default_host}:{default_port}"
+        )
+
+    async def test_host_port_startup_node(self) -> None:
+        """
+        Test that it is possible to use host & port arguments as startup node
+        args
+        """
+        cluster = await get_mocked_redis_client(host=default_host, port=default_port)
+        assert cluster.get_node(host=default_host, port=default_port) is not None
+
+        await cluster.aclose()
+
+    @pytest.mark.parametrize(
+        "read_from_replicas,load_balancing_strategy,mocks_srv_ports",
+        [
+            (True, None, [7001, 7002, 7001]),
+            (True, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
+            (True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
+            (True, LoadBalancingStrategy.RANDOM, [7002, 7001, 7002]),
+            (True, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
+            (False, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
+            (False, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
+            (False, LoadBalancingStrategy.RANDOM, [7002, 7001, 7002]),
+            (False, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
+        ],
+    )
+    async def test_reading_with_load_balancing_strategies(
+        self,
+        read_from_replicas: bool,
+        load_balancing_strategy: LoadBalancingStrategy,
+        mocks_srv_ports: List[int],
+    ) -> None:
+        def _make_mock_randint():
+            _state = (
+                1  # Start with 1 so we have clearly different results from round robin
+            )
+
+            def _mock_randint(lower: int, upper: int) -> int:
+                """
+                Return a controlled sequence of numbers when called repeatedly
+                """
+                if lower == upper:
+                    return lower
+
+                nonlocal _state
+                res = _state + lower
+                _state ^= 1
+                return res
+
+            return _mock_randint
+
+        mock_randint = _make_mock_randint()
+
+        with mock.patch.multiple(
+            Connection,
+            send_command=mock.DEFAULT,
+            read_response=mock.DEFAULT,
+            _connect=mock.DEFAULT,
+            can_read_destructive=mock.DEFAULT,
+            on_connect=mock.DEFAULT,
+        ) as mocks:
+            with (
+                mock.patch.object(
+                    ClusterNode, "execute_command", autospec=True
+                ) as execute_command,
+                patch("random.randint", wraps=mock_randint),
+            ):
+
+                async def execute_command_mock_first(self, *args, **options):
+                    await self.connection_class(**self.connection_kwargs).connect()
+                    # Primary
+                    assert self.port == mocks_srv_ports[0]
+                    execute_command.side_effect = execute_command_mock_second
+                    return "MOCK_OK"
+
+                def execute_command_mock_second(self, *args, **options):
+                    # Replica
+                    assert self.port == mocks_srv_ports[1]
+                    execute_command.side_effect = execute_command_mock_third
+                    return "MOCK_OK"
+
+                def execute_command_mock_third(self, *args, **options):
+                    # Primary
+                    assert self.port == mocks_srv_ports[2]
+                    return "MOCK_OK"
+
+                # We don't need to create a real cluster connection but we
+                # do want RedisCluster.on_connect function to get called,
+                # so we'll mock some of the Connection's functions to allow it
+                execute_command.side_effect = execute_command_mock_first
+                mocks["send_command"].return_value = True
+                mocks["read_response"].return_value = "OK"
+                mocks["_connect"].return_value = True
+                mocks["can_read_destructive"].return_value = False
+                mocks["on_connect"].return_value = True
+
+                # Create a cluster with reading from replications
+                read_cluster = await get_mocked_redis_client(
+                    host=default_host,
+                    port=default_port,
+                    read_from_replicas=read_from_replicas,
+                    load_balancing_strategy=load_balancing_strategy,
+                )
+                assert read_cluster.read_from_replicas is read_from_replicas
+                assert read_cluster.load_balancing_strategy is load_balancing_strategy
+                # Check that we read from the slot's nodes in a round robin
+                # matter.
+                # 'foo' belongs to slot 12182 and the slot's nodes are:
+                # [(127.0.0.1,7001,primary), (127.0.0.1,7002,replica)]
+                await read_cluster.get("foo")
+                await read_cluster.get("foo")
+                await read_cluster.get("foo")
+                mocks["send_command"].assert_has_calls([mock.call("READONLY")])
+
+                await read_cluster.aclose()
 
 
 @pytest.mark.onlycluster
@@ -1448,37 +1446,6 @@ class TestClusterRedisCommands:
     async def test_cluster_count_failure_report(self, r: RedisCluster) -> None:
         mock_all_nodes_resp(r, 0)
         assert await r.cluster_count_failure_report("node_0") == 0
-
-    @pytest.mark.fixed_client
-    @skip_if_redis_enterprise()
-    async def test_cluster_delslots(self) -> None:
-        cluster_slots = [
-            [0, 8191, ["127.0.0.1", 7000, "node_0"]],
-            [8192, 16383, ["127.0.0.1", 7001, "node_1"]],
-        ]
-        r = await get_mocked_redis_client(
-            host=default_host, port=default_port, cluster_slots=cluster_slots
-        )
-        mock_all_nodes_resp(r, "OK")
-        node0 = r.get_node(default_host, 7000)
-        node1 = r.get_node(default_host, 7001)
-        assert await r.cluster_delslots(0, 8192) == [True, True]
-        assert node0._free.pop().read_response.called
-        assert node1._free.pop().read_response.called
-
-        await r.aclose()
-
-    @pytest.mark.fixed_client
-    @skip_if_server_version_lt("7.0.0")
-    @skip_if_redis_enterprise()
-    async def test_cluster_delslotsrange(self):
-        r = await get_mocked_redis_client(host=default_host, port=default_port)
-        mock_all_nodes_resp(r, "OK")
-        node = r.get_random_node()
-        await r.cluster_addslots(node, 1, 2, 3, 4, 5)
-        assert await r.cluster_delslotsrange(1, 5)
-        assert node._free.pop().read_response.called
-        await r.aclose()
 
     @skip_if_redis_enterprise()
     async def test_cluster_failover(self, r: RedisCluster) -> None:
@@ -1686,34 +1653,6 @@ class TestClusterRedisCommands:
             assert links_to == links_for
             for i in range(0, len(res) - 1, 2):
                 assert res[i][b"node"] == res[i + 1][b"node"]
-
-    @pytest.mark.fixed_client
-    @skip_if_redis_enterprise()
-    async def test_readonly(self) -> None:
-        r = await get_mocked_redis_client(host=default_host, port=default_port)
-        mock_all_nodes_resp(r, "OK")
-        assert await r.readonly() is True
-        all_replicas_results = await r.readonly(target_nodes="replicas")
-        for res in all_replicas_results.values():
-            assert res is True
-        for replica in r.get_replicas():
-            assert replica._free.pop().read_response.called
-
-        await r.aclose()
-
-    @pytest.mark.fixed_client
-    @skip_if_redis_enterprise()
-    async def test_readwrite(self) -> None:
-        r = await get_mocked_redis_client(host=default_host, port=default_port)
-        mock_all_nodes_resp(r, "OK")
-        assert await r.readwrite() is True
-        all_replicas_results = await r.readwrite(target_nodes="replicas")
-        for res in all_replicas_results.values():
-            assert res is True
-        for replica in r.get_replicas():
-            assert replica._free.pop().read_response.called
-
-        await r.aclose()
 
     @skip_if_redis_enterprise()
     async def test_bgsave(self, r: RedisCluster) -> None:
@@ -2889,6 +2828,66 @@ class TestClusterRedisCommands:
             await r.hotkeys_reset()
         with pytest.raises(NotImplementedError):
             await r.hotkeys_stop()
+
+
+@pytest.mark.fixed_client
+class TestClusterRedisCommandsMocked:
+    """Cluster commands checked against mocked node replies; no server needed."""
+
+    @skip_if_redis_enterprise()
+    async def test_cluster_delslots(self) -> None:
+        cluster_slots = [
+            [0, 8191, ["127.0.0.1", 7000, "node_0"]],
+            [8192, 16383, ["127.0.0.1", 7001, "node_1"]],
+        ]
+        r = await get_mocked_redis_client(
+            host=default_host, port=default_port, cluster_slots=cluster_slots
+        )
+        mock_all_nodes_resp(r, "OK")
+        node0 = r.get_node(default_host, 7000)
+        node1 = r.get_node(default_host, 7001)
+        assert await r.cluster_delslots(0, 8192) == [True, True]
+        assert node0._free.pop().read_response.called
+        assert node1._free.pop().read_response.called
+
+        await r.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
+    async def test_cluster_delslotsrange(self):
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        mock_all_nodes_resp(r, "OK")
+        node = r.get_random_node()
+        await r.cluster_addslots(node, 1, 2, 3, 4, 5)
+        assert await r.cluster_delslotsrange(1, 5)
+        assert node._free.pop().read_response.called
+        await r.aclose()
+
+    @skip_if_redis_enterprise()
+    async def test_readonly(self) -> None:
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        mock_all_nodes_resp(r, "OK")
+        assert await r.readonly() is True
+        all_replicas_results = await r.readonly(target_nodes="replicas")
+        for res in all_replicas_results.values():
+            assert res is True
+        for replica in r.get_replicas():
+            assert replica._free.pop().read_response.called
+
+        await r.aclose()
+
+    @skip_if_redis_enterprise()
+    async def test_readwrite(self) -> None:
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        mock_all_nodes_resp(r, "OK")
+        assert await r.readwrite() is True
+        all_replicas_results = await r.readwrite(target_nodes="replicas")
+        for res in all_replicas_results.values():
+            assert res is True
+        for replica in r.get_replicas():
+            assert replica._free.pop().read_response.called
+
+        await r.aclose()
 
 
 class TestStaticMetadataRouting:
@@ -4785,46 +4784,6 @@ class TestClusterConnectionErrorHandling:
 class TestClusterPipeline:
     """Tests for the ClusterPipeline class."""
 
-    @pytest.mark.fixed_client
-    async def test_pipeline_nodes_manager_property(self) -> None:
-        """
-        Test that ClusterPipeline exposes nodes_manager property
-        that delegates to the cluster client's nodes_manager.
-        """
-        r = await get_mocked_redis_client(host=default_host, port=default_port)
-        try:
-            pipeline = r.pipeline()
-            # Verify that nodes_manager property exists and returns the same object
-            # as the cluster client's nodes_manager
-            assert pipeline.nodes_manager is r.nodes_manager
-            # Verify that we can access nodes_manager attributes
-            assert pipeline.nodes_manager.default_node is not None
-        finally:
-            await r.aclose()
-
-    @pytest.mark.fixed_client
-    async def test_pipeline_set_response_callback(self) -> None:
-        """
-        Test that ClusterPipeline exposes set_response_callback method
-        that delegates to the cluster client's set_response_callback.
-        """
-        r = await get_mocked_redis_client(host=default_host, port=default_port)
-        try:
-            pipeline = r.pipeline()
-
-            # Define a custom callback
-            def custom_callback(response):
-                return f"custom_{response}"
-
-            # Set the callback via the pipeline
-            pipeline.set_response_callback("CUSTOM_CMD", custom_callback)
-
-            # Verify that the callback was set on the cluster client
-            assert "CUSTOM_CMD" in r.response_callbacks
-            assert r.response_callbacks["CUSTOM_CMD"] is custom_callback
-        finally:
-            await r.aclose()
-
     async def test_blocked_arguments(self, r: RedisCluster) -> None:
         """Test handling for blocked pipeline arguments."""
 
@@ -4848,186 +4807,6 @@ class TestClusterPipeline:
                 f"ERROR: Calling pipelined function {command} is blocked "
                 "when running redis in cluster mode..."
             )
-
-    @pytest.mark.fixed_client
-    async def test_client_list_iter_blocked_on_cluster_pipeline(self) -> None:
-        """
-        client_list_iter sends the same CLIENT LIST command as client_list,
-        which PIPELINE_BLOCKED_COMMANDS blocks on ClusterPipeline.
-        client_list_iter has no wire-command entry of its own to add there,
-        so it must be blocked explicitly too, or it would fall through to
-        the inherited implementation and queue CLIENT LIST like a real
-        pipelined command instead of raising.
-        """
-        r = await get_mocked_redis_client(host=default_host, port=default_port)
-        try:
-            pipe = r.pipeline()
-            with pytest.raises(RedisClusterException):
-                pipe.client_list_iter()
-        finally:
-            await r.aclose()
-
-    @pytest.mark.fixed_client
-    async def test_evalsha_not_blocked_on_cluster_pipeline(self) -> None:
-        """EVALSHA must be usable on async ClusterPipeline (see #2914)."""
-        assert "EVALSHA" not in PIPELINE_BLOCKED_COMMANDS
-        r = await get_mocked_redis_client(host=default_host, port=default_port)
-        try:
-            pipe = r.pipeline()
-            sha = "a" * 40
-            returned = pipe.evalsha(sha, 1, "foo", "bar")
-            assert returned is pipe
-            queue = pipe._execution_strategy._command_queue
-            assert len(queue) == 1
-            assert queue[0].args == ("EVALSHA", sha, 1, "foo", "bar")
-        finally:
-            await r.aclose()
-
-    @pytest.mark.fixed_client
-    async def test_evalsha_zero_keys_pipeline_execute(self) -> None:
-        """Async ClusterPipeline must execute EVALSHA with numkeys=0."""
-        r = await get_mocked_redis_client(host=default_host, port=default_port)
-        try:
-            mock_all_nodes_resp(r, 42)
-            sha = "a" * 40
-            async with r.pipeline() as pipe:
-                pipe.evalsha(sha, 0)
-                assert await pipe.execute() == [42]
-        finally:
-            await r.aclose()
-
-    @pytest.mark.fixed_client
-    async def test_evalsha_zero_keys_reuses_slot_in_transaction(self) -> None:
-        """Zero-key EVALSHA in a transactional async pipeline reuses one slot."""
-        r = await get_mocked_redis_client(host=default_host, port=default_port)
-        try:
-            sha = "a" * 40
-            async with r.pipeline(transaction=True) as pipe:
-                pipe.evalsha(sha, 0)
-                pipe.evalsha(sha, 0)
-                slots = pipe._execution_strategy._pipeline_slots
-                assert len(slots) == 1
-
-                keyed_slot = key_slot(b"foo")
-
-                async def _fake_determine_slot(*_args, **_kwargs):
-                    return keyed_slot
-
-                with mock.patch.object(
-                    pipe.cluster_client,
-                    "_determine_slot",
-                    side_effect=_fake_determine_slot,
-                ):
-                    pipe.set("foo", "bar")
-                assert pipe._execution_strategy._pipeline_slots == {keyed_slot}
-                assert pipe._execution_strategy._transaction_has_keyed_slot is True
-        finally:
-            await r.aclose()
-
-    @pytest.mark.fixed_client
-    async def test_evalsha_zero_keys_follows_keyed_slot_in_transaction(self) -> None:
-        """Zero-key EVALSHA after a keyed slot is fixed reuses that slot."""
-        r = await get_mocked_redis_client(host=default_host, port=default_port)
-        try:
-            sha = "a" * 40
-            async with r.pipeline(transaction=True) as pipe:
-                strategy = pipe._execution_strategy
-                strategy._pipeline_slots = {key_slot(b"foo")}
-                strategy._transaction_has_keyed_slot = True
-                pipe.evalsha(sha, 0)
-                assert strategy._pipeline_slots == {key_slot(b"foo")}
-        finally:
-            await r.aclose()
-
-    @pytest.mark.fixed_client
-    async def test_slotless_command_does_not_lock_keyed_slot_flag(self) -> None:
-        """Slotless commands must not block later keyed retargeting."""
-        r = await get_mocked_redis_client(host=default_host, port=default_port)
-        try:
-            sha = "a" * 40
-            async with r.pipeline(transaction=True) as pipe:
-                pipe.evalsha(sha, 0)
-                assert pipe._execution_strategy._transaction_has_keyed_slot is False
-
-                async def _no_slot(*_args, **_kwargs):
-                    return None
-
-                with mock.patch.object(
-                    pipe.cluster_client,
-                    "_determine_slot",
-                    side_effect=_no_slot,
-                ):
-                    pipe.execute_command("CLIENT TRACKING", "ON")
-                assert pipe._execution_strategy._transaction_has_keyed_slot is False
-
-                keyed_slot = key_slot(b"foo")
-
-                async def _fake_determine_slot(*_args, **_kwargs):
-                    return keyed_slot
-
-                with mock.patch.object(
-                    pipe.cluster_client,
-                    "_determine_slot",
-                    side_effect=_fake_determine_slot,
-                ):
-                    pipe.set("foo", "bar")
-                assert pipe._execution_strategy._pipeline_slots == {keyed_slot}
-                assert pipe._execution_strategy._transaction_has_keyed_slot is True
-        finally:
-            await r.aclose()
-
-    @pytest.mark.fixed_client
-    async def test_evalsha_zero_keys_then_cross_slot_raises_at_execute(self) -> None:
-        """
-        Zero-key EVALSHA retarget must not swallow a later true cross-slot
-        conflict: two keyed commands on different slots still raise at execute().
-        """
-        r = await get_mocked_redis_client(host=default_host, port=default_port)
-        try:
-            sha = "a" * 40
-            slot_a = key_slot(b"{foo}a")
-            slot_b = key_slot(b"{bar}b")
-            assert slot_a != slot_b
-            async with r.pipeline(transaction=True) as pipe:
-                slots = iter([111, slot_a, slot_b])
-
-                async def _fake_determine_slot(*_args, **_kwargs):
-                    return next(slots)
-
-                with mock.patch.object(
-                    pipe.cluster_client,
-                    "_determine_slot",
-                    side_effect=_fake_determine_slot,
-                ):
-                    pipe.evalsha(sha, 0)
-                    pipe.set("{foo}a", "1")
-                    pipe.set("{bar}b", "2")
-                assert pipe._execution_strategy._pipeline_slots == {slot_a, slot_b}
-                with pytest.raises(
-                    CrossSlotTransactionError,
-                    match=(
-                        "All keys involved in a cluster transaction "
-                        "must map to the same slot"
-                    ),
-                ):
-                    await pipe.execute()
-        finally:
-            await r.aclose()
-
-    @pytest.mark.fixed_client
-    async def test_async_script_queues_evalsha_on_cluster_pipeline(self) -> None:
-        """AsyncScript must queue EVALSHA on ClusterPipeline without dropping it."""
-        r = await get_mocked_redis_client(host=default_host, port=default_port)
-        try:
-            script = r.register_script("return 1")
-            async with r.pipeline() as pipe:
-                await script(client=pipe)
-                queue = pipe._execution_strategy._command_queue
-                assert len(queue) == 1
-                assert queue[0].args[0] == "EVALSHA"
-                assert queue[0].args[1] == script.sha
-        finally:
-            await r.aclose()
 
     async def test_evalsha_in_pipeline(self, r: RedisCluster) -> None:
         """
@@ -5359,6 +5138,221 @@ class TestClusterPipeline:
             pipe.command_count()
             result = await pipe.execute(raise_on_error=False)
             assert result[0] == cmd_count
+
+
+@pytest.mark.fixed_client
+class TestClusterPipelineMocked:
+    """ClusterPipeline behaviour checked against mocked nodes; no server needed."""
+
+    async def test_async_script_queues_evalsha_on_cluster_pipeline(self) -> None:
+        """AsyncScript must queue EVALSHA on ClusterPipeline without dropping it."""
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            script = r.register_script("return 1")
+            async with r.pipeline() as pipe:
+                await script(client=pipe)
+                queue = pipe._execution_strategy._command_queue
+                assert len(queue) == 1
+                assert queue[0].args[0] == "EVALSHA"
+                assert queue[0].args[1] == script.sha
+        finally:
+            await r.aclose()
+
+    async def test_client_list_iter_blocked_on_cluster_pipeline(self) -> None:
+        """
+        client_list_iter sends the same CLIENT LIST command as client_list,
+        which PIPELINE_BLOCKED_COMMANDS blocks on ClusterPipeline.
+        client_list_iter has no wire-command entry of its own to add there,
+        so it must be blocked explicitly too, or it would fall through to
+        the inherited implementation and queue CLIENT LIST like a real
+        pipelined command instead of raising.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            pipe = r.pipeline()
+            with pytest.raises(RedisClusterException):
+                pipe.client_list_iter()
+        finally:
+            await r.aclose()
+
+    async def test_evalsha_not_blocked_on_cluster_pipeline(self) -> None:
+        """EVALSHA must be usable on async ClusterPipeline (see #2914)."""
+        assert "EVALSHA" not in PIPELINE_BLOCKED_COMMANDS
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            pipe = r.pipeline()
+            sha = "a" * 40
+            returned = pipe.evalsha(sha, 1, "foo", "bar")
+            assert returned is pipe
+            queue = pipe._execution_strategy._command_queue
+            assert len(queue) == 1
+            assert queue[0].args == ("EVALSHA", sha, 1, "foo", "bar")
+        finally:
+            await r.aclose()
+
+    async def test_evalsha_zero_keys_follows_keyed_slot_in_transaction(self) -> None:
+        """Zero-key EVALSHA after a keyed slot is fixed reuses that slot."""
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            sha = "a" * 40
+            async with r.pipeline(transaction=True) as pipe:
+                strategy = pipe._execution_strategy
+                strategy._pipeline_slots = {key_slot(b"foo")}
+                strategy._transaction_has_keyed_slot = True
+                pipe.evalsha(sha, 0)
+                assert strategy._pipeline_slots == {key_slot(b"foo")}
+        finally:
+            await r.aclose()
+
+    async def test_evalsha_zero_keys_pipeline_execute(self) -> None:
+        """Async ClusterPipeline must execute EVALSHA with numkeys=0."""
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            mock_all_nodes_resp(r, 42)
+            sha = "a" * 40
+            async with r.pipeline() as pipe:
+                pipe.evalsha(sha, 0)
+                assert await pipe.execute() == [42]
+        finally:
+            await r.aclose()
+
+    async def test_evalsha_zero_keys_reuses_slot_in_transaction(self) -> None:
+        """Zero-key EVALSHA in a transactional async pipeline reuses one slot."""
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            sha = "a" * 40
+            async with r.pipeline(transaction=True) as pipe:
+                pipe.evalsha(sha, 0)
+                pipe.evalsha(sha, 0)
+                slots = pipe._execution_strategy._pipeline_slots
+                assert len(slots) == 1
+
+                keyed_slot = key_slot(b"foo")
+
+                async def _fake_determine_slot(*_args, **_kwargs):
+                    return keyed_slot
+
+                with mock.patch.object(
+                    pipe.cluster_client,
+                    "_determine_slot",
+                    side_effect=_fake_determine_slot,
+                ):
+                    pipe.set("foo", "bar")
+                assert pipe._execution_strategy._pipeline_slots == {keyed_slot}
+                assert pipe._execution_strategy._transaction_has_keyed_slot is True
+        finally:
+            await r.aclose()
+
+    async def test_evalsha_zero_keys_then_cross_slot_raises_at_execute(self) -> None:
+        """
+        Zero-key EVALSHA retarget must not swallow a later true cross-slot
+        conflict: two keyed commands on different slots still raise at execute().
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            sha = "a" * 40
+            slot_a = key_slot(b"{foo}a")
+            slot_b = key_slot(b"{bar}b")
+            assert slot_a != slot_b
+            async with r.pipeline(transaction=True) as pipe:
+                slots = iter([111, slot_a, slot_b])
+
+                async def _fake_determine_slot(*_args, **_kwargs):
+                    return next(slots)
+
+                with mock.patch.object(
+                    pipe.cluster_client,
+                    "_determine_slot",
+                    side_effect=_fake_determine_slot,
+                ):
+                    pipe.evalsha(sha, 0)
+                    pipe.set("{foo}a", "1")
+                    pipe.set("{bar}b", "2")
+                assert pipe._execution_strategy._pipeline_slots == {slot_a, slot_b}
+                with pytest.raises(
+                    CrossSlotTransactionError,
+                    match=(
+                        "All keys involved in a cluster transaction "
+                        "must map to the same slot"
+                    ),
+                ):
+                    await pipe.execute()
+        finally:
+            await r.aclose()
+
+    async def test_pipeline_nodes_manager_property(self) -> None:
+        """
+        Test that ClusterPipeline exposes nodes_manager property
+        that delegates to the cluster client's nodes_manager.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            pipeline = r.pipeline()
+            # Verify that nodes_manager property exists and returns the same object
+            # as the cluster client's nodes_manager
+            assert pipeline.nodes_manager is r.nodes_manager
+            # Verify that we can access nodes_manager attributes
+            assert pipeline.nodes_manager.default_node is not None
+        finally:
+            await r.aclose()
+
+    async def test_pipeline_set_response_callback(self) -> None:
+        """
+        Test that ClusterPipeline exposes set_response_callback method
+        that delegates to the cluster client's set_response_callback.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            pipeline = r.pipeline()
+
+            # Define a custom callback
+            def custom_callback(response):
+                return f"custom_{response}"
+
+            # Set the callback via the pipeline
+            pipeline.set_response_callback("CUSTOM_CMD", custom_callback)
+
+            # Verify that the callback was set on the cluster client
+            assert "CUSTOM_CMD" in r.response_callbacks
+            assert r.response_callbacks["CUSTOM_CMD"] is custom_callback
+        finally:
+            await r.aclose()
+
+    async def test_slotless_command_does_not_lock_keyed_slot_flag(self) -> None:
+        """Slotless commands must not block later keyed retargeting."""
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            sha = "a" * 40
+            async with r.pipeline(transaction=True) as pipe:
+                pipe.evalsha(sha, 0)
+                assert pipe._execution_strategy._transaction_has_keyed_slot is False
+
+                async def _no_slot(*_args, **_kwargs):
+                    return None
+
+                with mock.patch.object(
+                    pipe.cluster_client,
+                    "_determine_slot",
+                    side_effect=_no_slot,
+                ):
+                    pipe.execute_command("CLIENT TRACKING", "ON")
+                assert pipe._execution_strategy._transaction_has_keyed_slot is False
+
+                keyed_slot = key_slot(b"foo")
+
+                async def _fake_determine_slot(*_args, **_kwargs):
+                    return keyed_slot
+
+                with mock.patch.object(
+                    pipe.cluster_client,
+                    "_determine_slot",
+                    side_effect=_fake_determine_slot,
+                ):
+                    pipe.set("foo", "bar")
+                assert pipe._execution_strategy._pipeline_slots == {keyed_slot}
+                assert pipe._execution_strategy._transaction_has_keyed_slot is True
+        finally:
+            await r.aclose()
 
 
 @pytest.mark.onlycluster
