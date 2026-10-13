@@ -38,7 +38,7 @@ from redis.cache import (
     InvalidationPolicy,
     LRUPolicy,
     TrackingMode,
-    _CacheRefresher,
+    CacheRefresher,
 )
 from redis.connection import (
     _NO_PENDING_HIT,
@@ -77,7 +77,12 @@ from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE, SENTINEL
 
 from .conftest import skip_if_redis_enterprise, skip_if_server_version_lt
-from .helpers import wait_for_condition
+from .helpers import (
+    FakeRefresherPool,
+    get_cache_key,
+    wait_for_condition,
+    wait_for_refreshes,
+)
 from .mocks import MockSocket
 
 
@@ -1363,7 +1368,7 @@ class TestUnitConnectionPool:
         )
 
         refresher = connection_pool._cache_refresher
-        assert isinstance(refresher, _CacheRefresher)
+        assert isinstance(refresher, CacheRefresher)
         assert refresher._max_inflight == 3
         assert refresher._pool_ref() is connection_pool
         assert connection_pool.make_connection()._refresher is refresher
@@ -1415,12 +1420,12 @@ class TestUnitConnectionPool:
         )
         before = connection_pool._cache_refresher
 
-        connection_pool._cache_refresher = Mock(spec=_CacheRefresher)
+        connection_pool._cache_refresher = Mock(spec=CacheRefresher)
         inherited = connection_pool._cache_refresher
 
         connection_pool.reset()
 
-        assert isinstance(connection_pool._cache_refresher, _CacheRefresher)
+        assert isinstance(connection_pool._cache_refresher, CacheRefresher)
         assert connection_pool._cache_refresher is not before
         # The inherited one belongs to the parent process, so it is left alone.
         inherited.stop.assert_not_called()
@@ -1435,7 +1440,7 @@ class TestUnitConnectionPool:
             protocol=3,
             cache_config=CacheConfig(invalidation_policy=InvalidationPolicy.REFRESH),
         )
-        connection_pool._cache_refresher = Mock(spec=_CacheRefresher)
+        connection_pool._cache_refresher = Mock(spec=CacheRefresher)
 
         # Also used for reconnects and failover, after which the pool keeps refreshing.
         connection_pool.disconnect()
@@ -2325,26 +2330,6 @@ def _refresh_inner_connection():
     return connection
 
 
-def _refresh_key(name):
-    return CacheKey(command="GET", redis_keys=(name,), redis_args=("GET", name))
-
-
-class _RefreshPool:
-    """The pool surface ``_CacheRefresher`` uses, handing out one prepared proxy."""
-
-    def __init__(self, cache, connection):
-        self.cache = cache
-        self.connection = connection
-        self.released = []
-
-    def _get_connection(self, if_available=False):
-        assert if_available, "a refresh must never wait for a pool connection"
-        return self.connection
-
-    def release(self, connection):
-        self.released.append(connection)
-
-
 def _flush_by_disconnect(proxy):
     proxy.disconnect()
 
@@ -2371,7 +2356,7 @@ class TestCacheProxyRefresh:
     """
     The invalidation callback under the refresh policy, and the refresh it hands off.
 
-    The refresh tests drive a real ``_CacheRefresher`` whose pool hands out a second proxy
+    The refresh tests drive a real ``CacheRefresher`` whose pool hands out a second proxy
     over the same cache, as a real pool does, so the re-read goes through the ordinary
     miss path of ``send_command`` and ``read_response``.
     """
@@ -2384,7 +2369,7 @@ class TestCacheProxyRefresh:
 
     @pytest.fixture
     def refresher(self):
-        return Mock(spec=_CacheRefresher, **{"submit.return_value": []})
+        return Mock(spec=CacheRefresher, **{"submit.return_value": []})
 
     @pytest.fixture
     def proxy(self, cache, refresher):
@@ -2402,8 +2387,8 @@ class TestCacheProxyRefresh:
         """
         inner = _refresh_inner_connection()
         # The fixture's frame keeps the pool alive: the refresher refers to it weakly.
-        pool = _RefreshPool(cache, None)
-        refresher = _CacheRefresher(pool, 4)
+        pool = FakeRefresherPool(cache)
+        refresher = CacheRefresher(pool, 4)
         pool.connection = CacheProxyConnection(
             inner, cache, threading.RLock(), refresher=refresher
         )
@@ -2421,20 +2406,12 @@ class TestCacheProxyRefresh:
             )
         )
 
-    @staticmethod
-    def _idle(refresher):
-        wait_for_condition(
-            lambda: not refresher._pending,
-            timeout=2,
-            error_message="refresher never went idle",
-        )
-
     def test_only_stored_replies_are_handed_to_the_refresher(
         self, proxy, cache, refresher
     ):
-        valid = _refresh_key("foo")
+        valid = get_cache_key("foo")
         in_flight = CacheKey(command="STRLEN", redis_keys=("foo",), redis_args=())
-        other = _refresh_key("bar")
+        other = get_cache_key("bar")
         self._store(cache, valid)
         self._store(cache, in_flight, status=CacheEntryStatus.IN_PROGRESS)
         self._store(cache, other)
@@ -2448,7 +2425,7 @@ class TestCacheProxyRefresh:
         record.assert_called_once_with(count=2, reason=CSCReason.INVALIDATION)
 
     def test_a_rejected_key_stays_removed(self, proxy, cache, refresher):
-        key = _refresh_key("foo")
+        key = get_cache_key("foo")
         self._store(cache, key)
         refresher.submit.return_value = [key]
 
@@ -2459,7 +2436,7 @@ class TestCacheProxyRefresh:
     def test_an_invalidation_for_nothing_cached_submits_nothing(
         self, proxy, cache, refresher
     ):
-        self._store(cache, _refresh_key("bar"))
+        self._store(cache, get_cache_key("bar"))
 
         with patch("redis.connection.record_csc_eviction") as record:
             proxy._on_invalidation_callback([b"invalidate", [b"foo"]])
@@ -2471,7 +2448,7 @@ class TestCacheProxyRefresh:
     def test_a_server_flush_empties_the_cache_and_refreshes_nothing(
         self, proxy, cache, refresher
     ):
-        self._store(cache, _refresh_key("foo"))
+        self._store(cache, get_cache_key("foo"))
 
         proxy._on_invalidation_callback([b"invalidate", None])
 
@@ -2483,7 +2460,7 @@ class TestCacheProxyRefresh:
         proxy = CacheProxyConnection(
             _refresh_inner_connection(), cache, threading.RLock()
         )
-        self._store(cache, _refresh_key("foo"))
+        self._store(cache, get_cache_key("foo"))
 
         with patch("redis.connection.record_csc_eviction") as record:
             proxy._on_invalidation_callback([b"invalidate", [b"foo"]])
@@ -2502,7 +2479,7 @@ class TestCacheProxyRefresh:
         ids=["disconnect", "reconnect", "framing-error", "server-flush"],
     )
     def test_every_flush_cancels_queued_refreshes(self, proxy, cache, refresher, flush):
-        self._store(cache, _refresh_key("foo"))
+        self._store(cache, get_cache_key("foo"))
 
         flush(proxy)
 
@@ -2516,13 +2493,13 @@ class TestCacheProxyRefresh:
             threading.RLock(),
             refresher=live.refresher,
         )
-        key = _refresh_key("foo")
+        key = get_cache_key("foo")
         self._store(cache, key)
         inner = live.inner
         inner.read_response.return_value = b"new"
 
         proxy._on_invalidation_callback([b"invalidate", [b"foo"]])
-        self._idle(live.refresher)
+        wait_for_refreshes(live.refresher)
 
         inner.send_command.assert_called_once_with("GET", "foo", keys=("foo",))
         entry = cache.get(key)
@@ -2539,7 +2516,7 @@ class TestCacheProxyRefresh:
             threading.RLock(),
             refresher=live.refresher,
         )
-        self._store(cache, _refresh_key("foo"))
+        self._store(cache, get_cache_key("foo"))
         inner = live.inner
 
         def invalidated_mid_flight(*args, **kwargs):
@@ -2550,7 +2527,7 @@ class TestCacheProxyRefresh:
         inner.read_response.side_effect = invalidated_mid_flight
 
         proxy._on_invalidation_callback([b"invalidate", [b"foo"]])
-        self._idle(live.refresher)
+        wait_for_refreshes(live.refresher)
 
         assert cache.size == 0
         # No second fetch: the entry was in flight, and its key was still pending.
@@ -2564,8 +2541,8 @@ class TestCacheProxyRefresh:
             threading.RLock(),
             refresher=live.refresher,
         )
-        self._store(cache, _refresh_key("foo"))
-        self._store(cache, _refresh_key("bar"))
+        self._store(cache, get_cache_key("foo"))
+        self._store(cache, get_cache_key("bar"))
         replies = iter([b"new-foo", b"new-bar"])
 
         def read_response(*args, **kwargs):
@@ -2578,10 +2555,10 @@ class TestCacheProxyRefresh:
         live.inner.read_response.side_effect = read_response
 
         proxy._on_invalidation_callback([b"invalidate", [b"foo"]])
-        self._idle(live.refresher)
+        wait_for_refreshes(live.refresher)
 
-        assert cache.get(_refresh_key("foo")).cache_value == b"new-foo"
-        assert cache.get(_refresh_key("bar")).cache_value == b"new-bar"
+        assert cache.get(get_cache_key("foo")).cache_value == b"new-foo"
+        assert cache.get(get_cache_key("bar")).cache_value == b"new-bar"
 
     @pytest.mark.parametrize(
         "error",
@@ -2595,15 +2572,15 @@ class TestCacheProxyRefresh:
             threading.RLock(),
             refresher=live.refresher,
         )
-        self._store(cache, _refresh_key("foo"))
-        self._store(cache, _refresh_key("bar"))
+        self._store(cache, get_cache_key("foo"))
+        self._store(cache, get_cache_key("bar"))
         inner = live.inner
         inner.read_response.side_effect = error
 
         proxy._on_invalidation_callback([b"invalidate", [b"foo"]])
-        self._idle(live.refresher)
+        wait_for_refreshes(live.refresher)
 
-        assert list(cache.collection) == [_refresh_key("bar")]
+        assert list(cache.collection) == [get_cache_key("bar")]
         inner.disconnect.assert_not_called()
 
     def test_a_connection_error_disconnects_and_flushes(self, cache, live):
@@ -2613,13 +2590,13 @@ class TestCacheProxyRefresh:
             threading.RLock(),
             refresher=live.refresher,
         )
-        self._store(cache, _refresh_key("foo"))
-        self._store(cache, _refresh_key("bar"))
+        self._store(cache, get_cache_key("foo"))
+        self._store(cache, get_cache_key("bar"))
         inner = live.inner
         inner.read_response.side_effect = ConnectionError("lost")
 
         proxy._on_invalidation_callback([b"invalidate", [b"foo"]])
-        self._idle(live.refresher)
+        wait_for_refreshes(live.refresher)
 
         inner.disconnect.assert_called_once()
         # A closed caching connection empties the shared cache, refresh or not.
@@ -2638,7 +2615,7 @@ class TestCacheProxyRefresh:
     def test_a_stored_refresh_reports_success_and_records_no_request(
         self, proxy, cache, requests_recorded
     ):
-        key = _refresh_key("foo")
+        key = get_cache_key("foo")
         proxy._conn.read_response.return_value = b"new"
 
         assert proxy._refresh_entry(key) is CSCRefreshResult.SUCCESS
@@ -2651,7 +2628,7 @@ class TestCacheProxyRefresh:
     def test_a_refresh_invalidated_in_flight_reports_discarded(
         self, proxy, cache, requests_recorded
     ):
-        key = _refresh_key("foo")
+        key = get_cache_key("foo")
 
         def invalidated_mid_flight(*args, **kwargs):
             cache.delete_by_redis_keys([b"foo"])
@@ -2667,7 +2644,7 @@ class TestCacheProxyRefresh:
         self, proxy, cache
     ):
         # Stored is what counts, even if the entry is already gone again.
-        key = _refresh_key("foo")
+        key = get_cache_key("foo")
         proxy._conn.read_response.return_value = b"new"
         original_set = cache.set
 
@@ -2682,7 +2659,7 @@ class TestCacheProxyRefresh:
         assert cache.get(key) is None
 
     def test_a_nil_refresh_reports_discarded(self, proxy, cache):
-        key = _refresh_key("foo")
+        key = get_cache_key("foo")
         proxy._conn.read_response.return_value = None
 
         assert proxy._refresh_entry(key) is CSCRefreshResult.DISCARDED
@@ -2701,7 +2678,7 @@ class TestCacheProxyRefresh:
         )
         proxy._conn.read_response.return_value = b"new"
 
-        assert proxy._refresh_entry(_refresh_key("foo")) is CSCRefreshResult.DISCARDED
+        assert proxy._refresh_entry(get_cache_key("foo")) is CSCRefreshResult.DISCARDED
         assert cache.size == 0
 
     def test_a_refresh_of_an_entry_already_stored_sends_nothing(
@@ -2709,7 +2686,7 @@ class TestCacheProxyRefresh:
     ):
         # A read stored the entry after the refresher checked for it. Its owner has
         # nothing pending, so the hit's drain reads nothing.
-        key = _refresh_key("foo")
+        key = get_cache_key("foo")
         cache.set(
             CacheEntry(
                 cache_key=key,
@@ -2726,12 +2703,70 @@ class TestCacheProxyRefresh:
         assert proxy._pending_cache_hit is _NO_PENDING_HIT
         assert requests_recorded == []
 
+    def test_a_refresh_flushed_before_its_placeholder_sends_nothing(
+        self, proxy, cache, requests_recorded
+    ):
+        key = get_cache_key("foo")
+
+        assert proxy._refresh_entry(key, is_current=lambda: False) is None
+
+        proxy._conn.send_command.assert_not_called()
+        proxy._conn.read_response.assert_not_called()
+        assert cache.get(key) is None
+        assert proxy._current_command_cache_key is None
+        assert requests_recorded == []
+
+        # The next refresh on the connection is not taken for a cancelled one.
+        proxy._conn.read_response.return_value = b"new"
+        assert proxy._refresh_entry(key) is CSCRefreshResult.SUCCESS
+
+    def test_a_refresh_asks_whether_it_is_current_once_staked(self, proxy, cache):
+        key = get_cache_key("foo")
+        seen = []
+
+        def is_current():
+            seen.append(cache.collection[key].status)
+            return True
+
+        proxy._conn.read_response.return_value = b"new"
+
+        assert proxy._refresh_entry(key, is_current=is_current) is (
+            CSCRefreshResult.SUCCESS
+        )
+        assert seen == [CacheEntryStatus.IN_PROGRESS]
+
+    def test_a_flush_tells_the_refresher_before_emptying_the_cache(
+        self, proxy, cache, refresher
+    ):
+        self._store(cache, get_cache_key("foo"))
+        sizes = []
+        refresher.cancel_pending.side_effect = lambda: sizes.append(cache.size)
+
+        proxy._on_invalidation_callback([b"invalidate", None])
+
+        assert sizes == [1]
+        assert cache.size == 0
+
+    def test_a_reconnect_inside_a_refresh_drops_its_placeholder(self, proxy, cache):
+        # A plain read keeps its placeholder across this reconnect; a refresh does not,
+        # because a flush refreshes nothing.
+        key = get_cache_key("foo")
+        handshake = _refresh_inner_connection()
+        proxy._enable_tracking_callback(handshake)
+        proxy._conn.send_command.side_effect = lambda *a, **k: (
+            proxy._enable_tracking_callback(handshake)
+        )
+        proxy._conn.read_response.return_value = b"new"
+
+        assert proxy._refresh_entry(key) is CSCRefreshResult.DISCARDED
+        assert cache.get(key) is None
+
     def test_a_read_after_a_failed_refresh_records_its_miss(
         self, proxy, requests_recorded
     ):
         proxy._conn.read_response.side_effect = ResponseError("WRONGTYPE")
         with pytest.raises(ResponseError):
-            proxy._refresh_entry(_refresh_key("foo"))
+            proxy._refresh_entry(get_cache_key("foo"))
         assert requests_recorded == []
 
         proxy._conn.read_response.side_effect = None
@@ -2748,8 +2783,8 @@ class TestCacheProxyRefresh:
             threading.RLock(),
             refresher=live.refresher,
         )
-        self._store(cache, _refresh_key("foo"))
-        self._store(cache, _refresh_key("bar"))
+        self._store(cache, get_cache_key("foo"))
+        self._store(cache, get_cache_key("bar"))
 
         def read_response(*args, **kwargs):
             # bar changes again while its re-read is in flight.
@@ -2764,9 +2799,9 @@ class TestCacheProxyRefresh:
             side_effect=lambda result, count=1: recorded.append((result, count)),
         ):
             proxy._on_invalidation_callback([b"invalidate", [b"foo"]])
-            self._idle(live.refresher)
+            wait_for_refreshes(live.refresher)
             proxy._on_invalidation_callback([b"invalidate", [b"bar"]])
-            self._idle(live.refresher)
+            wait_for_refreshes(live.refresher)
 
         assert recorded == [
             (CSCRefreshResult.SUCCESS, 1),
@@ -2785,14 +2820,14 @@ class TestCacheProxyRefresh:
         inner = _refresh_inner_connection()
         inner.pack_commands.return_value = [b"packed"]
         inner.read_response.side_effect = [b"OK", b"new"]
-        pool = _RefreshPool(cache, None)
-        refresher = _CacheRefresher(pool, 4)
+        pool = FakeRefresherPool(cache)
+        refresher = CacheRefresher(pool, 4)
         pool.connection = CacheProxyConnection(
             inner, cache, threading.RLock(), refresher=refresher
         )
         try:
-            self._store(cache, _refresh_key("foo"))
-            self._store(cache, _refresh_key("bar"))
+            self._store(cache, get_cache_key("foo"))
+            self._store(cache, get_cache_key("bar"))
             proxy = CacheProxyConnection(
                 _refresh_inner_connection(),
                 cache,
@@ -2801,22 +2836,22 @@ class TestCacheProxyRefresh:
             )
 
             proxy._on_invalidation_callback([b"invalidate", [b"foo"]])
-            self._idle(refresher)
+            wait_for_refreshes(refresher)
 
             inner.pack_commands.assert_called_once_with(
                 [(b"CLIENT", b"CACHING", b"YES"), ("GET", "foo")]
             )
-            assert cache.get(_refresh_key("foo")).cache_value == b"new"
+            assert cache.get(get_cache_key("foo")).cache_value == b"new"
 
             # A key the predicate no longer selects is re-read but not stored, exactly
             # as a user read of it would be.
             inner.read_response.side_effect = [b"other"]
             proxy._on_invalidation_callback([b"invalidate", [b"bar"]])
-            self._idle(refresher)
+            wait_for_refreshes(refresher)
 
             assert inner.pack_commands.call_count == 1
             inner.send_command.assert_called_once_with("GET", "bar", keys=("bar",))
-            assert cache.get(_refresh_key("bar")) is None
+            assert cache.get(get_cache_key("bar")) is None
             predicate.assert_any_call("GET", ("bar",))
         finally:
             refresher.stop()
@@ -2831,8 +2866,8 @@ class TestCacheProxyRefresh:
         inner = live.inner
         gate = threading.Event()
         inner.read_response.side_effect = lambda *a, **k: gate.wait(5) and b"new"
-        self._store(cache, _refresh_key("foo"))
-        self._store(cache, _refresh_key("bar"))
+        self._store(cache, get_cache_key("foo"))
+        self._store(cache, get_cache_key("bar"))
 
         try:
             proxy._on_invalidation_callback([b"invalidate", [b"foo"]])
@@ -2847,10 +2882,10 @@ class TestCacheProxyRefresh:
             callback.start()
             callback.join(timeout=1)
             assert not callback.is_alive()
-            assert cache.get(_refresh_key("bar")) is None
+            assert cache.get(get_cache_key("bar")) is None
         finally:
             gate.set()
-        self._idle(live.refresher)
+        wait_for_refreshes(live.refresher)
 
 
 @pytest.mark.fixed_client

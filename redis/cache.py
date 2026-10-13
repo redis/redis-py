@@ -1,4 +1,5 @@
 import logging
+import os
 import queue
 import threading
 import warnings
@@ -949,7 +950,7 @@ class CacheFactory(CacheFactoryInterface):
         return CacheProxy(cache_class(cache_config=self._config))
 
 
-class _CacheRefresher:
+class CacheRefresher:
     """
     Re-reads invalidated entries in the background, for one connection pool.
 
@@ -974,6 +975,11 @@ class _CacheRefresher:
     The thread starts on the first accepted key and exits once the queue has stayed empty
     for ``idle_timeout`` seconds, so a pool that is not refreshing holds no thread. It
     refers to the pool weakly and never keeps it alive.
+
+    The pool builds one when its cache is configured with ``InvalidationPolicy.REFRESH``,
+    and hands it to every connection it builds; applications do not build one. It belongs
+    to the process that built it: in a forked child it accepts nothing, and the child's
+    pool builds a refresher of its own.
     """
 
     IDLE_TIMEOUT = 30.0
@@ -982,15 +988,19 @@ class _CacheRefresher:
     def __init__(
         self, pool, max_inflight: int, idle_timeout: float = IDLE_TIMEOUT
     ) -> None:
+        self._pid = os.getpid()
         self._pool_ref = weakref.ref(pool)
         self._max_inflight = max_inflight
         self._idle_timeout = idle_timeout
         self._queue: queue.SimpleQueue = queue.SimpleQueue()
         self._pending: set[CacheKey] = set()
-        # Bumped by every cancel. A queued job of an older generation is dropped unrun, and
-        # a job that completes after a cancel does not touch ``_pending``, which by then
-        # belongs to newer work.
+        # Bumped by every cancel. A job of an older generation is dropped unrun, and a job
+        # that completes after a cancel does not touch ``_pending``, which by then belongs
+        # to newer work.
         self._generation = 0
+        # The generation the last ``stop`` left behind. A job older than it was cut short
+        # by a ``close()``.
+        self._stopped_generation = 0
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
 
@@ -1005,6 +1015,12 @@ class _CacheRefresher:
             list[CacheKey]: The keys rejected, because the queue was full or because no
             worker could be started. Their entries stay removed.
         """
+        if self._pid != os.getpid():
+            # A connection held across a fork. The parent's worker does not run here, and
+            # ``_lock`` may have been held by it at fork time, so it is not taken. Not
+            # recorded: this is no lack of capacity, like a key dropped by a flush.
+            return list(cache_keys)
+
         rejected = []
         start_error = None
 
@@ -1022,9 +1038,7 @@ class _CacheRefresher:
 
             # Under ``_lock``, together with the puts: the worker decides to exit under the
             # same lock, so a key can never be queued after it checked and before it left.
-            # A registered thread that is not alive is one inherited across a fork, which
-            # never runs in this process.
-            if accepted and (self._thread is None or not self._thread.is_alive()):
+            if accepted and self._thread is None:
                 worker = threading.Thread(
                     target=self._run, name="redis-csc-refresher", daemon=True
                 )
@@ -1056,34 +1070,64 @@ class _CacheRefresher:
         """
         Drop every accepted key that has not run yet.
 
-        Called wherever the cache is flushed: an emptied cache must not be refilled by work
-        queued before it was emptied. A job still waiting for a connection checks again
-        before it sends. A refresh already sent is not stopped: its placeholder usually went
-        with the flush, so its reply is not stored, and when it did not - the flush landed
-        just before the placeholder was staked, or was a reconnect, which keeps it - the
-        reply was read after the flush on a tracking connection, so what it stores is
-        current.
+        Called wherever the cache is flushed, before the flush: an emptied cache must not be
+        refilled by work queued before it was emptied. The queued jobs are removed, so the
+        queue never holds more than ``max_inflight`` keys, however often the cache is
+        flushed while the worker is busy. The job the worker holds checks the generation
+        once it has a connection, and again when ``send_command`` has staked its
+        placeholder: a flush before that point stops it, and a flush after it removes the
+        placeholder, so its reply is not stored.
+
+        Does no I/O and takes no lock but ``_lock``, like ``submit``: it is called under a
+        connection's cache lock.
         """
+        if self._pid != os.getpid():
+            return
+
         with self._lock:
             self._generation += 1
             self._pending.clear()
+            self._drop_queued_jobs()
 
     def stop(self) -> None:
         """
         Cancel all queued work and let the worker exit.
 
-        The refresher stays usable: a pool is reusable after ``close()``, and the next
-        accepted key starts a new worker.
+        A refresh that is waiting for a connection when it is stopped closes the connection
+        it gets rather than leave a socket open in a closed pool. The refresher stays
+        usable: a pool is reusable after ``close()``, and the next accepted key starts a new
+        worker.
         """
+        if self._pid != os.getpid():
+            return
+
         self.cancel_pending()
         with self._lock:
+            self._stopped_generation = self._generation
             # Only a running worker needs waking; one started later finds the queue empty.
             if self._thread is not None:
                 self._queue.put(self._STOP)
 
+    def _drop_queued_jobs(self) -> None:
+        # Called under ``_lock``. A stop request is kept, so the worker still exits.
+        stop_requested = False
+        while True:
+            try:
+                job = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            if job is self._STOP:
+                stop_requested = True
+        if stop_requested:
+            self._queue.put(self._STOP)
+
     def _is_current(self, generation: int) -> bool:
         with self._lock:
             return generation == self._generation
+
+    def _was_stopped_after(self, generation: int) -> bool:
+        with self._lock:
+            return self._stopped_generation > generation
 
     def _run(self) -> None:
         try:
@@ -1105,8 +1149,7 @@ class _CacheRefresher:
 
             if job is self._STOP:
                 with self._lock:
-                    # Whatever is still queued was accepted after the stop, or is an older
-                    # generation that the loop drops without a round trip.
+                    # Whatever is still queued was accepted after the stop.
                     if self._queue.empty():
                         self._thread = None
                         return
@@ -1161,8 +1204,14 @@ class _CacheRefresher:
             # Getting a connection can wait for a handshake, and a flush in that time must
             # still refresh nothing.
             if not self._is_current(generation):
+                if self._was_stopped_after(generation):
+                    # A ``close()`` came while this job connected a socket, and the pool
+                    # must not get an open one back.
+                    conn.disconnect()
                 return
-            result = conn._refresh_entry(cache_key)
+            result = conn._refresh_entry(
+                cache_key, is_current=lambda: self._is_current(generation)
+            )
         except (ConnectionError, TimeoutError, OSError) as e:
             # The socket is in an unknown state, so it is closed, as the client's own error
             # path does. Closing a caching connection flushes the cache.
