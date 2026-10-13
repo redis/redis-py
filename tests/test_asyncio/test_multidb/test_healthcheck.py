@@ -189,9 +189,10 @@ class TestMaintenanceAwareBudget:
     The health check budget follows the maintenance windows the probe client
     reports: relaxed while a window is active, plain otherwise.
 
-    Success paths and upper-bound assertions have wide margins, so a stalled
-    runner cannot fail them: a probe meant to finish does so seconds inside its
-    relaxed budget, and elapsed-time bounds sit seconds above the expected cutoff.
+    Success paths have wide margins, so a stalled runner cannot fail them: a
+    probe meant to finish does so seconds inside its relaxed budget. Elapsed-time
+    bounds sit about a second above the expected cutoff, well below the probe
+    sleeps, so a budget that is not applied still fails them.
     """
 
     def _policy_with_tracker(self, database):
@@ -279,7 +280,7 @@ class TestMaintenanceAwareBudget:
             await policy.execute([self._slow_check(10.0)], mock_db)
 
         assert isinstance(exc_info.value.original_exception, asyncio.TimeoutError)
-        assert time.monotonic() - start < 5.0
+        assert time.monotonic() - start < 1.5
 
     @pytest.mark.asyncio
     async def test_blocking_relaxed_timeout_relaxes_until_window_expires(self):
@@ -309,7 +310,7 @@ class TestMaintenanceAwareBudget:
             await policy.execute([self._slow_check(30.0)], mock_db)
 
         assert isinstance(exc_info.value.original_exception, asyncio.TimeoutError)
-        assert time.monotonic() - start < 5.0
+        assert time.monotonic() - start < 1.5
 
     @pytest.mark.asyncio
     async def test_window_outlives_notification_ttl_until_completed(self):
@@ -375,7 +376,7 @@ class TestMaintenanceAwareBudget:
         await completion
 
         assert isinstance(exc_info.value.original_exception, asyncio.TimeoutError)
-        assert time.monotonic() - start < 5.0
+        assert time.monotonic() - start < 1.5
 
     @pytest.mark.asyncio
     async def test_completed_window_restores_budget(self):

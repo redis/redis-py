@@ -1276,11 +1276,12 @@ class TestBaseSearchFunctionality(SearchTestsBase):
         info = client.ft().info()
         assert 495 == int(info["num_docs"])
 
-    @pytest.mark.fixed_client
-    def test_create_client_definition_hash(self):
+    @pytest.mark.redismod
+    @skip_ifmodversion_lt("2.0.0", "search")
+    def test_create_client_definition_hash(self, client):
         """
-        IndexType.HASH sends an explicit ON HASH. The server treats it like the
-        default index type, which test_create_client_definition covers.
+        IndexType.HASH sends an explicit ON HASH, which the server accepts and
+        indexes like the default index type; hset tests the client definition.
         """
         definition = IndexDefinition(
             prefix=["hset:", "henry"], index_type=IndexType.HASH, score=None
@@ -1288,6 +1289,15 @@ class TestBaseSearchFunctionality(SearchTestsBase):
         assert definition.args == ["ON", "HASH", "PREFIX", 2, "hset:", "henry"]
         default = IndexDefinition(prefix=["hset:", "henry"], score=None)
         assert default.args == ["PREFIX", 2, "hset:", "henry"]
+
+        client.ft().create_index((TextField("f1"),), definition=definition)
+        self.waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
+
+        client.hset("hset:1", "f1", "v1")
+        # outside the definition's prefixes, so not indexed
+        client.hset("other:1", "f1", "v1")
+        info = client.ft().info()
+        assert 1 == int(info["num_docs"])
 
     @pytest.mark.redismod
     @skip_ifmodversion_lt("2.2.0", "search")

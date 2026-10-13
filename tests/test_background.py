@@ -6,6 +6,11 @@ import pytest
 
 from redis.background import BackgroundScheduler
 
+# The scheduler waits with ``loop.call_later``, whose timer can fire a hair
+# before the requested delay on a coarse event loop clock. Far below any
+# interval a test asserts on, so it cannot mask a callback that ran early.
+EVENT_LOOP_TIMER_SLACK = 0.005
+
 
 def _wait_until(predicate, timeout=5.0):
     """Poll until ``predicate()`` is true; fail if the deadline passes first.
@@ -46,12 +51,15 @@ class TestBackgroundScheduler:
             assert arg2 == two
 
         scheduler = BackgroundScheduler()
+        registered = monotonic()
         scheduler.run_once(0.1, callback, one, two)
         assert execute_counter == 0
 
         _wait_until(lambda: execute_counter >= 1)
+        called = monotonic()
 
         assert execute_counter == 1
+        assert called - registered >= 0.1 - EVENT_LOOP_TIMER_SLACK
 
     @pytest.mark.parametrize(
         "interval,min_call_count",
@@ -70,16 +78,19 @@ class TestBackgroundScheduler:
             nonlocal one
             nonlocal two
 
-            execute_counter.append(1)
+            execute_counter.append(monotonic())
 
             assert arg1 == one
             assert arg2 == two
 
         scheduler = BackgroundScheduler()
+        registered = monotonic()
         scheduler.run_recurring(interval, callback, one, two)
         assert len(execute_counter) == 0
 
         _wait_until(lambda: len(execute_counter) >= min_call_count)
+        # the first call waits out the interval, rather than firing on registration
+        assert execute_counter[0] - registered >= interval - EVENT_LOOP_TIMER_SLACK
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -99,16 +110,19 @@ class TestBackgroundScheduler:
             nonlocal one
             nonlocal two
 
-            execute_counter.append(1)
+            execute_counter.append(monotonic())
 
             assert arg1 == one
             assert arg2 == two
 
         scheduler = BackgroundScheduler()
+        registered = monotonic()
         await scheduler.run_recurring_async(interval, callback, one, two)
         assert len(execute_counter) == 0
 
         await _wait_until_async(lambda: len(execute_counter) >= min_call_count)
+        # the first call waits out the interval, rather than firing on registration
+        assert execute_counter[0] - registered >= interval - EVENT_LOOP_TIMER_SLACK
 
     @pytest.mark.parametrize(
         "interval,min_call_count",
@@ -128,16 +142,19 @@ class TestBackgroundScheduler:
 
         async def coro_callback(arg1: str, arg2: int):
             nonlocal execute_counter
-            execute_counter.append(1)
+            execute_counter.append(monotonic())
             assert arg1 == one
             assert arg2 == two
 
         scheduler = BackgroundScheduler()
+        registered = monotonic()
         scheduler.run_recurring_coro(interval, coro_callback, one, two)
         assert len(execute_counter) == 0
 
         _wait_until(lambda: len(execute_counter) >= min_call_count)
         scheduler.stop()
+        # the first call waits out the interval, rather than firing on registration
+        assert execute_counter[0] - registered >= interval - EVENT_LOOP_TIMER_SLACK
 
     def test_run_recurring_coro_runs_in_background_thread(self):
         """
