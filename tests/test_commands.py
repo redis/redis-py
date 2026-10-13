@@ -8772,7 +8772,9 @@ class TestRedisCommands:
 
         thread = threading.Thread(target=helper)
         thread.start()
-        thread.join(0.1)
+        # A regression hangs forever, so the timeout only has to outlast a slow CI runner.
+        # A passing run returns as soon as the thread ends.
+        thread.join(5)
         try:
             assert not thread.is_alive()
             assert ok
